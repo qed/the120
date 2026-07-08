@@ -1,0 +1,383 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { motion, AnimatePresence } from "motion/react";
+import { saveParent } from "@/app/dashboard/storage";
+
+/**
+ * Account creation — the lead-capture step of the funnel (brief §13.2).
+ * V1 keeps everything in local state; `AccountForm` mirrors the future
+ * Supabase `parents` table (§13.5) so wiring auth/DB later is a drop-in.
+ */
+export type AccountForm = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  postalCode: string;
+  incomeBracket: string;
+  caslConsent: boolean;
+};
+
+// Brief flags brackets as an Open Item; using CAD-adjusted figures (confirmed choice).
+const INCOME_BRACKETS = [
+  "Under $75,000",
+  "$75,000 – $200,000",
+  "Over $200,000",
+  "Prefer not to say",
+];
+
+const EMPTY: AccountForm = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  postalCode: "",
+  incomeBracket: "",
+  caslConsent: false,
+};
+
+const POSTAL = /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type Errors = Partial<Record<keyof AccountForm, string>>;
+
+function validate(f: AccountForm): Errors {
+  const e: Errors = {};
+  if (!f.firstName.trim()) e.firstName = "Required";
+  if (!f.lastName.trim()) e.lastName = "Required";
+  if (!EMAIL.test(f.email)) e.email = "Enter a valid email";
+  if (f.phone.replace(/\D/g, "").length < 10) e.phone = "Enter a valid phone number";
+  if (!POSTAL.test(f.postalCode.trim())) e.postalCode = "Enter a valid postal code (e.g. M5V 2T6)";
+  if (!f.incomeBracket) e.incomeBracket = "Please choose one";
+  if (!f.caslConsent) e.caslConsent = "Consent is required to create your account";
+  return e;
+}
+
+export default function AccountModal({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<AccountForm>(EMPTY);
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitted, setSubmitted] = useState(false);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Reset + focus + scroll-lock + Esc handling while open.
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm(EMPTY);
+    setErrors({});
+    setSubmitted(false);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(t);
+    };
+  }, [isOpen, onClose]);
+
+  const set = <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setErrors((e) => ({ ...e, [key]: undefined }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const eObj = validate(form);
+    setErrors(eObj);
+    if (Object.keys(eObj).length > 0) return;
+
+    // TODO (V2 · Supabase): replace with
+    //   await supabase.auth.signUp({ email, password | magic-link })
+    //   await supabase.from("parents").insert({ ...form })
+    // For V1 we persist the parent locally so they land signed-in on the dashboard (§13.3).
+    saveParent({ firstName: form.firstName, lastName: form.lastName, email: form.email });
+    setSubmitted(true);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto p-4 sm:items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          aria-hidden={false}
+        >
+          {/* backdrop */}
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="fixed inset-0 -z-10 cursor-default bg-ink/60 backdrop-blur-sm"
+          />
+
+          <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="account-modal-title"
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="relative my-8 w-full max-w-lg overflow-hidden rounded-3xl border border-line bg-paper shadow-2xl"
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-line"
+            >
+              ✕
+            </button>
+
+            {submitted ? (
+              <SuccessView firstName={form.firstName} onClose={onClose} />
+            ) : (
+              <div className="max-h-[85vh] overflow-y-auto px-7 py-8 sm:px-9">
+                <p className="eyebrow">Founding cohort · Fall 2026</p>
+                <h2
+                  id="account-modal-title"
+                  className="mt-3 font-display text-2xl font-bold tracking-tight text-ink sm:text-3xl"
+                >
+                  Claim your child&rsquo;s seat.
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-ink-soft">
+                  Create your parent account. Next, you&rsquo;ll build your child&rsquo;s dossier and
+                  submit it for review — an assessment invitation follows.
+                </p>
+
+                <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Parent first name" error={errors.firstName}>
+                      <input
+                        ref={firstFieldRef}
+                        className={inputCls(errors.firstName)}
+                        value={form.firstName}
+                        onChange={(e) => set("firstName", e.target.value)}
+                        autoComplete="given-name"
+                      />
+                    </Field>
+                    <Field label="Last name" error={errors.lastName}>
+                      <input
+                        className={inputCls(errors.lastName)}
+                        value={form.lastName}
+                        onChange={(e) => set("lastName", e.target.value)}
+                        autoComplete="family-name"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label="Email" error={errors.email}>
+                    <input
+                      type="email"
+                      className={inputCls(errors.email)}
+                      value={form.email}
+                      onChange={(e) => set("email", e.target.value)}
+                      autoComplete="email"
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Phone" error={errors.phone}>
+                      <input
+                        type="tel"
+                        className={inputCls(errors.phone)}
+                        value={form.phone}
+                        onChange={(e) => set("phone", e.target.value)}
+                        autoComplete="tel"
+                        placeholder="(416) 555-0123"
+                      />
+                    </Field>
+                    <Field label="Postal code" error={errors.postalCode}>
+                      <input
+                        className={inputCls(errors.postalCode)}
+                        value={form.postalCode}
+                        onChange={(e) => set("postalCode", e.target.value.toUpperCase())}
+                        autoComplete="postal-code"
+                        placeholder="M5V 2T6"
+                        maxLength={7}
+                      />
+                    </Field>
+                  </div>
+
+                  <fieldset>
+                    <legend className="mb-1.5 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+                      Household income (CAD)
+                    </legend>
+                    <div className="grid grid-cols-2 gap-2">
+                      {INCOME_BRACKETS.map((b) => (
+                        <label
+                          key={b}
+                          className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                            form.incomeBracket === b
+                              ? "border-red bg-red/5 text-ink"
+                              : "border-line-strong text-ink-soft hover:border-ink"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="income"
+                            className="sr-only"
+                            checked={form.incomeBracket === b}
+                            onChange={() => set("incomeBracket", b)}
+                          />
+                          <span
+                            className={`h-3.5 w-3.5 flex-none rounded-full border ${
+                              form.incomeBracket === b ? "border-4 border-red" : "border-line-strong"
+                            }`}
+                          />
+                          {b}
+                        </label>
+                      ))}
+                    </div>
+                    {errors.incomeBracket && <ErrorText>{errors.incomeBracket}</ErrorText>}
+                  </fieldset>
+
+                  {/* CASL express opt-in (brief §13.2, §14.7) — Canadian, not GT's US SMS text */}
+                  <label
+                    className={`flex cursor-pointer gap-3 rounded-xl border p-3.5 text-xs leading-5 transition-colors ${
+                      errors.caslConsent ? "border-red bg-red/5" : "border-line bg-white"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 flex-none accent-red"
+                      checked={form.caslConsent}
+                      onChange={(e) => set("caslConsent", e.target.checked)}
+                    />
+                    <span className="text-ink-soft">
+                      Yes — The 120 (GT Toronto) may email and text me about my application, seat
+                      status, events, and enrolment. I can withdraw consent anytime via the
+                      unsubscribe link or by emailing{" "}
+                      <span className="text-ink">admissions@the120.school</span>.
+                    </span>
+                  </label>
+                  {errors.caslConsent && <ErrorText>{errors.caslConsent}</ErrorText>}
+
+                  <button
+                    type="submit"
+                    className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-red-dark"
+                  >
+                    Create account & claim seat
+                  </button>
+
+                  <p className="text-center text-[0.7rem] leading-4 text-muted">
+                    Already started?{" "}
+                    <Link href="/dashboard" className="text-ink underline underline-offset-2">
+                      Sign in
+                    </Link>
+                    . Your information is stored securely and used only for admissions (PIPEDA).
+                  </p>
+                </form>
+              </div>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/* ---------- success ---------- */
+
+function SuccessView({ firstName, onClose }: { firstName: string; onClose: () => void }) {
+  const steps = [
+    "Check your inbox — we've sent a link to set your password.",
+    "Add your child and build their dossier in the dashboard.",
+    "Submit for review → we invite you to a qualifying assessment + call.",
+  ];
+  return (
+    <div className="px-7 py-10 text-center sm:px-9">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red/10 text-2xl text-red">
+        ✓
+      </div>
+      <h2 className="mt-5 font-display text-2xl font-bold tracking-tight text-ink">
+        You&rsquo;re in{firstName ? `, ${firstName}` : ""}.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-ink-soft">
+        Your account is created and you&rsquo;re in the funnel — nurture updates start now. Here&rsquo;s
+        what happens next:
+      </p>
+
+      <ol className="mx-auto mt-6 max-w-sm space-y-3 text-left">
+        {steps.map((s, i) => (
+          <li key={i} className="flex gap-3 text-sm text-ink-soft">
+            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-ink font-mono text-xs text-white">
+              {i + 1}
+            </span>
+            {s}
+          </li>
+        ))}
+      </ol>
+
+      <p className="mx-auto mt-6 max-w-sm rounded-xl bg-paper-2 px-4 py-3 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted">
+        Dashboard & dossier builder — coming next
+      </p>
+
+      <div className="mt-6 flex flex-col items-center gap-3">
+        <Link
+          href="/dashboard"
+          onClick={onClose}
+          className="inline-flex h-12 items-center justify-center rounded-full bg-red px-8 font-mono text-xs uppercase tracking-[0.14em] text-white hover:bg-red-dark"
+        >
+          Go to your dashboard →
+        </Link>
+        <button
+          type="button"
+          onClick={onClose}
+          className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted hover:text-ink"
+        >
+          Later
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- field primitives ---------- */
+
+function inputCls(error?: string) {
+  return `h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-red ${
+    error ? "border-red" : "border-line-strong"
+  }`;
+}
+
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+        {label}
+      </span>
+      {children}
+      {error && <ErrorText>{error}</ErrorText>}
+    </label>
+  );
+}
+
+function ErrorText({ children }: { children: React.ReactNode }) {
+  return <span className="mt-1 block font-mono text-[0.65rem] text-red">{children}</span>;
+}

@@ -14,8 +14,9 @@ export default function Hero() {
         alt=""
         fill
         priority
+        quality={95}
         sizes="100vw"
-        className="-z-20 origin-right scale-[1.3] object-cover object-[78%_30%]"
+        className="-z-20 object-cover object-[72%_32%]"
       />
       {/* Legibility scrims — dark on the LEFT where the copy sits (over the blackboard),
           fading right so the kids stay clear. Plus a light top scrim for the nav. */}

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>Dossier — The 120</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #0300ED; }
+    a { color: #131416; }
+    a:hover { color: #D92632; }
+    @media print { body { background: #FFFFFF; } .no-print { display: none !important; } }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; min-height: 100vh; padding: 40px 24px 64px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 22px;">
+
+  <!-- toolbar -->
+  <div class="no-print" style="width: 860px; max-width: 100%; display: flex; justify-content: space-between; align-items: center;">
+    <a href="Dashboard.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.04em; color: #9FA2A7; text-decoration: none;">← BACK TO DASHBOARD</a>
+    <button onClick="{{ printPage }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #131416; background: #F7F6F3; border: none; padding: 12px 20px; border-radius: 10px; cursor: pointer;">PRINT / SAVE PDF</button>
+  </div>
+
+  <!-- the sheet -->
+  <div style="width: 860px; max-width: 100%; background: #F7F6F3; box-sizing: border-box; padding: 52px 56px; display: flex; flex-direction: column; gap: 32px; box-shadow: 0 8px 40px rgba(0,0,0,0.4);">
+
+    <!-- header -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 32px; border-bottom: 2px solid #131416; padding-bottom: 26px;">
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <span style="display: flex; align-items: center; gap: 10px;">
+          <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.16em; color: #55585E;">CANDIDATE DOSSIER · THE 120 · GT TORONTO</span>
+        </span>
+        <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 44px; letter-spacing: -0.01em; line-height: 1.05; margin: 0; color: #131416;">{{ name }}</h1>
+        <span style="font-size: 15px; color: #55585E;">{{ meta }}</span>
+      </div>
+      <span style="{{ statusStyle }}">{{ status }}</span>
+    </div>
+
+    <!-- subjects + workshops row -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px;">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #D92632;">GOING DEEP IN</span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <sc-for list="{{ subjects }}" as="sub" hint-placeholder-count="2">
+            <span style="font-family: Georgia, serif; font-style: italic; font-size: 22px; color: #131416; border-bottom: 2px solid #D92632; padding-bottom: 2px;">{{ sub }}</span>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #D92632;">WORKSHOP INTERESTS</span>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <sc-for list="{{ workshops }}" as="w" hint-placeholder-count="2">
+            <span style="font-size: 14.5px; color: #131416;">{{ w.title }} <span style="color: #9FA2A7; font-size: 13px;">— {{ w.advisor }}</span></span>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- project pitch -->
+    <div style="background: #0300ED; padding: 30px 34px; display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #EFC5B8;">THE PROJECT PITCH — IN THEIR OWN WORDS</span>
+      <p style="font-family: Georgia, 'Times New Roman', serif; font-size: 21px; line-height: 1.5; font-style: italic; color: #F7F6F3; margin: 0;">“{{ pitch }}”</p>
+    </div>
+
+    <!-- interests + scores -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #D92632;">INTERESTS & ACHIEVEMENTS</span>
+        <p style="font-size: 15px; line-height: 1.65; color: #131416; margin: 0;">{{ interests }}</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #D92632;">SCORES & EVIDENCE</span>
+        <p style="font-size: 15px; line-height: 1.65; color: #131416; margin: 0;">{{ scores }}</p>
+      </div>
+    </div>
+
+    <!-- footer -->
+    <div style="border-top: 1px solid #D8D5CF; padding-top: 20px; display: flex; justify-content: space-between; align-items: center; gap: 24px;">
+      <span style="font-size: 12px; color: #9FA2A7;">Submitted by {{ parentName }} · {{ contact }}</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #9FA2A7;">FOUNDING COHORT · FALL 2026</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { loaded: false };
+
+  componentDidMount() {
+    let account = null, kids = [], activeId = null;
+    try { account = JSON.parse(localStorage.getItem('the120.account') || 'null'); } catch (e) {}
+    try { kids = JSON.parse(localStorage.getItem('the120.children') || '[]'); } catch (e) {}
+    try { activeId = localStorage.getItem('the120.activeChild'); } catch (e) {}
+    if (!kids.length) { window.location.href = 'Dashboard.dc.html'; return; }
+    this.account = account || { firstName: '', lastName: '', email: '' };
+    this.kid = kids.find(k => k.id === activeId) || kids[0];
+    fetch('gt-workshops.json').then(r => r.json()).then(data => {
+      const lookup = {};
+      data.forEach(a => a.tracks.forEach(t => t.items.forEach(w => { lookup[w.id] = { title: w.title, advisor: a.name }; })));
+      this.gtLookup = lookup;
+      this.forceUpdate();
+    }).catch(() => {});
+    this.setState({ loaded: true });
+  }
+
+  renderVals() {
+    if (!this.state.loaded) return { name: '', meta: '', status: '', statusStyle: '', subjects: [], workshops: [], pitch: '', interests: '', scores: '', parentName: '', contact: '', printPage: () => {} };
+    const k = this.kid;
+    const catalog = this.gtLookup || {};
+    const subjects = [...(k.subjects || [])];
+    if (k.otherSubject) subjects.push(k.otherSubject);
+    const isDraft = k.status === 'Draft';
+    return {
+      name: k.name,
+      meta: (k.tribe ? k.tribe + ' · ' : '') + 'Grade ' + k.grade + (k.school ? ' · ' + k.school : '') + (k.birthYear ? ' · Born ' + k.birthYear : '') + ' · Toronto',
+      status: k.status.toUpperCase(),
+      statusStyle: "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; padding: 8px 16px; border-radius: 100px; white-space: nowrap;" + (isDraft ? ' background: #E0DDD7; color: #55585E;' : ' background: #D92632; color: #FFFFFF;'),
+      subjects,
+      workshops: (k.workshops || []).map(id => catalog[id] || { title: '…', advisor: '' }),
+      pitch: k.pitch || '—',
+      interests: k.interests || '—',
+      scores: k.scores || 'None shared',
+      parentName: this.account.firstName + ' ' + this.account.lastName,
+      contact: this.account.email,
+      printPage: () => window.print()
+    };
+  }
+}
+</script>
+</body>
+</html>

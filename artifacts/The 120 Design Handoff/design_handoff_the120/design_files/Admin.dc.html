@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>Admissions — The 120 (staff)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #ECEAE5; }
+    a { color: #131416; }
+    a:hover { color: #D92632; }
+    textarea::placeholder { color: #9FA2A7; }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #131416; min-height: 100vh;">
+
+  <!-- top bar -->
+  <div style="background: #0300ED; padding: 14px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+    <a href="Home.dc.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none;">
+      <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+      <span style="font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: #F7F6F3; white-space: nowrap;">The 120</span>
+    </a>
+    <span style="width: 1px; height: 20px; background: rgba(255,255,255,0.24);"></span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; color: rgba(255,255,255,0.75);">ADMISSIONS · DOSSIER QUEUE</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #131416; background: #EFC5B8; padding: 4px 10px; border-radius: 100px;">STAFF ONLY</span>
+    <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgba(255,255,255,0.75);">{{ seatsLabel }}</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: calc(100vh - 60px);">
+
+    <!-- queue -->
+    <div style="padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid #DDDAD4; box-sizing: border-box;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 16px;">
+        <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; margin: 0;">Dossier queue</h1>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #9FA2A7;">{{ queueCount }}</span>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <sc-for list="{{ statusFilters }}" as="sf" hint-placeholder-count="4">
+          <button onClick="{{ sf.select }}" style="{{ sf.style }}">{{ sf.label }}</button>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="5">
+          <button onClick="{{ r.select }}" style="{{ r.style }}">
+            <span style="display: flex; flex-direction: column; gap: 2px; text-align: left; min-width: 0;">
+              <span style="font-weight: 600; font-size: 15.5px;">{{ r.name }}</span>
+              <span style="font-size: 12.5px; color: #9FA2A7;">{{ r.meta }}</span>
+            </span>
+            <span style="margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #9FA2A7; white-space: nowrap;">{{ r.date }}</span>
+              <span style="{{ r.pillStyle }}">{{ r.status }}</span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- detail -->
+    <div style="padding: 26px 28px; box-sizing: border-box;">
+      <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; color: #D92632;">CANDIDATE DOSSIER</span>
+              <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 28px; letter-spacing: -0.01em;">{{ sel.name }}</span>
+              <span style="font-size: 13.5px; color: #55585E;">{{ sel.meta }}</span>
+            </div>
+            <span style="{{ sel.pillStyle }}">{{ sel.status }}</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;">
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">SUBJECTS</span>
+              <span style="font-size: 14px;">{{ sel.subjects }}</span>
+            </div>
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">PARENT</span>
+              <span style="font-size: 14px;">{{ sel.parent }}</span>
+            </div>
+          </div>
+
+          <div style="background: #0300ED; border-radius: 12px; padding: 18px 22px; display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #EFC5B8;">PROJECT PITCH</span>
+            <p style="font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 16px; line-height: 1.5; color: #F7F6F3; margin: 0;">“{{ sel.pitch }}”</p>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #9FA2A7;">INTERESTS & EVIDENCE</span>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #55585E; margin: 0;">{{ sel.interests }}</p>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #55585E; margin: 0;">{{ sel.scores }}</p>
+          </div>
+
+          <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">MOVE CANDIDATE</span>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <sc-for list="{{ sel.stageButtons }}" as="sb" hint-placeholder-count="6">
+                <button onClick="{{ sb.set }}" style="{{ sb.style }}">{{ sb.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #9FA2A7;">TEAM NOTES</span>
+            <textarea value="{{ sel.notes }}" onChange="{{ sel.setNotes }}" rows="3" placeholder="Assessment scheduling, call outcomes, flags…" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; line-height: 1.6; padding: 12px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical; width: 100%; box-sizing: border-box;"></textarea>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;seatsTaken&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 7, &quot;min&quot;: 0, &quot;max&quot;: 120, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Scarcity&quot;}}">
+class Component extends DCLogic {
+  state = { selId: null, filter: 'ALL', loaded: false };
+
+  componentDidMount() {
+    let queue = null;
+    try { queue = JSON.parse(localStorage.getItem('the120.adminQueue') || 'null'); } catch (e) {}
+    if (!queue || !queue.length) {
+      queue = [
+        { id: 'q1', name: 'Theo Vandermeer', grade: '4', school: 'Cottingham Jr PS', parent: 'Sofie Vandermeer · sofie.v@…', subjects: 'Math', pitch: 'A trading-card game where the math is the weapon — you win by solving faster.', interests: 'Speedcubing (sub-40), Beast Academy self-study two grades ahead.', scores: 'CCAT 98th percentile.', status: 'Submitted', date: 'Jul 5', notes: '' },
+        { id: 'q2', name: 'Amara Osei', grade: '7', school: 'Glen Ames Sr PS', parent: 'Kwame Osei · k.osei@…', subjects: 'Writing, History', pitch: 'A podcast season interviewing Toronto elders about neighbourhoods that no longer exist.', interests: 'School paper editor; NaNoWriMo finisher at 11.', scores: 'MAP Reading 235.', status: 'In review', date: 'Jul 3', notes: 'Strong pitch — pair with Morgan?' },
+        { id: 'q3', name: 'Lucas Braga', grade: '5', school: 'St. Clare CS', parent: 'Ana Braga · ana.braga@…', subjects: 'Science', pitch: 'Test which balcony vegetables actually grow best in a Toronto condo, with real data.', interests: 'iNaturalist top-500 observer in Ontario.', scores: 'Report cards uploaded.', status: 'Invited to assessment', date: 'Jun 30', notes: 'Assessment slot: Jul 12.' },
+        { id: 'q4', name: 'Zoe Tremblay', grade: '8', school: 'Homeschool', parent: 'Marc Tremblay · marc.t@…', subjects: 'Math, Science', pitch: 'Build and launch a high-altitude glider with an onboard flight computer I program myself.', interests: 'Ham radio licence (basic), Arduino since age 9.', scores: 'CCAT 99th; MAP Math 251.', status: 'Offered a seat', date: 'Jun 24', notes: 'Family also interested in Full Core — flagged for call.' },
+        { id: 'q5', name: 'Priya Nair', grade: '3', school: 'Fraser Mustard ELA', parent: 'Deepa Nair · deepa.n@…', subjects: 'Reading', pitch: 'Write and illustrate a chapter book series about a library cat who solves mysteries.', interests: 'Reads at Grade 6 level; keeps a review blog with her mom.', scores: 'Teacher letter uploaded.', status: 'Submitted', date: 'Jul 6', notes: '' },
+        { id: 'q6', name: 'Daniel Kim', grade: '6', school: 'Hollywood PS', parent: 'Grace Kim · grace.kim@…', subjects: 'Math', pitch: 'Qualify for MATHCOUNTS nationals and publish my practice system so other kids can use it.', interests: 'Chess 1350 rapid; Math Kangaroo medalist.', scores: 'AMC 8: 18.', status: 'Member of the 120', date: 'Jun 18', notes: 'Founding member #6. Tin Can shipped.' }
+      ];
+      localStorage.setItem('the120.adminQueue', JSON.stringify(queue));
+    }
+    // include the demo family's submitted kids
+    try {
+      const kids = JSON.parse(localStorage.getItem('the120.children') || '[]');
+      const acct = JSON.parse(localStorage.getItem('the120.account') || 'null');
+      kids.filter(k => k.status && k.status !== 'Draft').forEach(k => {
+        if (!queue.some(q => q.id === 'fam-' + k.id)) {
+          queue.push({ id: 'fam-' + k.id, name: k.name, grade: k.grade, school: k.school, parent: acct ? (acct.firstName + ' ' + acct.lastName + ' · ' + acct.email) : '—',
+            subjects: [...(k.subjects || []), k.otherSubject].filter(Boolean).join(', '), pitch: k.pitch, interests: k.interests, scores: k.scores || 'None shared', status: k.status, date: 'Jul 7', notes: '' });
+        }
+      });
+    } catch (e) {}
+    this.queue = queue;
+    this.setState({ loaded: true, selId: queue[0] ? queue[0].id : null });
+  }
+
+  persist() {
+    localStorage.setItem('the120.adminQueue', JSON.stringify(this.queue.filter(q => !String(q.id).startsWith('fam-'))));
+    this.forceUpdate();
+  }
+
+  renderVals() {
+    const seatsTaken = this.props.seatsTaken ?? 7;
+    const seatsLabel = seatsTaken + ' SEATS FILLED · ' + (120 - seatsTaken) + ' REMAIN';
+    if (!this.state.loaded) return { seatsLabel, queueCount: '', statusFilters: [], rows: [], hasSel: false, sel: {} };
+    const s = this.state;
+    const stages = ['Submitted', 'In review', 'Invited to assessment', 'Offered a seat', 'Member of the 120'];
+
+    const chip = (active) => "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.04em; padding: 7px 12px; border-radius: 100px; cursor: pointer;" + (active ? ' background: #0300ED; color: #FFFFFF; border: 1px solid #0300ED;' : ' background: #F7F6F3; color: #55585E; border: 1px solid #D8D5CF;');
+    const statusFilters = ['ALL', ...stages.map(x => x.toUpperCase())].map(label => ({
+      label,
+      select: () => this.setState({ filter: label }),
+      style: chip(s.filter === label)
+    }));
+
+    const pill = (status) => {
+      const idx = stages.indexOf(status);
+      const bg = idx <= 0 ? '#E0DDD7' : (idx >= 4 ? '#D92632' : '#0300ED');
+      const fg = idx <= 0 ? '#55585E' : '#FFFFFF';
+      return "font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 100px; white-space: nowrap; background: " + bg + '; color: ' + fg + ';';
+    };
+
+    const visible = this.queue.filter(q => s.filter === 'ALL' || q.status.toUpperCase() === s.filter);
+    const rows = visible.map(q => ({
+      name: q.name,
+      meta: 'Grade ' + q.grade + (q.school ? ' · ' + q.school : ''),
+      date: q.date,
+      status: q.status.toUpperCase(),
+      pillStyle: pill(q.status),
+      select: () => this.setState({ selId: q.id }),
+      style: 'display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 13px 16px; border-radius: 12px; cursor: pointer; font-family: \'Space Grotesk\', sans-serif;' + (s.selId === q.id ? ' background: #FFFFFF; border: 1px solid #0300ED; box-shadow: 0 2px 10px rgba(3,0,237,0.10);' : ' background: #F7F6F3; border: 1px solid #DDDAD4;')
+    }));
+
+    const q = this.queue.find(x => x.id === s.selId);
+    let sel = {};
+    if (q) {
+      sel = {
+        name: q.name,
+        meta: 'Grade ' + q.grade + (q.school ? ' · ' + q.school : '') + ' · submitted ' + q.date,
+        status: q.status.toUpperCase(),
+        pillStyle: pill(q.status),
+        subjects: q.subjects || '—',
+        parent: q.parent || '—',
+        pitch: q.pitch || '—',
+        interests: q.interests || '—',
+        scores: q.scores || '—',
+        notes: q.notes || '',
+        setNotes: (e) => { q.notes = e.target.value; this.persist(); },
+        stageButtons: stages.map(st => ({
+          label: st.toUpperCase(),
+          set: () => { q.status = st; this.persist(); },
+          style: chip(q.status === st)
+        }))
+      };
+    }
+
+    return {
+      seatsLabel,
+      queueCount: visible.length + ' OF ' + this.queue.length + ' DOSSIERS',
+      statusFilters, rows,
+      hasSel: !!q,
+      sel
+    };
+  }
+}
+</script>
+</body>
+</html>

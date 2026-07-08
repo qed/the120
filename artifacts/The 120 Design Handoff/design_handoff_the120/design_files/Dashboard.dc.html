@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>Dashboard — The 120</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #ECEAE5; }
+    a { color: #131416; }
+    a:hover { color: #D92632; }
+    input::placeholder, textarea::placeholder { color: #9FA2A7; }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #131416; min-height: 100vh; display: grid; grid-template-columns: 250px minmax(0, 1fr);">
+
+  <!-- SIDEBAR -->
+  <div style="background: #0300ED; padding: 26px 22px; display: flex; flex-direction: column; gap: 28px; box-sizing: border-box;">
+    <a href="Home.dc.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none;">
+      <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+      <span style="display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-weight: 700; font-size: 15px; letter-spacing: -0.02em; line-height: 1; color: #F7F6F3;">The 120</span>
+        <span style="font-weight: 500; font-size: 8px; letter-spacing: 0.2em; color: #EFC5B8; white-space: nowrap;">TORONTO</span>
+      </span>
+    </a>
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <button onClick="{{ goHome }}" style="{{ navHomeStyle }}">Overview</button>
+      <button onClick="{{ goWorkshops }}" style="{{ navWorkshopsStyle }}">Workshop catalog</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: rgba(255,255,255,0.6);">YOUR KIDS</span>
+      <sc-for list="{{ kidNav }}" as="k" hint-placeholder-count="1">
+        <button onClick="{{ k.select }}" style="{{ k.style }}">{{ k.name }}</button>
+      </sc-for>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <span style="font-size: 13px; color: #9FA2A7;">{{ parentName }}</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; color: rgba(255,255,255,0.6);">{{ seatsLabel }}</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div style="padding: 36px 44px; box-sizing: border-box; max-width: 1080px;">
+
+    <!-- OVERVIEW -->
+    <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; gap: 28px;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 36px; letter-spacing: -0.01em; margin: 0;">{{ welcome }}</h1>
+          <span style="font-size: 15px; color: #55585E;">Build each child's dossier, then submit it for review. We'll take it from there.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <sc-for list="{{ kidCards }}" as="kc" hint-placeholder-count="1">
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 26px 28px; display: flex; flex-direction: column; gap: 18px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-weight: 600; font-size: 22px; letter-spacing: -0.01em;">{{ kc.name }}</span>
+                  <span style="font-size: 14px; color: #55585E;">{{ kc.meta }}</span>
+                </div>
+                <span style="{{ kc.statusStyle }}">{{ kc.status }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.1em; color: #9FA2A7;">DOSSIER COMPLETENESS</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #131416;">{{ kc.pct }}</span>
+                </div>
+                <div style="height: 7px; background: #E0DDD7; border-radius: 100px; overflow: hidden;">
+                  <div style="{{ kc.barStyle }}"></div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button onClick="{{ kc.open }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #FFFFFF; background: #0300ED; padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer;">EDIT DOSSIER</button>
+                <button onClick="{{ kc.viewDossier }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #131416; background: none; border: 1px solid #C9C6C0; padding: 12px 20px; border-radius: 10px; cursor: pointer;">VIEW DOSSIER</button>
+                <sc-if value="{{ kc.canSubmit }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ kc.submit }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #FFFFFF; background: #D92632; padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer;">SUBMIT FOR REVIEW</button>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- add kid -->
+        <div style="border: 1.5px dashed #C9C6C0; border-radius: 14px; padding: 22px 28px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+          <span style="font-size: 14px; color: #55585E;">Add another child:</span>
+          <input value="{{ newKidName }}" onChange="{{ setNewKidName }}" placeholder="Child's first name" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none;">
+          <div style="display: flex; gap: 6px;">
+            <sc-for list="{{ gradeOpts }}" as="g" hint-placeholder-count="6">
+              <button onClick="{{ g.select }}" style="{{ g.style }}">{{ g.label }}</button>
+            </sc-for>
+          </div>
+          <button onClick="{{ addKid }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #FFFFFF; background: #0300ED; padding: 12px 18px; border-radius: 10px; border: none; cursor: pointer;">ADD CHILD</button>
+        </div>
+
+        <!-- seat pipeline -->
+        <div style="background: #0300ED; border-radius: 14px; padding: 26px 28px; display: flex; flex-direction: column; gap: 16px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; color: #EFC5B8;">THE PATH TO A SEAT</span>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <sc-for list="{{ pipeline }}" as="p" hint-placeholder-count="6">
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <span style="{{ p.style }}">{{ p.label }}</span>
+                <sc-if value="{{ p.arrow }}" hint-placeholder-val="{{ true }}">
+                  <span style="color: #55585E; font-size: 12px;">→</span>
+                </sc-if>
+              </span>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- CHILD EDITOR -->
+    <sc-if value="{{ isChild }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #D92632;">DOSSIER · {{ childStatus }}</span>
+            <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 34px; letter-spacing: -0.01em; margin: 0;">{{ childName }}'s dossier</h1>
+          </div>
+          <button onClick="{{ viewDossier }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: #131416; background: none; border: 1px solid #C9C6C0; padding: 12px 20px; border-radius: 10px; cursor: pointer;">VIEW AS PROFILE</button>
+        </div>
+
+        <!-- basics -->
+        <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px;">
+          <span style="font-weight: 600; font-size: 16px;">Basics</span>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Full name</span>
+              <input value="{{ cName }}" onChange="{{ setCName }}" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; padding: 11px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Grade</span>
+              <input value="{{ cGrade }}" onChange="{{ setCGrade }}" placeholder="3–8" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; padding: 11px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Birth year</span>
+              <input value="{{ cBirthYear }}" onChange="{{ setCBirthYear }}" placeholder="2015" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; padding: 11px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Current school</span>
+              <input value="{{ cSchool }}" onChange="{{ setCSchool }}" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; padding: 11px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none;">
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-size: 12.5px; font-weight: 600;">Tribe <span style="font-weight: 400; color: #9FA2A7;">(pick one of five)</span></span>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <sc-for list="{{ tribeOpts }}" as="tr" hint-placeholder-count="5">
+                <button onClick="{{ tr.select }}" style="{{ tr.style }}">{{ tr.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- subjects -->
+        <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-weight: 600; font-size: 16px;">Subject picks</span>
+            <span style="font-size: 13.5px; color: #55585E;">The 1–2 subjects they'll get super advanced in.</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <sc-for list="{{ subjects }}" as="sub" hint-placeholder-count="5">
+              <button onClick="{{ sub.toggle }}" style="{{ sub.style }}">{{ sub.label }}</button>
+            </sc-for>
+            <input value="{{ cOtherSubject }}" onChange="{{ setCOtherSubject }}" placeholder="Other…" style="font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; padding: 10px 14px; border: 1px solid #D8D5CF; border-radius: 100px; background: #FFFFFF; outline: none; width: 120px;">
+          </div>
+          <sc-if value="{{ subjectWarning }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 12.5px; color: #D92632;">Pick at most two subjects.</span>
+          </sc-if>
+        </div>
+
+        <!-- project pitch -->
+        <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-weight: 600; font-size: 16px;">Project pitch & interests</span>
+            <span style="font-size: 13.5px; color: #55585E;">The year-long project idea — the kid's own words are encouraged.</span>
+          </div>
+          <textarea value="{{ cPitch }}" onChange="{{ setCPitch }}" rows="4" placeholder="What do they want to build, write, launch, or master this year?" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; line-height: 1.6; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical;"></textarea>
+          <textarea value="{{ cInterests }}" onChange="{{ setCInterests }}" rows="2" placeholder="Interests, achievements, portfolio links…" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; line-height: 1.6; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical;"></textarea>
+        </div>
+
+        <!-- workshops + scores row -->
+        <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px;">
+          <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 16px;">
+              <span style="font-weight: 600; font-size: 16px;">Workshop selections</span>
+              <button onClick="{{ goWorkshops }}" style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; color: #D92632; background: none; border: none; cursor: pointer; padding: 0;">BROWSE CATALOG →</button>
+            </div>
+            <sc-if value="{{ hasWorkshops }}" hint-placeholder-val="{{ true }}">
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <sc-for list="{{ childWorkshops }}" as="w" hint-placeholder-count="2">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E4E2DD; border-radius: 10px; padding: 12px 16px;">
+                    <span style="display: flex; flex-direction: column; gap: 1px;">
+                      <span style="font-weight: 600; font-size: 14px;">{{ w.title }}</span>
+                      <span style="font-size: 12px; color: #9FA2A7;">{{ w.meta }}</span>
+                    </span>
+                    <button onClick="{{ w.remove }}" style="font-size: 14px; color: #9FA2A7; background: none; border: none; cursor: pointer;">✕</button>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noWorkshops }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size: 13.5px; color: #9FA2A7;">None saved yet — pick a few from the catalog to show what excites them.</span>
+            </sc-if>
+          </div>
+          <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 12px;">
+            <span style="font-weight: 600; font-size: 16px;">Scores & uploads <span style="font-weight: 400; font-size: 12.5px; color: #9FA2A7;">(optional)</span></span>
+            <textarea value="{{ cScores }}" onChange="{{ setCScores }}" rows="3" placeholder="MAP, CCAT, report cards — list anything you'd like to share" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; line-height: 1.6; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical;"></textarea>
+            <span style="font-size: 11.5px; color: #9FA2A7;">Treated as sensitive information; used only for admissions review.</span>
+          </div>
+        </div>
+
+        <!-- submit row -->
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <sc-if value="{{ canSubmitChild }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ submitChild }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #FFFFFF; background: #D92632; padding: 15px 26px; border-radius: 10px; border: none; cursor: pointer;">SUBMIT FOR REVIEW</button>
+          </sc-if>
+          <span style="font-size: 13px; color: #55585E;">{{ completenessNote }}</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- WORKSHOP CATALOG -->
+    <sc-if value="{{ isWorkshops }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 26px;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #D92632;">FALL 2026 · EXPRESSION OF INTEREST</span>
+          <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 36px; letter-spacing: -0.01em; margin: 0;">Explore Fall 2026 workshops</h1>
+          <span style="font-size: 15px; color: #55585E; max-width: 640px; line-height: 1.6;">{{ catalogNote }}</span>
+          <span style="font-size: 13px; color: #9FA2A7; max-width: 640px; line-height: 1.6;">Workshops meet 45–60 minutes, about 2× a week, across a 5–8 week session. GT covers equipment, materials, and logistics — your family just joins online from home.</span>
+        </div>
+
+        <!-- filters -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #9FA2A7; width: 52px;">TRACK</span>
+            <sc-for list="{{ trackFilters }}" as="tf" hint-placeholder-count="4">
+              <button onClick="{{ tf.select }}" style="{{ tf.style }}">{{ tf.label }}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #9FA2A7; width: 52px;">GRADE</span>
+            <sc-for list="{{ gradeFilters }}" as="gf" hint-placeholder-count="7">
+              <button onClick="{{ gf.select }}" style="{{ gf.style }}">{{ gf.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- result count -->
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: #9FA2A7;">{{ resultCount }}</span>
+
+        <!-- advisor sections -->
+        <div style="display: flex; flex-direction: column; gap: 34px;">
+          <sc-for list="{{ advisorGroups }}" as="ag" hint-placeholder-count="3">
+            <div style="{{ ag.sectionStyle }}">
+              <div style="display: flex; align-items: center; gap: 14px;">
+                <sc-if value="{{ ag.headshotSrc }}" hint-placeholder-val="{{ false }}">
+                  <span role="img" aria-label="{{ ag.name }}" style="{{ ag.headshotStyle }}"></span>
+                </sc-if>
+                <sc-if value="{{ ag.noHeadshot }}" hint-placeholder-val="{{ true }}">
+                  <span style="{{ ag.avatarStyle }}">{{ ag.initials }}</span>
+                </sc-if>
+                <span style="display: flex; flex-direction: column; gap: 1px;">
+                  <span style="font-weight: 600; font-size: 18px;">{{ ag.name }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #9FA2A7;">{{ ag.role }}</span>
+                </span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #9FA2A7; margin-left: auto;">{{ ag.count }}</span>
+              </div>
+              <p style="font-size: 13px; line-height: 1.6; color: #55585E; margin: 10px 0 0; max-width: 680px;">{{ ag.bio }}</p>
+              <sc-for list="{{ ag.groups }}" as="tg" hint-placeholder-count="1">
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 18px;">
+                  <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 17px; color: #131416;">{{ tg.track }}</span>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+                    <sc-for list="{{ tg.items }}" as="c" hint-placeholder-count="2">
+                      <div style="{{ c.cardStyle }}">
+                        <button onClick="{{ c.openDetails }}" style="{{ c.coverStyle }}">
+                          <sc-if value="{{ c.posterSrc }}" hint-placeholder-val="{{ false }}">
+                            <span role="img" aria-label="{{ c.title }} poster" style="{{ c.posterImgStyle }}"></span>
+                          </sc-if>
+                          <sc-if value="{{ c.video }}" hint-placeholder-val="{{ false }}">
+                            <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;"><span style="width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.92); color: #131416; display: flex; align-items: center; justify-content: center; font-size: 13px;">▶</span></span>
+                          </sc-if>
+                          <sc-if value="{{ c.noPoster }}" hint-placeholder-val="{{ true }}">
+                            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 7.5px; font-weight: 500; letter-spacing: 0.14em; opacity: 0.9;">{{ c.coverKick }}</span>
+                            <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 15px; line-height: 1.15; margin-top: 5px; text-align: left;">{{ c.title }}</span>
+                            <span style="margin-top: auto; font-family: 'IBM Plex Mono', monospace; font-size: 8px; letter-spacing: 0.08em; opacity: 0.75;">{{ c.coverFoot }}</span>
+                          </sc-if>
+                        </button>
+                        <div style="display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1;">
+                          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: {{ c.accent }};">{{ c.trackLabel }}</span>
+                          <span style="font-weight: 600; font-size: 16.5px; line-height: 1.2;">{{ c.title }}</span>
+                          <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; background: #ECEAE5; border-radius: 100px; padding: 4px 10px; color: #55585E;">{{ c.grades }}</span>
+                            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #9FA2A7;">{{ c.fmt }}</span>
+                          </span>
+                          <span style="font-size: 13px; line-height: 1.55; color: #55585E;">{{ c.desc }}</span>
+                          <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px;">
+                            <button onClick="{{ c.toggle }}" style="{{ c.btnStyle }}">{{ c.btnLabel }}</button>
+                            <button onClick="{{ c.openDetails }}" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.04em; color: #55585E; background: none; border: none; cursor: pointer; padding: 11px 8px;">DETAILS →</button>
+                          </div>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- DETAILS MODAL -->
+    <sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closeModal }}" style="position: fixed; inset: 0; background: rgba(19,20,22,0.55); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px;">
+        <div onClick="{{ stopClick }}" style="background: #F7F6F3; border-radius: 18px; max-width: 620px; width: 100%; max-height: 85vh; overflow: auto; padding: 36px 40px; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 24px 80px rgba(0,0,0,0.35);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: {{ modal.accent }};">{{ modal.trackLabel }} · {{ modal.gradesLabel }} · {{ modal.fmtLabel }} · 5–8 WEEK SESSION</span>
+              <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 30px; letter-spacing: -0.01em; line-height: 1.1;">{{ modal.title }}</span>
+            </div>
+            <button onClick="{{ closeModal }}" style="font-size: 20px; color: #9FA2A7; background: none; border: none; cursor: pointer; line-height: 1;">✕</button>
+          </div>
+          <div style="display: flex; gap: 22px; align-items: flex-start;">
+            <sc-if value="{{ modal.posterSrc }}" hint-placeholder-val="{{ false }}">
+              <span role="img" aria-label="{{ modal.title }} poster" style="{{ modal.modalPosterStyle }}"></span>
+            </sc-if>
+            <div style="display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1;">
+              <p style="font-size: 15px; line-height: 1.65; color: #131416; margin: 0;">{{ modal.desc }}</p>
+              <sc-if value="{{ modal.pitch }}" hint-placeholder-val="{{ false }}">
+                <p style="font-size: 13.5px; line-height: 1.6; color: #55585E; margin: 0; border-left: 3px solid {{ modal.accent }}; padding-left: 12px;">{{ modal.pitch }}</p>
+              </sc-if>
+              <sc-if value="{{ modal.calendar }}" hint-placeholder-val="{{ false }}">
+                <span style="display: flex; flex-direction: column; gap: 3px; background: #ECEAE5; border-radius: 10px; padding: 10px 14px; width: fit-content;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.12em; color: #9FA2A7;">COMPETITION CALENDAR</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.03em; color: #131416;">{{ modal.calendar }}</span>
+                </span>
+              </sc-if>
+            </div>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #E4E2DD; border-radius: 12px; padding: 16px 20px; display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-weight: 600; font-size: 14.5px;">{{ modal.advisor }} <span style="font-family: 'IBM Plex Mono', monospace; font-weight: 400; font-size: 10px; letter-spacing: 0.06em; color: #9FA2A7;">{{ modal.role }}</span></span>
+            <span style="font-size: 13px; line-height: 1.55; color: #55585E;">{{ modal.bio }}</span>
+          </div>
+          <span style="font-size: 11.5px; color: #9FA2A7;">GT covers equipment, materials, and logistics — your family just joins online from home.</span>
+          <button onClick="{{ modal.toggle }}" style="{{ modal.btnStyle }}">{{ modal.btnLabel }}</button>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;seatsTaken&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 7, &quot;min&quot;: 0, &quot;max&quot;: 120, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Scarcity&quot;}}">
+class Component extends DCLogic {
+  state = { view: 'home', childId: null, newKidName: '', newKidGrade: '3', loaded: false, trackFilter: 'ALL', gradeFilter: 'ALL', modalId: null };
+
+  componentDidMount() {
+    let account = null, kids = null;
+    try { account = JSON.parse(localStorage.getItem('the120.account') || 'null'); } catch (e) {}
+    try { kids = JSON.parse(localStorage.getItem('the120.children') || 'null'); } catch (e) {}
+    if (!account) {
+      account = { firstName: 'Jordan', lastName: 'Lee', email: 'jordan@example.com', phone: '(416) 555-0120', postal: 'M5V 2T6', income: '$90,000 – $220,000', casl: true, demo: true, created: new Date().toISOString() };
+      localStorage.setItem('the120.account', JSON.stringify(account));
+    }
+    if (!kids || !kids.length) {
+      kids = [{
+        id: 'k1', name: 'Maya Lee', grade: '6', birthYear: '2014', school: 'Runnymede PS',
+        subjects: ['Math', 'Science'], otherSubject: '',
+        pitch: "I want to build a weather balloon that takes pictures from the edge of space and write a guide so other kids can build one too.",
+        interests: 'Astronomy, chess (1100 rapid), Python turtle art. Won the school science fair 2 years running.',
+        scores: 'CCAT 99th percentile (Grade 5). MAP Math 240 (Winter).',
+        workshops: ['math-competitor-academy', 'vex-all-stars'],
+        tribe: 'The Scholars',
+        status: 'Draft'
+      }];
+      localStorage.setItem('the120.children', JSON.stringify(kids));
+    }
+    let migrated = false;
+    kids.forEach(k => { if (!k.tribe) { k.tribe = 'The Scholars'; migrated = true; } });
+    if (migrated) localStorage.setItem('the120.children', JSON.stringify(kids));
+    this.account = account;
+    this.kids = kids;
+    this.setState({ loaded: true, childId: kids[0] ? kids[0].id : null });
+    this.loadGtCatalog();
+  }
+
+  save() {
+    localStorage.setItem('the120.children', JSON.stringify(this.kids));
+    this.forceUpdate();
+  }
+
+  loadGtCatalog() {
+    fetch('gt-workshops.json').then(r => r.json()).then(data => {
+      this.gtData = data;
+      const valid = new Set();
+      data.forEach(a => a.tracks.forEach(t => t.items.forEach(w => valid.add(w.id))));
+      const map = { w1: 'math-competitor-academy', w2: 'say-that-again', w3: 'competitive-chess', w4: 'literary-league', w5: 'vex-all-stars', w6: 'page-turners', w7: 'sold', w8: 'botball-robotics' };
+      let changed = false;
+      (this.kids || []).forEach(k => {
+        const nw = (k.workshops || []).map(x => map[x] || x).filter(x => valid.has(x));
+        if (JSON.stringify(nw) !== JSON.stringify(k.workshops)) { k.workshops = nw; changed = true; }
+      });
+      if (changed) localStorage.setItem('the120.children', JSON.stringify(this.kids));
+      this.forceUpdate();
+    }).catch(() => {});
+  }
+
+  flatCatalog() {
+    const flat = [];
+    (this.gtData || []).forEach(a => a.tracks.forEach(t => t.items.forEach(w =>
+      flat.push({ ...w, advisor: a.name, role: a.role || 'Academic Advisor', bio: a.bio, accent: a.accent }))));
+    return flat;
+  }
+
+  gradeRange(chip) {
+    const parts = (chip || '').replace('Grades', '').trim().split('–');
+    const parse = (x) => { x = (x || '').trim(); if (x === 'K') return 0; if (x.indexOf('8+') >= 0) return 12; const n = parseInt(x, 10); return isNaN(n) ? null : n; };
+    const lo = parse(parts[0]); const hi = parse(parts.length > 1 ? parts[1] : parts[0]);
+    return [lo === null ? 0 : lo, hi === null ? 12 : hi];
+  }
+
+  completeness(kid) {
+    let done = 0, total = 6;
+    if (kid.name && kid.grade) done++;
+    if (kid.birthYear && kid.school) done++;
+    if ((kid.subjects || []).length || kid.otherSubject) done++;
+    if (kid.pitch) done++;
+    if (kid.interests) done++;
+    if ((kid.workshops || []).length) done++;
+    return Math.round((done / total) * 100);
+  }
+
+  renderVals() {
+    if (!this.state.loaded) return { isHome: true, kidNav: [], kidCards: [], pipeline: [], gradeOpts: [], welcome: 'Loading…', parentName: '', seatsLabel: '', subjects: [], advisorGroups: [], trackFilters: [], gradeFilters: [], modalOpen: false, modal: {} };
+
+    const seatsTaken = this.props.seatsTaken ?? 7;
+    const seatsLabel = (120 - seatsTaken) + ' OF 120 SEATS REMAIN';
+    const s = this.state;
+    const kids = this.kids;
+    const catalog = this.flatCatalog();
+    const kid = kids.find(k => k.id === s.childId) || kids[0];
+
+    const navBtn = (active) => "font-family: 'Space Grotesk', sans-serif; font-size: 14px; text-align: left; padding: 10px 12px; border-radius: 9px; border: none; cursor: pointer;" + (active ? ' background: rgba(255,255,255,0.20); color: #F7F6F3; font-weight: 600;' : ' background: none; color: #9FA2A7;');
+
+    const kidNav = kids.map(k => ({
+      name: k.name,
+      select: () => this.setState({ view: 'child', childId: k.id }),
+      style: navBtn(s.view === 'child' && s.childId === k.id)
+    }));
+
+    const statusPillStyle = (status) => {
+      const isDraft = status === 'Draft';
+      return "font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; padding: 7px 14px; border-radius: 100px;" + (isDraft ? ' background: #E0DDD7; color: #55585E;' : ' background: #D92632; color: #FFFFFF;');
+    };
+
+    const openDossier = (k) => () => {
+      localStorage.setItem('the120.activeChild', k.id);
+      window.location.href = 'Dossier.dc.html';
+    };
+    const submitKid = (k) => () => {
+      k.status = 'Submitted';
+      this.save();
+    };
+
+    const kidCards = kids.map(k => {
+      const pct = this.completeness(k);
+      return {
+        name: k.name,
+        meta: 'Grade ' + k.grade + (k.tribe ? ' · ' + k.tribe : '') + (k.school ? ' · ' + k.school : ''),
+        status: k.status.toUpperCase(),
+        statusStyle: statusPillStyle(k.status),
+        pct: pct + '%',
+        barStyle: 'height: 100%; width: ' + pct + '%; background: ' + (pct === 100 ? '#D92632' : '#131416') + '; border-radius: 100px;',
+        open: () => this.setState({ view: 'child', childId: k.id }),
+        viewDossier: openDossier(k),
+        canSubmit: k.status === 'Draft' && pct === 100,
+        submit: submitKid(k)
+      };
+    });
+
+    const stages = ['Draft', 'Submitted', 'In review', 'Invited to assessment', 'Offered a seat', 'Member of the 120'];
+    const maxStage = Math.max(...kids.map(k => stages.indexOf(k.status)), 0);
+    const pipeline = stages.map((label, i) => ({
+      label: label.toUpperCase(),
+      arrow: i < stages.length - 1,
+      style: "font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; padding: 7px 12px; border-radius: 100px;" + (i <= maxStage ? ' background: #EFC5B8; color: #131416;' : ' border: 1px solid rgba(255,255,255,0.24); color: #9FA2A7;')
+    }));
+
+    const gradeOpts = ['3','4','5','6','7','8'].map(g => ({
+      label: g,
+      select: () => this.setState({ newKidGrade: g }),
+      style: "font-family: 'IBM Plex Mono', monospace; font-size: 12px; width: 34px; height: 34px; border-radius: 8px; cursor: pointer;" + (s.newKidGrade === g ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;' : ' background: #FFFFFF; color: #131416; border: 1px solid #D8D5CF;')
+    }));
+
+    const addKid = () => {
+      if (!s.newKidName) return;
+      const nk = { id: 'k' + Date.now(), name: s.newKidName, grade: s.newKidGrade, birthYear: '', school: '', subjects: [], otherSubject: '', pitch: '', interests: '', scores: '', workshops: [], status: 'Draft' };
+      this.kids.push(nk);
+      this.save();
+      this.setState({ newKidName: '', view: 'child', childId: nk.id });
+    };
+
+    // child editor vals
+    const setKid = (key) => (e) => { kid[key] = e.target.value; this.save(); };
+    const subjectList = ['Math', 'Reading', 'Writing', 'Science', 'History'];
+    const subjects = subjectList.map(label => {
+      const active = (kid.subjects || []).includes(label);
+      return {
+        label,
+        toggle: () => {
+          if (active) kid.subjects = kid.subjects.filter(x => x !== label);
+          else if ((kid.subjects || []).length < 2) kid.subjects = [...(kid.subjects || []), label];
+          else { this.subjectWarn = true; setTimeout(() => { this.subjectWarn = false; this.forceUpdate(); }, 2500); }
+          this.save();
+        },
+        style: "font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; padding: 10px 18px; border-radius: 100px; cursor: pointer;" + (active ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;' : ' background: #FFFFFF; color: #131416; border: 1px solid #D8D5CF;')
+      };
+    });
+
+    const childWorkshops = (kid.workshops || []).map(id => {
+      const c = catalog.find(x => x.id === id);
+      if (!c) return { title: id, meta: '', remove: () => {} };
+      return {
+        title: c.title,
+        meta: c.advisor + ' · ' + c.track + ' · ' + c.grades + ' · ' + (c.fmt || ''),
+        remove: () => { kid.workshops = kid.workshops.filter(x => x !== id); this.save(); }
+      };
+    });
+
+    const pct = this.completeness(kid);
+    const canSubmitChild = kid.status === 'Draft' && pct === 100;
+
+    const filterChip = (active) => "font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em; padding: 8px 14px; border-radius: 100px; cursor: pointer;" + (active ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;' : ' background: #F7F6F3; color: #55585E; border: 1px solid #D8D5CF;');
+
+    const tracks = ['ALL', 'SCIENCES', 'HUMANITIES', 'COMPETITION'];
+    const trackFilters = tracks.map(t => ({
+      label: t, select: () => this.setState({ trackFilter: t }), style: filterChip(s.trackFilter === t)
+    }));
+    const gradesAll = ['ALL', 'K', '1', '2', '3', '4', '5', '6', '7', '8'];
+    const gradeFilters = gradesAll.map(g => ({
+      label: g, select: () => this.setState({ gradeFilter: g }), style: filterChip(s.gradeFilter === g)
+    }));
+
+    const passes = (c) => {
+      if (s.trackFilter !== 'ALL' && (c.track || '').toUpperCase() !== s.trackFilter) return false;
+      if (s.gradeFilter === 'ALL') return true;
+      const g = s.gradeFilter === 'K' ? 0 : parseInt(s.gradeFilter, 10);
+      const r = (typeof c.gLo === 'number') ? [c.gLo, c.gHi >= 8 ? 12 : c.gHi] : this.gradeRange(c.grades);
+      return g >= r[0] && g <= r[1];
+    };
+
+    const kidFirst = kid.name.split(' ')[0].toUpperCase();
+    const workshopVals = (c, accent) => {
+      const saved = (kid.workshops || []).includes(c.id);
+      return {
+        ...c,
+        accent,
+        trackLabel: (c.track || '').toUpperCase(),
+        coverKick: 'GT ANYWHERE · FALL 2026',
+        coverFoot: (c.grades || '').toUpperCase(),
+        noPoster: !c.posterSrc,
+        cardStyle: 'background: #FFFFFF; border: 1px solid #DDDAD4; border-left: 4px solid ' + accent + '; border-radius: 12px; padding: 14px; display: flex; gap: 14px;',
+        coverStyle: 'position: relative; flex: none; width: 118px; height: 177px; border-radius: 8px; border: none; cursor: ' + (c.posterSrc ? 'zoom-in' : 'pointer') + '; display: flex; flex-direction: column; padding: ' + (c.posterSrc ? '0' : '11px 10px') + '; color: #FFFFFF; text-align: left; overflow: hidden; background: ' + (c.wide ? '#FAF7F2' : 'linear-gradient(160deg, ' + accent + ' 0%, #010163 150%)') + ';',
+        posterImgStyle: 'position: absolute; inset: 0; width: 100%; height: 100%; background-image: url(' + c.posterSrc + '); background-size: ' + (c.wide ? 'contain' : 'cover') + '; background-repeat: no-repeat; background-position: ' + (c.wide ? 'center' : 'top') + ';',
+        modalPosterStyle: 'flex: none; width: 150px; height: 225px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.22); background-image: url(' + c.posterSrc + '); background-size: ' + (c.wide ? 'contain' : 'cover') + '; background-repeat: no-repeat; background-position: ' + (c.wide ? 'center' : 'top') + '; background-color: ' + (c.wide ? '#FAF7F2' : 'transparent') + ';',
+        toggle: () => {
+          if (saved) kid.workshops = kid.workshops.filter(x => x !== c.id);
+          else kid.workshops = [...(kid.workshops || []), c.id];
+          this.save();
+        },
+        openDetails: () => this.setState({ modalId: c.id }),
+        btnLabel: saved ? '★ ON ' + kidFirst + '\u2019S LIST' : '☆ I\u2019M INTERESTED',
+        btnStyle: "font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.04em; padding: 11px 14px; border-radius: 10px; cursor: pointer; width: fit-content;" + (saved ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;' : ' background: none; color: #131416; border: 1px solid #C9C6C0;')
+      };
+    };
+
+    const advisorGroups = (this.gtData || []).map(a => {
+      const groups = a.tracks.map(t => ({ track: t.track, items: t.items.filter(passes).map(c => workshopVals(c, a.accent)) })).filter(t => t.items.length);
+      const n = groups.reduce((x, t) => x + t.items.length, 0);
+      return {
+        name: a.name,
+        role: (a.role || 'Academic Advisor').toUpperCase(),
+        bio: a.bio,
+        count: n + ' workshop' + (n === 1 ? '' : 's'),
+        headshotSrc: a.headshotSrc || null,
+        headshotStyle: 'width: 42px; height: 42px; border-radius: 50%; flex: none; background-image: url(' + a.headshotSrc + '); background-size: cover; background-position: center top;',
+        noHeadshot: !a.headshotSrc,
+        initials: a.name.split(' ').map(x => x[0]).join(''),
+        sectionStyle: 'background: #F7F6F3; border: 1px solid #DDDAD4; border-left: 5px solid ' + a.accent + '; border-radius: 14px; padding: 22px 26px; display: flex; flex-direction: column;',
+        avatarStyle: 'width: 40px; height: 40px; border-radius: 50%; background: ' + a.accent + '; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: Georgia, serif; font-weight: 700; font-size: 14px; flex: none;',
+        groups
+      };
+    }).filter(g => g.groups.length);
+
+    const visibleCount = advisorGroups.reduce((x, g) => x + g.groups.reduce((y, t) => y + t.items.length, 0), 0);
+    const resultCount = visibleCount + ' OF ' + catalog.length + ' WORKSHOPS' + (visibleCount < catalog.length ? ' MATCH' : '');
+
+    const modalSrc = catalog.find(c => c.id === s.modalId);
+    let modal = {};
+    if (modalSrc) {
+      modal = workshopVals(modalSrc, modalSrc.accent);
+      modal.gradesLabel = (modalSrc.grades || '').toUpperCase();
+      modal.fmtLabel = (modalSrc.fmt || '').toUpperCase();
+      modal.role = (modalSrc.role || '').toUpperCase();
+      modal.btnStyle = modal.btnStyle.replace('width: fit-content;', 'width: 100%; padding: 15px 0; text-align: center;');
+    }
+
+    return {
+      seatsLabel,
+      parentName: this.account.firstName + ' ' + this.account.lastName,
+      welcome: 'Welcome back, ' + this.account.firstName,
+      isHome: s.view === 'home',
+      isChild: s.view === 'child',
+      isWorkshops: s.view === 'workshops',
+      goHome: () => this.setState({ view: 'home' }),
+      goWorkshops: () => this.setState({ view: 'workshops' }),
+      navHomeStyle: navBtn(s.view === 'home'),
+      navWorkshopsStyle: navBtn(s.view === 'workshops'),
+      kidNav, kidCards, pipeline, gradeOpts,
+      newKidName: s.newKidName,
+      setNewKidName: (e) => this.setState({ newKidName: e.target.value }),
+      addKid,
+      // child editor
+      childName: kid.name.split(' ')[0],
+      childStatus: kid.status.toUpperCase(),
+      cName: kid.name, setCName: setKid('name'),
+      cGrade: kid.grade, setCGrade: setKid('grade'),
+      cBirthYear: kid.birthYear, setCBirthYear: setKid('birthYear'),
+      cSchool: kid.school, setCSchool: setKid('school'),
+      cOtherSubject: kid.otherSubject, setCOtherSubject: setKid('otherSubject'),
+      cPitch: kid.pitch, setCPitch: setKid('pitch'),
+      cInterests: kid.interests, setCInterests: setKid('interests'),
+      cScores: kid.scores, setCScores: setKid('scores'),
+      subjects,
+      tribeOpts: ['The Athletes', 'The Founders', 'The Makers', 'The Scholars', 'The Givers'].map(label => ({
+        label,
+        select: () => { kid.tribe = label; this.save(); },
+        style: "font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; padding: 10px 18px; border-radius: 100px; cursor: pointer;" + (kid.tribe === label ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;' : ' background: #FFFFFF; color: #131416; border: 1px solid #D8D5CF;')
+      })),
+      subjectWarning: !!this.subjectWarn,
+      childWorkshops,
+      hasWorkshops: childWorkshops.length > 0,
+      noWorkshops: childWorkshops.length === 0,
+      canSubmitChild,
+      submitChild: submitKid(kid),
+      completenessNote: canSubmitChild ? 'Dossier complete — ready to submit.' : (kid.status !== 'Draft' ? 'Submitted ' + kid.status.toLowerCase() + ' — we\u2019ll email you at each step.' : 'Dossier ' + pct + '% complete. Finish every section to submit.'),
+      viewDossier: openDossier(kid),
+      // catalog
+      trackFilters, gradeFilters, advisorGroups, resultCount,
+      modalOpen: !!modalSrc,
+      modal,
+      closeModal: () => this.setState({ modalId: null }),
+      stopClick: (e) => e.stopPropagation(),
+      catalogNote: 'Here\u2019s what each advisor is offering this term. Save the workshops ' + kid.name.split(' ')[0] + ' is drawn to — selections feed the dossier as expression of interest.'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>The Athletes — The 120</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #0300ED; }
+    a { color: #F7F6F3; }
+    a:hover { color: #EFC5B8; }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #F7F6F3; min-height: 100vh; position: relative; background: #0300ED; box-sizing: border-box;">
+
+  <div style="position: absolute; inset: 0;">
+    <x-import component-from-global-scope="image-slot" from="./image-slot.js" id="athletes-hero-bg" shape="rect" placeholder="Full-bleed hero image · cover, center top · same specs as The Scholars" hint-size="100%,100%"></x-import>
+  </div>
+  <div style="position: absolute; inset: 0; background: linear-gradient(rgba(19,20,22,0.18) 0%, rgba(19,20,22,0) 30%, rgba(19,20,22,0.02) 55%, rgba(19,20,22,0.78) 100%); pointer-events: none;"></div>
+
+  <div style="position: relative; z-index: 2; min-height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; padding: 28px 44px 40px; pointer-events: none;">
+
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; pointer-events: auto;">
+      <a href="Home.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgba(255,255,255,0.7); text-decoration: none; white-space: nowrap;">← THE 120</a>
+      <span style="display: flex; align-items: center; gap: 11px;">
+        <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+        <span style="font-weight: 700; font-size: 15px; letter-spacing: -0.02em; white-space: nowrap;">The 120</span>
+      </span>
+    </div>
+
+    <div style="flex: 1;"></div>
+
+    <div style="max-width: 760px; display: flex; flex-direction: column; gap: 26px; pointer-events: auto;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.12em; color: #EFC5B8;">GROUP 01 · ATHLETES · ENROLLING NOW</span>
+      <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 72px; letter-spacing: -0.01em; line-height: 1.02; margin: 0;">The <span style="font-style: italic; color: #EFC5B8;">Athletes</span></h1>
+      <p style="font-size: 19px; line-height: 1.65; color: rgba(255,255,255,0.85); margin: 0; max-width: 620px;">For kids who train seriously and want more than practice. A year-long athletic project: a season record, a training system, a documented climb. Mentored by people who have competed, and demoed to the whole network at the Toronto intensives.</p>
+      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <a href="Book a Call.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #131416; background: #FFFFFF; padding: 16px 28px; border-radius: 10px; text-decoration: none; white-space: nowrap;">BOOK A CALL</a>
+        <a href="Join.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #FFFFFF; background: #D92632; padding: 16px 28px; border-radius: 10px; text-decoration: none; white-space: nowrap;">JOIN THE 120</a>
+      </div>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: rgba(255,255,255,0.6);">TIN CAN + ADDRESS BOOK INCLUDED · 3–5 HRS/WEEK · ALONGSIDE ANY SCHOOL & CLUB</span>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; border-top: 1px solid rgba(255,255,255,0.24); padding-top: 18px; margin-top: 44px; flex-wrap: wrap; pointer-events: auto;">
+      <span style="font-size: 12.5px; color: rgba(255,255,255,0.6);">All five groups enrolling now · <a href="Home.dc.html#groups" style="color: #EFC5B8;">See the groups</a></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgba(255,255,255,0.6);">FOUNDING COHORT · FALL 2026 · TORONTO</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

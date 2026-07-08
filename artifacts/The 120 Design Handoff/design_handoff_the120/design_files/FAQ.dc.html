@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>FAQ — The 120</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #F7F6F3; }
+    a { color: #131416; }
+    a:hover { color: #D92632; }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #131416; background: #F7F6F3;">
+
+  <!-- NAV -->
+  <div style="position: sticky; top: 18px; z-index: 50; margin: 18px 20px 0; background: #FFFFFF; border-radius: 14px; box-shadow: 0 4px 18px rgba(19,20,22,0.14); display: flex; justify-content: space-between; align-items: center; padding: 11px 22px;">
+    <a href="Home.dc.html" style="display: flex; align-items: center; gap: 11px; text-decoration: none;">
+      <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 17px; letter-spacing: -0.04em; padding: 6px 9px; line-height: 1;">120</span>
+      <span style="display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-weight: 700; font-size: 17px; letter-spacing: -0.02em; line-height: 1; white-space: nowrap;">The 120</span>
+        <span style="font-weight: 500; font-size: 9px; letter-spacing: 0.2em; color: #D92632; white-space: nowrap;">TORONTO</span>
+      </span>
+    </a>
+    <span style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: flex-end; row-gap: 8px;">
+      <a href="Home.dc.html#tribes" style="font-size: 14px; color: #131416; text-decoration: none; white-space: nowrap;">The tribes</a>
+      <a href="GT - Home.dc.html" style="font-size: 14px; color: #131416; text-decoration: none; white-space: nowrap;">GT Toronto</a>
+      <a href="Tuition.dc.html" style="font-size: 14px; color: #131416; text-decoration: none; white-space: nowrap;">Tuition</a>
+      <a href="FAQ.dc.html" style="font-size: 14px; color: #D92632; font-weight: 600; text-decoration: none; white-space: nowrap;">FAQ</a>
+      <a href="Dashboard.dc.html" style="font-size: 14px; color: #9FA2A7; text-decoration: none; white-space: nowrap;">Sign in</a>
+      <a href="Book a Call.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #131416; border: 1px solid #D8D5CF; padding: 11px 20px; border-radius: 10px; text-decoration: none; white-space: nowrap;">BOOK A CALL</a>
+      <a href="Join.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #FFFFFF; background: #D92632; padding: 12px 21px; border-radius: 10px; text-decoration: none; white-space: nowrap;">JOIN THE 120</a>
+    </span>
+  </div>
+
+  <!-- HERO -->
+  <div style="max-width: 900px; margin: 0 auto; padding: 84px 32px 48px; display: flex; flex-direction: column; gap: 20px;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.1em; color: #D92632;">FAQ</span>
+    <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 56px; letter-spacing: -0.01em; line-height: 1.06; margin: 0;">Questions, <span style="font-style: italic; color: #D92632;">answered</span></h1>
+    <p style="font-size: 17px; line-height: 1.6; color: #55585E; max-width: 620px; margin: 0;">Everything parents ask before joining the 120. Something missing? <a href="Book a Call.dc.html" style="color: #D92632;">Book a call</a> or write to admissions@the120.school.</p>
+  </div>
+
+  <!-- SECTIONS -->
+  <div style="max-width: 900px; margin: 0 auto; padding: 0 32px 80px; display: flex; flex-direction: column; gap: 44px;">
+    <sc-for list="{{ sections }}" as="sec" hint-placeholder-count="4">
+      <div style="display: flex; flex-direction: column;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: 0.12em; color: #D92632; padding-bottom: 14px;">{{ sec.label }}</span>
+        <sc-for list="{{ sec.faqs }}" as="f" hint-placeholder-count="3">
+          <div style="border-top: 1px solid #E4E2DD;">
+            <div onClick="{{ f.toggle }}" style="display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 20px 0; cursor: pointer;">
+              <span style="font-weight: 600; font-size: 17px;">{{ f.q }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: #D92632;">{{ f.icon }}</span>
+            </div>
+            <sc-if value="{{ f.open }}" hint-placeholder-val="{{ false }}">
+              <p style="font-size: 15px; line-height: 1.65; color: #55585E; margin: 0; padding: 0 0 22px; max-width: 720px;">{{ f.a }}</p>
+            </sc-if>
+          </div>
+        </sc-for>
+        <div style="border-top: 1px solid #E4E2DD;"></div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- CTA BAND -->
+  <div style="background: #D92632; padding: 72px 44px; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center;">
+    <h2 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 42px; letter-spacing: -0.01em; line-height: 1.1; margin: 0; color: #FFFFFF; max-width: 720px;">Still curious? <span style="font-style: italic;">Let's talk.</span></h2>
+    <div style="display: flex; align-items: center; gap: 18px;">
+      <a href="Join.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 14px; letter-spacing: 0.04em; color: #131416; background: #FFFFFF; padding: 16px 30px; border-radius: 10px; text-decoration: none; white-space: nowrap;">JOIN THE 120</a>
+      <a href="Book a Call.dc.html" style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 14px; letter-spacing: 0.04em; color: #FFFFFF; border: 1.5px solid rgba(255,255,255,0.6); padding: 14.5px 28px; border-radius: 10px; text-decoration: none; white-space: nowrap;">BOOK A CALL</a>
+    </div>
+    <span style="display: flex; align-items: center; gap: 9px;">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #FFFFFF;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: rgba(255,255,255,0.85);">{{ seatsLabel }}</span>
+    </span>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="background: #0300ED; padding: 48px 44px 36px;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 40px; flex-wrap: wrap;">
+        <a href="Home.dc.html" style="display: flex; align-items: center; gap: 11px; text-decoration: none;">
+          <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 17px; letter-spacing: -0.04em; padding: 6px 9px; line-height: 1;">120</span>
+          <span style="display: flex; flex-direction: column; gap: 1px;">
+            <span style="font-weight: 700; font-size: 17px; letter-spacing: -0.02em; line-height: 1; color: #F7F6F3; white-space: nowrap;">The 120</span>
+            <span style="font-weight: 500; font-size: 9px; letter-spacing: 0.2em; color: #D92632; white-space: nowrap;">TORONTO</span>
+          </span>
+        </a>
+        <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+          <a href="Home.dc.html#tribes" style="font-size: 13px; color: #9FA2A7; text-decoration: none;">The tribes</a>
+          <a href="GT - Home.dc.html" style="font-size: 13px; color: #9FA2A7; text-decoration: none;">GT Toronto</a>
+          <a href="Tuition.dc.html" style="font-size: 13px; color: #9FA2A7; text-decoration: none;">Tuition</a>
+          <a href="FAQ.dc.html" style="font-size: 13px; color: #9FA2A7; text-decoration: none;">FAQ</a>
+          <span style="font-size: 13px; color: #9FA2A7;">admissions@the120.school</span>
+        </div>
+      </div>
+      <div style="border-top: 1px solid rgba(255,255,255,0.24); padding-top: 20px;">
+        <span style="font-size: 12px; color: rgba(255,255,255,0.68);">© 2026 The 120 · A learning centre, part of the 2 Hour Learning Network. Official licensed partner of GT School. Not an accredited school. TIN CAN is a trademark of Tin Can Untechnologies, Inc.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;seatsTaken&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 7, &quot;min&quot;: 0, &quot;max&quot;: 120, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Scarcity&quot;}}">
+class Component extends DCLogic {
+  state = { open: 'm0' };
+
+  renderVals() {
+    const seatsTaken = this.props.seatsTaken ?? 7;
+    const seatsLabel = (120 - seatsTaken) + ' OF 120 SEATS REMAIN';
+
+    const data = [
+      { label: 'MEMBERSHIP & THE NETWORK', key: 'm', faqs: [
+        { q: 'What happens after I create an account?', a: 'You build your child\u2019s dossier in the dashboard \u2014 their interests, a project pitch in their own words, subject picks, and any scores you want to share \u2014 then submit it for review. If it\u2019s a fit, you\u2019re invited to a qualifying assessment and a call with our team.' },
+        { q: 'Does my child leave their current school?', a: 'No. Membership is 3\u20135 hours a week, alongside any school \u2014 public gifted stream, private, or homeschool. For families who want to go all-in, the Full Academic Core replaces school entirely; that conversation happens on your call.' },
+        { q: 'What is the Tin Can?', a: 'A screen-free Wi-Fi landline for kids \u2014 voice only, no apps, no feeds. Only parent-approved contacts can call. Every member\u2019s Tin Can ships with The 120 Address Book: the whole network, one call away. Device and service are included in membership.' },
+        { q: 'What if the 120 seats are full?', a: 'You join the waitlist and we invite you to the next assessment window. Seats open only when a member leaves \u2014 the 120 stays 120.' },
+        { q: 'Is this a school?', a: 'No \u2014 The 120 is a selective network and Ontario learning centre. Members keep their school. The Full Program tier supports Ontario homeschooling families with the complete GT academic core, delivered via GT School \u2013 Virtual.' },
+        { q: 'My child hasn\u2019t been formally identified as gifted. Can we apply?', a: 'Yes. The qualifying assessment is what matters \u2014 the same top 1\u20132% bar as GT School \u2014 not a school board designation. And if The 120 isn\u2019t the right fit, Alpha Anywhere Canada serves motivated kids of every profile.' }
+      ]},
+      { label: 'ACADEMICS & THE PROJECT', key: 'a', faqs: [
+        { q: 'Which subjects can my child accelerate in?', a: 'Math, Reading, Writing, Science, or History \u2014 pick one or two. Something else in mind? Tell us in the dossier; advisors regularly build custom trajectories.' },
+        { q: 'What counts as a project?', a: 'Anything real, sustained, and shippable: a novel, an app, a research study, a business, a robot, a documentary. The bar is that it\u2019s genuinely theirs and it ships by June \u2014 demoed live at the intensives along the way.' },
+        { q: 'What\u2019s the right age?', a: 'Grades 3\u20138. Seats are roughly balanced across grades, so a strong Grade 3 candidate isn\u2019t competing with Grade 8 applicants.' },
+        { q: 'Do Canadian universities recognize SAT and AP results?', a: 'Yes \u2014 SAT and AP are the international gold standard, recognized by U of T, Waterloo, McGill, and universities worldwide. They give gifted kids objective, external proof of mastery years early.' }
+      ]},
+      { label: 'INTENSIVES', key: 'i', faqs: [
+        { q: 'Are the intensives mandatory?', a: 'No \u2014 optional but strongly encouraged. We recommend at least one per year: it\u2019s where Tin Can friendships become real ones. All four weekends are in Toronto \u2014 a drive, not a flight, for most Ontario families.' },
+        { q: 'What if my child is shy?', a: 'They arrive already knowing people \u2014 their cohort has been talking on Tin Cans and meeting virtually all quarter. Team activities are designed for belonging, not performance. Shy kids tend to leave the weekend loudest.' },
+        { q: 'When is the Toronto campus coming?', a: 'A dedicated campus for the 120 is planned, following the blueprint of GT School\u2019s Georgetown hub. Until then, intensives run at a Toronto venue shared with member families \u2014 members hear first.' }
+      ]},
+      { label: 'PRACTICAL', key: 'p', faqs: [
+        { q: 'What does it cost, and in what currency?', a: '$15,000 CAD per year, all-inclusive \u2014 the Tin Can, project mentorship, subject acceleration, and all four intensives. No add-ons. As an Ontario learning centre, tuition is HST-exempt.' },
+        { q: 'We\u2019re outside Toronto. Can we still join?', a: 'Yes \u2014 the weekly rhythm is virtual, so anywhere in Ontario works. The four intensive weekends are in Toronto; most member families drive in. Farther afield? Book a call and we\u2019ll talk it through.' },
+        { q: 'How is my family\u2019s information handled?', a: 'Dossiers contain children\u2019s personal information, so we treat them as sensitive: collected only as needed for admissions, access-controlled, and covered by our privacy policy. Uploads like report cards are never shared outside the admissions team.' }
+      ]}
+    ];
+
+    const sections = data.map((sec) => ({
+      label: sec.label,
+      faqs: sec.faqs.map((f, i) => {
+        const id = sec.key + i;
+        return {
+          q: f.q, a: f.a,
+          open: this.state.open === id,
+          icon: this.state.open === id ? '−' : '+',
+          toggle: () => this.setState(s => ({ open: s.open === id ? null : id }))
+        };
+      })
+    }));
+
+    return { seatsLabel, sections };
+  }
+}
+</script>
+</body>
+</html>

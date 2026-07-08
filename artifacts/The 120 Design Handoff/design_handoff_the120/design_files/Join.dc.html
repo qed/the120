@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>Join the 120 — Create your account</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #0300ED; }
+    a { color: #131416; }
+    a:hover { color: #D92632; }
+    input::placeholder { color: #9FA2A7; }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #131416; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); overflow-x: hidden;">
+
+  <!-- LEFT: pitch panel -->
+  <div style="background: #0300ED; padding: 40px 48px; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; box-sizing: border-box;">
+    <a href="Home.dc.html" style="display: flex; align-items: center; gap: 11px; text-decoration: none; width: fit-content;">
+      <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 17px; letter-spacing: -0.04em; padding: 6px 9px; line-height: 1;">120</span>
+      <span style="display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-weight: 700; font-size: 17px; letter-spacing: -0.02em; line-height: 1; color: #F7F6F3;">The 120</span>
+        <span style="font-weight: 500; font-size: 9px; letter-spacing: 0.2em; color: #EFC5B8; white-space: nowrap;">TORONTO</span>
+      </span>
+    </a>
+    <div style="display: flex; flex-direction: column; gap: 24px; max-width: 460px;">
+      <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 46px; letter-spacing: -0.01em; line-height: 1.1; margin: 0; color: #F7F6F3;">Claim your child's seat — <span style="font-style: italic; color: #EFC5B8;">Fall 2026</span></h1>
+      <p style="font-size: 16px; line-height: 1.65; color: #9FA2A7; margin: 0;">Creating an account starts your child's dossier — their profile for the 120. Build it in the dashboard, submit it for review, and if it's a fit, we'll invite you to the qualifying assessment.</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="display: flex; gap: 12px; align-items: baseline;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #EFC5B8;">1</span><span style="font-size: 14.5px; color: #F7F6F3;">Create your parent account</span></span>
+        <span style="display: flex; gap: 12px; align-items: baseline;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #EFC5B8;">2</span><span style="font-size: 14.5px; color: #F7F6F3;">Build a dossier for each child</span></span>
+        <span style="display: flex; gap: 12px; align-items: baseline;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #EFC5B8;">3</span><span style="font-size: 14.5px; color: #F7F6F3;">Submit for review → assessment → a seat</span></span>
+      </div>
+    </div>
+    <span style="display: flex; align-items: center; gap: 9px;">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #EFC5B8;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: #9FA2A7;">{{ seatsLabel }}</span>
+    </span>
+  </div>
+
+  <!-- RIGHT: form -->
+  <div style="background: #F7F6F3; padding: 48px 56px; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box;">
+    <div style="max-width: 520px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 22px;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: #D92632;">CREATE YOUR ACCOUNT</span>
+        <span style="font-weight: 600; font-size: 24px; letter-spacing: -0.01em;">Join the 120</span>
+        <span style="font-size: 14px; color: #55585E;">Already started? <a href="Dashboard.dc.html" style="color: #D92632;">Sign in</a></span>
+      </div>
+
+      <sc-if value="{{ existing }}" hint-placeholder-val="{{ false }}">
+        <a href="Dashboard.dc.html" style="display: flex; align-items: center; gap: 10px; background: #0300ED; color: #F7F6F3; border-radius: 10px; padding: 13px 16px; text-decoration: none; font-size: 13.5px;">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: #EFC5B8; flex: none;"></span>
+          You're already signed in as {{ existing }} — go to your dashboard →
+        </a>
+      </sc-if>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">First name</span>
+          <input value="{{ firstName }}" onChange="{{ setFirstName }}" placeholder="Jordan" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">Last name</span>
+          <input value="{{ lastName }}" onChange="{{ setLastName }}" placeholder="Lee" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">Email</span>
+          <input value="{{ email }}" onChange="{{ setEmail }}" placeholder="you@example.com" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">Phone</span>
+          <input value="{{ phone }}" onChange="{{ setPhone }}" placeholder="(416) 555-0120" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1.4fr; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">Postal code</span>
+          <input value="{{ postal }}" onChange="{{ setPostal }}" placeholder="M5V 2T6" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-size: 13px; font-weight: 600;">Password</span>
+          <input type="password" value="{{ password }}" onChange="{{ setPassword }}" placeholder="8+ characters" style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; padding: 13px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; color: #131416; outline: none; width: 100%; box-sizing: border-box;">
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-size: 13px; font-weight: 600;">Household income <span style="font-weight: 400; color: #9FA2A7;">(CAD)</span></span>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+          <sc-for list="{{ incomes }}" as="inc" hint-placeholder-count="4">
+            <button onClick="{{ inc.select }}" style="{{ inc.style }}">{{ inc.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <label style="display: flex; gap: 12px; align-items: flex-start; cursor: pointer;">
+        <input type="checkbox" checked="{{ consent }}" onChange="{{ toggleConsent }}" style="margin-top: 3px; accent-color: #D92632; width: 16px; height: 16px;">
+        <span style="font-size: 12.5px; line-height: 1.6; color: #55585E;">Yes — I expressly consent to receive emails and text messages from The 120 (GT Toronto) about my child's application, program updates, and admissions events. I can unsubscribe at any time; every message includes an unsubscribe link. Consent is not a condition of admission.</span>
+      </label>
+
+      <button onClick="{{ submit }}" style="{{ submitStyle }}">{{ submitLabel }}</button>
+      <sc-if value="{{ error }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size: 13px; color: #D92632;">{{ error }}</span>
+      </sc-if>
+      <span style="font-size: 11.5px; line-height: 1.6; color: #9FA2A7;">Your information is used only to build your child's dossier and manage admissions, per our privacy policy. Children's information is collected only as needed and treated as sensitive.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;seatsTaken&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 7, &quot;min&quot;: 0, &quot;max&quot;: 120, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Scarcity&quot;}}">
+class Component extends DCLogic {
+  state = {
+    firstName: '', lastName: '', email: '', phone: '', postal: '', password: '',
+    income: null, consent: false, error: ''
+  };
+
+  componentDidMount() {
+    try {
+      const acct = JSON.parse(localStorage.getItem('the120.account') || 'null');
+      if (acct && acct.email) this.setState({ existing: acct.firstName || 'there' });
+    } catch (e) {}
+  }
+
+  renderVals() {
+    const seatsTaken = this.props.seatsTaken ?? 7;
+    const seatsLabel = (120 - seatsTaken) + ' OF 120 SEATS REMAIN';
+    const s = this.state;
+    const set = (key) => (e) => this.setState({ [key]: e.target.value, error: '' });
+
+    const incomeOpts = ['Under $90,000', '$90,000 – $220,000', 'Over $220,000', 'Prefer not to say'];
+    const incomes = incomeOpts.map((label) => ({
+      label,
+      select: () => this.setState({ income: label, error: '' }),
+      style: "font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; padding: 11px 10px; border-radius: 10px; cursor: pointer; text-align: center;" +
+        (s.income === label
+          ? ' background: #0300ED; color: #F7F6F3; border: 1px solid #0300ED;'
+          : ' background: #FFFFFF; color: #131416; border: 1px solid #D8D5CF;')
+    }));
+
+    const ready = s.firstName && s.lastName && s.email && s.phone && s.postal && s.password.length >= 8 && s.income && s.consent;
+
+    const submit = () => {
+      if (!ready) {
+        this.setState({ error: !s.consent && s.firstName && s.email
+          ? 'Please check the consent box to continue.'
+          : 'Please complete all fields (password 8+ characters), pick an income bracket, and check the consent box.' });
+        return;
+      }
+      const account = {
+        firstName: s.firstName, lastName: s.lastName, email: s.email, phone: s.phone,
+        postal: s.postal, income: s.income, casl: true, created: new Date().toISOString()
+      };
+      localStorage.setItem('the120.account', JSON.stringify(account));
+      window.location.href = 'Dashboard.dc.html';
+    };
+
+    return {
+      seatsLabel,
+      existing: this.state.existing || false,
+      firstName: s.firstName, setFirstName: set('firstName'),
+      lastName: s.lastName, setLastName: set('lastName'),
+      email: s.email, setEmail: set('email'),
+      phone: s.phone, setPhone: set('phone'),
+      postal: s.postal, setPostal: set('postal'),
+      password: s.password, setPassword: set('password'),
+      incomes,
+      consent: s.consent,
+      toggleConsent: () => this.setState({ consent: !s.consent, error: '' }),
+      submit,
+      submitLabel: 'CREATE ACCOUNT & START THE DOSSIER',
+      submitStyle: "font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 13px; letter-spacing: 0.04em; color: #FFFFFF; padding: 17px 0; border-radius: 10px; border: none; cursor: pointer; background: " + (ready ? '#D92632' : '#C9C6C0') + ';',
+      error: s.error
+    };
+  }
+}
+</script>
+</body>
+</html>

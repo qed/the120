@@ -1,0 +1,956 @@
+window.GT_WORKSHOPS = [
+ {
+  "id": "am",
+  "name": "Andreea Musat",
+  "role": null,
+  "accent": "#8E5BA6",
+  "headshot": "am.webp",
+  "monogram": null,
+  "bio": "A certified NLP coach and artist with 5 years running workshops and art classes for kids. She blends creative instinct with structured thinking, helping students find their footing, take creative risks, and discover they're capable of more than they imagined.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "think-like-a-scientist",
+      "title": "Think like a Scientist",
+      "track": "Sciences",
+      "grades": "Grades K–4",
+      "chips": [
+       "Grades K–4"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Run real chemistry experiments at home until results are clean and repeatable — then prove it to a real scientist live.",
+      "pitch": null,
+      "poster": "think-like-a-scientist.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "sound-the-alarm",
+      "title": "Sound the Alarm",
+      "track": "Sciences",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Build a real AI agent that listens, recognizes a signal, and sends alerts.",
+      "pitch": null,
+      "poster": "sound-the-alarm.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "the-peace-table",
+      "title": "The Peace Table",
+      "track": "Humanities",
+      "grades": "Grades K–2",
+      "chips": [
+       "Grades K–2"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
+      "pitch": null,
+      "poster": "the-peace-table.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "sold",
+      "title": "Sold!",
+      "track": "Humanities",
+      "grades": "Grades 2–5",
+      "chips": [
+       "Grades 2–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Write, shoot, and edit a real commercial, then screen it to a live audience who decide: would we buy it?",
+      "pitch": null,
+      "poster": "sold.webp",
+      "video": true,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "hidden-stories",
+      "title": "Hidden Stories",
+      "track": "Humanities",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Become a documentary filmmaker: find a story, shoot and edit it, and premiere it at a real film festival.",
+      "pitch": null,
+      "poster": "hidden-stories.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "aj",
+  "name": "Anjelina Belakovskaia",
+  "role": "Program Director · Chess",
+  "accent": "#A23E5C",
+  "headshot": "aj.webp",
+  "monogram": null,
+  "bio": "A 3-Time U.S. Women’s Chess Champion, Woman Grandmaster, finance professor, and former derivatives trader. Trained at the Botvinnik-Kasparov Chess Academy, she helps students develop critical thinking, creativity, confidence, and resilience through chess.",
+  "tracks": [
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "chess-foundations",
+      "title": "Chess Foundations",
+      "track": "Humanities",
+      "grades": "Grades K–8+",
+      "chips": [
+       "Grades K–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Recreational chess for beginners: rules, piece movement, and core tactics in a fun, low-pressure setting.",
+      "pitch": null,
+      "poster": "chess-foundations.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "chess-mastery",
+      "title": "Chess Mastery",
+      "track": "Humanities",
+      "grades": "Grades K–8+",
+      "chips": [
+       "Grades K–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Advanced recreational players deepen positional understanding and competitive skill.",
+      "pitch": null,
+      "poster": "chess-mastery.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "strategic-chess",
+      "title": "Strategic Chess",
+      "track": "Humanities",
+      "grades": "Grades K–8+",
+      "chips": [
+       "Grades K–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Developing players sharpen strategy, tactics, and game planning.",
+      "pitch": null,
+      "poster": "strategic-chess.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Competition",
+    "items": [
+     {
+      "id": "competitive-chess",
+      "title": "Competitive Chess",
+      "track": "Competition",
+      "grades": "Grades K–8+",
+      "chips": [
+       "Grades K–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "USCF-rated competitive chess across five levels — Rookies, Intermediate, Advanced, National, Grandmaster — matched to each player’s rating.",
+      "pitch": null,
+      "poster": "competitive-chess.webp",
+      "video": false,
+      "wide": true,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "cr",
+  "name": "Craig Lundberg",
+  "role": null,
+  "accent": "#A6884F",
+  "headshot": "cr.webp",
+  "monogram": null,
+  "bio": "An educator, former principal, coach, and learning designer with 15+ years of experience helping students discover their potential. Craig believes the best learning happens when students are challenged to solve real problems, ask big questions, and work together. His GT Anywhere workshops combine hands-on experiences with meaningful challenges that inspire curiosity, confidence, and lifelong learning.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "the-caldera",
+      "title": "The Caldera",
+      "track": "Sciences",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Become a Yellowstone field scientist and investigate real wildlife, geothermal, or volcanic data.",
+      "pitch": null,
+      "poster": "the-caldera.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "glitch-and-grow",
+      "title": "Glitch and Grow",
+      "track": "Humanities",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Choose a difficult skill, document every failure, and prove measurable improvement through deliberate practice.",
+      "pitch": null,
+      "poster": "glitch-and-grow.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "going-viral",
+      "title": "Going Viral",
+      "track": "Humanities",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Create original content, use AI feedback to improve it, and learn how creators capture attention.",
+      "pitch": null,
+      "poster": "going-viral.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "the-greenlight",
+      "title": "The Greenlight",
+      "track": "Humanities",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Write a professional script, create an AI-animated short film, and pitch it to a real film-industry pro.",
+      "pitch": null,
+      "poster": "the-greenlight.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "venture-lab",
+      "title": "Venture Lab",
+      "track": "Humanities",
+      "grades": "Grades 3–5",
+      "chips": [
+       "Grades 3–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Launch a real digital business, earn revenue, and pitch your venture to adult judges.",
+      "pitch": null,
+      "poster": "venture-lab.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Competition",
+    "items": [
+     {
+      "id": "history-on-trial",
+      "title": "History on Trial",
+      "track": "Competition",
+      "grades": "Grades 3–8+",
+      "chips": [
+       "Grades 3–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Research a historical topic you love using primary sources and present at the National History Day competition.",
+      "pitch": null,
+      "poster": "history-on-trial.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "dz",
+  "name": "David Zook",
+  "role": null,
+  "accent": "#2F6F8F",
+  "headshot": "dz.webp",
+  "monogram": null,
+  "bio": "Has coached robotics teams (winning multiple world championships), taught cars to drive themselves at Tesla, founded a high school, and raised two genuinely gifted kids who keep him appropriately humble. He's spent his career in rooms full of smart people trying to do hard things. When he's not at GT, he's probably on a plane, at a table with exceptional food, or recruiting another smart person into his orbit.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "ai-robot-coach-academy",
+      "title": "AI Robot Coach Academy",
+      "track": "Sciences",
+      "grades": "Grades 3–8+",
+      "chips": [
+       "Grades 3–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Coach robots through complex VEX VR challenges using Claude and ChatGPT, documented in an Engineering Notebook.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Sciences AI Robot Coach Academy GT Anywhere AR"
+     },
+     {
+      "id": "future-champion-lab",
+      "title": "Future Champion Lab",
+      "track": "Sciences",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Become a competitive analyst — study how champion teams win, and identify the patterns that produce winners.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Sciences Future Champion Lab GT Anywhere FC"
+     },
+     {
+      "id": "vex-all-stars",
+      "title": "VEX All-Stars: Rebuild the Legends",
+      "track": "Sciences",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "A virtual robotics challenge: compete on legendary VEX fields with Claude as your AI engineering partner.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Sciences VEX All-Stars: Rebuild the Legends GT Anywhere VA"
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "japanese-black-belt",
+      "title": "Japanese Black Belt: Reverse-Engineering a Language",
+      "track": "Humanities",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Reverse-engineer how Japanese verbs work so you can predict words you've never seen — drills, partner talk, rapid-fire.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Humanities Japanese Black Belt: Reverse-Engineering a Language GT Anywhere JB"
+     }
+    ]
+   },
+   {
+    "track": "Competition",
+    "items": [
+     {
+      "id": "botball-robotics",
+      "title": "Botball Robotics Team: Become a Founding Member",
+      "track": "Competition",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Found GT's first competition robotics team — fully autonomous robots, building toward the Botball World Championship.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Competition Botball Robotics Team: Become a Founding Member GT Anywhere BR"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "mm",
+  "name": "Melissa Muir",
+  "role": null,
+  "accent": "#B5562E",
+  "headshot": "mm.webp",
+  "monogram": null,
+  "bio": "M.A.T. — a bilingual educator with 15+ years across public, private, online, and homeschool classrooms, raising four trilingual kids in Quito. She takes every opportunity to get kids reading and surprising themselves with what they can do.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "unbuyable-product-lab",
+      "title": "The Unbuyable Product Lab",
+      "track": "Sciences",
+      "grades": "Grades 3–8+",
+      "chips": [
+       "Grades 3–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Invent a product that doesn't exist, 3D-print it, and pitch it to builders from Apple, Google, and SayMake.",
+      "pitch": null,
+      "poster": "unbuyable-product-lab.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "codebreakers",
+      "title": "Codebreakers",
+      "track": "Humanities",
+      "grades": "Grades 2–5",
+      "chips": [
+       "Grades 2–5"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Crack secret codes that get harder every week — including a final one no one has ever solved.",
+      "pitch": null,
+      "poster": "codebreakers.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "page-turners",
+      "title": "Page Turners",
+      "track": "Humanities",
+      "grades": "Grades 2–5",
+      "chips": [
+       "Grades 2–5"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Read what you love, score points for going bold into new genres, and climb the leaderboard.",
+      "pitch": null,
+      "poster": "page-turners.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "soy-un-experto",
+      "title": "Soy un Experto",
+      "track": "Humanities",
+      "grades": "Grades 3–8+",
+      "chips": [
+       "Grades 3–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Become the expert on Ecuadorian food and give a live tour — all in Spanish. The best guides earn a trip to Quito.",
+      "pitch": null,
+      "poster": "soy-un-experto.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "literary-league",
+      "title": "Literary League",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Divisions, standings, and real bragging rights for reading bravely and hitting your number.",
+      "pitch": null,
+      "poster": "literary-league.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "nt",
+  "name": "Norberto Troncoso",
+  "role": "Program Director · Speech & Debate",
+  "accent": "#3E5BA2",
+  "headshot": "nt.webp",
+  "monogram": null,
+  "bio": "A coach of hundreds of national and state champions, international keynote speaker, and creator of the P.O.W.E.R. Framework, Norberto teaches students that courage isn't the absence of fear, it's doing it scared. He helps kids build fearless communication, emotional intelligence, and leadership identity so they speak up, lead themselves, and rise to any room they walk into.",
+  "tracks": [
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "one-idea",
+      "title": "One Idea",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Find one original idea you believe in, build a TEDx-style talk around it, and deliver it live.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Humanities One Idea GT Anywhere OI"
+     },
+     {
+      "id": "say-that-again",
+      "title": "Say That Again",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Draw a random topic cold, take a clear position, and defend it under live challenge. No notes. No prep.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Humanities Say That Again GT Anywhere ST"
+     },
+     {
+      "id": "the-deal",
+      "title": "The Deal",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Master the Ackerman negotiation model used by FBI negotiators and close a real deal at a local business.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Humanities The Deal GT Anywhere TD"
+     }
+    ]
+   },
+   {
+    "track": "Competition",
+    "items": [
+     {
+      "id": "i-said-what-i-said",
+      "title": "I Said What I Said",
+      "track": "Competition",
+      "grades": "Grades 4–5",
+      "chips": [
+       "Grades 4–5",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Pick a side, say it clearly with the Point-Reason frame, and hold your ground when a peer pushes back.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Competition I Said What I Said GT Anywhere IS"
+     },
+     {
+      "id": "become-the-character",
+      "title": "Become the Character",
+      "track": "Competition",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Cut a published script to a solo 10-minute dramatic interpretation and perform live for theater pros (NSDA criteria).",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Competition Become the Character GT Anywhere BT"
+     },
+     {
+      "id": "the-verdict",
+      "title": "The Verdict",
+      "track": "Competition",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Build a real case, cross-examine witnesses, and argue before outside judges who deliver a binding verdict.",
+      "pitch": null,
+      "poster": null,
+      "video": false,
+      "wide": false,
+      "monoCover": "Competition The Verdict GT Anywhere TV"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "ru",
+  "name": "Ruchi Shukla",
+  "role": null,
+  "accent": "#1F7A6B",
+  "headshot": "ru.webp",
+  "monogram": null,
+  "bio": "An educator for 15 years, working in school systems around the world. She builds workshops that help kids learn about important global issues through hands-on play and activities.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "board-game-masters",
+      "title": "Board Game Masters",
+      "track": "Sciences",
+      "grades": "Grades K–2",
+      "chips": [
+       "Grades K–2"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
+      "pitch": null,
+      "poster": "board-game-masters.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "board-game-designer",
+      "title": "Board Game Designer",
+      "track": "Sciences",
+      "grades": "Grades 3–8+",
+      "chips": [
+       "Grades 3–8+"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Design, playtest, refine, and pitch an original board game while learning strategy and game-design thinking.",
+      "pitch": null,
+      "poster": "board-game-designer.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "food-lab-challenge",
+      "title": "Food Lab Challenge",
+      "track": "Humanities",
+      "grades": "Grades K–2",
+      "chips": [
+       "Grades K–2"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
+      "pitch": null,
+      "poster": "food-lab-challenge.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "passport-mission",
+      "title": "Passport Mission",
+      "track": "Humanities",
+      "grades": "Grades K–2",
+      "chips": [
+       "Grades K–2"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
+      "pitch": null,
+      "poster": "passport-mission.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "toy-inventors",
+      "title": "Toy Inventors",
+      "track": "Humanities",
+      "grades": "Grades K–2",
+      "chips": [
+       "Grades K–2"
+      ],
+      "fmt": "45 min · 2×/week",
+      "desc": "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
+      "pitch": null,
+      "poster": "toy-inventors.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "global-host-challenge",
+      "title": "Global Host Challenge",
+      "track": "Humanities",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Investigate cultural norms, interview people from other backgrounds, and design a cultural experience.",
+      "pitch": null,
+      "poster": "global-host-challenge.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "sky-tower-challenge",
+      "title": "Sky Tower Challenge",
+      "track": "Humanities",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Design, test, and rebuild towers — balancing height, strength, and stability like a real engineer.",
+      "pitch": null,
+      "poster": "sky-tower-challenge.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "young-inventors-challenge",
+      "title": "Young Inventors Challenge",
+      "track": "Humanities",
+      "grades": "Grades 5–8+",
+      "chips": [
+       "Grades 5–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Invent, prototype, test, and pitch creative solutions using recycled materials — real design thinking.",
+      "pitch": null,
+      "poster": "young-inventors-challenge.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sl",
+  "name": "Sarah Langdon",
+  "role": null,
+  "accent": "#6A8E3E",
+  "headshot": "sl.webp",
+  "monogram": null,
+  "bio": "An educator, advisor, and learning designer who believes students rise to the level of authentic challenge. She creates GT Anywhere workshops that blend academic rigor with real-world projects, helping kids discover they're capable of more than they imagined.",
+  "tracks": [
+   {
+    "track": "Sciences",
+    "items": [
+     {
+      "id": "attractions-in-action",
+      "title": "Attractions in Action",
+      "track": "Sciences",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Design an original attraction, prove the guest-flow and budget math, and field-test it on an earned Disney trip.",
+      "pitch": null,
+      "poster": "attractions-in-action.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "deep-time",
+      "title": "Deep Time",
+      "track": "Sciences",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Learn to read a mountain like a book, then read a never-before-seen rock face aloud to a working geologist.",
+      "pitch": null,
+      "poster": "deep-time.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "mind-lab",
+      "title": "Mind Lab",
+      "track": "Sciences",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Design and run an original behavioral-science experiment on real people, then defend it to a working psychologist.",
+      "pitch": null,
+      "poster": "mind-lab.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   },
+   {
+    "track": "Humanities",
+    "items": [
+     {
+      "id": "change-makers",
+      "title": "Change Makers",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Write an evidence-based policy letter to your council member, then defend it in live testimony under expert Q&A.",
+      "pitch": null,
+      "poster": "change-makers.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "on-the-record",
+      "title": "On the Record",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Report, interview, and produce a real podcast episode, then publish it to a live audience.",
+      "pitch": null,
+      "poster": "on-the-record.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "rewrite-history",
+      "title": "Rewrite History",
+      "track": "Humanities",
+      "grades": "Grades 6–8+",
+      "chips": [
+       "Grades 6–8+"
+      ],
+      "fmt": "60 min · 2×/week",
+      "desc": "Become a real historical figure and fight to change how history ends — winning the room with primary-source arguments.",
+      "pitch": null,
+      "poster": "rewrite-history.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p1783114067812",
+  "name": "Yash Mehta",
+  "role": "Program Director · new",
+  "accent": "#A65B96",
+  "headshot": null,
+  "monogram": "YM",
+  "bio": "International Olympiad Medallist, with a decade of experience selecting, training, and mentoring national teams to top ranks at International Olympiads. He coaches with the philosophy that problem-solving is the most fundamental skill one must be equipped with.",
+  "tracks": [
+   {
+    "track": "Competition",
+    "items": [
+     {
+      "id": "math-competitor-academy",
+      "title": "Math Competitor Academy",
+      "track": "Competition",
+      "grades": "Grades 4–8+",
+      "chips": [
+       "Grades 4–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Students train like math athletes, mastering competition strategies, tackling challenging problems, and competing in AMC 8, MOEMS, Math Kangaroo, and MathCounts.",
+      "pitch": null,
+      "poster": "math-competitor-academy.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     },
+     {
+      "id": "math-elite-academy",
+      "title": "Math Elite Academy",
+      "track": "Competition",
+      "grades": "Grades 4–8+",
+      "chips": [
+       "Grades 4–8+",
+       "Audition required"
+      ],
+      "fmt": "Year-long",
+      "desc": "Students tackle advanced competition mathematics, train for AMC 8, MathCounts, AMC 10, and AIME pathways, and prove their skills in nationally recognized contests.",
+      "pitch": null,
+      "poster": "math-elite-academy.webp",
+      "video": false,
+      "wide": false,
+      "monoCover": null
+     }
+    ]
+   }
+  ]
+ }
+];

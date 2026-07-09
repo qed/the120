@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 export default function GtHome() {
   return (
     <>
-      <Nav gt />
+      <Nav />
       <main className="flex-1">
         {/* GT hero */}
         <section className="relative -mt-[92px] flex min-h-[700px] flex-col justify-end overflow-hidden">
@@ -54,7 +54,7 @@ export default function GtHome() {
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end sm:gap-8">
               <span className="max-w-[680px] text-[17px] leading-relaxed text-white sm:text-lg">
                 The Scholars of the 120: accelerated academics on the GT platform, mastery with
-                no ceiling, and a weekly 1:1 with a PhD-level Academic Advisor.
+                no ceiling, and a bi-weekly 30 min 1:1 with an expert Academic Advisor.
               </span>
               <span className="whitespace-nowrap font-mono text-[11px] tracking-[0.08em] text-white/85">
                 1400+ SAT BY 8TH GRADE · 3X VELOCITY

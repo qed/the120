@@ -60,10 +60,6 @@ const faqs = [
     a: "Yes — SAT and AP are the international gold standard, recognized by U of T, Waterloo, McGill, and universities worldwide. For Scholars accelerating with GT, they're objective, external proof of mastery years early.",
   },
   {
-    q: "When is the Toronto campus coming?",
-    a: "A dedicated campus for the 120 is planned, following the blueprint of GT School's Georgetown hub. Until then, intensives run at a Toronto venue shared with member families — members hear first.",
-  },
-  {
     q: "We're outside Toronto. Can we still join?",
     a: "Yes — the weekly rhythm is virtual, so anywhere in Ontario works. The four intensive weekends are in Toronto; most member families drive in. Farther afield? Book a call and we'll talk it through.",
   },

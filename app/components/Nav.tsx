@@ -10,11 +10,11 @@ import { nav as defaultLinks } from "@/app/lib/site";
 
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
- * with side margins, over hero imagery. `gt` renders the GT Toronto variant
- * with a "← THE 120" breadcrumb. Links are identical site-wide by design —
- * page-specific link sets read as confusing.
+ * with side margins, over hero imagery. One nav for every page — The 120 is
+ * the product; groups (including GT/Scholars) are sub-pages with no variant
+ * chrome. Links are identical site-wide by design.
  */
-export default function Nav({ gt = false }: { gt?: boolean }) {
+export default function Nav() {
   const [open, setOpen] = useState(false);
   const items = [...defaultLinks];
 
@@ -39,17 +39,8 @@ export default function Nav({ gt = false }: { gt?: boolean }) {
       <div className="rounded-[14px] bg-white shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
         <div className="flex items-center justify-between px-[22px] py-[11px]">
           <span className="flex items-center gap-4">
-            {gt && (
-              <Link
-                href="/"
-                onClick={close}
-                className="hidden whitespace-nowrap font-mono text-[11px] tracking-[0.08em] text-muted transition-colors hover:text-red sm:inline"
-              >
-                ← THE 120
-              </Link>
-            )}
-            <Link href={gt ? "/gt" : "/"} aria-label="The 120 home" onClick={close}>
-              <Wordmark sublabel={gt ? "GT TORONTO" : "TORONTO"} />
+            <Link href="/" aria-label="The 120 home" onClick={close}>
+              <Wordmark sublabel="TORONTO" />
             </Link>
           </span>
 
@@ -122,15 +113,6 @@ export default function Nav({ gt = false }: { gt?: boolean }) {
               className="overflow-hidden border-t border-line lg:hidden"
             >
               <nav className="flex flex-col px-[22px] py-4">
-                {gt && (
-                  <Link
-                    href="/"
-                    onClick={close}
-                    className="border-b border-line py-3.5 font-mono text-sm uppercase tracking-[0.08em] text-muted transition-colors hover:text-red"
-                  >
-                    ← The 120
-                  </Link>
-                )}
                 {items.map((item) => (
                   <Link
                     key={item.href}

@@ -28,8 +28,7 @@ export default function KeyDates() {
         </ol>
 
         <p className="mt-6 font-mono text-[0.7rem] uppercase tracking-[0.14em] text-muted">
-          Virtual info sessions monthly · Venue in Toronto, shared on enrolment · A dedicated campus
-          is coming
+          Virtual info sessions monthly · Venue in Toronto, shared on enrolment
         </p>
       </div>
     </section>

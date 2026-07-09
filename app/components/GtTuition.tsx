@@ -5,7 +5,7 @@ import SeatsDot from "./SeatsDot";
 const checklist = [
   "5 hours a week of TimeBack, your academic core",
   "1–3 subjects, your choice, mastery-based",
-  "Weekly 1:1 with a PhD-level Academic Advisor",
+  "Bi-weekly 30 min 1:1 with an expert Academic Advisor",
   "Everything in Membership: Tin Can, project, intensives",
   "Supports Ontario homeschool registration",
 ];

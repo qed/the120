@@ -53,7 +53,7 @@ export default function Testimonials() {
         </div>
 
         <p className="mt-8 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-          Students from the 2 Hour Learning network — 13+ campuses.
+          Students from the 2 Hour Learning network — 51+ campuses.
         </p>
       </div>
     </section>

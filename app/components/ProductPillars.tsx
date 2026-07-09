@@ -22,8 +22,8 @@ const pillars = [
     n: "03",
     name: "The Subject",
     lede: "Get super advanced in one subject. Or two.",
-    body: "AI-adaptive acceleration on the GT / TimeBack platform, paired with a weekly 1:1 from a PhD-level Academic Advisor. Mastery-based, no ceiling — members routinely learn at 3x the pace of a traditional classroom.",
-    tags: ["TimeBack platform", "PhD-level advisor", "Mastery before progression"],
+    body: "AI-adaptive acceleration on the GT / TimeBack platform, paired with a bi-weekly 30 min 1:1 from an expert Academic Advisor. Mastery-based, no ceiling — members routinely learn at 3x the pace of a traditional classroom.",
+    tags: ["TimeBack platform", "Academic Advisor 1:1s", "Mastery before progression"],
   },
 ];
 
@@ -89,7 +89,7 @@ export default function ProductPillars() {
             ))}
           </div>
           <p className="mt-8 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-            Results from the GT School / 2 Hour Learning network — 13+ campuses. Not yet claimed as
+            Results from the GT School / 2 Hour Learning network — 51+ campuses. Not yet claimed as
             The 120&rsquo;s own outcomes.
           </p>
         </div>

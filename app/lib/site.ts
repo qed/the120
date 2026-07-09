@@ -16,7 +16,6 @@ export const TUITION_FULL_CORE_CAD = 15000;
 export const nav = [
   { label: "The groups", href: "/#groups" },
   { label: "How it works", href: "/#how" },
-  { label: "GT Toronto", href: "/gt" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;
@@ -96,10 +95,10 @@ export const groupBySlug = (slug: string) => groups.find((g) => g.slug === slug)
 
 /** Quarterly Toronto intensives. */
 export const intensives = [
-  { label: "Fall Intensive", date: "Oct 31 – Nov 1, 2026" },
-  { label: "Winter Intensive", date: "Jan 23 – 24, 2027" },
-  { label: "Spring Intensive", date: "Mar 27 – 28, 2027" },
-  { label: "Summer Intensive", date: "Jun 5 – 6, 2027" },
+  { label: "Fall Intensive", date: "Nov 7 – 8, 2026" },
+  { label: "Winter Intensive", date: "Jan 30 – 31, 2027" },
+  { label: "Spring Intensive", date: "Apr 3 – 4, 2027" },
+  { label: "Summer Intensive", date: "Jun 12 – 13, 2027" },
 ] as const;
 
 /** GT / 2 Hour Learning network outcomes — attributed to the network, never claimed as The 120's own. */

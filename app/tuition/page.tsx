@@ -24,7 +24,7 @@ const fullcore = [
   "Everything in Membership, plus:",
   "5 hours a week of TimeBack, your academic core",
   "1–3 subjects, your choice",
-  "Weekly 1:1 with a PhD-level Academic Advisor",
+  "Bi-weekly 30 min 1:1 with an expert Academic Advisor",
   "Academics via Alpha Anywhere or GT Anywhere, by group",
   "Supports Ontario homeschool registration",
 ];

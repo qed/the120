@@ -3,6 +3,7 @@ import Wordmark from "./Wordmark";
 
 const links = [
   { label: "The groups", href: "/#groups" },
+  { label: "Parents", href: "/parents" },
   { label: "GT Toronto", href: "/gt" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },

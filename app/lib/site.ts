@@ -9,7 +9,8 @@ export const SEATS_TOTAL = 120;
 // Update as commitments land; becomes a live Supabase deposit count in S4.
 export const SEATS_REMAINING = 113;
 export const SEATS_FILLED = SEATS_TOTAL - SEATS_REMAINING;
-export const seatsLabel = () => `${SEATS_REMAINING} OF ${SEATS_TOTAL} SEATS REMAIN`;
+export const seatsLabel = (remaining: number = SEATS_REMAINING) =>
+  `${remaining} OF ${SEATS_TOTAL} SEATS REMAIN`;
 
 /** Two price points, one network (handoff Tuition). */
 export const TUITION_MEMBERSHIP_CAD = 3000;

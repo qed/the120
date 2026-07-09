@@ -1,0 +1,8 @@
+# Hosted-project config pushed via `supabase config push`.
+project_id = "the120"
+
+[auth.email]
+enable_signup = true
+# No custom SMTP yet (default sender is rate-limited ~2/hr) — skip confirmation
+# emails so password signups land signed-in. Re-enable with custom SMTP (S6).
+enable_confirmations = false

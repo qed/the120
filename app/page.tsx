@@ -7,14 +7,16 @@ import ParentStoriesBand from "@/app/components/ParentStoriesBand";
 import TuitionTeaser from "@/app/components/TuitionTeaser";
 import CtaBand from "@/app/components/CtaBand";
 import Footer from "@/app/components/Footer";
+import { getSeatsRemaining } from "@/app/lib/seats";
 
-export default function Home() {
+export default async function Home() {
+  const seatsRemaining = await getSeatsRemaining();
   return (
     <>
       <Nav />
       <main className="flex-1">
         <Hero />
-        <GroupsBand />
+        <GroupsBand seatsRemaining={seatsRemaining} />
         <ThreeThings />
         <HowItWorks />
         <ParentStoriesBand />

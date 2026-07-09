@@ -6,6 +6,7 @@ import Cta from "@/app/components/Cta";
 import JoinButton from "@/app/components/JoinButton";
 import SeatsDot from "@/app/components/SeatsDot";
 import { BOOKING_URL } from "@/app/lib/site";
+import { getSeatsRemaining } from "@/app/lib/seats";
 
 export const metadata: Metadata = {
   title: "Tuition — The 120",
@@ -45,7 +46,8 @@ const finePrint = [
   },
 ];
 
-export default function TuitionPage() {
+export default async function TuitionPage() {
+  const seatsRemaining = await getSeatsRemaining();
   return (
     <>
       <Nav />
@@ -97,7 +99,7 @@ export default function TuitionPage() {
               </Cta>
               <JoinButton className="py-4">Join the 120</JoinButton>
             </div>
-            <SeatsDot tone="onDark" className="justify-center" />
+            <SeatsDot tone="onDark" className="justify-center" remaining={seatsRemaining} />
           </div>
 
           {/* Full Academic Core (white) */}

@@ -3,7 +3,7 @@ import SeatsDot from "./SeatsDot";
 import { groups } from "@/app/lib/site";
 
 /** Handoff: intro paragraph + seats dot, then the #0300ED five-groups band. */
-export default function GroupsBand() {
+export default function GroupsBand({ seatsRemaining }: { seatsRemaining?: number }) {
   return (
     <>
       {/* Intro + seats */}
@@ -13,7 +13,7 @@ export default function GroupsBand() {
           people with the same core interests, and different ones, in a cohort where everyone
           is building something. 3&ndash;5 hours a week, alongside any school.
         </p>
-        <SeatsDot className="flex-shrink-0" />
+        <SeatsDot className="flex-shrink-0" remaining={seatsRemaining} />
       </div>
 
       {/* Five groups */}

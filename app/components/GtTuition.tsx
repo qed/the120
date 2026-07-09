@@ -11,7 +11,7 @@ const checklist = [
 ];
 
 /** GT-Home tuition split (handoff): copy left, Full Academic Core card right. */
-export default function GtTuition() {
+export default function GtTuition({ seatsRemaining }: { seatsRemaining?: number }) {
   return (
     <section id="tuition" className="scroll-mt-24 border-t border-line bg-paper-2">
       <div className="mx-auto grid w-full max-w-[1240px] grid-cols-1 items-center gap-10 px-6 py-24 sm:px-8 lg:grid-cols-2 lg:gap-14">
@@ -47,7 +47,7 @@ export default function GtTuition() {
             ))}
           </div>
           <JoinButton className="w-full py-4">Join the 120</JoinButton>
-          <SeatsDot className="justify-center" />
+          <SeatsDot className="justify-center" remaining={seatsRemaining} />
         </div>
       </div>
     </section>

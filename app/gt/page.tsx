@@ -10,6 +10,7 @@ import GtTuition from "@/app/components/GtTuition";
 import Faq from "@/app/components/Faq";
 import CtaBand from "@/app/components/CtaBand";
 import Footer from "@/app/components/Footer";
+import { getSeatsRemaining } from "@/app/lib/seats";
 
 export const metadata: Metadata = {
   title: "GT Toronto — The Scholars of The 120",
@@ -19,7 +20,8 @@ export const metadata: Metadata = {
 
 /** The Scholars' sub-site (handoff GT - Home), keeping our interactive pieces.
  *  Nav links stay identical site-wide — page-specific link sets read as confusing. */
-export default function GtHome() {
+export default async function GtHome() {
+  const seatsRemaining = await getSeatsRemaining();
   return (
     <>
       <Nav />
@@ -72,7 +74,7 @@ export default function GtHome() {
         </div>
         <Promises />
         <Testimonials />
-        <GtTuition />
+        <GtTuition seatsRemaining={seatsRemaining} />
         <Faq />
         <CtaBand />
       </main>

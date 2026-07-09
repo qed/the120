@@ -1,12 +1,14 @@
 import { seatsLabel } from "@/app/lib/site";
 
-/** Handoff seats indicator: 8px red dot + mono label. */
+/** Handoff seats indicator: 8px red dot + mono label. Pass `remaining` for live counts (S4). */
 export default function SeatsDot({
   tone = "light",
   className = "",
+  remaining,
 }: {
   tone?: "light" | "onDark";
   className?: string;
+  remaining?: number;
 }) {
   return (
     <span className={`inline-flex items-center gap-[9px] ${className}`}>
@@ -18,7 +20,7 @@ export default function SeatsDot({
           tone === "onDark" ? "text-white/70" : "text-ink"
         }`}
       >
-        {seatsLabel()}
+        {seatsLabel(remaining)}
       </span>
     </span>
   );

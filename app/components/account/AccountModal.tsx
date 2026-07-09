@@ -3,17 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
-import { saveParent } from "@/app/dashboard/storage";
+import { supabaseBrowser } from "@/app/lib/supabase/client";
 
 /**
  * Account creation — the lead-capture step of the funnel (brief §13.2).
- * V1 keeps everything in local state; `AccountForm` mirrors the future
- * Supabase `parents` table (§13.5) so wiring auth/DB later is a drop-in.
+ * S1: creates a real Supabase user (email + password, auto-confirmed until
+ * custom SMTP exists) and persists the parent profile to the `parents` table.
  */
 export type AccountForm = {
   firstName: string;
   lastName: string;
   email: string;
+  password: string;
   phone: string;
   postalCode: string;
   caslConsent: boolean;
@@ -23,6 +24,7 @@ const EMPTY: AccountForm = {
   firstName: "",
   lastName: "",
   email: "",
+  password: "",
   phone: "",
   postalCode: "",
   caslConsent: false,
@@ -38,6 +40,7 @@ function validate(f: AccountForm): Errors {
   if (!f.firstName.trim()) e.firstName = "Required";
   if (!f.lastName.trim()) e.lastName = "Required";
   if (!EMAIL.test(f.email)) e.email = "Enter a valid email";
+  if (f.password.length < 8) e.password = "At least 8 characters";
   if (f.phone.replace(/\D/g, "").length < 10) e.phone = "Enter a valid phone number";
   if (!POSTAL.test(f.postalCode.trim())) e.postalCode = "Enter a valid postal code (e.g. M5V 2T6)";
   if (!f.caslConsent) e.caslConsent = "Consent is required to create your account";
@@ -54,6 +57,8 @@ export default function AccountModal({
   const [form, setForm] = useState<AccountForm>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -82,18 +87,48 @@ export default function AccountModal({
     setErrors((e) => ({ ...e, [key]: undefined }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const eObj = validate(form);
     setErrors(eObj);
     if (Object.keys(eObj).length > 0) return;
 
-    // TODO (V2 · Supabase): replace with
-    //   await supabase.auth.signUp({ email, password | magic-link })
-    //   await supabase.from("parents").insert({ ...form })
-    // For V1 we persist the parent locally so they land signed-in on the dashboard (§13.3).
-    saveParent({ firstName: form.firstName, lastName: form.lastName, email: form.email });
-    setSubmitted(true);
+    setSaving(true);
+    setSubmitError(null);
+    try {
+      const supabase = supabaseBrowser();
+      const { data, error } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: { data: { first_name: form.firstName, last_name: form.lastName } },
+      });
+      if (error) throw error;
+      const userId = data.user?.id;
+      if (!userId) throw new Error("Account created but no user returned — try signing in.");
+
+      const { error: profileError } = await supabase.from("parents").upsert({
+        id: userId,
+        first_name: form.firstName,
+        last_name: form.lastName,
+        email: form.email,
+        phone: form.phone,
+        postal_code: form.postalCode.trim().toUpperCase(),
+        casl_consent: form.caslConsent,
+        casl_consent_at: new Date().toISOString(),
+      });
+      if (profileError) throw profileError;
+
+      setSubmitted(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong — try again.";
+      setSubmitError(
+        /already registered/i.test(message)
+          ? "That email already has an account — sign in from the dashboard instead."
+          : message
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -185,6 +220,17 @@ export default function AccountModal({
                     />
                   </Field>
 
+                  <Field label="Password" error={errors.password}>
+                    <input
+                      type="password"
+                      className={inputCls(errors.password)}
+                      value={form.password}
+                      onChange={(e) => set("password", e.target.value)}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                    />
+                  </Field>
+
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Phone" error={errors.phone}>
                       <input
@@ -229,11 +275,18 @@ export default function AccountModal({
                   </label>
                   {errors.caslConsent && <ErrorText>{errors.caslConsent}</ErrorText>}
 
+                  {submitError && (
+                    <p className="rounded-xl border border-red bg-red/5 p-3 text-xs leading-5 text-red">
+                      {submitError}
+                    </p>
+                  )}
+
                   <button
                     type="submit"
-                    className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white shadow-sm shadow-red/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-dark hover:shadow-md hover:shadow-red/30 active:translate-y-0"
+                    disabled={saving}
+                    className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white shadow-sm shadow-red/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-dark hover:shadow-md hover:shadow-red/30 active:translate-y-0 disabled:cursor-wait disabled:opacity-60"
                   >
-                    Create account & claim seat
+                    {saving ? "Creating your account…" : "Create account & claim seat"}
                   </button>
 
                   <p className="text-center text-[0.7rem] leading-4 text-muted">
@@ -257,7 +310,7 @@ export default function AccountModal({
 
 function SuccessView({ firstName, onClose }: { firstName: string; onClose: () => void }) {
   const steps = [
-    "Check your inbox — we've sent a link to set your password.",
+    "You're signed in — your account is live.",
     "Add your child and build their dossier in the dashboard.",
     "Submit for review → we invite you to a qualifying assessment + call.",
   ];
@@ -284,10 +337,6 @@ function SuccessView({ firstName, onClose }: { firstName: string; onClose: () =>
           </li>
         ))}
       </ol>
-
-      <p className="mx-auto mt-6 max-w-sm rounded-xl bg-paper-2 px-4 py-3 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted">
-        Dashboard & dossier builder — coming next
-      </p>
 
       <div className="mt-6 flex flex-col items-center gap-3">
         <Link

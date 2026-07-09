@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import Wordmark from "@/app/components/Wordmark";
 import Cta from "@/app/components/Cta";
 import JoinButton from "@/app/components/JoinButton";
-import { groupBySlug, groups } from "@/app/lib/site";
+import { BOOKING_URL, groupBySlug, groups } from "@/app/lib/site";
 
 // The Scholars route to /gt, so only the four network groups render here.
 const NETWORK_GROUPS = groups.filter((g) => g.slug !== "scholars");
@@ -75,7 +75,7 @@ export default async function GroupPage({
           {group.body}
         </p>
         <div className="mt-2 flex flex-wrap gap-3.5">
-          <Cta href="#call" variant="white" className="px-7 py-4 text-sm">
+          <Cta href={BOOKING_URL} variant="white" className="px-7 py-4 text-sm">
             Book a call
           </Cta>
           <JoinButton className="px-7 py-4 text-sm">Join the 120</JoinButton>

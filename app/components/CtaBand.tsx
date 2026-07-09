@@ -1,5 +1,6 @@
 import Cta from "./Cta";
 import JoinButton from "./JoinButton";
+import { BOOKING_URL } from "@/app/lib/site";
 
 /** Handoff CTA band: centered serif on brand red, white JOIN + bordered BOOK pair. */
 export default function CtaBand({
@@ -25,7 +26,7 @@ export default function CtaBand({
         <JoinButton variant="white" className="px-[30px] py-4 text-sm">
           Join the 120
         </JoinButton>
-        <Cta href="#call" variant="ghostLight" className="px-7 py-[14.5px] text-sm">
+        <Cta href={BOOKING_URL} variant="ghostLight" className="px-7 py-[14.5px] text-sm">
           Book a call
         </Cta>
       </div>

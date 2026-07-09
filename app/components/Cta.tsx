@@ -40,8 +40,15 @@ export default function Cta({
   onClick?: () => void;
   children: React.ReactNode;
 }) {
+  const external = href.startsWith("http");
   return (
-    <Link href={href} className={ctaClass(variant, className)} onClick={onClick}>
+    <Link
+      href={href}
+      className={ctaClass(variant, className)}
+      onClick={onClick}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener" : undefined}
+    >
       {children}
     </Link>
   );

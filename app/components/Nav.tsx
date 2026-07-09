@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "motion/react";
 import Wordmark from "./Wordmark";
 import Cta from "./Cta";
 import JoinButton from "./JoinButton";
-import { nav as defaultLinks } from "@/app/lib/site";
+import { nav as defaultLinks, BOOKING_URL } from "@/app/lib/site";
 
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
@@ -61,7 +61,7 @@ export default function Nav() {
             >
               Sign in
             </Link>
-            <Cta href="#call" variant="ghost">
+            <Cta href={BOOKING_URL} variant="ghost">
               Book a call
             </Cta>
             <JoinButton>Join the 120</JoinButton>
@@ -127,7 +127,7 @@ export default function Nav() {
                   <JoinButton className="w-full" onClick={close}>
                     Join the 120
                   </JoinButton>
-                  <Cta href="#call" variant="ghost" className="w-full" onClick={close}>
+                  <Cta href={BOOKING_URL} variant="ghost" className="w-full" onClick={close}>
                     Book a call
                   </Cta>
                 </div>

@@ -5,6 +5,7 @@ import CtaBand from "@/app/components/CtaBand";
 import Cta from "@/app/components/Cta";
 import JoinButton from "@/app/components/JoinButton";
 import SeatsDot from "@/app/components/SeatsDot";
+import { BOOKING_URL } from "@/app/lib/site";
 
 export const metadata: Metadata = {
   title: "Tuition — The 120",
@@ -91,7 +92,7 @@ export default function TuitionPage() {
               ))}
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Cta href="#call" variant="white" className="py-4">
+              <Cta href={BOOKING_URL} variant="white" className="py-4">
                 Book a call
               </Cta>
               <JoinButton className="py-4">Join the 120</JoinButton>

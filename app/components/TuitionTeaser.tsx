@@ -10,8 +10,9 @@ export default function TuitionTeaser() {
           Two prices. <span className="accent">Two ways in.</span>
         </span>
         <span className="max-w-[640px] text-[15px] leading-relaxed text-ink-soft">
-          $3,000 CAD a year for Membership with math through Math Academy, or $15,000 for the
-          Full Academic Core with TimeBack. Every group is enrolling now.
+          $3,000 CAD a year to join, with math through Math Academy — upgrade to $15,000 for
+          the Full Academic Core with TimeBack. All tuition is HST-exempt. Every group is
+          enrolling now.
         </span>
       </div>
       <Cta href="/tuition" variant="ghost" className="self-start px-[26px] py-[15px] md:self-auto">

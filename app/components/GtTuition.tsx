@@ -22,7 +22,8 @@ export default function GtTuition() {
           </h2>
           <p className="max-w-[520px] text-[15px] leading-[1.65] text-ink-soft">
             Membership in the 120 is $3,000 CAD a year. Scholars who want the complete academic
-            core add TimeBack: the full GT program, 5 hours a week, for $15,000 all-in.
+            core upgrade to TimeBack: the full GT program, 5 hours a week, for $15,000 all-in.
+            All tuition is HST-exempt.
           </p>
           <Cta href="/tuition" variant="ghost" className="self-start px-[26px] py-[15px]">
             Compare the tiers →

@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     q: "What if the 120 seats are full?",
-    a: "You join the waitlist and are first in line for the next assessment window. Seat counts shown on this site are real and maintained.",
+    a: "You join the waitlist and are first in line for the next assessment window.",
   },
 ];
 

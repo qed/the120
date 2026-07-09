@@ -5,13 +5,23 @@
  */
 
 export const SEATS_TOTAL = 120;
-export const SEATS_REMAINING = 87;
+// Hand-maintained, truthful count (7 committed founding families as of 2026-07-09).
+// Update as commitments land; becomes a live Supabase deposit count in S4.
+export const SEATS_REMAINING = 113;
 export const SEATS_FILLED = SEATS_TOTAL - SEATS_REMAINING;
 export const seatsLabel = () => `${SEATS_REMAINING} OF ${SEATS_TOTAL} SEATS REMAIN`;
 
 /** Two price points, one network (handoff Tuition). */
 export const TUITION_MEMBERSHIP_CAD = 3000;
 export const TUITION_FULL_CORE_CAD = 15000;
+
+/**
+ * Booking target for every "Book a call" CTA (T1/T2).
+ * Set NEXT_PUBLIC_BOOKING_URL in Vercel (Cal.com/Calendly) to activate the real
+ * scheduler — no code change needed. Email fallback until then, so no dead clicks.
+ */
+export const BOOKING_URL =
+  process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:admissions@the120.school";
 
 export const nav = [
   { label: "The groups", href: "/#groups" },

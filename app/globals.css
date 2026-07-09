@@ -19,8 +19,10 @@
   --color-red-dark: #b31d28;
   --color-red-ink: #2a1215;
   --color-coral: #ff8a80;
-  /* Handoff identity (design_handoff_the120) */
-  --color-blue: #0300ed;
+  /* Handoff identity (design_handoff_the120).
+     Blue deepened from the handoff's #0300ED — the pure RGB blue vibrated
+     against the warm palette; deep indigo chosen from side-by-side variants. */
+  --color-blue: #22219b;
   --color-blush: #efc5b8;
 
   /* Semantic aliases used by the starter */

@@ -22,16 +22,6 @@ Horizons: **Phase 1** (recruitment push) → **Phase 2** (accounts + deposits fu
 - [ ] **Household income brackets**: Delete this part of the account signup flow (T5).
 - [ ] **Pricing story**: $3,000/yr to join (Membership benefits), upgradeable to $15,000/yr Full Academic Core. All HST-exempt — **every pricing view must say so** (T10; /tuition fine print + FAQ already do, home TuitionTeaser and /gt GtTuition don't yet).
 
-## 🔍 Claims inventory — vetting complete 2026-07-09
-
-All 12 claims vetted by Peter; verdicts applied in code the same day (see ✅ Done). Still open:
-
-| Claim | Status |
-|-------|--------|
-| Alpha Toronto parent testimonials (`artifacts/AlphaTestimonials.md` — Ian Logan, Gordon McKay, Peter Kuperman) | Vetted-real; **integration pending** (T9) — placement + publish-permission questions with Peter |
-| Dashboard workshop catalog | Real catalog found: **47 workshops, 9 advisors** in `artifacts/The 120 Design Handoff/design_handoff_the120/design_files/gt-workshops.json` (Andreea Musat, Anjelina Belakovskaia, Craig Lundberg, David Zook, Melissa Muir, Norberto Troncoso, Ruchi Shukla, Sarah Langdon, Yash Mehta). Import → T8 |
-| Network stats (3x, 1400+ SAT, 91%, AP 5s) | Confirmed GT/Scholars-pages-only (they already render only on /gt via ProductPillars/Testimonials) — keep there, never on general pages |
-
 ---
 
 ## 🚀 Phase 1
@@ -54,6 +44,8 @@ Delete the household-income step from `app/components/account/AccountModal.tsx` 
 
 **T8 · Import the real workshop catalog** *(dev)*
 Replace the 8 mocked workshops in `app/dashboard/data.ts` with the real 47-workshop / 9-advisor catalog from `artifacts/The 120 Design Handoff/design_handoff_the120/design_files/gt-workshops.json` (includes bios, tracks, grade ranges, formats, poster/headshot asset paths). The DossierEditor workshop picker needs grouping (by track or advisor) to stay usable at 47 items.
+
+Real catalog found: **47 workshops, 9 advisors** in `artifacts/The 120 Design Handoff/design_handoff_the120/design_files/gt-workshops.json` (Andreea Musat, Anjelina Belakovskaia, Craig Lundberg, David Zook, Melissa Muir, Norberto Troncoso, Ruchi Shukla, Sarah Langdon, Yash Mehta). Import → T8
 *Acceptance: dashboard shows only real workshops and real advisors; picker is navigable.*
 
 **T9 · /parents stories page — testimonials front and center** *(dev; ⚠️ publish permission from Ian Logan + Gordon McKay still unconfirmed — Owner: Peter)*

@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/*
+  The 120 — GT Toronto
+  Design system distilled from reference/Homepage Directions (standalone).html:
+  warm editorial paper, ink near-black, signature Tin Can red, mono labels.
+*/
+
+@theme inline {
+  /* Brand palette */
+  --color-paper: #f7f6f3;
+  --color-paper-2: #efece6;
+  --color-ink: #131416;
+  --color-ink-soft: #55585e;
+  --color-muted: #9fa2a7;
+  --color-line: #e4e2dd;
+  --color-line-strong: #d8d5cf;
+  --color-red: #d92632;
+  --color-red-dark: #b31d28;
+  --color-red-ink: #2a1215;
+  --color-coral: #ff8a80;
+  /* Handoff identity (design_handoff_the120).
+     Blue deepened from the handoff's #0300ED — the pure RGB blue vibrated
+     against the warm palette; deep indigo chosen from side-by-side variants. */
+  --color-blue: #22219b;
+  --color-blush: #efc5b8;
+
+  /* Semantic aliases used by the starter */
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+
+  /* Typography — loaded via next/font in layout.tsx */
+  --font-display: var(--font-space-grotesk), "Space Grotesk", sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
+
+/* Anchor jumps are instant — smooth scrolling read as dizzying on long pages. */
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Print: dossier profile only (used by the dashboard's Print / Save as PDF) */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+}
+
+/* Mono eyebrow/label used throughout the site */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-red);
+}
+
+/* Georgia display headline (handoff identity). Pair with .accent for the italic word. */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+}
+.display .accent {
+  font-style: italic;
+  color: var(--color-red);
+}
+.display .accent-blush {
+  font-style: italic;
+  color: var(--color-blush);
+}

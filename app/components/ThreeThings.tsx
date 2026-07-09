@@ -7,12 +7,12 @@ const things = [
   {
     kicker: "02 · THE PROJECT",
     title: "One year-long project, shipped",
-    body: "A season record, a company, a body of work, a research study, a service program. Mentored, milestone-driven, demoed live at the quarterly Toronto intensives.",
+    body: "A year-long project connected to their group: a season record, a company, a body of work, a research study, a service program. Mentored, milestone-driven, demoed live at the quarterly Toronto intensives.",
   },
   {
-    kicker: "03 · THE CRAFT",
-    title: "Serious depth in what they love",
-    body: "Each group goes deep its own way: accelerated academics for the Scholars, training blocks for the Athletes, studio practice for the Makers. Real coaching, no ceiling.",
+    kicker: "03 · THE SUBJECT",
+    title: "Get super advanced in one subject. Or two.",
+    body: "Personalized content acceleration on 1 of 2 academic platforms paired with regular calls to keep you on track. Mastery-based, no ceiling. Members routinely learn at 3X the pace of a traditional classroom in the chosen subject.",
   },
 ];
 

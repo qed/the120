@@ -39,14 +39,9 @@ Set `SEATS_REMAINING = 113` (7 committed of 120) in `app/lib/site.ts`. Delete "S
 
 **T4 · Claims round 1** *(dev)* — ✅ **Done 2026-07-09.** Applied all vetted verdicts: GT-partner line removed from footer; campus mentions removed (KeyDates footnote + FAQ entry); "PhD-level" → "Bi-weekly 30 min 1:1 with a strong Academic Advisor" (4 locations); 13+ → 51+ campuses (2 locations); intensive dates moved forward one week (Nov 7–8 2026, Jan 30–31, Apr 3–4, Jun 12–13 2027); GT Toronto removed from main nav (still reachable via Scholars card + footer).
 
-**T5 · Remove income brackets from signup** *(dev, ~30 min)*
-Delete the household-income step from `app/components/account/AccountModal.tsx` (field, validation, INCOME_BRACKETS constant) and from the parent data model.
+**T5 · Remove income brackets from signup** *(dev)* — ✅ **Done 2026-07-09** (`790101d`). Household-income step deleted from the account modal: field, validation, and constant.
 
-**T8 · Import the real workshop catalog** *(dev)*
-Replace the 8 mocked workshops in `app/dashboard/data.ts` with the real 47-workshop / 9-advisor catalog from `artifacts/The 120 Design Handoff/design_handoff_the120/design_files/gt-workshops.json` (includes bios, tracks, grade ranges, formats, poster/headshot asset paths). The DossierEditor workshop picker needs grouping (by track or advisor) to stay usable at 47 items.
-
-Real catalog found: **47 workshops, 9 advisors** in `artifacts/The 120 Design Handoff/design_handoff_the120/design_files/gt-workshops.json` (Andreea Musat, Anjelina Belakovskaia, Craig Lundberg, David Zook, Melissa Muir, Norberto Troncoso, Ruchi Shukla, Sarah Langdon, Yash Mehta). Import → T8
-*Acceptance: dashboard shows only real workshops and real advisors; picker is navigable.*
+**T8 · Import the real workshop catalog** *(dev)* — ✅ **Done 2026-07-09** (`47c98cc`). `app/dashboard/data.ts` now carries the real catalog from the design handoff's `gt-workshops.json`: **42 workshops** (5 dropped as K–2-only; The 120 is grades 3–8) across 3 tracks (Competition, Humanities, Sciences) + `ADVISORS` export with all 9 real advisors and bios. DossierEditor picker groups by collapsible track sections. Old localStorage picks with stale ids degrade gracefully.
 
 **T9 · /parents stories page — testimonials front and center** *(dev; ⚠️ publish permission from Ian Logan + Gordon McKay still unconfirmed — Owner: Peter)*
 Build a dedicated `/parents` stories page with the deep Toronto parent testimonials from `artifacts/AlphaTestimonials.md`, linked and referenced prominently from the home page. Per positioning: general proof content lives on/from home, not buried on GT sub-pages.
@@ -57,11 +52,9 @@ Per positioning (The 120 = one society, five groups; GT is just one): audit /gt 
 **T10 · HST-exempt on every pricing view** *(dev, ~20 min)*
 Add the HST-exempt mention to home `TuitionTeaser` and /gt `GtTuition` (already present in /tuition fine print + FAQ). Copy angle: "$3,000/yr to join, upgrade to $15,000/yr for the Full Academic Core — HST-exempt."
 
-**T6 · Create the Supabase project** *(Owner: Peter — external, ~30 min)*
-Enable email auth (password + magic link). Add to Vercel env: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server-only). Unblocks all of S1–S4.
+**T6 · Create the Supabase project** — ✅ **Done 2026-07-09.** Project `the120` (ref `deolvqnyvhhnavsifgxz`, us-east-1, org yzulxodcavahcyvhknfv), ACTIVE_HEALTHY. All three keys in Vercel env for production/preview/development (service-role key marked sensitive); `.env.local` pulled for local dev (gitignored). Email/password + magic-link auth are on by default. DB password saved to `~\.the120-supabase-db-password.txt` on Peter's machine — move to a password manager and delete the file. ⚠️ Default Supabase SMTP is rate-limited (~2 emails/hr) — fine for dev; production auth emails need custom SMTP (pair with the mailbox task, S6). Unblocks S1–S4.
 
-**T7 · Stripe deposit product** *(Owner: Peter + dev — external, ~1 hr)*
-In the existing Stripe account: $250 CAD product/price for "The 120 — Refundable Seat Deposit," refund terms in the statement descriptor/receipt copy (needs the refund-terms decision). Add `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` to Vercel env. Test-mode checkout verified end to end before live keys.
+**T7 · Stripe deposit product** *(Owner: Peter + dev — external)* — 🟡 **In progress 2026-07-09.** Stripe CLI installed on Peter's machine; **blocked on `stripe login`** (interactive). Then: $250 CAD test-mode product/price for "The 120 — Refundable Seat Deposit" (refundable until Sept 30, 2026 per decision), and `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` into Vercel env. Test-mode checkout verified end to end before live keys.
 
 ---
 

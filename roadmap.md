@@ -10,6 +10,8 @@ Working task list for the site. Check items off as they land; add new ones at th
 
 ## 🟠 External setup (accounts / services — not code)
 
+- [ ] **Vercel ↔ this repo**: the site currently deploys from a legacy mirror (`cactuscat18/the120-site`). To deploy from this repo: grant the Vercel GitHub App access to `qed/the120` (repo owner: github.com/apps/vercel → Configure → select the repo), then in the Vercel project: Settings → Git → Disconnect → Connect `qed/the120`, production branch `main`. Until then, commits are mirrored to the legacy repo so the live URL stays current.
+
 - [ ] **Create a Supabase project** for the site.
   - Enable email auth (password + magic link).
   - Add the project keys to Vercel → Settings → Environment Variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (and `SUPABASE_SERVICE_ROLE_KEY` as a server-only var).

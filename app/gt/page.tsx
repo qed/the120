@@ -17,19 +17,12 @@ export const metadata: Metadata = {
     "School reimagined for gifted kids who love to learn. Accelerated academics on the GT platform: mastery with no ceiling, run as GT Toronto.",
 };
 
-const gtLinks = [
-  { label: "The program", href: "/gt#program" },
-  { label: "TimeBack", href: "/gt#subject" },
-  { label: "Key dates", href: "/gt#dates" },
-  { label: "Tuition", href: "/tuition" },
-  { label: "FAQ", href: "/faq" },
-];
-
-/** The Scholars' sub-site (handoff GT - Home), keeping our interactive pieces. */
+/** The Scholars' sub-site (handoff GT - Home), keeping our interactive pieces.
+ *  Nav links stay identical site-wide — page-specific link sets read as confusing. */
 export default function GtHome() {
   return (
     <>
-      <Nav gt links={gtLinks} />
+      <Nav gt />
       <main className="flex-1">
         {/* GT hero */}
         <section className="relative -mt-[92px] flex min-h-[700px] flex-col justify-end overflow-hidden">

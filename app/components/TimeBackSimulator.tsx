@@ -357,7 +357,7 @@ export default function TimeBackSimulator() {
           </div>
         </div>
 
-        <p className="mt-4 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
+        <p className="mt-4 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-ink-soft">
           Illustrative. Velocity figures reflect GT / 2 Hour Learning network results, not
           guaranteed outcomes.
         </p>

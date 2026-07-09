@@ -33,9 +33,7 @@
   --font-serif: Georgia, "Times New Roman", serif;
 }
 
-html {
-  scroll-behavior: smooth;
-}
+/* Anchor jumps are instant — smooth scrolling read as dizzying on long pages. */
 
 body {
   background: var(--color-paper);

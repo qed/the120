@@ -54,7 +54,7 @@ export default function DashboardApp() {
               <p className="font-display text-4xl font-bold tracking-tight text-red">
                 {SEATS_REMAINING}
               </p>
-              <p className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted">
+              <p className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-ink-soft">
                 of {SEATS_TOTAL} seats remain
               </p>
             </div>

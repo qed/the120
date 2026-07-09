@@ -53,7 +53,7 @@ export default function ProductPillars() {
                 <span className="font-mono text-xs uppercase tracking-[0.18em] text-red">
                   {p.name}
                 </span>
-                <span className="font-display text-2xl font-bold text-line-strong">{p.n}</span>
+                <span className="font-display text-2xl font-bold text-muted">{p.n}</span>
               </div>
 
               <p className="mt-6 font-display text-xl font-bold leading-snug tracking-tight text-ink">

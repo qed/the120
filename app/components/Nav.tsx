@@ -8,22 +8,15 @@ import Cta from "./Cta";
 import JoinButton from "./JoinButton";
 import { nav as defaultLinks } from "@/app/lib/site";
 
-type NavLink = { label: string; href: string };
-
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
  * with side margins, over hero imagery. `gt` renders the GT Toronto variant
- * with a "← THE 120" breadcrumb.
+ * with a "← THE 120" breadcrumb. Links are identical site-wide by design —
+ * page-specific link sets read as confusing.
  */
-export default function Nav({
-  links,
-  gt = false,
-}: {
-  links?: NavLink[];
-  gt?: boolean;
-}) {
+export default function Nav({ gt = false }: { gt?: boolean }) {
   const [open, setOpen] = useState(false);
-  const items: NavLink[] = links ?? [...defaultLinks];
+  const items = [...defaultLinks];
 
   useEffect(() => {
     if (!open) return;

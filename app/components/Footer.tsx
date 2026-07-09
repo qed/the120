@@ -4,7 +4,6 @@ import Wordmark from "./Wordmark";
 const links = [
   { label: "The groups", href: "/#groups" },
   { label: "Parents", href: "/parents" },
-  { label: "GT Toronto", href: "/gt" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
   { label: "Sign in", href: "/dashboard" },
@@ -29,11 +28,12 @@ export default function Footer() {
                 {l.label}
               </Link>
             ))}
+            {/* Interim contact until admissions@the120.school exists (S6) */}
             <a
-              href="mailto:admissions@the120.school"
+              href="mailto:pkuperman@gmail.com"
               className="text-[13px] text-muted transition-colors hover:text-paper"
             >
-              admissions@the120.school
+              pkuperman@gmail.com
             </a>
           </div>
         </div>

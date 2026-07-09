@@ -21,7 +21,7 @@ export const TUITION_FULL_CORE_CAD = 15000;
  * scheduler — no code change needed. Email fallback until then, so no dead clicks.
  */
 export const BOOKING_URL =
-  process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:admissions@the120.school";
+  process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:pkuperman@gmail.com";
 
 export const nav = [
   { label: "The groups", href: "/#groups" },
@@ -86,8 +86,8 @@ export const groups: Group[] = [
     kicker: "GROUP 04 · GIFTED & TALENTED · ENROLLING NOW",
     blurb: "Accelerated academics with GT. Mastery with no ceiling.",
     body: "For gifted kids who love to learn. Accelerated academics on the GT platform with mastery and no ceiling, run as GT Toronto.",
-    href: "/gt",
-    cta: "ENROLLING NOW · GT TORONTO →",
+    href: "/scholars",
+    cta: "ENROLLING NOW · BOOK OR JOIN →",
   },
   {
     slug: "givers",

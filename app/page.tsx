@@ -1,12 +1,9 @@
 import Nav from "@/app/components/Nav";
 import Hero from "@/app/components/Hero";
-import ProductPillars from "@/app/components/ProductPillars";
-import TimeBackSimulator from "@/app/components/TimeBackSimulator";
-import KeyDates from "@/app/components/KeyDates";
-import Promises from "@/app/components/Promises";
-import Testimonials from "@/app/components/Testimonials";
-import TuitionCard from "@/app/components/TuitionCard";
-import Faq from "@/app/components/Faq";
+import GroupsBand from "@/app/components/GroupsBand";
+import ThreeThings from "@/app/components/ThreeThings";
+import HowItWorks from "@/app/components/HowItWorks";
+import TuitionTeaser from "@/app/components/TuitionTeaser";
 import CtaBand from "@/app/components/CtaBand";
 import Footer from "@/app/components/Footer";
 
@@ -16,13 +13,10 @@ export default function Home() {
       <Nav />
       <main className="flex-1">
         <Hero />
-        <ProductPillars />
-        <TimeBackSimulator />
-        <KeyDates />
-        <Promises />
-        <Testimonials />
-        <TuitionCard />
-        <Faq />
+        <GroupsBand />
+        <ThreeThings />
+        <HowItWorks />
+        <TuitionTeaser />
         <CtaBand />
       </main>
       <Footer />

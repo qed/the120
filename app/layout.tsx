@@ -17,9 +17,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "The 120 — GT Toronto | Come join the network.",
+  title: "The 120 — Toronto's most motivated and engaged kids",
   description:
-    "A selective network of Toronto's 120 best and brightest students, grades 3–8. One year-long project, one subject mastered, and a city-wide tribe of true intellectual peers. 3–5 hours a week. Only 120 seats.",
+    "A selective network of 120 kids across five groups: the Athletes, the Founders, the Makers, the Scholars, and the Givers. Grades 3–8, 3–5 hours a week, alongside any school. Only 120 seats.",
 };
 
 export default function RootLayout({

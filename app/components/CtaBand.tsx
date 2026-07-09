@@ -1,53 +1,33 @@
-import Image from "next/image";
 import Cta from "./Cta";
 import JoinButton from "./JoinButton";
-import { SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
 
-export default function CtaBand() {
+/** Handoff CTA band: centered serif on brand red, white JOIN + bordered BOOK pair. */
+export default function CtaBand({
+  headline,
+  accent,
+  subline = "Founding cohort · Fall 2026 · Grades 3–8 · Toronto",
+}: {
+  headline?: string;
+  accent?: string;
+  subline?: string;
+}) {
   return (
-    <section id="join" className="scroll-mt-24 overflow-hidden bg-red text-white">
-      <div className="mx-auto grid w-full max-w-6xl items-end gap-8 px-6 pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:pt-24">
-        <div className="pb-20 lg:pb-24">
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-white/70">
-            Claim your child&rsquo;s seat — Fall 2026
-          </p>
-          <h2 className="mt-4 max-w-2xl font-display text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
-            Come join the network. Come join the 120.
-          </h2>
-          <p className="mt-4 max-w-xl text-white/85">
-            Create an account, build your child&rsquo;s dossier, and submit it for review. An
-            assessment invitation follows.
-          </p>
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            <JoinButton variant="secondary" className="h-14 px-8 text-sm">
-              Join the 120
-            </JoinButton>
-            <Cta
-              href="#call"
-              className="h-14 border border-white/40 bg-transparent px-8 text-sm text-white hover:bg-white/10"
-            >
-              Book a call
-            </Cta>
-          </div>
-
-          <p className="mt-6 font-mono text-xs uppercase tracking-[0.14em] text-white/80">
-            <span className="font-bold text-white">{SEATS_REMAINING}</span> of {SEATS_TOTAL} seats
-            remain
-          </p>
-        </div>
-
-        {/* Robotics cutout — stands at the bottom edge of the band */}
-        <div className="relative mx-auto h-64 w-full max-w-xs sm:h-80 lg:h-[26rem]">
-          <Image
-            src="/reference/project-robotics.webp"
-            alt="A member smiling while holding the robot she built."
-            fill
-            loading="eager"
-            sizes="(max-width: 1152px) 20rem, 24rem"
-            className="object-contain object-bottom drop-shadow-[0_20px_40px_rgba(42,18,21,0.45)]"
-          />
-        </div>
+    <section
+      id="join"
+      className="flex scroll-mt-24 flex-col items-center gap-7 bg-red px-6 py-[88px] text-center sm:px-11"
+    >
+      <h2 className="display max-w-[800px] text-3xl text-white sm:text-[52px] sm:leading-[1.1]">
+        {headline ?? "Come join the network."}{" "}
+        <span className="italic">{accent ?? "Come join the 120."}</span>
+      </h2>
+      <span className="text-[17px] text-white/85">{subline}</span>
+      <div className="flex flex-wrap items-center justify-center gap-[18px]">
+        <JoinButton variant="white" className="px-[30px] py-4 text-sm">
+          Join the 120
+        </JoinButton>
+        <Cta href="#call" variant="ghostLight" className="px-7 py-[14.5px] text-sm">
+          Book a call
+        </Cta>
       </div>
     </section>
   );

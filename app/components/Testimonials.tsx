@@ -23,7 +23,7 @@ export default function Testimonials() {
         <div className="max-w-2xl">
           <p className="eyebrow">The community</p>
           <h2 className="mt-4 font-display text-3xl font-bold tracking-tight text-ink sm:text-4xl">
-            Your child&rsquo;s intellectual tribe awaits.
+            An intellectual group, not another activity.
           </h2>
           <p className="mt-4 text-lg leading-8 text-ink-soft">
             The hardest part of being the kid who asks for more is being the only one. In the 120,

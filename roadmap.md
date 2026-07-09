@@ -4,10 +4,7 @@ Working task list for the site. Check items off as they land; add new ones at th
 
 ## 🔴 Needs a decision (blocking build work)
 
-- [ ] **Design direction — five groups vs. single network.** Two candidate designs exist:
-  - The **design handoff bundle** (shared separately): the 120 is five groups — Athletes, Founders, Makers, Scholars (GT), Givers — with **$3,000 CAD Membership** (math via Math Academy, no TimeBack) + **$15,000 Full Academic Core**, and GT Toronto as the Scholars' sub-site.
-  - The **July 5 design brief (v4)**: single gifted network, assessment-gated top 1–2%, **$15,000 all-inclusive** — this is what's live right now.
-  These conflict on pricing, audience, and site structure, and the handoff can't be dated against the brief. A handoff-styled version is being built on a branch (Vercel preview link to follow) so both can be compared live before choosing.
+- [x] **Design direction — five groups vs. single network.** ✅ Confirmed: **five groups** (Athletes, Founders, Makers, Scholars/GT, Givers) with $3,000 Membership + $15,000 Full Academic Core, per the design handoff. The site now follows this direction; the single-network version is preserved in git history (`master` before the groups merge).
 - [ ] **Household income brackets** on account creation: currently CAD-adjusted (Under $75,000 / $75,000–$200,000 / Over $200,000 / Prefer not to say). Brief lists this as an open item — confirm or revert to GT's original figures.
 - [ ] **Full Academic Core pricing** (brief open item): same $15,000 as Membership, or premium?
 
@@ -26,7 +23,10 @@ Working task list for the site. Check items off as they land; add new ones at th
 
 ## 🟡 Build queue (code — unblocked or waiting on the above)
 
-- [ ] Handoff-integration branch: five-groups home, four group pages, serif/blue identity, $3k/$15k tuition → Vercel preview for the design decision.
+- [x] Handoff integration: five-groups home, four group pages, serif/blue identity, GT sub-site at /gt, /tuition, /faq. ✅
+- [ ] Client photography for the four group-page background slots (blue until provided).
+- [ ] Dashboard dossier: add a "group" picker (data model + UI) now that groups are confirmed.
+- [ ] Restyle dashboard + join modal surfaces to the handoff identity (buttons/labels updated; deep pass pending).
 - [ ] Supabase wiring (auth + dossier persistence) — **waiting on the Supabase project above**; V1 currently stores everything in the browser (localStorage).
 - [ ] Book-a-call buttons → real scheduling link — **waiting on the booking link above**.
 - [ ] Admin review queue (dossier queue, status changes, notes) — after Supabase.

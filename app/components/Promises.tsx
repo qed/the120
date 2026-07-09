@@ -9,7 +9,7 @@ const promises = [
   },
   {
     title: "Master real life skills",
-    body: "One shipped project a year, a real advisor, and a tribe that holds them to a higher bar.",
+    body: "One shipped project a year, a real advisor, and a group that holds them to a higher bar.",
   },
 ];
 

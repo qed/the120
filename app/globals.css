@@ -19,6 +19,9 @@
   --color-red-dark: #b31d28;
   --color-red-ink: #2a1215;
   --color-coral: #ff8a80;
+  /* Handoff identity (design_handoff_the120) */
+  --color-blue: #0300ed;
+  --color-blush: #efc5b8;
 
   /* Semantic aliases used by the starter */
   --color-background: var(--color-paper);
@@ -56,7 +59,23 @@ body {
 .eyebrow {
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--color-red);
+}
+
+/* Georgia display headline (handoff identity). Pair with .accent for the italic word. */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+}
+.display .accent {
+  font-style: italic;
+  color: var(--color-red);
+}
+.display .accent-blush {
+  font-style: italic;
+  color: var(--color-blush);
 }

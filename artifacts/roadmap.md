@@ -54,7 +54,10 @@ Add the HST-exempt mention to home `TuitionTeaser` and /gt `GtTuition` (already 
 
 **T6 · Create the Supabase project** — ✅ **Done 2026-07-09.** Project `the120` (ref `deolvqnyvhhnavsifgxz`, us-east-1, org yzulxodcavahcyvhknfv), ACTIVE_HEALTHY. All three keys in Vercel env for production/preview/development (service-role key marked sensitive); `.env.local` pulled for local dev (gitignored). Email/password + magic-link auth are on by default. DB password saved to `~\.the120-supabase-db-password.txt` on Peter's machine — move to a password manager and delete the file. ⚠️ Default Supabase SMTP is rate-limited (~2 emails/hr) — fine for dev; production auth emails need custom SMTP (pair with the mailbox task, S6). Unblocks S1–S4.
 
-**T7 · Stripe deposit product** *(Owner: Peter + dev — external)* — 🟡 **In progress 2026-07-09.** Stripe CLI installed on Peter's machine; **blocked on `stripe login`** (interactive). Then: $250 CAD test-mode product/price for "The 120 — Refundable Seat Deposit" (refundable until Sept 30, 2026 per decision), and `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` into Vercel env. Test-mode checkout verified end to end before live keys.
+**T7 · Stripe deposit product** *(Owner: Peter + dev)* — 🟡 **Mostly done 2026-07-09.** Test-mode product `prod_Ur6AwdjOT1R4FB` + price `price_1TrNyj25N9cbf3wUf1Hm125C` ($250.00 CAD) created; `STRIPE_DEPOSIT_PRICE_ID` in Vercel env (all environments). Remaining:
+  - **Peter**: copy `pk_test_…` and `sk_test_…` from dashboard.stripe.com/test/apikeys into Vercel as `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_SECRET_KEY` (keys aren't retrievable via CLI).
+  - `STRIPE_WEBHOOK_SECRET` comes with the webhook endpoint in S3 (`stripe listen` locally).
+  - ⚠️ **Account decision before live keys**: CLI authenticated to the **Hatch Coding CDN** account (`acct_103s7v25N9cbf3wU`) — parents' statements would reference it. Decide: dedicated Stripe account for The 120, or a custom statement descriptor on this one. CLI key expires in 90 days (~2026-10-07).
 
 ---
 

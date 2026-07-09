@@ -1,6 +1,6 @@
 # Roadmap — the120.school
 
-Working plan for the site. Peter is PM; two developers execute tickets via AI coding sessions.
+Working plan for the site. Peter is PM; two developers execute tickets via AI coding sessions. Done items should be moved to the bottom.
 Horizons: **Phase 1** (recruitment push) → **Phase 2** (accounts + deposits fully live) → **Phase 3**.
 Status markers: 🔴 not started · 🟡 in progress / partially done · ⛔ blocked on someone · ✅ done (bottom section).
 
@@ -20,7 +20,6 @@ Status markers: 🔴 not started · 🟡 in progress / partially done · ⛔ blo
 ## 🔴 Decisions made, still need coding
 
 - [ ] **Deposit refund terms** (Sept 30, 2026) → checkout copy, receipt email, terms page (lands with S3 + S7).
-- [x] **Household income brackets** → removed from signup (T5, done).
 - [ ] **Pricing story**: $3,000/yr to join, upgradeable to $15,000/yr Full Academic Core, all HST-exempt — **every pricing view must say so** (T10).
 
 ---
@@ -38,20 +37,14 @@ One Cal.com or Calendly event, 20–30 min intro call. Drop the URL in Vercel en
 Set `SEATS_REMAINING = 113` (7 committed of 120) in `app/lib/site.ts`. Delete "Seat counts shown on this site are real and maintained" from `app/components/Faq.tsx` until Stage 2 makes it true. Add a code comment: hand-maintained until wired to deposits (S4).
 *Acceptance: every seat figure on the site derives from the one constant and matches reality.*
 
-**T7 · Stripe deposit product** *(Owner: Peter + dev)* — 🟡 **Mostly done 2026-07-09.**
-Done: test-mode product `prod_Ur6AwdjOT1R4FB` + price `price_1TrNyj25N9cbf3wUf1Hm125C` ($250.00 CAD); `STRIPE_DEPOSIT_PRICE_ID` in Vercel env (all environments); Stripe CLI installed + authenticated. Remaining:
-  - **Peter**: copy `pk_test_…` and `sk_test_…` from dashboard.stripe.com/test/apikeys into Vercel as `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_SECRET_KEY` (keys aren't retrievable via CLI).
-  - `STRIPE_WEBHOOK_SECRET` comes with the webhook endpoint in S3 (`stripe listen` locally).
-  - ⚠️ **Account decision before live keys**: CLI authenticated to the **Hatch Coding CDN** account (`acct_103s7v25N9cbf3wU`) — parents' statements would reference it. Decide: dedicated Stripe account for The 120, or a custom statement descriptor on this one. CLI key expires ~2026-10-07.
-
-**T9 · /parents stories page — testimonials front and center** *(dev)* — ⛔ **Blocked: publish permission from Ian Logan + Gordon McKay unconfirmed (Owner: Peter).**
+**T9 · /parents stories page — testimonials front and center** *(dev)* — 🔴 **Ready to build — publish permission from Ian Logan + Gordon McKay confirmed.**
 Build a dedicated `/parents` stories page with the deep Toronto parent testimonials from `artifacts/AlphaTestimonials.md`, linked and referenced prominently from the home page. Per positioning: general proof content lives on/from home, not buried on GT sub-pages.
 
 **T10 · HST-exempt on every pricing view** *(dev, ~20 min)* — 🔴 **Not started.**
 Add the HST-exempt mention to home `TuitionTeaser` and /gt `GtTuition` (already present in /tuition fine print + FAQ). Copy angle: "$3,000/yr to join, upgrade to $15,000/yr for the Full Academic Core — HST-exempt."
 
 **T11 · De-emphasize GT to a plain sub-page** *(dev)* — 🟡 **Partially done** (GT nav variant + main-nav link removed 2026-07-09).
-Remaining: audit /gt for general content that belongs at the top level (testimonials, network proof) and slim /gt down to Scholars-specific info. GT-only footnote/stats stay on /gt per claims verdict. Overlaps with T9.
+Remaining: audit /gt for general content that belongs at the top level (testimonials, network proof) and slim /gt down to Scholars-specific info. GT-only footnote/stats stay on /gt per claims verdict. Overlaps with T9. For now, keep all current GT info at /gt but create Scholars specific pages and content at /scholars
 
 ---
 
@@ -66,6 +59,13 @@ Migrate the dashboard store from localStorage to Supabase: `parents → children
 **S3 · Deposit inside the dashboard** *(dev — the centrepiece)* — 🔴 **Not started; after S1/S2 + T7 keys.**
 "Reserve your child's seat — $250" in each child's dossier once submitted: creates a Stripe Checkout session tied to parent + child, webhook records the paid deposit (`deposits` table), child status advances, receipt email confirms refund terms (Sept 30, 2026). Refund path documented for admins.
 *Acceptance: a parent can go account → dossier → pay $250 → see "seat reserved" — and Stripe + Supabase agree.*
+
+**S10 · Stripe go-live: account decision + live mode** *(Owner: Peter + dev)* — 🔴 **Not started; required before accepting real deposits (after S3 works end to end in test mode).**
+Everything Stripe today is **test mode** on the **Hatch Coding CDN** account (`acct_103s7v25N9cbf3wU`). To go live:
+  1. **Account decision (Peter)**: dedicated Stripe account for The 120 (cleanest — separate books, own branding) **or** stay on Hatch Coding CDN with a custom statement descriptor (e.g. "THE120") so parents' card statements don't read "Hatch Coding". If switching accounts: recreate product/price there (~5 min) and update `STRIPE_DEPOSIT_PRICE_ID` + keys.
+  2. **Live keys**: put `pk_live_…` / `sk_live_…` into Vercel **production env only** (keep test keys on preview/development so preview deploys can never charge real cards).
+  3. **Live product + price + webhook**: recreate the deposit product in live mode; create the production webhook endpoint and set live `STRIPE_WEBHOOK_SECRET`.
+  4. **Verification**: one real $250 charge + refund round-trip before announcing to parents; confirm statement descriptor, receipt email, and refund copy (Sept 30, 2026 terms).
 
 **S4 · Seat counter reads real deposits (Stage 2)** *(dev)* — 🔴 **Not started; after S3.**
 `SEATS_REMAINING` becomes `120 − 7 founding commitments − paid deposits` from Supabase (ISR/revalidated). Restore the "real and maintained" FAQ line once true.
@@ -101,7 +101,9 @@ Logo/co-marketing rights before the brand appears beyond the legal line.
 
 ## ✅ Done
 
+- [x] **Household income brackets** → removed from signup (T5, done).
 **Tickets (2026-07-09):**
+- **T7 · Stripe deposit product (test mode)** — product `prod_Ur6AwdjOT1R4FB` + price `price_1TrNyj25N9cbf3wUf1Hm125C` ($250.00 CAD) on account `acct_103s7v25N9cbf3wU`; Vercel env has `STRIPE_DEPOSIT_PRICE_ID`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_SECRET_KEY` (permanent dashboard key, sensitive on production/preview) across all environments; `.env.local` refreshed. Stripe CLI installed + authenticated (its own key expires ~2026-10-07 — re-run `stripe login` then; doesn't affect the app). `STRIPE_WEBHOOK_SECRET` lands with S3's webhook endpoint; going live is S10.
 - **T4 · Claims round 1** — all 12 vetted claims applied: GT-partner line removed from footer; campus mentions removed (KeyDates footnote + FAQ entry); advisor claim now "Bi-weekly 30 min 1:1 with an expert Academic Advisor" (4 locations); 13+ → 51+ campuses (2 locations); intensive dates moved forward one week (Nov 7–8 2026, Jan 30–31, Apr 3–4, Jun 12–13 2027).
 - **T5 · Remove income brackets from signup** (`790101d`) — household-income step deleted from the account modal: field, validation, and constant.
 - **T6 · Supabase project created** — project `the120` (ref `deolvqnyvhhnavsifgxz`, us-east-1), ACTIVE_HEALTHY. All three keys in Vercel env for production/preview/development (service-role key sensitive); `.env.local` pulled locally (gitignored). Email/password + magic-link auth on by default. DB password saved to `~\.the120-supabase-db-password.txt` on Peter's machine — **move to a password manager and delete the file**. Unblocks S1–S4.

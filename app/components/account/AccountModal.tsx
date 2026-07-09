@@ -135,13 +135,16 @@ export default function AccountModal({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="relative my-8 w-full max-w-lg overflow-hidden rounded-3xl border border-line bg-paper shadow-2xl"
+            className="relative my-8 w-full max-w-lg overflow-hidden rounded-3xl bg-paper shadow-[0_0_0_1px_rgba(19,20,22,0.06),0_8px_16px_-8px_rgba(19,20,22,0.2),0_32px_80px_-16px_rgba(19,20,22,0.5)]"
           >
+            {/* Letterhead accent */}
+            <div className="h-1 bg-red" />
+
             <button
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-line"
+              className="absolute right-4 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-line"
             >
               ✕
             </button>
@@ -224,10 +227,10 @@ export default function AccountModal({
                       {INCOME_BRACKETS.map((b) => (
                         <label
                           key={b}
-                          className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                          className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-all duration-150 ${
                             form.incomeBracket === b
                               ? "border-red bg-red/5 text-ink"
-                              : "border-line-strong text-ink-soft hover:border-ink"
+                              : "border-line-strong bg-white text-ink-soft hover:border-ink hover:bg-paper-2/60"
                           }`}
                         >
                           <input
@@ -272,7 +275,7 @@ export default function AccountModal({
 
                   <button
                     type="submit"
-                    className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-red-dark"
+                    className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white shadow-sm shadow-red/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-dark hover:shadow-md hover:shadow-red/30 active:translate-y-0"
                   >
                     Create account & claim seat
                   </button>
@@ -353,7 +356,7 @@ function SuccessView({ firstName, onClose }: { firstName: string; onClose: () =>
 /* ---------- field primitives ---------- */
 
 function inputCls(error?: string) {
-  return `h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-red ${
+  return `h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-ink outline-none transition-all duration-150 placeholder:text-muted focus:border-red focus:ring-4 focus:ring-red/10 ${
     error ? "border-red" : "border-line-strong"
   }`;
 }

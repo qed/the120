@@ -30,9 +30,9 @@ export default function Hero() {
             A selective network · Only 120 seats
           </p>
 
-          <h1 className="mt-5 font-display text-4xl font-bold leading-[1.03] tracking-tight sm:text-5xl lg:text-[4.25rem]">
-            Come join the network.
-            <br />
+          <h1 className="mt-5 font-display text-4xl font-bold leading-[1.06] tracking-tight sm:text-5xl sm:leading-[1.03] lg:text-[4.25rem]">
+            Come join the network.{" "}
+            <br className="hidden sm:block" />
             Come join the 120.
           </h1>
 

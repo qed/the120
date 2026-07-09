@@ -33,7 +33,7 @@ export default function Faq() {
         <div className="mt-10 divide-y divide-line border-y border-line">
           {faqs.map((f) => (
             <details key={f.q} className="group py-5">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-display text-lg font-semibold tracking-tight text-ink">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-display text-lg font-semibold tracking-tight text-ink transition-colors hover:text-red">
                 {f.q}
                 <span className="font-mono text-xl text-red transition-transform group-open:rotate-45">
                   +

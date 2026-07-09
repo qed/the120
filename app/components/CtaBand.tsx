@@ -43,6 +43,7 @@ export default function CtaBand() {
             src="/reference/project-robotics.webp"
             alt="A member smiling while holding the robot she built."
             fill
+            loading="eager"
             sizes="(max-width: 1152px) 20rem, 24rem"
             className="object-contain object-bottom drop-shadow-[0_20px_40px_rgba(42,18,21,0.45)]"
           />

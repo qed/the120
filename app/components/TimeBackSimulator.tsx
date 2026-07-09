@@ -180,7 +180,7 @@ export default function TimeBackSimulator() {
             <button
               type="button"
               onClick={run}
-              className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-colors hover:bg-red-dark"
+              className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white shadow-sm shadow-red/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-dark hover:shadow-md hover:shadow-red/30 active:translate-y-0"
             >
               {phase === "done" ? "↻ Run it again" : started ? "Running…" : "▶ Run TimeBack"}
             </button>
@@ -234,7 +234,7 @@ export default function TimeBackSimulator() {
 
           {/* ---- Graph ---- */}
           <div className="relative bg-ink p-8 text-paper">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-xs uppercase tracking-[0.14em] text-white/60">
                 Learning velocity · {subject.label}
               </p>

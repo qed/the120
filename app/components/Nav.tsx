@@ -50,8 +50,8 @@ export default function Nav() {
           <Wordmark tone={solid ? "dark" : "light"} />
         </Link>
 
-        {/* Desktop links */}
-        <nav className="hidden items-center gap-8 md:flex">
+        {/* Desktop links — lg+ only; tablet gets the hamburger (links wrap/cram at 768) */}
+        <nav className="hidden items-center gap-8 lg:flex">
           {nav.map((item) => (
             <a
               key={item.href}
@@ -85,8 +85,8 @@ export default function Nav() {
             <JoinButton>Join the 120</JoinButton>
           </span>
 
-          {/* Hamburger — mobile only (visibility on the wrapper span) */}
-          <span className="md:hidden">
+          {/* Hamburger — mobile + tablet (visibility on the wrapper span) */}
+          <span className="lg:hidden">
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
@@ -128,7 +128,7 @@ export default function Nav() {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="overflow-hidden border-t border-line bg-paper md:hidden"
+            className="overflow-hidden border-t border-line bg-paper lg:hidden"
           >
             <nav className="mx-auto flex w-full max-w-6xl flex-col px-6 py-4">
               {nav.map((item) => (

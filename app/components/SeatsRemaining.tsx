@@ -58,14 +58,16 @@ export default function SeatsRemaining({
     <div
       className={`w-full max-w-md ${card ? `rounded-2xl p-6 ${t.card}` : ""} ${className}`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <span
           className={`font-mono text-[0.65rem] uppercase tracking-[0.18em] ${t.muted}`}
         >
-          Founding cohort · Fall 2026
+          {/* Short label on narrow screens so the row never double-wraps */}
+          <span className="sm:hidden">Fall 2026</span>
+          <span className="hidden sm:inline">Founding cohort · Fall 2026</span>
         </span>
         <span
-          className={`font-mono text-[0.65rem] uppercase tracking-[0.14em] ${t.muted}`}
+          className={`whitespace-nowrap font-mono text-[0.65rem] uppercase tracking-[0.14em] ${t.muted}`}
         >
           {pctClaimed}% claimed
         </span>

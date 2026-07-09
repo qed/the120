@@ -47,7 +47,7 @@ export default function ProductPillars() {
             <div
               key={p.id}
               id={p.id === "subject" ? undefined : p.id}
-              className="scroll-mt-24 rounded-2xl border border-line bg-white p-8 transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
+              className="scroll-mt-24 rounded-2xl border border-line bg-white p-8 transition-all duration-300 ease-out hover:-translate-y-1 hover:border-line-strong hover:shadow-[0_24px_50px_-30px_rgba(19,20,22,0.35)]"
             >
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs uppercase tracking-[0.18em] text-red">

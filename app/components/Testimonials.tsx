@@ -35,7 +35,7 @@ export default function Testimonials() {
           {quotes.map((q) => (
             <figure
               key={q.name}
-              className="flex flex-col justify-between rounded-2xl border border-line bg-white p-8"
+              className="flex flex-col justify-between rounded-2xl border border-line bg-white p-8 transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_24px_50px_-30px_rgba(19,20,22,0.3)]"
             >
               <blockquote className="font-display text-lg font-medium leading-snug text-ink">
                 <span className="text-red">&ldquo;</span>

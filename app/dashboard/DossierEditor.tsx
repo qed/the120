@@ -263,37 +263,45 @@ export default function DossierEditor({
           title="Workshops of interest"
           hint={`Express interest — this isn't scheduling. Selected: ${child.workshopIds.length}`}
         >
-          <div className="grid gap-3 sm:grid-cols-2">
-            {WORKSHOPS.map((w) => {
-              const on = child.workshopIds.includes(w.id);
-              return (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => toggleWorkshop(w.id)}
-                  className={`rounded-xl border p-4 text-left transition-colors ${
-                    on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-display text-sm font-bold text-ink">{w.title}</span>
-                    <span
-                      className={`mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full border text-[0.55rem] ${
-                        on ? "border-red bg-red text-white" : "border-line-strong text-transparent"
+          {[...new Set(WORKSHOPS.map((w) => w.track))].map((track) => (
+            <details key={track} className="group mt-3 first:mt-0" open>
+              <summary className="mb-3 flex cursor-pointer list-none items-center gap-2 font-mono text-[0.7rem] uppercase tracking-[0.14em] text-muted">
+                <span className="text-red transition-transform group-open:rotate-90">▸</span>
+                {track} · {WORKSHOPS.filter((w) => w.track === track).length} workshops
+              </summary>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {WORKSHOPS.filter((w) => w.track === track).map((w) => {
+                  const on = child.workshopIds.includes(w.id);
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => toggleWorkshop(w.id)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
                       }`}
                     >
-                      ✓
-                    </span>
-                  </div>
-                  <p className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-muted">
-                    {w.track} · Grades {w.grades} · {w.length}
-                  </p>
-                  <p className="mt-2 text-xs leading-5 text-ink-soft">{w.description}</p>
-                  <p className="mt-2 font-mono text-[0.65rem] text-red">{w.advisor}</p>
-                </button>
-              );
-            })}
-          </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-display text-sm font-bold text-ink">{w.title}</span>
+                        <span
+                          className={`mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full border text-[0.55rem] ${
+                            on ? "border-red bg-red text-white" : "border-line-strong text-transparent"
+                          }`}
+                        >
+                          ✓
+                        </span>
+                      </div>
+                      <p className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-muted">
+                        {w.track} · Grades {w.grades} · {w.length}
+                      </p>
+                      <p className="mt-2 text-xs leading-5 text-ink-soft">{w.description}</p>
+                      <p className="mt-2 font-mono text-[0.65rem] text-red">{w.advisor}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+          ))}
         </Section>
 
         {/* 4 · Project & interests */}

@@ -5,12 +5,13 @@ Working task list for the site. Check items off as they land; add new ones at th
 ## 🔴 Needs a decision (blocking build work)
 
 - [x] **Design direction — five groups vs. single network.** ✅ Confirmed: **five groups** (Athletes, Founders, Makers, Scholars/GT, Givers) with $3,000 Membership + $15,000 Full Academic Core, per the design handoff. The site now follows this direction; the single-network version is preserved in git history (`master` before the groups merge).
-- [ ] **Household income brackets** on account creation: currently CAD-adjusted (Under $75,000 / $75,000–$200,000 / Over $200,000 / Prefer not to say). Brief lists this as an open item — confirm or revert to GT's original figures.
+- [ ] **Household income brackets** on account creation: currently CAD-adjusted (Under $90,000 / 90,000–$250,000 / Over $250,000 / Prefer not to say). Brief lists this as an open item — confirm or revert to GT's original figures.
 - [ ] **Full Academic Core pricing** (brief open item): same $15,000 as Membership, or premium?
 
 ## 🟠 External setup (accounts / services — not code)
 
-- [ ] **Vercel ↔ this repo**: the site currently deploys from a legacy mirror (`cactuscat18/the120-site`). To deploy from this repo: grant the Vercel GitHub App access to `qed/the120` (repo owner: github.com/apps/vercel → Configure → select the repo), then in the Vercel project: Settings → Git → Disconnect → Connect `qed/the120`, production branch `main`. Until then, commits are mirrored to the legacy repo so the live URL stays current.
+- [x] **Vercel ↔ this repo**: ✅ Done. The Vercel project `the120` (helix3 team) is connected to `qed/the120`, production branch `main` — pushes to `main` auto-deploy. The legacy mirror (`cactuscat18/the120-site`) is no longer needed for deploys.
+  - ⚠️ **jointhe120.vercel.app is a pinned alias, not a project domain** — it points at one specific deployment and does NOT auto-update on deploy. After each production deploy, re-point it: `vercel alias set <new-deployment-url> jointhe120.vercel.app --scope helix3`. Converting it to a real project domain is blocked: the `jointhe120` subdomain is registered to a project in another Vercel account (likely the legacy cactuscat18 account) — release it there to fix permanently. The auto-updating production URLs are `the120-helix3.vercel.app` and `the120-rho.vercel.app`.
 
 - [ ] **Create a Supabase project** for the site.
   - Enable email auth (password + magic link).

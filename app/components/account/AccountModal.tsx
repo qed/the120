@@ -16,17 +16,8 @@ export type AccountForm = {
   email: string;
   phone: string;
   postalCode: string;
-  incomeBracket: string;
   caslConsent: boolean;
 };
-
-// Brief flags brackets as an Open Item; using CAD-adjusted figures (confirmed choice).
-const INCOME_BRACKETS = [
-  "Under $75,000",
-  "$75,000 – $200,000",
-  "Over $200,000",
-  "Prefer not to say",
-];
 
 const EMPTY: AccountForm = {
   firstName: "",
@@ -34,7 +25,6 @@ const EMPTY: AccountForm = {
   email: "",
   phone: "",
   postalCode: "",
-  incomeBracket: "",
   caslConsent: false,
 };
 
@@ -50,7 +40,6 @@ function validate(f: AccountForm): Errors {
   if (!EMAIL.test(f.email)) e.email = "Enter a valid email";
   if (f.phone.replace(/\D/g, "").length < 10) e.phone = "Enter a valid phone number";
   if (!POSTAL.test(f.postalCode.trim())) e.postalCode = "Enter a valid postal code (e.g. M5V 2T6)";
-  if (!f.incomeBracket) e.incomeBracket = "Please choose one";
   if (!f.caslConsent) e.caslConsent = "Consent is required to create your account";
   return e;
 }
@@ -218,39 +207,6 @@ export default function AccountModal({
                       />
                     </Field>
                   </div>
-
-                  <fieldset>
-                    <legend className="mb-1.5 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
-                      Household income (CAD)
-                    </legend>
-                    <div className="grid grid-cols-2 gap-2">
-                      {INCOME_BRACKETS.map((b) => (
-                        <label
-                          key={b}
-                          className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition-all duration-150 ${
-                            form.incomeBracket === b
-                              ? "border-red bg-red/5 text-ink"
-                              : "border-line-strong bg-white text-ink-soft hover:border-ink hover:bg-paper-2/60"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="income"
-                            className="sr-only"
-                            checked={form.incomeBracket === b}
-                            onChange={() => set("incomeBracket", b)}
-                          />
-                          <span
-                            className={`h-3.5 w-3.5 flex-none rounded-full border ${
-                              form.incomeBracket === b ? "border-4 border-red" : "border-line-strong"
-                            }`}
-                          />
-                          {b}
-                        </label>
-                      ))}
-                    </div>
-                    {errors.incomeBracket && <ErrorText>{errors.incomeBracket}</ErrorText>}
-                  </fieldset>
 
                   {/* CASL express opt-in (brief §13.2, §14.7) — Canadian, not GT's US SMS text */}
                   <label

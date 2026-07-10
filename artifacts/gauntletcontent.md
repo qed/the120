@@ -334,8 +334,8 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | geo.similarity-proof | Prove two triangles similar (Low; kernel source) | self — Geometry (KA 4) | — | | |
 | geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | | |
 | geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | — | | |
-| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Trig/Precalc will cross-reference here | | |
-| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Trig/Precalc and the calculus sections cross-reference here | | |
+| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc will cross-reference here | | |
+| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc and the calculus sections cross-reference here | | |
 | geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | — | | |
 | geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | — | | |
 | geo.distance-formula | Distance between two points | self — Geometry (KA 6) | — | | |
@@ -359,6 +359,61 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | geo.surface-area | Surface area of a solid (Low; kernel source) | self — Geometry (KA 9) | — | | |
 | geo.conditional-forms | Converse/inverse/contrapositive identification | self — Geometry (gap merge — logic/proof-writing) | — | | |
 | geo.two-column-proof | Write a two-column proof (Low; kernel source) | self — Geometry (gap merge — logic/proof-writing) | — | | |
+| alg2.add-polynomials | Add or subtract two polynomials | self — Algebra 2 (KA 1) | — | | |
+| alg2.expand-binomial-square | Expand a squared binomial | self — Algebra 2 (KA 1) | — | | |
+| alg2.expand-conjugate-product | Expand (a + b)(a − b) to a difference of squares | self — Algebra 2 (KA 1) | — | | |
+| alg2.imaginary-powers | Powers of i (mod-4 cycle recall) | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.simplify-sqrt-negative | Square root of a negative number in i-form | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.add-subtract-complex | Add or subtract complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.complex-conjugate | Conjugate of a complex number | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.multiply-complex | Multiply two complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.solve-quadratic-complex | Solve a quadratic with complex solutions (Low; kernel source) | self — Algebra 2 (KA 2) | — | | |
+| alg2.sum-diff-cubes-pattern | Sum/difference-of-cubes pattern slot | self — Algebra 2 (KA 3) | — | | |
+| alg2.factor-by-grouping | Factor a four-term polynomial by grouping (Low; kernel source) | self — Algebra 2 (KA 3) | — | | |
+| alg2.factor-quadratic-form | Factor an expression in quadratic form (Low; kernel source) | self — Algebra 2 (KA 3) | — | | |
+| alg2.divide-poly-by-monomial | Divide a polynomial by a monomial | self — Algebra 2 (KA 4) | — | | |
+| alg2.remainder-theorem | Remainder via p(a) (remainder theorem) | self — Algebra 2 (KA 4) | — | | |
+| alg2.factor-check | Verify (x − a) is a factor (factor theorem) | self — Algebra 2 (KA 4) | — | | |
+| alg2.polynomial-long-division | Polynomial long/synthetic division (Low; kernel source) | self — Algebra 2 (KA 4) | — | | |
+| alg2.zero-multiplicity | Multiplicity of a zero from factored form | self — Algebra 2 (KA 5) | — | | |
+| alg2.multiplicity-cross-touch | Cross vs touch at a zero (multiplicity parity) | self — Algebra 2 (KA 5) | — | | |
+| alg2.end-behavior | End behavior from degree and leading coefficient | self — Algebra 2 (KA 5) | — | | |
+| alg2.evaluate-rational-exponent | Evaluate a rational-exponent power | self — Algebra 2 (KA 6) | — | | |
+| alg2.rational-exponent-product | Product rule with rational exponents | self — Algebra 2 (KA 6) | — | | |
+| alg2.simplify-cube-root | Simplify a cube root to a∛b | self — Algebra 2 (KA 6) | — | | |
+| alg2.combine-radicals | Add or subtract like radicals | self — Algebra 2 (KA 6) | — | | |
+| alg2.exponential-solve-common-base | Solve bˣ = k by power recognition | self — Algebra 2 (KA 7) | — | | |
+| alg2.evaluate-log | Evaluate a logarithm | self — Algebra 2 (KA 8) | — | | |
+| alg2.log-product-rule | Product rule for logarithms | self — Algebra 2 (KA 8) | — | | |
+| alg2.log-power-rule | Power rule for logarithms | self — Algebra 2 (KA 8) | — | | |
+| alg2.natural-log-facts | Natural-log special values (ln 1, ln e, ln eᵏ) | self — Algebra 2 (KA 8) | — | | |
+| alg2.solve-exponential-equation | Solve an exponential equation with logs (Low; kernel source) | self — Algebra 2 (KA 8) | — | | |
+| alg2.function-shift-direction | Shift direction of f(x ± a) ± b | self — Algebra 2 (KA 9) | — | | |
+| alg2.function-reflection-rule | Reflection axis of −f(x) / f(−x) | self — Algebra 2 (KA 9) | — | | |
+| alg2.function-scale-direction | Stretch vs compression from a·f(x) / f(bx) | self — Algebra 2 (KA 9) | — | | |
+| alg2.transformed-point | Track a point through shifts | self — Algebra 2 (KA 9) | — | | |
+| alg2.even-odd-classify | Classify a function as even/odd/neither | self — Algebra 2 (KA 9) | — | | |
+| alg2.solve-sqrt-equation-simple | Solve √x = k | self — Algebra 2 (KA 10) | — | | |
+| alg2.check-extraneous | Extraneous-solution verification | self — Algebra 2 (KA 10) | — | | |
+| alg2.solve-radical-equation | Solve a radical equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 9 row, paid this pass | | |
+| alg2.solve-rational-equation | Solve a rational equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 8 row, paid this pass | | |
+| alg2.degrees-to-radians | Degrees → radians as kπ | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc will cross-reference here (radians live in both KA trig courses) | | |
+| alg2.radians-to-degrees | Radians → degrees | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc will cross-reference here | | |
+| alg2.pythagorean-identity-apply | cos θ from sin θ via sin²θ + cos²θ = 1 | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 4) will cross-reference here | | |
+| alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) will cross-reference here | | |
+| alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
+| alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
+| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) and the BC series section will cross-reference here | | |
+| alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
+| alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.binomial-expansion | Expand a binomial power (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc will cross-reference here | | |
+| alg2.simple-probability | Probability of a simple event | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.complement-probability | Complement probability 1 − p | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.permutation-count | Count ordered arrangements (falling product) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.compound-event-probability | Compound-event probability (Low; kernel source) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
+| alg2.evaluate-composite | Evaluate f(g(x)) at a point | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) will cross-reference here | | |
+| alg2.inverse-of-linear | Inverse of a linear function | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) will cross-reference here | | |
 
 ---
 
@@ -1863,7 +1918,484 @@ Every KA Geometry unit (9) plus the no-OpenStax-book cross-check rows maps to en
 
 ## Algebra 2
 
-Swept against the KA Algebra 2 checklist (12 units); cross-check must catch sequences/series and probability. Closes the primary in-degree window. *Authored in a later pass.*
+Swept against the KA Algebra 2 checklist (12 units) with the double cross-check the plan assigns this course — Intermediate Algebra 2e and Algebra & Trigonometry 2e. **This pass closes the primary in-degree window (Foundational → Algebra 2):** every kernel citation below is among the last that can count toward the primary ranking column, so the citation norm is exercised at full strictness — genuine prerequisites are cited even where the entry would read fine without them. The cross-check's headline outcomes are exactly the two gaps the plan predicted: KA Algebra 2 has **no sequences/series unit** and **no probability/counting unit** — both merged below (Intermediate Algebra 2e ch. 12; Algebra & Trigonometry 2e ch. 13) — plus one gap the plan did not name: a composite/inverse-functions block (Intermediate Algebra 2e ch. 10). No pinned calibration entries live in this section (the calibration table's pins live in Pre-Algebra and Algebra 1 only), so every rating below is calibrated against the pinned set: the short-expression entries against alg1.distribute-linear / alg1.factor-simple-quadratic, the fraction entries against prealg.simplify-fraction / prealg.fraction-add-unlike, the true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions. The section lands 55 records (14 High / 31 Medium / 10 Low) plus 21 cross-reference rows; heavy cross-reference traffic runs back to Algebra 1 (the factoring toolkit, exponent rules, radicals, exponential models) and Geometry (the two registry-flagged canonical trig targets), and this section in turn mints the canonical homes the Trig/Precalc sweep will cross-reference (complex arithmetic, radian conversion, composite/inverse functions, series, probability and counting). This unit also pays the two debts recorded upstream: radical-equation and rational-equation solving, deferred here by the Algebra 1 disposition table's OS 9 and OS 8 rows, land under KA unit 10.
+
+**KA Unit 1 — Polynomial arithmetic.** (Binomial and monomial products, degree, and like-term collection are owned upstream — cross-references below; this unit's new grain is multi-term addition and the two special-product patterns.)
+
+**Multiplying two binomials** → see alg1.multiply-binomials (owned by Algebra 1).
+**Multiplying monomials** → see alg1.multiply-monomials (owned by Algebra 1).
+**Degree of a polynomial** → see alg1.polynomial-degree (owned by Algebra 1).
+**Combining like terms across variables** → see alg1.combine-like-terms-multivar (owned by Algebra 1).
+
+### alg2.add-polynomials — Add or subtract two polynomials
+
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: Two or three parallel coefficient additions held by degree slot, then a ~11-token entry ≈ 2.75s — Medium's upper half; flips to Low at 2× entry time, hence the marker. This is the multi-term arithmetic the Pre-Algebra OS 10 and Algebra 1 OS 6 dispositions deferred here.
+Sample: Add: (3x² + 2x − 1) + (x² − 5x + 4) → 4x^2-3x+3 · Rule: expr-commutative-ws · Params: two polynomials of degree 2–3 with 3 terms each, coefficients ∈ [−9, 9]; result coefficients nonzero ∈ [−12, 12] (vanishing terms excluded — spotting a cancelled term is a different scan skill and would split the key family); subtraction prompts flip every sign of the second polynomial; answer alphabet {digits, x, ^, +, −}.
+Kernels: [prealg.combine-like-terms, alg1.combine-like-terms-multivar, fk.integer-add-sub]
+
+### alg2.expand-binomial-square — Expand a squared binomial
+
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: One pattern application (a², 2ab, b² — no FOIL bookkeeping) with a ~10-token entry — 4–7s; flips to Low at 2× entry time, hence the marker.
+Sample: Expand: (x + 5)² → x^2+10x+25 · Rule: expr-commutative-ws · Params: (x ± b)² with b ∈ [1, 9] (middle coefficient 2b ≤ 18, constant b² ≤ 81); the (ax + b)² band with a ∈ [2, 3] keys separately; answer alphabet {digits, x, ^, +, −}.
+Kernels: [fk.perfect-squares, fk.doubling-halving, alg1.multiply-binomials]
+
+### alg2.expand-conjugate-product — Expand (a + b)(a − b)
+
+Rating: High · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: Pure pattern recall (difference of squares — the middle term never exists) with a ~7-token entry ≈ 1.75s — ≤3s total; flips to Medium at 2× entry time, hence the marker.
+Sample: Multiply: (x + 6)(x − 6) → x^2-36 · Rule: expr-commutative-ws · Params: (x + k)(x − k) with k ∈ [2, 12], constants k² ≤ 144; the (ax + k)(ax − k) band keys separately; answer alphabet {digits, x, ^, −}.
+Kernels: [fk.perfect-squares, alg1.multiply-binomials]
+
+**KA Unit 2 — Complex numbers.**
+
+### alg2.imaginary-powers — Powers of i
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: One mod-4 cycle read against a memorized 4-value table plus a short-option tap — ≤3s.
+Sample: i³ = ? → −i (options: 1 · i · −1 · −i) · Rule: mc · Params: exponents ∈ [2, 12] in the base band, [13, 40] in the stretch band (the mod-4 reduction is the same move at any size); fixed 4-option set {1, i, −1, −i}.
+Kernels: [fk.division-facts]
+
+### alg2.simplify-sqrt-negative — Square root of a negative number
+
+Rating: High · Format: short-expression · Render: unicode-inline
+Why: One root recall plus the i-append rule — ≤3s with a 2-token entry.
+Sample: √−36 = ? → 6i · Rule: expr-commutative-ws · Params: radicands −k² with k ∈ [2, 15]; the non-square band (√−8 = 2i√2) is excluded — the ai√b answer shape splits the key family and is alg1.simplify-radical territory; answer alphabet {digits, i}.
+Kernels: [prealg.square-root, fk.perfect-squares]
+
+### alg2.add-subtract-complex — Add or subtract complex numbers
+
+Rating: Medium · Format: short-expression · Render: unicode-inline
+Why: Two parallel signed additions (real and imaginary slots) plus a ~5-token entry — Medium's floor, ~3–4s.
+Sample: (3 + 2i) + (1 − 5i) → 4-3i · Rule: expr-commutative-ws · Params: real and imaginary parts nonzero integers ∈ [−9, 9]; results keep both parts nonzero, ∈ [−18, 18]; subtraction prompts included; answer alphabet {digits, i, +, −}.
+Kernels: [fk.integer-add-sub]
+
+### alg2.complex-conjugate — Conjugate of a complex number
+
+Rating: High · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: One sign flip and a copy-down — ~1s think + ~1.25s entry; entry dominates the High budget, hence the marker.
+Sample: What is the conjugate of 3 − 4i? → 3+4i · Rule: expr-commutative-ws · Params: real and imaginary parts nonzero integers ∈ [−9, 9] in both sign renderings; answer alphabet {digits, i, +, −}.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg2.multiply-complex — Multiply two complex numbers
+
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: The FOIL move of alg1.multiply-binomials plus the i² = −1 merge — Medium's ceiling, 5–8s even with a short ~4-token entry; flips to Low at 2× entry time, hence the marker.
+Sample: (2 + 3i)(1 − 2i) → 8-i · Rule: expr-commutative-ws · Params: parts nonzero integers ∈ [−5, 5]; products kept with both result parts nonzero, ∈ [−40, 40]; the pure-imaginary warm-up band (3i · 2i) keys separately; answer alphabet {digits, i, +, −}.
+Kernels: [alg1.multiply-binomials, fk.integer-mul-div, fk.integer-add-sub]
+
+### alg2.solve-quadratic-complex — Solve a quadratic with complex solutions
+
+Rating: Low
+Why: Inherently multi-step at any speed — run the quadratic formula, keep the negative discriminant, convert it to i-form, and assemble both solutions while holding every intermediate.
+Kernels: [alg1.solve-by-quadratic-formula, alg1.discriminant-root-count, alg2.simplify-sqrt-negative]
+
+**KA Unit 3 — Polynomial factorization.** (The whole Algebra 1 factoring toolkit is owned upstream — cross-references below; this unit's new grain is the cube patterns and the higher-degree moves.)
+
+**Factoring out the GCF** → see alg1.factor-gcf (owned by Algebra 1).
+**Factoring a difference of squares** → see alg1.factor-difference-of-squares (owned by Algebra 1).
+**Recognizing a perfect-square trinomial** → see alg1.factor-perfect-square-trinomial (owned by Algebra 1).
+**Factoring a monic quadratic** → see alg1.factor-simple-quadratic (owned by Algebra 1).
+**Factoring a non-monic quadratic** → see alg1.factor-nonmonic-quadratic (owned by Algebra 1; Low).
+
+### alg2.sum-diff-cubes-pattern — Sum/difference of cubes pattern
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One cube-root recall dropped into the memorized pattern slot — 3–5s; asking for a alone dodges the ~17-token factored answer, which would be entry-prohibitive at any tier.
+Sample: x³ + 27 = (x + a)(x² − ax + a²). a = ? → 3 · Rule: int-exact · Params: constants k³ with k ∈ [2, 6]; sum and difference variants balanced (the difference variant shows (x − a)(x² + ax + a²)); answers ∈ [2, 6].
+Kernels: [fk.perfect-cubes, prealg.cube-root]
+
+### alg2.factor-by-grouping — Factor a four-term polynomial by grouping
+
+Rating: Low
+Why: Inherently multi-step at any speed — split into pairs, factor each pair's GCF, then factor out the common binomial while holding both halves.
+Kernels: [alg1.factor-gcf, alg1.factor-pairs-sum-product]
+
+### alg2.factor-quadratic-form — Factor an expression in quadratic form
+
+Rating: Low
+Why: Inherently multi-step at any speed — spot the u = x² substitution, factor the disguised quadratic, then substitute back through both factors.
+Kernels: [alg1.factor-simple-quadratic, alg1.exponent-power-rule]
+
+**KA Unit 4 — Polynomial division.**
+
+### alg2.divide-poly-by-monomial — Divide a polynomial by a monomial
+
+Rating: Medium · Format: short-expression · Render: unicode-inline
+Why: Two parallel monomial quotients (coefficient division plus exponent subtraction, term by term) — 3–6s with a ~8-token entry.
+Sample: (6x⁵ + 9x³) ÷ 3x² → 2x^3+3x · Rule: expr-commutative-ws · Params: 2-term dividends; coefficients multiples of the divisor coefficient with quotients ∈ [2, 9]; exponent differences ≥ 1 (no constant or negative-exponent results); answer alphabet {digits, x, ^, +, −}.
+Kernels: [alg1.simplify-monomial-quotient, fk.division-facts]
+
+### alg2.remainder-theorem — Remainder via the remainder theorem
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One rule recall (remainder = p(a)) collapsing a division into a single substitute-and-evaluate — 4–7s.
+Sample: What is the remainder when x² + 3x + 1 is divided by x − 2? → 11 · Rule: int-exact · Params: monic quadratics and cubics with coefficients ∈ [−5, 5]; divisors x − a with a ∈ [−3, 3] excluding 0; answers ∈ [−40, 40] (negative answers carry the touch-minus-key caveat).
+Kernels: [prealg.evaluate-expression, alg1.evaluate-function]
+
+### alg2.factor-check — Is (x − a) a factor
+
+Rating: Medium · Format: true-false · Render: unicode-inline
+Why: One remainder-theorem evaluation compared against zero — 3–6s; genuinely a verification judgment, which is what true-false is for.
+Sample: True or false: (x − 2) is a factor of x³ − 8 → true · Rule: tf · Params: monic quadratics and cubics with coefficients ∈ [−5, 5]; candidate roots a ∈ [−3, 3] excluding 0; false cases leave remainders ±[1, 6]; families balanced 50/50.
+Kernels: [alg2.remainder-theorem, prealg.check-solution]
+
+### alg2.polynomial-long-division — Polynomial long (or synthetic) division
+
+Rating: Low
+Why: Inherently multi-step at any speed — divide the lead terms, multiply back, subtract, bring down, repeat — a full held algorithm whichever notation is used.
+Kernels: [alg1.simplify-monomial-quotient, alg1.multiply-binomials, alg2.add-polynomials, alg2.remainder-theorem]
+
+**KA Unit 5 — Polynomial graphs.**
+
+**Zeros from factored form** → see alg1.roots-from-factored-form (owned by Algebra 1).
+
+### alg2.zero-multiplicity — Multiplicity of a zero
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One exponent read off the named factor — ≤3s.
+Sample: y = (x − 2)³(x + 1). What is the multiplicity of the zero at x = 2? → 3 · Rule: int-exact · Params: 2–3 distinct linear factors with exponents ∈ [1, 4], roots ∈ [−9, 9]; the asked zero rotates; answers ∈ [1, 4].
+Kernels: [alg1.roots-from-factored-form]
+
+### alg2.multiplicity-cross-touch — Cross or touch at a zero
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: One parity judgment on the read-off exponent (odd crosses, even touches) and a two-option tap — ≤3s.
+Sample: y = (x − 2)²(x + 1). At x = 2, the graph…? → Touches the x-axis (options: Crosses the x-axis · Touches the x-axis) · Rule: mc · Params: factored polynomials as in alg2.zero-multiplicity; the asked zero's exponent ∈ [1, 4]; odd/even families balanced 50/50.
+Kernels: [alg2.zero-multiplicity]
+
+### alg2.end-behavior — End behavior of a polynomial
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Two chained judgments — locate the leading term, then combine degree parity with the coefficient's sign — 3–6s with a two-option tap.
+Sample: y = −2x³ + x − 5. As x → ∞, y → ? → −∞ (options: ∞ · −∞) · Rule: mc · Params: degrees ∈ [2, 5], leading coefficients ∈ [−5, 5] excluding 0; terms not always in descending order (the scan is part of the skill); x → ∞ and x → −∞ prompts balanced.
+Kernels: [alg1.polynomial-degree, fk.integer-mul-div]
+
+**KA Unit 6 — Rational exponents and radicals.** (Square-root simplification and products are owned by Algebra 1; the perfect-root reads by Pre-Algebra — cross-references below and in the disposition table.)
+
+**Simplifying square roots to a√b** → see alg1.simplify-radical (owned by Algebra 1).
+**Multiplying square roots** → see alg1.multiply-square-roots (owned by Algebra 1).
+
+### alg2.evaluate-rational-exponent — Evaluate a rational-exponent power
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One root recall chained with one small power (8^(2/3): cube root, then square) — 3–6s; the stacked fractional exponent needs a math renderer.
+Sample: Evaluate 8^(2/3) → 4 · Rule: int-exact · Params: bases from the perfect-power families {4, 8, 9, 16, 25, 27, 32, 64, 81, 100, 125}; exponents p/q with q ∈ {2, 3}, p ∈ [1, 3], chosen so answers are positive integers ≤ 243; unit-fraction exponents (p = 1) form the easy sub-band.
+Kernels: [prealg.square-root, prealg.cube-root, prealg.evaluate-exponent]
+
+### alg2.rational-exponent-product — Product rule with rational exponents
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One fraction addition wearing exponent clothes — 3–6s; params keep the exponent sum an integer so the answer is a single small number.
+Sample: 2^(1/2) · 2^(3/2) = 2ⁿ. n = ? → 2 · Rule: int-exact · Params: exponent pairs p/q + r/q with q ∈ {2, 3, 4} summing to an integer ∈ [1, 4]; displayed base from {2, 3, 5, 10, x}.
+Kernels: [prealg.exponent-product-rule, prealg.fraction-add-unlike]
+
+### alg2.simplify-cube-root — Simplify a cube root
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One largest-cube-factor extraction (54 = 27 · 2) with a cube-root recall — 4–7s; the a, b pair mirrors alg1.simplify-radical's shape.
+Sample: ∛54 = a∛b. a, then b → 3, 2 · Rule: pair-ordered · Params: radicands ∈ [16, 250] with a cube factor ≥ 8; b cube-free ∈ {2, 3, 4, 5, 6, 7, 9, 10}; a ∈ [2, 5].
+Kernels: [fk.perfect-cubes, prealg.cube-root, alg1.simplify-radical]
+
+### alg2.combine-radicals — Add or subtract like radicals
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One simplification to a common surd plus one coefficient addition — 4–7s.
+Sample: √8 + √2 = a√b. a, then b → 3, 2 · Rule: pair-ordered · Params: pairs built so both terms reduce to multiples of one surd √b with b ∈ {2, 3, 5}; result coefficients ∈ [2, 9]; already-like pairs (2√3 + 4√3) form the easy sub-band.
+Kernels: [alg1.simplify-radical, fk.addition-facts]
+
+**KA Unit 7 — Exponential models.** (The growth/decay reads are owned by Algebra 1 — cross-references below; the modeling remainder is in the disposition table.)
+
+**Growth vs decay from the base** → see alg1.growth-or-decay (owned by Algebra 1).
+**Percent rate from a growth/decay factor** → see alg1.growth-factor-to-rate (owned by Algebra 1).
+**Evaluating a·bˣ** → see alg1.evaluate-exponential (owned by Algebra 1).
+
+### alg2.exponential-solve-common-base — Solve bˣ = k by recognizing the power
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One inverse-power recall against the powers fact family (2ˣ = 32 is "which power of 2 is 32") — ≤3s.
+Sample: 2ˣ = 32. x = ? → 5 · Rule: int-exact · Params: bases ∈ {2, 3, 4, 5, 10}; k a memorized power with exponent answers ∈ [2, 6]; the base-rewrite band (4ˣ = 32 → x = 5/2) is excluded — a fraction answer splits the shape, and the multi-step rewrite is Trig/Precalc grain.
+Kernels: [prealg.evaluate-exponent]
+
+**KA Unit 8 — Logarithms.**
+
+### alg2.evaluate-log — Evaluate a logarithm
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: The same inverse-power recall as alg2.exponential-solve-common-base in log notation — ≤3s once the notation is automatic; log↔exponent form conversion is exercised implicitly here, not as a separate entry.
+Sample: log₂ 32 = ? → 5 · Rule: int-exact · Params: bases ∈ {2, 3, 5, 10}; arguments memorized powers with answers ∈ [0, 6] (log-of-1 and log-of-base cases included); the negative-answer band (log₂ ¼ = −2) carries the touch-minus-key caveat.
+Kernels: [prealg.evaluate-exponent, alg2.exponential-solve-common-base]
+
+### alg2.log-product-rule — Product rule for logs
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One rule application (sum of logs = log of the product) chained with one evaluation — 4–7s.
+Sample: log₆ 4 + log₆ 9 = ? → 2 · Rule: int-exact · Params: argument pairs whose product is a small power of the base; bases ∈ {2, 3, 5, 6, 10}; answers ∈ [1, 4]; the quotient-rule variant (difference of logs) shares params and keys separately.
+Kernels: [alg2.evaluate-log, fk.times-tables]
+
+### alg2.log-power-rule — Power rule for logs
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One exponent pull-down and one multiplication fact — 3–6s.
+Sample: log₂ 8⁵ = ? → 15 · Rule: int-exact · Params: inner arguments memorized powers of the base (inner log value ∈ [1, 4]); outer exponents ∈ [2, 6]; answers ≤ 24.
+Kernels: [alg2.evaluate-log, fk.times-tables]
+
+### alg2.natural-log-facts — Natural-log special values
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Pure recall of the ln fact family (ln 1 = 0, ln e = 1, ln eᵏ = k) — ≤2s.
+Sample: ln e³ = ? → 3 · Rule: int-exact · Params: prompts over {ln 1, ln e, ln eᵏ with k ∈ [2, 6]}; the negative-k band carries the touch-minus-key caveat.
+Kernels: [alg2.evaluate-log]
+
+### alg2.solve-exponential-equation — Solve an exponential equation with logs
+
+Rating: Low
+Why: Inherently multi-step at any speed — isolate the exponential, take a log of both sides, then solve the resulting equation (usually with calculator evaluation).
+Kernels: [alg2.evaluate-log, alg2.exponential-solve-common-base, prealg.solve-two-step-equation]
+
+**KA Unit 9 — Transformations of functions.**
+
+### alg2.function-shift-direction — Which way does f(x ± a) ± b shift
+
+Rating: High · Format: multiple-choice
+Why: One recalled rule pair (inside moves opposite, outside moves as written) and a short 4-option scan — ≤3s.
+Sample: Compared with y = f(x), the graph of y = f(x − 4) is shifted…? → 4 right (options: 4 right · 4 left · 4 up · 4 down) · Rule: mc · Params: single shifts a ∈ [1, 9]; inside/outside position and ± sign balanced; the inside-minus-moves-right trap is the point of the family.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg2.function-reflection-rule — Which axis does −f(x) / f(−x) reflect across
+
+Rating: High · Format: multiple-choice
+Why: One recalled rule (outside minus flips y, inside minus flips x) and a two-option tap — ≤3s.
+Sample: The graph of y = f(−x) is the graph of f reflected across which axis? → the y-axis (options: the x-axis · the y-axis) · Rule: mc · Params: −f(x) and f(−x) prompts balanced 50/50; the composed band (−f(−x)) is excluded — two rules at once is a different family.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg2.function-scale-direction — Stretch or compression from a·f(x) / f(bx)
+
+Rating: Medium · Format: multiple-choice
+Why: One rule selection with the counterintuitive inside-factor inversion (f(2x) compresses) plus a 4-option scan — 3–6s.
+Sample: Compared with y = f(x), the graph of y = f(2x) is…? → compressed horizontally (options: stretched horizontally · compressed horizontally · stretched vertically · compressed vertically) · Rule: mc · Params: factors ∈ {2, 3, 1/2, 1/3}; inside and outside positions balanced; fractional factors exercise the second inversion.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg2.transformed-point — Track a point through a transformation
+
+Rating: Medium · Format: two-numbers
+Why: The shift rules applied to one concrete point — two signed additions after the rule read — 4–7s with the pair entry.
+Sample: (2, 5) lies on y = f(x). Which point lies on y = f(x − 3) + 1? → 5, 6 · Rule: pair-ordered · Params: base points ∈ [−9, 9]; shifts a, b ∈ [1, 6] in all four sign combinations; image coordinates ∈ [−15, 15]; negative coordinates carry the touch-minus-key caveat.
+Kernels: [alg2.function-shift-direction, fk.integer-add-sub]
+
+### alg2.even-odd-classify — Even, odd, or neither
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One exponent-parity scan across the terms (or one f(−x) substitution check) — 3–6s with a 3-option tap.
+Sample: f(x) = x³ − 4x. Even, odd, or neither? → Odd (options: Even · Odd · Neither) · Rule: mc · Params: polynomials with 2–3 terms, exponents ≤ 5, coefficients ∈ [−9, 9]; all-even, all-odd, and mixed cases balanced; the constant-term-is-even convention exercised (x² + 3 is even).
+Kernels: [prealg.evaluate-expression]
+
+**KA Unit 10 — Equations.** (This unit pays the two debts recorded upstream: the Algebra 1 disposition table's OS 9 and OS 8 rows deferred radical-equation and rational-equation solving here.)
+
+### alg2.solve-sqrt-equation-simple — Solve √x = k
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One squaring recall — the inverse read of prealg.square-root — ≤3s.
+Sample: √x = 7. x = ? → 49 · Rule: int-exact · Params: k ∈ [2, 15]; answers perfect squares ≤ 225; the shifted band (√(x − a) = k) adds one addition and keys separately.
+Kernels: [fk.perfect-squares, prealg.square-root]
+
+### alg2.check-extraneous — Extraneous-solution check
+
+Rating: Medium · Format: true-false · Render: unicode-inline
+Why: One substitution against the original equation with the sign trap in view (√x is never negative) — 3–6s; genuinely a verification judgment.
+Sample: True or false: x = 9 is a solution of √x = −3 → false · Rule: tf · Params: one-step radical and rational equations; candidates ∈ [1, 25]; false cases split between arithmetic misses and the extraneous traps (negative-radical and zero-denominator cases ≥ 40%); families balanced 50/50.
+Kernels: [prealg.check-solution, prealg.square-root]
+
+### alg2.solve-radical-equation — Solve a radical equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — isolate the radical, square both sides, solve the resulting equation, then check for extraneous roots.
+Kernels: [alg2.solve-sqrt-equation-simple, prealg.solve-two-step-equation, alg2.check-extraneous]
+
+### alg2.solve-rational-equation — Solve a rational equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — clear denominators (or cross-multiply), solve, then exclude values that zero a denominator.
+Kernels: [prealg.solve-proportion, prealg.solve-multi-step-equation, alg1.simplify-rational-expression, alg2.check-extraneous]
+
+**KA Unit 11 — Trigonometry.** (The right-triangle foundations are owned by Geometry — cross-references below, hitting the two canonical targets the Geometry pass flagged in the registry; this unit's new grain is radians and the identity/quadrant reads. Unit-circle coordinates at special angles are the same fact family as geo.exact-trig-values and are satisfied by that cross-reference — radian phrasing joins that entry's key families during the Trig/Precalc pass, per its registry note.)
+
+**Right-triangle trig ratios (SOH-CAH-TOA)** → see geo.trig-ratio-definition (owned by Geometry).
+**Exact trig values at special angles / unit-circle coordinates** → see geo.exact-trig-values (owned by Geometry).
+
+### alg2.degrees-to-radians — Convert degrees to radians
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One ratio reduction (θ/180 in lowest terms) — 3–6s on the assumed fraction pad.
+Sample: Express 150° in radians as kπ. k = ? → 5/6 · Rule: frac-lowest-terms · Params: angles multiples of 15 ∈ [15, 330] excluding multiples of 180 (integer k excluded — answer-shape split); k in lowest terms with denominator ∈ {2, 3, 4, 6, 12}.
+Kernels: [prealg.simplify-fraction, fk.division-facts]
+
+### alg2.radians-to-degrees — Convert radians to degrees
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One fraction-of move (the coefficient of π, taken of 180°) — 3–5s.
+Sample: Convert 2π/3 radians to degrees → 120 · Rule: int-exact · Params: coefficients p/q with q ∈ {2, 3, 4, 6}, p ∈ [1, 11], values in (0, 2π]; integer-degree answers ≤ 360.
+Kernels: [fk.fraction-of-number, fk.times-tables]
+
+### alg2.pythagorean-identity-apply — Find cos θ from sin θ via the identity
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One triple recall through the sin²θ + cos²θ = 1 lens (3-4-5 in fraction clothes) plus a quadrant sign read — 4–7s.
+Sample: sin θ = 3/5 and θ is in Quadrant I. cos θ = ? → 4/5 · Rule: frac-lowest-terms · Params: ratios from the primitive triples (3-4-5, 5-12-13, 8-15-17, 7-24-25), already in lowest terms; Quadrant I base band; the Quadrant II–IV band adds the sign judgment (sign to the numerator per the format spec); sin→cos and cos→sin balanced.
+Kernels: [prealg.pythagorean-hypotenuse, geo.trig-ratio-definition, prealg.simplify-fraction]
+
+### alg2.trig-sign-by-quadrant — Sign of a trig function by quadrant
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One recalled sign map (ASTC) applied to a two-condition read — 3–5s; the answer is the quadrant number, so entry is one digit.
+Sample: sin θ < 0 and cos θ > 0. Which quadrant is θ in? (1–4) → 4 · Rule: int-exact · Params: condition pairs over {sin, cos, tan} × {< 0, > 0} with a unique quadrant answer; all four quadrants balanced; answers ∈ [1, 4].
+Kernels: [prealg.identify-quadrant]
+
+**KA Unit 12 — Modeling.** Out-of-grain end-to-end (the course's word-problem capstone) — see the disposition table, which names the kernels it exercises.
+
+**OpenStax cross-check merges — sequences, series, and the binomial theorem (Intermediate Algebra 2e ch. 12; Algebra & Trigonometry 2e ch. 13).** The plan's first predicted gap, confirmed: KA Algebra 2's 12 units contain no sequences/series unit. The sequence skills themselves are owned upstream (cross-references below); the series, factorial, and binomial fact families are new and merged here, each with its source note.
+
+**Next term of an arithmetic sequence** → see prealg.next-term-arithmetic (owned by Pre-Algebra).
+**nth term of an arithmetic sequence** → see alg1.arithmetic-nth-term (owned by Algebra 1).
+**Next term of a geometric sequence** → see alg1.next-term-geometric (owned by Algebra 1).
+**nth term of a geometric sequence** → see alg1.geometric-nth-term (owned by Algebra 1).
+
+### alg2.arithmetic-series-sum — Sum of an arithmetic series (endpoints given)
+
+Rating: Medium · Format: single-number
+Why: One formula application (n/2 · (a₁ + aₙ)) fused into an addition and one held multiplication — Medium's upper half, 4–7s at the friendly params below. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: An arithmetic series has 10 terms, first term 3, last term 21. What is the sum? → 120 · Rule: int-exact · Params: n ∈ {4, 6, 8, 10, 20} (even, so n/2 is whole); a₁, aₙ ∈ [1, 30] with a₁ + aₙ ≤ 40; answers ≤ 400; the variant where aₙ must be computed first is excluded — that composite is alg1.arithmetic-nth-term chained with this entry, Low grain.
+Kernels: [fk.addition-facts, fk.doubling-halving, fk.two-digit-times-one-digit]
+
+### alg2.geometric-series-sum — Sum of a finite geometric series
+
+Rating: Low
+Why: Inherently multi-step at any speed — evaluate rⁿ, subtract 1, divide, and multiply by the first term while holding each intermediate. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Kernels: [prealg.evaluate-exponent, alg1.geometric-nth-term, fk.division-facts]
+
+### alg2.infinite-geometric-sum — Sum of an infinite geometric series
+
+Rating: Medium · Format: single-number
+Why: One formula application (a / (1 − r)) that collapses to a subtraction and one small fraction division at benchmark ratios — 4–7s. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: 8 + 4 + 2 + 1 + … = ? → 16 · Rule: int-exact · Params: ratios ∈ {1/2, 1/3, 1/4, 2/3, 3/4}; first terms chosen so a / (1 − r) is a positive integer ≤ 100; prompts show either the leading terms (ratio inferred) or a and r explicitly.
+Kernels: [prealg.fraction-divide, fk.doubling-halving, alg1.next-term-geometric]
+
+### alg2.evaluate-sigma — Evaluate a small sigma-notation sum
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: Three substitutions and a running sum held mentally — Medium's ceiling, 5–8s at three terms; the stacked Σ limits need a math renderer. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: Σₖ₌₁³ (2k + 1) → 15 · Rule: int-exact · Params: summands ak + b with a, b ∈ [1, 5]; exactly 3 terms (upper limit 3, or an index range of size 3); answers ≤ 60.
+Kernels: [prealg.evaluate-expression, fk.addition-facts]
+
+### alg2.factorial — Evaluate a factorial
+
+Rating: High · Format: single-number
+Why: Pure fact-family recall through 6! for a fluent student — ≤3s with a ≤3-digit entry. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: 5! = ? → 120 · Rule: int-exact · Params: n ∈ [0, 6] (0! = 1 included deliberately); answers ≤ 720; 7! and up drift into computation and are excluded from the recall family.
+Kernels: [fk.times-tables]
+
+### alg2.binomial-coefficient — Evaluate a binomial coefficient
+
+Rating: Medium · Format: single-number
+Why: One small-case recall (Pascal's-triangle rows) or one collapsed quotient (6 · 5 / 2) — 3–6s at the params below. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: C(6, 2) = ? → 15 · Rule: int-exact · Params: n ∈ [3, 8]; k ∈ {0, 1, 2, n−2, n−1, n} (the symmetry shortcut is part of the skill); answers ≤ 70; prompts use both C(n, k) and "n choose k" phrasings.
+Kernels: [alg2.factorial, fk.times-tables, fk.division-facts]
+
+### alg2.binomial-expansion — Expand a binomial power
+
+Rating: Low
+Why: Inherently multi-step at any speed — generate the coefficient row, walk the descending/ascending powers, and combine sign and constant factors term by term. (source: OpenStax Intermediate Algebra 2e ch. 12 / Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Kernels: [alg2.binomial-coefficient, alg1.multiply-binomials, prealg.evaluate-exponent]
+
+**OpenStax cross-check merges — probability and counting (Algebra & Trigonometry 2e ch. 13).** The plan's second predicted gap, confirmed: no KA Algebra 2 unit hosts probability or counting. Merged below with source notes. Only Algebra & Trigonometry 2e carries this block — Intermediate Algebra 2e has no probability chapter — noted so the diff record is complete.
+
+### alg2.simple-probability — Probability of a simple event
+
+Rating: High · Format: fraction · Surface-sensitive
+Why: One favorable-over-total read — ~1.5s think + ~1s entry on the assumed fraction pad; flips to Medium if entry runs 2× slow, hence the marker. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: A bag holds 3 red and 5 blue marbles. P(red) = ? → 3/8 · Rule: frac-lowest-terms · Params: totals ≤ 20; base-band answers already in lowest terms; the reduce band (4 red of 12 → 1/3) adds one reduction and sits at the High/Medium boundary; contexts rotate (marbles, dice, spinners, cards by suit) with the arithmetic shape fixed.
+Kernels: [prealg.simplify-fraction]
+
+### alg2.complement-probability — Probability of the complement
+
+Rating: Medium · Format: fraction
+Why: One subtraction from 1 recast over the given denominator (5/5 − 2/5) — Medium's floor, ~3–4s. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: P(rain) = 2/5. What is P(no rain)? → 3/5 · Rule: frac-lowest-terms · Params: given probabilities a/b in lowest terms with b ∈ [3, 12]; answers (b−a)/b are automatically in lowest terms since gcd(a, b) = 1.
+Kernels: [fk.subtraction-facts, alg2.simple-probability]
+
+### alg2.permutation-count — Count ordered arrangements
+
+Rating: Medium · Format: single-number
+Why: One falling-product read (5 · 4 for two slots) held mentally — 3–6s. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Sample: How many ways can 1st and 2nd place be awarded among 5 runners? → 20 · Rule: int-exact · Params: n ∈ [4, 10], slots ∈ {2, 3}; answers ≤ 720; full-line arrangements (all n in order) asked through n = 5 and keyed as their own family alongside alg2.factorial.
+Kernels: [fk.times-tables, alg2.factorial]
+
+### alg2.compound-event-probability — Probability of a compound event
+
+Rating: Low
+Why: Inherently multi-step at any speed — decompose into and/or structure, pick the multiplication or addition rule, compute each piece, and combine the fractions. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Kernels: [alg2.simple-probability, alg2.complement-probability, prealg.fraction-multiply, prealg.fraction-add-unlike]
+
+**OpenStax cross-check merges — composite and inverse functions (Intermediate Algebra 2e ch. 10).** A third genuine diff beyond the two the plan predicted: Intermediate Algebra 2e opens its exponential/log chapter with composite and inverse functions, which no snapshotted KA Algebra 2 unit hosts (KA places them in Precalculus unit 1). First-course-owns puts the canonical records here, where the cross-check surfaced them; the Trig/Precalc sweep will cross-reference, per the registry notes.
+
+### alg2.evaluate-composite — Evaluate a composite function at a point
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: Two chained evaluations (inner first, then outer) held mentally — 4–7s. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which will cross-reference here)
+Sample: f(x) = 2x + 1 and g(x) = x². f(g(2)) = ? → 9 · Rule: int-exact · Params: one linear and one quadratic (or two linear) with coefficients ∈ [1, 5]; inputs ∈ [−4, 4]; both orders asked (f(g(x)) and g(f(x))); answers ∈ [−40, 60] (negative answers carry the touch-minus-key caveat).
+Kernels: [alg1.evaluate-function, prealg.evaluate-expression]
+
+### alg2.inverse-of-linear — Inverse of a linear function
+
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: One two-step un-doing read (subtract b, divide by a) written as a single expression — 4–7s with a ~8-token entry; flips to Low at 2× entry time, hence the marker. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which will cross-reference here)
+Sample: f(x) = 2x + 3. f⁻¹(x) = ? → (x-3)/2 · Rule: expr-commutative-ws · Params: f(x) = ax + b with a ∈ [2, 9], b ∈ [1, 9] in both signs; the answer's canonical shape is (x − b)/a — the split form x/a − b/a is a different token string and is not accepted, since holding the un-doing as one expression is the drill; answer alphabet {digits, x, +, −, /, (, )}.
+Kernels: [alg1.rearrange-formula-one-step, prealg.solve-two-step-equation]
+
+### Algebra 2 checklist disposition table
+
+Every KA Algebra 2 unit (12), every Intermediate Algebra 2e chapter (12), and every Algebra & Trigonometry 2e chapter (13) maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows. (Algebra & Trigonometry 2e chapters 7–10 are trigonometry-course grain; their rows record the deferral to the Trig/Precalc sweep, which uses the same book as its cross-check.)
+
+| Checklist unit | Disposition |
+|---|---|
+| KA 1 Polynomial arithmetic | alg2.add-polynomials, alg2.expand-binomial-square, alg2.expand-conjugate-product; binomial products → alg1.multiply-binomials; monomial products → alg1.multiply-monomials; degree → alg1.polynomial-degree; like terms → alg1.combine-like-terms-multivar; binomial × trinomial and longer products: recorded judgment — the FOIL move compounded past one held merge is Low grain with no new kernel beyond alg1.multiply-binomials, alg2.add-polynomials |
+| KA 2 Complex numbers | alg2.imaginary-powers, alg2.simplify-sqrt-negative, alg2.add-subtract-complex, alg2.complex-conjugate, alg2.multiply-complex, alg2.solve-quadratic-complex (Low) |
+| KA 3 Polynomial factorization | alg2.sum-diff-cubes-pattern, alg2.factor-by-grouping (Low), alg2.factor-quadratic-form (Low); GCF / difference of squares / perfect-square trinomial / monic / non-monic factoring → alg1.factor-gcf, alg1.factor-difference-of-squares, alg1.factor-perfect-square-trinomial, alg1.factor-simple-quadratic, alg1.factor-nonmonic-quadratic (owned by Algebra 1) |
+| KA 4 Polynomial division | alg2.divide-poly-by-monomial, alg2.remainder-theorem, alg2.factor-check, alg2.polynomial-long-division (Low) |
+| KA 5 Polynomial graphs | alg2.zero-multiplicity, alg2.multiplicity-cross-touch, alg2.end-behavior; zeros from factored form → alg1.roots-from-factored-form; sketching, positivity intervals, and turning-point analysis out-of-grain: graph output/reading — no drillable content beyond kernels alg2.end-behavior, alg2.zero-multiplicity, alg2.multiplicity-cross-touch |
+| KA 6 Rational exponents and radicals | alg2.evaluate-rational-exponent, alg2.rational-exponent-product, alg2.simplify-cube-root, alg2.combine-radicals; square-root simplification → alg1.simplify-radical; root products → alg1.multiply-square-roots; perfect square/cube roots → prealg.square-root, prealg.cube-root (owned upstream) |
+| KA 7 Exponential models | alg2.exponential-solve-common-base; growth vs decay → alg1.growth-or-decay; factor ↔ rate → alg1.growth-factor-to-rate; evaluation → alg1.evaluate-exponential; model construction and interpretation word problems out-of-grain: modeling — no drillable content beyond kernels alg1.evaluate-exponential, alg1.growth-factor-to-rate, alg2.exponential-solve-common-base |
+| KA 8 Logarithms | alg2.evaluate-log, alg2.log-product-rule, alg2.log-power-rule, alg2.natural-log-facts, alg2.solve-exponential-equation (Low); log ↔ exponent form conversion: recorded judgment — exercised inside alg2.evaluate-log, no separate entry; change of base: recorded judgment — calculator-dependent evaluation with no exact fact family beyond alg2.evaluate-log |
+| KA 9 Transformations of functions | alg2.function-shift-direction, alg2.function-reflection-rule, alg2.function-scale-direction, alg2.transformed-point, alg2.even-odd-classify; graphing transformed functions and reading transformations off drawn graphs out-of-grain: graph input/output — no drillable content beyond kernels alg2.function-shift-direction, alg2.transformed-point |
+| KA 10 Equations | alg2.solve-sqrt-equation-simple, alg2.check-extraneous, alg2.solve-radical-equation (Low — the debt from Algebra 1's OS 9 row), alg2.solve-rational-equation (Low — the debt from Algebra 1's OS 8 row); solving equations by graphing out-of-grain: graph reading — no drillable content beyond kernels alg2.check-extraneous |
+| KA 11 Trigonometry | alg2.degrees-to-radians, alg2.radians-to-degrees, alg2.pythagorean-identity-apply, alg2.trig-sign-by-quadrant; right-triangle ratios → geo.trig-ratio-definition; special-angle values and unit-circle coordinates → geo.exact-trig-values (owned by Geometry); sinusoidal graphs and their features: recorded judgment — owned by the Trig/Precalc sweep (KA Trigonometry unit 2), deferred |
+| KA 12 Modeling | out-of-grain end-to-end: modeling/word-problem unit — no drillable content beyond kernels alg1.evaluate-exponential, alg2.exponential-solve-common-base, alg2.evaluate-composite, alg2.arithmetic-series-sum |
+| Int 1 Foundations | covered: the fk/prealg arithmetic, expression, and exponent sets (see the Pre-Algebra section and Algebra 1 OS 1 row) |
+| Int 2 Solving Linear Equations | covered by the Pre-Algebra KA 7/10/12 and Algebra 1 KA 2 entry sets; absolute-value inequalities out-of-grain: interval answers are not in the format legend — no drillable content beyond kernels alg1.solve-absolute-value-equation, prealg.solve-one-step-inequality |
+| Int 3 Graphs and Functions | covered by the Algebra 1 KA 4/5/8 entry sets; graph reading out-of-grain (recorded there) |
+| Int 4 Systems of Linear Equations | covered: prealg.solve-2x2-system (Low), prealg.check-system-solution, alg1.system-solution-count; 3×3 systems: recorded judgment — the same elimination moves compounded, no new kernel beyond prealg.solve-2x2-system |
+| Int 5 Polynomials and Polynomial Functions | covered by the KA 1 entry set and its Algebra 1 owners |
+| Int 6 Factoring | covered by the KA 3 entry set (alg2.sum-diff-cubes-pattern, alg2.factor-by-grouping and the Algebra 1 owners) |
+| Int 7 Rational Expressions and Functions | covered: alg1.simplify-rational-expression (Low, owned by Algebra 1), alg2.solve-rational-equation (Low); complex fractions: recorded judgment — a Low-grain composite of prealg.fraction-divide and alg1.simplify-rational-expression, no separate entry |
+| Int 8 Roots and Radicals | covered by the KA 6 entry set plus alg2.solve-radical-equation (Low); rationalizing denominators: recorded judgment — the a√b/c answer shape is not in the format legend; no drillable content beyond kernels alg1.simplify-radical, alg1.multiply-square-roots |
+| Int 9 Quadratic Equations and Functions | covered by the Algebra 1 KA 14 entry set plus alg2.solve-quadratic-complex (Low) |
+| Int 10 Exponential and Logarithmic Functions | covered by the KA 7/8 entry sets; merged: alg2.evaluate-composite, alg2.inverse-of-linear (composite/inverse block — the diff beyond the plan's predicted gaps) |
+| Int 11 Conics | covered: geo.circle-equation-read, geo.circle-radius-read, geo.circle-general-to-standard (Low), geo.parabola-focus-directrix (Low) — owned by Geometry; ellipse and hyperbola feature reads: recorded judgment — owned by KA Precalculus unit 5, deferred to the Trig/Precalc sweep |
+| Int 12 Sequences, Series and Binomial Theorem | merged (the plan's predicted gap): alg2.arithmetic-series-sum, alg2.geometric-series-sum (Low), alg2.infinite-geometric-sum, alg2.evaluate-sigma, alg2.factorial, alg2.binomial-coefficient, alg2.binomial-expansion (Low); sequences themselves → prealg.next-term-arithmetic, alg1.arithmetic-nth-term, alg1.next-term-geometric, alg1.geometric-nth-term (owned upstream) |
+| A&T 1 Prerequisites | covered: the fk/prealg/alg1 foundations sets (see the Algebra 1 OS 1 row) |
+| A&T 2 Equations and Inequalities | covered by the Pre-Algebra/Algebra 1 equation sets plus alg2.solve-quadratic-complex, alg2.solve-radical-equation, alg2.solve-rational-equation (all Low) |
+| A&T 3 Functions | covered by the Algebra 1 KA 8 and Algebra 2 KA 9 entry sets plus alg2.evaluate-composite |
+| A&T 4 Linear Functions | covered by the Algebra 1 KA 4/5 entry sets |
+| A&T 5 Polynomial and Rational Functions | covered by the KA 1/3/4/5 entry sets and their Algebra 1 owners; rational-function asymptotes: recorded judgment — owned by KA Precalculus unit 4, deferred to the Trig/Precalc sweep |
+| A&T 6 Exponential and Logarithmic Functions | covered by the KA 7/8 entry sets plus alg2.evaluate-composite, alg2.inverse-of-linear |
+| A&T 7 The Unit Circle: Sine and Cosine Functions | trigonometry-course grain: deferred to the Trig/Precalc sweep (the Algebra 2-grain unit-circle intro is the KA 11 row) |
+| A&T 8 Periodic Functions | trigonometry-course grain: deferred to the Trig/Precalc sweep |
+| A&T 9 Trigonometric Identities and Equations | trigonometry-course grain: deferred to the Trig/Precalc sweep (the identity's Algebra 2-grain intro is merged as alg2.pythagorean-identity-apply under KA 11) |
+| A&T 10 Further Applications of Trigonometry | trigonometry-course grain: deferred to the Trig/Precalc sweep |
+| A&T 11 Systems of Equations and Inequalities | covered: the Pre-Algebra/Algebra 1 systems owners (see Int 4 row); matrices: recorded judgment — owned by KA Precalculus unit 7, deferred to the Trig/Precalc sweep |
+| A&T 12 Analytic Geometry | covered by the Geometry KA 6/7 entry sets; ellipse and hyperbola: recorded judgment — owned by KA Precalculus unit 5, deferred (same as Int 11) |
+| A&T 13 Sequences, Probability, and Counting Theory | merged (the plan's predicted gaps): the Int 12 series/binomial set plus the probability/counting block — alg2.simple-probability, alg2.complement-probability, alg2.permutation-count, alg2.compound-event-probability (Low) |
 
 ---
 

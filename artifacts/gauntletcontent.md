@@ -335,7 +335,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | | |
 | geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | — | | |
 | geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
-| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc and the calculus sections cross-reference here | | |
+| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass); the calculus sections cross-reference here (satisfied in the Calculus AB pass) | | |
 | geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | — | | |
 | geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | — | | |
 | geo.distance-formula | Distance between two points | self — Geometry (KA 6) | — | | |
@@ -403,7 +403,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) cross-references here (satisfied in the Trig/Precalc pass) | | |
 | alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
 | alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section will also cross-reference here | | |
+| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | | |
 | alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
 | alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
 | alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
@@ -441,7 +441,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | trig.complex-divide | Divide two complex numbers (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
 | trig.complex-to-polar | Convert a complex number to polar form (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
 | trig.vertical-asymptote | Vertical asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | — | | |
-| trig.horizontal-asymptote | Horizontal asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | also satisfies the limit-at-infinity rows (KA Precalc 10) — same read | | |
+| trig.horizontal-asymptote | Horizontal asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | also satisfies the limit-at-infinity rows (KA Precalc 10) — same read; the Calculus AB (CED 1, limits at infinity) and BC (CED 10, sequence limits) rows cross-reference here (recorded in the calculus passes) | | |
 | trig.identify-hole | Removable discontinuity from factored form | self — Trig/Precalc (KA Precalc 4) | — | | |
 | trig.graph-rational-function | Graph a rational function (Low; kernel source) | self — Trig/Precalc (KA Precalc 4) | — | | |
 | trig.ellipse-axes-read | Semi-axis lengths off an ellipse's standard form | self — Trig/Precalc (KA Precalc 5) | pays the Int 11 / A&T 12 ellipse-hyperbola deferral recorded in the Algebra 2 pass | | |
@@ -458,15 +458,85 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | trig.matrix-inverse-2x2 | Inverse of a 2×2 matrix (Low; kernel source) | self — Trig/Precalc (KA Precalc 7) | — | | |
 | trig.multiplication-principle | Fundamental counting principle | self — Trig/Precalc (KA Precalc 8) | — | | |
 | trig.probability-with-counting | Probability via combinatorial counting (Low; kernel source) | self — Trig/Precalc (KA Precalc 8) | — | | |
-| trig.geometric-series-converges | Convergence judgment for a geometric series | self — Trig/Precalc (KA Precalc 9) | first-course-owns: the BC series section (CED unit 10) will also cross-reference here | | |
-| trig.limit-by-substitution | Limit by direct substitution | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
-| trig.limit-removable-factor | Limit of a removable-singularity quotient | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
-| trig.classify-discontinuity | Classify a discontinuity | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
-| trig.continuity-at-point | Continuity check at a piecewise seam | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
-| trig.limit-by-rationalizing | Limit requiring algebraic manipulation (Low; kernel source) | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
-| trig.polar-to-rectangular | Polar → rectangular coordinates at axis angles | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
-| trig.parametric-evaluate | Evaluate a parametric point at t | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
-| trig.eliminate-parameter | Eliminate the parameter (Low; kernel source) | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
+| trig.geometric-series-converges | Convergence judgment for a geometric series | self — Trig/Precalc (KA Precalc 9) | first-course-owns: the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | | |
+| trig.limit-by-substitution | Limit by direct substitution | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
+| trig.limit-removable-factor | Limit of a removable-singularity quotient | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
+| trig.classify-discontinuity | Classify a discontinuity | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
+| trig.continuity-at-point | Continuity check at a piecewise seam | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
+| trig.limit-by-rationalizing | Limit requiring algebraic manipulation (Low; kernel source) | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
+| trig.polar-to-rectangular | Polar → rectangular coordinates at axis angles | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
+| trig.parametric-evaluate | Evaluate a parametric point at t | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
+| trig.eliminate-parameter | Eliminate the parameter (Low; kernel source) | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
+| calcab.special-trig-limits | Special trig limits (sin(ax)/x family) recall | self — Calculus AB (CED 1) | — | | |
+| calcab.ivt-guarantees-zero | IVT sign-change guarantee check | self — Calculus AB (CED 1) | — | | |
+| calcab.derivative-power-rule | Power rule d/dx xⁿ = nxⁿ⁻¹ | self — Calculus AB (CED 2) | — | | |
+| calcab.derivative-standard-table | Derivative recall for the standard function table | self — Calculus AB (CED 2) | — | | |
+| calcab.derivative-at-point | Evaluate f′(a) for a monomial | self — Calculus AB (CED 2) | — | | |
+| calcab.differentiate-polynomial | Differentiate a short polynomial termwise | self — Calculus AB (CED 2) | — | | |
+| calcab.product-quotient-rule-recall | Product/quotient rule formula recall | self — Calculus AB (CED 2) | — | | |
+| calcab.recognize-difference-quotient | Recognize a difference quotient as a table derivative | self — Calculus AB (CED 2) | — | | |
+| calcab.apply-product-rule | Differentiate a product (Low; kernel source) | self — Calculus AB (CED 2) | — | | |
+| calcab.tangent-line-equation | Equation of a tangent line (Low; kernel source) | self — Calculus AB (CED 2) | — | | |
+| calcab.chain-rule-recall | Chain rule formula recall | self — Calculus AB (CED 3) | — | | |
+| calcab.chain-rule-linear-inner | Differentiate f(ax) via the chain rule | self — Calculus AB (CED 3) | — | | |
+| calcab.derivative-inverse-trig-table | Inverse-trig derivative table recall | self — Calculus AB (CED 3) | — | | |
+| calcab.second-derivative-power | Evaluate f″(a) for a monomial | self — Calculus AB (CED 3) | — | | |
+| calcab.implicit-differentiation | Implicit differentiation (Low; kernel source) | self — Calculus AB (CED 3) | — | | |
+| calcab.derivative-inverse-function-value | Derivative of an inverse function at a value (Low; kernel source) | self — Calculus AB (CED 3) | — | | |
+| calcab.velocity-from-position | Velocity from a position polynomial | self — Calculus AB (CED 4) | — | | |
+| calcab.indeterminate-form-check | Verify a 0/0 or ∞/∞ indeterminate form | self — Calculus AB (CED 4) | — | | |
+| calcab.lhopital-apply | Evaluate a limit by L'Hôpital's rule (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
+| calcab.related-rates | Related-rates problems (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
+| calcab.linear-approximation | Tangent-line approximation (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
+| calcab.derivative-sign-read | Increasing/decreasing from the sign of f′ | self — Calculus AB (CED 5) | — | | |
+| calcab.concavity-sign-read | Concavity from the sign of f″ | self — Calculus AB (CED 5) | — | | |
+| calcab.second-derivative-test-read | Classify a critical point via the second-derivative test | self — Calculus AB (CED 5) | — | | |
+| calcab.critical-point-quadratic | Critical point of a quadratic | self — Calculus AB (CED 5) | — | | |
+| calcab.mvt-apply | Find the Mean Value Theorem's c (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
+| calcab.find-inflection-points | Find inflection points (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
+| calcab.absolute-extrema-closed-interval | Absolute extrema by the candidates test (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
+| calcab.optimization | Applied optimization (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
+| calcab.antiderivative-power-rule | Antiderivative power rule | self — Calculus AB (CED 6) | — | | |
+| calcab.antiderivative-standard-table | Antiderivative recall for the standard table | self — Calculus AB (CED 6) | — | | |
+| calcab.ftc-derivative-of-accumulation | Derivative of an accumulation function (FTC part 1) | self — Calculus AB (CED 6) | — | | |
+| calcab.definite-integral-power | Evaluate a one-term definite integral (FTC part 2) | self — Calculus AB (CED 6) | — | | |
+| calcab.integral-additivity | Definite-integral properties (additivity, reversal, scaling) | self — Calculus AB (CED 6) | — | | |
+| calcab.riemann-sum-compute | Compute a Riemann sum (Low; kernel source) | self — Calculus AB (CED 6) | — | | |
+| calcab.u-substitution | Integrate by u-substitution (Low; kernel source) | self — Calculus AB (CED 6) | — | | |
+| calcab.verify-de-solution | Verify a differential-equation solution | self — Calculus AB (CED 7) | — | | |
+| calcab.exponential-de-solution | General solution of y′ = ky | self — Calculus AB (CED 7) | — | | |
+| calcab.solve-separable-de | Solve a separable differential equation (Low; kernel source) | self — Calculus AB (CED 7) | — | | |
+| calcab.average-value-from-integral | Average value of f from a given integral | self — Calculus AB (CED 8) | — | | |
+| calcab.position-from-velocity-simple | Position from velocity and an initial value | self — Calculus AB (CED 8) | — | | |
+| calcab.area-between-curves | Area between curves (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
+| calcab.volume-disk-washer | Disk/washer volumes of revolution (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
+| calcab.volume-cross-sections | Volumes by known cross-sections (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
+| calcbc.parametric-slope-formula-recall | Parametric dy/dx formula recall | self — BC-only (CED 9) | — | | |
+| calcbc.vector-derivative-evaluate | Componentwise derivative of a vector-valued function at t | self — BC-only (CED 9) | — | | |
+| calcbc.polar-area-formula-recall | Polar area formula recall | self — BC-only (CED 9) | — | | |
+| calcbc.parametric-slope-at-point | Parametric slope at a point (Low; kernel source) | self — BC-only (CED 9) | — | | |
+| calcbc.second-derivative-parametric | Parametric second derivative (Low; kernel source) | self — BC-only (CED 9) | — | | |
+| calcbc.polar-area-compute | Compute a polar-region area (Low; kernel source) | self — BC-only (CED 9) | — | | |
+| calcbc.p-series-converges | p-series convergence judgment | self — BC-only (CED 10) | — | | |
+| calcbc.ratio-test-read | Ratio-test threshold read | self — BC-only (CED 10) | — | | |
+| calcbc.nth-term-test | nth-term divergence test | self — BC-only (CED 10) | — | | |
+| calcbc.alternating-series-converges | Alternating-series convergence check | self — BC-only (CED 10) | — | | |
+| calcbc.choose-convergence-test | Choose the convergence test from series structure | self — BC-only (CED 10) | — | | |
+| calcbc.absolute-conditional-classify | Absolute vs conditional convergence classification | self — BC-only (CED 10) | — | | |
+| calcbc.maclaurin-table-recall | Maclaurin series table recall | self — BC-only (CED 10) | — | | |
+| calcbc.maclaurin-coefficient | Coefficient of xⁿ in a table Maclaurin series | self — BC-only (CED 10) | — | | |
+| calcbc.taylor-coefficient-from-derivative | Taylor coefficient from a given derivative value | self — BC-only (CED 10) | — | | |
+| calcbc.radius-geometric-form | Radius of convergence of a geometric-form series | self — BC-only (CED 10) | — | | |
+| calcbc.interval-of-convergence | Interval of convergence (Low; kernel source) | self — BC-only (CED 10) | — | | |
+| calcbc.taylor-polynomial-build | Build a Taylor polynomial (Low; kernel source) | self — BC-only (CED 10) | — | | |
+| calcbc.lagrange-error-bound | Lagrange error bound (Low; kernel source) | self — BC-only (CED 10) | — | | |
+| calcbc.parts-formula-recall | Integration-by-parts formula recall | self — BC-only (CED 6 BC scope) | — | | |
+| calcbc.integration-by-parts | Integrate by parts (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | | |
+| calcbc.partial-fraction-decomposition | Partial-fraction decomposition and integration (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | | |
+| calcbc.improper-p-integral-converges | Improper p-integral convergence judgment | self — BC-only (CED 6 BC scope) | — | | |
+| calcbc.euler-step | One Euler-method step | self — BC-only (CED 7 BC scope) | — | | |
+| calcbc.logistic-limit-read | Carrying capacity off a logistic differential equation | self — BC-only (CED 7 BC scope) | — | | |
+| calcbc.arc-length-formula-recall | Arc-length formula recall (function and parametric forms) | self — BC-only (CED 8 BC scope; parametric family serves CED 9) | — | | |
 
 ---
 
@@ -2938,13 +3008,549 @@ Every KA Trigonometry unit (4), every KA Precalculus unit (10), the four Algebra
 
 ## AP Calculus AB
 
-Swept against CED Units 1–8. Expected strongest Low→kernel extraction (derivative/antiderivative fact families, exact trig values). *Authored in a later pass.*
+Swept against AP Calculus CED Units 1–8, the calculus checklist of record. **There is no OpenStax cross-check for the calculus sections:** the document snapshots no OpenStax calculus TOC, and per the plan the AP CED is the sole named checklist here — recorded explicitly in the disposition table's cross-check row rather than silently omitted (the Geometry section's no-book row is the precedent). The section lands 44 records (8 High / 19 Medium / 17 Low) plus 8 cross-reference rows, and delivers the strongest Low→kernel extraction in the document, as the plan predicted: the derivative and antiderivative fact families minted under CED 2/3/6 (calcab.derivative-power-rule, calcab.derivative-standard-table, calcab.chain-rule-recall, calcab.antiderivative-power-rule, calcab.antiderivative-standard-table) are cited by nearly every Low entry below — the fast kernels the multi-step calculus problems decompose into — alongside citation traffic to earlier courses (exact trig values, the Algebra 1 factoring toolkit, equation solving, evaluation skills). CED Unit 1 is absorbed almost entirely by the five Trig/Precalc limit entries the registry pre-flagged for exactly this sweep, plus geo.exact-trig-values per its registry note — all flags updated to satisfied. The primary in-degree window (Foundational → Algebra 2) remains closed: every citation here counts toward the registry's full-range column only — expected post-Algebra 2 behavior, not a defect. No pinned calibration entries live here; ratings are calibrated against the pinned set — MC entries against geo.triangle-congruence-criteria, true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions, short-expression entries against alg1.distribute-linear / alg1.factor-simple-quadratic, single-number entries against the prealg.gcd-two-numbers / prealg.lcm-two-numbers Medium pins and the fk.* High pins. **No new accepted-answer rules were needed:** derivative-expression answers ride the existing `expr-commutative-ws` short-expression rule (checked before considering a new rule — commutative term/factor reordering with no other rewrite is exactly the right acceptance for a derivative in standard form).
+
+**CED Unit 1 — Limits and Continuity.** (The computational limit toolkit is owned by Trig/Precalc — the registry pre-flagged all five entries for this absorption; this unit's new grain is the two AP-specific judgments below.)
+
+**Limits by direct substitution** → see trig.limit-by-substitution (owned by Trig/Precalc).
+**Limits of removable-singularity quotients** → see trig.limit-removable-factor (owned by Trig/Precalc).
+**Limits requiring conjugates or complex fractions** → see trig.limit-by-rationalizing (owned by Trig/Precalc; Low).
+**Classifying discontinuities** → see trig.classify-discontinuity (owned by Trig/Precalc).
+**Continuity at a piecewise seam** → see trig.continuity-at-point (owned by Trig/Precalc).
+**Limits at infinity of rational functions** → see trig.horizontal-asymptote (owned by Trig/Precalc — the same leading-term read).
+**Infinite limits / vertical asymptotes** → see trig.vertical-asymptote (owned by Trig/Precalc).
+**Exact trig values at special angles** (cited throughout both calculus sections) → see geo.exact-trig-values (owned by Geometry — per its registry note).
+
+### calcab.special-trig-limits — Special trig limits
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One recall of the sin x/x = 1 fact plus a coefficient read — 3–5s; the quotient display needs a math renderer.
+Sample: lim (x → 0) of sin(5x)/x → 5 · Rule: int-exact · Params: families lim sin(ax)/x = a and lim sin(ax)/sin(bx) = a/b with a a multiple of b (integer answers only — the a/b fraction band is an answer-shape split and excluded); a, b ∈ [1, 9]; the lim (1 − cos x)/x = 0 family keys separately (answer always 0); answers ∈ [0, 9].
+Kernels: [trig.limit-by-substitution, fk.division-facts]
+
+### calcab.ivt-guarantees-zero — Does the IVT guarantee a zero
+
+Rating: Medium · Format: true-false
+Why: One hypothesis check (continuity stated?) plus one endpoint sign compare — 3–6s; genuinely a verification judgment.
+Sample: True or false: f is continuous on [1, 4] with f(1) = −3 and f(4) = 2, so f must have a zero in (1, 4) → true · Rule: tf · Params: endpoint values nonzero integers ∈ [−9, 9]; true cases have opposite-sign endpoints with continuity stated; false cases keep same-sign endpoints (the IVT guarantees nothing) or drop the continuity hypothesis; families balanced 50/50.
+Kernels: [trig.continuity-at-point]
+
+**CED Unit 2 — Differentiation: Definition and Fundamental Properties.**
+
+### calcab.derivative-power-rule — Power rule
+
+Rating: High · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: Pure rule recall (bring the exponent down, drop it by one) with a 4-token answer ≈ 1s entry + Enter — High; flips to Medium at 2× entry time, hence the marker.
+Sample: d/dx x⁵ → 5x^4 · Rule: expr-commutative-ws · Params: n ∈ [2, 9] (n = 1 and constants excluded — read-off giveaways); the negative- and fractional-exponent bands are excluded here (their rewritten forms 1/x and √x live in calcab.derivative-standard-table); answer alphabet {digits, x, ^}.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.derivative-standard-table — Standard derivative table
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: Pure table recall plus one tap — ≤3s; the option pool's sign flips and cofunction near-misses are the whole discrimination.
+Sample: d/dx sin x = ? → cos x (options: cos x · −cos x · sin x · −sin x) · Rule: mc · Params: fact families d/dx of sin x, cos x, tan x, eˣ, ln x, plus the rewritten power-rule forms 1/x and √x; 4 options per family pairing the answer with its sign flip and the classic near-misses (tan x options: sec²x · sec x tan x · cot x · −sec²x); each function keys separately — the table rows are the fact family.
+Kernels: [calcab.derivative-power-rule]
+
+### calcab.derivative-at-point — Evaluate f′ at a point
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One rule application plus one substitute-and-evaluate held mentally — 3–6s.
+Sample: f(x) = x³. f′(2) = ? → 12 · Rule: int-exact · Params: monomials axⁿ with a ∈ [1, 5], n ∈ [2, 4]; evaluation points ∈ [−3, 3]; answers ∈ [−99, 99]; negative answers carry the touch-minus-key caveat.
+Kernels: [calcab.derivative-power-rule, prealg.evaluate-exponent, fk.times-tables]
+
+### calcab.differentiate-polynomial — Differentiate a short polynomial
+
+Rating: Medium · Format: short-expression · Render: unicode-inline
+Why: Termwise rule application (two coefficient products; the constant drops) held mentally, then a ~4–6-token entry — 3–6s.
+Sample: d/dx (3x² + 5x − 4) → 6x+5 · Rule: expr-commutative-ws · Params: polynomials of degree 2–3 with 3 terms, coefficients ∈ [1, 9]; result coefficients ≤ 27; answer alphabet {digits, x, ^, +, −}.
+Kernels: [calcab.derivative-power-rule, fk.times-tables]
+
+### calcab.product-quotient-rule-recall — Product and quotient rule recall
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Pure formula recall, but the four look-alike arrangements force a careful option scan — 3–6s (the angle-sum-formula precedent).
+Sample: (fg)′ = ? → f′g + fg′ (options: f′g + fg′ · f′g − fg′ · f′g′ · f′g + fg) · Rule: mc · Params: product and quotient prompts balanced; quotient options permute numerator order and sign ((f′g − fg′)/g² vs (fg′ − f′g)/g² and the no-square distractor); the two rules key separately.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.recognize-difference-quotient — Recognize a difference quotient
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: One structural recognition (this limit *is* f′) plus a table read — 3–6s.
+Sample: lim (h → 0) of (sin(x + h) − sin x)/h = ? → cos x (options: cos x · sin x · −cos x · 0) · Rule: mc · Params: base functions from the standard table (sin x, cos x, eˣ, ln x, xⁿ); both forms (f(x + h) − f(x))/h and (f(x) − f(a))/(x − a) (the second band answers with f′(a) at a special value); the 0 distractor is fixed in every pool — mistaking the limit for plain substitution is the classic miss.
+Kernels: [calcab.derivative-standard-table, calcab.derivative-power-rule]
+
+### calcab.apply-product-rule — Differentiate a product
+
+Rating: Low
+Why: Inherently multi-step at any speed — differentiate both factors, assemble f′g + fg′, then collect like terms.
+Kernels: [calcab.product-quotient-rule-recall, calcab.derivative-standard-table, calcab.derivative-power-rule, alg2.add-polynomials]
+
+### calcab.tangent-line-equation — Equation of a tangent line
+
+Rating: Low
+Why: Inherently multi-step at any speed — evaluate f(a), differentiate, evaluate f′(a), then assemble the point-slope equation.
+Kernels: [calcab.derivative-at-point, alg1.evaluate-function, alg1.write-line-equation]
+
+**CED Unit 3 — Differentiation: Composite, Implicit, and Inverse Functions.**
+
+### calcab.chain-rule-recall — Chain rule recall
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Pure formula recall with look-alike composite arrangements forcing the scan — 3–5s.
+Sample: (f(g(x)))′ = ? → f′(g(x))·g′(x) (options: f′(g(x))·g′(x) · f′(x)·g′(x) · f′(g′(x)) · f′(g(x))) · Rule: mc · Params: fixed 4-option pool of the correct form and the three classic malformations (uncomposed product; derivative inside; missing inner factor).
+Kernels: [alg2.evaluate-composite]
+
+### calcab.chain-rule-linear-inner — Chain rule with a linear inner function
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One table recall plus one bring-the-coefficient-out application — 3–6s.
+Sample: d/dx sin(3x) = ? → 3 cos 3x (options: 3 cos 3x · cos 3x · −3 cos 3x · 3 cos x) · Rule: mc · Params: outer function from the standard table (sin, cos, eˣ), inner ax with a ∈ [2, 9]; options permute the coefficient (missing/present), sign, and inner argument; each outer function keys separately; the ln(ax) family (derivative 1/x — the coefficient cancels) is the deliberate trap band.
+Kernels: [calcab.derivative-standard-table, calcab.chain-rule-recall]
+
+### calcab.derivative-inverse-trig-table — Inverse-trig derivative table
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Pure table recall, but the three derivatives and their negations are dense look-alikes — 3–6s of careful scan.
+Sample: d/dx arctan x = ? → 1/(1 + x²) (options: 1/(1 + x²) · −1/(1 + x²) · 1/√(1 − x²) · −1/√(1 − x²)) · Rule: mc · Params: arcsin/arccos/arctan; fixed option pool drawn from the three table derivatives and their negations; each function keys separately.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.second-derivative-power — Evaluate f″ at a point
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: Two rule applications collapse to one n(n − 1) product for a fluent student, plus an evaluation — Medium's upper half, 4–7s.
+Sample: f(x) = x⁴. f″(1) = ? → 12 · Rule: int-exact · Params: monomials axⁿ with a ∈ [1, 3], n ∈ [3, 5]; evaluation points ∈ [−2, 2]; answers ∈ [−96, 96]; negative answers carry the touch-minus-key caveat.
+Kernels: [calcab.derivative-power-rule, fk.times-tables, prealg.evaluate-exponent]
+
+### calcab.implicit-differentiation — Implicit differentiation
+
+Rating: Low
+Why: Inherently multi-step at any speed — differentiate both sides with chain-rule bookkeeping on every y term, collect the dy/dx terms, then solve for dy/dx.
+Kernels: [calcab.chain-rule-recall, calcab.derivative-power-rule, alg1.solve-equation-both-sides]
+
+### calcab.derivative-inverse-function-value — Derivative of an inverse at a value
+
+Rating: Low
+Why: Inherently multi-step at any speed — find a with f(a) = b, compute f′(a), then take the reciprocal, holding each intermediate.
+Kernels: [calcab.derivative-at-point, alg2.inverse-of-linear, prealg.fraction-divide]
+
+**CED Unit 4 — Contextual Applications of Differentiation.**
+
+### calcab.velocity-from-position — Velocity from a position function
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One contextual identification (v = s′) plus a differentiate-and-evaluate — Medium's upper half, 4–7s.
+Sample: s(t) = t³ − 3t. The velocity at t = 2? → 9 · Rule: int-exact · Params: position polynomials of degree 2–3 with coefficients ∈ [1, 5]; t ∈ [1, 4]; the acceleration variant (a = s″) keys separately; answers ∈ [−60, 60]; negative answers carry the touch-minus-key caveat.
+Kernels: [calcab.differentiate-polynomial, calcab.derivative-at-point]
+
+### calcab.indeterminate-form-check — Verify an indeterminate form
+
+Rating: Medium · Format: true-false · Render: needs-math-render
+Why: Two substitution reads (numerator and denominator) plus a compare — 3–6s; genuinely a verification judgment, and the gate L'Hôpital's rule requires.
+Sample: True or false: lim (x → 0) of (eˣ − 1)/x is a 0/0 indeterminate form → true · Rule: tf · Params: quotients built from polynomial, trig, exponential, and log pieces; true cases 0/0 or ∞/∞; false cases have a nonzero denominator limit or a finite/nonzero numerator over 0; families balanced 50/50.
+Kernels: [trig.limit-by-substitution]
+
+### calcab.lhopital-apply — Evaluate a limit by L'Hôpital's rule
+
+Rating: Low
+Why: Inherently multi-step at any speed — verify the indeterminate form, differentiate numerator and denominator separately, then re-evaluate the limit (sometimes more than once).
+Kernels: [calcab.indeterminate-form-check, calcab.derivative-standard-table, calcab.differentiate-polynomial, trig.limit-by-substitution]
+
+### calcab.related-rates — Related rates
+
+Rating: Low
+Why: Inherently multi-step at any speed — set up the geometric relation, differentiate implicitly with respect to time, substitute the snapshot values, then solve for the asked rate.
+Kernels: [calcab.implicit-differentiation, calcab.chain-rule-recall, prealg.circle-area-pi, prealg.pythagorean-hypotenuse]
+
+### calcab.linear-approximation — Tangent-line approximation
+
+Rating: Low
+Why: Inherently multi-step at any speed — evaluate f and f′ at the anchor, form the tangent line, then evaluate it at the nearby input.
+Kernels: [calcab.derivative-at-point, alg1.write-line-equation, prealg.evaluate-expression]
+
+**CED Unit 5 — Analytical Applications of Differentiation.**
+
+### calcab.derivative-sign-read — Increasing or decreasing from f′
+
+Rating: High · Format: true-false
+Why: Pure sign-to-behavior recall (f′ > 0 means increasing) plus a single tap — ≤3s; genuinely a verification judgment.
+Sample: True or false: if f′(3) = −2, then f is decreasing at x = 3 → true · Rule: tf · Params: f′ values nonzero integers ∈ [−9, 9]; increasing and decreasing claims crossed with both signs, balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.concavity-sign-read — Concavity from f″
+
+Rating: High · Format: true-false
+Why: Pure sign-to-shape recall (f″ > 0 means concave up) plus a single tap — ≤3s.
+Sample: True or false: if f″(1) = 4, the graph of f is concave up at x = 1 → true · Rule: tf · Params: f″ values nonzero integers ∈ [−9, 9]; concave-up and concave-down claims crossed with both signs, balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.second-derivative-test-read — Second-derivative test
+
+Rating: High · Format: multiple-choice
+Why: One memorized sign map (f′ = 0 with f″ < 0 is a max) plus a tap — ≤3s with a 3-option scan.
+Sample: f′(2) = 0 and f″(2) = −3. At x = 2, f has ? → Local maximum (options: Local maximum · Local minimum · Neither/inconclusive) · Rule: mc · Params: f″ values nonzero ∈ [−9, 9] for the max/min families; the f″ = 0 inconclusive case forms its own stretch band; fixed 3 options.
+Kernels: [calcab.concavity-sign-read]
+
+### calcab.critical-point-quadratic — Critical point of a quadratic
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One mental differentiation and one linear solve, collapsing to x = −b/2a (the axis-of-symmetry read in calculus clothes) — 3–6s.
+Sample: f(x) = x² − 6x + 1. Critical point at x = ? → 3 · Rule: int-exact · Params: quadratics ax² + bx + c with a ∈ [1, 4], b chosen so −b/2a is an integer ∈ [−9, 9]; c decorative; negative answers carry the touch-minus-key caveat.
+Kernels: [calcab.differentiate-polynomial, prealg.solve-one-step-equation, alg1.axis-of-symmetry]
+
+### calcab.mvt-apply — Find the Mean Value Theorem's c
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute the average rate over the interval, differentiate, set the two equal, then solve.
+Kernels: [alg1.slope-two-points, calcab.differentiate-polynomial, prealg.solve-two-step-equation]
+
+### calcab.find-inflection-points — Find inflection points
+
+Rating: Low
+Why: Inherently multi-step at any speed — differentiate twice, solve f″ = 0, then confirm the concavity sign actually changes.
+Kernels: [calcab.differentiate-polynomial, prealg.solve-two-step-equation, calcab.concavity-sign-read]
+
+### calcab.absolute-extrema-closed-interval — Absolute extrema on a closed interval
+
+Rating: Low
+Why: Inherently multi-step at any speed — the candidates test: find critical points, evaluate f at each and at both endpoints, then compare the list.
+Kernels: [calcab.critical-point-quadratic, calcab.differentiate-polynomial, alg1.evaluate-function]
+
+### calcab.optimization — Applied optimization
+
+Rating: Low
+Why: Inherently multi-step at any speed — model the quantity, reduce to one variable, differentiate, find and classify the critical point, then answer the asked variant.
+Kernels: [calcab.critical-point-quadratic, calcab.second-derivative-test-read, alg1.evaluate-function]
+
+**CED Unit 6 — Integration and Accumulation of Change.**
+
+### calcab.antiderivative-power-rule — Antiderivative power rule
+
+Rating: High · Format: single-number · Render: needs-math-render
+Why: Pure inverse-rule recall (raise the exponent, divide by it) — ≤3s with a 1-digit entry; asking for the shared exponent-and-divisor n keeps the answer a single integer.
+Sample: ∫x⁴ dx = xⁿ/n + C. n = ? → 5 · Rule: int-exact · Params: integrand exponents ∈ [1, 8] (the exponent–divisor coincidence of the pure power family is the point); the coefficient variant ∫axⁿ dx keys separately and still asks for n only; answers ∈ [2, 9].
+Kernels: [calcab.derivative-power-rule]
+
+### calcab.antiderivative-standard-table — Standard antiderivative table
+
+Rating: High · Format: multiple-choice · Render: needs-math-render
+Why: Pure inverse-table recall plus one tap — ≤3s; the sign flips in the option pool are the whole discrimination.
+Sample: ∫cos x dx = ? → sin x + C (options: sin x + C · −sin x + C · cos x + C · −cos x + C) · Rule: mc · Params: table families ∫sin x, ∫cos x, ∫eˣ, ∫1/x, ∫sec²x; 4 options per family pairing the answer with sign flips and cofunction near-misses; each family keys separately.
+Kernels: [calcab.derivative-standard-table]
+
+### calcab.ftc-derivative-of-accumulation — Derivative of an accumulation function
+
+Rating: High · Format: short-expression · Render: needs-math-render · Surface-sensitive
+Why: Pure rule recall (FTC part 1 — swap t for x) with a ~3-token entry — High; flips to Medium at 2× entry time, hence the marker.
+Sample: g(x) = ∫₂ˣ t³ dt. g′(x) = ? → x^3 · Rule: expr-commutative-ws · Params: integrands tⁿ (n ∈ [2, 5]) and 2-term polynomials in t; lower bound decorative ∈ [0, 5]; the chain-rule upper-bound variant (upper limit x², a composite) is Low grain and excluded; answer alphabet {digits, x, ^, +, −}.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcab.definite-integral-power — Evaluate a one-term definite integral
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One antiderivative recall plus an endpoint evaluation (and a subtraction in the offset band) — Medium's upper half, 4–7s.
+Sample: ∫₀² 3x² dx = ? → 8 · Rule: int-exact · Params: integrands axⁿ with a a multiple of n + 1 (integer antiderivative coefficients); bounds integers ∈ [0, 4], zero lower bound in the base band (nonzero lower bounds form the subtract band); answers ∈ [1, 99].
+Kernels: [calcab.antiderivative-power-rule, prealg.evaluate-exponent, fk.subtraction-facts]
+
+### calcab.integral-additivity — Definite-integral properties
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One property recall (adjacent intervals add; reversal negates; constants factor) plus one signed operation — Medium's floor, ~3–4s.
+Sample: ∫₁³ f(x) dx = 5 and ∫₃⁷ f(x) dx = 2. ∫₁⁷ f(x) dx = ? → 7 · Rule: int-exact · Params: given values integers ∈ [−9, 9]; families: adjacent-interval additivity, bound reversal (∫₇¹ from ∫₁⁷), and constant-multiple ∫kf with k ∈ [2, 5], each keyed separately; answers ∈ [−45, 45]; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+### calcab.riemann-sum-compute — Compute a Riemann sum
+
+Rating: Low
+Why: Inherently multi-step at any speed — evaluate f at each sample point, multiply by the widths, and accumulate the running sum.
+Kernels: [alg1.evaluate-function, fk.times-tables, fk.addition-facts]
+
+### calcab.u-substitution — Integrate by u-substitution
+
+Rating: Low
+Why: Inherently multi-step at any speed — choose u, transform the integrand and differential (and bounds, if definite), integrate, then back-substitute.
+Kernels: [calcab.antiderivative-standard-table, calcab.antiderivative-power-rule, calcab.chain-rule-recall]
+
+**CED Unit 7 — Differential Equations.** (The BC-only topics of this unit — Euler's method and the logistic model — are recorded in the BC-only section's extension block.)
+
+### calcab.verify-de-solution — Verify a differential-equation solution
+
+Rating: Medium · Format: true-false · Render: unicode-inline
+Why: One differentiate-and-compare held mentally — 3–6s; genuinely a verification judgment.
+Sample: True or false: y = e³ˣ satisfies y′ = 3y → true · Rule: tf · Params: candidates Ceᵏˣ against y′ = ky, and sin kx / cos kx against y″ = −k²y (keyed separately); k ∈ [−5, 5] nonzero; false cases flip a sign or offset the coefficient by 1–2; families balanced 50/50.
+Kernels: [calcab.chain-rule-linear-inner, calcab.derivative-standard-table]
+
+### calcab.exponential-de-solution — General solution of y′ = ky
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One memorized solution shape (y = Ceᵏᵗ) plus a scan of the two classic traps — 3–5s.
+Sample: The general solution of dy/dt = 5y? → y = Ce⁵ᵗ (options: y = Ce⁵ᵗ · y = Ce⁻⁵ᵗ · y = 5eᵗ + C · y = e⁵ᵗ + C) · Rule: mc · Params: k nonzero ∈ [−9, 9]; the fixed option pool probes the sign of k and where C sits (factor vs added constant).
+Kernels: [calcab.chain-rule-linear-inner]
+
+### calcab.solve-separable-de — Solve a separable differential equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — separate the variables, integrate both sides, fit the constant to the initial condition, then isolate y.
+Kernels: [calcab.antiderivative-power-rule, calcab.antiderivative-standard-table, alg2.natural-log-facts, prealg.solve-one-step-equation]
+
+**CED Unit 8 — Applications of Integration.** (The BC-only arc-length topic is recorded in the BC-only section's extension block.)
+
+### calcab.average-value-from-integral — Average value from a given integral
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One formula recall (1/(b − a) times the integral) collapsing to a single division — 3–5s.
+Sample: ∫₁⁵ f(x) dx = 12. The average value of f on [1, 5]? → 3 · Rule: int-exact · Params: interval widths ∈ [2, 9]; integral values chosen so answers are integers ∈ [−12, 12]; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.division-facts, fk.subtraction-facts]
+
+### calcab.position-from-velocity-simple — Position from velocity and an initial value
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One antiderivative recall, one evaluation, one addition — Medium's upper half, 4–7s.
+Sample: v(t) = 2t and s(0) = 3. s(2) = ? → 7 · Rule: int-exact · Params: v linear or one-term quadratic with integer antiderivative values; t ∈ [1, 3]; initial values ∈ [−9, 9]; answers ∈ [−40, 40]; negative answers carry the touch-minus-key caveat.
+Kernels: [calcab.antiderivative-power-rule, prealg.evaluate-expression, fk.integer-add-sub]
+
+### calcab.area-between-curves — Area between curves
+
+Rating: Low
+Why: Inherently multi-step at any speed — find the intersections, subtract the functions the right way around, then integrate the difference.
+Kernels: [alg1.solve-quadratic-by-factoring, alg2.add-polynomials, calcab.definite-integral-power]
+
+### calcab.volume-disk-washer — Volumes by disks and washers
+
+Rating: Low
+Why: Inherently multi-step at any speed — set up π∫(R² − r²), square the radius functions, then integrate and evaluate.
+Kernels: [calcab.definite-integral-power, alg2.expand-binomial-square, prealg.circle-area-pi]
+
+### calcab.volume-cross-sections — Volumes by known cross-sections
+
+Rating: Low
+Why: Inherently multi-step at any speed — express the cross-sectional area from the base region, then integrate it along the axis.
+Kernels: [calcab.definite-integral-power, prealg.area-triangle, fk.perfect-squares]
+
+### AP Calculus AB checklist disposition table
+
+Every AB CED unit (1–8) plus the no-OpenStax cross-check row maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| CED 1 Limits and Continuity | calcab.special-trig-limits, calcab.ivt-guarantees-zero; the core limit toolkit → trig.limit-by-substitution, trig.limit-removable-factor, trig.limit-by-rationalizing (Low), trig.classify-discontinuity, trig.continuity-at-point (owned by Trig/Precalc — the registry's pre-flagged absorption, satisfied); limits at infinity → trig.horizontal-asymptote; infinite limits → trig.vertical-asymptote; squeeze theorem: recorded judgment — a bounding argument whose one drill-shaped instance is calcab.special-trig-limits; estimating limits from graphs and tables out-of-grain: graph/table reading — no drillable content beyond kernels trig.limit-by-substitution |
+| CED 2 Differentiation: Definition and Fundamental Properties | calcab.derivative-power-rule, calcab.derivative-standard-table, calcab.derivative-at-point, calcab.differentiate-polynomial, calcab.product-quotient-rule-recall, calcab.recognize-difference-quotient, calcab.apply-product-rule (Low), calcab.tangent-line-equation (Low); differentiability-implies-continuity: recorded judgment — concept vocabulary with no fact family |
+| CED 3 Differentiation: Composite, Implicit, and Inverse Functions | calcab.chain-rule-recall, calcab.chain-rule-linear-inner, calcab.derivative-inverse-trig-table, calcab.second-derivative-power, calcab.implicit-differentiation (Low), calcab.derivative-inverse-function-value (Low) |
+| CED 4 Contextual Applications of Differentiation | calcab.velocity-from-position, calcab.indeterminate-form-check, calcab.lhopital-apply (Low), calcab.related-rates (Low), calcab.linear-approximation (Low); interpreting the derivative in context out-of-grain: modeling prose — no drillable content beyond kernels calcab.velocity-from-position, calcab.derivative-sign-read |
+| CED 5 Analytical Applications of Differentiation | calcab.derivative-sign-read, calcab.concavity-sign-read, calcab.second-derivative-test-read, calcab.critical-point-quadratic, calcab.mvt-apply (Low), calcab.find-inflection-points (Low), calcab.absolute-extrema-closed-interval (Low), calcab.optimization (Low); Extreme Value Theorem: recorded judgment — an existence guarantee with no computation; curve sketching and derivative-graph reading out-of-grain: graph input/output — no drillable content beyond kernels calcab.derivative-sign-read, calcab.concavity-sign-read, calcab.critical-point-quadratic |
+| CED 6 Integration and Accumulation of Change | calcab.antiderivative-power-rule, calcab.antiderivative-standard-table, calcab.ftc-derivative-of-accumulation, calcab.definite-integral-power, calcab.integral-additivity, calcab.riemann-sum-compute (Low), calcab.u-substitution (Low); integrands needing long division or completing the square: recorded judgment — Low-grain composites of alg2.polynomial-long-division / alg1.complete-the-square and the antiderivative tables, no new kernel; accumulation-of-change word problems out-of-grain: modeling — no drillable content beyond kernels calcab.definite-integral-power, calcab.integral-additivity; BC-only techniques (integration by parts, partial fractions, improper integrals) → the BC-only section's extension block |
+| CED 7 Differential Equations | calcab.verify-de-solution, calcab.exponential-de-solution, calcab.solve-separable-de (Low); slope fields out-of-grain: graph input/output — no drillable content beyond kernels calcab.verify-de-solution; BC-only topics (Euler's method, logistic model) → the BC-only section's extension block |
+| CED 8 Applications of Integration | calcab.average-value-from-integral, calcab.position-from-velocity-simple, calcab.area-between-curves (Low), calcab.volume-disk-washer (Low), calcab.volume-cross-sections (Low); displacement vs total distance: recorded judgment — a sign-analysis composite of calcab.position-from-velocity-simple and calcab.derivative-sign-read, no separate entry; BC-only arc length → the BC-only section's extension block |
+| Cross-check — OpenStax | recorded: the document snapshots no OpenStax calculus TOC — per the plan, the AP CED is the sole checklist for the calculus sections, so there is no TOC diff to run; recorded here explicitly rather than silently omitted (the Geometry no-book row is the precedent) |
 
 ---
 
 ## BC-only
 
-Swept against CED Units 9–10 (parametric/polar/vector-valued; infinite sequences and series). *Authored in a later pass.*
+Swept against AP Calculus CED Units 9–10, the BC-only units — plus a clearly labeled **extension block** for the topics the CED marks BC-only *inside* the shared units (integration by parts, partial fractions, and improper integrals in unit 6; Euler's method and the logistic model in unit 7; arc length in unit 8): the checklist snapshot is unit-grain, so recording these here keeps "nothing dropped" honest without re-sweeping units the AB section owns. The same no-OpenStax condition as the AB section applies and is recorded in the cross-check row. The section lands 26 records (3 High / 15 Medium / 8 Low) plus 9 cross-reference rows. **This pass pays every remaining registry forward-flag:** the polar/parametric merge block the Trig/Precalc pass minted for exactly this sweep (trig.polar-to-rectangular, trig.parametric-evaluate, trig.eliminate-parameter — cross-referenced under CED 9), trig.geometric-series-converges, and **alg2.infinite-geometric-sum's BC clause** — the oldest outstanding flag in the registry, recorded during the Algebra 2 pass — all updated to satisfied. Series-convergence facts are the marquee fact-family territory the plan predicted: the p-series and ratio-test threshold reads below are pure-recall drills that the Low series composites (interval of convergence, Taylor construction, error bounds) cite as their fast kernels. Citations count toward the full-range registry column only (the primary window closed at Algebra 2 — expected). No pinned calibration entries live here; ratings are calibrated against the pinned set — true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions, MC entries against geo.triangle-congruence-criteria, fraction entries against prealg.simplify-fraction / prealg.fraction-add-unlike, two-number entries against alg1.read-slope-intercept / alg1.factor-pairs-sum-product. No new accepted-answer rules were needed.
+
+**CED Unit 9 — Parametric Equations, Polar Coordinates, and Vector-Valued Functions.** (The precalculus substrate is owned by Trig/Precalc — its OpenStax merge block was minted for this sweep; this unit's new grain is the calculus on top of it.)
+
+**Evaluating a parametric point at t** → see trig.parametric-evaluate (owned by Trig/Precalc).
+**Eliminating the parameter** → see trig.eliminate-parameter (owned by Trig/Precalc; Low).
+**Polar ↔ rectangular conversion** → see trig.polar-to-rectangular (owned by Trig/Precalc).
+**Vector addition and subtraction** → see trig.vector-add (owned by Trig/Precalc).
+**Speed / magnitude of a velocity vector** → see trig.complex-modulus (owned by Trig/Precalc — the same √(a² + b²) fact family, per its registry note).
+
+### calcbc.parametric-slope-formula-recall — Parametric slope formula
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: Pure formula recall, but the reciprocal look-alike forces a careful scan — 3–5s.
+Sample: For x = x(t), y = y(t), dy/dx = ? → (dy/dt)/(dx/dt) (options: (dy/dt)/(dx/dt) · (dx/dt)/(dy/dt) · (dy/dt)·(dx/dt) · dy/dt − dx/dt) · Rule: mc · Params: fixed 4-option pool — the correct quotient, its reciprocal, the product, and the difference malformation.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcbc.vector-derivative-evaluate — Derivative of a vector-valued function at t
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: Two parallel differentiate-and-evaluate moves plus the pair entry — 4–7s.
+Sample: r(t) = ⟨t², 3t⟩. r′(1) = ? → 2, 3 · Rule: pair-ordered · Params: components polynomial of degree ≤ 3 with coefficients ∈ [1, 5]; t ∈ [−2, 3]; the second-derivative variant r″ keys separately; components of the answer integers ∈ [−20, 20]; negative components carry the touch-minus-key caveat.
+Kernels: [calcab.derivative-power-rule, calcab.derivative-at-point]
+
+### calcbc.polar-area-formula-recall — Polar area formula
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: Pure formula recall; the ½ and the square are exactly what the look-alike options probe — 3–5s.
+Sample: The area swept by r = f(θ) from θ = α to θ = β is ? → ½∫r² dθ (options: ½∫r² dθ · ∫r² dθ · ½∫r dθ · 2π∫r dθ) · Rule: mc · Params: fixed 4-option pool permuting the ½ factor and the power of r (the shell-formula look-alike included).
+Kernels: No drillable kernel beyond entries already listed
+
+### calcbc.parametric-slope-at-point — Parametric slope at a point
+
+Rating: Low
+Why: Inherently multi-step at any speed — differentiate both components, form the quotient, then evaluate at the given t while holding both derivatives.
+Kernels: [calcbc.parametric-slope-formula-recall, calcab.derivative-at-point, prealg.simplify-fraction]
+
+### calcbc.second-derivative-parametric — Parametric second derivative
+
+Rating: Low
+Why: Inherently multi-step at any speed — differentiate dy/dx with respect to t, then divide by dx/dt again, holding the chain throughout.
+Kernels: [calcbc.parametric-slope-formula-recall, calcab.chain-rule-recall, alg1.simplify-rational-expression]
+
+### calcbc.polar-area-compute — Compute a polar-region area
+
+Rating: Low
+Why: Inherently multi-step at any speed — set up ½∫r², expand the square (with an identity where the integrand demands it), integrate, then evaluate the bounds.
+Kernels: [calcbc.polar-area-formula-recall, calcab.definite-integral-power, alg2.expand-binomial-square, alg2.pythagorean-identity-apply]
+
+**CED Unit 10 — Infinite Sequences and Series.** (Geometric-series convergence and sums are owned upstream — the flagged cross-references below, including alg2.infinite-geometric-sum's BC clause; this unit's new grain is the convergence-test fact families and the Taylor/Maclaurin machinery.)
+
+**Convergence of a geometric series** → see trig.geometric-series-converges (owned by Trig/Precalc — registry flag satisfied).
+**Sum of a convergent infinite geometric series** → see alg2.infinite-geometric-sum (owned by Algebra 2 — the BC clause its registry note carried since the Algebra 2 pass, satisfied here).
+**Finite geometric partial sums** → see alg2.geometric-series-sum (owned by Algebra 2; Low).
+**Limit of a rational sequence** → see trig.horizontal-asymptote (owned by Trig/Precalc — the same leading-term read, per its registry note).
+
+### calcbc.p-series-converges — p-series convergence
+
+Rating: High · Format: true-false
+Why: One p-read against the memorized p > 1 line — ≤3s; genuinely a verification judgment.
+Sample: True or false: 1 + 1/4 + 1/9 + 1/16 + ⋯ converges → true · Rule: tf · Params: p-series shown as 4 expanded terms with p ∈ {1/2, 1, 2, 3} (the harmonic p = 1 is the marquee false case); geometric look-alikes excluded — owned by trig.geometric-series-converges; families balanced 50/50.
+Kernels: [fk.perfect-squares]
+
+### calcbc.ratio-test-read — Ratio-test threshold
+
+Rating: High · Format: multiple-choice
+Why: One memorized threshold read (L < 1 converges, L > 1 diverges, L = 1 says nothing) plus a tap — ≤3s.
+Sample: The ratio test gives L = 1/2 for a series. The conclusion? → Converges absolutely (options: Converges absolutely · Diverges · Test is inconclusive) · Rule: mc · Params: L ∈ {0, 1/3, 1/2, 2/3, 1, 3/2, 2, ∞} spanning all three zones (L = 1 is the trap); fixed 3 options.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcbc.nth-term-test — nth-term divergence test
+
+Rating: Medium · Format: true-false
+Why: One term-limit read plus the test's one-way logic (it can only prove divergence) — 3–6s.
+Sample: True or false: 1/2 + 2/3 + 3/4 + 4/5 + ⋯ diverges → true · Rule: tf · Params: true cases have term limit ≠ 0 (rational terms with equal degrees); false cases claim the test *proves convergence* for terms → 0 (it never does) or claim divergence where the terms do vanish; families balanced 50/50.
+Kernels: [trig.horizontal-asymptote]
+
+### calcbc.alternating-series-converges — Alternating series test
+
+Rating: Medium · Format: true-false · Render: unicode-inline
+Why: Two quick condition checks (magnitudes decrease; terms → 0) — 3–6s; genuinely a verification judgment.
+Sample: True or false: 1 − 1/2 + 1/3 − 1/4 + ⋯ converges → true · Rule: tf · Params: alternating series shown as 4 expanded terms; true cases have decreasing magnitudes with limit 0; false cases break one condition (terms ↛ 0, or magnitudes not decreasing); families balanced 50/50.
+Kernels: [calcbc.nth-term-test]
+
+### calcbc.choose-convergence-test — Choose the convergence test
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: One structural classification against memorized cues (factorials → ratio; 1/nᵖ → p-series; (−1)ⁿ → alternating; rⁿ → geometric) — 3–6s; the trig.choose-triangle-law of series.
+Sample: Which test settles Σ n/3ⁿ? → Ratio test (options: Ratio test · p-series test · Alternating series test · Geometric series test) · Rule: mc · Params: series templates keyed to their canonical test (factorial/mixed exponential terms → ratio; pure 1/nᵖ → p-series; alternating-sign → alternating; pure rⁿ → geometric); fixed 4 options; templates where two tests apply equally are excluded.
+Kernels: [calcbc.p-series-converges, trig.geometric-series-converges, calcbc.ratio-test-read]
+
+### calcbc.absolute-conditional-classify — Absolute vs conditional convergence
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Two chained convergence reads (the series; then its absolute-value version) — Medium's upper half, 4–7s.
+Sample: Σ (−1)ⁿ⁺¹/n is ? → Conditionally convergent (options: Absolutely convergent · Conditionally convergent · Divergent) · Rule: mc · Params: the three classic families balanced — alternating harmonic (conditional), alternating p > 1 (absolute), alternating with terms ↛ 0 (divergent); fixed 3 options.
+Kernels: [calcbc.p-series-converges, calcbc.alternating-series-converges, calcbc.nth-term-test]
+
+### calcbc.maclaurin-table-recall — Maclaurin series table
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Pure table recall, but the look-alike expansions force a term-pattern scan (factorials? alternating? odd powers?) — 3–6s.
+Sample: 1 + x + x²/2! + x³/3! + ⋯ is the Maclaurin series of ? → eˣ (options: eˣ · sin x · cos x · 1/(1 − x)) · Rule: mc · Params: the four table series (eˣ, sin x, cos x, 1/(1 − x)) asked in both directions — series shown, name the function (as sampled) and function shown, pick the expansion; each direction keys separately; fixed 4-option pool.
+Kernels: [alg2.factorial]
+
+### calcbc.maclaurin-coefficient — Coefficient in a table Maclaurin series
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One table recall plus one factorial read — 3–6s on the assumed fraction pad.
+Sample: The coefficient of x³ in the Maclaurin series of eˣ? → 1/6 · Rule: frac-lowest-terms · Params: functions from the table; asked degree n ∈ [2, 5]; answers ±1/n! (already lowest terms); the sign band comes from the sin/cos alternation; the vanishing sin/cos slots (coefficient 0) are excluded — answer-shape split; negative fractions put the sign on the numerator per the format spec.
+Kernels: [calcbc.maclaurin-table-recall, alg2.factorial]
+
+### calcbc.taylor-coefficient-from-derivative — Taylor coefficient from a derivative value
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One formula recall (cₙ = f⁽ⁿ⁾(a)/n!) collapsing to a single division — 3–5s.
+Sample: f⁽³⁾(0) = 12. The coefficient of x³ in f's Maclaurin series? → 2 · Rule: int-exact · Params: n ∈ [2, 4]; f⁽ⁿ⁾(0) a multiple of n! with quotients ∈ [−9, 9]; the reverse direction (coefficient given, derivative asked) keys separately; negative answers carry the touch-minus-key caveat.
+Kernels: [alg2.factorial, fk.division-facts]
+
+### calcbc.radius-geometric-form — Radius of convergence, geometric form
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One |r| < 1 read mapped onto the geometric ratio x/a — 3–5s.
+Sample: Σ (x/3)ⁿ converges exactly when |x| < R. R = ? → 3 · Rule: int-exact · Params: forms (x/a)ⁿ and ((x − c)/a)ⁿ (centered band asks for R only) with a ∈ [2, 9]; the (ax)ⁿ family (R = 1/a, a fraction) is excluded — answer-shape split; answers ∈ [2, 9].
+Kernels: [trig.geometric-series-converges]
+
+### calcbc.interval-of-convergence — Interval of convergence
+
+Rating: Low
+Why: Inherently multi-step at any speed — run the ratio test on the general term, solve the resulting inequality, then check both endpoints with separate convergence arguments.
+Kernels: [calcbc.ratio-test-read, calcbc.radius-geometric-form, calcbc.p-series-converges, calcbc.alternating-series-converges]
+
+### calcbc.taylor-polynomial-build — Build a Taylor polynomial
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute successive derivatives at the center, divide each by its factorial, and assemble the polynomial while holding the list.
+Kernels: [calcbc.taylor-coefficient-from-derivative, calcab.derivative-standard-table, calcab.differentiate-polynomial]
+
+### calcbc.lagrange-error-bound — Lagrange error bound
+
+Rating: Low
+Why: Inherently multi-step at any speed — bound the (n + 1)st derivative, assemble M·|x − a|ⁿ⁺¹/(n + 1)!, then evaluate the bound.
+Kernels: [calcbc.taylor-coefficient-from-derivative, alg2.factorial, prealg.evaluate-exponent]
+
+**BC-scope extensions within shared CED units 6–8.** The CED marks these topics BC-only inside units the AB section owns; the unit-grain checklist snapshot cannot separate them, so they are enumerated here (each AB disposition row for units 6–8 points at this block). Same entry grammar, same registry mediation.
+
+### calcbc.parts-formula-recall — Integration-by-parts formula
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: Pure formula recall with a sign-and-placement trap in the options — 3–5s. (CED 6, BC scope)
+Sample: ∫u dv = ? → uv − ∫v du (options: uv − ∫v du · uv + ∫v du · vu − ∫u dv · u dv − ∫uv) · Rule: mc · Params: fixed 4-option pool permuting the sign and the residual-integral contents.
+Kernels: [calcab.product-quotient-rule-recall]
+
+### calcbc.integration-by-parts — Integrate by parts
+
+Rating: Low
+Why: Inherently multi-step at any speed — choose u and dv, differentiate and antidifferentiate, assemble uv − ∫v du, then finish the residual integral. (CED 6, BC scope)
+Kernels: [calcbc.parts-formula-recall, calcab.antiderivative-standard-table, calcab.derivative-standard-table]
+
+### calcbc.partial-fraction-decomposition — Partial fractions
+
+Rating: Low
+Why: Inherently multi-step at any speed — factor the denominator, set up unknown numerators, solve the coefficient system, then integrate the pieces. (CED 6, BC scope)
+Kernels: [alg1.factor-simple-quadratic, prealg.solve-2x2-system, calcab.antiderivative-standard-table]
+
+### calcbc.improper-p-integral-converges — Improper p-integral convergence
+
+Rating: Medium · Format: true-false · Render: needs-math-render
+Why: One p-threshold read — the integral twin of the p-series fact — 3–5s; genuinely a verification judgment. (CED 6, BC scope)
+Sample: True or false: ∫₁^∞ 1/x² dx converges → true · Rule: tf · Params: ∫₁^∞ 1/xᵖ with p ∈ {1/2, 1, 2, 3} (p = 1 the trap); the ∫₀¹ endpoint-singularity band flips the criterion (converges for p < 1) and keys separately; families balanced 50/50.
+Kernels: [calcbc.p-series-converges, calcab.antiderivative-power-rule]
+
+### calcbc.euler-step — One Euler-method step
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One slope evaluation plus one multiply-and-add held mentally — 4–7s. (CED 7, BC scope)
+Sample: dy/dx = x + y with y(0) = 1, step size h = 1. One Euler step gives y(1) ≈ ? → 2 · Rule: int-exact · Params: f(x, y) linear with coefficients ∈ [1, 3]; h ∈ {1, 2}; exactly one step (multi-step tables are Low grain and excluded); answers integers ∈ [−20, 20]; negative answers carry the touch-minus-key caveat.
+Kernels: [prealg.evaluate-expression, fk.times-tables, fk.integer-add-sub]
+
+### calcbc.logistic-limit-read — Carrying capacity of a logistic model
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One carrying-capacity read off the memorized logistic shape — ≤3s. (CED 7, BC scope)
+Sample: dP/dt = 0.5P(1 − P/400). lim (t → ∞) P = ? → 400 · Rule: int-exact · Params: forms kP(1 − P/M) and kP(M − P) (limit M in both, but the read differs — keyed separately); M round values ∈ [50, 900]; k decorative; the fastest-growth read (P = M/2) is a stretch band keyed separately.
+Kernels: No drillable kernel beyond entries already listed
+
+### calcbc.arc-length-formula-recall — Arc-length formula
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: Pure formula recall with sign, root, and volume-formula look-alikes forcing the scan — 3–6s. (CED 8, BC scope; the parametric family serves CED 9)
+Sample: The arc length of y = f(x) for a ≤ x ≤ b is ? → ∫ₐᵇ √(1 + (f′(x))²) dx (options: ∫ₐᵇ √(1 + (f′(x))²) dx · ∫ₐᵇ √(1 − (f′(x))²) dx · ∫ₐᵇ (1 + f′(x)²) dx · π∫ₐᵇ f(x)² dx) · Rule: mc · Params: the function form (sampled) and the parametric form ∫√((dx/dt)² + (dy/dt)²) dt as two keyed families; fixed 4-option pools permuting the sign under the root, the root itself, and the disk-volume look-alike.
+Kernels: No drillable kernel beyond entries already listed (see prealg.pythagorean-hypotenuse — the formula is the Pythagorean idea recalled whole)
+
+### BC-only checklist disposition table
+
+Both BC-only CED units (9–10), the three BC-scope extension rows for shared units 6–8, and the no-OpenStax cross-check row map to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| CED 9 Parametric Equations, Polar Coordinates, and Vector-Valued Functions | calcbc.parametric-slope-formula-recall, calcbc.vector-derivative-evaluate, calcbc.polar-area-formula-recall, calcbc.parametric-slope-at-point (Low), calcbc.second-derivative-parametric (Low), calcbc.polar-area-compute (Low); parametric evaluation → trig.parametric-evaluate, parameter elimination → trig.eliminate-parameter (Low), polar ↔ rectangular → trig.polar-to-rectangular (owned by Trig/Precalc — the merge block minted for this sweep, flags satisfied); vector addition → trig.vector-add; speed/magnitude → trig.complex-modulus (the √(a² + b²) family); parametric arc length → calcbc.arc-length-formula-recall (extension block — the parametric family); vector-valued integrals: recorded judgment — componentwise application of calcab.antiderivative-power-rule, no new fact family; polar-curve graphing out-of-grain: graph output — no drillable content beyond kernels trig.polar-to-rectangular, geo.exact-trig-values |
+| CED 10 Infinite Sequences and Series | calcbc.p-series-converges, calcbc.ratio-test-read, calcbc.nth-term-test, calcbc.alternating-series-converges, calcbc.choose-convergence-test, calcbc.absolute-conditional-classify, calcbc.maclaurin-table-recall, calcbc.maclaurin-coefficient, calcbc.taylor-coefficient-from-derivative, calcbc.radius-geometric-form, calcbc.interval-of-convergence (Low), calcbc.taylor-polynomial-build (Low), calcbc.lagrange-error-bound (Low); geometric convergence → trig.geometric-series-converges, infinite geometric sums → alg2.infinite-geometric-sum (BC clause paid), partial sums → alg2.geometric-series-sum (Low); sequence limits → trig.horizontal-asymptote; direct/limit comparison tests: recorded judgment — the choose-the-test read is hosted by calcbc.choose-convergence-test and execution is Low-grain with no kernel beyond calcbc.p-series-converges; telescoping series: recorded judgment — partial-fraction rewrite plus cancellation bookkeeping, Low grain with no kernel beyond calcbc.partial-fraction-decomposition; term-by-term differentiation/integration of power series: recorded judgment — calcab.derivative-power-rule / calcab.antiderivative-power-rule applied inside a sum, no new fact family |
+| CED 6 (BC scope) — advanced integration techniques | calcbc.parts-formula-recall, calcbc.integration-by-parts (Low), calcbc.partial-fraction-decomposition (Low), calcbc.improper-p-integral-converges |
+| CED 7 (BC scope) — Euler's method and the logistic model | calcbc.euler-step, calcbc.logistic-limit-read; logistic solution curves and interpretation out-of-grain: modeling — no drillable content beyond kernels calcbc.logistic-limit-read, calcab.exponential-de-solution |
+| CED 8 (BC scope) — arc length | calcbc.arc-length-formula-recall; arc-length computation: recorded judgment — the setup is the recall entry and the evaluation is a Low-grain composite of calcab.definite-integral-power with no new kernel |
+| Cross-check — OpenStax | recorded: same condition as the AB section — no OpenStax calculus snapshot exists in this document; the AP CED is the sole checklist per the plan |
 
 ---
 

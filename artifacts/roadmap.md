@@ -50,9 +50,9 @@ Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_10
 
 ---
 
-## 🎮 MathRaiders (FastMath game)
+## 🎮 The Gauntlet (FastMath game — formerly MathRaiders)
 
-**M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/raiders`, in main nav).
+**M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/gauntlet` — renamed from `/raiders`, redirect in place; in main nav).
 Boss-battle FastMath: correct answers do damage (speed + streak multipliers), wrong answers cost player HP; 2-minute raids, 4 bosses with generated arenas + sprites (Nano Banana Pro, `scripts/gen-sprites.mjs`), XP + local save. Topics: ×, ÷, +, − plus GCD, LCM, common denominator, and triangle congruence (rendered figures, multiple choice). Fully open demo for now, per direction.
 
 **M2 · Deposit gating + account saves** *(dev)* — 🔴 Not started.
@@ -62,7 +62,7 @@ When product wants it: full topic set / Mastery Trials behind a paid deposit (de
 Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudio cues (hits, crits, misses, final-seconds ticks, fanfares) with mute; adaptive trainer (per-fact speed/accuracy, weak facts re-served ~35%); teach-on-miss (correct answer shown before advancing); post-raid "Train these" report + waste %; grade bands (3–4/5–6/7–8); boss medals (🥉🥈🥇) + sequential boss unlocks; Mastery Trial survival mode (+2s/−4s, waves, personal best); daily raid streak; XP titles + bar; first-run how-to; leave-raid confirm; tab-hidden timer pause; reduced-motion support; congruence problems rotate + vary marks. Multiplayer deliberately skipped (product call).
 
 **M4 · Later game ideas** *(dev)* — 🔴 Not started.
-Rename pending (product to pick); more bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
+More bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
 
 ## 🧊 Phase 3 / Later
 

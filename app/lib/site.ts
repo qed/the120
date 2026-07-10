@@ -28,7 +28,7 @@ export const nav = [
   { label: "The groups", href: "/#groups" },
   { label: "How it works", href: "/#how" },
   { label: "Parents", href: "/parents" },
-  { label: "MathRaiders", href: "/raiders" },
+  { label: "The Gauntlet", href: "/gauntlet" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;

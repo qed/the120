@@ -73,7 +73,7 @@ const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0
 
 type Phase = "menu" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
 
-export default function RaidersGame() {
+export default function GauntletGame() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
@@ -288,8 +288,8 @@ function Menu({
       </div>
 
       <h1 className="mt-6 text-center text-5xl font-bold tracking-tight sm:text-6xl">
-        <span className="bg-gradient-to-r from-indigo-400 to-blue-500 bg-clip-text text-transparent">MATH</span>{" "}
-        <span className="bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent">RAIDERS</span>
+        <span className="bg-gradient-to-r from-indigo-400 to-blue-500 bg-clip-text text-transparent">THE</span>{" "}
+        <span className="bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent">GAUNTLET</span>
       </h1>
       <p className="mt-2 text-center text-white/70">
         Answer fast. Every correct answer strikes the boss — speed and streaks hit harder.

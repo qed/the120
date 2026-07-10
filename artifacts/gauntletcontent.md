@@ -187,11 +187,29 @@ Ten rules, closed set. Format ↔ rule compatibility is fixed by the Formats col
 
 ## Kernel registry
 
-Live registry of every kernel slug in the document. Maintained continuously from the first authoring pass; citations may only use slugs listed here. In-degree columns are computed in the final consistency pass (blank until then). *Currently empty — populated by the authoring passes.*
+Live registry of every kernel slug in the document. Maintained continuously from the first authoring pass; citations may only use slugs listed here. In-degree columns are computed in the final consistency pass (blank until then).
 
 | Slug | One-line definition | Owning entry | Canonical-home note | In-degree (primary) | In-degree (full) |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| fk.times-tables | Single-fact multiplication recall (factor families through 12) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
+| fk.division-facts | Division facts as times-table inverses | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
+| fk.addition-facts | Addition facts and fluent mental addition (sums ≤ 50) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
+| fk.subtraction-facts | Subtraction facts and fluent mental subtraction (within 50) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
+| prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
+| prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
+| prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
+| geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | minted during calibration; Geometry pass absorbs | | |
+| prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra pinned stub | — | | |
+| prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra pinned stub | — | | |
+| prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra pinned stub | — | | |
+| prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra pinned stub | — | | |
+| prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra pinned stub | — | | |
+| prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra pinned stub | — | | |
+| alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 pinned stub | — | | |
+| alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 pinned stub | — | | |
+| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 pinned stub | — | | |
+| alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 pinned stub | — | | |
+| alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 pinned stub | — | | |
 
 ---
 
@@ -243,7 +261,106 @@ AB = Units 1–8; BC = Units 1–10: 1 Limits and Continuity; 2 Differentiation:
 
 ## Calibration anchors & pinned reference set
 
-The eight existing game topics rated as worked examples of the tier definitions, plus ~10 pinned reference entries covering the tier × format cells the anchors miss. The recalibration standard for the final consistency pass. *Authored in a later pass.*
+The eight existing game topics rated as worked examples of the tier definitions, plus eleven pinned reference entries covering the tier × format cells the anchors miss. **This set is the recalibration standard:** the Unit 9 consistency pass compares every later entry's rating against these pinned examples and adjusts outliers with a note — a later entry claiming High must be plausibly as fast as the High pins below; anything slower than the Medium pins is Low.
+
+**Where these entries live.** The eight anchor entries are authored in this section (they are the document's worked examples and must be readable before any course section); each is a Foundational/early entry whose owning course pass absorbs it in place — the Foundational-kernels pass absorbs the four `fk.` anchors, the Pre-Algebra pass the three `prealg.` anchors, and the Geometry pass `geo.triangle-congruence-criteria`. The eleven reference entries live as **pinned stubs inside their proper course sections** (Pre-Algebra and Algebra 1) and are pinned here by slug in the calibration table, never duplicated.
+
+**Surface assumptions vs. observed behavior (anchors).** Per the conditional-rating rule, anchors are rated under the Input-format legend's *assumed* surfaces, not observed current behavior — but for `single-number` and `multiple-choice` the assumed model and the shipped engine coincide (length-based auto-judge with no Enter; tap-to-answer), and the proposed game pad shares the OS keyboard's ~250ms-per-tap time model, so these eight ratings double as observations of the live game. The one behavioral divergence — the proposed leading-zero normalization for `single-number` — is unreachable under auto-judge and rating-neutral. New-format entries (everything in the reference set except the MC-adjacent `true-false`) have **no** shipped counterpart: those ratings are conditional on the assumed Enter-to-submit surfaces.
+
+**The eight anchors** — every entry below is generated by `app/gauntlet/game/problems.ts` today; `Params:` notes quote the actual `R`-table bounds per band (g34 / g56 / g78). Each anchor ends with an *Anchor rationale* line stating which tier boundary it is the worked example for.
+
+### fk.times-tables — Multiplication facts
+
+Rating: High · Format: single-number
+Why: Pure single-fact recall — the tier definition's "pure recall" case verbatim; ~1s think + ≤0.75s entry.
+Sample: 7 × 8 → 56 · Rule: int-exact · Params: both factors uniform in `R.mul` — g34 [2,6] / g56 [2,10] / g78 [2,12]; products ≤ 144 (answers 1–3 digits). Per-fact keys are commutative-normalized (`mul:7×8`).
+Kernels: No drillable kernel beyond entries already listed
+*Anchor rationale:* pins the **High interior** — the fastest fact family the game hosts; every later "pure recall" claim is measured against this.
+
+### fk.division-facts — Division facts (times-table inverses)
+
+Rating: High · Format: single-number
+Why: One inverse-table lookup, no transformation — still the tier definition's "pure recall".
+Sample: 56 ÷ 8 → 7 · Rule: int-exact · Params: divisor and quotient each drawn from `R.mul` — g34 [2,6] / g56 [2,10] / g78 [2,12]; the dividend is their product (≤ 36 / 100 / 144), so division is always exact and answers are 1–2 digit positive integers.
+Kernels: [fk.times-tables]
+*Anchor rationale:* pins **High via inverse recall** — shows that reaching a fact through its inverse lookup does not drop a tier.
+
+### fk.addition-facts — Addition facts and mental two-digit addition
+
+Rating: High · Format: single-number
+Why: Single-digit sums are pure recall; top-band two-digit sums are one fluent mental step still inside ≈ ≤3s.
+Sample: 9 + 7 → 16 · Rule: int-exact · Params: sums capped at `R.addMax` — g34 12 / g56 20 / g78 50; first addend ∈ [2, max−2], second ∈ [2, max−first], so both addends ≥ 2 and the sum never exceeds the band cap.
+Kernels: No drillable kernel beyond entries already listed
+*Anchor rationale:* pins **High's upper edge** — g78 sums near 50 (e.g. 27 + 19) are the slowest additions still rated High.
+
+### fk.subtraction-facts — Subtraction facts and mental two-digit subtraction
+
+Rating: High · Format: single-number
+Why: Fact-family recall at small bands; g78 borrowing cases (e.g. 43 − 17) are one fluent mental step that stays ≈ ≤3s.
+Sample: 14 − 6 → 8 · Rule: int-exact · Params: minuend ∈ [4, `R.addMax`] (g34 12 / g56 20 / g78 50), subtrahend ∈ [1, minuend−1]; all answers are positive integers — the current game never emits a negative.
+Kernels: [fk.addition-facts]
+*Anchor rationale:* pins the **High→Medium boundary from above** — the top-band borrowing cases are the reference for "still High, barely"; anything slower than these must claim Medium.
+
+### prealg.gcd-two-numbers — Greatest common divisor of two small numbers
+
+Rating: Medium · Format: single-number
+Why: One mental transformation — extracting the common-factor structure of two 2-digit numbers — squarely the tier definition's 3–8s case.
+Sample: GCD(36, 24) → 12 · Rule: int-exact · Params: built as seed × multiplier — seed g from `R.gcdFactors` (g34 {2,3,4,5} / g56 {2…7} / g78 {2…9}), one operand g·{2…5}, the other g·{2…6} (g·7 on collision), larger printed first; operands ≤ 63 (g78). Note: the true GCD can exceed the seed when the multipliers share a factor (36 = 6·6, 24 = 6·4 → GCD 12, not 6) — the answer is gcd(a, b), not the seed.
+Kernels: [fk.times-tables, fk.division-facts]
+*Anchor rationale:* pins the **Medium floor** — the smallest genuine one-transformation skill the game currently hosts; anything faster than this should claim High.
+
+### prealg.lcm-two-numbers — Least common multiple of two small numbers
+
+Rating: Medium · Format: single-number
+Why: One transformation — run up the multiples of the larger operand until the smaller divides — 3–8s for a fluent student at band values.
+Sample: LCM(8, 12) → 24 · Rule: int-exact · Params: two distinct picks from `R.lcmPool` — g34 {2,3,4,5,6} / g56 {2,3,4,5,6,8,10} / g78 {2,3,4,5,6,8,9,10,12}, smaller printed first; answers capped at `R.lcmCap` 40 / 90 / 144 (pairs over the cap are regenerated).
+Kernels: [fk.times-tables]
+*Anchor rationale:* pins the **Medium interior** — the canonical "one mental transformation" worked example.
+
+### prealg.common-denominator — Least common denominator of two fractions
+
+Rating: Medium · Format: single-number
+Why: Identical computation to prealg.lcm-two-numbers plus a longer prompt to parse — total response time counts the reading, keeping it Medium with less headroom.
+Sample: Least common denominator of 1/4 and 5/6 → 12 · Rule: int-exact · Params: denominators are two distinct picks from `R.lcmPool` with LCM ≤ `R.lcmCap` (same pools and caps as LCM: 40 / 90 / 144); numerators ∈ [1, denominator−1] are decorative — the answer is the LCM of the denominators.
+Kernels: [prealg.lcm-two-numbers]
+*Anchor rationale:* pins **prompt-reading overhead** — the worked example that a wordier prompt spends tier budget without changing the math.
+
+### geo.triangle-congruence-criteria — Which congruence criterion applies
+
+Rating: Medium · Format: multiple-choice · Render: needs-figure
+Why: One judgment — read the tick/angle marks off the figure and match a memorized criterion — plus 5-option scan time, landing mid-Medium.
+Sample: [marked triangle pair] Which criterion proves these triangles congruent? → SAS · Rule: mc · Params: answer uniform over the fixed 5 options {SSS, SAS, ASA, AAS, Not enough info}; mark placement rotates through 3 offsets; figure sides are display-only px values in [60,90] / [70,100] / [80,110] with rotations ±25° (second triangle +{0, 90, 180}°); no band scaling.
+Kernels: No drillable kernel beyond entries already listed
+*Anchor rationale:* pins **Medium × multiple-choice** — the worked example that option-scan and figure-reading time count as thinking time.
+*Slug note:* minted with the `geo.` prefix now (congruence criteria are Geometry grain); the Geometry pass absorbs this anchor into its section as the canonical entry.
+
+**The pinned reference set** — eleven entries covering the tier × format cells the anchors miss: the Medium and Low tiers get non-single-number worked examples, and each of `two-numbers`, `short-expression`, `fraction`, `decimal`, and `true-false` gets at least one pin (`single-number` and `multiple-choice` are covered by anchors). Each is a real drillable skill authored as a pinned stub in its proper course section — see the Pre-Algebra and Algebra 1 sections — and pinned here by slug only.
+
+**Calibration table** — the full pinned set. Unit 9's recalibration compares all later entries against this table: same tier ⇒ comparable total response time; every format's first later entry is checked against its format pins here.
+
+| Pinned slug | Tier | Format · Rule | What it pins |
+|---|---|---|---|
+| fk.times-tables | High | single-number · int-exact | High interior — pure-recall baseline |
+| fk.division-facts | High | single-number · int-exact | High via inverse recall |
+| fk.addition-facts | High | single-number · int-exact | High upper edge (top-band 2-digit sums) |
+| fk.subtraction-facts | High | single-number · int-exact | High→Medium boundary from above (borrowing cases) |
+| prealg.gcd-two-numbers | Medium | single-number · int-exact | Medium floor — smallest genuine transformation |
+| prealg.lcm-two-numbers | Medium | single-number · int-exact | Medium interior — canonical one-transformation case |
+| prealg.common-denominator | Medium | single-number · int-exact | Prompt-reading overhead counts toward the tier |
+| geo.triangle-congruence-criteria | Medium | multiple-choice · mc | Medium × MC — option-scan and figure time count |
+| prealg.percent-to-decimal | High | decimal · dec-exact | High × decimal — entry-dominated High (Surface-sensitive) |
+| prealg.simplify-fraction | High | fraction · frac-lowest-terms | High × fraction boundary (Surface-sensitive) |
+| prealg.fraction-add-unlike | Medium | fraction · frac-lowest-terms | Medium × fraction — chained transformation held mentally |
+| prealg.multiply-decimals | Medium | decimal · dec-exact | Medium floor × decimal |
+| prealg.divisibility-rule-check | High | true-false · tf | High × true-false — rule verification, one tap |
+| prealg.compare-fractions | Medium | true-false · tf | Medium × true-false — binary judgment needing a transformation |
+| alg1.factor-pairs-sum-product | Medium | two-numbers · pair-unordered | Medium × two-numbers (unordered pair) |
+| alg1.read-slope-intercept | High | two-numbers · pair-ordered | High × two-numbers (ordered pair; Surface-sensitive) |
+| alg1.distribute-linear | High | short-expression · expr-commutative-ws | High × short-expression — tiny token count (Surface-sensitive) |
+| alg1.factor-simple-quadratic | Medium | short-expression · factored-commutative-ws | Medium ceiling × short-expression — flips Low at 2× entry time (Surface-sensitive) |
+| alg1.solve-quadratic-by-factoring | Low | — | The Low worked example — inherently multi-step, mined for kernels |
+
+Coverage check: every format in the legend has at least one pin (single-number ×7, multiple-choice ×1, decimal ×2, fraction ×2, true-false ×2, two-numbers ×2, short-expression ×2) and every tier has at least one pin (High ×9, Medium ×9, Low ×1). Rule coverage: 9 of the 10 accepted-answer rules have a pinned exemplar; `frac-any-equivalent` does not — the first course entry citing it is calibrated against the two fraction pins.
 
 ---
 
@@ -257,11 +374,102 @@ Sub-Pre-Algebra skills (`fk.` slugs) that course entries cite as prerequisites �
 
 Swept against the KA Pre-Algebra checklist (15 units) with the Prealgebra 2e cross-check; includes the course's checklist-disposition table. *Authored in a later pass.*
 
+**Stub — pinned reference entries.** The six entries below were authored during calibration; this course's pass absorbs this stub in place (the entries stay, the stub framing goes).
+
+### prealg.percent-to-decimal — Percent → decimal conversion
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: decimal · Surface-sensitive
+Why: Pure rule recall (shift the point two places) — ~0.5s think + ~1.25s entry on the assumed decimal pad; entry is most of the budget, so a 2× slower surface would tip it to Medium.
+Sample: Write 35% as a decimal → 0.35 · Rule: dec-exact · Params: integer percents ∈ [1, 150]; answers normalize to at most 2 decimal places under dec-exact.
+Kernels: No drillable kernel beyond entries already listed
+
+### prealg.simplify-fraction — Reduce a fraction to lowest terms
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: fraction · Surface-sensitive
+Why: Fluent students recognize the common factor on sight — one step, ~1.5s think + ~1s entry on the assumed fraction pad; sits at the High boundary and flips to Medium if entry runs 2× slow.
+Sample: Write 6/8 in lowest terms → 3/4 · Rule: frac-lowest-terms · Params: built as (a·g)/(b·g) with gcd(a, b) = 1, a, b ∈ [1, 9], g ∈ [2, 6]; given denominators ≤ 54.
+Kernels: [fk.times-tables, fk.division-facts]
+
+### prealg.fraction-add-unlike — Add two fractions with unlike denominators
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: fraction
+Why: One chained transformation held mentally — find the LCD, rescale, add, reduce — ~4–6s total, safely inside the 3–8s tier.
+Sample: 1/2 + 1/3 → 5/6 · Rule: frac-lowest-terms · Params: distinct denominators from {2, 3, 4, 5, 6, 8, 10, 12} with LCD ≤ 24; answers in lowest terms, improper allowed (1/2 + 2/3 → 7/6).
+Kernels: [prealg.common-denominator, fk.addition-facts, fk.times-tables]
+
+### prealg.multiply-decimals — Multiply two one-place decimals
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: decimal
+Why: One transformation — times-table product plus a decimal-place count — landing at the Medium floor (~3–4s total).
+Sample: 0.3 × 0.4 → 0.12 · Rule: dec-exact · Params: both factors are tenths in [0.2, 0.9]; digit products that are multiples of 10 (e.g. 0.2 × 0.5) are excluded so the place count is always exercised and dec-exact normalization never hides a trailing zero.
+Kernels: [fk.times-tables]
+
+### prealg.divisibility-rule-check — Divisibility-rule verification
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: true-false
+Why: One rule application (digit sum or last-digit test) plus a single tap ≈ 2s total; true-false is legitimate here because the drillable skill IS the rule-based verification — the numeric restatement ("remainder of 51 ÷ 3") drills slower long division instead of the rule.
+Sample: True or false: 51 is divisible by 3 → true · Rule: tf · Params: divisors ∈ {2, 3, 4, 5, 6, 9, 10}; dividends 2–3 digits; families generated balanced 50/50 true/false with near-miss false cases (remainder 1–2).
+Kernels: [fk.addition-facts, fk.division-facts]
+
+### prealg.compare-fractions — Verify a fraction inequality
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: true-false
+Why: One transformation — cross-multiply and compare — ~3–5s; the judgment is genuinely binary (verify a claimed inequality), which is what true-false is for.
+Sample: True or false: 3/5 > 2/3 → false · Rule: tf · Params: denominators ≤ 12; values distinct but within ~1/6 of each other so cross-multiplication is genuinely required; families balanced 50/50 true/false.
+Kernels: [fk.times-tables]
+
 ---
 
 ## Algebra 1
 
 Swept against KA Algebra 1 units 1–15 with the Elementary Algebra 2e cross-check (must catch the KA statistics gap). *Authored in a later pass.*
+
+**Stub — pinned reference entries.** The five entries below were authored during calibration; this course's pass absorbs this stub in place (the entries stay, the stub framing goes).
+
+### alg1.factor-pairs-sum-product — Two numbers from their sum and product
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: two-numbers
+Why: One mental search through a factor-pair family — the core inner move of factoring — ~3–6s think + ~1.25s entry on the assumed two-number pad.
+Sample: Two numbers with sum 7 and product 12 → 3, 4 · Rule: pair-unordered · Params: pinned (all-positive) version: pair members ∈ [2, 12], so sums ≤ 24 and products ≤ 144; sign variants (negative pairs) are authored in the full Algebra 1 pass.
+Kernels: [fk.times-tables, fk.addition-facts]
+
+### alg1.read-slope-intercept — Read slope and y-intercept from y = mx + b
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: two-numbers · Surface-sensitive
+Why: Pure read-off, no transformation — ~1s think + ~1.25s entry; entry dominates the High budget, hence the marker.
+Sample: y = 3x − 2 — slope, then y-intercept → 3, -2 · Rule: pair-ordered · Params: m and b nonzero integers ∈ [−9, 9]; negative answers carry the engine contract's touch-minus-key caveat until the proposed pad exists.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg1.distribute-linear — Distribute a constant over a binomial
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: short-expression · Surface-sensitive
+Why: One mental step (two times-table products) with a 5-token answer ≈ 1.5s entry — the worked proof that short-expression CAN be High when the token count is tiny; flips to Medium at 2× entry time.
+Sample: Expand 3(x + 4) → 3x+12 · Rule: expr-commutative-ws · Params: outer constant ∈ [2, 9]; binomial x ± c with c ∈ [1, 9]; answer alphabet {digits, x, +, −}.
+Kernels: [fk.times-tables]
+
+### alg1.factor-simple-quadratic — Factor a monic quadratic
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: One transformation (the sum-product search) but a 12-token answer ≈ 3.25s of pure entry — ~5–8s total, at Medium's ceiling; flips to Low at 2× entry time, hence the marker.
+Sample: Factor: x² + 7x + 12 → (x+3)(x+4) · Rule: factored-commutative-ws · Params: monic x² + bx + c with both roots ∈ [1, 9] in the pinned version (b ≤ 18, c ≤ 81); sign variants in the full Algebra 1 pass.
+Kernels: [alg1.factor-pairs-sum-product]
+
+### alg1.solve-quadratic-by-factoring — Solve x² + bx + c = 0 by factoring
+
+*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Low
+Why: Inherently multi-step at any speed — factor, apply the zero-product property, read off both roots — the tier definition's Low case even for a fluent student.
+Kernels: [alg1.factor-simple-quadratic, alg1.factor-pairs-sum-product]
 
 ---
 

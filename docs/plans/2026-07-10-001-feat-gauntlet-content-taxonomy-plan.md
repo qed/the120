@@ -167,7 +167,7 @@ Kernels: [<slug>, <slug>] | "No drillable kernel beyond entries already listed (
 - Engine-contract claims each carry a repo file pointer and match the verified findings (string match, auto-judge, strip regex, no keypad).
 - All checklist snapshots — six KA course lists, five OpenStax TOCs, and the AP CED unit list — are present with named source and as-of date, matching this plan's Appendix.
 
-- [ ] **Unit 2: Calibration anchors and pinned reference set**
+- [x] **Unit 2: Calibration anchors and pinned reference set**
 
 **Goal:** Rate the eight existing game topics as worked examples of the tier definitions (each with the full R3 record: rating, rationale, sample, format, params — params taken from the actual `R` table bands in `app/gauntlet/game/problems.ts`), then author ~10 pinned reference entries chosen to cover the tier × format cells the anchors miss (Medium tier; two-number, short-expression, fraction, true/false formats). Mark the reference set as the recalibration standard for Unit 9.
 

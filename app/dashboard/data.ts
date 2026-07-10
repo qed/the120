@@ -24,7 +24,7 @@ export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
 export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id === s);
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
-export const GRADES = [3, 4, 5, 6, 7, 8] as const;
+export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 export const SUBJECTS = ["Math", "Reading", "Writing", "Science", "History"] as const;
 
 export type Workshop = {

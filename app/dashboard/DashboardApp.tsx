@@ -151,7 +151,7 @@ export default function DashboardApp({
                 Add your first child
               </span>
               <span className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">
-                Grades 3–8 · one dossier each
+                Ages 8–17 · one dossier each
               </span>
             </button>
           ) : (

@@ -140,7 +140,7 @@ export default function ParentsPage() {
         <CtaBand
           headline="Your kid could be"
           accent="one of the 120."
-          subline="Founding cohort · Fall 2026 · Grades 3–8 · Toronto"
+          subline="Founding cohort · Fall 2026 · Ages 8–17 · Toronto"
         />
       </main>
       <Footer />

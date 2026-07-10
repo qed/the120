@@ -28,13 +28,14 @@ export default function Hero() {
 
       <div className="px-6 pb-10 pt-44 sm:px-11">
         <h1 className="display max-w-[820px] text-4xl text-white sm:text-5xl lg:text-[68px]">
-          There are <span className="accent-blush">120 of them.</span> Is your kid one?
+          Build Your Network. <span className="accent-blush">Top 1% academics.</span> Super
+          Interesting Projects. Ages 8&ndash;17.
         </h1>
         <div className="my-[22px] h-px max-w-[820px] bg-white/45 sm:mb-[18px] sm:mt-[26px]" />
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end sm:gap-8">
           <span className="max-w-[680px] text-[17px] leading-relaxed text-white sm:text-lg">
             Athletes, founders, makers, scholars, givers: Toronto&rsquo;s most motivated and
-            engaged kids, grades 3&ndash;8, building interesting lives together.
+            engaged kids, ages 8&ndash;17, building interesting lives together.
           </span>
           <span className="whitespace-nowrap font-mono text-[11px] tracking-[0.08em] text-white/85">
             PART OF THE 2 HOUR LEARNING NETWORK

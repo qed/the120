@@ -45,7 +45,7 @@ const faqs = [
   },
   {
     q: "What's the right age?",
-    a: "Grades 3–8. Seats are roughly balanced across grades, so a strong Grade 3 candidate isn't competing with Grade 8 applicants.",
+    a: "Ages 8–17. Seats are roughly balanced across ages, so a strong 8-year-old candidate isn't competing with 17-year-old applicants.",
   },
   {
     q: "Are the intensives mandatory?",

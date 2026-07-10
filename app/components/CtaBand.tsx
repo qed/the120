@@ -6,7 +6,7 @@ import { BOOKING_URL } from "@/app/lib/site";
 export default function CtaBand({
   headline,
   accent,
-  subline = "Founding cohort · Fall 2026 · Grades 3–8 · Toronto",
+  subline = "Founding cohort · Fall 2026 · Ages 8–17 · Toronto",
 }: {
   headline?: string;
   accent?: string;

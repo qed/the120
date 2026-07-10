@@ -147,7 +147,7 @@ export default async function TuitionPage() {
         <CtaBand
           headline="Claim your child's seat for"
           accent="Fall 2026"
-          subline="Grades 3–8 · Toronto · All five groups enrolling"
+          subline="Ages 8–17 · Toronto · All five groups enrolling"
         />
       </main>
       <Footer />

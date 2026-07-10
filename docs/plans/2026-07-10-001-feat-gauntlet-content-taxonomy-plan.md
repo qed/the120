@@ -1,7 +1,7 @@
 ---
 title: "feat: Author the Gauntlet content taxonomy (artifacts/gauntletcontent.md)"
 type: feat
-status: active
+status: completed
 date: 2026-07-10
 origin: docs/brainstorms/2026-07-10-gauntlet-content-taxonomy-requirements.md
 ---
@@ -219,25 +219,25 @@ Units 3–8 share one recipe: sweep the course's snapshotted KA checklist unit-b
 
 **Requirements / Dependencies / Files / Approach / Test scenarios / Verification:** as Unit 3, for Algebra 1. Depends on Unit 3.
 
-- [ ] **Unit 5: Geometry section**
+- [x] **Unit 5: Geometry section**
 
 **Goal:** Author Geometry against the KA Geometry checklist (9 units); cross-check must catch constructions and logic/proof-writing gaps. Expect a high share of Low entries with rich kernel extraction (the congruence anchor lives here canonically).
 
 **Requirements / Dependencies / Files / Approach / Test scenarios / Verification:** as Unit 3, for Geometry. Depends on Unit 4.
 
-- [ ] **Unit 6: Algebra 2 section**
+- [x] **Unit 6: Algebra 2 section**
 
 **Goal:** Author Algebra 2 against the KA Algebra 2 checklist (12 units); cross-check must catch sequences/series and probability gaps (Intermediate Algebra 2e / Algebra & Trig 2e). This closes the primary in-degree window (Foundational→Algebra 2), so registry hygiene matters most here.
 
 **Requirements / Dependencies / Files / Approach / Test scenarios / Verification:** as Unit 3, for Algebra 2. Depends on Unit 5.
 
-- [ ] **Unit 7: Trigonometry/Precalculus section**
+- [x] **Unit 7: Trigonometry/Precalculus section**
 
 **Goal:** Author the joint Trig/Precalc section against BOTH KA courses (Trigonometry 4 units + Precalculus 10 units, deduplicated between themselves and against earlier canonical owners — heavy cross-reference traffic to Geometry/Algebra 2), with Algebra & Trigonometry 2e / Precalculus 2e cross-check.
 
 **Requirements / Dependencies / Files / Approach / Test scenarios / Verification:** as Unit 3, for Trig/Precalc (disposition table covers both KA course checklists). Depends on Unit 6.
 
-- [ ] **Unit 8: AP Calculus AB + BC-only sections**
+- [x] **Unit 8: AP Calculus AB + BC-only sections**
 
 **Goal:** Author Calculus AB against CED Units 1–8 and a BC-only section against CED Units 9–10. Expect the strongest Low→kernel extraction in the document (derivative/antiderivative fact families, exact trig values, series-convergence facts) with many kernels resolving to earlier sections.
 
@@ -245,7 +245,7 @@ Units 3–8 share one recipe: sweep the course's snapshotted KA checklist unit-b
 
 ### Phase C — Consolidation and ranking
 
-- [ ] **Unit 9: Consistency pass and in-degree computation (verify-only)**
+- [x] **Unit 9: Consistency pass and in-degree computation (verify-only)**
 
 **Goal:** One full-document pass that inserts nothing: recalibrate every rating against the anchors + pinned reference set (adjusting outliers with a note); validate every format id, rule id, and render flag against the legends; audit the kernel registry (no orphan slugs, no synonyms, every citation resolves); audit all disposition tables; then compute kernel in-degree per Decision 10 and record both columns (Foundational→Alg2 primary; full-range secondary) in the registry table.
 
@@ -267,7 +267,7 @@ Units 3–8 share one recipe: sweep the course's snapshotted KA checklist unit-b
 - Rating-adjustment notes exist for every entry whose tier changed in recalibration.
 - In-degree columns present for every registry kernel; spot-recount of the top ~10 matches the recorded values.
 
-- [ ] **Unit 10: Top-picks section and final self-containment audit**
+- [x] **Unit 10: Top-picks section and final self-containment audit**
 
 **Goal:** Write the R7 "build this first" section: ~20–30 picks ranked by primary in-degree with the secondary full-range column, tie-breaks justified in one line each; each pick flagged current-engine or needs-input-type-X with MC-fallback-acceptable / no-MC-fallback, plus its render flag; call out the zero-engine-work starter subset (current-engine AND plain-text/unicode-inline render AND non-negative answer). Then run the final audit against the origin doc's success criteria.
 

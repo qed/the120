@@ -34,10 +34,9 @@ const EMPTY: AccountForm = {
   caslConsent: false,
 };
 
-/** Attribution options (GTM: ambassadors, Gauntlet, verticals). Both fields optional. */
+/** Attribution options (GTM: ambassadors, verticals). Both fields optional. */
 const HEARD_ABOUT_OPTIONS = [
   "A friend or ambassador",
-  "The Gauntlet game",
   "Parent group or forum",
   "My child's school",
   "Coach or program director",

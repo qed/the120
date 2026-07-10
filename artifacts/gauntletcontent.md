@@ -334,7 +334,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | geo.similarity-proof | Prove two triangles similar (Low; kernel source) | self — Geometry (KA 4) | — | | |
 | geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | | |
 | geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | — | | |
-| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc will cross-reference here | | |
+| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
 | geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc and the calculus sections cross-reference here | | |
 | geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | — | | |
 | geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | — | | |
@@ -362,11 +362,11 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | alg2.add-polynomials | Add or subtract two polynomials | self — Algebra 2 (KA 1) | — | | |
 | alg2.expand-binomial-square | Expand a squared binomial | self — Algebra 2 (KA 1) | — | | |
 | alg2.expand-conjugate-product | Expand (a + b)(a − b) to a difference of squares | self — Algebra 2 (KA 1) | — | | |
-| alg2.imaginary-powers | Powers of i (mod-4 cycle recall) | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
-| alg2.simplify-sqrt-negative | Square root of a negative number in i-form | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
-| alg2.add-subtract-complex | Add or subtract complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
-| alg2.complex-conjugate | Conjugate of a complex number | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
-| alg2.multiply-complex | Multiply two complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) will cross-reference here | | |
+| alg2.imaginary-powers | Powers of i (mod-4 cycle recall) | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.simplify-sqrt-negative | Square root of a negative number in i-form | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.add-subtract-complex | Add or subtract complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.complex-conjugate | Conjugate of a complex number | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.multiply-complex | Multiply two complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
 | alg2.solve-quadratic-complex | Solve a quadratic with complex solutions (Low; kernel source) | self — Algebra 2 (KA 2) | — | | |
 | alg2.sum-diff-cubes-pattern | Sum/difference-of-cubes pattern slot | self — Algebra 2 (KA 3) | — | | |
 | alg2.factor-by-grouping | Factor a four-term polynomial by grouping (Low; kernel source) | self — Algebra 2 (KA 3) | — | | |
@@ -397,23 +397,76 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | alg2.check-extraneous | Extraneous-solution verification | self — Algebra 2 (KA 10) | — | | |
 | alg2.solve-radical-equation | Solve a radical equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 9 row, paid this pass | | |
 | alg2.solve-rational-equation | Solve a rational equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 8 row, paid this pass | | |
-| alg2.degrees-to-radians | Degrees → radians as kπ | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc will cross-reference here (radians live in both KA trig courses) | | |
-| alg2.radians-to-degrees | Radians → degrees | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc will cross-reference here | | |
-| alg2.pythagorean-identity-apply | cos θ from sin θ via sin²θ + cos²θ = 1 | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 4) will cross-reference here | | |
-| alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) will cross-reference here | | |
-| alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
-| alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
-| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) and the BC series section will cross-reference here | | |
-| alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) will cross-reference here | | |
-| alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.binomial-expansion | Expand a binomial power (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc will cross-reference here | | |
-| alg2.simple-probability | Probability of a simple event | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.complement-probability | Complement probability 1 − p | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.permutation-count | Count ordered arrangements (falling product) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.compound-event-probability | Compound-event probability (Low; kernel source) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) will cross-reference here | | |
-| alg2.evaluate-composite | Evaluate f(g(x)) at a point | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) will cross-reference here | | |
-| alg2.inverse-of-linear | Inverse of a linear function | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) will cross-reference here | | |
+| alg2.degrees-to-radians | Degrees → radians as kπ | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) (radians live in both KA trig courses) | | |
+| alg2.radians-to-degrees | Radians → degrees | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.pythagorean-identity-apply | cos θ from sin θ via sin²θ + cos²θ = 1 | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 4) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section will also cross-reference here | | |
+| alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.binomial-expansion | Expand a binomial power (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.simple-probability | Probability of a simple event | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.complement-probability | Complement probability 1 − p | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.permutation-count | Count ordered arrangements (falling product) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.compound-event-probability | Compound-event probability (Low; kernel source) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.evaluate-composite | Evaluate f(g(x)) at a point | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| alg2.inverse-of-linear | Inverse of a linear function | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | | |
+| trig.reference-angle | Reference angle of a rotation | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.coterminal-angle | Coterminal angle in [0°, 360°) | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.exact-trig-any-quadrant | Exact trig values beyond Quadrant I | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.reciprocal-trig-value | Evaluate csc/sec/cot at special angles | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.amplitude-from-equation | Amplitude read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.midline-from-equation | Midline read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.period-from-equation | Period of a sinusoid as kπ | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.evaluate-inverse-trig | Inverse trig at special values | self — Trig/Precalc (KA Trig 2) | — | | |
+| trig.graph-sinusoid | Graph a sinusoidal function (Low; kernel source) | self — Trig/Precalc (KA Trig 2) | pays the Algebra 2 KA 11 sinusoid deferral | | |
+| trig.triangle-area-sine | Triangle area via ½ab·sin C at special angles | self — Trig/Precalc (KA Trig 3) | — | | |
+| trig.choose-triangle-law | Choose law of sines vs cosines from the given configuration | self — Trig/Precalc (KA Trig 3) | — | | |
+| trig.law-of-sines-solve | Solve a triangle with the law of sines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | | |
+| trig.law-of-cosines-solve | Solve a triangle with the law of cosines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | | |
+| trig.tan-from-sin-cos | Tangent via the quotient identity | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.trig-parity | Even/odd identities for sin/cos/tan | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.angle-sum-formula-recall | Angle addition formula recall | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.double-angle-evaluate | Evaluate sin 2θ / cos 2θ from sin θ and cos θ | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.solve-basic-trig-equation | Solve sin/cos/tan θ = special value on [0°, 360°) | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.solve-trig-equation-general | Solve a general trig equation (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.prove-identity | Prove a trigonometric identity (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | | |
+| trig.compose-functions-expression | Compose two functions symbolically | self — Trig/Precalc (KA Precalc 1) | — | | |
+| trig.verify-inverse-pair | Verify two functions are inverses | self — Trig/Precalc (KA Precalc 1) | — | | |
+| trig.complex-quadrant | Quadrant of a complex number | self — Trig/Precalc (KA Precalc 3) | — | | |
+| trig.complex-modulus | Modulus of a complex number | self — Trig/Precalc (KA Precalc 3) | also owns vector magnitude (KA Precalc 6) and the polar r-computation (A&T ch. 10) — same √(a²+b²) fact family | | |
+| trig.complex-divide | Divide two complex numbers (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
+| trig.complex-to-polar | Convert a complex number to polar form (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
+| trig.vertical-asymptote | Vertical asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | — | | |
+| trig.horizontal-asymptote | Horizontal asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | also satisfies the limit-at-infinity rows (KA Precalc 10) — same read | | |
+| trig.identify-hole | Removable discontinuity from factored form | self — Trig/Precalc (KA Precalc 4) | — | | |
+| trig.graph-rational-function | Graph a rational function (Low; kernel source) | self — Trig/Precalc (KA Precalc 4) | — | | |
+| trig.ellipse-axes-read | Semi-axis lengths off an ellipse's standard form | self — Trig/Precalc (KA Precalc 5) | pays the Int 11 / A&T 12 ellipse-hyperbola deferral recorded in the Algebra 2 pass | | |
+| trig.ellipse-foci-distance | Focal distance of an ellipse | self — Trig/Precalc (KA Precalc 5) | — | | |
+| trig.hyperbola-asymptote-slope | Asymptote slope off a hyperbola's standard form | self — Trig/Precalc (KA Precalc 5) | — | | |
+| trig.classify-conic | Classify a conic from its equation | self — Trig/Precalc (KA Precalc 5) | — | | |
+| trig.vector-add | Add or subtract vectors componentwise | self — Trig/Precalc (KA Precalc 6) | — | | |
+| trig.vector-from-points | Vector between two points | self — Trig/Precalc (KA Precalc 6) | — | | |
+| trig.vector-direction-angle | Direction angle of a vector (Low; kernel source) | self — Trig/Precalc (KA Precalc 6) | — | | |
+| trig.matrix-add-entry | One entry of a matrix sum or difference | self — Trig/Precalc (KA Precalc 7) | — | | |
+| trig.matrix-multiply-entry | One entry of a 2×2 matrix product | self — Trig/Precalc (KA Precalc 7) | — | | |
+| trig.determinant-2x2 | Determinant of a 2×2 matrix | self — Trig/Precalc (KA Precalc 7) | — | | |
+| trig.matrix-product-defined | Judge whether a matrix product is defined | self — Trig/Precalc (KA Precalc 7) | — | | |
+| trig.matrix-inverse-2x2 | Inverse of a 2×2 matrix (Low; kernel source) | self — Trig/Precalc (KA Precalc 7) | — | | |
+| trig.multiplication-principle | Fundamental counting principle | self — Trig/Precalc (KA Precalc 8) | — | | |
+| trig.probability-with-counting | Probability via combinatorial counting (Low; kernel source) | self — Trig/Precalc (KA Precalc 8) | — | | |
+| trig.geometric-series-converges | Convergence judgment for a geometric series | self — Trig/Precalc (KA Precalc 9) | first-course-owns: the BC series section (CED unit 10) will also cross-reference here | | |
+| trig.limit-by-substitution | Limit by direct substitution | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
+| trig.limit-removable-factor | Limit of a removable-singularity quotient | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
+| trig.classify-discontinuity | Classify a discontinuity | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
+| trig.continuity-at-point | Continuity check at a piecewise seam | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
+| trig.limit-by-rationalizing | Limit requiring algebraic manipulation (Low; kernel source) | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) will also cross-reference here | | |
+| trig.polar-to-rectangular | Polar → rectangular coordinates at axis angles | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
+| trig.parametric-evaluate | Evaluate a parametric point at t | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
+| trig.eliminate-parameter | Eliminate the parameter (Low; kernel source) | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) will also cross-reference here | | |
 
 ---
 
@@ -1723,7 +1776,7 @@ Kernels: [prealg.pythagorean-hypotenuse, prealg.simplify-fraction]
 
 Rating: High · Format: multiple-choice · Render: unicode-inline
 Why: Pure table recall (the 0°/30°/45°/60°/90° grid) plus a short-symbol option scan — ≤3s; the scan stays light because options are 3–4 characters.
-Sample: sin 60° = ? → √3/2 (options: 1/2 · √2/2 · √3/2 · 1) · Rule: mc · Params: sin and cos over {0°, 30°, 45°, 60°, 90°} and tan over {0°, 30°, 45°, 60°}; fixed option pools per function ({0, 1/2, √2/2, √3/2, 1} for sin/cos; {0, √3/3, 1, √3} for tan); 4 options shown per prompt, always including the answer. Canonical entry by first-course-owns — the Trig/Precalc sweep cross-references here (radian phrasing is added there; same table, same keys).
+Sample: sin 60° = ? → √3/2 (options: 1/2 · √2/2 · √3/2 · 1) · Rule: mc · Params: sin and cos over {0°, 30°, 45°, 60°, 90°} and tan over {0°, 30°, 45°, 60°}; fixed option pools per function ({0, 1/2, √2/2, √3/2, 1} for sin/cos; {0, √3/3, 1, √3} for tan); 4 options shown per prompt, always including the answer; radian band (authored during the Trig/Precalc pass, as promised here): the same angles posed as {0, π/6, π/4, π/3, π/2} — same table, same option pools, same keys. Canonical entry by first-course-owns — the Trig/Precalc sweep cross-references here.
 Kernels: [geo.special-right-triangle, geo.trig-ratio-definition]
 
 ### geo.trig-cofunction — Cofunction complement read
@@ -2342,14 +2395,14 @@ Kernels: [alg2.simple-probability, alg2.complement-probability, prealg.fraction-
 ### alg2.evaluate-composite — Evaluate a composite function at a point
 
 Rating: Medium · Format: single-number · Render: unicode-inline
-Why: Two chained evaluations (inner first, then outer) held mentally — 4–7s. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which will cross-reference here)
+Why: Two chained evaluations (inner first, then outer) held mentally — 4–7s. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which cross-references here (satisfied in the Trig/Precalc pass))
 Sample: f(x) = 2x + 1 and g(x) = x². f(g(2)) = ? → 9 · Rule: int-exact · Params: one linear and one quadratic (or two linear) with coefficients ∈ [1, 5]; inputs ∈ [−4, 4]; both orders asked (f(g(x)) and g(f(x))); answers ∈ [−40, 60] (negative answers carry the touch-minus-key caveat).
 Kernels: [alg1.evaluate-function, prealg.evaluate-expression]
 
 ### alg2.inverse-of-linear — Inverse of a linear function
 
 Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
-Why: One two-step un-doing read (subtract b, divide by a) written as a single expression — 4–7s with a ~8-token entry; flips to Low at 2× entry time, hence the marker. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which will cross-reference here)
+Why: One two-step un-doing read (subtract b, divide by a) written as a single expression — 4–7s with a ~8-token entry; flips to Low at 2× entry time, hence the marker. (source: OpenStax Intermediate Algebra 2e ch. 10 — absent from KA Algebra 2; KA hosts it in Precalculus unit 1, which cross-references here (satisfied in the Trig/Precalc pass))
 Sample: f(x) = 2x + 3. f⁻¹(x) = ? → (x-3)/2 · Rule: expr-commutative-ws · Params: f(x) = ax + b with a ∈ [2, 9], b ∈ [1, 9] in both signs; the answer's canonical shape is (x − b)/a — the split form x/a − b/a is a different token string and is not accepted, since holding the un-doing as one expression is the drill; answer alphabet {digits, x, +, −, /, (, )}.
 Kernels: [alg1.rearrange-formula-one-step, prealg.solve-two-step-equation]
 
@@ -2401,7 +2454,485 @@ Every KA Algebra 2 unit (12), every Intermediate Algebra 2e chapter (12), and ev
 
 ## Trigonometry / Precalculus
 
-Joint sweep of both KA courses (Trigonometry 4 units + Precalculus 10 units), deduplicated between themselves and against earlier canonical owners; Algebra & Trigonometry 2e / Precalculus 2e cross-check. *Authored in a later pass.*
+Joint sweep of both KA trig-track courses — Trigonometry (4 units) and Precalculus (10 units) — deduplicated between themselves (KA Precalc unit 2 assumes the standalone Trigonometry course's foundations and sweeps as pure dedup) and against earlier canonical owners, with the Algebra & Trigonometry 2e / Precalculus 2e cross-check. **This is the document's heaviest cross-reference section, by design:** the Algebra 2 pass pre-flagged ~20 canonical homes for exactly this sweep (complex arithmetic, radian conversion, the identity and quadrant reads, series, probability and counting, composite/inverse functions), and Geometry's two registry-flagged trig targets (geo.trig-ratio-definition, geo.exact-trig-values) absorb all right-triangle trig. The section lands 53 records (7 High / 33 Medium / 13 Low) plus 40 cross-reference rows (38 to earlier-course owners, 2 intra-section — vector magnitude and limits-at-infinity resolve to entries minted earlier in this same sweep). **The primary in-degree window (Foundational → Algebra 2) is closed:** every citation below counts only toward the registry's full-range column — the expected post-Algebra 2 behavior, not a defect — so the citation norm is applied at the same strictness as before, but its yield is forward inventory. No pinned calibration entries live here (the pins live in Pre-Algebra and Algebra 1 only); ratings are calibrated against the pinned set — MC entries against geo.triangle-congruence-criteria / geo.exact-trig-values, fraction entries against prealg.simplify-fraction / prealg.fraction-add-unlike, two-number entries against alg1.read-slope-intercept / alg1.factor-pairs-sum-product, true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions. This pass pays the four deferral debts the Algebra 2 disposition table recorded against Algebra & Trigonometry 2e chapters 7–10 (each chapter has an explicit payoff row in the disposition table), pays the Algebra 2 KA 11 sinusoid deferral, pays the Int 11 / A&T 12 ellipse-hyperbola deferral, and extends geo.exact-trig-values with its promised radian phrasing (recorded in that entry's params). The cross-check's genuine diff beyond the recorded deferrals: polar coordinates and parametric equations (A&T ch. 10 / Precalculus 2e ch. 8) appear in **neither** KA snapshot course — merged at the end of the section with source notes; the BC section (CED unit 9) will cross-reference them.
+
+**KA Trigonometry Unit 1 — Right triangles & trigonometry.** Fully owned by earlier courses — Geometry's unit 5 and Pre-Algebra's Pythagorean entry; the registry flagged geo.trig-ratio-definition and geo.exact-trig-values for exactly this absorption. No new grain (right-triangle word problems are out-of-grain — see the disposition table).
+
+**Right-triangle trig ratios (SOH-CAH-TOA)** → see geo.trig-ratio-definition (owned by Geometry).
+**Special right triangles (45-45-90 / 30-60-90)** → see geo.special-right-triangle (owned by Geometry).
+**Sine–cosine complements** → see geo.trig-cofunction (owned by Geometry).
+**Pythagorean theorem / triples** → see prealg.pythagorean-hypotenuse (owned by Pre-Algebra).
+**Solving right triangles for sides and angles** → see geo.solve-right-triangle (owned by Geometry; Low).
+
+**KA Trigonometry Unit 2 — Trigonometric functions.** (The unit-circle value table, radian conversions, and sign map are owned upstream — cross-references below; this unit's new grain is angle bookkeeping, all-quadrant evaluation, the reciprocal functions, sinusoid feature reads, and inverse trig at special values.)
+
+**Unit-circle values at special angles** → see geo.exact-trig-values (owned by Geometry) — radian phrasing joins that entry's key families this pass, per its registry note (params extension recorded in the entry).
+**Degrees → radians** → see alg2.degrees-to-radians (owned by Algebra 2).
+**Radians → degrees** → see alg2.radians-to-degrees (owned by Algebra 2).
+**Trig-function signs by quadrant (ASTC)** → see alg2.trig-sign-by-quadrant (owned by Algebra 2).
+
+### trig.reference-angle — Reference angle of a rotation
+
+Rating: Medium · Format: single-number
+Why: One quadrant placement plus one subtraction against 180 or 360 — 3–5s.
+Sample: What is the reference angle of 150°? → 30 · Rule: int-exact · Params: angles multiples of 5 in (90°, 360°) off the axes (Quadrant I inputs excluded — the answer is the angle itself, a giveaway family); answers ∈ [5, 85]; radian-posed variants are excluded — the kπ answer shape belongs to the fraction format and would split the key family (the skill is identical).
+Kernels: [fk.subtraction-facts]
+
+### trig.coterminal-angle — Coterminal angle in [0°, 360°)
+
+Rating: Medium · Format: single-number
+Why: One ±360 adjustment (occasionally two) — 3–5s with a 2–3 digit entry.
+Sample: Which angle in [0°, 360°) is coterminal with 405°? → 45 · Rule: int-exact · Params: inputs multiples of 5 in [−720°, 1080°] excluding [0°, 360°) itself; at most two 360-steps needed; answers ∈ [0, 355].
+Kernels: [fk.addition-facts, fk.subtraction-facts]
+
+### trig.exact-trig-any-quadrant — Exact trig values beyond Quadrant I
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Two chained recalls — reference angle, then the ASTC sign — on top of the value table, 3–6s with a short-symbol option scan.
+Sample: sin 150° = ? → 1/2 (options: 1/2 · −1/2 · √3/2 · −√3/2) · Rule: mc · Params: sin/cos/tan at special angles in Quadrants II–IV (150°, 210°, 315°, … and their radian forms 5π/6, 7π/6, …); 4 options pairing the two candidate magnitudes with both signs; the Quadrant I table itself is owned by geo.exact-trig-values and excluded here.
+Kernels: [geo.exact-trig-values, trig.reference-angle, alg2.trig-sign-by-quadrant]
+
+### trig.reciprocal-trig-value — Evaluate a reciprocal trig function
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One table recall plus one reciprocal flip — 3–5s with a short-symbol scan.
+Sample: csc 30° = ? → 2 (options: 2 · 1/2 · √2 · 2√3/3) · Rule: mc · Params: csc/sec/cot over the special angles where the base function is nonzero; fixed option pools per function, rationalized forms shown (2√3/3, never 2/√3); 4 options, answer always present.
+Kernels: [geo.exact-trig-values, prealg.fraction-divide]
+
+### trig.amplitude-from-equation — Amplitude off a sinusoid's equation
+
+Rating: High · Format: single-number
+Why: One |a| read — pure read-off, ≤2s.
+Sample: y = −3 sin(2x) + 1. Amplitude? → 3 · Rule: int-exact · Params: a nonzero integer ∈ [−9, 9]; the angular coefficient and vertical shift are decorative; sin and cos prompts balanced; answers always positive integers.
+Kernels: [prealg.absolute-value]
+
+### trig.midline-from-equation — Midline off a sinusoid's equation
+
+Rating: High · Format: single-number
+Why: One constant-term read with its sign — ≤2s.
+Sample: y = 2 sin(3x) − 4. The midline is y = ? → -4 · Rule: int-exact · Params: vertical shifts nonzero integers ∈ [−9, 9] in both sign renderings; amplitude and angular coefficient decorative; negative answers carry the touch-minus-key caveat.
+Kernels: No drillable kernel beyond entries already listed
+
+### trig.period-from-equation — Period off a sinusoid's equation
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One rule application (period = 2π/b) reduced to lowest terms — 3–6s on the assumed fraction pad.
+Sample: The period of y = sin(4x) is kπ. k = ? → 1/2 · Rule: frac-lowest-terms · Params: b ∈ {3, 4, 6, 8, 12} (b ∈ {1, 2} excluded — integer k is an answer-shape split); k = 2/b in lowest terms; sin and cos prompts balanced; the tangent family (period π/b) is a recorded separate key family if built.
+Kernels: [prealg.simplify-fraction, fk.division-facts]
+
+### trig.evaluate-inverse-trig — Inverse trig at special values
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One inverse table read constrained to the principal range — 3–6s with a short option scan.
+Sample: arcsin(1/2) = ? → π/6 (options: π/6 · π/4 · π/3 · π/2) · Rule: mc · Params: arcsin/arccos/arctan over the special-value table, answers restricted to each function's principal range; negative inputs (arcsin(−1/2) = −π/6) form the stretch band; 4 options drawn from the special-angle pool.
+Kernels: [geo.exact-trig-values]
+
+### trig.graph-sinusoid — Graph a sinusoidal function
+
+Rating: Low
+Why: Inherently multi-step at any speed — extract amplitude, period, midline, and phase shift, then draw the curve; the output is a graph, which no input format hosts.
+Kernels: [trig.amplitude-from-equation, trig.period-from-equation, trig.midline-from-equation, alg2.function-shift-direction]
+
+**KA Trigonometry Unit 3 — Non-right triangles & trigonometry.**
+
+### trig.triangle-area-sine — Triangle area from two sides and the included angle
+
+Rating: Medium · Format: single-number
+Why: One formula application (½ab sin C) that collapses to two products and a halving at special angles — Medium's upper half, 4–7s.
+Sample: A triangle has sides 8 and 5 with a 30° included angle. Its area? → 10 · Rule: int-exact · Params: sides ∈ [2, 12] with ab even; included angle ∈ {30°, 90°, 150°} (sin = 1/2 or 1) so answers are positive integers ≤ 72; the 60°/120° band is excluded — irrational areas have no supported answer shape.
+Kernels: [geo.exact-trig-values, fk.times-tables, fk.doubling-halving]
+
+### trig.choose-triangle-law — Law of sines or law of cosines
+
+Rating: Medium · Format: multiple-choice
+Why: One configuration classification (what is given, what is asked) mapped to a memorized rule — 3–6s.
+Sample: You know two sides and the included angle and want the third side. Which law applies? → Law of cosines (options: Law of sines · Law of cosines) · Rule: mc · Params: given-information templates over {ASA/AAS → sines, SAS/SSS → cosines, SSA → sines}; phrased both abstractly ("two angles and a side") and with concrete labeled values; families balanced 50/50.
+Kernels: [geo.triangle-congruence-criteria]
+
+### trig.law-of-sines-solve — Solve a triangle with the law of sines
+
+Rating: Low
+Why: Inherently multi-step at any speed — set up the sine ratio, cross-multiply, and evaluate (usually with a calculator) while holding the setup.
+Kernels: [prealg.solve-proportion, geo.exact-trig-values, geo.triangle-angle-sum, trig.choose-triangle-law]
+
+### trig.law-of-cosines-solve — Solve a triangle with the law of cosines
+
+Rating: Low
+Why: Inherently multi-step at any speed — assemble c² = a² + b² − 2ab cos C, evaluate each piece, combine, then take the root.
+Kernels: [fk.perfect-squares, geo.exact-trig-values, prealg.square-root, trig.choose-triangle-law]
+
+**KA Trigonometry Unit 4 — Trigonometric equations and identities.**
+
+**Pythagorean identity (cos θ from sin θ with quadrant sign)** → see alg2.pythagorean-identity-apply (owned by Algebra 2).
+
+### trig.tan-from-sin-cos — Tangent via the quotient identity
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One identity recall (tan = sin/cos) plus a fraction division that cancels the shared denominator — 3–6s.
+Sample: sin θ = 3/5 and cos θ = 4/5. tan θ = ? → 3/4 · Rule: frac-lowest-terms · Params: sin/cos pairs from the primitive triples (3-4-5, 5-12-13, 8-15-17, 7-24-25), answers already in lowest terms; the signed band (Quadrant II–IV values) puts the sign on the numerator per the format spec; cot prompts share the params and key separately.
+Kernels: [geo.trig-ratio-definition, prealg.fraction-divide]
+
+### trig.trig-parity — Even/odd identities for trig functions
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: Pure parity recall (cos is even; sin and tan are odd) — ≤2s with a 4-option tap.
+Sample: sin(−θ) = ? → −sin θ (options: sin θ · −sin θ · cos θ · −cos θ) · Rule: mc · Params: sin/cos/tan prompts balanced; fixed 4-option pool per function pairing ± of the same function and its cofunction.
+Kernels: No drillable kernel beyond entries already listed
+
+### trig.angle-sum-formula-recall — Angle addition formula recall
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: Pure formula recall, but the four look-alike expansions force a careful option scan — 3–6s, and the scan is most of the budget.
+Sample: sin(a + b) = ? → sin a cos b + cos a sin b (options: sin a cos b + cos a sin b · sin a cos b − cos a sin b · cos a cos b − sin a sin b · cos a cos b + sin a sin b) · Rule: mc · Params: sin(a ± b) and cos(a ± b) prompts balanced; the options are always the four expansions, so sign-and-function discrimination is the whole skill; double-angle forms (sin 2θ, cos 2θ) included as a = b phrasings in the stretch band.
+Kernels: No drillable kernel beyond entries already listed
+
+### trig.double-angle-evaluate — Evaluate sin 2θ from sin θ and cos θ
+
+Rating: Medium · Format: fraction · Render: unicode-inline · Surface-sensitive
+Why: One formula recall (2 sin θ cos θ) plus two held products — Medium's ceiling, 5–8s; flips to Low if fraction entry runs 2× slow, hence the marker.
+Sample: sin θ = 3/5 and cos θ = 4/5. sin 2θ = ? → 24/25 · Rule: frac-lowest-terms · Params: sin/cos pairs from the primitive triples; answers 2ab/c² already in lowest terms by the triple's structure; the cos 2θ variant (cos²θ − sin²θ) shares params and keys separately.
+Kernels: [trig.angle-sum-formula-recall, prealg.fraction-multiply]
+
+### trig.solve-basic-trig-equation — Solve sin θ = k on [0°, 360°)
+
+Rating: Medium · Format: two-numbers · Surface-sensitive
+Why: One table inversion plus one reflection rule for the second solution — Medium's upper half, 5–8s with the pair entry; flips to Low at 2× entry time, hence the marker.
+Sample: Solve sin θ = 1/2 for 0° ≤ θ < 360° — both solutions → 30, 150 · Rule: pair-unordered · Params: sin/cos/tan set equal to a ± special value; both solutions integer degree measures in [0, 360); single-solution and no-solution families (sin θ = 2) excluded — different answer shapes; equations needing algebraic isolation first are trig.solve-trig-equation-general grain (Low).
+Kernels: [geo.exact-trig-values, trig.reference-angle, alg2.trig-sign-by-quadrant]
+
+### trig.solve-trig-equation-general — Solve a general trig equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — isolate the trig function (possibly factoring a trig quadratic first), invert at a reference angle, then enumerate solutions across quadrants and periods.
+Kernels: [trig.solve-basic-trig-equation, alg1.factor-simple-quadratic, alg2.pythagorean-identity-apply]
+
+### trig.prove-identity — Prove a trigonometric identity
+
+Rating: Low
+Why: Inherently multi-step at any speed — rewrite one side through a chain of identity substitutions toward the target form; the output is a derivation, which no input format hosts.
+Kernels: [alg2.pythagorean-identity-apply, trig.tan-from-sin-cos, trig.trig-parity, trig.angle-sum-formula-recall]
+
+**KA Precalculus Unit 1 — Composite and inverse functions.**
+
+**Evaluating f(g(x)) at a point** → see alg2.evaluate-composite (owned by Algebra 2 via its OpenStax merge; the registry note recorded this cross-reference in advance).
+**Inverse of a linear function** → see alg2.inverse-of-linear (owned by Algebra 2 via its OpenStax merge).
+
+### trig.compose-functions-expression — Compose two functions symbolically
+
+Rating: Medium · Format: short-expression
+Why: One substitution and one distribute-and-collect held mentally, then a ~5-token entry — 4–7s.
+Sample: f(x) = 2x + 1 and g(x) = x − 3. f(g(x)) = ? → 2x-5 · Rule: expr-commutative-ws · Params: outer linear ax + b with a ∈ [2, 5], b ∈ [1, 9]; inner x ± c with c ∈ [1, 9]; both composition orders asked; result coefficients nonzero ∈ [−20, 20]; answer alphabet {digits, x, +, −}.
+Kernels: [alg2.evaluate-composite, alg1.distribute-linear, prealg.combine-like-terms]
+
+### trig.verify-inverse-pair — Are two functions inverses
+
+Rating: Medium · Format: true-false
+Why: One composition check (does g undo f, structurally or at a test value?) — 3–6s; genuinely a verification judgment.
+Sample: True or false: g(x) = (x − 3)/2 is the inverse of f(x) = 2x + 3 → true · Rule: tf · Params: f linear ax + b with a ∈ [2, 5], b ∈ [1, 9]; false cases flip a sign or swap a and b inside g (the classic near-miss); families balanced 50/50.
+Kernels: [alg2.inverse-of-linear, alg2.evaluate-composite]
+
+**KA Precalculus Unit 2 — Trigonometry.** Pure dedup, exactly as the checklist snapshot warns ("KA Precalc Unit 2 assumes the standalone Trigonometry course's foundations"): every lesson resolves to a Trigonometry-course entry above (inverse trig → trig.evaluate-inverse-trig; law of sines/cosines → trig.law-of-sines-solve, trig.law-of-cosines-solve, trig.choose-triangle-law; equations → trig.solve-basic-trig-equation, trig.solve-trig-equation-general; angle addition → trig.angle-sum-formula-recall, trig.double-angle-evaluate) or an earlier owner (alg2.pythagorean-identity-apply; geo.exact-trig-values). No new grain — see the disposition row; sinusoidal modeling is out-of-grain.
+
+**KA Precalculus Unit 3 — Complex numbers.** (The arithmetic core is owned by Algebra 2 — the five registry-flagged cross-references below; this unit's new grain is the complex plane and the polar bridge.)
+
+**Powers of i** → see alg2.imaginary-powers (owned by Algebra 2).
+**Square root of a negative number** → see alg2.simplify-sqrt-negative (owned by Algebra 2).
+**Adding and subtracting complex numbers** → see alg2.add-subtract-complex (owned by Algebra 2).
+**Complex conjugates** → see alg2.complex-conjugate (owned by Algebra 2).
+**Multiplying complex numbers** → see alg2.multiply-complex (owned by Algebra 2).
+**Distance between complex numbers (as plane points)** → see geo.distance-formula (owned by Geometry).
+**Midpoint of complex numbers (as plane points)** → see geo.midpoint-formula (owned by Geometry).
+
+### trig.complex-quadrant — Quadrant of a complex number
+
+Rating: High · Format: single-number
+Why: One two-sign read on the a + bi form — the quadrant map in complex clothes, ≤2s.
+Sample: Which quadrant of the complex plane contains 3 − 4i? (answer 1–4) → 4 · Rule: int-exact · Params: real and imaginary parts nonzero integers ∈ [−9, 9]; all four quadrants uniform; on-axis numbers excluded.
+Kernels: [prealg.identify-quadrant]
+
+### trig.complex-modulus — Modulus of a complex number
+
+Rating: Medium · Format: single-number
+Why: One √(a² + b²) triple recognition — the Pythagorean read in complex clothes, 3–6s.
+Sample: |3 + 4i| = ? → 5 · Rule: int-exact · Params: (|a|, |b|, |z|) drawn from the Pythagorean triples (3-4-5, 5-12-13, 8-15-17, 7-24-25) and their ≤×3 multiples, signs free; answers ≤ 75. Also the canonical home of vector magnitude and the polar-form r-computation (registry note) — the same fact family, keyed together.
+Kernels: [prealg.pythagorean-hypotenuse, geo.distance-formula]
+
+### trig.complex-divide — Divide two complex numbers
+
+Rating: Low
+Why: Inherently multi-step at any speed — multiply numerator and denominator by the conjugate, expand both products, then reduce the resulting fraction.
+Kernels: [alg2.complex-conjugate, alg2.multiply-complex, prealg.simplify-fraction]
+
+### trig.complex-to-polar — Convert a complex number to polar form
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute the modulus, find the reference angle, then place the argument by quadrant.
+Kernels: [trig.complex-modulus, trig.reference-angle, geo.exact-trig-values, trig.complex-quadrant]
+
+**KA Precalculus Unit 4 — Rational functions.**
+
+**Simplifying rational expressions** → see alg1.simplify-rational-expression (owned by Algebra 1; Low).
+**Solving rational equations** → see alg2.solve-rational-equation (owned by Algebra 2; Low).
+
+### trig.vertical-asymptote — Vertical asymptote of a rational function
+
+Rating: High · Format: single-number
+Why: One denominator-zero read with a sign flip — ≤3s.
+Sample: y = (x + 1)/(x − 3). Vertical asymptote at x = ? → 3 · Rule: int-exact · Params: denominators x − a with a nonzero ∈ [−9, 9] in both sign renderings; numerators share no factor with the denominator (shared factors are trig.identify-hole's family); negative answers carry the touch-minus-key caveat.
+Kernels: [alg1.roots-from-factored-form]
+
+### trig.horizontal-asymptote — Horizontal asymptote of a rational function
+
+Rating: Medium · Format: single-number
+Why: One degree comparison plus a leading-coefficient division — 3–6s.
+Sample: y = (6x + 1)/(2x − 5). Horizontal asymptote at y = ? → 3 · Rule: int-exact · Params: equal-degree pairs with integer leading-coefficient ratios ∈ [−9, 9] excluding 0 (non-integer ratios excluded — answer-shape split), plus the lower-degree-numerator band (answer 0); the no-horizontal-asymptote case is excluded (no numeric answer shape); negative answers carry the touch-minus-key caveat. Also satisfies the limit-at-infinity rows of KA Precalc unit 10 — same read, per the registry note.
+Kernels: [alg1.polynomial-degree, fk.division-facts]
+
+### trig.identify-hole — Removable discontinuity from factored form
+
+Rating: Medium · Format: single-number
+Why: One common-factor spot across numerator and denominator plus a sign-flip read — 3–5s.
+Sample: y = ((x − 2)(x + 5))/(x − 2). Hole at x = ? → 2 · Rule: int-exact · Params: both parts shown factored with exactly one shared linear factor, roots nonzero ∈ [−9, 9]; unfactored displays are excluded — factoring first pushes the chain to Low grain; negative answers carry the touch-minus-key caveat.
+Kernels: [alg1.roots-from-factored-form]
+
+### trig.graph-rational-function — Graph a rational function
+
+Rating: Low
+Why: Inherently multi-step at any speed — locate asymptotes, holes, and intercepts, then assemble the sketch; the output is a graph, which no input format hosts.
+Kernels: [trig.vertical-asymptote, trig.horizontal-asymptote, trig.identify-hole, alg1.intercept-from-equation]
+
+**KA Precalculus Unit 5 — Conic sections.** (Circles and the parabola focus/directrix are owned by Geometry — cross-references below; this unit's new grain is the ellipse/hyperbola feature reads, paying the Int 11 / A&T 12 deferrals recorded during the Algebra 2 pass.)
+
+**Circle center from standard form** → see geo.circle-equation-read (owned by Geometry).
+**Circle radius from standard form** → see geo.circle-radius-read (owned by Geometry).
+**Circle features from general form** → see geo.circle-general-to-standard (owned by Geometry; Low).
+**Parabola focus and directrix** → see geo.parabola-focus-directrix (owned by Geometry; Low).
+
+### trig.ellipse-axes-read — Semi-axis lengths off an ellipse's standard form
+
+Rating: Medium · Format: two-numbers · Render: needs-math-render
+Why: Two square-root recalls plus a which-is-larger judgment — 3–6s with the pair entry; the stacked x²/a² form needs a math renderer.
+Sample: x²/25 + y²/9 = 1 — semi-major, then semi-minor axis length → 5, 3 · Rule: pair-ordered · Params: denominators distinct perfect squares ∈ {4, …, 144} in both orientations (major axis on x or y); answers ∈ [2, 12].
+Kernels: [prealg.square-root, fk.perfect-squares]
+
+### trig.ellipse-foci-distance — Focal distance of an ellipse
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One formula application (c² = a² − b²) that collapses to a subtraction and a root recall — Medium's upper half, 4–7s.
+Sample: x²/25 + y²/9 = 1. The foci are (±c, 0). c = ? → 4 · Rule: int-exact · Params: denominator pairs with a² − b² a perfect square — (b, c, a) Pythagorean-triple-structured (25 − 9 = 16); answers c ∈ [3, 12]. The hyperbola analog (c² = a² + b²) is a recorded separate key family — same move, opposite sign (see the disposition row).
+Kernels: [fk.perfect-squares, fk.subtraction-facts, prealg.square-root]
+
+### trig.hyperbola-asymptote-slope — Asymptote slope off a hyperbola's standard form
+
+Rating: Medium · Format: fraction · Render: needs-math-render
+Why: Two square-root recalls assembled into b/a — 3–6s on the assumed fraction pad.
+Sample: x²/9 − y²/4 = 1. The positive asymptote slope? → 2/3 · Rule: frac-lowest-terms · Params: denominators perfect squares ∈ {4, …, 144} with the slope non-integer and already in lowest terms (integer slopes excluded — answer-shape split); the y-leading orientation (slope a/b) balanced in; the positive slope is always the one asked.
+Kernels: [prealg.square-root, prealg.simplify-fraction]
+
+### trig.classify-conic — Classify a conic from its equation
+
+Rating: Medium · Format: multiple-choice · Render: unicode-inline
+Why: One coefficient scan (signs and equality of the squared terms; a missing square) — 3–6s with a 4-option tap.
+Sample: x² + 4y² = 16 is which conic? → Ellipse (options: Circle · Ellipse · Parabola · Hyperbola) · Rule: mc · Params: forms Ax² + Cy² + Dx + Ey = F with the four cases balanced (A = C circle; A ≠ C same-sign ellipse; opposite signs hyperbola; one square missing parabola); coefficients ∈ [−9, 9].
+Kernels: No drillable kernel beyond entries already listed
+
+**KA Precalculus Unit 6 — Vectors.**
+
+**Scalar multiplication of a vector (component scaling)** → see geo.dilate-point (owned by Geometry — the identical component move in vector notation).
+
+### trig.vector-add — Add two vectors componentwise
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: Two parallel signed additions plus the pair entry — Medium's floor, ~3–4s; the translate-a-point move in vector notation.
+Sample: ⟨3, −2⟩ + ⟨1, 5⟩ = ? → 4, 3 · Rule: pair-ordered · Params: components nonzero integers ∈ [−9, 9]; subtraction prompts included; results ∈ [−18, 18]; negative components carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub, geo.translate-point]
+
+### trig.vector-from-points — Vector between two points
+
+Rating: Medium · Format: two-numbers
+Why: Two coordinate subtractions (terminal minus initial, with the order trap) — 3–5s with the pair entry.
+Sample: The vector from (1, 2) to (4, 6)? → 3, 4 · Rule: pair-ordered · Params: integer points ∈ [−9, 9]; components nonzero ∈ [−12, 12]; negative components carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+**Vector magnitude** → see trig.complex-modulus (owned by this section under KA Precalc unit 3 — the same √(a² + b²) fact family, keyed together per the registry note).
+
+### trig.vector-direction-angle — Direction angle of a vector
+
+Rating: Low
+Why: Inherently multi-step at any speed — form the component ratio, invert the tangent, then adjust the angle for quadrant.
+Kernels: [geo.trig-ratio-definition, trig.evaluate-inverse-trig, trig.reference-angle, prealg.identify-quadrant]
+
+**KA Precalculus Unit 7 — Matrices.**
+
+**Solving 2×2 linear systems (with or without matrix notation)** → see prealg.solve-2x2-system (owned by Pre-Algebra; Low).
+
+### trig.matrix-add-entry — One entry of a matrix sum
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One position lookup plus one signed addition — Medium's floor, ~3–4s; the bracket layout needs a math renderer.
+Sample: A = [3 −1; 2 5], B = [1 4; −2 0]. The row 1, column 2 entry of A + B? → 3 · Rule: int-exact · Params: 2×2 matrices with entries ∈ [−9, 9]; A + B and A − B prompts balanced; the scalar band (an entry of kA, k ∈ [2, 5]) keys separately; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+### trig.matrix-multiply-entry — One entry of a matrix product
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One row-times-column dot product — two signed products and an addition held mentally — Medium's upper half, 4–7s.
+Sample: A = [2 1; 3 4], B = [5 0; −1 2]. The row 1, column 1 entry of AB? → 9 · Rule: int-exact · Params: 2×2 matrices with entries ∈ [−5, 5]; the asked position rotates; answers ∈ [−60, 60]; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.times-tables, fk.integer-mul-div, fk.integer-add-sub]
+
+### trig.determinant-2x2 — Determinant of a 2×2 matrix
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: Two products and a subtraction (ad − bc) held mentally — 3–6s.
+Sample: det [3 1; 4 2] = ? → 2 · Rule: int-exact · Params: entries ∈ [−9, 9]; answers ∈ [−99, 99], nonzero in the base band (the singular case joins the trig.matrix-inverse-2x2 story); negative answers carry the touch-minus-key caveat.
+Kernels: [fk.times-tables, fk.integer-mul-div, fk.subtraction-facts]
+
+### trig.matrix-product-defined — Is a matrix product defined
+
+Rating: High · Format: true-false
+Why: One inner-dimension match (columns of A = rows of B) — ≤3s; genuinely a verification judgment.
+Sample: True or false: the product of a 2×3 matrix and a 3×4 matrix is defined → true · Rule: tf · Params: dimensions ∈ [1, 5]²; false cases mismatch the inner dimensions (outer-dimension distractors deliberate); the result-size variant ("…and the product is 2×4") shares the family; balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+### trig.matrix-inverse-2x2 — Inverse of a 2×2 matrix
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute the determinant, swap and negate the entries, then divide all four by the determinant while holding every intermediate; the matrix answer shape also has no input format.
+Kernels: [trig.determinant-2x2, prealg.simplify-fraction, fk.integer-mul-div]
+
+**KA Precalculus Unit 8 — Probability and combinatorics.** (The whole computational core is owned by Algebra 2's OpenStax merge — the registry-flagged cross-references below; this unit's new grain is the counting principle and the Low counting-probability composite.)
+
+**Probability of a simple event** → see alg2.simple-probability (owned by Algebra 2).
+**Complement probability** → see alg2.complement-probability (owned by Algebra 2).
+**Permutation counts** → see alg2.permutation-count (owned by Algebra 2).
+**Factorials** → see alg2.factorial (owned by Algebra 2).
+**Binomial coefficients / combinations** → see alg2.binomial-coefficient (owned by Algebra 2).
+**Binomial theorem expansion** → see alg2.binomial-expansion (owned by Algebra 2; Low).
+**Compound-event probability** → see alg2.compound-event-probability (owned by Algebra 2; Low).
+
+### trig.multiplication-principle — Fundamental counting principle
+
+Rating: Medium · Format: single-number
+Why: One rule application (multiply the independent choice counts) plus prompt parse — 3–5s.
+Sample: A menu has 3 mains and 4 sides. How many main-and-side combinations? → 12 · Rule: int-exact · Params: 2–3 independent stages with counts ∈ [2, 6]; products ≤ 120; contexts rotate (menus, outfits, codes) with the arithmetic shape fixed.
+Kernels: [fk.times-tables]
+
+### trig.probability-with-counting — Probability via combinatorial counting
+
+Rating: Low
+Why: Inherently multi-step at any speed — count favorable and total outcomes with combinatorial formulas, then assemble and reduce the probability fraction.
+Kernels: [alg2.simple-probability, alg2.binomial-coefficient, alg2.permutation-count, trig.multiplication-principle]
+
+**KA Precalculus Unit 9 — Series.** (Everything computable is owned by Algebra 2's OpenStax merge — cross-references below; the new grain is the convergence judgment.)
+
+**Arithmetic series sums** → see alg2.arithmetic-series-sum (owned by Algebra 2).
+**Finite geometric series sums** → see alg2.geometric-series-sum (owned by Algebra 2; Low).
+**Infinite geometric series sums** → see alg2.infinite-geometric-sum (owned by Algebra 2).
+**Sigma-notation evaluation** → see alg2.evaluate-sigma (owned by Algebra 2).
+
+### trig.geometric-series-converges — Does a geometric series converge
+
+Rating: High · Format: true-false
+Why: One |r| < 1 judgment off an easy ratio read — ≤3s; genuinely a verification judgment.
+Sample: True or false: 8 + 4 + 2 + 1 + … converges → true · Rule: tf · Params: ratios ∈ {±1/2, ±1/3, ±2/3, ±3/4, ±1, ±2, ±3/2}; series shown as 4 leading terms with integer or simple-fraction terms; |r| < 1 and |r| ≥ 1 cases balanced 50/50 (r = ±1 included as the trap).
+Kernels: [alg1.next-term-geometric]
+
+**KA Precalculus Unit 10 — Limits and continuity.**
+
+### trig.limit-by-substitution — Limit by direct substitution
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One continuity recognition plus one substitute-and-evaluate — 3–6s.
+Sample: lim (x → 2) of x² + 3x − 1 → 9 · Rule: int-exact · Params: polynomials of degree ≤ 2 with coefficients ∈ [−5, 5]; approach points ∈ [−4, 4]; answers ∈ [−40, 60]; negative answers carry the touch-minus-key caveat.
+Kernels: [prealg.evaluate-expression, alg1.evaluate-function]
+
+### trig.limit-removable-factor — Limit of a removable-singularity quotient
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One difference-of-squares recognition, a cancel, and a substitution — Medium's ceiling, 5–8s; the fluent shortcut ((x² − a²)/(x − a) → 2a at x = a) is the drill.
+Sample: lim (x → 3) of (x² − 9)/(x − 3) → 6 · Rule: int-exact · Params: numerators x² − a² with a ∈ [2, 9], denominators x − a, approach point a; answers 2a ≤ 18; general factor-and-cancel quotients are excluded — factoring first pushes the chain to Low (trig.limit-by-rationalizing hosts the radical analog).
+Kernels: [alg1.factor-difference-of-squares, prealg.evaluate-expression]
+
+### trig.classify-discontinuity — Classify a discontinuity
+
+Rating: Medium · Format: multiple-choice · Render: needs-math-render
+Why: One structural read (shared factor → removable; denominator zero alone → infinite; piecewise mismatch → jump) — 3–6s with a 3-option tap.
+Sample: At x = 2, f(x) = ((x − 2)(x + 1))/(x − 2) has which type of discontinuity? → Removable (options: Removable · Jump · Infinite) · Rule: mc · Params: factored rational functions (removable vs infinite cases) and two-branch piecewise functions with a gap (jump cases); the three cases balanced; values ∈ [−9, 9].
+Kernels: [trig.identify-hole, trig.vertical-asymptote]
+
+### trig.continuity-at-point — Is a piecewise function continuous at the seam
+
+Rating: Medium · Format: true-false · Render: needs-math-render
+Why: Two branch evaluations at the boundary and a compare — Medium's upper half, 4–7s; genuinely a verification judgment.
+Sample: f(x) = x + 1 for x < 2; f(x) = 2x − 1 for x ≥ 2. True or false: f is continuous at x = 2 → true · Rule: tf · Params: two linear branches with coefficients ∈ [1, 5], seam at x ∈ [−3, 3]; false cases miss by 1–3; families balanced 50/50.
+Kernels: [alg1.evaluate-piecewise, alg1.evaluate-function]
+
+**Limits at infinity of a rational function** → see trig.horizontal-asymptote (owned by this section under KA Precalc unit 4 — the same leading-term read, per the registry note).
+
+### trig.limit-by-rationalizing — Limit requiring algebraic manipulation
+
+Rating: Low
+Why: Inherently multi-step at any speed — multiply by a conjugate (or clear a complex fraction), expand, cancel, then substitute, holding the chain throughout.
+Kernels: [alg2.expand-conjugate-product, alg1.simplify-rational-expression, prealg.evaluate-expression]
+
+**OpenStax cross-check merges — polar coordinates and parametric equations (Algebra & Trigonometry 2e ch. 10 / Precalculus 2e ch. 8).** The genuine diff beyond the four recorded deferrals: both cross-check books host polar coordinates and parametric equations in their trig-applications chapters, and **neither KA snapshot course contains them** (KA hosts them in AP Calculus BC territory — CED unit 9, which will cross-reference here per first-course-owns). Merged below with source notes; the polar form of complex numbers was already handled under KA Precalc unit 3 (trig.complex-to-polar).
+
+### trig.polar-to-rectangular — Polar → rectangular coordinates
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: Two special-value products ((r cos θ, r sin θ)) held in parallel — 4–7s with the pair entry. (source: OpenStax A&T 2e ch. 10 / Precalculus 2e ch. 8 — absent from both KA snapshot courses)
+Sample: Convert (r, θ) = (2, 180°) to rectangular coordinates → -2, 0 · Rule: pair-ordered · Params: r ∈ [1, 9]; θ ∈ {0°, 90°, 180°, 270°} and radian equivalents (axis angles only — integer coordinates; the 30°/45°/60° band is excluded, irrational coordinates have no supported answer shape); negative coordinates carry the touch-minus-key caveat.
+Kernels: [geo.exact-trig-values, fk.integer-mul-div]
+
+### trig.parametric-evaluate — Evaluate a parametric point
+
+Rating: Medium · Format: two-numbers
+Why: Two parallel substitute-and-evaluate moves — 4–7s with the pair entry. (source: OpenStax A&T 2e ch. 10 / Precalculus 2e ch. 8 — absent from both KA snapshot courses)
+Sample: x = 2t + 1, y = t². The point at t = 3? → 7, 9 · Rule: pair-ordered · Params: x(t) linear, y(t) linear or t², coefficients ∈ [1, 5]; t ∈ [−4, 4]; coordinates ∈ [−20, 20]; negative coordinates carry the touch-minus-key caveat.
+Kernels: [prealg.evaluate-expression, alg1.evaluate-function]
+
+### trig.eliminate-parameter — Eliminate the parameter
+
+Rating: Low
+Why: Inherently multi-step at any speed — solve one equation for t, substitute into the other, and simplify to a Cartesian equation. (source: OpenStax A&T 2e ch. 10 / Precalculus 2e ch. 8 — absent from both KA snapshot courses)
+Kernels: [alg1.rearrange-formula-one-step, alg2.evaluate-composite, prealg.combine-like-terms]
+
+### Trigonometry / Precalculus checklist disposition table
+
+Every KA Trigonometry unit (4), every KA Precalculus unit (10), the four Algebra & Trigonometry 2e chapters deferred here by the Algebra 2 pass (7–10, each with an explicit payoff row), and every Precalculus 2e chapter (12) maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| KA Trig 1 Right triangles & trigonometry | fully cross-referenced: geo.trig-ratio-definition, geo.special-right-triangle, geo.trig-cofunction, geo.solve-right-triangle (Low), prealg.pythagorean-hypotenuse (all owned upstream); right-triangle word problems and modeling out-of-grain — no drillable content beyond kernels geo.trig-ratio-definition, geo.exact-trig-values |
+| KA Trig 2 Trigonometric functions | trig.reference-angle, trig.coterminal-angle, trig.exact-trig-any-quadrant, trig.reciprocal-trig-value, trig.amplitude-from-equation, trig.midline-from-equation, trig.period-from-equation, trig.evaluate-inverse-trig, trig.graph-sinusoid (Low — pays the Algebra 2 KA 11 sinusoid deferral); unit circle → geo.exact-trig-values (radian phrasing joined this pass); radians → alg2.degrees-to-radians, alg2.radians-to-degrees; ASTC → alg2.trig-sign-by-quadrant; feature reads from drawn graphs out-of-grain: graph input; tangent graphs: recorded judgment — the period-π analog of trig.period-from-equation, a separate key family if built |
+| KA Trig 3 Non-right triangles & trigonometry | trig.triangle-area-sine, trig.choose-triangle-law, trig.law-of-sines-solve (Low), trig.law-of-cosines-solve (Low); applied triangle word problems out-of-grain — no drillable content beyond kernels trig.choose-triangle-law, geo.exact-trig-values |
+| KA Trig 4 Trigonometric equations and identities | trig.tan-from-sin-cos, trig.trig-parity, trig.angle-sum-formula-recall, trig.double-angle-evaluate, trig.solve-basic-trig-equation, trig.solve-trig-equation-general (Low), trig.prove-identity (Low); Pythagorean identity → alg2.pythagorean-identity-apply (owned by Algebra 2) |
+| KA Precalc 1 Composite and inverse functions | trig.compose-functions-expression, trig.verify-inverse-pair; point evaluation → alg2.evaluate-composite, inverse of a linear function → alg2.inverse-of-linear (owned by Algebra 2); domain/range and invertibility-from-graph out-of-grain: interval answers are not in the format legend / graph reading — no drillable content beyond kernels alg2.evaluate-composite, alg2.inverse-of-linear |
+| KA Precalc 2 Trigonometry | pure dedup (the snapshot's own note): inverse trig → trig.evaluate-inverse-trig; law of sines/cosines → trig.law-of-sines-solve, trig.law-of-cosines-solve, trig.choose-triangle-law; equations → trig.solve-basic-trig-equation, trig.solve-trig-equation-general; angle addition → trig.angle-sum-formula-recall, trig.double-angle-evaluate; identities → alg2.pythagorean-identity-apply, trig.prove-identity; values → geo.exact-trig-values, trig.exact-trig-any-quadrant; sinusoidal models out-of-grain: modeling — no drillable content beyond kernels trig.amplitude-from-equation, trig.period-from-equation, trig.midline-from-equation |
+| KA Precalc 3 Complex numbers | trig.complex-quadrant, trig.complex-modulus, trig.complex-divide (Low), trig.complex-to-polar (Low); arithmetic → alg2.imaginary-powers, alg2.simplify-sqrt-negative, alg2.add-subtract-complex, alg2.complex-conjugate, alg2.multiply-complex (owned by Algebra 2); plane distance/midpoint → geo.distance-formula, geo.midpoint-formula (owned by Geometry); multiplying in polar form: recorded judgment — a Low-grain composite of trig.complex-to-polar and alg2.multiply-complex, no separate entry |
+| KA Precalc 4 Rational functions | trig.vertical-asymptote, trig.horizontal-asymptote, trig.identify-hole, trig.graph-rational-function (Low); simplification → alg1.simplify-rational-expression (Low, owned by Algebra 1); equations → alg2.solve-rational-equation (Low, owned by Algebra 2); slant asymptotes: recorded judgment — requires polynomial long division (alg2.polynomial-long-division, Low) and an expression answer, no drillable read beyond it |
+| KA Precalc 5 Conic sections | trig.ellipse-axes-read, trig.ellipse-foci-distance, trig.hyperbola-asymptote-slope, trig.classify-conic (pays the Int 11 / A&T 12 ellipse-hyperbola deferrals from the Algebra 2 pass); circles → geo.circle-equation-read, geo.circle-radius-read, geo.circle-general-to-standard (Low); parabola → geo.parabola-focus-directrix (Low) (owned by Geometry); hyperbola foci: recorded judgment — the same single-formula move as trig.ellipse-foci-distance with c² = a² + b², a separate key family if built |
+| KA Precalc 6 Vectors | trig.vector-add, trig.vector-from-points, trig.vector-direction-angle (Low); magnitude → trig.complex-modulus (same √(a²+b²) family, owned under KA Precalc 3); scalar multiplication → geo.dilate-point (owned by Geometry); unit vectors: recorded judgment — fraction-component pairs are not in the format legend (two-numbers is integer-only); vector word problems out-of-grain: modeling — no drillable content beyond kernels trig.vector-add, trig.complex-modulus |
+| KA Precalc 7 Matrices | trig.matrix-add-entry, trig.matrix-multiply-entry, trig.determinant-2x2, trig.matrix-product-defined, trig.matrix-inverse-2x2 (Low); systems via matrices → prealg.solve-2x2-system (Low, owned by Pre-Algebra); matrix transformations of the plane and whole-matrix answers out-of-grain: no matrix answer format — no drillable content beyond kernels trig.matrix-multiply-entry, trig.determinant-2x2 |
+| KA Precalc 8 Probability and combinatorics | trig.multiplication-principle, trig.probability-with-counting (Low); the computational core → alg2.simple-probability, alg2.complement-probability, alg2.permutation-count, alg2.factorial, alg2.binomial-coefficient, alg2.binomial-expansion (Low), alg2.compound-event-probability (Low) (owned by Algebra 2) |
+| KA Precalc 9 Series | trig.geometric-series-converges; sums → alg2.arithmetic-series-sum, alg2.geometric-series-sum (Low), alg2.infinite-geometric-sum, alg2.evaluate-sigma (owned by Algebra 2) |
+| KA Precalc 10 Limits and continuity | trig.limit-by-substitution, trig.limit-removable-factor, trig.classify-discontinuity, trig.continuity-at-point, trig.limit-by-rationalizing (Low); limits at infinity of rationals → trig.horizontal-asymptote (same read, owned under KA Precalc 4); limits from graphs and tables out-of-grain: graph/table reading — no drillable content beyond kernels trig.limit-by-substitution, trig.continuity-at-point |
+| A&T 7 The Unit Circle: Sine and Cosine Functions (deferred debt — **paid**) | paid by the KA Trig 2 set: geo.exact-trig-values (with the radian extension authored this pass), trig.reference-angle, trig.coterminal-angle, trig.exact-trig-any-quadrant, alg2.degrees-to-radians, alg2.radians-to-degrees |
+| A&T 8 Periodic Functions (deferred debt — **paid**) | paid by: trig.amplitude-from-equation, trig.midline-from-equation, trig.period-from-equation, trig.graph-sinusoid (Low), trig.evaluate-inverse-trig, trig.reciprocal-trig-value |
+| A&T 9 Trigonometric Identities and Equations (deferred debt — **paid**) | paid by the KA Trig 4 set (trig.tan-from-sin-cos, trig.trig-parity, trig.angle-sum-formula-recall, trig.double-angle-evaluate, trig.solve-basic-trig-equation, trig.solve-trig-equation-general, trig.prove-identity) plus alg2.pythagorean-identity-apply; half-angle and sum-to-product formulas: recorded judgment — Low-grain composites with no new kernel beyond trig.angle-sum-formula-recall, alg2.pythagorean-identity-apply |
+| A&T 10 Further Applications of Trigonometry (deferred debt — **paid**) | paid by the KA Trig 3 set (laws of sines/cosines, triangle area) and the KA Precalc 6 vector set; merged beyond the deferral: trig.polar-to-rectangular, trig.parametric-evaluate, trig.eliminate-parameter (Low); polar form of complex numbers → trig.complex-to-polar (Low, KA Precalc 3); rectangular→polar r-computation → trig.complex-modulus (registry note) |
+| Precalc 2e 1 Functions | covered: the Algebra 1 KA 8 / Algebra 2 KA 9 function sets plus alg2.evaluate-composite, alg2.inverse-of-linear, trig.compose-functions-expression, trig.verify-inverse-pair |
+| Precalc 2e 2 Linear Functions | covered by the Algebra 1 KA 4/5 entry sets |
+| Precalc 2e 3 Polynomial and Rational Functions | covered by the Algebra 2 KA 1/3/4/5 entry sets plus the KA Precalc 4 rational-function set |
+| Precalc 2e 4 Exponential and Logarithmic Functions | covered by the Algebra 2 KA 7/8 entry sets |
+| Precalc 2e 5 Trigonometric Functions | covered by the KA Trig 1 and KA Trig 2 rows (Geometry owners plus the trig.* unit-2 set) |
+| Precalc 2e 6 Periodic Functions | covered by the A&T 8 payoff row |
+| Precalc 2e 7 Trigonometric Identities and Equations | covered by the A&T 9 payoff row |
+| Precalc 2e 8 Further Applications of Trigonometry | covered by the A&T 10 payoff row (including the polar/parametric merges) |
+| Precalc 2e 9 Systems of Equations and Inequalities | covered: the Pre-Algebra/Algebra 1 systems owners (see the Algebra 2 Int 4 row) plus the KA Precalc 7 matrix set; partial fractions: recorded judgment — a Low-grain composite of alg2.solve-rational-equation and prealg.solve-2x2-system territory, no drillable kernel beyond those |
+| Precalc 2e 10 Analytic Geometry | covered by the KA Precalc 5 conic set and its Geometry owners |
+| Precalc 2e 11 Sequences, Probability and Counting Theory | covered by the Algebra 2 sequences/series/probability merge block (cross-referenced under KA Precalc 8/9) plus trig.multiplication-principle |
+| Precalc 2e 12 Introduction to Calculus | covered by the KA Precalc 10 limit set; the derivative preview: recorded judgment — Calculus AB grain (CED units 1–2), deferred to that sweep |
 
 ---
 

@@ -119,7 +119,7 @@ Seven formats. For each: the **assumed input surface** (a hypothetical game-rend
 - **Surface (PROPOSAL):** digit pad + minus + a **fraction-bar key** (rendered `/`) + backspace + Enter. UI shows numerator/denominator slots.
 - **Entry time:** digits × 250ms + 250ms bar + 250ms Enter (1-digit/1-digit fraction ≈ 1.0s).
 - **Allowed characters:** `0-9`, `-`, one `/`.
-- **Normalization:** split on `/`; sign moved to numerator (`1/-2` → `-1/2`); denominator must be a positive integer after the move; then the entry's rule decides equivalence (`frac-lowest-terms` vs `frac-any-equivalent`). Integer-valued answers to fraction-format entries must still be entered as the format demands the rule states (e.g. `4/2` vs `2` — governed by the rule, see legend).
+- **Normalization:** split on `/`; sign moved to numerator (`1/-2` → `-1/2`); denominator must be a positive integer after the move; then the entry's rule decides equivalence (`frac-lowest-terms` vs `frac-any-equivalent`). Integer-valued answers to fraction-format entries are still entered on the fraction surface; which written form the judge accepts (e.g. `4/2` vs `2`) is governed by the entry's rule — see the Accepted-answer rule legend.
 - **Accept/reject (answer `2/3` under `frac-lowest-terms`):** `2/3` ✓ · `4/6` ✗ (not lowest terms) · `0.67` ✗ (wrong format). Under `frac-any-equivalent`: `4/6` ✓.
 
 ### `decimal` — a decimal answer
@@ -160,6 +160,8 @@ Ten rules, closed set. Format ↔ rule compatibility is fixed by the Formats col
 - **Primary (Foundational → Algebra 2):** count only citing entries whose **own section** is Foundational kernels through Algebra 2. This is the ranking column for the "Build this first" section.
 - **Full-range (secondary):** count citing entries from all sections, Foundational through BC-only.
 
+**What counts as a citation (clarified during the Unit 9 computation):** exactly the slugs inside a bracketed `Kernels:` list — nothing else. Cross-reference rows, the parenthetical `(see …)` pointer after a "no drillable kernel" sentence, registry annotations, and disposition-table mentions are **not** citations and contribute nothing to in-degree.
+
 **Citation norm (binding):** High/Medium entries **must** declare prerequisite kernels whenever a registered kernel is a genuine prerequisite of the skill — "may" is not the standard, because in-degree has to measure dependency weight, not authoring salience. The Unit 9 consistency pass spot-checks citation *completeness* ("what kernels should this entry cite?") on a sample, not just citation resolution.
 
 **Registry mediation:** citations may only use slugs that exist in the kernel registry; a kernel is registered at its first citation. Synonyms are prevented at citation time (check the registry before minting), never repaired later.
@@ -187,356 +189,356 @@ Ten rules, closed set. Format ↔ rule compatibility is fixed by the Formats col
 
 ## Kernel registry
 
-Live registry of every kernel slug in the document. Maintained continuously from the first authoring pass; citations may only use slugs listed here. In-degree columns are computed in the final consistency pass (blank until then).
+Live registry of every kernel slug in the document. Maintained continuously from the first authoring pass; citations may only use slugs listed here. In-degree columns were computed in the Unit 9 consistency pass per the In-degree & citation rules (both columns filled below; method and top-10 spot-recount recorded in the Unit 9 changelog).
 
 | Slug | One-line definition | Owning entry | Canonical-home note | In-degree (primary) | In-degree (full) |
 |---|---|---|---|---|---|
-| fk.times-tables | Single-fact multiplication recall (factor families through 12) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
-| fk.division-facts | Division facts as times-table inverses | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
-| fk.addition-facts | Addition facts and fluent mental addition (sums ≤ 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
-| fk.subtraction-facts | Subtraction facts and fluent mental subtraction (within 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
-| prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
-| prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
-| prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
-| geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | authored in calibration section; absorbed by Geometry via cross-reference (Geometry pass) | | |
-| prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 (KA 13, pinned calibration entry) | — | | |
-| alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 (KA 5, pinned calibration entry) | — | | |
-| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 (KA 1, pinned calibration entry) | canonical home: **Pre-Algebra** (KA Pre-Algebra units 6/12 exercise it first — recorded during the Pre-Algebra pass); slug immutable, minted in Algebra 1 during calibration; Pre-Algebra carries the cross-reference row | | |
-| alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 (KA 13, pinned calibration entry) | — | | |
-| alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 (KA 14, pinned calibration entry) | — | | |
-| fk.place-value | Identify the digit in a named place | self — Foundational kernels | — | | |
-| fk.integer-add-sub | Signed integer addition and subtraction | self — Foundational kernels | — | | |
-| fk.integer-mul-div | Sign rules for integer products and quotients | self — Foundational kernels | — | | |
-| fk.doubling-halving | Double or halve a number fluently | self — Foundational kernels | — | | |
-| fk.two-digit-times-one-digit | 2-digit × 1-digit mental multiplication | self — Foundational kernels | — | | |
-| fk.perfect-squares | Perfect-square recall through 15² | self — Foundational kernels | — | | |
-| fk.perfect-cubes | Perfect-cube recall through 6³ | self — Foundational kernels | — | | |
-| fk.powers-of-ten | Multiply/divide by a power of ten (place shift) | self — Foundational kernels | — | | |
-| fk.fraction-of-number | Fraction of a whole number | self — Foundational kernels | — | | |
-| prealg.smallest-prime-factor | Smallest prime factor of a 2-digit composite | self — Pre-Algebra (KA 1) | — | | |
-| prealg.prime-factorization | Full prime factorization (Low; kernel source) | self — Pre-Algebra (KA 1) | — | | |
-| prealg.next-term-arithmetic | Next term of an arithmetic pattern | self — Pre-Algebra (KA 2) | — | | |
-| prealg.simplify-ratio | Simplify a ratio to lowest terms | self — Pre-Algebra (KA 3) | — | | |
-| prealg.unit-rate | Unit rate from a quantity pair | self — Pre-Algebra (KA 3) | — | | |
-| prealg.solve-proportion | Missing value in a proportion / equivalent fractions | self — Pre-Algebra (KA 3) | also satisfies KA 9 and OpenStax ch. 4 equivalent-fractions rows | | |
-| prealg.decimal-to-percent | Convert a decimal to a percent | self — Pre-Algebra (KA 4) | — | | |
-| prealg.percent-to-fraction | Percent → fraction in lowest terms | self — Pre-Algebra (KA 4) | — | | |
-| prealg.fraction-to-percent | Fraction → percent | self — Pre-Algebra (KA 4) | — | | |
-| prealg.percent-of-number | Percent of a number (benchmark percents) | self — Pre-Algebra (KA 4) | — | | |
-| prealg.find-whole-from-percent | Find the whole from a part and percent | self — Pre-Algebra (KA 4) | — | | |
-| prealg.find-percent-from-pair | What percent is a of b | self — Pre-Algebra (KA 4) | — | | |
-| prealg.percent-change | Percent increase or decrease | self — Pre-Algebra (KA 4) | — | | |
-| prealg.evaluate-exponent | Evaluate a small power | self — Pre-Algebra (KA 5) | — | | |
-| prealg.order-of-operations | Two-operation order of operations | self — Pre-Algebra (KA 5) | — | | |
-| prealg.evaluate-expression | Evaluate a one-variable expression | self — Pre-Algebra (KA 6) | — | | |
-| prealg.combine-like-terms | Combine like terms in one variable | self — Pre-Algebra (KA 6) | — | | |
-| prealg.solve-one-step-equation | Solve a one-step equation | self — Pre-Algebra (KA 7) | — | | |
-| prealg.check-solution | Check a candidate solution of a linear equation | self — Pre-Algebra (KA 7) | — | | |
-| prealg.absolute-value | Absolute value of an integer | self — Pre-Algebra (KA 8) | — | | |
-| prealg.constant-of-proportionality | Constant of proportionality from a pair | self — Pre-Algebra (KA 9) | — | | |
-| prealg.solve-two-step-equation | Solve a two-step equation | self — Pre-Algebra (KA 10) | — | | |
-| prealg.solve-one-step-inequality | Solve a one-step inequality (boundary + direction) | self — Pre-Algebra (KA 10) | — | | |
-| prealg.square-root | Square root of a perfect square | self — Pre-Algebra (KA 11) | — | | |
-| prealg.cube-root | Cube root of a perfect cube | self — Pre-Algebra (KA 11) | — | | |
-| prealg.root-between-integers | Bracket a square root between consecutive integers | self — Pre-Algebra (KA 11) | — | | |
-| prealg.exponent-product-rule | Product rule for exponents (add exponents) | self — Pre-Algebra (KA 11) | — | | |
-| prealg.negative-exponent | Negative exponent as a unit fraction | self — Pre-Algebra (KA 11) | — | | |
-| prealg.scientific-to-standard | Scientific notation → standard form | self — Pre-Algebra (KA 11) | — | | |
-| prealg.scientific-notation-exponent | Exponent when a value is written in scientific notation | self — Pre-Algebra (KA 11) | — | | |
-| prealg.solve-multi-step-equation | Solve a multi-step equation (Low; kernel source) | self — Pre-Algebra (KA 12) | — | | |
-| prealg.check-point-solution | Check a point against a two-variable equation | self — Pre-Algebra (KA 13) | — | | |
-| prealg.check-system-solution | Check a candidate solution of a 2×2 system | self — Pre-Algebra (KA 15) | — | | |
-| prealg.solve-2x2-system | Solve a 2×2 linear system (Low; kernel source) | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 unit 6 cross-references here (recorded during the Algebra 1 pass) | | |
-| prealg.fraction-multiply | Multiply two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
-| prealg.fraction-divide | Divide two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
-| prealg.mixed-to-improper | Mixed number → improper fraction | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
-| prealg.decimal-add-sub | Add or subtract decimals | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
-| prealg.fraction-to-decimal | Fraction → terminating decimal | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
-| prealg.decimal-to-fraction | Decimal → fraction in lowest terms | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
-| prealg.round-to-place | Round to a named place (whole or decimal) | self — Pre-Algebra (OpenStax merge, chs. 1 & 5) | — | | |
-| prealg.identify-property | Name the illustrated arithmetic property | self — Pre-Algebra (OpenStax merge, ch. 7) | — | | |
-| prealg.perimeter-rectangle | Perimeter of a rectangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
-| prealg.area-triangle | Area of a triangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
-| prealg.circle-area-pi | Circle area as a coefficient of π | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
-| prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | first-course-owns: Geometry unit 5 cross-references here (recorded during the Geometry pass) | | |
-| prealg.identify-quadrant | Quadrant of a coordinate point | self — Pre-Algebra (OpenStax merge, ch. 11) | — | | |
-| fk.unit-conversion-facts | Recall a measurement conversion factor | self — Foundational kernels (added during Algebra 1 pass) | — | | |
-| alg1.combine-like-terms-multivar | Combine like terms across multiple variables | self — Algebra 1 (KA 1) | — | | |
-| alg1.solve-equation-both-sides | Solve ax = bx + c (variables on both sides) | self — Algebra 1 (KA 2) | — | | |
-| alg1.rearrange-formula-one-step | Solve a one-step formula for a variable | self — Algebra 1 (KA 2) | — | | |
-| alg1.unit-convert-one-step | One-step unit conversion | self — Algebra 1 (KA 3) | — | | |
-| alg1.slope-two-points | Slope from two points | self — Algebra 1 (KA 4) | — | | |
-| alg1.intercept-from-equation | Axis intercept from standard form | self — Algebra 1 (KA 4) | — | | |
-| alg1.graph-line-from-equation | Graph a line from its equation (Low; kernel source) | self — Algebra 1 (KA 4) | — | | |
-| alg1.read-point-slope | Read the anchor point off point-slope form | self — Algebra 1 (KA 5) | — | | |
-| alg1.slope-from-standard-form | Slope from standard form (m = −A/B) | self — Algebra 1 (KA 5) | — | | |
-| alg1.write-line-equation | Write the equation of a line (Low; kernel source) | self — Algebra 1 (KA 5) | — | | |
-| alg1.system-solution-count | Number of solutions of a 2×2 system | self — Algebra 1 (KA 6) | — | | |
-| alg1.check-inequality-solution | Check a point against a two-variable inequality | self — Algebra 1 (KA 7) | — | | |
-| alg1.evaluate-function | Evaluate f(x) in function notation | self — Algebra 1 (KA 8) | — | | |
-| alg1.is-function-pairs | Judge whether a set of ordered pairs is a function | self — Algebra 1 (KA 8) | — | | |
-| alg1.next-term-geometric | Next term of a geometric sequence | self — Algebra 1 (KA 9) | — | | |
-| alg1.arithmetic-nth-term | nth term of an arithmetic sequence | self — Algebra 1 (KA 9) | — | | |
-| alg1.geometric-nth-term | nth term of a geometric sequence | self — Algebra 1 (KA 9) | — | | |
-| alg1.evaluate-absolute-expression | Evaluate an absolute-value expression | self — Algebra 1 (KA 10) | — | | |
-| alg1.solve-absolute-value-equation | Solve an absolute-value equation (both solutions) | self — Algebra 1 (KA 10) | — | | |
-| alg1.evaluate-piecewise | Evaluate a piecewise function | self — Algebra 1 (KA 10) | — | | |
-| alg1.exponent-power-rule | Power-of-a-power rule (multiply exponents) | self — Algebra 1 (KA 11) | — | | |
-| alg1.exponent-quotient-rule | Quotient rule for exponents (subtract exponents) | self — Algebra 1 (KA 11) | — | | |
-| alg1.simplify-radical | Simplify a square root to a√b | self — Algebra 1 (KA 11) | — | | |
-| alg1.evaluate-exponential | Evaluate an exponential expression a·bˣ | self — Algebra 1 (KA 12) | — | | |
-| alg1.growth-or-decay | Classify growth vs decay from the base | self — Algebra 1 (KA 12) | — | | |
-| alg1.growth-factor-to-rate | Percent rate from a growth/decay factor | self — Algebra 1 (KA 12) | — | | |
-| alg1.multiply-binomials | Multiply two binomials | self — Algebra 1 (KA 13) | — | | |
-| alg1.factor-gcf | Factor out the greatest common factor | self — Algebra 1 (KA 13) | — | | |
-| alg1.factor-difference-of-squares | Factor a difference of squares | self — Algebra 1 (KA 13) | — | | |
-| alg1.factor-perfect-square-trinomial | Recognize a perfect-square trinomial | self — Algebra 1 (KA 13) | — | | |
-| alg1.factor-nonmonic-quadratic | Factor a non-monic quadratic (Low; kernel source) | self — Algebra 1 (KA 13) | — | | |
-| alg1.roots-from-factored-form | Roots from factored form (zero-product read-off) | self — Algebra 1 (KA 14) | — | | |
-| alg1.vertex-from-vertex-form | Vertex from vertex form | self — Algebra 1 (KA 14) | — | | |
-| alg1.axis-of-symmetry | Axis of symmetry from standard form | self — Algebra 1 (KA 14) | — | | |
-| alg1.discriminant-root-count | Count real solutions via the discriminant | self — Algebra 1 (KA 14) | — | | |
-| alg1.solve-x-squared-equals-k | Solve x² = k (both solutions) | self — Algebra 1 (KA 14) | — | | |
-| alg1.solve-by-quadratic-formula | Solve via the quadratic formula (Low; kernel source) | self — Algebra 1 (KA 14) | — | | |
-| alg1.complete-the-square | Complete the square (Low; kernel source) | self — Algebra 1 (KA 14) | — | | |
-| alg1.classify-rational-irrational | Classify a number as rational or irrational | self — Algebra 1 (KA 15) | — | | |
-| alg1.rational-irrational-operations | Closure judgments for rational/irrational sums and products | self — Algebra 1 (KA 15) | — | | |
-| alg1.linear-word-problem | Translate-and-solve linear word problems (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 3) | — | | |
-| alg1.polynomial-degree | Degree of a polynomial | self — Algebra 1 (OpenStax merge, ch. 6) | — | | |
-| alg1.multiply-monomials | Multiply two monomials | self — Algebra 1 (OpenStax merge, ch. 6) | — | | |
-| alg1.simplify-monomial-quotient | Divide two monomials | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
-| alg1.simplify-rational-expression | Simplify a rational expression (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
-| alg1.multiply-square-roots | Multiply square roots to an integer | self — Algebra 1 (OpenStax merge, ch. 9) | — | | |
-| geo.translate-point | Translate a point by a vector | self — Geometry (KA 1) | — | | |
-| geo.reflect-point | Reflect a point across an axis | self — Geometry (KA 1) | — | | |
-| geo.rotate-point | Rotate a point about the origin (90°/180°/270°) | self — Geometry (KA 1) | — | | |
-| geo.dilate-point | Dilate a point from the origin | self — Geometry (KA 1) | — | | |
-| geo.is-rigid-motion | Classify a transformation as rigid or not | self — Geometry (KA 2) | — | | |
-| geo.compose-transformations | Compose transformations in sequence (Low; kernel source) | self — Geometry (KA 2) | — | | |
-| geo.vertical-angle-read | Vertical angles are equal (read-off) | self — Geometry (KA 3) | — | | |
-| geo.supplement-complement | Supplement or complement of an angle | self — Geometry (KA 3) | — | | |
-| geo.transversal-angle | Angle from parallel lines cut by a transversal | self — Geometry (KA 3) | — | | |
-| geo.triangle-angle-sum | Third angle of a triangle | self — Geometry (KA 3) | — | | |
-| geo.exterior-angle | Exterior angle of a triangle | self — Geometry (KA 3) | — | | |
-| geo.polygon-angle-sum | Interior angle sum of an n-gon | self — Geometry (KA 3) | — | | |
-| geo.isosceles-base-angles | Isosceles triangle angle relations | self — Geometry (KA 3) | — | | |
-| geo.corresponding-parts | Corresponding parts of congruent triangles | self — Geometry (KA 3) | — | | |
-| geo.congruence-proof | Prove two triangles congruent (Low; kernel source) | self — Geometry (KA 3) | — | | |
-| geo.similarity-criteria | Match a marked pair to a similarity criterion | self — Geometry (KA 4) | — | | |
-| geo.scale-factor | Scale factor between similar figures | self — Geometry (KA 4) | — | | |
-| geo.area-scale-factor | Area ratio from a length scale factor | self — Geometry (KA 4) | — | | |
-| geo.similarity-proof | Prove two triangles similar (Low; kernel source) | self — Geometry (KA 4) | — | | |
-| geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | | |
-| geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | — | | |
-| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
-| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass); the calculus sections cross-reference here (satisfied in the Calculus AB pass) | | |
-| geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | — | | |
-| geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | — | | |
-| geo.distance-formula | Distance between two points | self — Geometry (KA 6) | — | | |
-| geo.midpoint-formula | Midpoint of a segment | self — Geometry (KA 6) | — | | |
-| geo.perpendicular-slope | Negative-reciprocal slope of a perpendicular line | self — Geometry (KA 6) | — | | |
-| geo.coordinate-geometry-proof | Verify figure properties on coordinates (Low; kernel source) | self — Geometry (KA 6) | — | | |
-| geo.circle-equation-read | Center from a circle's standard form | self — Geometry (KA 7) | — | | |
-| geo.circle-radius-read | Radius from a circle's standard form | self — Geometry (KA 7) | — | | |
-| geo.circle-general-to-standard | Circle center/radius from general form (Low; kernel source) | self — Geometry (KA 7) | — | | |
-| geo.parabola-focus-directrix | Focus and directrix of a parabola (Low; kernel source) | self — Geometry (KA 7) | — | | |
-| geo.central-inscribed-angle | Central and inscribed angle measures | self — Geometry (KA 8) | — | | |
-| geo.arc-length-fraction | Arc length as a π-coefficient | self — Geometry (KA 8) | — | | |
-| geo.sector-area-fraction | Sector area as a π-coefficient | self — Geometry (KA 8) | — | | |
-| geo.tangent-radius-problem | Tangent-segment problems (Low; kernel source) | self — Geometry (KA 8) | — | | |
-| geo.volume-box | Volume of a rectangular box / prism | self — Geometry (KA 9) | — | | |
-| geo.volume-cylinder-pi | Cylinder volume as a π-coefficient | self — Geometry (KA 9) | — | | |
-| geo.volume-cone-pi | Cone volume as a π-coefficient | self — Geometry (KA 9) | — | | |
-| geo.volume-sphere-pi | Sphere volume as a π-coefficient | self — Geometry (KA 9) | — | | |
-| geo.volume-scale-factor | Volume ratio from a length scale factor | self — Geometry (KA 9) | — | | |
-| geo.cross-section-id | Identify a solid's cross-section | self — Geometry (KA 9) | — | | |
-| geo.surface-area | Surface area of a solid (Low; kernel source) | self — Geometry (KA 9) | — | | |
-| geo.conditional-forms | Converse/inverse/contrapositive identification | self — Geometry (gap merge — logic/proof-writing) | — | | |
-| geo.two-column-proof | Write a two-column proof (Low; kernel source) | self — Geometry (gap merge — logic/proof-writing) | — | | |
-| alg2.add-polynomials | Add or subtract two polynomials | self — Algebra 2 (KA 1) | — | | |
-| alg2.expand-binomial-square | Expand a squared binomial | self — Algebra 2 (KA 1) | — | | |
-| alg2.expand-conjugate-product | Expand (a + b)(a − b) to a difference of squares | self — Algebra 2 (KA 1) | — | | |
-| alg2.imaginary-powers | Powers of i (mod-4 cycle recall) | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.simplify-sqrt-negative | Square root of a negative number in i-form | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.add-subtract-complex | Add or subtract complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.complex-conjugate | Conjugate of a complex number | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.multiply-complex | Multiply two complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.solve-quadratic-complex | Solve a quadratic with complex solutions (Low; kernel source) | self — Algebra 2 (KA 2) | — | | |
-| alg2.sum-diff-cubes-pattern | Sum/difference-of-cubes pattern slot | self — Algebra 2 (KA 3) | — | | |
-| alg2.factor-by-grouping | Factor a four-term polynomial by grouping (Low; kernel source) | self — Algebra 2 (KA 3) | — | | |
-| alg2.factor-quadratic-form | Factor an expression in quadratic form (Low; kernel source) | self — Algebra 2 (KA 3) | — | | |
-| alg2.divide-poly-by-monomial | Divide a polynomial by a monomial | self — Algebra 2 (KA 4) | — | | |
-| alg2.remainder-theorem | Remainder via p(a) (remainder theorem) | self — Algebra 2 (KA 4) | — | | |
-| alg2.factor-check | Verify (x − a) is a factor (factor theorem) | self — Algebra 2 (KA 4) | — | | |
-| alg2.polynomial-long-division | Polynomial long/synthetic division (Low; kernel source) | self — Algebra 2 (KA 4) | — | | |
-| alg2.zero-multiplicity | Multiplicity of a zero from factored form | self — Algebra 2 (KA 5) | — | | |
-| alg2.multiplicity-cross-touch | Cross vs touch at a zero (multiplicity parity) | self — Algebra 2 (KA 5) | — | | |
-| alg2.end-behavior | End behavior from degree and leading coefficient | self — Algebra 2 (KA 5) | — | | |
-| alg2.evaluate-rational-exponent | Evaluate a rational-exponent power | self — Algebra 2 (KA 6) | — | | |
-| alg2.rational-exponent-product | Product rule with rational exponents | self — Algebra 2 (KA 6) | — | | |
-| alg2.simplify-cube-root | Simplify a cube root to a∛b | self — Algebra 2 (KA 6) | — | | |
-| alg2.combine-radicals | Add or subtract like radicals | self — Algebra 2 (KA 6) | — | | |
-| alg2.exponential-solve-common-base | Solve bˣ = k by power recognition | self — Algebra 2 (KA 7) | — | | |
-| alg2.evaluate-log | Evaluate a logarithm | self — Algebra 2 (KA 8) | — | | |
-| alg2.log-product-rule | Product rule for logarithms | self — Algebra 2 (KA 8) | — | | |
-| alg2.log-power-rule | Power rule for logarithms | self — Algebra 2 (KA 8) | — | | |
-| alg2.natural-log-facts | Natural-log special values (ln 1, ln e, ln eᵏ) | self — Algebra 2 (KA 8) | — | | |
-| alg2.solve-exponential-equation | Solve an exponential equation with logs (Low; kernel source) | self — Algebra 2 (KA 8) | — | | |
-| alg2.function-shift-direction | Shift direction of f(x ± a) ± b | self — Algebra 2 (KA 9) | — | | |
-| alg2.function-reflection-rule | Reflection axis of −f(x) / f(−x) | self — Algebra 2 (KA 9) | — | | |
-| alg2.function-scale-direction | Stretch vs compression from a·f(x) / f(bx) | self — Algebra 2 (KA 9) | — | | |
-| alg2.transformed-point | Track a point through shifts | self — Algebra 2 (KA 9) | — | | |
-| alg2.even-odd-classify | Classify a function as even/odd/neither | self — Algebra 2 (KA 9) | — | | |
-| alg2.solve-sqrt-equation-simple | Solve √x = k | self — Algebra 2 (KA 10) | — | | |
-| alg2.check-extraneous | Extraneous-solution verification | self — Algebra 2 (KA 10) | — | | |
-| alg2.solve-radical-equation | Solve a radical equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 9 row, paid this pass | | |
-| alg2.solve-rational-equation | Solve a rational equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 8 row, paid this pass | | |
-| alg2.degrees-to-radians | Degrees → radians as kπ | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) (radians live in both KA trig courses) | | |
-| alg2.radians-to-degrees | Radians → degrees | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.pythagorean-identity-apply | cos θ from sin θ via sin²θ + cos²θ = 1 | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 4) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | | |
-| alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.binomial-expansion | Expand a binomial power (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.simple-probability | Probability of a simple event | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.complement-probability | Complement probability 1 − p | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.permutation-count | Count ordered arrangements (falling product) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.compound-event-probability | Compound-event probability (Low; kernel source) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.evaluate-composite | Evaluate f(g(x)) at a point | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| alg2.inverse-of-linear | Inverse of a linear function | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | | |
-| trig.reference-angle | Reference angle of a rotation | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.coterminal-angle | Coterminal angle in [0°, 360°) | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.exact-trig-any-quadrant | Exact trig values beyond Quadrant I | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.reciprocal-trig-value | Evaluate csc/sec/cot at special angles | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.amplitude-from-equation | Amplitude read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.midline-from-equation | Midline read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.period-from-equation | Period of a sinusoid as kπ | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.evaluate-inverse-trig | Inverse trig at special values | self — Trig/Precalc (KA Trig 2) | — | | |
-| trig.graph-sinusoid | Graph a sinusoidal function (Low; kernel source) | self — Trig/Precalc (KA Trig 2) | pays the Algebra 2 KA 11 sinusoid deferral | | |
-| trig.triangle-area-sine | Triangle area via ½ab·sin C at special angles | self — Trig/Precalc (KA Trig 3) | — | | |
-| trig.choose-triangle-law | Choose law of sines vs cosines from the given configuration | self — Trig/Precalc (KA Trig 3) | — | | |
-| trig.law-of-sines-solve | Solve a triangle with the law of sines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | | |
-| trig.law-of-cosines-solve | Solve a triangle with the law of cosines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | | |
-| trig.tan-from-sin-cos | Tangent via the quotient identity | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.trig-parity | Even/odd identities for sin/cos/tan | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.angle-sum-formula-recall | Angle addition formula recall | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.double-angle-evaluate | Evaluate sin 2θ / cos 2θ from sin θ and cos θ | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.solve-basic-trig-equation | Solve sin/cos/tan θ = special value on [0°, 360°) | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.solve-trig-equation-general | Solve a general trig equation (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.prove-identity | Prove a trigonometric identity (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | | |
-| trig.compose-functions-expression | Compose two functions symbolically | self — Trig/Precalc (KA Precalc 1) | — | | |
-| trig.verify-inverse-pair | Verify two functions are inverses | self — Trig/Precalc (KA Precalc 1) | — | | |
-| trig.complex-quadrant | Quadrant of a complex number | self — Trig/Precalc (KA Precalc 3) | — | | |
-| trig.complex-modulus | Modulus of a complex number | self — Trig/Precalc (KA Precalc 3) | also owns vector magnitude (KA Precalc 6) and the polar r-computation (A&T ch. 10) — same √(a²+b²) fact family | | |
-| trig.complex-divide | Divide two complex numbers (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
-| trig.complex-to-polar | Convert a complex number to polar form (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | | |
-| trig.vertical-asymptote | Vertical asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | — | | |
-| trig.horizontal-asymptote | Horizontal asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | also satisfies the limit-at-infinity rows (KA Precalc 10) — same read; the Calculus AB (CED 1, limits at infinity) and BC (CED 10, sequence limits) rows cross-reference here (recorded in the calculus passes) | | |
-| trig.identify-hole | Removable discontinuity from factored form | self — Trig/Precalc (KA Precalc 4) | — | | |
-| trig.graph-rational-function | Graph a rational function (Low; kernel source) | self — Trig/Precalc (KA Precalc 4) | — | | |
-| trig.ellipse-axes-read | Semi-axis lengths off an ellipse's standard form | self — Trig/Precalc (KA Precalc 5) | pays the Int 11 / A&T 12 ellipse-hyperbola deferral recorded in the Algebra 2 pass | | |
-| trig.ellipse-foci-distance | Focal distance of an ellipse | self — Trig/Precalc (KA Precalc 5) | — | | |
-| trig.hyperbola-asymptote-slope | Asymptote slope off a hyperbola's standard form | self — Trig/Precalc (KA Precalc 5) | — | | |
-| trig.classify-conic | Classify a conic from its equation | self — Trig/Precalc (KA Precalc 5) | — | | |
-| trig.vector-add | Add or subtract vectors componentwise | self — Trig/Precalc (KA Precalc 6) | — | | |
-| trig.vector-from-points | Vector between two points | self — Trig/Precalc (KA Precalc 6) | — | | |
-| trig.vector-direction-angle | Direction angle of a vector (Low; kernel source) | self — Trig/Precalc (KA Precalc 6) | — | | |
-| trig.matrix-add-entry | One entry of a matrix sum or difference | self — Trig/Precalc (KA Precalc 7) | — | | |
-| trig.matrix-multiply-entry | One entry of a 2×2 matrix product | self — Trig/Precalc (KA Precalc 7) | — | | |
-| trig.determinant-2x2 | Determinant of a 2×2 matrix | self — Trig/Precalc (KA Precalc 7) | — | | |
-| trig.matrix-product-defined | Judge whether a matrix product is defined | self — Trig/Precalc (KA Precalc 7) | — | | |
-| trig.matrix-inverse-2x2 | Inverse of a 2×2 matrix (Low; kernel source) | self — Trig/Precalc (KA Precalc 7) | — | | |
-| trig.multiplication-principle | Fundamental counting principle | self — Trig/Precalc (KA Precalc 8) | — | | |
-| trig.probability-with-counting | Probability via combinatorial counting (Low; kernel source) | self — Trig/Precalc (KA Precalc 8) | — | | |
-| trig.geometric-series-converges | Convergence judgment for a geometric series | self — Trig/Precalc (KA Precalc 9) | first-course-owns: the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | | |
-| trig.limit-by-substitution | Limit by direct substitution | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
-| trig.limit-removable-factor | Limit of a removable-singularity quotient | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
-| trig.classify-discontinuity | Classify a discontinuity | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
-| trig.continuity-at-point | Continuity check at a piecewise seam | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
-| trig.limit-by-rationalizing | Limit requiring algebraic manipulation (Low; kernel source) | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | | |
-| trig.polar-to-rectangular | Polar → rectangular coordinates at axis angles | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
-| trig.parametric-evaluate | Evaluate a parametric point at t | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
-| trig.eliminate-parameter | Eliminate the parameter (Low; kernel source) | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | | |
-| calcab.special-trig-limits | Special trig limits (sin(ax)/x family) recall | self — Calculus AB (CED 1) | — | | |
-| calcab.ivt-guarantees-zero | IVT sign-change guarantee check | self — Calculus AB (CED 1) | — | | |
-| calcab.derivative-power-rule | Power rule d/dx xⁿ = nxⁿ⁻¹ | self — Calculus AB (CED 2) | — | | |
-| calcab.derivative-standard-table | Derivative recall for the standard function table | self — Calculus AB (CED 2) | — | | |
-| calcab.derivative-at-point | Evaluate f′(a) for a monomial | self — Calculus AB (CED 2) | — | | |
-| calcab.differentiate-polynomial | Differentiate a short polynomial termwise | self — Calculus AB (CED 2) | — | | |
-| calcab.product-quotient-rule-recall | Product/quotient rule formula recall | self — Calculus AB (CED 2) | — | | |
-| calcab.recognize-difference-quotient | Recognize a difference quotient as a table derivative | self — Calculus AB (CED 2) | — | | |
-| calcab.apply-product-rule | Differentiate a product (Low; kernel source) | self — Calculus AB (CED 2) | — | | |
-| calcab.tangent-line-equation | Equation of a tangent line (Low; kernel source) | self — Calculus AB (CED 2) | — | | |
-| calcab.chain-rule-recall | Chain rule formula recall | self — Calculus AB (CED 3) | — | | |
-| calcab.chain-rule-linear-inner | Differentiate f(ax) via the chain rule | self — Calculus AB (CED 3) | — | | |
-| calcab.derivative-inverse-trig-table | Inverse-trig derivative table recall | self — Calculus AB (CED 3) | — | | |
-| calcab.second-derivative-power | Evaluate f″(a) for a monomial | self — Calculus AB (CED 3) | — | | |
-| calcab.implicit-differentiation | Implicit differentiation (Low; kernel source) | self — Calculus AB (CED 3) | — | | |
-| calcab.derivative-inverse-function-value | Derivative of an inverse function at a value (Low; kernel source) | self — Calculus AB (CED 3) | — | | |
-| calcab.velocity-from-position | Velocity from a position polynomial | self — Calculus AB (CED 4) | — | | |
-| calcab.indeterminate-form-check | Verify a 0/0 or ∞/∞ indeterminate form | self — Calculus AB (CED 4) | — | | |
-| calcab.lhopital-apply | Evaluate a limit by L'Hôpital's rule (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
-| calcab.related-rates | Related-rates problems (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
-| calcab.linear-approximation | Tangent-line approximation (Low; kernel source) | self — Calculus AB (CED 4) | — | | |
-| calcab.derivative-sign-read | Increasing/decreasing from the sign of f′ | self — Calculus AB (CED 5) | — | | |
-| calcab.concavity-sign-read | Concavity from the sign of f″ | self — Calculus AB (CED 5) | — | | |
-| calcab.second-derivative-test-read | Classify a critical point via the second-derivative test | self — Calculus AB (CED 5) | — | | |
-| calcab.critical-point-quadratic | Critical point of a quadratic | self — Calculus AB (CED 5) | — | | |
-| calcab.mvt-apply | Find the Mean Value Theorem's c (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
-| calcab.find-inflection-points | Find inflection points (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
-| calcab.absolute-extrema-closed-interval | Absolute extrema by the candidates test (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
-| calcab.optimization | Applied optimization (Low; kernel source) | self — Calculus AB (CED 5) | — | | |
-| calcab.antiderivative-power-rule | Antiderivative power rule | self — Calculus AB (CED 6) | — | | |
-| calcab.antiderivative-standard-table | Antiderivative recall for the standard table | self — Calculus AB (CED 6) | — | | |
-| calcab.ftc-derivative-of-accumulation | Derivative of an accumulation function (FTC part 1) | self — Calculus AB (CED 6) | — | | |
-| calcab.definite-integral-power | Evaluate a one-term definite integral (FTC part 2) | self — Calculus AB (CED 6) | — | | |
-| calcab.integral-additivity | Definite-integral properties (additivity, reversal, scaling) | self — Calculus AB (CED 6) | — | | |
-| calcab.riemann-sum-compute | Compute a Riemann sum (Low; kernel source) | self — Calculus AB (CED 6) | — | | |
-| calcab.u-substitution | Integrate by u-substitution (Low; kernel source) | self — Calculus AB (CED 6) | — | | |
-| calcab.verify-de-solution | Verify a differential-equation solution | self — Calculus AB (CED 7) | — | | |
-| calcab.exponential-de-solution | General solution of y′ = ky | self — Calculus AB (CED 7) | — | | |
-| calcab.solve-separable-de | Solve a separable differential equation (Low; kernel source) | self — Calculus AB (CED 7) | — | | |
-| calcab.average-value-from-integral | Average value of f from a given integral | self — Calculus AB (CED 8) | — | | |
-| calcab.position-from-velocity-simple | Position from velocity and an initial value | self — Calculus AB (CED 8) | — | | |
-| calcab.area-between-curves | Area between curves (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
-| calcab.volume-disk-washer | Disk/washer volumes of revolution (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
-| calcab.volume-cross-sections | Volumes by known cross-sections (Low; kernel source) | self — Calculus AB (CED 8) | — | | |
-| calcbc.parametric-slope-formula-recall | Parametric dy/dx formula recall | self — BC-only (CED 9) | — | | |
-| calcbc.vector-derivative-evaluate | Componentwise derivative of a vector-valued function at t | self — BC-only (CED 9) | — | | |
-| calcbc.polar-area-formula-recall | Polar area formula recall | self — BC-only (CED 9) | — | | |
-| calcbc.parametric-slope-at-point | Parametric slope at a point (Low; kernel source) | self — BC-only (CED 9) | — | | |
-| calcbc.second-derivative-parametric | Parametric second derivative (Low; kernel source) | self — BC-only (CED 9) | — | | |
-| calcbc.polar-area-compute | Compute a polar-region area (Low; kernel source) | self — BC-only (CED 9) | — | | |
-| calcbc.p-series-converges | p-series convergence judgment | self — BC-only (CED 10) | — | | |
-| calcbc.ratio-test-read | Ratio-test threshold read | self — BC-only (CED 10) | — | | |
-| calcbc.nth-term-test | nth-term divergence test | self — BC-only (CED 10) | — | | |
-| calcbc.alternating-series-converges | Alternating-series convergence check | self — BC-only (CED 10) | — | | |
-| calcbc.choose-convergence-test | Choose the convergence test from series structure | self — BC-only (CED 10) | — | | |
-| calcbc.absolute-conditional-classify | Absolute vs conditional convergence classification | self — BC-only (CED 10) | — | | |
-| calcbc.maclaurin-table-recall | Maclaurin series table recall | self — BC-only (CED 10) | — | | |
-| calcbc.maclaurin-coefficient | Coefficient of xⁿ in a table Maclaurin series | self — BC-only (CED 10) | — | | |
-| calcbc.taylor-coefficient-from-derivative | Taylor coefficient from a given derivative value | self — BC-only (CED 10) | — | | |
-| calcbc.radius-geometric-form | Radius of convergence of a geometric-form series | self — BC-only (CED 10) | — | | |
-| calcbc.interval-of-convergence | Interval of convergence (Low; kernel source) | self — BC-only (CED 10) | — | | |
-| calcbc.taylor-polynomial-build | Build a Taylor polynomial (Low; kernel source) | self — BC-only (CED 10) | — | | |
-| calcbc.lagrange-error-bound | Lagrange error bound (Low; kernel source) | self — BC-only (CED 10) | — | | |
-| calcbc.parts-formula-recall | Integration-by-parts formula recall | self — BC-only (CED 6 BC scope) | — | | |
-| calcbc.integration-by-parts | Integrate by parts (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | | |
-| calcbc.partial-fraction-decomposition | Partial-fraction decomposition and integration (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | | |
-| calcbc.improper-p-integral-converges | Improper p-integral convergence judgment | self — BC-only (CED 6 BC scope) | — | | |
-| calcbc.euler-step | One Euler-method step | self — BC-only (CED 7 BC scope) | — | | |
-| calcbc.logistic-limit-read | Carrying capacity off a logistic differential equation | self — BC-only (CED 7 BC scope) | — | | |
-| calcbc.arc-length-formula-recall | Arc-length formula recall (function and parametric forms) | self — BC-only (CED 8 BC scope; parametric family serves CED 9) | — | | |
+| fk.times-tables | Single-fact multiplication recall (factor families through 12) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (the Pre-Algebra pass — the same pass seeded the Foundational kernels section) | 49 | 58 |
+| fk.division-facts | Division facts as times-table inverses | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (the Pre-Algebra pass — the same pass seeded the Foundational kernels section) | 23 | 28 |
+| fk.addition-facts | Addition facts and fluent mental addition (sums ≤ 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (the Pre-Algebra pass — the same pass seeded the Foundational kernels section) | 25 | 27 |
+| fk.subtraction-facts | Subtraction facts and fluent mental subtraction (within 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (the Pre-Algebra pass — the same pass seeded the Foundational kernels section) | 15 | 21 |
+| prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | 2 | 2 |
+| prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | 1 | 1 |
+| prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | 1 | 1 |
+| geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | authored in calibration section; absorbed by Geometry via cross-reference (Geometry pass) | 3 | 4 |
+| prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra section (pinned calibration entry) | — | 0 | 0 |
+| prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra section (pinned calibration entry) | — | 14 | 19 |
+| prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra section (pinned calibration entry) | — | 2 | 2 |
+| prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra section (pinned calibration entry) | — | 0 | 0 |
+| prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra section (pinned calibration entry) | — | 1 | 1 |
+| prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra section (pinned calibration entry) | — | 0 | 0 |
+| alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 (KA 13, pinned calibration entry) | — | 4 | 4 |
+| alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 (KA 5, pinned calibration entry) | canonical here per first-course-owns (minted in the Algebra 1 calibration stub); Pre-Algebra (KA 14) cross-references here (noted in the Unit 9 consistency pass) | 3 | 3 |
+| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 (KA 1, pinned calibration entry) | canonical home: **Pre-Algebra** (KA Pre-Algebra units 6/12 exercise it first — recorded during the Pre-Algebra pass); slug immutable, minted in Algebra 1 during calibration; Pre-Algebra carries the cross-reference row | 3 | 4 |
+| alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 (KA 13, pinned calibration entry) | first-course-owns: Algebra 2 (KA 3) cross-references here (noted in the Unit 9 consistency pass) | 3 | 5 |
+| alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 (KA 14, pinned calibration entry) | — | 0 | 1 |
+| fk.place-value | Identify the digit in a named place | self — Foundational kernels | — | 6 | 6 |
+| fk.integer-add-sub | Signed integer addition and subtraction | self — Foundational kernels | — | 19 | 26 |
+| fk.integer-mul-div | Sign rules for integer products and quotients | self — Foundational kernels | — | 13 | 17 |
+| fk.doubling-halving | Double or halve a number fluently | self — Foundational kernels | — | 14 | 15 |
+| fk.two-digit-times-one-digit | 2-digit × 1-digit mental multiplication | self — Foundational kernels | — | 6 | 6 |
+| fk.perfect-squares | Perfect-square recall through 15² | self — Foundational kernels | — | 23 | 28 |
+| fk.perfect-cubes | Perfect-cube recall through 6³ | self — Foundational kernels | — | 6 | 6 |
+| fk.powers-of-ten | Multiply/divide by a power of ten (place shift) | self — Foundational kernels | — | 7 | 7 |
+| fk.fraction-of-number | Fraction of a whole number | self — Foundational kernels | — | 7 | 7 |
+| prealg.smallest-prime-factor | Smallest prime factor of a 2-digit composite | self — Pre-Algebra (KA 1) | — | 1 | 1 |
+| prealg.prime-factorization | Full prime factorization (Low; kernel source) | self — Pre-Algebra (KA 1) | — | 0 | 0 |
+| prealg.next-term-arithmetic | Next term of an arithmetic pattern | self — Pre-Algebra (KA 2) | first-course-owns: Algebra 1 (KA 9) and Algebra 2 (sequences/series merge block) cross-reference here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| prealg.simplify-ratio | Simplify a ratio to lowest terms | self — Pre-Algebra (KA 3) | — | 1 | 1 |
+| prealg.unit-rate | Unit rate from a quantity pair | self — Pre-Algebra (KA 3) | — | 1 | 1 |
+| prealg.solve-proportion | Missing value in a proportion / equivalent fractions | self — Pre-Algebra (KA 3) | also satisfies KA 9 and OpenStax ch. 4 equivalent-fractions rows; first-course-owns: Geometry (KA 4) cross-references here (noted in the Unit 9 consistency pass) | 4 | 5 |
+| prealg.decimal-to-percent | Convert a decimal to a percent | self — Pre-Algebra (KA 4) | — | 1 | 1 |
+| prealg.percent-to-fraction | Percent → fraction in lowest terms | self — Pre-Algebra (KA 4) | — | 0 | 0 |
+| prealg.fraction-to-percent | Fraction → percent | self — Pre-Algebra (KA 4) | — | 1 | 1 |
+| prealg.percent-of-number | Percent of a number (benchmark percents) | self — Pre-Algebra (KA 4) | — | 1 | 1 |
+| prealg.find-whole-from-percent | Find the whole from a part and percent | self — Pre-Algebra (KA 4) | — | 0 | 0 |
+| prealg.find-percent-from-pair | What percent is a of b | self — Pre-Algebra (KA 4) | — | 1 | 1 |
+| prealg.percent-change | Percent increase or decrease | self — Pre-Algebra (KA 4) | — | 0 | 0 |
+| prealg.evaluate-exponent | Evaluate a small power | self — Pre-Algebra (KA 5) | — | 8 | 12 |
+| prealg.order-of-operations | Two-operation order of operations | self — Pre-Algebra (KA 5) | — | 0 | 0 |
+| prealg.evaluate-expression | Evaluate a one-variable expression | self — Pre-Algebra (KA 6) | first-course-owns: Algebra 1 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 10 | 17 |
+| prealg.combine-like-terms | Combine like terms in one variable | self — Pre-Algebra (KA 6) | first-course-owns: Algebra 1 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 4 | 6 |
+| prealg.solve-one-step-equation | Solve a one-step equation | self — Pre-Algebra (KA 7) | first-course-owns: Algebra 1 (KA 2) cross-references here (noted in the Unit 9 consistency pass) | 6 | 8 |
+| prealg.check-solution | Check a candidate solution of a linear equation | self — Pre-Algebra (KA 7) | — | 2 | 2 |
+| prealg.absolute-value | Absolute value of an integer | self — Pre-Algebra (KA 8) | first-course-owns: Algebra 1 (KA 10) cross-references here (noted in the Unit 9 consistency pass) | 2 | 3 |
+| prealg.constant-of-proportionality | Constant of proportionality from a pair | self — Pre-Algebra (KA 9) | — | 0 | 0 |
+| prealg.solve-two-step-equation | Solve a two-step equation | self — Pre-Algebra (KA 10) | first-course-owns: Algebra 1 (KA 2) cross-references here (noted in the Unit 9 consistency pass) | 7 | 9 |
+| prealg.solve-one-step-inequality | Solve a one-step inequality (boundary + direction) | self — Pre-Algebra (KA 10) | first-course-owns: Algebra 1 (KA 2) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| prealg.square-root | Square root of a perfect square | self — Pre-Algebra (KA 11) | first-course-owns: Algebra 1 (KA 11) cross-references here (noted in the Unit 9 consistency pass) | 11 | 15 |
+| prealg.cube-root | Cube root of a perfect cube | self — Pre-Algebra (KA 11) | first-course-owns: Algebra 1 (KA 11) cross-references here (noted in the Unit 9 consistency pass) | 3 | 3 |
+| prealg.root-between-integers | Bracket a square root between consecutive integers | self — Pre-Algebra (KA 11) | first-course-owns: Algebra 1 (KA 11) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| prealg.exponent-product-rule | Product rule for exponents (add exponents) | self — Pre-Algebra (KA 11) | first-course-owns: Algebra 1 (KA 11) cross-references here (noted in the Unit 9 consistency pass) | 4 | 4 |
+| prealg.negative-exponent | Negative exponent as a unit fraction | self — Pre-Algebra (KA 11) | first-course-owns: Algebra 1 (KA 11) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| prealg.scientific-to-standard | Scientific notation → standard form | self — Pre-Algebra (KA 11) | — | 0 | 0 |
+| prealg.scientific-notation-exponent | Exponent when a value is written in scientific notation | self — Pre-Algebra (KA 11) | — | 0 | 0 |
+| prealg.solve-multi-step-equation | Solve a multi-step equation (Low; kernel source) | self — Pre-Algebra (KA 12) | first-course-owns: Algebra 1 (KA 2) cross-references here (noted in the Unit 9 consistency pass) | 2 | 2 |
+| prealg.check-point-solution | Check a point against a two-variable equation | self — Pre-Algebra (KA 13) | — | 2 | 2 |
+| prealg.check-system-solution | Check a candidate solution of a 2×2 system | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 (KA 6) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| prealg.solve-2x2-system | Solve a 2×2 linear system (Low; kernel source) | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 unit 6 cross-references here (recorded during the Algebra 1 pass); Trig/Precalc (KA Precalc 7) also cross-references here (noted in the Unit 9 consistency pass) | 0 | 1 |
+| prealg.fraction-multiply | Multiply two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | 2 | 3 |
+| prealg.fraction-divide | Divide two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | 1 | 4 |
+| prealg.mixed-to-improper | Mixed number → improper fraction | self — Pre-Algebra (OpenStax merge, ch. 4) | — | 0 | 0 |
+| prealg.decimal-add-sub | Add or subtract decimals | self — Pre-Algebra (OpenStax merge, ch. 5) | — | 0 | 0 |
+| prealg.fraction-to-decimal | Fraction → terminating decimal | self — Pre-Algebra (OpenStax merge, ch. 5) | — | 0 | 0 |
+| prealg.decimal-to-fraction | Decimal → fraction in lowest terms | self — Pre-Algebra (OpenStax merge, ch. 5) | — | 0 | 0 |
+| prealg.round-to-place | Round to a named place (whole or decimal) | self — Pre-Algebra (OpenStax merge, chs. 1 & 5) | — | 0 | 0 |
+| prealg.identify-property | Name the illustrated arithmetic property | self — Pre-Algebra (OpenStax merge, ch. 7) | — | 0 | 0 |
+| prealg.perimeter-rectangle | Perimeter of a rectangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | 1 | 1 |
+| prealg.area-triangle | Area of a triangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | 2 | 3 |
+| prealg.circle-area-pi | Circle area as a coefficient of π | self — Pre-Algebra (OpenStax merge, ch. 9) | first-course-owns: Geometry (KA 8) cross-references here (noted in the Unit 9 consistency pass) | 3 | 5 |
+| prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | first-course-owns: Geometry unit 5 cross-references here (recorded during the Geometry pass); Trig/Precalc (KA Trig 1) also cross-references here (noted in the Unit 9 consistency pass) | 6 | 8 |
+| prealg.identify-quadrant | Quadrant of a coordinate point | self — Pre-Algebra (OpenStax merge, ch. 11) | — | 1 | 3 |
+| fk.unit-conversion-facts | Recall a measurement conversion factor | self — Foundational kernels (added during Algebra 1 pass) | — | 1 | 1 |
+| alg1.combine-like-terms-multivar | Combine like terms across multiple variables | self — Algebra 1 (KA 1) | first-course-owns: Algebra 2 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| alg1.solve-equation-both-sides | Solve ax = bx + c (variables on both sides) | self — Algebra 1 (KA 2) | — | 0 | 1 |
+| alg1.rearrange-formula-one-step | Solve a one-step formula for a variable | self — Algebra 1 (KA 2) | — | 1 | 2 |
+| alg1.unit-convert-one-step | One-step unit conversion | self — Algebra 1 (KA 3) | — | 0 | 0 |
+| alg1.slope-two-points | Slope from two points | self — Algebra 1 (KA 4) | first-course-owns: Geometry (KA 6) cross-references here (noted in the Unit 9 consistency pass) | 4 | 5 |
+| alg1.intercept-from-equation | Axis intercept from standard form | self — Algebra 1 (KA 4) | — | 1 | 2 |
+| alg1.graph-line-from-equation | Graph a line from its equation (Low; kernel source) | self — Algebra 1 (KA 4) | — | 0 | 0 |
+| alg1.read-point-slope | Read the anchor point off point-slope form | self — Algebra 1 (KA 5) | — | 0 | 0 |
+| alg1.slope-from-standard-form | Slope from standard form (m = −A/B) | self — Algebra 1 (KA 5) | — | 0 | 0 |
+| alg1.write-line-equation | Write the equation of a line (Low; kernel source) | self — Algebra 1 (KA 5) | first-course-owns: Geometry (KA 6) cross-references here (noted in the Unit 9 consistency pass) | 0 | 2 |
+| alg1.system-solution-count | Number of solutions of a 2×2 system | self — Algebra 1 (KA 6) | — | 0 | 0 |
+| alg1.check-inequality-solution | Check a point against a two-variable inequality | self — Algebra 1 (KA 7) | — | 0 | 0 |
+| alg1.evaluate-function | Evaluate f(x) in function notation | self — Algebra 1 (KA 8) | — | 4 | 11 |
+| alg1.is-function-pairs | Judge whether a set of ordered pairs is a function | self — Algebra 1 (KA 8) | — | 0 | 0 |
+| alg1.next-term-geometric | Next term of a geometric sequence | self — Algebra 1 (KA 9) | first-course-owns: Algebra 2 (sequences/series merge block) cross-references here (noted in the Unit 9 consistency pass) | 1 | 2 |
+| alg1.arithmetic-nth-term | nth term of an arithmetic sequence | self — Algebra 1 (KA 9) | first-course-owns: Algebra 2 (sequences/series merge block) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.geometric-nth-term | nth term of a geometric sequence | self — Algebra 1 (KA 9) | first-course-owns: Algebra 2 (sequences/series merge block) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| alg1.evaluate-absolute-expression | Evaluate an absolute-value expression | self — Algebra 1 (KA 10) | — | 0 | 0 |
+| alg1.solve-absolute-value-equation | Solve an absolute-value equation (both solutions) | self — Algebra 1 (KA 10) | — | 0 | 0 |
+| alg1.evaluate-piecewise | Evaluate a piecewise function | self — Algebra 1 (KA 10) | — | 0 | 1 |
+| alg1.exponent-power-rule | Power-of-a-power rule (multiply exponents) | self — Algebra 1 (KA 11) | — | 1 | 1 |
+| alg1.exponent-quotient-rule | Quotient rule for exponents (subtract exponents) | self — Algebra 1 (KA 11) | — | 1 | 1 |
+| alg1.simplify-radical | Simplify a square root to a√b | self — Algebra 1 (KA 11) | first-course-owns: Algebra 2 (KA 6) cross-references here (noted in the Unit 9 consistency pass) | 3 | 3 |
+| alg1.evaluate-exponential | Evaluate an exponential expression a·bˣ | self — Algebra 1 (KA 12) | first-course-owns: Algebra 2 (KA 7) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.growth-or-decay | Classify growth vs decay from the base | self — Algebra 1 (KA 12) | first-course-owns: Algebra 2 (KA 7) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.growth-factor-to-rate | Percent rate from a growth/decay factor | self — Algebra 1 (KA 12) | first-course-owns: Algebra 2 (KA 7) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.multiply-binomials | Multiply two binomials | self — Algebra 1 (KA 13) | first-course-owns: Algebra 2 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 6 | 6 |
+| alg1.factor-gcf | Factor out the greatest common factor | self — Algebra 1 (KA 13) | first-course-owns: Algebra 2 (KA 3) cross-references here (noted in the Unit 9 consistency pass) | 3 | 3 |
+| alg1.factor-difference-of-squares | Factor a difference of squares | self — Algebra 1 (KA 13) | first-course-owns: Algebra 2 (KA 3) cross-references here (noted in the Unit 9 consistency pass) | 0 | 1 |
+| alg1.factor-perfect-square-trinomial | Recognize a perfect-square trinomial | self — Algebra 1 (KA 13) | first-course-owns: Algebra 2 (KA 3) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| alg1.factor-nonmonic-quadratic | Factor a non-monic quadratic (Low; kernel source) | self — Algebra 1 (KA 13) | first-course-owns: Algebra 2 (KA 3) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.roots-from-factored-form | Roots from factored form (zero-product read-off) | self — Algebra 1 (KA 14) | first-course-owns: Algebra 2 (KA 5) cross-references here (noted in the Unit 9 consistency pass) | 2 | 4 |
+| alg1.vertex-from-vertex-form | Vertex from vertex form | self — Algebra 1 (KA 14) | — | 2 | 2 |
+| alg1.axis-of-symmetry | Axis of symmetry from standard form | self — Algebra 1 (KA 14) | — | 0 | 1 |
+| alg1.discriminant-root-count | Count real solutions via the discriminant | self — Algebra 1 (KA 14) | — | 2 | 2 |
+| alg1.solve-x-squared-equals-k | Solve x² = k (both solutions) | self — Algebra 1 (KA 14) | — | 1 | 1 |
+| alg1.solve-by-quadratic-formula | Solve via the quadratic formula (Low; kernel source) | self — Algebra 1 (KA 14) | — | 1 | 1 |
+| alg1.complete-the-square | Complete the square (Low; kernel source) | self — Algebra 1 (KA 14) | — | 1 | 1 |
+| alg1.classify-rational-irrational | Classify a number as rational or irrational | self — Algebra 1 (KA 15) | — | 1 | 1 |
+| alg1.rational-irrational-operations | Closure judgments for rational/irrational sums and products | self — Algebra 1 (KA 15) | — | 0 | 0 |
+| alg1.linear-word-problem | Translate-and-solve linear word problems (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 3) | — | 0 | 0 |
+| alg1.polynomial-degree | Degree of a polynomial | self — Algebra 1 (OpenStax merge, ch. 6) | first-course-owns: Algebra 2 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 1 | 2 |
+| alg1.multiply-monomials | Multiply two monomials | self — Algebra 1 (OpenStax merge, ch. 6) | first-course-owns: Algebra 2 (KA 1) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg1.simplify-monomial-quotient | Divide two monomials | self — Algebra 1 (OpenStax merge, ch. 8) | — | 3 | 3 |
+| alg1.simplify-rational-expression | Simplify a rational expression (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 8) | first-course-owns: Trig/Precalc (KA Precalc 4) cross-references here (noted in the Unit 9 consistency pass) | 1 | 3 |
+| alg1.multiply-square-roots | Multiply square roots to an integer | self — Algebra 1 (OpenStax merge, ch. 9) | first-course-owns: Algebra 2 (KA 6) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| geo.translate-point | Translate a point by a vector | self — Geometry (KA 1) | — | 1 | 2 |
+| geo.reflect-point | Reflect a point across an axis | self — Geometry (KA 1) | — | 1 | 1 |
+| geo.rotate-point | Rotate a point about the origin (90°/180°/270°) | self — Geometry (KA 1) | — | 1 | 1 |
+| geo.dilate-point | Dilate a point from the origin | self — Geometry (KA 1) | first-course-owns: Trig/Precalc (KA Precalc 6) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| geo.is-rigid-motion | Classify a transformation as rigid or not | self — Geometry (KA 2) | — | 0 | 0 |
+| geo.compose-transformations | Compose transformations in sequence (Low; kernel source) | self — Geometry (KA 2) | — | 0 | 0 |
+| geo.vertical-angle-read | Vertical angles are equal (read-off) | self — Geometry (KA 3) | — | 3 | 3 |
+| geo.supplement-complement | Supplement or complement of an angle | self — Geometry (KA 3) | — | 3 | 3 |
+| geo.transversal-angle | Angle from parallel lines cut by a transversal | self — Geometry (KA 3) | — | 1 | 1 |
+| geo.triangle-angle-sum | Third angle of a triangle | self — Geometry (KA 3) | — | 2 | 3 |
+| geo.exterior-angle | Exterior angle of a triangle | self — Geometry (KA 3) | — | 0 | 0 |
+| geo.polygon-angle-sum | Interior angle sum of an n-gon | self — Geometry (KA 3) | — | 0 | 0 |
+| geo.isosceles-base-angles | Isosceles triangle angle relations | self — Geometry (KA 3) | — | 1 | 1 |
+| geo.corresponding-parts | Corresponding parts of congruent triangles | self — Geometry (KA 3) | — | 2 | 2 |
+| geo.congruence-proof | Prove two triangles congruent (Low; kernel source) | self — Geometry (KA 3) | — | 0 | 0 |
+| geo.similarity-criteria | Match a marked pair to a similarity criterion | self — Geometry (KA 4) | — | 1 | 1 |
+| geo.scale-factor | Scale factor between similar figures | self — Geometry (KA 4) | — | 0 | 0 |
+| geo.area-scale-factor | Area ratio from a length scale factor | self — Geometry (KA 4) | — | 1 | 1 |
+| geo.similarity-proof | Prove two triangles similar (Low; kernel source) | self — Geometry (KA 4) | — | 0 | 0 |
+| geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | 1 | 1 |
+| geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | first-course-owns: Trig/Precalc (KA Trig 1) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | 3 | 5 |
+| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Algebra 2 unit 11 cross-references here (recorded during the Algebra 2 pass); Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass); the calculus sections cross-reference here (satisfied in the Calculus AB pass) | 1 | 10 |
+| geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | first-course-owns: Trig/Precalc (KA Trig 1) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | first-course-owns: Trig/Precalc (KA Trig 1) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| geo.distance-formula | Distance between two points | self — Geometry (KA 6) | first-course-owns: Trig/Precalc (KA Precalc 3) cross-references here (noted in the Unit 9 consistency pass) | 1 | 2 |
+| geo.midpoint-formula | Midpoint of a segment | self — Geometry (KA 6) | first-course-owns: Trig/Precalc (KA Precalc 3) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| geo.perpendicular-slope | Negative-reciprocal slope of a perpendicular line | self — Geometry (KA 6) | — | 1 | 1 |
+| geo.coordinate-geometry-proof | Verify figure properties on coordinates (Low; kernel source) | self — Geometry (KA 6) | — | 0 | 0 |
+| geo.circle-equation-read | Center from a circle's standard form | self — Geometry (KA 7) | first-course-owns: Trig/Precalc (KA Precalc 5) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| geo.circle-radius-read | Radius from a circle's standard form | self — Geometry (KA 7) | first-course-owns: Trig/Precalc (KA Precalc 5) cross-references here (noted in the Unit 9 consistency pass) | 1 | 1 |
+| geo.circle-general-to-standard | Circle center/radius from general form (Low; kernel source) | self — Geometry (KA 7) | first-course-owns: Trig/Precalc (KA Precalc 5) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| geo.parabola-focus-directrix | Focus and directrix of a parabola (Low; kernel source) | self — Geometry (KA 7) | first-course-owns: Trig/Precalc (KA Precalc 5) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| geo.central-inscribed-angle | Central and inscribed angle measures | self — Geometry (KA 8) | — | 0 | 0 |
+| geo.arc-length-fraction | Arc length as a π-coefficient | self — Geometry (KA 8) | — | 0 | 0 |
+| geo.sector-area-fraction | Sector area as a π-coefficient | self — Geometry (KA 8) | — | 0 | 0 |
+| geo.tangent-radius-problem | Tangent-segment problems (Low; kernel source) | self — Geometry (KA 8) | — | 0 | 0 |
+| geo.volume-box | Volume of a rectangular box / prism | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.volume-cylinder-pi | Cylinder volume as a π-coefficient | self — Geometry (KA 9) | — | 1 | 1 |
+| geo.volume-cone-pi | Cone volume as a π-coefficient | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.volume-sphere-pi | Sphere volume as a π-coefficient | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.volume-scale-factor | Volume ratio from a length scale factor | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.cross-section-id | Identify a solid's cross-section | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.surface-area | Surface area of a solid (Low; kernel source) | self — Geometry (KA 9) | — | 0 | 0 |
+| geo.conditional-forms | Converse/inverse/contrapositive identification | self — Geometry (gap merge — logic/proof-writing) | — | 1 | 1 |
+| geo.two-column-proof | Write a two-column proof (Low; kernel source) | self — Geometry (gap merge — logic/proof-writing) | — | 0 | 0 |
+| alg2.add-polynomials | Add or subtract two polynomials | self — Algebra 2 (KA 1) | — | 1 | 3 |
+| alg2.expand-binomial-square | Expand a squared binomial | self — Algebra 2 (KA 1) | — | 0 | 2 |
+| alg2.expand-conjugate-product | Expand (a + b)(a − b) to a difference of squares | self — Algebra 2 (KA 1) | — | 0 | 1 |
+| alg2.imaginary-powers | Powers of i (mod-4 cycle recall) | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.simplify-sqrt-negative | Square root of a negative number in i-form | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | 1 | 1 |
+| alg2.add-subtract-complex | Add or subtract complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.complex-conjugate | Conjugate of a complex number | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 1 |
+| alg2.multiply-complex | Multiply two complex numbers | self — Algebra 2 (KA 2) | first-course-owns: Trig/Precalc (KA Precalc unit 3) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 1 |
+| alg2.solve-quadratic-complex | Solve a quadratic with complex solutions (Low; kernel source) | self — Algebra 2 (KA 2) | — | 0 | 0 |
+| alg2.sum-diff-cubes-pattern | Sum/difference-of-cubes pattern slot | self — Algebra 2 (KA 3) | — | 0 | 0 |
+| alg2.factor-by-grouping | Factor a four-term polynomial by grouping (Low; kernel source) | self — Algebra 2 (KA 3) | — | 0 | 0 |
+| alg2.factor-quadratic-form | Factor an expression in quadratic form (Low; kernel source) | self — Algebra 2 (KA 3) | — | 0 | 0 |
+| alg2.divide-poly-by-monomial | Divide a polynomial by a monomial | self — Algebra 2 (KA 4) | — | 0 | 0 |
+| alg2.remainder-theorem | Remainder via p(a) (remainder theorem) | self — Algebra 2 (KA 4) | — | 2 | 2 |
+| alg2.factor-check | Verify (x − a) is a factor (factor theorem) | self — Algebra 2 (KA 4) | — | 0 | 0 |
+| alg2.polynomial-long-division | Polynomial long/synthetic division (Low; kernel source) | self — Algebra 2 (KA 4) | — | 0 | 0 |
+| alg2.zero-multiplicity | Multiplicity of a zero from factored form | self — Algebra 2 (KA 5) | — | 1 | 1 |
+| alg2.multiplicity-cross-touch | Cross vs touch at a zero (multiplicity parity) | self — Algebra 2 (KA 5) | — | 0 | 0 |
+| alg2.end-behavior | End behavior from degree and leading coefficient | self — Algebra 2 (KA 5) | — | 0 | 0 |
+| alg2.evaluate-rational-exponent | Evaluate a rational-exponent power | self — Algebra 2 (KA 6) | — | 0 | 0 |
+| alg2.rational-exponent-product | Product rule with rational exponents | self — Algebra 2 (KA 6) | — | 0 | 0 |
+| alg2.simplify-cube-root | Simplify a cube root to a∛b | self — Algebra 2 (KA 6) | — | 0 | 0 |
+| alg2.combine-radicals | Add or subtract like radicals | self — Algebra 2 (KA 6) | — | 0 | 0 |
+| alg2.exponential-solve-common-base | Solve bˣ = k by power recognition | self — Algebra 2 (KA 7) | — | 2 | 2 |
+| alg2.evaluate-log | Evaluate a logarithm | self — Algebra 2 (KA 8) | — | 4 | 4 |
+| alg2.log-product-rule | Product rule for logarithms | self — Algebra 2 (KA 8) | — | 0 | 0 |
+| alg2.log-power-rule | Power rule for logarithms | self — Algebra 2 (KA 8) | — | 0 | 0 |
+| alg2.natural-log-facts | Natural-log special values (ln 1, ln e, ln eᵏ) | self — Algebra 2 (KA 8) | — | 0 | 1 |
+| alg2.solve-exponential-equation | Solve an exponential equation with logs (Low; kernel source) | self — Algebra 2 (KA 8) | — | 0 | 0 |
+| alg2.function-shift-direction | Shift direction of f(x ± a) ± b | self — Algebra 2 (KA 9) | — | 1 | 2 |
+| alg2.function-reflection-rule | Reflection axis of −f(x) / f(−x) | self — Algebra 2 (KA 9) | — | 0 | 0 |
+| alg2.function-scale-direction | Stretch vs compression from a·f(x) / f(bx) | self — Algebra 2 (KA 9) | — | 0 | 0 |
+| alg2.transformed-point | Track a point through shifts | self — Algebra 2 (KA 9) | — | 0 | 0 |
+| alg2.even-odd-classify | Classify a function as even/odd/neither | self — Algebra 2 (KA 9) | — | 0 | 0 |
+| alg2.solve-sqrt-equation-simple | Solve √x = k | self — Algebra 2 (KA 10) | — | 1 | 1 |
+| alg2.check-extraneous | Extraneous-solution verification | self — Algebra 2 (KA 10) | — | 2 | 2 |
+| alg2.solve-radical-equation | Solve a radical equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 9 row, paid this pass | 0 | 0 |
+| alg2.solve-rational-equation | Solve a rational equation (Low; kernel source) | self — Algebra 2 (KA 10) | deferred debt from Algebra 1's OS 8 row, paid this pass; first-course-owns: Trig/Precalc (KA Precalc 4) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg2.degrees-to-radians | Degrees → radians as kπ | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) (radians live in both KA trig courses) | 0 | 0 |
+| alg2.radians-to-degrees | Radians → degrees | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.pythagorean-identity-apply | cos θ from sin θ via sin²θ + cos²θ = 1 | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 4) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 3 |
+| alg2.trig-sign-by-quadrant | Quadrant from trig-function signs (ASTC) | self — Algebra 2 (KA 11) | first-course-owns: Trig/Precalc (KA Trigonometry unit 2) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 2 |
+| alg2.arithmetic-series-sum | Arithmetic series sum with endpoints given | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.geometric-series-sum | Finite geometric series sum (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section (CED 10) also cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| alg2.infinite-geometric-sum | Infinite geometric series sum a/(1 − r) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass); the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | 0 | 0 |
+| alg2.evaluate-sigma | Evaluate a 3-term sigma-notation sum | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 9) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.factorial | Factorial recall through 6! | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 2 | 6 |
+| alg2.binomial-coefficient | Evaluate C(n, k) at small n | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 1 | 2 |
+| alg2.binomial-expansion | Expand a binomial power (Low; kernel source) | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 12 / A&T ch. 13) | first-course-owns: Trig/Precalc cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.simple-probability | Probability of a simple event | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 2 | 3 |
+| alg2.complement-probability | Complement probability 1 − p | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 1 | 1 |
+| alg2.permutation-count | Count ordered arrangements (falling product) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 1 |
+| alg2.compound-event-probability | Compound-event probability (Low; kernel source) | self — Algebra 2 (OpenStax merge, A&T ch. 13) | first-course-owns: Trig/Precalc (KA Precalc unit 8) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 0 |
+| alg2.evaluate-composite | Evaluate f(g(x)) at a point | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 4 |
+| alg2.inverse-of-linear | Inverse of a linear function | self — Algebra 2 (OpenStax merge, Int. Algebra ch. 10) | first-course-owns: Trig/Precalc (KA Precalc unit 1) cross-references here (satisfied in the Trig/Precalc pass) | 0 | 2 |
+| trig.reference-angle | Reference angle of a rotation | self — Trig/Precalc (KA Trig 2) | — | 0 | 4 |
+| trig.coterminal-angle | Coterminal angle in [0°, 360°) | self — Trig/Precalc (KA Trig 2) | — | 0 | 0 |
+| trig.exact-trig-any-quadrant | Exact trig values beyond Quadrant I | self — Trig/Precalc (KA Trig 2) | — | 0 | 0 |
+| trig.reciprocal-trig-value | Evaluate csc/sec/cot at special angles | self — Trig/Precalc (KA Trig 2) | — | 0 | 0 |
+| trig.amplitude-from-equation | Amplitude read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | 0 | 1 |
+| trig.midline-from-equation | Midline read off a sinusoid's equation | self — Trig/Precalc (KA Trig 2) | — | 0 | 1 |
+| trig.period-from-equation | Period of a sinusoid as kπ | self — Trig/Precalc (KA Trig 2) | — | 0 | 1 |
+| trig.evaluate-inverse-trig | Inverse trig at special values | self — Trig/Precalc (KA Trig 2) | — | 0 | 1 |
+| trig.graph-sinusoid | Graph a sinusoidal function (Low; kernel source) | self — Trig/Precalc (KA Trig 2) | pays the Algebra 2 KA 11 sinusoid deferral | 0 | 0 |
+| trig.triangle-area-sine | Triangle area via ½ab·sin C at special angles | self — Trig/Precalc (KA Trig 3) | — | 0 | 0 |
+| trig.choose-triangle-law | Choose law of sines vs cosines from the given configuration | self — Trig/Precalc (KA Trig 3) | — | 0 | 2 |
+| trig.law-of-sines-solve | Solve a triangle with the law of sines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | 0 | 0 |
+| trig.law-of-cosines-solve | Solve a triangle with the law of cosines (Low; kernel source) | self — Trig/Precalc (KA Trig 3) | — | 0 | 0 |
+| trig.tan-from-sin-cos | Tangent via the quotient identity | self — Trig/Precalc (KA Trig 4) | — | 0 | 1 |
+| trig.trig-parity | Even/odd identities for sin/cos/tan | self — Trig/Precalc (KA Trig 4) | — | 0 | 1 |
+| trig.angle-sum-formula-recall | Angle addition formula recall | self — Trig/Precalc (KA Trig 4) | — | 0 | 2 |
+| trig.double-angle-evaluate | Evaluate sin 2θ / cos 2θ from sin θ and cos θ | self — Trig/Precalc (KA Trig 4) | — | 0 | 0 |
+| trig.solve-basic-trig-equation | Solve sin/cos/tan θ = special value on [0°, 360°) | self — Trig/Precalc (KA Trig 4) | — | 0 | 1 |
+| trig.solve-trig-equation-general | Solve a general trig equation (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | 0 | 0 |
+| trig.prove-identity | Prove a trigonometric identity (Low; kernel source) | self — Trig/Precalc (KA Trig 4) | — | 0 | 0 |
+| trig.compose-functions-expression | Compose two functions symbolically | self — Trig/Precalc (KA Precalc 1) | — | 0 | 0 |
+| trig.verify-inverse-pair | Verify two functions are inverses | self — Trig/Precalc (KA Precalc 1) | — | 0 | 0 |
+| trig.complex-quadrant | Quadrant of a complex number | self — Trig/Precalc (KA Precalc 3) | — | 0 | 1 |
+| trig.complex-modulus | Modulus of a complex number | self — Trig/Precalc (KA Precalc 3) | also owns vector magnitude (KA Precalc 6) and the polar r-computation (A&T ch. 10) — same √(a²+b²) fact family; the BC section (CED 9, speed/magnitude) also cross-references here (noted in the Unit 9 consistency pass) | 0 | 1 |
+| trig.complex-divide | Divide two complex numbers (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | 0 | 0 |
+| trig.complex-to-polar | Convert a complex number to polar form (Low; kernel source) | self — Trig/Precalc (KA Precalc 3) | — | 0 | 0 |
+| trig.vertical-asymptote | Vertical asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | first-course-owns: Calculus AB (CED 1) cross-references here (noted in the Unit 9 consistency pass) | 0 | 2 |
+| trig.horizontal-asymptote | Horizontal asymptote of a rational function | self — Trig/Precalc (KA Precalc 4) | also satisfies the limit-at-infinity rows (KA Precalc 10) — same read; the Calculus AB (CED 1, limits at infinity) and BC (CED 10, sequence limits) rows cross-reference here (recorded in the calculus passes) | 0 | 2 |
+| trig.identify-hole | Removable discontinuity from factored form | self — Trig/Precalc (KA Precalc 4) | — | 0 | 2 |
+| trig.graph-rational-function | Graph a rational function (Low; kernel source) | self — Trig/Precalc (KA Precalc 4) | — | 0 | 0 |
+| trig.ellipse-axes-read | Semi-axis lengths off an ellipse's standard form | self — Trig/Precalc (KA Precalc 5) | pays the Int 11 / A&T 12 ellipse-hyperbola deferral recorded in the Algebra 2 pass | 0 | 0 |
+| trig.ellipse-foci-distance | Focal distance of an ellipse | self — Trig/Precalc (KA Precalc 5) | — | 0 | 0 |
+| trig.hyperbola-asymptote-slope | Asymptote slope off a hyperbola's standard form | self — Trig/Precalc (KA Precalc 5) | — | 0 | 0 |
+| trig.classify-conic | Classify a conic from its equation | self — Trig/Precalc (KA Precalc 5) | — | 0 | 0 |
+| trig.vector-add | Add or subtract vectors componentwise | self — Trig/Precalc (KA Precalc 6) | first-course-owns: BC (CED 9) cross-references here (noted in the Unit 9 consistency pass) | 0 | 0 |
+| trig.vector-from-points | Vector between two points | self — Trig/Precalc (KA Precalc 6) | — | 0 | 0 |
+| trig.vector-direction-angle | Direction angle of a vector (Low; kernel source) | self — Trig/Precalc (KA Precalc 6) | — | 0 | 0 |
+| trig.matrix-add-entry | One entry of a matrix sum or difference | self — Trig/Precalc (KA Precalc 7) | — | 0 | 0 |
+| trig.matrix-multiply-entry | One entry of a 2×2 matrix product | self — Trig/Precalc (KA Precalc 7) | — | 0 | 0 |
+| trig.determinant-2x2 | Determinant of a 2×2 matrix | self — Trig/Precalc (KA Precalc 7) | — | 0 | 1 |
+| trig.matrix-product-defined | Judge whether a matrix product is defined | self — Trig/Precalc (KA Precalc 7) | — | 0 | 0 |
+| trig.matrix-inverse-2x2 | Inverse of a 2×2 matrix (Low; kernel source) | self — Trig/Precalc (KA Precalc 7) | — | 0 | 0 |
+| trig.multiplication-principle | Fundamental counting principle | self — Trig/Precalc (KA Precalc 8) | — | 0 | 1 |
+| trig.probability-with-counting | Probability via combinatorial counting (Low; kernel source) | self — Trig/Precalc (KA Precalc 8) | — | 0 | 0 |
+| trig.geometric-series-converges | Convergence judgment for a geometric series | self — Trig/Precalc (KA Precalc 9) | first-course-owns: the BC series section (CED unit 10) cross-references here (satisfied in the BC pass) | 0 | 2 |
+| trig.limit-by-substitution | Limit by direct substitution | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | 0 | 3 |
+| trig.limit-removable-factor | Limit of a removable-singularity quotient | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | 0 | 0 |
+| trig.classify-discontinuity | Classify a discontinuity | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | 0 | 0 |
+| trig.continuity-at-point | Continuity check at a piecewise seam | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | 0 | 1 |
+| trig.limit-by-rationalizing | Limit requiring algebraic manipulation (Low; kernel source) | self — Trig/Precalc (KA Precalc 10) | first-course-owns: Calculus AB (CED unit 1) cross-references here (satisfied in the Calculus AB pass) | 0 | 0 |
+| trig.polar-to-rectangular | Polar → rectangular coordinates at axis angles | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | 0 | 0 |
+| trig.parametric-evaluate | Evaluate a parametric point at t | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | 0 | 0 |
+| trig.eliminate-parameter | Eliminate the parameter (Low; kernel source) | self — Trig/Precalc (OpenStax merge, A&T ch. 10 / Precalc 2e ch. 8) | first-course-owns: the BC section (CED unit 9) cross-references here (satisfied in the BC pass) | 0 | 0 |
+| calcab.special-trig-limits | Special trig limits (sin(ax)/x family) recall | self — Calculus AB (CED 1) | — | 0 | 0 |
+| calcab.ivt-guarantees-zero | IVT sign-change guarantee check | self — Calculus AB (CED 1) | — | 0 | 0 |
+| calcab.derivative-power-rule | Power rule d/dx xⁿ = nxⁿ⁻¹ | self — Calculus AB (CED 2) | — | 0 | 9 |
+| calcab.derivative-standard-table | Derivative recall for the standard function table | self — Calculus AB (CED 2) | — | 0 | 8 |
+| calcab.derivative-at-point | Evaluate f′(a) for a monomial | self — Calculus AB (CED 2) | — | 0 | 6 |
+| calcab.differentiate-polynomial | Differentiate a short polynomial termwise | self — Calculus AB (CED 2) | — | 0 | 7 |
+| calcab.product-quotient-rule-recall | Product/quotient rule formula recall | self — Calculus AB (CED 2) | — | 0 | 2 |
+| calcab.recognize-difference-quotient | Recognize a difference quotient as a table derivative | self — Calculus AB (CED 2) | — | 0 | 0 |
+| calcab.apply-product-rule | Differentiate a product (Low; kernel source) | self — Calculus AB (CED 2) | — | 0 | 0 |
+| calcab.tangent-line-equation | Equation of a tangent line (Low; kernel source) | self — Calculus AB (CED 2) | — | 0 | 0 |
+| calcab.chain-rule-recall | Chain rule formula recall | self — Calculus AB (CED 3) | — | 0 | 5 |
+| calcab.chain-rule-linear-inner | Differentiate f(ax) via the chain rule | self — Calculus AB (CED 3) | — | 0 | 2 |
+| calcab.derivative-inverse-trig-table | Inverse-trig derivative table recall | self — Calculus AB (CED 3) | — | 0 | 0 |
+| calcab.second-derivative-power | Evaluate f″(a) for a monomial | self — Calculus AB (CED 3) | — | 0 | 0 |
+| calcab.implicit-differentiation | Implicit differentiation (Low; kernel source) | self — Calculus AB (CED 3) | — | 0 | 1 |
+| calcab.derivative-inverse-function-value | Derivative of an inverse function at a value (Low; kernel source) | self — Calculus AB (CED 3) | — | 0 | 0 |
+| calcab.velocity-from-position | Velocity from a position polynomial | self — Calculus AB (CED 4) | — | 0 | 0 |
+| calcab.indeterminate-form-check | Verify a 0/0 or ∞/∞ indeterminate form | self — Calculus AB (CED 4) | — | 0 | 1 |
+| calcab.lhopital-apply | Evaluate a limit by L'Hôpital's rule (Low; kernel source) | self — Calculus AB (CED 4) | — | 0 | 0 |
+| calcab.related-rates | Related-rates problems (Low; kernel source) | self — Calculus AB (CED 4) | — | 0 | 0 |
+| calcab.linear-approximation | Tangent-line approximation (Low; kernel source) | self — Calculus AB (CED 4) | — | 0 | 0 |
+| calcab.derivative-sign-read | Increasing/decreasing from the sign of f′ | self — Calculus AB (CED 5) | — | 0 | 0 |
+| calcab.concavity-sign-read | Concavity from the sign of f″ | self — Calculus AB (CED 5) | — | 0 | 2 |
+| calcab.second-derivative-test-read | Classify a critical point via the second-derivative test | self — Calculus AB (CED 5) | — | 0 | 1 |
+| calcab.critical-point-quadratic | Critical point of a quadratic | self — Calculus AB (CED 5) | — | 0 | 2 |
+| calcab.mvt-apply | Find the Mean Value Theorem's c (Low; kernel source) | self — Calculus AB (CED 5) | — | 0 | 0 |
+| calcab.find-inflection-points | Find inflection points (Low; kernel source) | self — Calculus AB (CED 5) | — | 0 | 0 |
+| calcab.absolute-extrema-closed-interval | Absolute extrema by the candidates test (Low; kernel source) | self — Calculus AB (CED 5) | — | 0 | 0 |
+| calcab.optimization | Applied optimization (Low; kernel source) | self — Calculus AB (CED 5) | — | 0 | 0 |
+| calcab.antiderivative-power-rule | Antiderivative power rule | self — Calculus AB (CED 6) | — | 0 | 5 |
+| calcab.antiderivative-standard-table | Antiderivative recall for the standard table | self — Calculus AB (CED 6) | — | 0 | 4 |
+| calcab.ftc-derivative-of-accumulation | Derivative of an accumulation function (FTC part 1) | self — Calculus AB (CED 6) | — | 0 | 0 |
+| calcab.definite-integral-power | Evaluate a one-term definite integral (FTC part 2) | self — Calculus AB (CED 6) | — | 0 | 4 |
+| calcab.integral-additivity | Definite-integral properties (additivity, reversal, scaling) | self — Calculus AB (CED 6) | — | 0 | 0 |
+| calcab.riemann-sum-compute | Compute a Riemann sum (Low; kernel source) | self — Calculus AB (CED 6) | — | 0 | 0 |
+| calcab.u-substitution | Integrate by u-substitution (Low; kernel source) | self — Calculus AB (CED 6) | — | 0 | 0 |
+| calcab.verify-de-solution | Verify a differential-equation solution | self — Calculus AB (CED 7) | — | 0 | 0 |
+| calcab.exponential-de-solution | General solution of y′ = ky | self — Calculus AB (CED 7) | — | 0 | 0 |
+| calcab.solve-separable-de | Solve a separable differential equation (Low; kernel source) | self — Calculus AB (CED 7) | — | 0 | 0 |
+| calcab.average-value-from-integral | Average value of f from a given integral | self — Calculus AB (CED 8) | — | 0 | 0 |
+| calcab.position-from-velocity-simple | Position from velocity and an initial value | self — Calculus AB (CED 8) | — | 0 | 0 |
+| calcab.area-between-curves | Area between curves (Low; kernel source) | self — Calculus AB (CED 8) | — | 0 | 0 |
+| calcab.volume-disk-washer | Disk/washer volumes of revolution (Low; kernel source) | self — Calculus AB (CED 8) | — | 0 | 0 |
+| calcab.volume-cross-sections | Volumes by known cross-sections (Low; kernel source) | self — Calculus AB (CED 8) | — | 0 | 0 |
+| calcbc.parametric-slope-formula-recall | Parametric dy/dx formula recall | self — BC-only (CED 9) | — | 0 | 2 |
+| calcbc.vector-derivative-evaluate | Componentwise derivative of a vector-valued function at t | self — BC-only (CED 9) | — | 0 | 0 |
+| calcbc.polar-area-formula-recall | Polar area formula recall | self — BC-only (CED 9) | — | 0 | 1 |
+| calcbc.parametric-slope-at-point | Parametric slope at a point (Low; kernel source) | self — BC-only (CED 9) | — | 0 | 0 |
+| calcbc.second-derivative-parametric | Parametric second derivative (Low; kernel source) | self — BC-only (CED 9) | — | 0 | 0 |
+| calcbc.polar-area-compute | Compute a polar-region area (Low; kernel source) | self — BC-only (CED 9) | — | 0 | 0 |
+| calcbc.p-series-converges | p-series convergence judgment | self — BC-only (CED 10) | — | 0 | 4 |
+| calcbc.ratio-test-read | Ratio-test threshold read | self — BC-only (CED 10) | — | 0 | 2 |
+| calcbc.nth-term-test | nth-term divergence test | self — BC-only (CED 10) | — | 0 | 2 |
+| calcbc.alternating-series-converges | Alternating-series convergence check | self — BC-only (CED 10) | — | 0 | 2 |
+| calcbc.choose-convergence-test | Choose the convergence test from series structure | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.absolute-conditional-classify | Absolute vs conditional convergence classification | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.maclaurin-table-recall | Maclaurin series table recall | self — BC-only (CED 10) | — | 0 | 1 |
+| calcbc.maclaurin-coefficient | Coefficient of xⁿ in a table Maclaurin series | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.taylor-coefficient-from-derivative | Taylor coefficient from a given derivative value | self — BC-only (CED 10) | — | 0 | 2 |
+| calcbc.radius-geometric-form | Radius of convergence of a geometric-form series | self — BC-only (CED 10) | — | 0 | 1 |
+| calcbc.interval-of-convergence | Interval of convergence (Low; kernel source) | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.taylor-polynomial-build | Build a Taylor polynomial (Low; kernel source) | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.lagrange-error-bound | Lagrange error bound (Low; kernel source) | self — BC-only (CED 10) | — | 0 | 0 |
+| calcbc.parts-formula-recall | Integration-by-parts formula recall | self — BC-only (CED 6 BC scope) | — | 0 | 1 |
+| calcbc.integration-by-parts | Integrate by parts (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | 0 | 0 |
+| calcbc.partial-fraction-decomposition | Partial-fraction decomposition and integration (Low; kernel source) | self — BC-only (CED 6 BC scope) | — | 0 | 0 |
+| calcbc.improper-p-integral-converges | Improper p-integral convergence judgment | self — BC-only (CED 6 BC scope) | — | 0 | 0 |
+| calcbc.euler-step | One Euler-method step | self — BC-only (CED 7 BC scope) | — | 0 | 0 |
+| calcbc.logistic-limit-read | Carrying capacity off a logistic differential equation | self — BC-only (CED 7 BC scope) | — | 0 | 0 |
+| calcbc.arc-length-formula-recall | Arc-length formula recall (function and parametric forms) | self — BC-only (CED 8 BC scope; parametric family serves CED 9) | — | 0 | 0 |
 
 ---
 
@@ -1137,15 +1139,16 @@ Kernels: [fk.division-facts]
 
 Rating: Medium · Format: fraction
 Why: One chained transformation — read the place value as the denominator, then reduce — 3–6s. (source: OpenStax Prealgebra 2e ch. 5 — absent from KA sweep)
-Sample: Write 0.25 as a fraction in lowest terms → 1/4 · Rule: frac-lowest-terms · Params: decimals with 1–2 places in (0, 1), excluding values already over 10 in lowest terms only when no reduction exists (at least one reduction step required); lowest-terms denominators ≤ 25.
+Sample: Write 0.25 as a fraction in lowest terms → 1/4 · Rule: frac-lowest-terms · Params: decimals with 1–2 places in (0, 1), excluding values whose place-value fraction (over 10 or 100) is already in lowest terms — at least one reduction step is always required; lowest-terms denominators ≤ 25.
 Kernels: [fk.place-value, prealg.simplify-fraction]
 
 ### prealg.round-to-place — Round to a named place
 
-Rating: High · Format: decimal
-Why: One digit judgment (look one place right, round) — ≤3s; decimal format lets one entry cover whole-number and decimal targets, and dec-exact accepts integer answers unchanged. (source: OpenStax Prealgebra 2e chs. 1 & 5 — absent from KA sweep)
+Rating: High · Format: decimal · Surface-sensitive
+Why: One digit judgment (look one place right, round) — ≤3s, with the up-to-5-digit entry a large share of the budget; decimal format lets one entry cover whole-number and decimal targets, and dec-exact accepts integer answers unchanged. (source: OpenStax Prealgebra 2e chs. 1 & 5 — absent from KA sweep)
 Sample: Round 3.86 to the nearest tenth → 3.9 · Rule: dec-exact · Params: whole numbers 3–5 digits rounded to tens/hundreds/thousands, and decimals with 2–3 places rounded to ones/tenths/hundredths; boundary digit 5 included deliberately.
 Kernels: [fk.place-value]
+*Marker added (Unit 9 recalibration):* Surface-sensitive — the tier flips to Medium if entry runs 2× slow, the same arithmetic that marks prealg.percent-to-decimal; the tier itself is unchanged.
 
 **OpenStax cross-check merges — other chapters (Prealgebra 2e chs. 7, 9, 11).**
 
@@ -1673,7 +1676,7 @@ Every KA Algebra 1 unit (1–15, plus the non-content 16–17 row), the recorded
 
 ## Geometry
 
-Swept against the KA Geometry checklist (9 units). **There is no OpenStax Geometry book**, so this section's cross-check cannot be a TOC diff: per the plan, the check instead runs the named traditional-Geometry gap list — constructions and logic/proof-writing — against the sweep, with both outcomes recorded in the gap-merge block and the disposition table. Entries are grouped by the KA unit that surfaced them. As expected of Geometry, the Low share is the document's highest so far (10 of 46 records) — proof, construction, and solve-the-figure topics are mined for kernels, not hosted. No pinned reference entries live here; one calibration **anchor** does — geo.triangle-congruence-criteria, whose canonical record stays in the calibration section and is absorbed by reference under KA unit 3. Cross-reference traffic runs back to Pre-Algebra and Algebra 1 owners (Pythagorean triples, circle area, proportions, slope — first-course-owns), and two entries minted here (geo.trig-ratio-definition, geo.exact-trig-values) are flagged in the registry as the canonical targets the Trig/Precalc sweep will cross-reference.
+Swept against the KA Geometry checklist (9 units). **There is no OpenStax Geometry book**, so this section's cross-check cannot be a TOC diff: per the plan, the check instead runs the named traditional-Geometry gap list — constructions and logic/proof-writing — against the sweep, with both outcomes recorded in the gap-merge block and the disposition table. Entries are grouped by the KA unit that surfaced them. As expected of Geometry, the Low share is the document's highest so far (10 of 46 records) — proof, construction, and solve-the-figure topics are mined for kernels, not hosted. No pinned reference entries live here; one calibration **anchor** does — geo.triangle-congruence-criteria, whose canonical record stays in the calibration section and is absorbed by reference under KA unit 3. Cross-reference traffic runs back to Pre-Algebra and Algebra 1 owners (Pythagorean triples, circle area, proportions, slope — first-course-owns), and two entries minted here (geo.trig-ratio-definition, geo.exact-trig-values) are flagged in the registry as the canonical targets of the Trig/Precalc sweep's cross-references — flags since satisfied in that pass.
 
 **KA Unit 1 — Performing transformations.**
 
@@ -2041,7 +2044,7 @@ Every KA Geometry unit (9) plus the no-OpenStax-book cross-check rows maps to en
 
 ## Algebra 2
 
-Swept against the KA Algebra 2 checklist (12 units) with the double cross-check the plan assigns this course — Intermediate Algebra 2e and Algebra & Trigonometry 2e. **This pass closes the primary in-degree window (Foundational → Algebra 2):** every kernel citation below is among the last that can count toward the primary ranking column, so the citation norm is exercised at full strictness — genuine prerequisites are cited even where the entry would read fine without them. The cross-check's headline outcomes are exactly the two gaps the plan predicted: KA Algebra 2 has **no sequences/series unit** and **no probability/counting unit** — both merged below (Intermediate Algebra 2e ch. 12; Algebra & Trigonometry 2e ch. 13) — plus one gap the plan did not name: a composite/inverse-functions block (Intermediate Algebra 2e ch. 10). No pinned calibration entries live in this section (the calibration table's pins live in Pre-Algebra and Algebra 1 only), so every rating below is calibrated against the pinned set: the short-expression entries against alg1.distribute-linear / alg1.factor-simple-quadratic, the fraction entries against prealg.simplify-fraction / prealg.fraction-add-unlike, the true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions. The section lands 55 records (14 High / 31 Medium / 10 Low) plus 21 cross-reference rows; heavy cross-reference traffic runs back to Algebra 1 (the factoring toolkit, exponent rules, radicals, exponential models) and Geometry (the two registry-flagged canonical trig targets), and this section in turn mints the canonical homes the Trig/Precalc sweep will cross-reference (complex arithmetic, radian conversion, composite/inverse functions, series, probability and counting). This unit also pays the two debts recorded upstream: radical-equation and rational-equation solving, deferred here by the Algebra 1 disposition table's OS 9 and OS 8 rows, land under KA unit 10.
+Swept against the KA Algebra 2 checklist (12 units) with the double cross-check the plan assigns this course — Intermediate Algebra 2e and Algebra & Trigonometry 2e. **This pass closes the primary in-degree window (Foundational → Algebra 2):** every kernel citation below is among the last that can count toward the primary ranking column, so the citation norm is exercised at full strictness — genuine prerequisites are cited even where the entry would read fine without them. The cross-check's headline outcomes are exactly the two gaps the plan predicted: KA Algebra 2 has **no sequences/series unit** and **no probability/counting unit** — both merged below (Intermediate Algebra 2e ch. 12; Algebra & Trigonometry 2e ch. 13) — plus one gap the plan did not name: a composite/inverse-functions block (Intermediate Algebra 2e ch. 10). No pinned calibration entries live in this section (the calibration table's pins live in Pre-Algebra and Algebra 1 only), so every rating below is calibrated against the pinned set: the short-expression entries against alg1.distribute-linear / alg1.factor-simple-quadratic, the fraction entries against prealg.simplify-fraction / prealg.fraction-add-unlike, the true-false entries against prealg.divisibility-rule-check / prealg.compare-fractions. The section lands 55 records (15 High / 30 Medium / 10 Low — tier counts as of the Unit 9 recalibration of alg2.complement-probability) plus 21 cross-reference rows; heavy cross-reference traffic runs back to Algebra 1 (the factoring toolkit, exponent rules, radicals, exponential models) and Geometry (the two registry-flagged canonical trig targets), and this section in turn mints the canonical homes the Trig/Precalc sweep cross-references (complex arithmetic, radian conversion, composite/inverse functions, series, probability and counting — satisfied in that pass). This unit also pays the two debts recorded upstream: radical-equation and rational-equation solving, deferred here by the Algebra 1 disposition table's OS 9 and OS 8 rows, land under KA unit 10.
 
 **KA Unit 1 — Polynomial arithmetic.** (Binomial and monomial products, degree, and like-term collection are owned upstream — cross-references below; this unit's new grain is multi-term addition and the two special-product patterns.)
 
@@ -2442,10 +2445,11 @@ Kernels: [prealg.simplify-fraction]
 
 ### alg2.complement-probability — Probability of the complement
 
-Rating: Medium · Format: fraction
-Why: One subtraction from 1 recast over the given denominator (5/5 − 2/5) — Medium's floor, ~3–4s. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
+Rating: High · Format: fraction · Surface-sensitive
+Why: One fused move — recast 1 over the given denominator and subtract the numerators ((5 − 2)/5) — ~1.5s think + ~1s entry on the assumed fraction pad; entry is most of the remaining High budget, so a 2× slower surface tips it to Medium. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
 Sample: P(rain) = 2/5. What is P(no rain)? → 3/5 · Rule: frac-lowest-terms · Params: given probabilities a/b in lowest terms with b ∈ [3, 12]; answers (b−a)/b are automatically in lowest terms since gcd(a, b) = 1.
 Kernels: [fk.subtraction-facts, alg2.simple-probability]
+*Rating adjusted (Unit 9 recalibration):* Medium → High — measured against the fraction pins, this is one fused subtract-over-a-kept-denominator move, strictly simpler than prealg.mixed-to-improper (High × fraction) and only a subtraction fact beyond alg2.simple-probability (High × fraction); the original Medium-floor call was an outlier against the calibration table.
 
 ### alg2.permutation-count — Count ordered arrangements
 
@@ -2460,7 +2464,7 @@ Rating: Low
 Why: Inherently multi-step at any speed — decompose into and/or structure, pick the multiplication or addition rule, compute each piece, and combine the fractions. (source: OpenStax Algebra & Trigonometry 2e ch. 13 — absent from KA sweep)
 Kernels: [alg2.simple-probability, alg2.complement-probability, prealg.fraction-multiply, prealg.fraction-add-unlike]
 
-**OpenStax cross-check merges — composite and inverse functions (Intermediate Algebra 2e ch. 10).** A third genuine diff beyond the two the plan predicted: Intermediate Algebra 2e opens its exponential/log chapter with composite and inverse functions, which no snapshotted KA Algebra 2 unit hosts (KA places them in Precalculus unit 1). First-course-owns puts the canonical records here, where the cross-check surfaced them; the Trig/Precalc sweep will cross-reference, per the registry notes.
+**OpenStax cross-check merges — composite and inverse functions (Intermediate Algebra 2e ch. 10).** A third genuine diff beyond the two the plan predicted: Intermediate Algebra 2e opens its exponential/log chapter with composite and inverse functions, which no snapshotted KA Algebra 2 unit hosts (KA places them in Precalculus unit 1). First-course-owns puts the canonical records here, where the cross-check surfaced them; the Trig/Precalc sweep cross-references them, per the registry notes (satisfied in that pass).
 
 ### alg2.evaluate-composite — Evaluate a composite function at a point
 
@@ -2945,7 +2949,7 @@ Rating: Low
 Why: Inherently multi-step at any speed — multiply by a conjugate (or clear a complex fraction), expand, cancel, then substitute, holding the chain throughout.
 Kernels: [alg2.expand-conjugate-product, alg1.simplify-rational-expression, prealg.evaluate-expression]
 
-**OpenStax cross-check merges — polar coordinates and parametric equations (Algebra & Trigonometry 2e ch. 10 / Precalculus 2e ch. 8).** The genuine diff beyond the four recorded deferrals: both cross-check books host polar coordinates and parametric equations in their trig-applications chapters, and **neither KA snapshot course contains them** (KA hosts them in AP Calculus BC territory — CED unit 9, which will cross-reference here per first-course-owns). Merged below with source notes; the polar form of complex numbers was already handled under KA Precalc unit 3 (trig.complex-to-polar).
+**OpenStax cross-check merges — polar coordinates and parametric equations (Algebra & Trigonometry 2e ch. 10 / Precalculus 2e ch. 8).** The genuine diff beyond the four recorded deferrals: both cross-check books host polar coordinates and parametric equations in their trig-applications chapters, and **neither KA snapshot course contains them** (KA hosts them in AP Calculus BC territory — CED unit 9, which cross-references here per first-course-owns; satisfied in the BC pass). Merged below with source notes; the polar form of complex numbers was already handled under KA Precalc unit 3 (trig.complex-to-polar).
 
 ### trig.polar-to-rectangular — Polar → rectangular coordinates
 
@@ -3551,6 +3555,55 @@ Both BC-only CED units (9–10), the three BC-scope extension rows for shared un
 | CED 7 (BC scope) — Euler's method and the logistic model | calcbc.euler-step, calcbc.logistic-limit-read; logistic solution curves and interpretation out-of-grain: modeling — no drillable content beyond kernels calcbc.logistic-limit-read, calcab.exponential-de-solution |
 | CED 8 (BC scope) — arc length | calcbc.arc-length-formula-recall; arc-length computation: recorded judgment — the setup is the recall entry and the evaluation is a Low-grain composite of calcab.definite-integral-power with no new kernel |
 | Cross-check — OpenStax | recorded: same condition as the AB section — no OpenStax calculus snapshot exists in this document; the AP CED is the sole checklist per the plan |
+
+---
+
+## Unit 9 consistency pass — changelog (verify-only)
+
+One full-document pass: recalibration against the anchors + pinned reference set, legend/registry/disposition audits, cross-reference annotation normalization, and the in-degree computation. **Nothing was inserted** — no new entries, kernels, formats, or rules; every change below is an adjustment, repair, or annotation, listed with its reason.
+
+**Audit results** (scripted over the machine-parseable `Rating:` and `Kernels:` lines, with fenced grammar examples excluded):
+
+- 346 rated entries; 346 registry rows; 100 cross-reference rows. Every registry slug has exactly one owning entry and every entry has exactly one registry row — **zero orphan slugs**.
+- Format ids: **0 unknown**. Rule ids: **0 unknown**. Render flags: **0 unknown**. Rule↔format pairings: **0 illegal** (all 346 records use only legend vocabulary).
+- Kernel citations: **0 unresolved** (every cited slug is registered and owned by an entry), 0 self-citations, 0 `Kernels:`-grammar violations; every cross-reference row's target resolves.
+- Disposition tables: **0 unmapped checklist units** and 0 unknown slugs named in any row — Pre-Algebra 26 rows (15 KA + 11 OS), Algebra 1 27 (15 KA + non-content row + statistics gap row + 10 OS), Geometry 12 (9 KA + 3 cross-check/gap), Algebra 2 37 (12 KA + 12 Int + 13 A&T), Trig/Precalc 30 (4 KA Trig + 10 KA Precalc + 4 A&T payoffs + 12 Precalc 2e), Calculus AB 9 (8 CED + cross-check), BC-only 6 (2 CED + 3 extension + cross-check).
+- Synonym scan of the slug list: no two slugs name one skill. The deliberate near-pairs are each recorded where they live: alg2.evaluate-log vs alg2.exponential-solve-common-base (same recall, two notations — cross-cited); calcab.critical-point-quadratic vs alg1.axis-of-symmetry ("in calculus clothes", kernel-cited); the √(a² + b²) family consolidated under trig.complex-modulus by registry note.
+- Citation-completeness spot-check (sample of six across sections: prealg.percent-of-number, alg1.simplify-radical, geo.sector-area-fraction, alg2.pythagorean-identity-apply, trig.exact-trig-any-quadrant, calcab.definite-integral-power): no missing genuine prerequisites found.
+
+**Recalibration outcomes.** Every entry was compared against the anchors and the calibration table; the borderline calls flagged by the course passes were each re-examined. One tier changed, one marker was added, and all other flagged calls stand:
+
+| Entry | Flagged as | Outcome |
+|---|---|---|
+| geo.exact-trig-values | High × MC vs the Medium × MC anchor | **Kept High** — pure table recall with 3–4-character options; the anchor's Medium comes from figure-reading plus a 5-option scan, and High × MC is established by trig.trig-parity, alg1.growth-or-decay, calcab.derivative-standard-table |
+| geo.distance-formula | Medium ceiling | **Kept Medium** — three fact-level micro-moves at triple-friendly params, inside 8s like alg1.discriminant-root-count |
+| geo.translate-point, geo.dilate-point | Medium floor vs arguably High | **Kept Medium** — "one move is High, the doubled parallel move is Medium" is the document-wide rule (geo.midpoint-formula, trig.vector-add, alg2.add-subtract-complex all rate Medium on it); promoting these two would fork the tier line |
+| alg2.complement-probability | Medium floor vs High | **Adjusted Medium → High** (note on the entry) — one fused subtract-over-a-kept-denominator, strictly simpler than prealg.mixed-to-improper (High × fraction) |
+| alg2.multiply-complex | Medium ceiling | **Kept Medium** — FOIL plus the i² merge is strictly more than alg1.multiply-binomials (Medium's upper half) |
+| alg2.expand-conjugate-product | High × short-expression | **Kept High** — pattern recall plus a ~7-token entry ≈ 2.75s, the alg1.distribute-linear pin's case |
+| trig.limit-removable-factor | Medium via restricted params | **Kept Medium** — the fluent 2a shortcut under the restricted x² − a² family is one recognition plus a doubling |
+| trig.solve-basic-trig-equation | Medium ceiling, surface-sensitive | **Kept Medium** — one table inversion plus one reflection rule; the Surface-sensitive marker already carries the entry-time risk |
+| trig.double-angle-evaluate | Medium ceiling, surface-sensitive | **Kept Medium** — formula recall plus two held triple-products stays under 8s |
+| trig.geometric-series-converges | High × TF | **Kept High** — the ratio read off 4 simple shown terms is fluent-instant; the calcbc.p-series-converges precedent (High off 4 expanded terms) |
+| trig.triangle-area-sine | Medium via restricted angles | **Kept Medium** — two products plus a halving at sin ∈ {1/2, 1} |
+| calcab.derivative-power-rule | High × short-expression | **Kept High** — rule recall plus a 4-token entry, the distribute-linear pin's case |
+| calcab.ftc-derivative-of-accumulation | High × short-expression | **Kept High** — swap-t-for-x recall plus a ~3-token entry; the compact symbolic prompt does not spend the prealg.common-denominator anchor's reading budget |
+| calcab.mvt-apply | Low | **Kept Low** — three chained Medium-grade sub-computations at any parameter restriction |
+| calcbc.euler-step | Medium via one-step params | **Kept Medium** — one slope evaluation plus one multiply-add, the alg1.arithmetic-nth-term shape |
+| prealg.round-to-place | (surfaced by the sweep, not pre-flagged) | **Marker added: Surface-sensitive** (note on the entry) — entry-dominated High exactly like prealg.percent-to-decimal; tier unchanged |
+
+No other outliers surfaced by the full sweep. The Algebra 2 section-intro tier counts were updated for the one tier change.
+
+**Textual repairs (verification hygiene, no semantic change intended):**
+
+1. Input-format legend, `fraction` normalization bullet: repaired the garbled sentence "must still be entered as the format demands the rule states" to say what the surrounding spec intends — integer-valued answers stay on the fraction surface, and the accepted written form is governed by the entry's rule.
+2. prealg.decimal-to-fraction: rewrote the confusing Params clause ("excluding values already over 10 in lowest terms only when no reduction exists") — the parameter intent, unchanged, is that decimals whose place-value fraction is already in lowest terms are excluded so one reduction step is always exercised.
+3. Satisfied-tense updates: four sentences still said a later course "will cross-reference" where the cross-reference has since been recorded (Geometry section intro; Algebra 2 section intro; Algebra 2 composite/inverse merge block; Trig/Precalc polar/parametric merge block).
+4. Registry tense on the four fk. anchor rows: the Foundational-kernels seeding and the Pre-Algebra sweep were one and the same pass — the label now says so instead of reading as two events.
+
+**Annotation normalization (55 registry rows).** Registry rows for cross-referenced canonical owners inconsistently carried the "first-course-owns: X cross-references here" note. Every registry row that is the target of at least one cross-reference row now names each citing course: 49 rows gained the note and 6 rows (prealg.solve-proportion, prealg.pythagorean-hypotenuse, prealg.solve-2x2-system, alg2.solve-rational-equation, alg2.geometric-series-sum, trig.complex-modulus) had an existing note extended. Notes added by this pass are tagged "(noted in the Unit 9 consistency pass)".
+
+**In-degree computation.** Computed per the In-degree & citation rules, with the counting rule clarified there during this pass (only bracketed `Kernels:` lists count; cross-reference rows, `(see …)` pointers, registry annotations, and disposition mentions do not): distinct citing entry slugs over the 689 (entry, kernel) citation pairs, fenced grammar examples excluded; the primary column filters to citing entries whose own section is Foundational → Algebra 2. Both columns are recorded for all 346 registry rows. **Top-10 spot-recount:** the ten highest primary in-degrees (fk.times-tables 49/58, fk.addition-facts 25/27, fk.division-facts 23/28, fk.perfect-squares 23/28, fk.integer-add-sub 19/26, fk.subtraction-facts 15/21, prealg.simplify-fraction 14/19, fk.doubling-halving 14/15, fk.integer-mul-div 13/17, prealg.square-root 11/15) were manually recounted by an independent method — **all ten match the recorded values**, and the fk.doubling-halving citer list was verified name-by-name (15 citers: 14 primary-window, 1 Trig/Precalc; prose mentions correctly excluded).
 
 ---
 

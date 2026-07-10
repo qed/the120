@@ -3609,4 +3609,139 @@ No other outliers surfaced by the full sweep. The Algebra 2 section-intro tier c
 
 ## Build this first
 
-The prioritized top picks: ~20–30 topics ranked by primary (Foundational→Algebra 2) kernel in-degree with the full-range column secondary; each flagged current-engine or needs-input-type-X with MC-fallback status and render flag; includes the zero-engine-work starter subset and the post-Algebra-2 forward inventory. *Authored in a later pass.*
+The prioritized next-content roadmap. Ranking is mechanical: **primary kernel in-degree** (distinct citing entries whose own section is Foundational → Algebra 2, per the In-degree & citation rules) descending, with the **full-range** column shown as the secondary signal. The cutoff is **primary in-degree ≥ 4**, which the registry yields exactly **28 picks** for — inside R7's ~20–30 band; the next band down (primary 3) holds 12 more kernels and would overflow it. Ties are broken by judgment with a one-line justification each (list below the table); where only the primary column ties, the full-range column is the first tiebreaker and judgment enters only when both columns tie. Post-Algebra 2 kernels (`trig.` / `calcab.` / `calcbc.`) score 0 primary **by construction** — no Foundational→Algebra 2 entry cites forward — so they never enter this ranking (not even via tie-break prose); they live in the separately labeled **forward inventory** at the end of this section.
+
+Reading the flags:
+
+- **Engine** — *current-engine* per the definition in "How to read this document": the answer is a single integer (negative allowed by the judge — but see ⚠ minus) or multiple choice. Everything else names the legend format it waits on, marked *MC fallback acceptable* or **no-MC-fallback** (reasoning list below the tie-breaks).
+- **shipped** — four picks are the four `fk.` calibration anchors the live game already drills (`app/gauntlet/game/problems.ts`). They keep their rank because the ranking is mechanical — and it is independent confirmation that the current game targets the highest-leverage kernels — but they cost no build; the actionable list starts at #4.
+- **Render** — the entry's render flag; *plain* is the default-omitted plain-text flag.
+- **⚠ minus** — at least one of the pick's parameter bands emits negative answers: the judge grades them, but touch `inputMode="numeric"` keyboards may expose no minus key (engine contract), so the pick carries **touch-entry risk** until the proposed game-rendered pad ships.
+- **✦ starter** — member of the zero-engine-work starter subset (the Starter Twelve, below).
+
+### The ranked picks
+
+| # | Kernel | In-degree (primary / full) | Tier | Engine | Render | Notes |
+|---|---|---|---|---|---|---|
+| 1 | fk.times-tables | 49 / 58 | High | current-engine — **shipped** | plain | the document's load-bearing kernel |
+| 2 | fk.addition-facts | 25 / 27 | High | current-engine — **shipped** | plain | — |
+| 3 | fk.division-facts | 23 / 28 | High | current-engine — **shipped** | plain | tie vs #4 — see tie-breaks |
+| 4 | fk.perfect-squares | 23 / 28 | High | current-engine | unicode-inline | ✦ starter — the top actionable pick |
+| 5 | fk.integer-add-sub | 19 / 26 | High | current-engine | plain | ⚠ minus (answers ∈ [−40, 40]) |
+| 6 | fk.subtraction-facts | 15 / 21 | High | current-engine — **shipped** | plain | — |
+| 7 | prealg.simplify-fraction | 14 / 19 | High | needs `fraction` — MC fallback acceptable | plain | Surface-sensitive; tie vs #8 |
+| 8 | fk.doubling-halving | 14 / 15 | High | current-engine | plain | ✦ starter |
+| 9 | fk.integer-mul-div | 13 / 17 | High | current-engine | plain | ⚠ minus |
+| 10 | prealg.square-root | 11 / 15 | High | current-engine | unicode-inline | ✦ starter |
+| 11 | prealg.evaluate-expression | 10 / 17 | Medium | current-engine | plain | ⚠ minus (signed band) |
+| 12 | prealg.evaluate-exponent | 8 / 12 | High | current-engine | unicode-inline | ✦ starter |
+| 13 | prealg.solve-two-step-equation | 7 / 9 | Medium | current-engine | plain | ⚠ minus; heads the 7-band — see tie-breaks |
+| 14 | fk.fraction-of-number | 7 / 7 | Medium | current-engine | plain | ✦ starter; tie vs #15 |
+| 15 | fk.powers-of-ten | 7 / 7 | High | current-engine | plain | ✦ starter |
+| 16 | prealg.solve-one-step-equation | 6 / 8 | High | current-engine | plain | ⚠ minus (signed band); tie vs #17 |
+| 17 | prealg.pythagorean-hypotenuse | 6 / 8 | Medium | current-engine | plain | ✦ starter |
+| 18 | fk.two-digit-times-one-digit | 6 / 6 | Medium | current-engine | plain | ✦ starter; four-way tie #18–21 |
+| 19 | fk.perfect-cubes | 6 / 6 | High | current-engine | unicode-inline | ✦ starter |
+| 20 | fk.place-value | 6 / 6 | High | current-engine | plain | ✦ starter |
+| 21 | alg1.multiply-binomials | 6 / 6 | Medium | needs `short-expression` — MC fallback acceptable | plain | Surface-sensitive |
+| 22 | alg1.evaluate-function | 4 / 11 | Medium | current-engine | plain | ⚠ minus; heads the 4-band — see tie-breaks |
+| 23 | prealg.combine-like-terms | 4 / 6 | High | needs `short-expression` — MC fallback acceptable | plain | Surface-sensitive |
+| 24 | prealg.solve-proportion | 4 / 5 | Medium | current-engine | plain | ✦ starter; tie vs #25 |
+| 25 | alg1.slope-two-points | 4 / 5 | Medium | needs `fraction` — MC fallback acceptable | plain | — |
+| 26 | alg1.factor-pairs-sum-product | 4 / 4 | Medium | needs `two-numbers` — **no-MC-fallback** | plain | ⚠ minus (signed band); three-way tie #26–28 |
+| 27 | prealg.exponent-product-rule | 4 / 4 | High | current-engine | unicode-inline | ✦ starter |
+| 28 | alg2.evaluate-log | 4 / 4 | High | current-engine | unicode-inline | ⚠ minus (negative band, e.g. log₂ ¼) |
+
+### Tie-break decisions
+
+- **#3 fk.division-facts over #4 fk.perfect-squares** (23/28, exact tie in both columns): division-facts listed first as the shipped half of the tie — it costs no build and is the inverse read of #1 — which makes perfect-squares the top *actionable* pick.
+- **#7 prealg.simplify-fraction over #8 fk.doubling-halving** (primary 14): broken by the full-range column, 19 vs 15.
+- **#13 prealg.solve-two-step-equation** heads the primary-7 band on full-range (9 vs 7). **#14 fk.fraction-of-number over #15 fk.powers-of-ten** (7/7, exact tie): fraction-of-number's citers sit in the document's heaviest strand (fractions → percents → proportions), while powers-of-ten's leverage stays inside the decimal/scientific-notation family.
+- **#16 prealg.solve-one-step-equation over #17 prealg.pythagorean-hypotenuse** (6/8, exact tie): solve-one-step is itself a declared kernel of the #13 pick, so building it compounds inside this very list; the Pythagorean-triple family is a leaf.
+- **#18–21** (6/6, exact four-way tie): fk.two-digit-times-one-digit first (the most direct extension of the shipped `mul` generator), then fk.perfect-cubes (completes the power-recall family beside #4 and #12), then fk.place-value (a pure read-off — the cheapest generator on the list), then alg1.multiply-binomials (last of the four only because it waits on the `short-expression` surface).
+- **#22 alg1.evaluate-function** heads the primary-4 band on full-range (11), **#23 prealg.combine-like-terms** follows (6). **#24 prealg.solve-proportion over #25 alg1.slope-two-points** (4/5, exact tie): solve-proportion is current-engine and starter-eligible while slope waits on the `fraction` pad. **#26–28** (4/4, three-way tie): alg1.factor-pairs-sum-product first — its citers are the factoring strand, the marquee Algebra 1 content this expansion exists to unlock; then prealg.exponent-product-rule (zero engine work); then alg2.evaluate-log (its negative band carries the touch-minus caveat).
+
+### MC-fallback reasoning (needs-input picks)
+
+- **prealg.simplify-fraction — acceptable.** Distractors like the unreduced equivalent (4/6 offered against 6/8 → 3/4) and near-miss reductions probe the same on-sight common-factor judgment the entry drills; the fallback caps difficulty (candidates leak) but preserves the skill.
+- **alg1.multiply-binomials — acceptable.** Options varying the middle coefficient and its sign still force the four-products-and-middle-merge move the entry names as the held-in-head step; the x² and constant terms leak, capping difficulty.
+- **prealg.combine-like-terms — acceptable.** The drilled move is one coefficient addition, fully exercised by coefficient distractors (8x vs 15x vs 2x for 5x + 3x).
+- **alg1.slope-two-points — acceptable.** Sign-flip and run-over-rise distractors reproduce the classic errors; choosing among them still requires computing Δy/Δx (only the lowest-terms reduction is partially leaked).
+- **alg1.factor-pairs-sum-product — no-MC-fallback.** The entry's skill *is* the mental search through a factor-pair family; displayed candidate pairs convert the search into plug-and-check (one multiply plus one add per option), which destroys exactly the move being drilled.
+
+### Starter subset — zero engine work (the Starter Twelve)
+
+Picks that are current-engine **and** plain-text or unicode-inline render **and** non-negative-answer across *all* parameter bands (the touch-minus caveat rules the signed-band picks out) — buildable today against the shipped input pipeline with no input, render, or keypad work. The four shipped anchors qualify trivially and are excluded (already live). In rank order:
+
+1. fk.perfect-squares (#4)
+2. fk.doubling-halving (#8)
+3. prealg.square-root (#10)
+4. prealg.evaluate-exponent (#12)
+5. fk.fraction-of-number (#14)
+6. fk.powers-of-ten (#15)
+7. prealg.pythagorean-hypotenuse (#17)
+8. fk.two-digit-times-one-digit (#18)
+9. fk.perfect-cubes (#19)
+10. fk.place-value (#20)
+11. prealg.solve-proportion (#24)
+12. prealg.exponent-product-rule (#27)
+
+Two notes binding on the build: new generators must mint per-fact keys the engine contract's way (stable, order-normalized) or the weak-fact trainer cannot track the new families; and seven more current-engine picks (#5, #9, #11, #13, #16, #22, #28) miss the subset **only** on their negative-answer bands — each becomes zero-work the day the proposed pad (with its minus key) ships, or sooner if the product accepts OS-keyboard minus-entry risk on touch.
+
+### Forward inventory — post-Algebra 2 kernels (not ranked above)
+
+Every `trig.` / `calcab.` / `calcbc.` kernel scores 0 primary by construction, so this sublist is ordered by the **secondary (full-range) column** — it is the seed list for the day content expansion reaches past Algebra 2, not part of the primary ranking. Full-range ≥ 3 is tabled; ties are listed alphabetically with no ranking claim. (The adjacent case geo.exact-trig-values, 1 / 10, is *not* forward inventory — Geometry sits inside the primary window — but its full-range column tells the same story: it turns top-tier the moment trig-and-beyond content is scheduled.)
+
+| Kernel | In-degree (primary / full) | Tier · Format | Engine | Render |
+|---|---|---|---|---|
+| calcab.derivative-power-rule | 0 / 9 | High · short-expression | needs `short-expression` | unicode-inline (Surface-sensitive) |
+| calcab.derivative-standard-table | 0 / 8 | High · multiple-choice | current-engine | unicode-inline |
+| calcab.differentiate-polynomial | 0 / 7 | Medium · short-expression | needs `short-expression` | unicode-inline |
+| calcab.derivative-at-point | 0 / 6 | Medium · single-number | current-engine | unicode-inline |
+| calcab.antiderivative-power-rule | 0 / 5 | High · single-number | current-engine | needs-math-render |
+| calcab.chain-rule-recall | 0 / 5 | Medium · multiple-choice | current-engine | unicode-inline |
+| calcab.antiderivative-standard-table | 0 / 4 | High · multiple-choice | current-engine | needs-math-render |
+| calcab.definite-integral-power | 0 / 4 | Medium · single-number | current-engine | needs-math-render |
+| calcbc.p-series-converges | 0 / 4 | High · true-false | needs `true-false` | plain |
+| trig.reference-angle | 0 / 4 | Medium · single-number | current-engine | plain |
+| trig.limit-by-substitution | 0 / 3 | Medium · single-number | current-engine | unicode-inline |
+
+Fifteen more kernels sit at full-range 2: calcab.chain-rule-linear-inner, calcab.concavity-sign-read, calcab.critical-point-quadratic, calcab.product-quotient-rule-recall, calcbc.alternating-series-converges, calcbc.nth-term-test, calcbc.parametric-slope-formula-recall, calcbc.ratio-test-read, calcbc.taylor-coefficient-from-derivative, trig.angle-sum-formula-recall, trig.choose-triangle-law, trig.geometric-series-converges, trig.horizontal-asymptote, trig.identify-hole, trig.vertical-asymptote. Everything below that is inventory for its own course's future pass, readable straight off the registry.
+
+---
+
+## Final self-containment audit (Unit 10)
+
+The origin success criteria, operationalized per the plan's Unit 10 verification and run 2026-07-10, after the Build-this-first section above was authored. **All three audits pass; no defects found.**
+
+**1. Random-sample checklist audit — 10/10 findable.** Selection method (reproducible, no randomness): number the seven snapshotted primary checklists' units in document order — KA Pre-Algebra 1–15 → indices 1–15, KA Algebra 1 1–15 → 16–30, KA Geometry 1–9 → 31–39, KA Algebra 2 1–12 → 40–51, KA Trigonometry 1–4 → 52–55, KA Precalculus 1–10 → 56–65, AP CED 1–10 → 66–75 — and take every 7th unit starting at index 7.
+
+| Index | Checklist unit | Found as |
+|---|---|---|
+| 7 | Pre-Algebra 7 — Equations & inequalities introduction | rated entries (prealg.solve-one-step-equation, prealg.check-solution) |
+| 14 | Pre-Algebra 14 — Functions and linear models | entry (prealg.evaluate-expression) + cross-reference (→ alg1.read-slope-intercept) + out-of-grain disposition |
+| 21 | Algebra 1 6 — Systems of equations | entry (alg1.system-solution-count) + cross-references (→ prealg.solve-2x2-system, prealg.check-system-solution) + out-of-grain disposition |
+| 28 | Algebra 1 13 — Quadratics: Multiplying & factoring | seven rated entries (two of them calibration pins) |
+| 35 | Geometry 5 — Right triangles & trigonometry | six rated entries + cross-reference (→ prealg.pythagorean-hypotenuse) + recorded judgment |
+| 42 | Algebra 2 3 — Polynomial factorization | rated entries + cross-references to the Algebra 1 factoring family |
+| 49 | Algebra 2 10 — Equations | rated entries (including the two paid deferral debts) + out-of-grain disposition |
+| 56 | Precalculus 1 — Composite and inverse functions | rated entries + cross-references (→ alg2.evaluate-composite, alg2.inverse-of-linear) + out-of-grain disposition |
+| 63 | Precalculus 8 — Probability and combinatorics | rated entries + cross-references to the Algebra 2 probability/combinatorics block |
+| 70 | CED 5 — Analytical Applications of Differentiation | eight rated entries + recorded judgments (EVT; curve sketching out-of-grain) |
+
+**2. Consumer dry-run — 3/3 pass.** One top pick per flag class, checking that the entry alone — plus the legends this document defines — answers every generator-facing question, with no other document opened:
+
+| Generator question | fk.perfect-squares (current-engine) | prealg.simplify-fraction (needs new format) | alg1.factor-pairs-sum-product (no-MC-fallback) |
+|---|---|---|---|
+| Question shape | "13² →" | "Write 6/8 in lowest terms →" | "Two numbers with sum 7 and product 12 →" |
+| Answer shape | single integer (169) | fraction a/b (3/4) | unordered integer pair (3, 4) |
+| Accepted-answer rule | int-exact (rule legend) | frac-lowest-terms (rule legend) | pair-unordered (rule legend) |
+| Input format + submit model | single-number; length-based auto-judge (format legend) | fraction; Enter-to-submit on the proposed fraction pad (format legend) | two-numbers; Enter-to-submit on the proposed pair pad (format legend) |
+| Value bounds | bases ∈ [2, 15], answers ≤ 225 | (a·g)/(b·g) with gcd(a, b) = 1, a, b ∈ [1, 9], g ∈ [2, 6], denominators ≤ 54 | pinned band: members ∈ [2, 12]; signed band: ∈ [−12, 12] excluding 0, touch-minus caveat |
+| Render needs | unicode-inline | plain-text (default) | plain-text (default) |
+
+Outcome: every cell reads off the entry's own record plus the two legends; nothing required `problems.ts`, the plan, or any external source.
+
+**3. Grain audit — pass. Final count: 346 rated entries**, plus 100 cross-reference rows and zero unmapped checklist rows across all disposition tables (Unit 9). Sanity note per the plan: 346 sits comfortably in the intended "hundreds" range and far above the ~150 line below which chapter-grain entries would be suspected — the count is a sweep outcome, not a padding target. Deterministic sample (every 30th rated entry in document order, 11 entries: prealg.percent-of-number, prealg.mixed-to-improper, alg1.geometric-nth-term, alg1.simplify-monomial-quotient, geo.perpendicular-slope, alg2.factor-quadratic-form, alg2.trig-sign-by-quadrant, trig.double-angle-evaluate, trig.limit-removable-factor, calcab.second-derivative-test-read, calcbc.alternating-series-converges): each names exactly one drillable fact family — the High/Medium samples fully determine a generator, and the one Low in the sample (alg2.factor-quadratic-form) is a single multi-step skill mined for kernels, as the grammar requires. Section-shape check: the Build-this-first section carries 28 ranked, flagged picks (inside the 20–30 band), the separately labeled forward inventory, and the named Starter Twelve subset.
+
+No audit surfaced a defect; this pass inserts nothing beyond the two sections it exists to add.

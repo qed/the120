@@ -50,6 +50,17 @@ Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_10
 
 ---
 
+## 🎮 MathRaiders (FastMath game)
+
+**M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/raiders`, in main nav).
+Boss-battle FastMath: correct answers do damage (speed + streak multipliers), wrong answers cost player HP; 2-minute raids, 4 bosses with generated arenas + sprites (Nano Banana Pro, `scripts/gen-sprites.mjs`), XP + local save. Topics: ×, ÷, +, − plus GCD, LCM, common denominator, and triangle congruence (rendered figures, multiple choice). Fully open demo for now, per direction.
+
+**M2 · Deposit gating + account saves** *(dev)* — 🔴 Not started.
+When product wants it: full topic set / Mastery Trials behind a paid deposit (deposits table already live), progress saved to the family's Supabase account instead of localStorage.
+
+**M3 · Game depth** *(dev)* — 🔴 Not started.
+Sound effects/music toggle, Mastery Trials mode (timed accuracy gauntlet), multiplayer raid rooms, more bosses/arenas, difficulty scaling by grade.
+
 ## 🧊 Phase 3 / Later
 
 - CASL-consented nurture email flow (needs an email provider decision — Resend, Customer.io).

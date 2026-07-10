@@ -55,6 +55,35 @@ body {
   }
 }
 
+/* ---- MathRaiders (app/raiders) ---- */
+@keyframes mr-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-7px, 2px) rotate(-2deg); }
+  40% { transform: translate(6px, -3px) rotate(2deg); }
+  60% { transform: translate(-5px, 1px); }
+  80% { transform: translate(4px, -1px); }
+}
+.mr-shake { animation: mr-shake 0.35s ease-in-out; }
+
+@keyframes mr-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.mr-float { animation: mr-float 3.2s ease-in-out infinite; }
+
+@keyframes mr-dmg {
+  0% { opacity: 0; transform: translateY(6px) scale(0.7); }
+  15% { opacity: 1; transform: translateY(-6px) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-52px) scale(1); }
+}
+.mr-dmg { animation: mr-dmg 0.7s ease-out forwards; }
+
+@keyframes mr-wrong {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+  30% { box-shadow: inset 0 0 120px 10px rgba(239, 68, 68, 0.45); }
+}
+.mr-wrong { animation: mr-wrong 0.45s ease-out; }
+
 /* Mono eyebrow/label used throughout the site */
 .eyebrow {
   font-family: var(--font-mono);

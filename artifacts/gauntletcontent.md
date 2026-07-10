@@ -198,7 +198,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
 | prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
 | prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
-| geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | minted during calibration; Geometry pass absorbs | | |
+| geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | authored in calibration section; absorbed by Geometry via cross-reference (Geometry pass) | | |
 | prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra section (pinned calibration entry) | — | | |
 | prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra section (pinned calibration entry) | — | | |
 | prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra section (pinned calibration entry) | — | | |
@@ -264,7 +264,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | prealg.perimeter-rectangle | Perimeter of a rectangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
 | prealg.area-triangle | Area of a triangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
 | prealg.circle-area-pi | Circle area as a coefficient of π | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
-| prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | Geometry unit 5 will cross-reference here | | |
+| prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | first-course-owns: Geometry unit 5 cross-references here (recorded during the Geometry pass) | | |
 | prealg.identify-quadrant | Quadrant of a coordinate point | self — Pre-Algebra (OpenStax merge, ch. 11) | — | | |
 | fk.unit-conversion-facts | Recall a measurement conversion factor | self — Foundational kernels (added during Algebra 1 pass) | — | | |
 | alg1.combine-like-terms-multivar | Combine like terms across multiple variables | self — Algebra 1 (KA 1) | — | | |
@@ -313,6 +313,52 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | alg1.simplify-monomial-quotient | Divide two monomials | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
 | alg1.simplify-rational-expression | Simplify a rational expression (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
 | alg1.multiply-square-roots | Multiply square roots to an integer | self — Algebra 1 (OpenStax merge, ch. 9) | — | | |
+| geo.translate-point | Translate a point by a vector | self — Geometry (KA 1) | — | | |
+| geo.reflect-point | Reflect a point across an axis | self — Geometry (KA 1) | — | | |
+| geo.rotate-point | Rotate a point about the origin (90°/180°/270°) | self — Geometry (KA 1) | — | | |
+| geo.dilate-point | Dilate a point from the origin | self — Geometry (KA 1) | — | | |
+| geo.is-rigid-motion | Classify a transformation as rigid or not | self — Geometry (KA 2) | — | | |
+| geo.compose-transformations | Compose transformations in sequence (Low; kernel source) | self — Geometry (KA 2) | — | | |
+| geo.vertical-angle-read | Vertical angles are equal (read-off) | self — Geometry (KA 3) | — | | |
+| geo.supplement-complement | Supplement or complement of an angle | self — Geometry (KA 3) | — | | |
+| geo.transversal-angle | Angle from parallel lines cut by a transversal | self — Geometry (KA 3) | — | | |
+| geo.triangle-angle-sum | Third angle of a triangle | self — Geometry (KA 3) | — | | |
+| geo.exterior-angle | Exterior angle of a triangle | self — Geometry (KA 3) | — | | |
+| geo.polygon-angle-sum | Interior angle sum of an n-gon | self — Geometry (KA 3) | — | | |
+| geo.isosceles-base-angles | Isosceles triangle angle relations | self — Geometry (KA 3) | — | | |
+| geo.corresponding-parts | Corresponding parts of congruent triangles | self — Geometry (KA 3) | — | | |
+| geo.congruence-proof | Prove two triangles congruent (Low; kernel source) | self — Geometry (KA 3) | — | | |
+| geo.similarity-criteria | Match a marked pair to a similarity criterion | self — Geometry (KA 4) | — | | |
+| geo.scale-factor | Scale factor between similar figures | self — Geometry (KA 4) | — | | |
+| geo.area-scale-factor | Area ratio from a length scale factor | self — Geometry (KA 4) | — | | |
+| geo.similarity-proof | Prove two triangles similar (Low; kernel source) | self — Geometry (KA 4) | — | | |
+| geo.pythagorean-verify | Verify a right triangle via a² + b² = c² | self — Geometry (KA 5) | — | | |
+| geo.special-right-triangle | 45-45-90 / 30-60-90 side-ratio application | self — Geometry (KA 5) | — | | |
+| geo.trig-ratio-definition | Read sin/cos/tan off a labeled right triangle | self — Geometry (KA 5) | first-course-owns: Trig/Precalc will cross-reference here | | |
+| geo.exact-trig-values | Exact trig values at special angles | self — Geometry (KA 5) | first-course-owns: canonical here; Trig/Precalc and the calculus sections cross-reference here | | |
+| geo.trig-cofunction | Cofunction complement (sin θ = cos(90° − θ)) | self — Geometry (KA 5) | — | | |
+| geo.solve-right-triangle | Solve a right triangle with trig (Low; kernel source) | self — Geometry (KA 5) | — | | |
+| geo.distance-formula | Distance between two points | self — Geometry (KA 6) | — | | |
+| geo.midpoint-formula | Midpoint of a segment | self — Geometry (KA 6) | — | | |
+| geo.perpendicular-slope | Negative-reciprocal slope of a perpendicular line | self — Geometry (KA 6) | — | | |
+| geo.coordinate-geometry-proof | Verify figure properties on coordinates (Low; kernel source) | self — Geometry (KA 6) | — | | |
+| geo.circle-equation-read | Center from a circle's standard form | self — Geometry (KA 7) | — | | |
+| geo.circle-radius-read | Radius from a circle's standard form | self — Geometry (KA 7) | — | | |
+| geo.circle-general-to-standard | Circle center/radius from general form (Low; kernel source) | self — Geometry (KA 7) | — | | |
+| geo.parabola-focus-directrix | Focus and directrix of a parabola (Low; kernel source) | self — Geometry (KA 7) | — | | |
+| geo.central-inscribed-angle | Central and inscribed angle measures | self — Geometry (KA 8) | — | | |
+| geo.arc-length-fraction | Arc length as a π-coefficient | self — Geometry (KA 8) | — | | |
+| geo.sector-area-fraction | Sector area as a π-coefficient | self — Geometry (KA 8) | — | | |
+| geo.tangent-radius-problem | Tangent-segment problems (Low; kernel source) | self — Geometry (KA 8) | — | | |
+| geo.volume-box | Volume of a rectangular box / prism | self — Geometry (KA 9) | — | | |
+| geo.volume-cylinder-pi | Cylinder volume as a π-coefficient | self — Geometry (KA 9) | — | | |
+| geo.volume-cone-pi | Cone volume as a π-coefficient | self — Geometry (KA 9) | — | | |
+| geo.volume-sphere-pi | Sphere volume as a π-coefficient | self — Geometry (KA 9) | — | | |
+| geo.volume-scale-factor | Volume ratio from a length scale factor | self — Geometry (KA 9) | — | | |
+| geo.cross-section-id | Identify a solid's cross-section | self — Geometry (KA 9) | — | | |
+| geo.surface-area | Surface area of a solid (Low; kernel source) | self — Geometry (KA 9) | — | | |
+| geo.conditional-forms | Converse/inverse/contrapositive identification | self — Geometry (gap merge — logic/proof-writing) | — | | |
+| geo.two-column-proof | Write a two-column proof (Low; kernel source) | self — Geometry (gap merge — logic/proof-writing) | — | | |
 
 ---
 
@@ -1449,7 +1495,369 @@ Every KA Algebra 1 unit (1–15, plus the non-content 16–17 row), the recorded
 
 ## Geometry
 
-Swept against the KA Geometry checklist (9 units); cross-check must catch constructions and logic/proof-writing. Expected high share of Low entries with rich kernel extraction. *Authored in a later pass.*
+Swept against the KA Geometry checklist (9 units). **There is no OpenStax Geometry book**, so this section's cross-check cannot be a TOC diff: per the plan, the check instead runs the named traditional-Geometry gap list — constructions and logic/proof-writing — against the sweep, with both outcomes recorded in the gap-merge block and the disposition table. Entries are grouped by the KA unit that surfaced them. As expected of Geometry, the Low share is the document's highest so far (10 of 46 records) — proof, construction, and solve-the-figure topics are mined for kernels, not hosted. No pinned reference entries live here; one calibration **anchor** does — geo.triangle-congruence-criteria, whose canonical record stays in the calibration section and is absorbed by reference under KA unit 3. Cross-reference traffic runs back to Pre-Algebra and Algebra 1 owners (Pythagorean triples, circle area, proportions, slope — first-course-owns), and two entries minted here (geo.trig-ratio-definition, geo.exact-trig-values) are flagged in the registry as the canonical targets the Trig/Precalc sweep will cross-reference.
+
+**KA Unit 1 — Performing transformations.**
+
+### geo.translate-point — Translate a point
+
+Rating: Medium · Format: two-numbers
+Why: Two parallel signed additions plus the pair entry — Medium's floor, ~3–4s; one addition alone would be High, the doubled move is what lifts it.
+Sample: Translate (3, −2) by 4 right and 5 up → 7, 3 · Rule: pair-ordered · Params: points and shifts integers ∈ [−9, 9]; shifts phrased both as words (right/left/up/down) and as ⟨a, b⟩ vectors; image coordinates ∈ [−18, 18]; negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+### geo.reflect-point — Reflect a point across an axis
+
+Rating: High · Format: two-numbers · Surface-sensitive
+Why: One memorized sign-flip rule and a copy-down — ~1s think + ~1.5s pair entry; entry dominates the High budget, hence the marker.
+Sample: Reflect (3, −2) across the x-axis → 3, 2 · Rule: pair-ordered · Params: base band mirrors the x-axis and y-axis (pure sign flips); the y = x / y = −x band (coordinate swap plus flips) keys separately; coordinates nonzero integers ∈ [−9, 9]; negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-mul-div]
+
+### geo.rotate-point — Rotate a point about the origin
+
+Rating: Medium · Format: two-numbers
+Why: One coordinate-rule selection (which of the 90°/180°/270° maps applies) plus a swap-and-flip — 3–6s with the pair entry.
+Sample: Rotate (3, 4) 90° counterclockwise about the origin → -4, 3 · Rule: pair-ordered · Params: coordinates nonzero integers ∈ [−9, 9]; angles ∈ {90, 180, 270} in both directions (equivalent phrasings like 90° CW = 270° CCW deliberately included); negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-mul-div]
+
+### geo.dilate-point — Dilate a point from the origin
+
+Rating: Medium · Format: two-numbers
+Why: Two parallel table facts (scale each coordinate) plus the pair entry — Medium's floor, ~3–4s.
+Sample: Dilate (3, −2) from the origin by factor 4 → 12, -8 · Rule: pair-ordered · Params: coordinates nonzero integers ∈ [−9, 9]; integer factors ∈ [2, 5], plus a halving band (factor 1/2 on even coordinates); image coordinates ∈ [−45, 45]; negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.times-tables, fk.integer-mul-div, fk.doubling-halving]
+
+**KA Unit 2 — Transformation properties and proofs.**
+
+### geo.is-rigid-motion — Is the transformation a rigid motion
+
+Rating: High · Format: true-false
+Why: One recalled classification (translations/rotations/reflections preserve distance, dilations do not) and a tap — ≤2s; genuinely a verification judgment.
+Sample: True or false: a dilation with scale factor 2 is a rigid motion → false · Rule: tf · Params: claim templates over the four transformation types × {is a rigid motion, preserves distance, preserves angle measure}; dilation angle-preservation included as the true-but-tricky case; families balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+### geo.compose-transformations — Compose two or more transformations
+
+Rating: Low
+Why: Inherently multi-step at any speed — apply each transformation in sequence while holding the intermediate image.
+Kernels: [geo.translate-point, geo.reflect-point, geo.rotate-point, geo.dilate-point]
+
+**KA Unit 3 — Congruence.**
+
+**geo.triangle-congruence-criteria — Which congruence criterion applies** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference — the section's canonical congruence-criterion entry.
+
+### geo.vertical-angle-read — Vertical angles are equal
+
+Rating: High · Format: single-number
+Why: Pure rule recall (vertical angles are congruent) and a copy-down — ≤2s.
+Sample: Two lines intersect. One angle measures 74°. What is the angle vertically opposite it? → 74 · Rule: int-exact · Params: angles ∈ [10, 170] excluding 90; the adjacent-angle variant (asking the linear-pair partner) belongs to geo.supplement-complement, not this key family.
+Kernels: No drillable kernel beyond entries already listed
+
+### geo.supplement-complement — Supplement or complement of an angle
+
+Rating: Medium · Format: single-number
+Why: One rule selection (to 90° or to 180°?) plus one 2–3 digit subtraction — Medium's floor, ~3–4s.
+Sample: What is the supplement of 68°? → 112 · Rule: int-exact · Params: complements of angles ∈ [5, 85], supplements of angles ∈ [5, 175]; multiples of 5 in the base band, arbitrary integers in the stretch band; answers positive integers.
+Kernels: [fk.subtraction-facts]
+
+### geo.transversal-angle — Angle from parallel lines and a transversal
+
+Rating: Medium · Format: single-number
+Why: One relationship classification (equal or supplementary?) chained with at most one subtraction — 3–6s.
+Sample: Parallel lines are cut by a transversal. One angle measures 65°. What is the measure of its co-interior (same-side interior) angle? → 115 · Rule: int-exact · Params: given angles ∈ [15, 165]; asked relationships rotate through {corresponding, alternate interior, alternate exterior (equal), co-interior (supplementary)}; the relationship is named in the prompt (no figure needed).
+Kernels: [geo.supplement-complement, geo.vertical-angle-read]
+
+### geo.triangle-angle-sum — Third angle of a triangle
+
+Rating: Medium · Format: single-number
+Why: One addition and one subtraction from 180 held in sequence — 3–5s.
+Sample: A triangle has angles 65° and 48°. What is the third angle? → 67 · Rule: int-exact · Params: two given angles ∈ [15, 130] with sum ∈ [50, 165]; multiples of 5 in the base band; a right-triangle sub-band (one angle 90°) reduces to a single subtraction from 90.
+Kernels: [fk.addition-facts, fk.subtraction-facts]
+
+### geo.exterior-angle — Exterior angle of a triangle
+
+Rating: Medium · Format: single-number
+Why: One rule recall (exterior angle = sum of the two remote interiors) plus one addition — 3–5s.
+Sample: A triangle has interior angles 40° and 60° at A and B. What is the exterior angle at C? → 100 · Rule: int-exact · Params: remote interiors ∈ [20, 80] in multiples of 5; the inverse variant (exterior and one remote interior given, find the other) is one subtraction and shares the key family.
+Kernels: [geo.triangle-angle-sum, fk.addition-facts]
+
+### geo.polygon-angle-sum — Interior angle sum of a polygon
+
+Rating: Medium · Format: single-number
+Why: One rule application ((n − 2) · 180) — a single held multiplication, 3–6s with the 3–4 digit entry.
+Sample: What is the interior angle sum of a hexagon? → 720 · Rule: int-exact · Params: n ∈ [3, 12], named polygons through decagon plus "an n-sided polygon" phrasing; answers ≤ 1800; the regular-polygon single-angle variant (divide the sum by n) keys separately as a stretch band.
+Kernels: [fk.two-digit-times-one-digit, fk.times-tables]
+
+### geo.isosceles-base-angles — Isosceles triangle angles
+
+Rating: Medium · Format: single-number
+Why: One rule (base angles are equal) chained with a subtraction and a halving — Medium's upper half, 4–7s.
+Sample: An isosceles triangle has vertex angle 40°. What is each base angle? → 70 · Rule: int-exact · Params: vertex angles even ∈ [20, 140] so base-angle answers are integers; the inverse variant (base angle given, find the vertex angle) is a doubling and a subtraction, same key family.
+Kernels: [geo.triangle-angle-sum, fk.doubling-halving, fk.subtraction-facts]
+
+### geo.corresponding-parts — Corresponding parts of congruent triangles
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: One positional letter-map read (A↔D, B↔E, C↔F) and a tap — ≤3s with a 3-option scan.
+Sample: △ABC ≅ △DEF. Which side corresponds to AB? → DE (options: DE · EF · DF) · Rule: mc · Params: vertex orders scrambled (△BCA ≅ △EFD and the like) so the map must be read, not assumed; sides and angles both asked; 3 options drawn from the target triangle's parts.
+Kernels: No drillable kernel beyond entries already listed
+
+### geo.congruence-proof — Prove two triangles congruent
+
+Rating: Low
+Why: Inherently multi-step at any speed — gather the given marks, justify each correspondence, select a criterion, and chain the statements into a proof.
+Kernels: [geo.triangle-congruence-criteria, geo.corresponding-parts, geo.vertical-angle-read, geo.isosceles-base-angles]
+
+**KA Unit 4 — Similarity.**
+
+**Missing side in similar figures (set up and solve the proportion)** → see prealg.solve-proportion (owned by Pre-Algebra) — the proportion solve is the drill; the figure only supplies the pair.
+
+### geo.similarity-criteria — Which similarity criterion applies
+
+Rating: Medium · Format: multiple-choice · Render: needs-figure
+Why: One marked-figure read matched to a memorized criterion plus a 4-option scan — mid-Medium; the congruence anchor's move with a shorter option list.
+Sample: [marked triangle pair] Which criterion proves these triangles similar? → AA (options: AA · SAS similarity · SSS similarity · Not enough info) · Rule: mc · Params: fixed 4-option set; mark styles rotate (two angle pairs; two proportional side pairs with included angle; three proportional side pairs; insufficient marks); side-length labels kept to small integers with ratios ∈ {1:2, 2:3, 3:4}.
+Kernels: [geo.triangle-congruence-criteria, prealg.solve-proportion]
+
+### geo.scale-factor — Scale factor between similar figures
+
+Rating: Medium · Format: fraction
+Why: One ratio reduction from a corresponding side pair — 3–5s on the assumed fraction pad.
+Sample: Two similar triangles have corresponding sides 12 and 18. What is the scale factor (small to large)? → 3/2 · Rule: frac-lowest-terms · Params: side pairs built as (a·g, b·g) with a, b ∈ [1, 9] coprime, g ∈ [2, 8]; sides ≤ 72; direction (small→large or large→small) stated in the prompt; integer-factor cases excluded (different answer shape — they key with the dilation family).
+Kernels: [prealg.simplify-ratio, prealg.simplify-fraction]
+
+### geo.area-scale-factor — Area ratio from a length scale factor
+
+Rating: High · Format: single-number
+Why: One rule recall (area scales by k²) and one square fact — ≤3s.
+Sample: A figure is scaled by factor 3. Its area is multiplied by what? → 9 · Rule: int-exact · Params: integer factors ∈ [2, 12]; answers perfect squares ≤ 144; the volume analog (k³) keys separately as geo.volume-scale-factor under Solid geometry.
+Kernels: [fk.perfect-squares]
+
+### geo.similarity-proof — Prove two triangles similar
+
+Rating: Low
+Why: Inherently multi-step at any speed — establish the angle pairs or side ratios, justify each, then conclude via a criterion.
+Kernels: [geo.similarity-criteria, prealg.solve-proportion, geo.transversal-angle]
+
+**KA Unit 5 — Right triangles & trigonometry.**
+
+**Pythagorean triples (hypotenuse or leg recall)** → see prealg.pythagorean-hypotenuse (owned by Pre-Algebra via its OpenStax merge; the registry note recorded this cross-reference in advance).
+
+### geo.pythagorean-verify — Is it a right triangle
+
+Rating: Medium · Format: true-false
+Why: Two square recalls, an addition, and a compare against the third square — Medium's upper half, 4–7s; genuinely a verification judgment.
+Sample: True or false: a triangle with sides 6, 8, 10 is a right triangle → true · Rule: tf · Params: true cases are scaled Pythagorean triples with sides ≤ 30; false cases perturb one side by 1–2; the largest side is always listed last so the hypotenuse candidate is unambiguous; families balanced 50/50.
+Kernels: [fk.perfect-squares, prealg.pythagorean-hypotenuse, fk.addition-facts]
+
+### geo.special-right-triangle — Special right triangle side ratios
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One ratio-slot recall (1 : 1 : √2 or 1 : √3 : 2) and one scaling — 4–7s with the a, b pair entry.
+Sample: A 45-45-90 triangle has legs of length 5. The hypotenuse is a√b — a, then b → 5, 2 · Rule: pair-ordered · Params: 45-45-90 leg→hypotenuse (a√2) and 30-60-90 short-leg→long-leg (a√3) slots, a ∈ [2, 12]; the rational 30-60-90 slot (hypotenuse = 2 · short leg) is excluded — a bare doubling already covered by fk.doubling-halving, and a different answer shape.
+Kernels: [fk.times-tables, alg1.simplify-radical]
+
+### geo.trig-ratio-definition — Read a trig ratio off a right triangle
+
+Rating: Medium · Format: fraction · Render: needs-figure
+Why: One SOH-CAH-TOA slot recall and a side pick, then the fraction entry — 3–6s.
+Sample: [right triangle with legs 3 and 4, hypotenuse 5; θ marked where the side of length 4 meets the hypotenuse] sin θ = ? → 3/5 · Rule: frac-lowest-terms · Params: sides are primitive Pythagorean triples (3-4-5, 5-12-13, 8-15-17, 7-24-25) in the base band so the read-off is already in lowest terms; the scaled-triple band (6-8-10 → sin θ = 3/5) adds the reduction step and sits at Medium's ceiling; sin, cos, and tan rotate.
+Kernels: [prealg.pythagorean-hypotenuse, prealg.simplify-fraction]
+
+### geo.exact-trig-values — Exact trig values of special angles
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: Pure table recall (the 0°/30°/45°/60°/90° grid) plus a short-symbol option scan — ≤3s; the scan stays light because options are 3–4 characters.
+Sample: sin 60° = ? → √3/2 (options: 1/2 · √2/2 · √3/2 · 1) · Rule: mc · Params: sin and cos over {0°, 30°, 45°, 60°, 90°} and tan over {0°, 30°, 45°, 60°}; fixed option pools per function ({0, 1/2, √2/2, √3/2, 1} for sin/cos; {0, √3/3, 1, √3} for tan); 4 options shown per prompt, always including the answer. Canonical entry by first-course-owns — the Trig/Precalc sweep cross-references here (radian phrasing is added there; same table, same keys).
+Kernels: [geo.special-right-triangle, geo.trig-ratio-definition]
+
+### geo.trig-cofunction — Cofunction complement read
+
+Rating: High · Format: single-number
+Why: One rule recall (sin θ = cos(90° − θ)) plus one subtraction fact — ≤3s.
+Sample: sin 40° = cos ?° → 50 · Rule: int-exact · Params: angles ∈ [5, 85] in multiples of 5; both directions (sin→cos, cos→sin); answers positive integers.
+Kernels: [geo.supplement-complement, fk.subtraction-facts]
+
+### geo.solve-right-triangle — Solve a right triangle with trigonometry
+
+Rating: Low
+Why: Inherently multi-step at any speed — choose the ratio, set up the equation, solve, and evaluate (usually with a calculator) while holding the setup.
+Kernels: [geo.trig-ratio-definition, prealg.solve-proportion, prealg.pythagorean-hypotenuse, geo.exact-trig-values]
+
+**KA Unit 6 — Analytic geometry.**
+
+**Slope from two points** → see alg1.slope-two-points (owned by Algebra 1).
+**Equation of a parallel or perpendicular line through a point** → see alg1.write-line-equation (owned by Algebra 1; Low) — the added slope flip is geo.perpendicular-slope below.
+
+### geo.distance-formula — Distance between two points
+
+Rating: Medium · Format: single-number
+Why: Two coordinate differences, a triple recognition, and a root — Medium's ceiling, 5–8s even with triple-friendly params.
+Sample: What is the distance from (1, 2) to (4, 6)? → 5 · Rule: int-exact · Params: point pairs constructed so (|Δx|, |Δy|, d) is a Pythagorean triple with d ≤ 26; coordinates ∈ [−12, 12]; axis-aligned pairs (one coordinate shared) form the easy sub-band.
+Kernels: [prealg.pythagorean-hypotenuse, fk.integer-add-sub, fk.perfect-squares]
+
+### geo.midpoint-formula — Midpoint of a segment
+
+Rating: Medium · Format: two-numbers
+Why: Two coordinate averages (add, then halve) held in parallel plus the pair entry — 3–6s.
+Sample: What is the midpoint of (2, −3) and (8, 5)? → 5, 1 · Rule: pair-ordered · Params: integer endpoints ∈ [−9, 9] with both coordinate sums even (integer midpoints only); negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub, fk.doubling-halving]
+
+### geo.perpendicular-slope — Slope of a perpendicular line
+
+Rating: High · Format: fraction · Surface-sensitive
+Why: One negative-reciprocal flip — ~1s think + ~1.5s fraction entry; entry is most of the High budget, hence the marker.
+Sample: A line has slope 2/3. What is the slope of a perpendicular line? → -3/2 · Rule: frac-lowest-terms · Params: given slopes ±a/b in lowest terms with a, b ∈ [1, 9]; integer given slopes (flip to unit fractions) included; sign to the numerator per the format spec; the parallel-slope variant is a copy-down and is excluded as its own trivial family.
+Kernels: [alg1.slope-two-points]
+
+### geo.coordinate-geometry-proof — Verify a figure's properties on coordinates
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute several distances, slopes, or midpoints and combine them into a classification or proof.
+Kernels: [geo.distance-formula, geo.midpoint-formula, alg1.slope-two-points, geo.perpendicular-slope]
+
+**KA Unit 7 — Conic sections.**
+
+### geo.circle-equation-read — Center from a circle's standard form
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: Two memorized sign-flip reads (the vertex-form move, applied twice) — Medium's floor, ~3–4s with the pair entry.
+Sample: (x − 3)² + (y + 2)² = 25. Center (h, then k)? → 3, -2 · Rule: pair-ordered · Params: h, k nonzero integers ∈ [−9, 9] shown in both + and − renderings; the radius term is decorative here; negative coordinates carry the touch-minus-key caveat.
+Kernels: [alg1.vertex-from-vertex-form, fk.integer-add-sub]
+
+### geo.circle-radius-read — Radius from a circle's standard form
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One square-root recall off the right-hand side — ≤3s.
+Sample: (x − 3)² + (y + 2)² = 49. Radius? → 7 · Rule: int-exact · Params: right-hand sides perfect squares ∈ {4, …, 225}; the center is decorative; the non-square band (r² = 20 → r = 2√5) is excluded — different answer shape, alg1.simplify-radical territory.
+Kernels: [prealg.square-root, fk.perfect-squares]
+
+### geo.circle-general-to-standard — Circle center and radius from general form
+
+Rating: Low
+Why: Inherently multi-step at any speed — complete the square in x and in y and rebalance the constant before anything can be read off.
+Kernels: [alg1.complete-the-square, geo.circle-equation-read, geo.circle-radius-read]
+
+### geo.parabola-focus-directrix — Focus and directrix of a parabola
+
+Rating: Low
+Why: Inherently multi-step at any speed — extract the vertex, compute p from the leading coefficient, then place the focus and directrix relative to the vertex.
+Kernels: [alg1.vertex-from-vertex-form, prealg.simplify-fraction, fk.integer-add-sub]
+
+**KA Unit 8 — Circles.**
+
+**Circle area (coefficient of π)** → see prealg.circle-area-pi (owned by Pre-Algebra via its OpenStax merge; the circumference analog is that entry's flagged separate key family).
+
+### geo.central-inscribed-angle — Central and inscribed angles
+
+Rating: Medium · Format: single-number
+Why: One rule selection (inscribed = half the arc; central = the arc) plus at most one halving or doubling — 3–5s.
+Sample: An inscribed angle intercepts an arc of 80°. What is the angle's measure? → 40 · Rule: int-exact · Params: arcs even ∈ [20, 170] so inscribed answers are integers; prompts rotate through {arc→inscribed, arc→central, inscribed→arc, central→arc}; the semicircle case (inscribed angle 90°) included; all values stated in text (no figure needed).
+Kernels: [fk.doubling-halving]
+
+### geo.arc-length-fraction — Arc length as a coefficient of π
+
+Rating: Medium · Format: single-number
+Why: Two chained fraction moves (angle/360 of 2r) with divisibility-friendly params — Medium's upper half, 4–7s.
+Sample: A circle has radius 6. The length of a 90° arc is kπ. k = ? → 3 · Rule: int-exact · Params: central angles ∈ {30, 45, 60, 90, 120, 180, 270}; radii ∈ [2, 12] chosen so k = 2r · (angle/360) is a positive integer ≤ 18.
+Kernels: [fk.fraction-of-number, fk.doubling-halving, prealg.simplify-fraction]
+
+### geo.sector-area-fraction — Sector area as a coefficient of π
+
+Rating: Medium · Format: single-number
+Why: A square recall chained with a fraction-of move (angle/360 of r²) — Medium's upper half, 4–7s.
+Sample: A circle has radius 6. The area of a 90° sector is kπ. k = ? → 9 · Rule: int-exact · Params: central angles ∈ {30, 45, 60, 90, 120, 180, 270}; radii ∈ [2, 12] chosen so k = r² · (angle/360) is a positive integer ≤ 108.
+Kernels: [fk.perfect-squares, fk.fraction-of-number, prealg.circle-area-pi]
+
+### geo.tangent-radius-problem — Tangent-segment problems
+
+Rating: Low
+Why: Inherently multi-step at any speed — invoke the tangent-perpendicular-to-radius fact, build the right triangle, then run the Pythagorean computation.
+Kernels: [prealg.pythagorean-hypotenuse, geo.pythagorean-verify]
+
+**KA Unit 9 — Solid geometry.**
+
+### geo.volume-box — Volume of a rectangular box
+
+Rating: Medium · Format: single-number
+Why: Two chained multiplications held mentally — 3–6s at small dimensions.
+Sample: What is the volume of a 3 × 4 × 5 box? → 60 · Rule: int-exact · Params: dimensions ∈ [2, 9] with at most one ≥ 7; volumes ≤ 336; the triangular-prism band (½ · base · height · length, divisibility-friendly) keys separately and is where the prealg.area-triangle kernel bites.
+Kernels: [fk.times-tables, fk.two-digit-times-one-digit, prealg.area-triangle]
+
+### geo.volume-cylinder-pi — Cylinder volume as a coefficient of π
+
+Rating: Medium · Format: single-number
+Why: One square recall and one product (r²h) — 3–6s.
+Sample: A cylinder has radius 3 and height 5. Its volume is kπ. k = ? → 45 · Rule: int-exact · Params: r ∈ [2, 9], h ∈ [2, 12]; k = r²h ≤ 400.
+Kernels: [fk.perfect-squares, fk.two-digit-times-one-digit, prealg.circle-area-pi]
+
+### geo.volume-cone-pi — Cone volume as a coefficient of π
+
+Rating: Medium · Format: single-number
+Why: The cylinder move with a one-third factor chained on — Medium's upper half, 4–7s at divisibility-friendly params.
+Sample: A cone has radius 3 and height 4. Its volume is kπ. k = ? → 12 · Rule: int-exact · Params: r ∈ [2, 9], h chosen so r²h is divisible by 3; k ≤ 150; the pyramid analog (⅓ · base area · height, no π) keys separately.
+Kernels: [geo.volume-cylinder-pi, fk.fraction-of-number]
+
+### geo.volume-sphere-pi — Sphere volume as a coefficient of π
+
+Rating: Medium · Format: single-number
+Why: One cube recall and a 4/3 factor with divisibility-friendly radii — Medium's upper half, 4–7s.
+Sample: A sphere has radius 3. Its volume is kπ. k = ? → 36 · Rule: int-exact · Params: r ∈ {3, 6, 9} so k = 4r³/3 is a positive integer ≤ 972; the fraction-answer band (r = 2 → k = 32/3) is excluded — answer-shape split.
+Kernels: [fk.perfect-cubes, fk.fraction-of-number]
+
+### geo.volume-scale-factor — Volume ratio from a length scale factor
+
+Rating: High · Format: single-number
+Why: One rule recall (volume scales by k³) and one cube fact — ≤3s.
+Sample: A solid is scaled by factor 3. Its volume is multiplied by what? → 27 · Rule: int-exact · Params: integer factors ∈ [2, 6]; answers perfect cubes ≤ 216.
+Kernels: [fk.perfect-cubes, geo.area-scale-factor]
+
+### geo.cross-section-id — Identify a cross-section
+
+Rating: High · Format: multiple-choice
+Why: One spatial recall (which plane cut gives which shape) and a tap — ≤3s with a 4-option scan.
+Sample: A plane cuts a cylinder parallel to its base. The cross-section is a…? → Circle (options: Circle · Rectangle · Ellipse · Triangle) · Rule: mc · Params: solids ∈ {cylinder, cone, sphere, cube, rectangular prism, square pyramid} × cut orientations {parallel to base, perpendicular to base, through the apex}; 4 options per prompt drawn from a fixed shape pool.
+Kernels: No drillable kernel beyond entries already listed
+
+### geo.surface-area — Surface area of a solid
+
+Rating: Low
+Why: Inherently multi-step at any speed — enumerate the faces, compute each area, and sum while tracking which faces repeat.
+Kernels: [prealg.area-triangle, prealg.perimeter-rectangle, prealg.circle-area-pi, fk.times-tables]
+
+**Cross-check — no OpenStax Geometry book (named-gap merges).** OpenStax publishes no Geometry title, so there is no TOC to diff. Per the plan, the cross-check instead runs the named traditional-Geometry gap list — **constructions** and **logic/proof-writing** — against the KA sweep above. Outcomes: (1) **Constructions** — absent from the KA snapshot and confirmed absent from the sweep; recorded as a judgment, not merged: compass-and-straightedge work is tool manipulation with a drawn result, which no input format hosts, and its residual recall component ("which construction produces which object") is too thin to stand as a fact family. Recorded in the disposition table. (2) **Logic/proof-writing** — absent from the KA snapshot as a named unit (KA folds proofs into units 2–4); its two drillable skills are merged below with gap-list source notes.
+
+### geo.conditional-forms — Converse, inverse, contrapositive
+
+Rating: Medium · Format: multiple-choice
+Why: One recalled statement-mapping applied to short p/q clauses plus a wordy 3-option scan — mid-Medium, 4–7s. (source: no-OpenStax-book gap check — logic/proof-writing, absent from the KA snapshot)
+Sample: "If a shape is a square, then it has four sides." Which is the contrapositive? → If a shape does not have four sides, then it is not a square. (options: the converse, inverse, and contrapositive, each written out) · Rule: mc · Params: asked form uniform over {converse, inverse, contrapositive}; statement templates use one-clause p and q so options stay short; the 3 options are always the three transformed forms of the given statement.
+Kernels: No drillable kernel beyond entries already listed
+
+### geo.two-column-proof — Write a two-column proof
+
+Rating: Low
+Why: Inherently multi-step at any speed — sequence given facts, theorems, and justifications into a chain; the output is prose-structured, which no input format hosts. (source: no-OpenStax-book gap check — logic/proof-writing)
+Kernels: [geo.conditional-forms, geo.triangle-congruence-criteria, geo.vertical-angle-read, geo.supplement-complement, geo.corresponding-parts]
+
+### Geometry checklist disposition table
+
+Every KA Geometry unit (9) plus the no-OpenStax-book cross-check rows maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| KA 1 Performing transformations | geo.translate-point, geo.reflect-point, geo.rotate-point, geo.dilate-point; transforming whole figures / drawing images out-of-grain: graph output — no drillable content beyond kernels geo.translate-point, geo.reflect-point, geo.rotate-point, geo.dilate-point |
+| KA 2 Transformation properties and proofs | geo.is-rigid-motion, geo.compose-transformations (Low); transformation-based congruence arguments out-of-grain: proof prose — no drillable content beyond kernels geo.is-rigid-motion, geo.compose-transformations |
+| KA 3 Congruence | geo.triangle-congruence-criteria (anchor, absorbed), geo.vertical-angle-read, geo.supplement-complement, geo.transversal-angle, geo.triangle-angle-sum, geo.exterior-angle, geo.polygon-angle-sum, geo.isosceles-base-angles, geo.corresponding-parts, geo.congruence-proof (Low) |
+| KA 4 Similarity | geo.similarity-criteria, geo.scale-factor, geo.area-scale-factor, geo.similarity-proof (Low); missing side via proportion → prealg.solve-proportion (owned by Pre-Algebra) |
+| KA 5 Right triangles & trigonometry | geo.pythagorean-verify, geo.special-right-triangle, geo.trig-ratio-definition, geo.exact-trig-values, geo.trig-cofunction, geo.solve-right-triangle (Low); Pythagorean triples → prealg.pythagorean-hypotenuse (owned by Pre-Algebra); general (non-triple) Pythagorean solves: recorded judgment — irrational side lengths have no supported answer shape beyond the a√b pair, and the multi-step solve is covered by the kernels on geo.solve-right-triangle |
+| KA 6 Analytic geometry | geo.distance-formula, geo.midpoint-formula, geo.perpendicular-slope, geo.coordinate-geometry-proof (Low); slope → alg1.slope-two-points (owned by Algebra 1); parallel/perpendicular line equations → alg1.write-line-equation (Low, owned by Algebra 1); dividing a segment in a given ratio: recorded judgment — a weighted-average composite of geo.midpoint-formula and fk.fraction-of-number, no separate entry |
+| KA 7 Conic sections | geo.circle-equation-read, geo.circle-radius-read, geo.circle-general-to-standard (Low), geo.parabola-focus-directrix (Low) |
+| KA 8 Circles | geo.central-inscribed-angle, geo.arc-length-fraction, geo.sector-area-fraction, geo.tangent-radius-problem (Low); circle area/circumference → prealg.circle-area-pi (owned by Pre-Algebra); inscribed-shape angle chases and circle theorems/proofs out-of-grain: multi-step angle chasing — no drillable content beyond kernels geo.central-inscribed-angle, geo.supplement-complement, geo.triangle-angle-sum |
+| KA 9 Solid geometry | geo.volume-box, geo.volume-cylinder-pi, geo.volume-cone-pi, geo.volume-sphere-pi, geo.volume-scale-factor, geo.cross-section-id, geo.surface-area (Low); density and solid-geometry word problems out-of-grain: modeling — no drillable content beyond kernels geo.volume-box, geo.volume-cylinder-pi |
+| Cross-check — OpenStax | recorded: OpenStax publishes no Geometry title, so no TOC diff exists; per the plan, the cross-check runs the named traditional-Geometry gap list (constructions; logic/proof-writing) instead — outcomes in the two rows below |
+| Gap — constructions | recorded judgment (not merged): compass-and-straightedge constructions are tool manipulation with a drawn result — no input format hosts the output, and the residual recall component is too thin for a fact family; no drillable content beyond kernels geo.midpoint-formula, geo.perpendicular-slope (the coordinate analogues) |
+| Gap — logic & proof-writing | merged: geo.conditional-forms, geo.two-column-proof (Low), each with a gap-list source note; proof exercises beyond these are out-of-grain prose |
 
 ---
 

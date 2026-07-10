@@ -191,25 +191,81 @@ Live registry of every kernel slug in the document. Maintained continuously from
 
 | Slug | One-line definition | Owning entry | Canonical-home note | In-degree (primary) | In-degree (full) |
 |---|---|---|---|---|---|
-| fk.times-tables | Single-fact multiplication recall (factor families through 12) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
-| fk.division-facts | Division facts as times-table inverses | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
-| fk.addition-facts | Addition facts and fluent mental addition (sums ≤ 50) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
-| fk.subtraction-facts | Subtraction facts and fluent mental subtraction (within 50) | self — calibration anchor | authored in calibration section; Foundational pass absorbs | | |
-| prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
-| prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
-| prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; Pre-Algebra pass absorbs | | |
+| fk.times-tables | Single-fact multiplication recall (factor families through 12) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
+| fk.division-facts | Division facts as times-table inverses | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
+| fk.addition-facts | Addition facts and fluent mental addition (sums ≤ 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
+| fk.subtraction-facts | Subtraction facts and fluent mental subtraction (within 50) | self — calibration anchor | authored in calibration section; absorbed by Foundational kernels via cross-reference (Pre-Algebra pass) | | |
+| prealg.gcd-two-numbers | GCD of two small composite numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
+| prealg.lcm-two-numbers | LCM of two small numbers | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
+| prealg.common-denominator | Least common denominator of two fractions | self — calibration anchor | authored in calibration section; absorbed by Pre-Algebra via cross-reference (Pre-Algebra pass) | | |
 | geo.triangle-congruence-criteria | Match a marked triangle pair to SSS/SAS/ASA/AAS/insufficient | self — calibration anchor | minted during calibration; Geometry pass absorbs | | |
-| prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra pinned stub | — | | |
-| prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra pinned stub | — | | |
-| prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra pinned stub | — | | |
-| prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra pinned stub | — | | |
-| prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra pinned stub | — | | |
-| prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra pinned stub | — | | |
+| prealg.percent-to-decimal | Convert an integer percent to a decimal | self — Pre-Algebra section (pinned calibration entry) | — | | |
+| prealg.simplify-fraction | Reduce a fraction to lowest terms | self — Pre-Algebra section (pinned calibration entry) | — | | |
+| prealg.fraction-add-unlike | Add two unlike-denominator fractions | self — Pre-Algebra section (pinned calibration entry) | — | | |
+| prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra section (pinned calibration entry) | — | | |
+| prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra section (pinned calibration entry) | — | | |
+| prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra section (pinned calibration entry) | — | | |
 | alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 pinned stub | — | | |
 | alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 pinned stub | — | | |
-| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 pinned stub | — | | |
+| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 pinned stub | canonical home: **Pre-Algebra** (KA Pre-Algebra units 6/12 exercise it first — recorded during the Pre-Algebra pass); slug immutable, minted in Algebra 1 during calibration; Pre-Algebra carries the cross-reference row | | |
 | alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 pinned stub | — | | |
 | alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 pinned stub | — | | |
+| fk.place-value | Identify the digit in a named place | self — Foundational kernels | — | | |
+| fk.integer-add-sub | Signed integer addition and subtraction | self — Foundational kernels | — | | |
+| fk.integer-mul-div | Sign rules for integer products and quotients | self — Foundational kernels | — | | |
+| fk.doubling-halving | Double or halve a number fluently | self — Foundational kernels | — | | |
+| fk.two-digit-times-one-digit | 2-digit × 1-digit mental multiplication | self — Foundational kernels | — | | |
+| fk.perfect-squares | Perfect-square recall through 15² | self — Foundational kernels | — | | |
+| fk.perfect-cubes | Perfect-cube recall through 6³ | self — Foundational kernels | — | | |
+| fk.powers-of-ten | Multiply/divide by a power of ten (place shift) | self — Foundational kernels | — | | |
+| fk.fraction-of-number | Fraction of a whole number | self — Foundational kernels | — | | |
+| prealg.smallest-prime-factor | Smallest prime factor of a 2-digit composite | self — Pre-Algebra (KA 1) | — | | |
+| prealg.prime-factorization | Full prime factorization (Low; kernel source) | self — Pre-Algebra (KA 1) | — | | |
+| prealg.next-term-arithmetic | Next term of an arithmetic pattern | self — Pre-Algebra (KA 2) | — | | |
+| prealg.simplify-ratio | Simplify a ratio to lowest terms | self — Pre-Algebra (KA 3) | — | | |
+| prealg.unit-rate | Unit rate from a quantity pair | self — Pre-Algebra (KA 3) | — | | |
+| prealg.solve-proportion | Missing value in a proportion / equivalent fractions | self — Pre-Algebra (KA 3) | also satisfies KA 9 and OpenStax ch. 4 equivalent-fractions rows | | |
+| prealg.decimal-to-percent | Convert a decimal to a percent | self — Pre-Algebra (KA 4) | — | | |
+| prealg.percent-to-fraction | Percent → fraction in lowest terms | self — Pre-Algebra (KA 4) | — | | |
+| prealg.fraction-to-percent | Fraction → percent | self — Pre-Algebra (KA 4) | — | | |
+| prealg.percent-of-number | Percent of a number (benchmark percents) | self — Pre-Algebra (KA 4) | — | | |
+| prealg.find-whole-from-percent | Find the whole from a part and percent | self — Pre-Algebra (KA 4) | — | | |
+| prealg.find-percent-from-pair | What percent is a of b | self — Pre-Algebra (KA 4) | — | | |
+| prealg.percent-change | Percent increase or decrease | self — Pre-Algebra (KA 4) | — | | |
+| prealg.evaluate-exponent | Evaluate a small power | self — Pre-Algebra (KA 5) | — | | |
+| prealg.order-of-operations | Two-operation order of operations | self — Pre-Algebra (KA 5) | — | | |
+| prealg.evaluate-expression | Evaluate a one-variable expression | self — Pre-Algebra (KA 6) | — | | |
+| prealg.combine-like-terms | Combine like terms in one variable | self — Pre-Algebra (KA 6) | — | | |
+| prealg.solve-one-step-equation | Solve a one-step equation | self — Pre-Algebra (KA 7) | — | | |
+| prealg.check-solution | Check a candidate solution of a linear equation | self — Pre-Algebra (KA 7) | — | | |
+| prealg.absolute-value | Absolute value of an integer | self — Pre-Algebra (KA 8) | — | | |
+| prealg.constant-of-proportionality | Constant of proportionality from a pair | self — Pre-Algebra (KA 9) | — | | |
+| prealg.solve-two-step-equation | Solve a two-step equation | self — Pre-Algebra (KA 10) | — | | |
+| prealg.solve-one-step-inequality | Solve a one-step inequality (boundary + direction) | self — Pre-Algebra (KA 10) | — | | |
+| prealg.square-root | Square root of a perfect square | self — Pre-Algebra (KA 11) | — | | |
+| prealg.cube-root | Cube root of a perfect cube | self — Pre-Algebra (KA 11) | — | | |
+| prealg.root-between-integers | Bracket a square root between consecutive integers | self — Pre-Algebra (KA 11) | — | | |
+| prealg.exponent-product-rule | Product rule for exponents (add exponents) | self — Pre-Algebra (KA 11) | — | | |
+| prealg.negative-exponent | Negative exponent as a unit fraction | self — Pre-Algebra (KA 11) | — | | |
+| prealg.scientific-to-standard | Scientific notation → standard form | self — Pre-Algebra (KA 11) | — | | |
+| prealg.scientific-notation-exponent | Exponent when a value is written in scientific notation | self — Pre-Algebra (KA 11) | — | | |
+| prealg.solve-multi-step-equation | Solve a multi-step equation (Low; kernel source) | self — Pre-Algebra (KA 12) | — | | |
+| prealg.check-point-solution | Check a point against a two-variable equation | self — Pre-Algebra (KA 13) | — | | |
+| prealg.check-system-solution | Check a candidate solution of a 2×2 system | self — Pre-Algebra (KA 15) | — | | |
+| prealg.solve-2x2-system | Solve a 2×2 linear system (Low; kernel source) | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 unit 6 will cross-reference here | | |
+| prealg.fraction-multiply | Multiply two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
+| prealg.fraction-divide | Divide two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
+| prealg.mixed-to-improper | Mixed number → improper fraction | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
+| prealg.decimal-add-sub | Add or subtract decimals | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
+| prealg.fraction-to-decimal | Fraction → terminating decimal | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
+| prealg.decimal-to-fraction | Decimal → fraction in lowest terms | self — Pre-Algebra (OpenStax merge, ch. 5) | — | | |
+| prealg.round-to-place | Round to a named place (whole or decimal) | self — Pre-Algebra (OpenStax merge, chs. 1 & 5) | — | | |
+| prealg.identify-property | Name the illustrated arithmetic property | self — Pre-Algebra (OpenStax merge, ch. 7) | — | | |
+| prealg.perimeter-rectangle | Perimeter of a rectangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
+| prealg.area-triangle | Area of a triangle | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
+| prealg.circle-area-pi | Circle area as a coefficient of π | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
+| prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | Geometry unit 5 will cross-reference here | | |
+| prealg.identify-quadrant | Quadrant of a coordinate point | self — Pre-Algebra (OpenStax merge, ch. 11) | — | | |
 
 ---
 
@@ -366,63 +422,531 @@ Coverage check: every format in the legend has at least one pin (single-number �
 
 ## Foundational kernels
 
-Sub-Pre-Algebra skills (`fk.` slugs) that course entries cite as prerequisites — times tables, integer operations, fraction sense. Seeded during the Pre-Algebra pass; grows strictly via registry-mediated additions. *Authored in a later pass.*
+Sub-Pre-Algebra skills (`fk.` slugs) that course entries cite as prerequisites — number facts, place value, signed-number arithmetic, fraction sense. Seeded during the Pre-Algebra pass; grows strictly via registry-mediated additions (an `fk.` entry exists **only** because at least one course entry cites it — this section is demand-driven, never a curriculum sweep of elementary arithmetic, which is out of scope except as kernels). Four of these kernels are the calibration anchors; their canonical records live in the calibration section and are absorbed here by reference, not duplicated.
+
+**Anchor cross-references** (canonical records in *Calibration anchors & pinned reference set*):
+
+**fk.times-tables — Multiplication facts** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
+**fk.division-facts — Division facts (times-table inverses)** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
+**fk.addition-facts — Addition facts and mental two-digit addition** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
+**fk.subtraction-facts — Subtraction facts and mental two-digit subtraction** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
+
+### fk.place-value — Place-value identification
+
+Rating: High · Format: single-number
+Why: Pure read-off of a named place — no transformation; ~1–2s think + one or two keystrokes.
+Sample: In 3,482, which digit is in the tens place? → 8 · Rule: int-exact · Params: whole numbers 3–5 digits, asked place from ones through thousands; decimal variant asks tenths/hundredths of numbers with ≤ 2 decimal places; answer is always a single digit 0–9.
+Kernels: No drillable kernel beyond entries already listed
+
+### fk.integer-add-sub — Signed addition and subtraction
+
+Rating: High · Format: single-number
+Why: One sign-aware fact-family step (e.g. −7 + 12 rides the same fact as 12 − 7) — recall-speed for a fluent student, ≤3s.
+Sample: −7 + 12 → 5 · Rule: int-exact · Params: operands ∈ [−20, 20], both addition and subtraction prompts, all sign combinations; answers ∈ [−40, 40] — negative answers carry the engine contract's touch-minus-key caveat until the proposed pad exists.
+Kernels: [fk.addition-facts, fk.subtraction-facts]
+
+### fk.integer-mul-div — Sign rules for products and quotients
+
+Rating: High · Format: single-number
+Why: One times-table fact plus a memorized sign rule — still pure recall, ≤3s.
+Sample: (−3) × (−4) → 12 · Rule: int-exact · Params: factors ∈ [−12, 12] excluding 0 and ±1, magnitudes within times-table range; division prompts always exact (dividend = divisor × quotient); negative answers carry the touch-minus-key caveat.
+Kernels: [fk.times-tables, fk.division-facts]
+
+### fk.doubling-halving — Double or halve a number
+
+Rating: High · Format: single-number
+Why: Single fluent operation drilled to recall (halving 46 is one move, not a division procedure); ≤3s including entry.
+Sample: Half of 46 → 23 · Rule: int-exact · Params: doubling: n ∈ [13, 99]; halving: even n ∈ [12, 98] plus round hundreds ≤ 400; answers always positive integers.
+Kernels: [fk.addition-facts, fk.division-facts]
+
+### fk.two-digit-times-one-digit — 2-digit × 1-digit mental multiplication
+
+Rating: Medium · Format: single-number
+Why: One held-in-head transformation (split, two table facts, recombine: 34 × 6 = 180 + 24) — squarely 3–8s.
+Sample: 34 × 6 → 204 · Rule: int-exact · Params: 2-digit factor ∈ [13, 49] excluding multiples of 10, 1-digit factor ∈ [3, 9]; answers ≤ 441 (3 digits).
+Kernels: [fk.times-tables, fk.addition-facts]
+
+### fk.perfect-squares — Perfect-square recall
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Pure fact recall (squares are drilled as a fact family, not computed); ≤3s even at 15².
+Sample: 13² → 169 · Rule: int-exact · Params: bases ∈ [2, 15]; answers ≤ 225 (3 digits). Per-fact keys `sq:13` style — no commutative normalization needed.
+Kernels: [fk.times-tables]
+
+### fk.perfect-cubes — Perfect-cube recall
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Small-cube recall is a fact family like squares; bases past 6 drift toward computation, so params cap there to keep the entry pure recall.
+Sample: 4³ → 64 · Rule: int-exact · Params: bases ∈ [2, 6] core (answers ≤ 216); optional stretch band bases 7–10 should be flagged as its own key family if used, since those are computed, not recalled.
+Kernels: [fk.times-tables]
+
+### fk.powers-of-ten — Multiply or divide by a power of ten
+
+Rating: High · Format: single-number
+Why: Pure place-shift rule — no arithmetic content at all; ≤3s.
+Sample: 4700 ÷ 100 → 47 · Rule: int-exact · Params: shifts of 1–4 places; operands chosen so the answer is a positive integer (decimal-answer variants live in the Pre-Algebra decimal entries that cite this kernel); answers ≤ 6 digits.
+Kernels: [fk.place-value]
+
+### fk.fraction-of-number — Fraction of a whole number
+
+Rating: Medium · Format: single-number
+Why: One two-fact transformation (divide by the denominator, multiply by the numerator) held mentally — 3–6s.
+Sample: 3/4 of 20 → 15 · Rule: int-exact · Params: denominators ∈ [2, 10], numerators ∈ [1, denominator−1] (unit fractions form the easy sub-band), whole ∈ [6, 60] and divisible by the denominator; answers positive integers ≤ 54.
+Kernels: [fk.division-facts, fk.times-tables]
 
 ---
 
 ## Pre-Algebra
 
-Swept against the KA Pre-Algebra checklist (15 units) with the Prealgebra 2e cross-check; includes the course's checklist-disposition table. *Authored in a later pass.*
+Swept against the KA Pre-Algebra checklist (15 units) with the Prealgebra 2e cross-check; the checklist-disposition table closes the section. Entries are grouped by the KA unit that surfaced them, followed by the OpenStax cross-check merges (KA Pre-Algebra has no fraction-arithmetic or decimal-arithmetic unit — those skills sit in KA's earlier arithmetic course — so the fraction/decimal block below enters via the OpenStax diff). Pre-Algebra is the first course, so nearly every topic here is canonical (first-course-owns); the two exceptions are cross-reference rows to Algebra 1 calibration stubs, annotated in the registry. Six entries carry the `pinned calibration entry` tag — authored during calibration, absorbed here in place; three more Pre-Algebra entries (`prealg.gcd-two-numbers`, `prealg.lcm-two-numbers`, `prealg.common-denominator`) are calibration **anchors** whose canonical records stay in the calibration section and are absorbed by reference where they arise below.
 
-**Stub — pinned reference entries.** The six entries below were authored during calibration; this course's pass absorbs this stub in place (the entries stay, the stub framing goes).
+**KA Unit 1 — Factors and multiples.**
 
-### prealg.percent-to-decimal — Percent → decimal conversion
+**prealg.gcd-two-numbers — Greatest common divisor of two small numbers** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
+**prealg.lcm-two-numbers — Least common multiple of two small numbers** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference.
 
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: High · Format: decimal · Surface-sensitive
-Why: Pure rule recall (shift the point two places) — ~0.5s think + ~1.25s entry on the assumed decimal pad; entry is most of the budget, so a 2× slower surface would tip it to Medium.
-Sample: Write 35% as a decimal → 0.35 · Rule: dec-exact · Params: integer percents ∈ [1, 150]; answers normalize to at most 2 decimal places under dec-exact.
-Kernels: No drillable kernel beyond entries already listed
+### prealg.divisibility-rule-check — Divisibility-rule verification · pinned calibration entry
 
-### prealg.simplify-fraction — Reduce a fraction to lowest terms
-
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: High · Format: fraction · Surface-sensitive
-Why: Fluent students recognize the common factor on sight — one step, ~1.5s think + ~1s entry on the assumed fraction pad; sits at the High boundary and flips to Medium if entry runs 2× slow.
-Sample: Write 6/8 in lowest terms → 3/4 · Rule: frac-lowest-terms · Params: built as (a·g)/(b·g) with gcd(a, b) = 1, a, b ∈ [1, 9], g ∈ [2, 6]; given denominators ≤ 54.
-Kernels: [fk.times-tables, fk.division-facts]
-
-### prealg.fraction-add-unlike — Add two fractions with unlike denominators
-
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: Medium · Format: fraction
-Why: One chained transformation held mentally — find the LCD, rescale, add, reduce — ~4–6s total, safely inside the 3–8s tier.
-Sample: 1/2 + 1/3 → 5/6 · Rule: frac-lowest-terms · Params: distinct denominators from {2, 3, 4, 5, 6, 8, 10, 12} with LCD ≤ 24; answers in lowest terms, improper allowed (1/2 + 2/3 → 7/6).
-Kernels: [prealg.common-denominator, fk.addition-facts, fk.times-tables]
-
-### prealg.multiply-decimals — Multiply two one-place decimals
-
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: Medium · Format: decimal
-Why: One transformation — times-table product plus a decimal-place count — landing at the Medium floor (~3–4s total).
-Sample: 0.3 × 0.4 → 0.12 · Rule: dec-exact · Params: both factors are tenths in [0.2, 0.9]; digit products that are multiples of 10 (e.g. 0.2 × 0.5) are excluded so the place count is always exercised and dec-exact normalization never hides a trailing zero.
-Kernels: [fk.times-tables]
-
-### prealg.divisibility-rule-check — Divisibility-rule verification
-
-*(pinned reference entry — this course's pass absorbs this stub)*
 Rating: High · Format: true-false
 Why: One rule application (digit sum or last-digit test) plus a single tap ≈ 2s total; true-false is legitimate here because the drillable skill IS the rule-based verification — the numeric restatement ("remainder of 51 ÷ 3") drills slower long division instead of the rule.
 Sample: True or false: 51 is divisible by 3 → true · Rule: tf · Params: divisors ∈ {2, 3, 4, 5, 6, 9, 10}; dividends 2–3 digits; families generated balanced 50/50 true/false with near-miss false cases (remainder 1–2).
 Kernels: [fk.addition-facts, fk.division-facts]
 
-### prealg.compare-fractions — Verify a fraction inequality
+### prealg.smallest-prime-factor — Smallest prime factor
 
-*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: High · Format: single-number
+Why: One divisibility-rule scan (2? 3? 5? 7?) ending at the first hit — recall-speed for a fluent student, ≤3s; also the legend's canonical numeric restatement of "is N prime?".
+Sample: Smallest prime factor of 51 → 3 · Rule: int-exact · Params: n ∈ [10, 99] composite with smallest prime factor ∈ {2, 3, 5, 7}, factors 3/5/7 weighted over the trivial 2; answers one digit.
+Kernels: [prealg.divisibility-rule-check, fk.division-facts]
+
+### prealg.prime-factorization — Full prime factorization
+
+Rating: Low
+Why: Inherently multi-step at any speed — repeated smallest-factor extraction until 1, with bookkeeping of the accumulated factors.
+Kernels: [prealg.smallest-prime-factor, fk.division-facts, fk.times-tables]
+
+**KA Unit 2 — Patterns.**
+
+### prealg.next-term-arithmetic — Next term of an arithmetic pattern
+
+Rating: Medium · Format: single-number
+Why: One transformation — spot the common difference, apply it once — 3–5s including the scan of the shown terms.
+Sample: Next term: 3, 7, 11, 15, … → 19 · Rule: int-exact · Params: first term ∈ [1, 20], common difference ∈ ±[2, 9], four terms shown; decreasing patterns may cross zero (negative answers carry the touch-minus-key caveat).
+Kernels: [fk.addition-facts, fk.subtraction-facts]
+
+**KA Unit 3 — Ratios and rates.**
+
+### prealg.simplify-ratio — Simplify a ratio
+
+Rating: Medium · Format: two-numbers
+Why: One transformation — find the common factor and divide it out of both sides — the same move as simplifying a fraction, 3–6s.
+Sample: Write 12 : 18 in simplest form (a, b) → 2, 3 · Rule: pair-ordered · Params: built as (a·g) : (b·g) with gcd(a, b) = 1, a, b ∈ [1, 9], g ∈ [2, 8]; given terms ≤ 72.
+Kernels: [prealg.gcd-two-numbers, fk.division-facts]
+
+### prealg.unit-rate — Unit rate from a quantity pair
+
+Rating: Medium · Format: single-number
+Why: One division held mentally (240 ÷ 4 is a table fact plus a place shift) — 3–6s including prompt parse.
+Sample: 240 miles in 4 hours — how many miles per hour? → 60 · Rule: int-exact · Params: divisor ∈ [2, 12], integer answers ∈ [5, 95], totals ≤ 600; contexts rotate (miles/hour, cost/item, pages/minute) but the arithmetic shape is fixed.
+Kernels: [fk.division-facts, fk.powers-of-ten]
+
+### prealg.solve-proportion — Missing value in a proportion
+
+Rating: Medium · Format: single-number
+Why: One transformation — read the scale factor across the equivalence and apply it — 3–6s; owns the "equivalent fractions, missing value" drill for the whole document.
+Sample: 3/4 = x/20 → 15 · Rule: int-exact · Params: base fraction a/b in lowest terms, a, b ∈ [1, 9]; integer scale factor ∈ [2, 9]; all four values ≤ 100; the unknown rotates through all four positions.
+Kernels: [fk.times-tables, fk.division-facts]
+
+**KA Unit 4 — Percentages.**
+
+### prealg.percent-to-decimal — Percent → decimal conversion · pinned calibration entry
+
+Rating: High · Format: decimal · Surface-sensitive
+Why: Pure rule recall (shift the point two places) — ~0.5s think + ~1.25s entry on the assumed decimal pad; entry is most of the budget, so a 2× slower surface would tip it to Medium.
+Sample: Write 35% as a decimal → 0.35 · Rule: dec-exact · Params: integer percents ∈ [1, 150]; answers normalize to at most 2 decimal places under dec-exact.
+Kernels: No drillable kernel beyond entries already listed
+
+### prealg.decimal-to-percent — Decimal → percent conversion
+
+Rating: High · Format: single-number
+Why: Pure rule recall (shift the point two places the other way); the answer is the percent *number*, so entry is one or two digits — ≤2s total.
+Sample: Write 0.07 as a percent (number only) → 7 · Rule: int-exact · Params: decimals with ≤ 2 places in (0, 1.5]; only values with integer percent forms; answers ∈ [1, 150].
+Kernels: [fk.powers-of-ten]
+
+### prealg.percent-to-fraction — Percent → fraction in lowest terms
+
+Rating: Medium · Format: fraction
+Why: One chained transformation — put the percent over 100 and reduce — 3–6s on the assumed fraction pad.
+Sample: Write 40% as a fraction in lowest terms → 2/5 · Rule: frac-lowest-terms · Params: integer percents ∈ [1, 99] with gcd(p, 100) ≥ 4 so genuine reduction is always exercised; lowest-terms denominators ≤ 25.
+Kernels: [prealg.simplify-fraction, fk.division-facts]
+
+### prealg.fraction-to-percent — Fraction → percent
+
+Rating: Medium · Format: single-number
+Why: One transformation — scale the denominator to 100 (or recall the benchmark) — 3–5s; the answer is the percent number, so entry is cheap.
+Sample: Write 3/5 as a percent (number only) → 60 · Rule: int-exact · Params: denominators ∈ {2, 4, 5, 10, 20, 25, 50}, fractions in lowest terms; integer percent answers ∈ [2, 98].
+Kernels: [fk.times-tables, fk.powers-of-ten]
+
+### prealg.percent-of-number — Percent of a number
+
+Rating: Medium · Format: single-number
+Why: One mental route — 10%-shift or benchmark-fraction — held in the head, 3–7s at the friendly parameter values below.
+Sample: 25% of 44 → 11 · Rule: int-exact · Params: percents ∈ {5, 10, 20, 25, 50, 75} ∪ multiples of 10 ≤ 90; wholes ≤ 200 chosen so answers are positive integers ≤ 180.
+Kernels: [fk.fraction-of-number, fk.doubling-halving, fk.powers-of-ten]
+
+### prealg.find-whole-from-percent — Find the whole from a part and percent
+
+Rating: Medium · Format: single-number
+Why: One inverse transformation (12 is 25% → the whole is 12 × 4) — one benchmark inversion plus one product, 4–7s.
+Sample: 12 is 25% of what number? → 48 · Rule: int-exact · Params: percents ∈ {10, 20, 25, 50, 75}; parts chosen so wholes are integers ≤ 200.
+Kernels: [fk.times-tables, fk.fraction-of-number]
+
+### prealg.find-percent-from-pair — What percent is a of b
+
+Rating: Medium · Format: single-number
+Why: One transformation — reduce the pair to a benchmark fraction and read its percent — 4–7s at benchmark-only params.
+Sample: 9 is what percent of 36? (number only) → 25 · Rule: int-exact · Params: part/whole reduces to a fraction with denominator ∈ {2, 4, 5, 10, 20}; wholes ≤ 200; integer percent answers.
+Kernels: [prealg.simplify-fraction, prealg.fraction-to-percent]
+
+### prealg.percent-change — Percent increase or decrease
+
+Rating: Medium · Format: single-number
+Why: Two quick chained steps (difference, then difference-over-original as a benchmark percent) — sits at Medium's upper half even with friendly numbers; params keep every division a benchmark read.
+Sample: A price rises from 40 to 50. Percent increase? (number only) → 25 · Rule: int-exact · Params: originals ∈ [10, 200]; change/original ∈ {5%, 10%, 20%, 25%, 50%, 100%}; increases and decreases balanced; answer is the unsigned percent number (direction lives in the prompt).
+Kernels: [fk.subtraction-facts, prealg.find-percent-from-pair]
+
+**KA Unit 5 — Exponents intro and order of operations.**
+
+### prealg.evaluate-exponent — Evaluate a small power
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Squares and cubes are recall; the fourth-power top band adds one held multiplication — still ≤3s for a fluent student.
+Sample: 3⁴ → 81 · Rule: int-exact · Params: base ∈ [2, 10], exponent ∈ [2, 4], values ≤ 1024; exponent-4 cases restricted to bases 2–5.
+Kernels: [fk.times-tables, fk.perfect-squares, fk.perfect-cubes, fk.two-digit-times-one-digit]
+
+### prealg.order-of-operations — Two-operation order of operations
+
+Rating: Medium · Format: single-number
+Why: One precedence judgment plus two fact-level operations held in sequence — 3–6s.
+Sample: 3 + 4 × 2 → 11 · Rule: int-exact · Params: exactly two operations from {+, −, ×} (optionally one parenthesis pair that changes the answer); operands ≤ 12; every intermediate and final value a positive integer ≤ 60.
+Kernels: [fk.times-tables, fk.addition-facts, fk.subtraction-facts]
+
+**KA Unit 6 — Variables & expressions.**
+
+### prealg.evaluate-expression — Evaluate a one-variable expression
+
+Rating: Medium · Format: single-number
+Why: One substitution plus one or two fact-level operations — 3–6s held mentally.
+Sample: 3x + 2 when x = 4 → 14 · Rule: int-exact · Params: forms ax + b, a(x + b), x² + a with a, b ∈ [1, 9], x ∈ [2, 9]; signed band substitutes x ∈ [−9, −2] (negative answers carry the touch-minus-key caveat).
+Kernels: [fk.times-tables, fk.addition-facts, fk.integer-mul-div]
+
+### prealg.combine-like-terms — Combine like terms
+
+Rating: High · Format: short-expression · Surface-sensitive
+Why: One addition fact wearing algebra clothes; the answer is 2–3 tokens (≤1s entry), so total stays ≤3s — flips to Medium if entry runs 2× slow.
+Sample: Simplify 5x + 3x → 8x · Rule: expr-commutative-ws · Params: 2–3 like terms in one variable, coefficients ∈ [1, 12], coefficient sums ≤ 99; answer alphabet {digits, x}; mixed-family variants (unlike terms present) belong to Algebra 1's sweep, not here.
+Kernels: [fk.addition-facts]
+
+**Distributive property (expand a(x + b))** → see alg1.distribute-linear (minted in the Algebra 1 calibration stub; canonical home **Pre-Algebra** per the registry note — KA Pre-Algebra units 6 and 12 exercise it first; slug immutable, in-degree follows the registry).
+
+**KA Unit 7 — Equations & inequalities introduction.**
+
+### prealg.solve-one-step-equation — Solve a one-step equation
+
+Rating: High · Format: single-number
+Why: One inverse-operation read (x + 7 = 12 *is* 12 − 7 to a fluent student) — recall speed, ≤3s.
+Sample: x + 7 = 12. x = ? → 5 · Rule: int-exact · Params: all four operations; add/sub operands within the fact-family cap 50, mul/div within times-table range; integer answers; signed band (e.g. x + 9 = 4) admits negative answers with the touch-minus-key caveat.
+Kernels: [fk.addition-facts, fk.subtraction-facts, fk.times-tables, fk.division-facts]
+
+### prealg.check-solution — Check a candidate solution
+
+Rating: High · Format: true-false
+Why: One substitution-and-compare plus a single tap — ≤3s; genuinely a verification judgment, which is what true-false is for.
+Sample: True or false: x = 3 is a solution of 2x + 1 = 7 → true · Rule: tf · Params: forms ax + b = c with a, b ∈ [1, 9], candidates ∈ [1, 9]; false cases off by 1–2; families balanced 50/50.
+Kernels: [prealg.evaluate-expression]
+
+**KA Unit 8 — Percent & rational number word problems.**
+
+### prealg.absolute-value — Absolute value
+
+Rating: High · Format: single-number
+Why: Pure sign strip — no computation in the base band; the |a − b| band adds one subtraction fact and stays ≤3s.
+Sample: |−7| → 7 · Rule: int-exact · Params: base band |n| with n ∈ [−99, 99]; stretch band |a − b| with a, b ∈ [1, 12]; answers always non-negative integers.
+Kernels: [fk.subtraction-facts]
+
+*(The rest of Unit 8 is word-problem application — see the disposition table, which names the kernels it exercises.)*
+
+**KA Unit 9 — Proportional relationships.** (The missing-value drill is owned by Unit 3's prealg.solve-proportion; this unit adds the read-the-constant skill.)
+
+### prealg.constant-of-proportionality — Constant of proportionality
+
+Rating: Medium · Format: single-number
+Why: One division read from a stated pair (k = y/x) — 3–5s including prompt parse.
+Sample: y is proportional to x, and y = 12 when x = 3. k = ? → 4 · Rule: int-exact · Params: k ∈ [2, 12], x ∈ [2, 9], y = kx ≤ 108; prompt variants give a pair, a table row, or the equation y = kx directly.
+Kernels: [fk.division-facts]
+
+**KA Unit 10 — One-step and two-step equations & inequalities.** (One-step equations are owned under Unit 7.)
+
+### prealg.solve-two-step-equation — Solve a two-step equation
+
+Rating: Medium · Format: single-number
+Why: Two chained inverse operations held mentally (undo the constant, then the coefficient) — 3–7s.
+Sample: 3x + 5 = 20. x = ? → 5 · Rule: int-exact · Params: ax + b = c with a ∈ [2, 9], b ∈ [−15, 15], integer x ∈ [−9, 9]; c ≤ 99; negative answers carry the touch-minus-key caveat.
+Kernels: [prealg.solve-one-step-equation, fk.integer-add-sub, fk.integer-mul-div]
+
+### prealg.solve-one-step-inequality — Solve a one-step inequality
+
+Rating: Medium · Format: multiple-choice
+Why: One inverse operation plus a direction judgment (does the sign flip?) — 3–6s with a 4-option scan; MC is justified because the drillable skill is boundary *and* direction, and no single-number restatement preserves direction (the legend's last-resort case).
+Sample: Solve: −3x < 12 → x > −4 (options: x > −4 · x < −4 · x > 4 · x < 4) · Rule: mc · Params: one step by any of the four operations; nonzero coefficients ∈ [−9, 9]; integer boundaries ∈ [−12, 12]; 4 options permuting direction and boundary sign; negative-coefficient (flip) cases ≥ 40% of the family.
+Kernels: [prealg.solve-one-step-equation, fk.integer-mul-div]
+
+**KA Unit 11 — Roots, exponents, & scientific notation.**
+
+### prealg.square-root — Square root of a perfect square
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Inverse recall against the squares fact family — ≤3s.
+Sample: √144 → 12 · Rule: int-exact · Params: radicands the squares of [2, 15]; answers ≤ 15.
+Kernels: [fk.perfect-squares]
+
+### prealg.cube-root — Cube root of a perfect cube
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: Inverse recall against the small-cube fact family — ≤3s.
+Sample: ∛64 → 4 · Rule: int-exact · Params: radicands the cubes of [2, 6]; answers ≤ 6.
+Kernels: [fk.perfect-cubes]
+
+### prealg.root-between-integers — Bracket a square root between integers
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One placement judgment against the squares family (49 < 50 < 64) plus a short two-number entry — 3–6s.
+Sample: √50 lies between which consecutive integers? (smaller, larger) → 7, 8 · Rule: pair-ordered · Params: non-square radicands ∈ [5, 250]; answers consecutive integers in [2, 15].
+Kernels: [fk.perfect-squares]
+
+### prealg.exponent-product-rule — Product rule for exponents
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One addition fact once the rule is automatic (add the exponents) — ≤3s; asking for the exponent alone keeps the answer a single small integer.
+Sample: 10³ × 10⁴ = 10ⁿ. n = ? → 7 · Rule: int-exact · Params: exponents ∈ [1, 9], displayed base from {2, 3, 5, 10, x}; answers ≤ 18.
+Kernels: [fk.addition-facts]
+
+### prealg.negative-exponent — Negative exponent as a unit fraction
+
+Rating: Medium · Format: fraction · Render: unicode-inline
+Why: One rule application (reciprocal of the positive power) chained onto a power recall — 3–6s on the assumed fraction pad.
+Sample: Write 2⁻³ as a fraction → 1/8 · Rule: frac-lowest-terms · Params: base ∈ [2, 10], exponent ∈ {−1, −2, −3}; denominators ≤ 1000; numerator always 1 (already lowest terms).
+Kernels: [prealg.evaluate-exponent]
+
+### prealg.scientific-to-standard — Scientific notation → standard form
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One place-shift transformation; the multi-digit answer makes entry a real share of the 3–8s budget.
+Sample: 3.2 × 10⁴ in standard form → 32000 · Rule: int-exact · Params: mantissa an integer 1–9 or one-decimal-place value ∈ [1.1, 9.9]; exponent ∈ [2, 6] and ≥ the mantissa's decimal places, so answers are positive integers ≤ 7 digits.
+Kernels: [fk.powers-of-ten, fk.place-value]
+
+### prealg.scientific-notation-exponent — Exponent for scientific notation
+
+Rating: Medium · Format: single-number
+Why: One digit-count judgment (where does the point land?) — 3–5s; asking only for the exponent dodges the unsupported mixed decimal-times-power answer shape.
+Sample: 45,000 = 4.5 × 10ⁿ. n = ? → 4 · Rule: int-exact · Params: values 3–7 digit whole numbers with ≤ 2 significant figures, plus small decimals (0.0032 → n = −3; negative answers carry the touch-minus-key caveat).
+Kernels: [fk.place-value, fk.powers-of-ten]
+
+**KA Unit 12 — Multi-step equations.**
+
+### prealg.solve-multi-step-equation — Solve a multi-step equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — distribute, collect like terms, then two inverse operations, with intermediate state to hold.
+Kernels: [prealg.solve-two-step-equation, prealg.combine-like-terms, alg1.distribute-linear]
+
+**KA Unit 13 — Two-variable equations.** (Evaluating y from x is owned by prealg.evaluate-expression; plotting and graph-reading are out-of-grain — see the disposition table.)
+
+### prealg.check-point-solution — Check a point against a two-variable equation
+
+Rating: Medium · Format: true-false
+Why: One substitution of both coordinates and a compare — 3–6s; genuinely binary.
+Sample: True or false: (2, 3) is a solution of y = 2x − 1 → true · Rule: tf · Params: y = mx + b with m, b ∈ [−9, 9]; coordinates ∈ [−9, 9]; false cases off by 1–3; families balanced 50/50.
+Kernels: [prealg.evaluate-expression, fk.integer-mul-div, fk.integer-add-sub]
+
+**KA Unit 14 — Functions and linear models.** (No new canonical entries: function evaluation → prealg.evaluate-expression; the slope-intercept read-off is a cross-reference.)
+
+**Slope-intercept read-off (m and b from y = mx + b)** → see alg1.read-slope-intercept (owned by Algebra 1; minted in its calibration stub).
+
+**KA Unit 15 — Systems of equations.**
+
+### prealg.check-system-solution — Check a candidate solution of a 2×2 system
+
+Rating: Medium · Format: true-false
+Why: Two quick substitutions and compares — 4–7s, top half of Medium; still one binary judgment.
+Sample: True or false: (2, 1) solves x + y = 3 and x − y = 1 → true · Rule: tf · Params: integer-coefficient equations with coefficients ∈ [−5, 5], coordinates ∈ [−6, 6]; false cases fail exactly one equation; families balanced 50/50.
+Kernels: [prealg.check-point-solution, fk.integer-add-sub]
+
+### prealg.solve-2x2-system — Solve a 2×2 linear system
+
+Rating: Low
+Why: Inherently multi-step at any speed — eliminate or substitute, solve, back-substitute — with intermediate results to hold; canonical here by first-course-owns (KA Pre-Algebra unit 15 lists it before Algebra 1 does).
+Kernels: [prealg.solve-two-step-equation, prealg.solve-one-step-equation, fk.integer-add-sub]
+
+**OpenStax cross-check merges — fractions & decimals (Prealgebra 2e chs. 4–5).** KA Pre-Algebra's checklist has no fraction- or decimal-arithmetic unit; four calibration pins already live in this territory, and the diff below fills the remaining fact families. Every non-pin entry in this block carries its OpenStax source note.
+
+### prealg.simplify-fraction — Reduce a fraction to lowest terms · pinned calibration entry
+
+Rating: High · Format: fraction · Surface-sensitive
+Why: Fluent students recognize the common factor on sight — one step, ~1.5s think + ~1s entry on the assumed fraction pad; sits at the High boundary and flips to Medium if entry runs 2× slow.
+Sample: Write 6/8 in lowest terms → 3/4 · Rule: frac-lowest-terms · Params: built as (a·g)/(b·g) with gcd(a, b) = 1, a, b ∈ [1, 9], g ∈ [2, 6]; given denominators ≤ 54.
+Kernels: [fk.times-tables, fk.division-facts]
+
+**prealg.common-denominator — Least common denominator of two fractions** → canonical record authored as a calibration anchor · pinned calibration entry; absorbed here by reference (OpenStax ch. 4 territory).
+
+### prealg.fraction-add-unlike — Add two fractions with unlike denominators · pinned calibration entry
+
+Rating: Medium · Format: fraction
+Why: One chained transformation held mentally — find the LCD, rescale, add, reduce — ~4–6s total, safely inside the 3–8s tier.
+Sample: 1/2 + 1/3 → 5/6 · Rule: frac-lowest-terms · Params: distinct denominators from {2, 3, 4, 5, 6, 8, 10, 12} with LCD ≤ 24; answers in lowest terms, improper allowed (1/2 + 2/3 → 7/6).
+Kernels: [prealg.common-denominator, fk.addition-facts, fk.times-tables]
+
+### prealg.compare-fractions — Verify a fraction inequality · pinned calibration entry
+
 Rating: Medium · Format: true-false
 Why: One transformation — cross-multiply and compare — ~3–5s; the judgment is genuinely binary (verify a claimed inequality), which is what true-false is for.
 Sample: True or false: 3/5 > 2/3 → false · Rule: tf · Params: denominators ≤ 12; values distinct but within ~1/6 of each other so cross-multiplication is genuinely required; families balanced 50/50 true/false.
 Kernels: [fk.times-tables]
+
+### prealg.fraction-multiply — Multiply two fractions
+
+Rating: Medium · Format: fraction
+Why: Two table facts plus a reduction (or one cross-cancellation) held mentally — 3–6s. (source: OpenStax Prealgebra 2e ch. 4 — absent from KA sweep)
+Sample: 2/3 × 3/4 → 1/2 · Rule: frac-lowest-terms · Params: numerators/denominators ∈ [1, 9]; pairs constructed so at least one cross-cancellation exists; lowest-terms answers with denominator ≤ 24, improper allowed.
+Kernels: [fk.times-tables, prealg.simplify-fraction]
+
+### prealg.fraction-divide — Divide two fractions
+
+Rating: Medium · Format: fraction
+Why: One rule application (invert and multiply) chained onto the multiplication skill — 4–7s. (source: OpenStax Prealgebra 2e ch. 4 — absent from KA sweep)
+Sample: 3/4 ÷ 2/5 → 15/8 · Rule: frac-lowest-terms · Params: numerators/denominators ∈ [1, 9]; results in lowest terms with denominator ≤ 24, improper allowed; divisor never equal to the dividend (answer 1 gives away the rule).
+Kernels: [prealg.fraction-multiply, fk.times-tables]
+
+### prealg.mixed-to-improper — Mixed number → improper fraction
+
+Rating: High · Format: fraction · Surface-sensitive
+Why: One fused move (whole × denominator + numerator, denominator kept) — ≤2s think; entry (~1.25s) is most of the remaining High budget, so a 2× slower surface tips it to Medium. (source: OpenStax Prealgebra 2e ch. 4 — absent from KA sweep)
+Sample: Write 2 3/4 as an improper fraction → 11/4 · Rule: frac-lowest-terms · Params: whole ∈ [1, 9]; proper part in lowest terms with denominator ∈ [2, 9] (gcd(numerator, denominator) = 1 guarantees the improper result is already in lowest terms); answer numerators ≤ 89. The reverse direction (improper → mixed) has no supported answer format and is recorded as a disposition, not an entry.
+Kernels: [fk.times-tables, fk.addition-facts]
+
+### prealg.multiply-decimals — Multiply two one-place decimals · pinned calibration entry
+
+Rating: Medium · Format: decimal
+Why: One transformation — times-table product plus a decimal-place count — landing at the Medium floor (~3–4s total).
+Sample: 0.3 × 0.4 → 0.12 · Rule: dec-exact · Params: both factors are tenths in [0.2, 0.9]; digit products that are multiples of 10 (e.g. 0.2 × 0.5) are excluded so the place count is always exercised and dec-exact normalization never hides a trailing zero.
+Kernels: [fk.times-tables]
+
+### prealg.decimal-add-sub — Add or subtract decimals
+
+Rating: Medium · Format: decimal
+Why: One place-aligned fact-family operation — the alignment judgment is what lifts it above the whole-number anchors into low Medium. (source: OpenStax Prealgebra 2e ch. 5 — absent from KA sweep)
+Sample: 0.7 + 0.58 → 1.28 · Rule: dec-exact · Params: operands with 1–2 decimal places in (0, 20), mixed place counts required; subtraction differences kept positive; answers ≤ 2 places (no hidden trailing zeros).
+Kernels: [fk.addition-facts, fk.subtraction-facts, fk.place-value]
+
+### prealg.fraction-to-decimal — Fraction → decimal
+
+Rating: Medium · Format: decimal
+Why: Benchmark conversions are recall, the rest is one short division held mentally — 3–6s at terminating-only params. (source: OpenStax Prealgebra 2e ch. 5 — absent from KA sweep)
+Sample: Write 3/8 as a decimal → 0.375 · Rule: dec-exact · Params: fractions in lowest terms with denominator ∈ {2, 4, 5, 8, 10, 20, 25}; terminating answers with ≤ 3 decimal places.
+Kernels: [fk.division-facts]
+
+### prealg.decimal-to-fraction — Decimal → fraction in lowest terms
+
+Rating: Medium · Format: fraction
+Why: One chained transformation — read the place value as the denominator, then reduce — 3–6s. (source: OpenStax Prealgebra 2e ch. 5 — absent from KA sweep)
+Sample: Write 0.25 as a fraction in lowest terms → 1/4 · Rule: frac-lowest-terms · Params: decimals with 1–2 places in (0, 1), excluding values already over 10 in lowest terms only when no reduction exists (at least one reduction step required); lowest-terms denominators ≤ 25.
+Kernels: [fk.place-value, prealg.simplify-fraction]
+
+### prealg.round-to-place — Round to a named place
+
+Rating: High · Format: decimal
+Why: One digit judgment (look one place right, round) — ≤3s; decimal format lets one entry cover whole-number and decimal targets, and dec-exact accepts integer answers unchanged. (source: OpenStax Prealgebra 2e chs. 1 & 5 — absent from KA sweep)
+Sample: Round 3.86 to the nearest tenth → 3.9 · Rule: dec-exact · Params: whole numbers 3–5 digits rounded to tens/hundreds/thousands, and decimals with 2–3 places rounded to ones/tenths/hundredths; boundary digit 5 included deliberately.
+Kernels: [fk.place-value]
+
+**OpenStax cross-check merges — other chapters (Prealgebra 2e chs. 7, 9, 11).**
+
+### prealg.identify-property — Name the illustrated property
+
+Rating: Medium · Format: multiple-choice
+Why: One pattern-match against four memorized property shapes plus an option scan — 3–5s; MC is justified because the answer *is* a name, with no numeric restatement. (source: OpenStax Prealgebra 2e ch. 7 — absent from KA sweep)
+Sample: 3 + 5 = 5 + 3 illustrates which property? → Commutative (options: Commutative · Associative · Distributive · Identity) · Rule: mc · Params: fixed 4-option set; instance templates per property over both + and ×; operands ∈ [2, 9]; associative instances always show the moved parentheses.
+Kernels: No drillable kernel beyond entries already listed
+
+### prealg.perimeter-rectangle — Perimeter of a rectangle
+
+Rating: Medium · Format: single-number
+Why: One formula application held mentally (add the sides, double) — 3–5s. (source: OpenStax Prealgebra 2e ch. 9 — absent from KA sweep)
+Sample: Perimeter of a 7 by 4 rectangle → 22 · Rule: int-exact · Params: sides ∈ [2, 20]; perimeters ≤ 80; prompt states the dimensions in text (no figure needed).
+Kernels: [fk.addition-facts, fk.doubling-halving]
+
+### prealg.area-triangle — Area of a triangle
+
+Rating: Medium · Format: single-number
+Why: One formula application (half of base × height) — two fused fact-level moves, 3–6s. (source: OpenStax Prealgebra 2e ch. 9 — absent from KA sweep)
+Sample: Area of a triangle with base 10 and height 7 → 35 · Rule: int-exact · Params: base, height ∈ [2, 12] with base × height even; answers integers ≤ 72; dimensions stated in text (no figure needed).
+Kernels: [fk.times-tables, fk.doubling-halving]
+
+### prealg.circle-area-pi — Circle area as a coefficient of π
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One formula application (square the radius); asking for the coefficient of π keeps the answer a single integer — 3–5s. (source: OpenStax Prealgebra 2e ch. 9 — absent from KA sweep)
+Sample: A circle has radius 5. Its area is kπ. k = ? → 25 · Rule: int-exact · Params: radius ∈ [2, 12]; answers ≤ 144. The circumference analog (k = 2r) is a separate key family if built — do not mix keys with area.
+Kernels: [fk.perfect-squares]
+
+### prealg.pythagorean-hypotenuse — Pythagorean triple recall
+
+Rating: Medium · Format: single-number
+Why: Triple recall (3-4-5 and friends) with a one-step scale check — 3–6s at triples-only params; general non-triple cases would be Low and are excluded. (source: OpenStax Prealgebra 2e ch. 9 — absent from KA sweep)
+Sample: A right triangle has legs 3 and 4. How long is the hypotenuse? → 5 · Rule: int-exact · Params: triples (3,4,5), (5,12,13), (8,15,17), (7,24,25) and integer multiples up to (30,40,50); missing-leg variants included; sides stated in text (no figure needed).
+Kernels: [fk.perfect-squares, prealg.square-root]
+
+### prealg.identify-quadrant — Quadrant of a point
+
+Rating: High · Format: single-number
+Why: One two-sign read — pure recall of the quadrant map, ≤2s. (source: OpenStax Prealgebra 2e ch. 11 — absent from KA sweep)
+Sample: Which quadrant contains (−3, 5)? (answer 1–4) → 2 · Rule: int-exact · Params: coordinates nonzero integers ∈ [−9, 9]; all four quadrants uniform; on-axis points excluded.
+Kernels: No drillable kernel beyond entries already listed
+
+**OpenStax chapters with no merge:** ch. 10 (Polynomials) is deliberately **not** merged — its drillable intro content is already covered by prealg.combine-like-terms and prealg.exponent-product-rule, and full polynomial arithmetic is Algebra-course grain (KA Algebra 1 unit 13 / Algebra 2 unit 1 are its canonical homes; merging here would front-run those sweeps). All other chapters are either covered by KA-swept entries or merged above — see the disposition table.
+
+### Pre-Algebra checklist disposition table
+
+Every KA Pre-Algebra unit (15) and every OpenStax Prealgebra 2e chapter (11) maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| KA 1 Factors and multiples | prealg.divisibility-rule-check, prealg.smallest-prime-factor, prealg.prime-factorization (Low), prealg.gcd-two-numbers (anchor), prealg.lcm-two-numbers (anchor) |
+| KA 2 Patterns | prealg.next-term-arithmetic; remainder out-of-grain: writing/graphing pattern rules is modeling — no drillable content beyond kernels prealg.next-term-arithmetic, prealg.evaluate-expression |
+| KA 3 Ratios and rates | prealg.simplify-ratio, prealg.unit-rate, prealg.solve-proportion; rate word problems out-of-grain — no drillable content beyond kernels prealg.unit-rate, prealg.solve-proportion |
+| KA 4 Percentages | prealg.percent-to-decimal, prealg.decimal-to-percent, prealg.percent-to-fraction, prealg.fraction-to-percent, prealg.percent-of-number, prealg.find-whole-from-percent, prealg.find-percent-from-pair, prealg.percent-change |
+| KA 5 Exponents intro and order of operations | prealg.evaluate-exponent, prealg.order-of-operations |
+| KA 6 Variables & expressions | prealg.evaluate-expression, prealg.combine-like-terms; distributive property → cross-reference to alg1.distribute-linear (canonical home Pre-Algebra per registry); phrase-to-expression translation out-of-grain: word modeling — no drillable content beyond kernels prealg.evaluate-expression |
+| KA 7 Equations & inequalities introduction | prealg.solve-one-step-equation, prealg.check-solution |
+| KA 8 Percent & rational number word problems | prealg.absolute-value; remainder out-of-grain: word-problem/modeling unit — no drillable content beyond kernels prealg.percent-of-number, prealg.find-whole-from-percent, prealg.percent-change, prealg.fraction-add-unlike, fk.integer-add-sub, fk.integer-mul-div |
+| KA 9 Proportional relationships | prealg.constant-of-proportionality; missing-value proportions → prealg.solve-proportion (owned under KA 3); graphing proportional relationships out-of-grain: graph reading, no supported answer shape — no drillable content beyond kernels prealg.constant-of-proportionality |
+| KA 10 One-step and two-step equations & inequalities | prealg.solve-two-step-equation, prealg.solve-one-step-inequality; one-step equations → prealg.solve-one-step-equation (owned under KA 7) |
+| KA 11 Roots, exponents, & scientific notation | prealg.square-root, prealg.cube-root, prealg.root-between-integers, prealg.exponent-product-rule, prealg.negative-exponent, prealg.scientific-to-standard, prealg.scientific-notation-exponent |
+| KA 12 Multi-step equations | prealg.solve-multi-step-equation (Low; kernels prealg.solve-two-step-equation, prealg.combine-like-terms, alg1.distribute-linear) |
+| KA 13 Two-variable equations | prealg.check-point-solution; completing solution tables → prealg.evaluate-expression; plotting/graph reading out-of-grain: needs graph input/figure output the format set does not define — no drillable content beyond kernels prealg.evaluate-expression, prealg.check-point-solution |
+| KA 14 Functions and linear models | function evaluation → prealg.evaluate-expression; slope-intercept read-off → cross-reference to alg1.read-slope-intercept (owned by Algebra 1); remainder out-of-grain: linear-model interpretation and graph reading — no drillable content beyond kernels prealg.evaluate-expression, alg1.read-slope-intercept |
+| KA 15 Systems of equations | prealg.check-system-solution, prealg.solve-2x2-system (Low) |
+| OS 1 Whole Numbers | covered: fk.addition-facts, fk.subtraction-facts, fk.times-tables, fk.division-facts (anchors), fk.place-value, prealg.divisibility-rule-check; rounding merged as prealg.round-to-place |
+| OS 2 The Language of Algebra | covered: prealg.evaluate-expression, prealg.combine-like-terms, prealg.order-of-operations, prealg.solve-one-step-equation |
+| OS 3 Integers | covered: fk.integer-add-sub, fk.integer-mul-div (Foundational kernels), prealg.absolute-value |
+| OS 4 Fractions | covered: prealg.simplify-fraction, prealg.fraction-add-unlike, prealg.compare-fractions, prealg.common-denominator (anchor), prealg.solve-proportion (equivalent fractions); merged: prealg.fraction-multiply, prealg.fraction-divide, prealg.mixed-to-improper. Improper → mixed direction: recorded judgment — no supported answer format (mixed numbers are not in the format legend); revisit only if a mixed-number format is ever added |
+| OS 5 Decimals | covered: prealg.multiply-decimals; merged: prealg.decimal-add-sub, prealg.fraction-to-decimal, prealg.decimal-to-fraction, prealg.round-to-place |
+| OS 6 Percents | covered by the KA 4 entry set (see that row) |
+| OS 7 The Properties of Real Numbers | merged: prealg.identify-property; remainder out-of-grain: property vocabulary and justification prose — no drillable content beyond kernels prealg.identify-property |
+| OS 8 Solving Linear Equations | covered by the KA 7 / KA 10 / KA 12 entry sets |
+| OS 9 Math Models and Geometry | merged: prealg.perimeter-rectangle, prealg.area-triangle, prealg.circle-area-pi, prealg.pythagorean-hypotenuse; remainder out-of-grain: multi-step geometry word problems — no drillable content beyond kernels prealg.perimeter-rectangle, prealg.area-triangle, prealg.circle-area-pi, prealg.pythagorean-hypotenuse, prealg.percent-of-number |
+| OS 10 Polynomials | no merge (recorded judgment): drillable intro covered by prealg.combine-like-terms, prealg.exponent-product-rule; polynomial arithmetic proper is Algebra-course grain — canonical homes KA Algebra 1 unit 13 / Algebra 2 unit 1 |
+| OS 11 Graphs | merged: prealg.identify-quadrant; plotting/graph reading out-of-grain: no supported answer shape — no drillable content beyond kernels prealg.identify-quadrant, prealg.check-point-solution |
 
 ---
 

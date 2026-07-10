@@ -192,7 +192,7 @@ Kernels: [<slug>, <slug>] | "No drillable kernel beyond entries already listed (
 
 Units 3–8 share one recipe: sweep the course's snapshotted KA checklist unit-by-unit → enumerate single-skill entries (full R3/R5/R6 records for High/Medium; rating + reason + kernels for Low) → run the OpenStax cross-check diff and merge missing topics under this course's prefix with a source note → write the course's checklist-disposition table (every checklist unit → entry slugs or an explicit out-of-grain/cross-reference disposition) → register new kernels and citations in the live registry. Cross-course topics follow first-course-owns (Decision 4).
 
-- [ ] **Unit 3: Foundational kernels seed + Pre-Algebra section**
+- [x] **Unit 3: Foundational kernels seed + Pre-Algebra section**
 
 **Goal:** Author the Pre-Algebra section against the KA Pre-Algebra checklist (15 units) with the Prealgebra 2e cross-check, seeding the Foundational kernels section with the sub-Pre-Algebra skills (`fk.` slugs) that Pre-Algebra entries cite (many will overlap the 8 anchors — anchors ARE Foundational/early entries and take their canonical slugs here).
 

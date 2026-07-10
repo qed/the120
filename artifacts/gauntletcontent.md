@@ -205,11 +205,11 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | prealg.multiply-decimals | Multiply two one-place decimals | self — Pre-Algebra section (pinned calibration entry) | — | | |
 | prealg.divisibility-rule-check | Verify divisibility via digit-sum / last-digit rules | self — Pre-Algebra section (pinned calibration entry) | — | | |
 | prealg.compare-fractions | Verify a fraction inequality by cross-multiplication | self — Pre-Algebra section (pinned calibration entry) | — | | |
-| alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 pinned stub | — | | |
-| alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 pinned stub | — | | |
-| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 pinned stub | canonical home: **Pre-Algebra** (KA Pre-Algebra units 6/12 exercise it first — recorded during the Pre-Algebra pass); slug immutable, minted in Algebra 1 during calibration; Pre-Algebra carries the cross-reference row | | |
-| alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 pinned stub | — | | |
-| alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 pinned stub | — | | |
+| alg1.factor-pairs-sum-product | Recover two numbers from their sum and product | self — Algebra 1 (KA 13, pinned calibration entry) | — | | |
+| alg1.read-slope-intercept | Read m and b off slope-intercept form | self — Algebra 1 (KA 5, pinned calibration entry) | — | | |
+| alg1.distribute-linear | Distribute a constant over a binomial | self — Algebra 1 (KA 1, pinned calibration entry) | canonical home: **Pre-Algebra** (KA Pre-Algebra units 6/12 exercise it first — recorded during the Pre-Algebra pass); slug immutable, minted in Algebra 1 during calibration; Pre-Algebra carries the cross-reference row | | |
+| alg1.factor-simple-quadratic | Factor a monic quadratic into two binomials | self — Algebra 1 (KA 13, pinned calibration entry) | — | | |
+| alg1.solve-quadratic-by-factoring | Solve a monic quadratic by factoring (Low; kernel source) | self — Algebra 1 (KA 14, pinned calibration entry) | — | | |
 | fk.place-value | Identify the digit in a named place | self — Foundational kernels | — | | |
 | fk.integer-add-sub | Signed integer addition and subtraction | self — Foundational kernels | — | | |
 | fk.integer-mul-div | Sign rules for integer products and quotients | self — Foundational kernels | — | | |
@@ -252,7 +252,7 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | prealg.solve-multi-step-equation | Solve a multi-step equation (Low; kernel source) | self — Pre-Algebra (KA 12) | — | | |
 | prealg.check-point-solution | Check a point against a two-variable equation | self — Pre-Algebra (KA 13) | — | | |
 | prealg.check-system-solution | Check a candidate solution of a 2×2 system | self — Pre-Algebra (KA 15) | — | | |
-| prealg.solve-2x2-system | Solve a 2×2 linear system (Low; kernel source) | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 unit 6 will cross-reference here | | |
+| prealg.solve-2x2-system | Solve a 2×2 linear system (Low; kernel source) | self — Pre-Algebra (KA 15) | first-course-owns: Algebra 1 unit 6 cross-references here (recorded during the Algebra 1 pass) | | |
 | prealg.fraction-multiply | Multiply two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
 | prealg.fraction-divide | Divide two fractions | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
 | prealg.mixed-to-improper | Mixed number → improper fraction | self — Pre-Algebra (OpenStax merge, ch. 4) | — | | |
@@ -266,6 +266,53 @@ Live registry of every kernel slug in the document. Maintained continuously from
 | prealg.circle-area-pi | Circle area as a coefficient of π | self — Pre-Algebra (OpenStax merge, ch. 9) | — | | |
 | prealg.pythagorean-hypotenuse | Pythagorean triple recall (hypotenuse or leg) | self — Pre-Algebra (OpenStax merge, ch. 9) | Geometry unit 5 will cross-reference here | | |
 | prealg.identify-quadrant | Quadrant of a coordinate point | self — Pre-Algebra (OpenStax merge, ch. 11) | — | | |
+| fk.unit-conversion-facts | Recall a measurement conversion factor | self — Foundational kernels (added during Algebra 1 pass) | — | | |
+| alg1.combine-like-terms-multivar | Combine like terms across multiple variables | self — Algebra 1 (KA 1) | — | | |
+| alg1.solve-equation-both-sides | Solve ax = bx + c (variables on both sides) | self — Algebra 1 (KA 2) | — | | |
+| alg1.rearrange-formula-one-step | Solve a one-step formula for a variable | self — Algebra 1 (KA 2) | — | | |
+| alg1.unit-convert-one-step | One-step unit conversion | self — Algebra 1 (KA 3) | — | | |
+| alg1.slope-two-points | Slope from two points | self — Algebra 1 (KA 4) | — | | |
+| alg1.intercept-from-equation | Axis intercept from standard form | self — Algebra 1 (KA 4) | — | | |
+| alg1.graph-line-from-equation | Graph a line from its equation (Low; kernel source) | self — Algebra 1 (KA 4) | — | | |
+| alg1.read-point-slope | Read the anchor point off point-slope form | self — Algebra 1 (KA 5) | — | | |
+| alg1.slope-from-standard-form | Slope from standard form (m = −A/B) | self — Algebra 1 (KA 5) | — | | |
+| alg1.write-line-equation | Write the equation of a line (Low; kernel source) | self — Algebra 1 (KA 5) | — | | |
+| alg1.system-solution-count | Number of solutions of a 2×2 system | self — Algebra 1 (KA 6) | — | | |
+| alg1.check-inequality-solution | Check a point against a two-variable inequality | self — Algebra 1 (KA 7) | — | | |
+| alg1.evaluate-function | Evaluate f(x) in function notation | self — Algebra 1 (KA 8) | — | | |
+| alg1.is-function-pairs | Judge whether a set of ordered pairs is a function | self — Algebra 1 (KA 8) | — | | |
+| alg1.next-term-geometric | Next term of a geometric sequence | self — Algebra 1 (KA 9) | — | | |
+| alg1.arithmetic-nth-term | nth term of an arithmetic sequence | self — Algebra 1 (KA 9) | — | | |
+| alg1.geometric-nth-term | nth term of a geometric sequence | self — Algebra 1 (KA 9) | — | | |
+| alg1.evaluate-absolute-expression | Evaluate an absolute-value expression | self — Algebra 1 (KA 10) | — | | |
+| alg1.solve-absolute-value-equation | Solve an absolute-value equation (both solutions) | self — Algebra 1 (KA 10) | — | | |
+| alg1.evaluate-piecewise | Evaluate a piecewise function | self — Algebra 1 (KA 10) | — | | |
+| alg1.exponent-power-rule | Power-of-a-power rule (multiply exponents) | self — Algebra 1 (KA 11) | — | | |
+| alg1.exponent-quotient-rule | Quotient rule for exponents (subtract exponents) | self — Algebra 1 (KA 11) | — | | |
+| alg1.simplify-radical | Simplify a square root to a√b | self — Algebra 1 (KA 11) | — | | |
+| alg1.evaluate-exponential | Evaluate an exponential expression a·bˣ | self — Algebra 1 (KA 12) | — | | |
+| alg1.growth-or-decay | Classify growth vs decay from the base | self — Algebra 1 (KA 12) | — | | |
+| alg1.growth-factor-to-rate | Percent rate from a growth/decay factor | self — Algebra 1 (KA 12) | — | | |
+| alg1.multiply-binomials | Multiply two binomials | self — Algebra 1 (KA 13) | — | | |
+| alg1.factor-gcf | Factor out the greatest common factor | self — Algebra 1 (KA 13) | — | | |
+| alg1.factor-difference-of-squares | Factor a difference of squares | self — Algebra 1 (KA 13) | — | | |
+| alg1.factor-perfect-square-trinomial | Recognize a perfect-square trinomial | self — Algebra 1 (KA 13) | — | | |
+| alg1.factor-nonmonic-quadratic | Factor a non-monic quadratic (Low; kernel source) | self — Algebra 1 (KA 13) | — | | |
+| alg1.roots-from-factored-form | Roots from factored form (zero-product read-off) | self — Algebra 1 (KA 14) | — | | |
+| alg1.vertex-from-vertex-form | Vertex from vertex form | self — Algebra 1 (KA 14) | — | | |
+| alg1.axis-of-symmetry | Axis of symmetry from standard form | self — Algebra 1 (KA 14) | — | | |
+| alg1.discriminant-root-count | Count real solutions via the discriminant | self — Algebra 1 (KA 14) | — | | |
+| alg1.solve-x-squared-equals-k | Solve x² = k (both solutions) | self — Algebra 1 (KA 14) | — | | |
+| alg1.solve-by-quadratic-formula | Solve via the quadratic formula (Low; kernel source) | self — Algebra 1 (KA 14) | — | | |
+| alg1.complete-the-square | Complete the square (Low; kernel source) | self — Algebra 1 (KA 14) | — | | |
+| alg1.classify-rational-irrational | Classify a number as rational or irrational | self — Algebra 1 (KA 15) | — | | |
+| alg1.rational-irrational-operations | Closure judgments for rational/irrational sums and products | self — Algebra 1 (KA 15) | — | | |
+| alg1.linear-word-problem | Translate-and-solve linear word problems (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 3) | — | | |
+| alg1.polynomial-degree | Degree of a polynomial | self — Algebra 1 (OpenStax merge, ch. 6) | — | | |
+| alg1.multiply-monomials | Multiply two monomials | self — Algebra 1 (OpenStax merge, ch. 6) | — | | |
+| alg1.simplify-monomial-quotient | Divide two monomials | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
+| alg1.simplify-rational-expression | Simplify a rational expression (Low; kernel source) | self — Algebra 1 (OpenStax merge, ch. 8) | — | | |
+| alg1.multiply-square-roots | Multiply square roots to an integer | self — Algebra 1 (OpenStax merge, ch. 9) | — | | |
 
 ---
 
@@ -493,6 +540,13 @@ Rating: Medium · Format: single-number
 Why: One two-fact transformation (divide by the denominator, multiply by the numerator) held mentally — 3–6s.
 Sample: 3/4 of 20 → 15 · Rule: int-exact · Params: denominators ∈ [2, 10], numerators ∈ [1, denominator−1] (unit fractions form the easy sub-band), whole ∈ [6, 60] and divisible by the denominator; answers positive integers ≤ 54.
 Kernels: [fk.division-facts, fk.times-tables]
+
+### fk.unit-conversion-facts — Measurement conversion-factor recall
+
+Rating: High · Format: single-number
+Why: Pure fact recall of a memorized conversion factor — ≤2s. (added during Algebra 1 pass — first cited by alg1.unit-convert-one-step)
+Sample: How many minutes are in one hour? → 60 · Rule: int-exact · Params: factor families: time (60 s/min, 60 min/hr, 24 hr/day, 7 day/wk), metric (10, 100, 1000 place factors), customary length (12 in/ft, 3 ft/yd; 5280 ft/mi as a stretch band); asked as bare factor recall in both directions of phrasing; answers ≤ 5280.
+Kernels: No drillable kernel beyond entries already listed
 
 ---
 
@@ -952,48 +1006,444 @@ Every KA Pre-Algebra unit (15) and every OpenStax Prealgebra 2e chapter (11) map
 
 ## Algebra 1
 
-Swept against KA Algebra 1 units 1–15 with the Elementary Algebra 2e cross-check (must catch the KA statistics gap). *Authored in a later pass.*
+Swept against KA Algebra 1 units 1–15 with the Elementary Algebra 2e cross-check (units 16–17 are non-content — see the disposition table). Entries are grouped by the KA unit that surfaced them, followed by the OpenStax cross-check merges. Heavy cross-reference traffic runs back to Pre-Algebra owners (equation solving, exponent rules, systems — first-course-owns). Five entries carry the `pinned calibration entry` tag — authored during calibration, absorbed here in place; their pinned params are extended (never changed) where the calibration record deferred sign variants to this pass. The cross-check's headline finding is negative: the traditional-Algebra-1 one-variable-statistics/scatterplot block appears in **no** snapshot checklist source — recorded honestly in the merge block and disposition table, with no entries invented for it.
 
-**Stub — pinned reference entries.** The five entries below were authored during calibration; this course's pass absorbs this stub in place (the entries stay, the stub framing goes).
+**KA Unit 1 — Algebra foundations.**
 
-### alg1.factor-pairs-sum-product — Two numbers from their sum and product
+**Evaluating expressions by substitution** → see prealg.evaluate-expression (owned by Pre-Algebra).
+**Combining like terms in one variable** → see prealg.combine-like-terms (owned by Pre-Algebra).
 
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: Medium · Format: two-numbers
-Why: One mental search through a factor-pair family — the core inner move of factoring — ~3–6s think + ~1.25s entry on the assumed two-number pad.
-Sample: Two numbers with sum 7 and product 12 → 3, 4 · Rule: pair-unordered · Params: pinned (all-positive) version: pair members ∈ [2, 12], so sums ≤ 24 and products ≤ 144; sign variants (negative pairs) are authored in the full Algebra 1 pass.
-Kernels: [fk.times-tables, fk.addition-facts]
+### alg1.distribute-linear — Distribute a constant over a binomial · pinned calibration entry
 
-### alg1.read-slope-intercept — Read slope and y-intercept from y = mx + b
+Rating: High · Format: short-expression · Surface-sensitive
+Why: One mental step (two times-table products) with a 5-token answer ≈ 1.5s entry — the worked proof that short-expression CAN be High when the token count is tiny; flips to Medium at 2× entry time.
+Sample: Expand 3(x + 4) → 3x+12 · Rule: expr-commutative-ws · Params: outer constant ∈ [2, 9]; binomial x ± c with c ∈ [1, 9]; answer alphabet {digits, x, +, −}.
+Kernels: [fk.times-tables]
+*Canonical-home note:* the registry records **Pre-Algebra** as this entry's canonical home (KA Pre-Algebra units 6/12 exercise it first); the slug is immutable and the record stays here where it was minted — Pre-Algebra carries the cross-reference row.
 
-*(pinned reference entry — this course's pass absorbs this stub)*
+### alg1.combine-like-terms-multivar — Combine like terms across variables
+
+Rating: Medium · Format: short-expression
+Why: Two or three addition facts sorted by variable family and held mentally — 3–6s including a ~6-token entry.
+Sample: Simplify 4x + 3y + 2x → 6x+3y · Rule: expr-commutative-ws · Params: 3–4 terms over two variable families (x, y) with coefficients ∈ [1, 9]; at least one family has two terms; result coefficients ≤ 19 and kept positive even in the signed band (one negative coefficient allowed among the inputs); answer alphabet {digits, x, y, +, −}.
+Kernels: [prealg.combine-like-terms, fk.addition-facts]
+
+**KA Unit 2 — Solving equations & inequalities.**
+
+**One-step equations** → see prealg.solve-one-step-equation (owned by Pre-Algebra).
+**Two-step equations** → see prealg.solve-two-step-equation (owned by Pre-Algebra).
+**Multi-step equations (distribute + collect + solve)** → see prealg.solve-multi-step-equation (owned by Pre-Algebra; Low).
+**One-step inequalities (boundary + direction)** → see prealg.solve-one-step-inequality (owned by Pre-Algebra).
+
+### alg1.solve-equation-both-sides — Solve ax = bx + c
+
+Rating: Medium · Format: single-number
+Why: Two chained inverse moves (collect the x-terms, then one division) held mentally — 3–7s, the same two-move shape as prealg.solve-two-step-equation.
+Sample: 7x = 4x + 12. x = ? → 4 · Rule: int-exact · Params: a, b ∈ [2, 12] distinct with a − b ∈ [2, 9]; c = (a − b)·x with integer x ∈ [2, 9]; negative-x band flips c's sign (negative answers carry the touch-minus-key caveat).
+Kernels: [prealg.solve-two-step-equation, prealg.combine-like-terms, fk.subtraction-facts]
+
+### alg1.rearrange-formula-one-step — Solve a formula for a variable (one step)
+
+Rating: Medium · Format: short-expression
+Why: One inverse-operation read applied to symbols instead of numbers — 3–5s with a ~3-token entry.
+Sample: d = rt. Solve for t → d/r · Rule: expr-commutative-ws · Params: formula families with exactly one multiplicative or additive step (d = rt, A = lw, y = x + b, P = a + b + c solved for one addend); answer alphabet is the formula's 2–3 letters plus / − ( ); answers ≤ 5 tokens. Multi-step rearrangements are Low grain and excluded — they are prealg.solve-multi-step-equation in symbol clothing.
+Kernels: [prealg.solve-one-step-equation]
+
+**KA Unit 3 — Working with units.**
+
+### alg1.unit-convert-one-step — One-step unit conversion
+
+Rating: Medium · Format: single-number
+Why: One conversion-factor recall plus one product or place shift — 3–5s.
+Sample: Convert 3 hours to minutes → 180 · Rule: int-exact · Params: single-factor conversions from the time/metric/customary-length families (min↔hr, s↔min, m↔cm, m↔km, in↔ft, ft↔yd); multipliers chosen so answers are positive integers ≤ 10,000; both directions asked, the dividing direction always exact.
+Kernels: [fk.unit-conversion-facts, fk.times-tables, fk.powers-of-ten]
+
+**KA Unit 4 — Linear equations & graphs.**
+
+### alg1.slope-two-points — Slope from two points
+
+Rating: Medium · Format: fraction
+Why: Two subtraction facts and a reduction held mentally — 4–7s on the assumed fraction pad; the document's canonical rise-over-run drill.
+Sample: Slope through (1, 2) and (4, 4) → 2/3 · Rule: frac-lowest-terms · Params: integer coordinates ∈ [−9, 9] with distinct x-values; slopes non-integer in lowest terms with |numerator| ≤ 9 and denominator ≤ 9 (integer-slope cases excluded — a different answer shape that would split the key family); negative slopes included, sign to the numerator per the format spec.
+Kernels: [fk.integer-add-sub, prealg.simplify-fraction]
+
+### alg1.intercept-from-equation — Axis intercept from standard form
+
+Rating: Medium · Format: single-number
+Why: One zero-substitution and one division — 3–5s.
+Sample: x-intercept of 2x + 3y = 12 (x-value only) → 6 · Rule: int-exact · Params: coefficients ∈ [2, 9]; the constant a multiple of the asked coefficient with quotient ∈ [−9, 9] excluding 0; x- and y-intercept prompts balanced; negative answers carry the touch-minus-key caveat.
+Kernels: [prealg.solve-one-step-equation, fk.division-facts]
+
+### alg1.graph-line-from-equation — Graph a line from its equation
+
+Rating: Low
+Why: Inherently multi-step at any speed — extract slope and intercept, plot, apply rise-over-run, draw — and the answer is a drawn graph, which no input format hosts.
+Kernels: [alg1.read-slope-intercept, alg1.intercept-from-equation, alg1.slope-two-points]
+
+**KA Unit 5 — Forms of linear equations.**
+
+### alg1.read-slope-intercept — Read slope and y-intercept from y = mx + b · pinned calibration entry
+
 Rating: High · Format: two-numbers · Surface-sensitive
 Why: Pure read-off, no transformation — ~1s think + ~1.25s entry; entry dominates the High budget, hence the marker.
 Sample: y = 3x − 2 — slope, then y-intercept → 3, -2 · Rule: pair-ordered · Params: m and b nonzero integers ∈ [−9, 9]; negative answers carry the engine contract's touch-minus-key caveat until the proposed pad exists.
 Kernels: No drillable kernel beyond entries already listed
 
-### alg1.distribute-linear — Distribute a constant over a binomial
+### alg1.read-point-slope — Read the anchor point off point-slope form
 
-*(pinned reference entry — this course's pass absorbs this stub)*
-Rating: High · Format: short-expression · Surface-sensitive
-Why: One mental step (two times-table products) with a 5-token answer ≈ 1.5s entry — the worked proof that short-expression CAN be High when the token count is tiny; flips to Medium at 2× entry time.
-Sample: Expand 3(x + 4) → 3x+12 · Rule: expr-commutative-ws · Params: outer constant ∈ [2, 9]; binomial x ± c with c ∈ [1, 9]; answer alphabet {digits, x, +, −}.
-Kernels: [fk.times-tables]
+Rating: Medium · Format: two-numbers
+Why: One memorized sign-flip read applied twice (y − y₁ and x − x₁ both flip) — Medium floor, ~3–4s with the pair entry.
+Sample: y − 3 = 2(x − 1) passes through which point? (x, then y) → 1, 3 · Rule: pair-ordered · Params: x₁, y₁ nonzero integers ∈ [−9, 9] shown in both + and − renderings; the slope ∈ [−9, 9] excluding 0 is decorative; negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
 
-### alg1.factor-simple-quadratic — Factor a monic quadratic
+### alg1.slope-from-standard-form — Slope from standard form
 
-*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: fraction
+Why: One rule recall (m = −A/B) plus a sign judgment and a possible reduction — 3–6s.
+Sample: Slope of 2x + 3y = 6 → -2/3 · Rule: frac-lowest-terms · Params: A, B nonzero integers ∈ [−9, 9]; results kept non-integer, in lowest terms after reduction with |numerator| ≤ 9 and denominator ≤ 9; sign to the numerator; the constant term is decorative.
+Kernels: [fk.integer-mul-div, prealg.simplify-fraction]
+
+### alg1.write-line-equation — Write the equation of a line
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute the slope, back-solve the intercept, assemble the equation — with intermediate state to hold.
+Kernels: [alg1.slope-two-points, alg1.read-slope-intercept, prealg.evaluate-expression]
+
+**KA Unit 6 — Systems of equations.**
+
+**Solving 2×2 linear systems** → see prealg.solve-2x2-system (owned by Pre-Algebra; Low).
+**Checking a candidate solution of a system** → see prealg.check-system-solution (owned by Pre-Algebra).
+
+### alg1.system-solution-count — How many solutions does a system have
+
+Rating: Medium · Format: multiple-choice
+Why: Two comparisons (same slope? same intercept?) plus a 3-option scan — 4–7s; MC is justified because the answer is a category and no numeric restatement preserves "infinitely many".
+Sample: y = 2x + 1 and y = 2x − 4 — how many solutions? → None (options: One · None · Infinitely many) · Rule: mc · Params: both equations in slope-intercept form with m, b integers ∈ [−9, 9]; the three cases balanced; distinct-slope cases keep intercepts distinct too, so slope is the only reliable discriminator.
+Kernels: [alg1.read-slope-intercept]
+
+**KA Unit 7 — Inequalities (systems & graphs).**
+
+### alg1.check-inequality-solution — Check a point against a two-variable inequality
+
+Rating: Medium · Format: true-false
+Why: One double substitution and a directional compare — 3–6s; genuinely a verification judgment.
+Sample: True or false: (1, 4) satisfies y > 2x + 1 → true · Rule: tf · Params: forms y <, >, ≤, ≥ mx + b with m, b ∈ [−5, 5]; points ∈ [−6, 6]; boundary-equality cases included so the strict/inclusive distinction is exercised; families balanced 50/50.
+Kernels: [prealg.check-point-solution, fk.integer-mul-div]
+
+**KA Unit 8 — Functions.**
+
+### alg1.evaluate-function — Evaluate f(x) in function notation
+
+Rating: Medium · Format: single-number
+Why: The same substitute-and-compute move as prealg.evaluate-expression with the f(x) notation read layered on — 3–6s.
+Sample: f(x) = 3x − 2. f(4) = ? → 10 · Rule: int-exact · Params: linear forms ax + b and a − bx with a, b ∈ [1, 9]; inputs ∈ [−9, 9]; negative answers carry the touch-minus-key caveat.
+Kernels: [prealg.evaluate-expression]
+
+### alg1.is-function-pairs — Is a set of ordered pairs a function
+
+Rating: Medium · Format: true-false
+Why: One scan for a repeated input with different outputs — 3–6s over 3–4 shown pairs; genuinely binary.
+Sample: True or false: {(1, 2), (2, 5), (1, 4)} is a function → false · Rule: tf · Params: 3–4 pairs with coordinates ∈ [0, 9]; false cases repeat exactly one x-value with different y-values; true cases may repeat a y-value (the classic distractor); families balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+**KA Unit 9 — Sequences.**
+
+**Next term of an arithmetic pattern** → see prealg.next-term-arithmetic (owned by Pre-Algebra).
+
+### alg1.next-term-geometric — Next term of a geometric sequence
+
+Rating: Medium · Format: single-number
+Why: Spot the common ratio, apply one product — 3–5s including the term scan.
+Sample: Next term: 2, 6, 18, 54, … → 162 · Rule: int-exact · Params: first term ∈ [1, 5], ratio ∈ {2, 3, 4, 5, 10}, three or four terms shown; answers ≤ 1000.
+Kernels: [fk.times-tables, fk.two-digit-times-one-digit]
+
+### alg1.arithmetic-nth-term — nth term of an arithmetic sequence
+
+Rating: Medium · Format: single-number
+Why: One formula application (a₁ + (n−1)d) fused into two fact-level moves — 4–7s.
+Sample: An arithmetic sequence starts at 3 with common difference 4. What is the 5th term? → 19 · Rule: int-exact · Params: first term ∈ [1, 12], common difference ∈ ±[2, 9], n ∈ [4, 9]; answers ∈ [−60, 99] (negative answers carry the touch-minus-key caveat).
+Kernels: [fk.times-tables, fk.addition-facts, prealg.evaluate-expression]
+
+### alg1.geometric-nth-term — nth term of a geometric sequence
+
+Rating: Medium · Format: single-number
+Why: One power recall and one product (a₁ · r^(n−1)) — Medium's upper half at the tiny params below.
+Sample: A geometric sequence starts at 2 with common ratio 3. What is the 4th term? → 54 · Rule: int-exact · Params: first term ∈ [1, 5], ratio ∈ {2, 3}, n ∈ [3, 5]; answers ≤ 500.
+Kernels: [prealg.evaluate-exponent, fk.times-tables]
+
+**KA Unit 10 — Absolute value & piecewise functions.**
+
+**Absolute value of an integer** → see prealg.absolute-value (owned by Pre-Algebra).
+
+### alg1.evaluate-absolute-expression — Evaluate an absolute-value expression
+
+Rating: Medium · Format: single-number
+Why: One substitution, one inner computation, one sign strip — 3–6s.
+Sample: |2x − 9| when x = 2 → 5 · Rule: int-exact · Params: forms |ax − b| and a|x| + b with a, b ∈ [1, 9]; inputs ∈ [−9, 9]; answers non-negative integers ≤ 99.
+Kernels: [prealg.evaluate-expression, prealg.absolute-value]
+
+### alg1.solve-absolute-value-equation — Solve an absolute-value equation
+
+Rating: Medium · Format: two-numbers
+Why: One split into two one-step equations (x − a = ±b) solved as fact-level moves — Medium's upper half, ~5–8s with the pair entry.
+Sample: |x − 2| = 5 — both solutions → 7, -3 · Rule: pair-unordered · Params: forms |x| = b and |x − a| = b with a ∈ [−9, 9], b ∈ [1, 9]; both solutions ∈ [−18, 18]; negative solutions carry the touch-minus-key caveat.
+Kernels: [prealg.solve-one-step-equation, prealg.absolute-value, fk.integer-add-sub]
+
+### alg1.evaluate-piecewise — Evaluate a piecewise function
+
+Rating: Medium · Format: single-number · Render: needs-math-render
+Why: One branch-selection judgment plus one substitution — 4–7s; the stacked case notation needs a math renderer.
+Sample: f(x) = x + 1 for x < 0; f(x) = 2x for x ≥ 0. f(−3) = ? → -2 · Rule: int-exact · Params: two linear branches with coefficients ∈ [1, 5], split at 0 or ±[1, 5]; inputs ∈ [−9, 9], kept off the boundary in the base band and on it in the stretch band; negative answers carry the touch-minus-key caveat.
+Kernels: [alg1.evaluate-function]
+
+**KA Unit 11 — Exponents & radicals.**
+
+**Product rule for exponents** → see prealg.exponent-product-rule (owned by Pre-Algebra).
+**Negative exponents** → see prealg.negative-exponent (owned by Pre-Algebra).
+**Square roots of perfect squares** → see prealg.square-root (owned by Pre-Algebra).
+**Cube roots of perfect cubes** → see prealg.cube-root (owned by Pre-Algebra).
+**Bracketing a root between integers** → see prealg.root-between-integers (owned by Pre-Algebra).
+
+### alg1.exponent-power-rule — Power of a power
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One times-table fact once the multiply-the-exponents rule is automatic — ≤3s; asking for the exponent alone keeps the answer one small integer.
+Sample: (x³)⁴ = xⁿ. n = ? → 12 · Rule: int-exact · Params: exponents ∈ [2, 9]; displayed base from {2, 3, 5, 10, x}; answers ≤ 81.
+Kernels: [fk.times-tables, prealg.exponent-product-rule]
+
+### alg1.exponent-quotient-rule — Quotient rule for exponents
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One subtraction fact once the subtract-the-exponents rule is automatic — ≤3s; answer is the exponent alone.
+Sample: x⁷ ÷ x³ = xⁿ. n = ? → 4 · Rule: int-exact · Params: exponents ∈ [2, 12] with a positive difference in the base band; the signed band allows negative n (touch-minus-key caveat); displayed base from {2, 3, 5, 10, x}.
+Kernels: [fk.subtraction-facts, prealg.exponent-product-rule]
+
+### alg1.simplify-radical — Simplify a square root
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One largest-square-factor extraction (72 = 36 · 2) and a root recall — 4–7s.
+Sample: √72 = a√b. a, then b → 6, 2 · Rule: pair-ordered · Params: radicands ∈ [8, 200] with a square factor ≥ 4; b squarefree ∈ {2, 3, 5, 6, 7, 10}; a ∈ [2, 12].
+Kernels: [fk.perfect-squares, fk.times-tables, prealg.square-root]
+
+**KA Unit 12 — Exponential growth & decay.**
+
+### alg1.evaluate-exponential — Evaluate an exponential expression
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One power recall chained with one product — 3–6s.
+Sample: f(x) = 3 · 2ˣ. f(4) = ? → 48 · Rule: int-exact · Params: coefficient ∈ [1, 9]; base ∈ {2, 3, 5, 10}; exponent ∈ [1, 5] with base^exponent ≤ 243; answers positive integers ≤ 1000.
+Kernels: [prealg.evaluate-exponent, fk.times-tables, alg1.evaluate-function]
+
+### alg1.growth-or-decay — Growth or decay from the base
+
+Rating: High · Format: multiple-choice · Render: unicode-inline
+Why: One compare-to-1 judgment and a two-option tap — ≤3s.
+Sample: y = 200(0.9)ᵗ — growth or decay? → Decay (options: Growth · Decay) · Rule: mc · Params: bases ∈ (0, 2] excluding 1, written with 1–2 decimal places; initial values decorative; families balanced 50/50.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg1.growth-factor-to-rate — Percent rate from a growth/decay factor
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One subtraction against 1 and a two-place shift — 3–5s; the answer is the percent number.
+Sample: y = 500(1.07)ᵗ — what percent growth rate? (number only) → 7 · Rule: int-exact · Params: factors 1 ± r with r at 1–2 decimal places; integer percent answers ∈ [1, 75]; growth and decay balanced, the unsigned rate asked (direction lives in the prompt).
+Kernels: [prealg.decimal-to-percent, fk.subtraction-facts]
+
+**KA Unit 13 — Quadratics: Multiplying & factoring.**
+
+### alg1.factor-pairs-sum-product — Two numbers from their sum and product · pinned calibration entry
+
+Rating: Medium · Format: two-numbers
+Why: One mental search through a factor-pair family — the core inner move of factoring — ~3–6s think + ~1.25s entry on the assumed two-number pad.
+Sample: Two numbers with sum 7 and product 12 → 3, 4 · Rule: pair-unordered · Params: pinned (all-positive) band: pair members ∈ [2, 12], so sums ≤ 24 and products ≤ 144; signed band (authored this pass, as the pin deferred): pair members ∈ [−12, 12] excluding 0, covering the negative-sum and negative-product families; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.times-tables, fk.addition-facts]
+
+### alg1.multiply-binomials — Multiply two binomials
+
+Rating: Medium · Format: short-expression · Surface-sensitive
+Why: Four small products with a middle-term merge held mentally, then a ~9-token entry ≈ 2.5s — Medium's upper half; flips to Low at 2× entry time, hence the marker.
+Sample: Multiply: (x + 3)(x + 4) → x^2+7x+12 · Rule: expr-commutative-ws · Params: monic binomials with constants ∈ [1, 9] in the base band (middle coefficient ≤ 18, constant ≤ 81); signed band mixes ±; vanishing-middle-term cases belong to the difference-of-squares family and key separately; answer alphabet {digits, x, ^, +, −}.
+Kernels: [alg1.distribute-linear, fk.times-tables, fk.addition-facts]
+
+### alg1.factor-simple-quadratic — Factor a monic quadratic · pinned calibration entry
+
 Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
 Why: One transformation (the sum-product search) but a 12-token answer ≈ 3.25s of pure entry — ~5–8s total, at Medium's ceiling; flips to Low at 2× entry time, hence the marker.
-Sample: Factor: x² + 7x + 12 → (x+3)(x+4) · Rule: factored-commutative-ws · Params: monic x² + bx + c with both roots ∈ [1, 9] in the pinned version (b ≤ 18, c ≤ 81); sign variants in the full Algebra 1 pass.
+Sample: Factor: x² + 7x + 12 → (x+3)(x+4) · Rule: factored-commutative-ws · Params: pinned band: monic x² + bx + c with both roots ∈ [1, 9] (b ≤ 18, c ≤ 81); signed band (authored this pass, as the pin deferred): roots ∈ [−9, 9] excluding 0, giving all four sign patterns of b and c; answer alphabet gains −.
 Kernels: [alg1.factor-pairs-sum-product]
 
-### alg1.solve-quadratic-by-factoring — Solve x² + bx + c = 0 by factoring
+### alg1.factor-gcf — Factor out the greatest common factor
 
-*(pinned reference entry — this course's pass absorbs this stub)*
+Rating: Medium · Format: short-expression
+Why: One GCD read plus two divisions, with a ~7-token entry — 3–6s.
+Sample: Factor: 6x + 12 → 6(x+2) · Rule: factored-commutative-ws · Params: gcf ∈ [2, 9]; two terms with both coefficients multiples of the gcf and ≤ 72; the variable-gcf band (6x² + 9x → 3x(2x+3)) keys separately; answer alphabet {digits, x, ^, +, −, (, )}.
+Kernels: [prealg.gcd-two-numbers, alg1.distribute-linear, fk.division-facts]
+
+### alg1.factor-difference-of-squares — Factor a difference of squares
+
+Rating: Medium · Format: short-expression · Render: unicode-inline · Surface-sensitive
+Why: One pattern recognition and two square-root recalls, but a ~12-token entry ≈ 3.25s — Medium's ceiling; flips to Low at 2× entry time, hence the marker.
+Sample: Factor: x² − 49 → (x+7)(x-7) · Rule: factored-commutative-ws · Params: monic x² − k² with k ∈ [2, 12]; the coefficient band (a²x² − k², a ∈ [2, 5]) keys separately; answer alphabet {digits, x, +, −, (, )}.
+Kernels: [fk.perfect-squares, prealg.square-root]
+
+### alg1.factor-perfect-square-trinomial — Recognize a perfect-square trinomial
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One halving and one square-check (is c = (b/2)²?) — 3–5s; asking for a alone keeps the answer one small integer.
+Sample: x² + 6x + 9 = (x + a)². a = ? → 3 · Rule: int-exact · Params: a ∈ [1, 12] (middle coefficient 2a ≤ 24, constant a² ≤ 144); the minus variant (x − a)² shows the sign in the prompt and still asks for positive a.
+Kernels: [fk.doubling-halving, fk.perfect-squares]
+
+### alg1.factor-nonmonic-quadratic — Factor a non-monic quadratic
+
+Rating: Low
+Why: Inherently multi-step at any speed — search ac's factor pairs, split the middle term, factor by grouping — with intermediate state to hold.
+Kernels: [alg1.factor-pairs-sum-product, alg1.factor-gcf, alg1.multiply-binomials, fk.times-tables]
+
+**KA Unit 14 — Quadratic functions & equations.**
+
+### alg1.solve-quadratic-by-factoring — Solve x² + bx + c = 0 by factoring · pinned calibration entry
+
 Rating: Low
 Why: Inherently multi-step at any speed — factor, apply the zero-product property, read off both roots — the tier definition's Low case even for a fluent student.
-Kernels: [alg1.factor-simple-quadratic, alg1.factor-pairs-sum-product]
+Kernels: [alg1.factor-simple-quadratic, alg1.factor-pairs-sum-product, alg1.roots-from-factored-form]
+
+### alg1.roots-from-factored-form — Roots from factored form
+
+Rating: Medium · Format: two-numbers
+Why: Two sign-flip reads off the factors (zero-product read-off) — Medium floor, ~3–4s with the pair entry.
+Sample: y = (x − 2)(x + 5) — both roots → 2, -5 · Rule: pair-unordered · Params: roots distinct nonzero integers ∈ [−9, 9] in all sign combinations; negative roots carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+### alg1.vertex-from-vertex-form — Vertex from vertex form
+
+Rating: High · Format: two-numbers · Render: unicode-inline · Surface-sensitive
+Why: A read-off with one memorized sign flip on h — ~1.5s think + ~1.5s entry; entry dominates the High budget, hence the marker.
+Sample: y = (x − 3)² + 5 — vertex (h, then k) → 3, 5 · Rule: pair-ordered · Params: h, k nonzero integers ∈ [−9, 9] in both sign renderings; negative coordinates carry the touch-minus-key caveat.
+Kernels: [fk.integer-add-sub]
+
+### alg1.axis-of-symmetry — Axis of symmetry from standard form
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One rule application (x = −b/2a; the monic band makes it a halving with a sign flip) — 3–5s.
+Sample: y = x² − 6x + 1 — axis of symmetry x = ? → 3 · Rule: int-exact · Params: monic base band with even b ∈ [−18, 18] excluding 0; the a ∈ {2, 3} stretch band keeps b/2a an integer; the constant term is decorative; negative answers carry the touch-minus-key caveat.
+Kernels: [fk.doubling-halving, fk.integer-mul-div]
+
+### alg1.discriminant-root-count — Count real solutions via the discriminant
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One held computation (b² − 4ac) and a sign read — Medium's upper half, 5–8s at small params.
+Sample: How many real solutions: x² + 6x + 9 = 0? → 1 · Rule: int-exact · Params: a ∈ [1, 3], b ∈ [−9, 9], c ∈ [−9, 9] with |b² − 4ac| ≤ 81; answers ∈ {0, 1, 2} balanced.
+Kernels: [fk.perfect-squares, fk.times-tables, fk.integer-mul-div]
+
+### alg1.solve-x-squared-equals-k — Solve x² = k
+
+Rating: Medium · Format: two-numbers · Render: unicode-inline
+Why: One root recall plus the ± judgment — Medium floor with the pair entry.
+Sample: x² = 49 — both solutions → 7, -7 · Rule: pair-unordered · Params: k a perfect square in {4, …, 225}; the shifted band (x − a)² = k with a ∈ [1, 9] keys separately; negative solutions carry the touch-minus-key caveat.
+Kernels: [prealg.square-root, fk.perfect-squares]
+
+### alg1.solve-by-quadratic-formula — Solve via the quadratic formula
+
+Rating: Low
+Why: Inherently multi-step at any speed — compute the discriminant, root it, then assemble two quotient values while holding every intermediate.
+Kernels: [alg1.discriminant-root-count, prealg.square-root, prealg.simplify-fraction, fk.integer-add-sub]
+
+### alg1.complete-the-square — Complete the square
+
+Rating: Low
+Why: Inherently multi-step at any speed — halve b, square it, rebalance the constant, rewrite as a shifted square, then root — a chain of moves with carried state.
+Kernels: [fk.doubling-halving, fk.perfect-squares, alg1.factor-perfect-square-trinomial, alg1.solve-x-squared-equals-k]
+
+**KA Unit 15 — Irrational numbers.**
+
+### alg1.classify-rational-irrational — Classify a number as rational or irrational
+
+Rating: High · Format: true-false · Render: unicode-inline
+Why: One perfect-square (or form) check and a tap — ≤3s; genuinely a verification judgment.
+Sample: True or false: √17 is irrational → true · Rule: tf · Params: candidates: √n for n ∈ [2, 225] with perfect and non-perfect squares balanced, terminating and repeating decimals, fractions, and π-multiples; families balanced 50/50 true/false.
+Kernels: [fk.perfect-squares]
+
+### alg1.rational-irrational-operations — Closure judgments for sums and products
+
+Rating: Medium · Format: true-false · Render: unicode-inline
+Why: One recalled closure rule (or one counterexample check) — 3–6s; binary by nature.
+Sample: True or false: the sum of a rational number and an irrational number is always irrational → true · Rule: tf · Params: claim templates over {sum, product} × {rational/rational, rational/irrational, irrational/irrational} with "always" phrasing; false cases include the irrational/irrational always-claims and the zero-product trap (0 × √2 is rational); families balanced 50/50.
+Kernels: [alg1.classify-rational-irrational]
+
+**OpenStax cross-check merges — Elementary Algebra 2e.** The plan's expected KA gap — one-variable statistics/scatterplots (traditional Algebra 1) — was checked against both snapshots and **no snapshot checklist source contains it**: it is absent from the snapshotted KA Algebra 1 units 1–15 and equally absent from the Elementary Algebra 2e TOC (chapters 1–10 contain no statistics chapter). Recorded in the disposition table as out-of-checklist and flagged for a future curriculum pass — no entries were invented for it. The genuine diffs the cross-check did surface are merged below, each with its source note.
+
+### alg1.linear-word-problem — Translate-and-solve linear word problems
+
+Rating: Low
+Why: Inherently multi-step at any speed — parse the scenario, define a variable, translate to an equation, then solve; the translation alone exceeds any tier budget. (source: OpenStax Elementary Algebra 2e ch. 3 — KA spreads these across units as applications rather than a checklist unit)
+Kernels: [prealg.solve-two-step-equation, prealg.solve-multi-step-equation, prealg.unit-rate, prealg.percent-of-number]
+
+### alg1.polynomial-degree — Degree of a polynomial
+
+Rating: High · Format: single-number · Render: unicode-inline
+Why: One largest-exponent read — ≤2s. (source: OpenStax Elementary Algebra 2e ch. 6 — absent from KA sweep)
+Sample: Degree of 4x³ + 2x − 7 → 3 · Rule: int-exact · Params: 2–4 terms in one variable, exponents ≤ 9, coefficients ∈ [−9, 9]; terms not always in descending order — the scan is the skill.
+Kernels: No drillable kernel beyond entries already listed
+
+### alg1.multiply-monomials — Multiply two monomials
+
+Rating: Medium · Format: short-expression · Render: unicode-inline
+Why: Two parallel facts — coefficient product and exponent sum — with a ~5-token entry, 3–5s. (source: OpenStax Elementary Algebra 2e ch. 6 — absent from KA sweep)
+Sample: 3x² · 4x³ → 12x^5 · Rule: expr-commutative-ws · Params: coefficients ∈ [2, 9] with product ≤ 81; exponents ∈ [1, 6] with sum ≤ 9; single variable; answer alphabet {digits, x, ^}.
+Kernels: [fk.times-tables, prealg.exponent-product-rule]
+
+### alg1.simplify-monomial-quotient — Divide two monomials
+
+Rating: Medium · Format: short-expression · Render: unicode-inline
+Why: One coefficient division and one exponent subtraction — 3–5s. (source: OpenStax Elementary Algebra 2e ch. 8 — absent from KA sweep)
+Sample: 6x⁵ ÷ 2x² → 3x^3 · Rule: expr-commutative-ws · Params: coefficient quotient an integer ∈ [2, 9]; exponent difference ∈ [1, 6]; single variable; answer alphabet {digits, x, ^}.
+Kernels: [fk.division-facts, alg1.exponent-quotient-rule]
+
+### alg1.simplify-rational-expression — Simplify a rational expression
+
+Rating: Low
+Why: Inherently multi-step at any speed — factor numerator and denominator, then cancel common factors while holding both factorizations. (source: OpenStax Elementary Algebra 2e ch. 8 — absent from KA Algebra 1; KA hosts rational expressions in Algebra 2, but first-course-owns puts the canonical Low record here where the cross-check surfaced it)
+Kernels: [alg1.factor-simple-quadratic, alg1.factor-gcf, alg1.simplify-monomial-quotient]
+
+### alg1.multiply-square-roots — Multiply square roots
+
+Rating: Medium · Format: single-number · Render: unicode-inline
+Why: One product under the radical and one root recall — 3–5s at integer-answer params. (source: OpenStax Elementary Algebra 2e ch. 9 — absent from KA sweep)
+Sample: √2 × √8 → 4 · Rule: int-exact · Params: radicand pairs with a perfect-square product in {4, …, 144}; radicands ∈ [2, 50]; answers ∈ [2, 12].
+Kernels: [fk.times-tables, prealg.square-root, fk.perfect-squares]
+
+### Algebra 1 checklist disposition table
+
+Every KA Algebra 1 unit (1–15, plus the non-content 16–17 row), the recorded statistics gap check, and every Elementary Algebra 2e chapter (10) maps to entry slugs, a cross-reference, or an explicit disposition. Zero unmapped rows.
+
+| Checklist unit | Disposition |
+|---|---|
+| KA 1 Algebra foundations | alg1.distribute-linear (pin; canonical home Pre-Algebra per registry), alg1.combine-like-terms-multivar; substitution/evaluation → prealg.evaluate-expression; one-variable like terms → prealg.combine-like-terms; division-by-zero convention out-of-grain: concept vocabulary — no drillable content beyond kernels prealg.evaluate-expression |
+| KA 2 Solving equations & inequalities | alg1.solve-equation-both-sides, alg1.rearrange-formula-one-step; one/two-step equations → prealg.solve-one-step-equation, prealg.solve-two-step-equation; multi-step equations → prealg.solve-multi-step-equation (Low, owned by Pre-Algebra); one-step inequalities → prealg.solve-one-step-inequality; multi-step inequalities: recorded judgment — no new entry; same moves as prealg.solve-multi-step-equation plus the flip judgment of prealg.solve-one-step-inequality |
+| KA 3 Working with units | alg1.unit-convert-one-step; rate-conversion and dimensional-analysis word problems out-of-grain: modeling — no drillable content beyond kernels alg1.unit-convert-one-step, prealg.unit-rate |
+| KA 4 Linear equations & graphs | alg1.slope-two-points, alg1.intercept-from-equation, alg1.graph-line-from-equation (Low); slope/intercepts read from a drawn graph out-of-grain: needs graph-figure input the format set does not define; horizontal/vertical lines: recorded judgment — zero slope is excluded from alg1.slope-two-points params (answer-shape split) and undefined slope has no numeric answer shape |
+| KA 5 Forms of linear equations | alg1.read-slope-intercept (pin), alg1.read-point-slope, alg1.slope-from-standard-form, alg1.write-line-equation (Low) |
+| KA 6 Systems of equations | alg1.system-solution-count; solving 2×2 systems → prealg.solve-2x2-system (Low, owned by Pre-Algebra); checking candidates → prealg.check-system-solution; systems word problems out-of-grain: modeling — no drillable content beyond kernels prealg.solve-2x2-system |
+| KA 7 Inequalities (systems & graphs) | alg1.check-inequality-solution; graphing one- and two-variable inequalities and systems out-of-grain: graph output — no drillable content beyond kernels alg1.check-inequality-solution, prealg.solve-one-step-inequality |
+| KA 8 Functions | alg1.evaluate-function, alg1.is-function-pairs; domain/range out-of-grain: interval answers not in the format legend; average rate of change: recorded judgment — a multi-step composite of alg1.evaluate-function and alg1.slope-two-points, no separate entry; graph interpretation out-of-grain |
+| KA 9 Sequences | alg1.next-term-geometric, alg1.arithmetic-nth-term, alg1.geometric-nth-term; arithmetic next-term → prealg.next-term-arithmetic (owned by Pre-Algebra); recursive↔explicit formula conversion out-of-grain: formula writing — no drillable content beyond kernels alg1.arithmetic-nth-term, alg1.geometric-nth-term |
+| KA 10 Absolute value & piecewise functions | alg1.evaluate-absolute-expression, alg1.solve-absolute-value-equation, alg1.evaluate-piecewise; absolute value of an integer → prealg.absolute-value; graphing absolute-value/piecewise functions out-of-grain: graph output |
+| KA 11 Exponents & radicals | alg1.exponent-power-rule, alg1.exponent-quotient-rule, alg1.simplify-radical; product rule → prealg.exponent-product-rule; negative exponents → prealg.negative-exponent; square roots → prealg.square-root; cube roots → prealg.cube-root; root bracketing → prealg.root-between-integers |
+| KA 12 Exponential growth & decay | alg1.evaluate-exponential, alg1.growth-or-decay, alg1.growth-factor-to-rate; exponential-vs-linear model selection and growth/decay word problems out-of-grain: modeling — no drillable content beyond kernels alg1.growth-or-decay, alg1.evaluate-exponential, alg1.growth-factor-to-rate |
+| KA 13 Quadratics: Multiplying & factoring | alg1.factor-pairs-sum-product (pin), alg1.factor-simple-quadratic (pin), alg1.multiply-binomials, alg1.factor-gcf, alg1.factor-difference-of-squares, alg1.factor-perfect-square-trinomial, alg1.factor-nonmonic-quadratic (Low) |
+| KA 14 Quadratic functions & equations | alg1.solve-quadratic-by-factoring (pin, Low), alg1.roots-from-factored-form, alg1.vertex-from-vertex-form, alg1.axis-of-symmetry, alg1.discriminant-root-count, alg1.solve-x-squared-equals-k, alg1.solve-by-quadratic-formula (Low), alg1.complete-the-square (Low); graphing parabolas and feature-reading from drawn graphs out-of-grain: graph input/output |
+| KA 15 Irrational numbers | alg1.classify-rational-irrational, alg1.rational-irrational-operations |
+| KA 16–17 | non-content units (course challenge/review) — no sweep required, recorded per plan |
+| KA gap check — one-variable statistics & scatterplots (traditional Algebra 1) | no snapshot checklist source contains it: absent from KA Algebra 1 units 1–15 and from Elementary Algebra 2e chs. 1–10 — recorded as out-of-checklist, flagged for a future curriculum pass; no entries invented |
+| OS 1 Foundations | covered: fk/prealg arithmetic and expression sets (see the Pre-Algebra section) — prealg.evaluate-expression, prealg.combine-like-terms, prealg.order-of-operations, fk.integer-add-sub, fk.integer-mul-div |
+| OS 2 Solving Linear Equations and Inequalities | covered by the KA 2 entry set |
+| OS 3 Math Models | merged: alg1.linear-word-problem (Low); remainder out-of-grain: applied modeling — no drillable content beyond the kernels named on that entry |
+| OS 4 Graphs | covered by the KA 4 / KA 5 entry sets |
+| OS 5 Systems of Linear Equations | covered by the KA 6 row (cross-references to the Pre-Algebra owners) |
+| OS 6 Polynomials | merged: alg1.polynomial-degree, alg1.multiply-monomials; polynomial add/subtract: recorded judgment — the same move as prealg.combine-like-terms / alg1.combine-like-terms-multivar at more terms; full multi-term polynomial arithmetic is Algebra 2 unit 1 grain (deferred to that sweep, consistent with the Pre-Algebra OS 10 disposition) |
+| OS 7 Factoring | covered by the KA 13 entry set |
+| OS 8 Rational Expressions and Equations | merged: alg1.simplify-monomial-quotient, alg1.simplify-rational-expression (Low); rational-equation solving: recorded judgment — Low grain owned by KA Algebra 2 unit 10 (Equations), deferred to that sweep |
+| OS 9 Roots and Radicals | merged: alg1.multiply-square-roots; covered: prealg.square-root, prealg.root-between-integers, alg1.simplify-radical; radical-equation solving: recorded judgment — owned by KA Algebra 2 unit 10, deferred to that sweep |
+| OS 10 Quadratic Equations | covered by the KA 14 entry set |
 
 ---
 

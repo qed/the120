@@ -213,7 +213,7 @@ Units 3–8 share one recipe: sweep the course's snapshotted KA checklist unit-b
 - Every High/Medium entry has: rating, rationale, sample+answer, format id from the legend, rule id from the legend (where the format requires one), params note, render flag. Every Low entry has rating, reason, and kernels-or-explicit-none.
 - OpenStax diff outcomes recorded (merged entries carry a source note; already-covered rows say so).
 
-- [ ] **Unit 4: Algebra 1 section**
+- [x] **Unit 4: Algebra 1 section**
 
 **Goal:** Author Algebra 1 against KA units 1–15 with the Elementary Algebra 2e cross-check (must catch the KA statistics gap). Expected home of marquee entries like `alg1.factor-pairs-sum-product`.
 

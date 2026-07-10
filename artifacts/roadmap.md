@@ -67,8 +67,8 @@ More bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
 **G1 · Playtesters + endgame difficulty** *(Owner: founder — humans; dev supports)* — 🔴 Not started.
 Recruit 3–5 playtesters who will really dig in, including one hardcore math kid and one decidedly non-math kid who aspires to better grades. Goal: tune the last boss to "bragging rights" hard and the 2nd-to-last to "earn your level-up" hard. Dev support ready: damage/HP/speed-window/penalty are single constants in `app/gauntlet/components/Battle.tsx`; per-boss difficulty modifiers + a fifth "bragging rights" boss can ship within a day of first feedback.
 
-**G2 · Pathway system (basics → complex)** *(dev)* — 🔴 Not started; partially blocked.
-Skill-tree progression: start at foundations, unlock topics by demonstrated mastery (the adaptive fact-tracking from M3 already measures this). Blocked on: (a) `gauntletcontent.md` topic inventory (being produced in a separate session), (b) the ninja_maths pathway reference image (never received — drop it in `reference/`). Architecture note: current unlock chain (boss gating) generalizes to topic nodes.
+**G2 · Pathway system (basics → complex)** *(dev)* — 🔴 Not started; content blocker cleared.
+Skill-tree progression: start at foundations, unlock topics by demonstrated mastery (the adaptive fact-tracking from M3 already measures this). Blocker (a) ✅ **complete 2026-07-10**: `artifacts/gauntletcontent.md` shipped — full Pre-Algebra → AP Calc BC taxonomy (346 rated entries, 100 cross-references, kernel registry with in-degree ranking, 28 prioritized top picks incl. the "Starter Twelve" zero-engine-work subset). Remaining blocker: (b) the ninja_maths pathway reference image (never received — drop it in `reference/`). Architecture note: current unlock chain (boss gating) generalizes to topic nodes.
 
 ## 🧊 Phase 3 / Later
 

@@ -196,7 +196,7 @@ export default function GauntletGame() {
         <Menu
           save={save}
           topics={topics}
-          setTopics={setTopics}
+          toggleTopic={(id) => setTopics((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]))}
           setBand={(b) => setSave((p) => ({ ...p, band: b }))}
           onStart={startBattle}
           onTrial={() => {
@@ -256,7 +256,7 @@ export default function GauntletGame() {
 function Menu({
   save,
   topics,
-  setTopics,
+  toggleTopic,
   setBand,
   onStart,
   onTrial,
@@ -264,14 +264,14 @@ function Menu({
 }: {
   save: Save;
   topics: TopicId[];
-  setTopics: (t: TopicId[]) => void;
+  toggleTopic: (id: TopicId) => void;
   setBand: (b: Band) => void;
   onStart: (bossIdx: number) => void;
   onTrial: () => void;
   onHelp: () => void;
 }) {
   const toggle = (id: TopicId) =>
-    setTopics(topics.includes(id) ? topics.filter((t) => t !== id) : [...topics, id]);
+    toggleTopic(id);
   const level = levelOf(save.xp);
   const xpIntoLevel = save.xp - (level - 1) * 100;
   const dailyActive = save.daily.date === todayStr();

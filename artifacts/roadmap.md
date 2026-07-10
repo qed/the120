@@ -64,6 +64,12 @@ Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudi
 **M4 · Later game ideas** *(dev)* — 🔴 Not started.
 More bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
 
+**G1 · Playtesters + endgame difficulty** *(Owner: founder — humans; dev supports)* — 🔴 Not started.
+Recruit 3–5 playtesters who will really dig in, including one hardcore math kid and one decidedly non-math kid who aspires to better grades. Goal: tune the last boss to "bragging rights" hard and the 2nd-to-last to "earn your level-up" hard. Dev support ready: damage/HP/speed-window/penalty are single constants in `app/gauntlet/components/Battle.tsx`; per-boss difficulty modifiers + a fifth "bragging rights" boss can ship within a day of first feedback.
+
+**G2 · Pathway system (basics → complex)** *(dev)* — 🔴 Not started; partially blocked.
+Skill-tree progression: start at foundations, unlock topics by demonstrated mastery (the adaptive fact-tracking from M3 already measures this). Blocked on: (a) `gauntletcontent.md` topic inventory (being produced in a separate session), (b) the ninja_maths pathway reference image (never received — drop it in `reference/`). Architecture note: current unlock chain (boss gating) generalizes to topic nodes.
+
 ## 🧊 Phase 3 / Later
 
 - CASL-consented nurture email flow (needs an email provider decision — Resend, Customer.io).
@@ -78,6 +84,11 @@ More bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
 ---
 
 ## ✅ Done
+
+**2026-07-10 — funnel verified in production + GTM plan:**
+- **Production E2E, full funnel** ✅ — scripted browser run against jointhe120.vercel.app: join modal → Supabase signup (auto-confirm) → dashboard → child dossier to 100% (real workshop catalog) → submit for review → "Reserve seat · $250" → Stripe test checkout (4242 card) → redirected back with "✓ Seat deposit received" → child card shows "SEAT RESERVED · $250 DEPOSIT PAID" → **live seat count decremented 113 → 112**. ⚠️ **Cleanup needed:** refund the QA deposit in the Stripe *test* dashboard (customer `the120.e2e.07101008@example.com`) — the charge.refunded webhook restores the public count to 113 — and delete the QA parent/child rows in Supabase. Until then the public counter includes one QA deposit.
+- **GTM 8-week sprint plan** → `artifacts/gtm-8-week-sprint.md` — Arm/Seed/Surge/Land phases, funnel math to 48–55 deposits by Sept 1, F1/F2 ambassador system (recognition incentives, CASL-safe), five-group vertical outreach, Gauntlet Summer Tournament as the organic engine, September landing definition-of-done, Monday checklist. Flags the same Week-1 blockers as this roadmap: S10 Stripe live, T2 booking link, email provider.
+- **Gauntlet question-type UI audit** — all 8 topics verified isolated and rendering correctly (numeric auto-submit ×7; congruence figures + 5-choice); fixed a topic-toggle state race (stale closure on rapid clicks).
 
 **2026-07-09 — the funnel ships (S1–S4 + Phase 1):**
 - **S1 · Supabase auth** (`09e3727`) — join modal creates real users (email+password, auto-confirmed until SMTP); parents table with CASL consent; sign-in screen; auth-gated dashboard. Schema migration: parents/children/deposits + RLS (verified: anon reads zero rows) + `seats_claimed()`.

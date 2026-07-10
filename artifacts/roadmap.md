@@ -58,8 +58,11 @@ Boss-battle FastMath: correct answers do damage (speed + streak multipliers), wr
 **M2 · Deposit gating + account saves** *(dev)* — 🔴 Not started.
 When product wants it: full topic set / Mastery Trials behind a paid deposit (deposits table already live), progress saved to the family's Supabase account instead of localStorage.
 
-**M3 · Game depth** *(dev)* — 🔴 Not started.
-Sound effects/music toggle, Mastery Trials mode (timed accuracy gauntlet), multiplayer raid rooms, more bosses/arenas, difficulty scaling by grade.
+**M3 · Game depth round 1** *(dev)* — ✅ **Shipped.**
+Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudio cues (hits, crits, misses, final-seconds ticks, fanfares) with mute; adaptive trainer (per-fact speed/accuracy, weak facts re-served ~35%); teach-on-miss (correct answer shown before advancing); post-raid "Train these" report + waste %; grade bands (3–4/5–6/7–8); boss medals (🥉🥈🥇) + sequential boss unlocks; Mastery Trial survival mode (+2s/−4s, waves, personal best); daily raid streak; XP titles + bar; first-run how-to; leave-raid confirm; tab-hidden timer pause; reduced-motion support; congruence problems rotate + vary marks. Multiplayer deliberately skipped (product call).
+
+**M4 · Later game ideas** *(dev)* — 🔴 Not started.
+Rename pending (product to pick); more bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
 
 ## 🧊 Phase 3 / Later
 

@@ -6,8 +6,8 @@ import type { TrianglePair } from "../game/problems";
 export default function TriangleFigure({ pair }: { pair: TrianglePair }) {
   return (
     <div className="flex items-center justify-center gap-8">
-      <Tri sides={pair.a.sides} marks={pair.a.marks} flip={false} />
-      <Tri sides={pair.b.sides} marks={pair.b.marks} flip />
+      <Tri sides={pair.a.sides} marks={pair.a.marks} flip={false} rotate={pair.a.rotate} />
+      <Tri sides={pair.b.sides} marks={pair.b.marks} flip rotate={pair.b.rotate} />
     </div>
   );
 }
@@ -16,10 +16,12 @@ function Tri({
   sides,
   marks,
   flip,
+  rotate = 0,
 }: {
   sides: [number, number, number];
   marks: string[];
   flip: boolean;
+  rotate?: number;
 }) {
   // Build a triangle from side lengths (scaled to fit ~150x110 box)
   const [a, b, c] = sides;
@@ -60,7 +62,7 @@ function Tri({
       viewBox={`0 0 ${view.w} ${view.h}`}
       width={view.w}
       height={view.h}
-      style={flip ? { transform: "scaleX(-1)" } : undefined}
+      style={{ transform: `${flip ? "scaleX(-1) " : ""}rotate(${rotate}deg)` }}
       aria-hidden
     >
       <polygon

@@ -17,6 +17,8 @@ export type AccountForm = {
   password: string;
   phone: string;
   postalCode: string;
+  heardAbout: string;
+  referralCode: string;
   caslConsent: boolean;
 };
 
@@ -27,8 +29,22 @@ const EMPTY: AccountForm = {
   password: "",
   phone: "",
   postalCode: "",
+  heardAbout: "",
+  referralCode: "",
   caslConsent: false,
 };
+
+/** Attribution options (GTM: ambassadors, Gauntlet, verticals). Both fields optional. */
+const HEARD_ABOUT_OPTIONS = [
+  "A friend or ambassador",
+  "The Gauntlet game",
+  "Parent group or forum",
+  "My child's school",
+  "Coach or program director",
+  "Search",
+  "Event",
+  "Other",
+];
 
 const POSTAL = /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -97,16 +113,28 @@ export default function AccountModal({
     setSubmitError(null);
     try {
       const supabase = supabaseBrowser();
+      const heardAbout = form.heardAbout.trim();
+      const referralCode = form.referralCode.trim().toUpperCase();
+
       const { data, error } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
-        options: { data: { first_name: form.firstName, last_name: form.lastName } },
+        options: {
+          data: {
+            first_name: form.firstName,
+            last_name: form.lastName,
+            // Attribution is also kept in auth metadata so it's captured even
+            // before the parents-table migration lands.
+            heard_about: heardAbout,
+            referral_code: referralCode,
+          },
+        },
       });
       if (error) throw error;
       const userId = data.user?.id;
       if (!userId) throw new Error("Account created but no user returned — try signing in.");
 
-      const { error: profileError } = await supabase.from("parents").upsert({
+      const baseProfile = {
         id: userId,
         first_name: form.firstName,
         last_name: form.lastName,
@@ -115,7 +143,15 @@ export default function AccountModal({
         postal_code: form.postalCode.trim().toUpperCase(),
         casl_consent: form.caslConsent,
         casl_consent_at: new Date().toISOString(),
-      });
+      };
+      let { error: profileError } = await supabase
+        .from("parents")
+        .upsert({ ...baseProfile, heard_about: heardAbout, referral_code: referralCode });
+      if (profileError && /heard_about|referral_code|column/i.test(profileError.message)) {
+        // Migration not applied yet — save the profile without attribution columns
+        // (attribution still lives in auth metadata above).
+        ({ error: profileError } = await supabase.from("parents").upsert(baseProfile));
+      }
       if (profileError) throw profileError;
 
       setSubmitted(true);
@@ -250,6 +286,36 @@ export default function AccountModal({
                         autoComplete="postal-code"
                         placeholder="M5V 2T6"
                         maxLength={7}
+                      />
+                    </Field>
+                  </div>
+
+                  {/* Attribution (optional): how they heard + ambassador/referral code */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+                        How did you hear about us?
+                      </span>
+                      <select
+                        className={inputCls()}
+                        value={form.heardAbout}
+                        onChange={(e) => set("heardAbout", e.target.value)}
+                      >
+                        <option value="">Optional — pick one</option>
+                        {HEARD_ABOUT_OPTIONS.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Field label="Referral code (optional)">
+                      <input
+                        className={inputCls()}
+                        value={form.referralCode}
+                        onChange={(e) => set("referralCode", e.target.value.toUpperCase())}
+                        placeholder="AMB-NAME"
+                        maxLength={24}
                       />
                     </Field>
                   </div>

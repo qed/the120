@@ -8,6 +8,34 @@ import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/au
 import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
+import { shareScore, type ShareData } from "./game/shareCard";
+
+/** Share button with delivered-state feedback (GTM share card). */
+function ShareButton({ data }: { data: ShareData }) {
+  const [state, setState] = useState<"idle" | "busy" | "shared" | "downloaded">("idle");
+  return (
+    <button
+      onClick={async () => {
+        setState("busy");
+        try {
+          setState(await shareScore(data));
+        } catch {
+          setState("idle");
+        }
+      }}
+      className="rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300 disabled:opacity-60"
+      disabled={state === "busy"}
+    >
+      {state === "busy"
+        ? "MAKING CARD…"
+        : state === "shared"
+          ? "SHARED ✓"
+          : state === "downloaded"
+            ? "SAVED — SEND IT ✓"
+            : "📸 SHARE SCORE"}
+    </button>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Save (v2) — local until account-linked saves (roadmap M2)          */
@@ -489,6 +517,19 @@ function Result({
       )}
 
       <div className="mt-8 flex flex-wrap justify-center gap-3">
+        {won && (
+          <ShareButton
+            data={{
+              kind: "raid",
+              bossId: boss.id,
+              bossName: boss.name,
+              medal,
+              damage: stats.damage,
+              accuracy: acc,
+              bestStreak: stats.bestStreak,
+            }}
+          />
+        )}
         {won && onNext && (
           <button onClick={onNext} className="rounded-xl bg-emerald-500 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-400">
             NEXT BOSS →
@@ -545,7 +586,8 @@ function TrialResult({
         </div>
       )}
 
-      <div className="mt-8 flex gap-3">
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        {score > 0 && <ShareButton data={{ kind: "trial", score, best }} />}
         <button onClick={onRetry} className="rounded-xl bg-amber-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-amber-300">
           RUN IT BACK
         </button>

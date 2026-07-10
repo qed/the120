@@ -143,7 +143,7 @@ Kernels: [<slug>, <slug>] | "No drillable kernel beyond entries already listed (
 
 ### Phase A — Contracts and calibration (the parts that are near-impossible to retrofit)
 
-- [ ] **Unit 1: Document skeleton, engine contract, format legend, and checklist snapshots**
+- [x] **Unit 1: Document skeleton, engine contract, format legend, and checklist snapshots**
 
 **Goal:** Create `artifacts/gauntletcontent.md` with everything every later entry depends on: the "How to read this document" preamble (tier definitions, format-preference order, current-engine definition — restated from R4/R5/R7 so the doc is standalone per R8); the verified engine contract (exact-string matching, length-based auto-judge with its no-backspace nuance, strip regex, `numeric|choice` universe, no custom keypad, positive-integer-only answers today — the judge grades negatives but touch `inputMode="numeric"` keyboards may lack a minus key — per-fact `key` convention for the adaptive trainer) with code pointers to `app/gauntlet/components/Battle.tsx` and `app/gauntlet/game/problems.ts`; the input-format legend (single number, two numbers, short expression, multiple choice, true/false, fraction, decimal) with per-format assumed input surface, submit model, allowed characters, normalization mini-spec, and accept/reject examples; the closed accepted-answer-rule legend; the in-degree counting rule; the canonical-ownership and cross-reference-row rules; the slug convention; the empty kernel registry section; and the snapshotted checklists (KA unit lists per course, OpenStax TOC cross-check lists, AP CED units) each with source + as-of date.
 

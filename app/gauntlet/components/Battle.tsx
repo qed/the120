@@ -325,7 +325,8 @@ export default function Battle({
           )}
           <p className={`text-center font-bold ${problem.prompt.length > 24 ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"}`}>
             {problem.prompt}
-            {problem.kind === "numeric" && (
+            {/* only append "= ?" when the prompt doesn't already ask its own question */}
+            {problem.kind === "numeric" && !problem.prompt.includes("?") && (
               <span style={{ color: boss.glow }}>
                 {" "}
                 = {reveal ? <span className="text-emerald-400">{reveal.answer}</span> : "?"}
@@ -333,7 +334,7 @@ export default function Battle({
             )}
           </p>
 
-          {reveal && problem.kind === "choice" && (
+          {reveal && (problem.kind === "choice" || problem.prompt.includes("?")) && (
             <p className="mt-2 text-center font-mono text-sm text-emerald-400">
               Answer: {reveal.answer}
             </p>

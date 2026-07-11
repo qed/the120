@@ -152,7 +152,9 @@ export default function Trial({
           )}
           <p className={`text-center font-bold ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
             {problem.prompt}
-            {problem.kind === "numeric" && <span className="text-amber-300"> = ?</span>}
+            {problem.kind === "numeric" && !problem.prompt.includes("?") && (
+              <span className="text-amber-300"> = ?</span>
+            )}
           </p>
           {problem.kind === "numeric" ? (
             <input

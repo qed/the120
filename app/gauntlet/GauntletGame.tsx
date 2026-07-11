@@ -358,22 +358,29 @@ function Menu({
             </button>
           ))}
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {TOPICS.map((t) => {
-            const on = topics.includes(t.id);
-            return (
-              <button
-                key={t.id}
-                onClick={() => toggle(t.id)}
-                className={`rounded-full border px-3.5 py-1.5 font-mono text-xs transition-all ${
-                  on ? "border-cyan-400 bg-cyan-400/20 text-cyan-200" : "border-white/20 text-white/60 hover:border-white/50"
-                }`}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+        {([1, 2] as const).map((tier) => (
+          <div key={tier} className="mt-3">
+            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
+              {tier === 1 ? "Number facts" : "Skills & concepts"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {TOPICS.filter((t) => t.tier === tier).map((t) => {
+                const on = topics.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => toggle(t.id)}
+                    className={`rounded-full border px-3.5 py-1.5 font-mono text-xs transition-all ${
+                      on ? "border-cyan-400 bg-cyan-400/20 text-cyan-200" : "border-white/20 text-white/60 hover:border-white/50"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Bosses (gated) + Mastery Trial */}

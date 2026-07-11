@@ -1,16 +1,32 @@
 /**
- * MathRaiders problem engine.
- * - Grade bands scale ranges (B4).
+ * Gauntlet problem engine.
+ * - Grade bands scale ranges for the core arithmetic topics (B4).
  * - Every problem carries a stable `key` so the adaptive trainer can track
  *   per-fact speed/accuracy and re-serve weak facts (B1).
- * - Congruence problems randomize rotation and mark placement (B5).
+ * - Starter Twelve topics implement artifacts/gauntletcontent.md's ranked
+ *   kernel picks (✦ starter subset) with the params specified there.
  */
 
 export type TopicId =
+  // core arithmetic (shipped picks #1/2/3/6)
   | "mul"
   | "div"
   | "add"
   | "sub"
+  // Starter Twelve (gauntletcontent.md)
+  | "sq"
+  | "cube"
+  | "sqrt"
+  | "pow"
+  | "dbl"
+  | "pow10"
+  | "fracof"
+  | "place"
+  | "mul2x1"
+  | "pyth"
+  | "prop"
+  | "exprule"
+  // earlier concept topics
   | "gcd"
   | "lcm"
   | "denom"
@@ -24,17 +40,30 @@ export const BANDS: { id: Band; label: string }[] = [
   { id: "g78", label: "Grades 7–8" },
 ];
 
-export type Topic = { id: TopicId; label: string };
+export type Topic = { id: TopicId; label: string; tier: 1 | 2 };
 
+/** tier 1 = number facts, tier 2 = skills & concepts. */
 export const TOPICS: Topic[] = [
-  { id: "mul", label: "Multiplication" },
-  { id: "div", label: "Division" },
-  { id: "add", label: "Addition" },
-  { id: "sub", label: "Subtraction" },
-  { id: "gcd", label: "GCD" },
-  { id: "lcm", label: "LCM" },
-  { id: "denom", label: "Common denominator" },
-  { id: "congruence", label: "Triangle congruence" },
+  { id: "mul", label: "Multiplication", tier: 1 },
+  { id: "div", label: "Division", tier: 1 },
+  { id: "add", label: "Addition", tier: 1 },
+  { id: "sub", label: "Subtraction", tier: 1 },
+  { id: "sq", label: "Squares", tier: 1 },
+  { id: "cube", label: "Cubes", tier: 1 },
+  { id: "dbl", label: "Double & halve", tier: 1 },
+  { id: "pow10", label: "Powers of ten", tier: 1 },
+  { id: "mul2x1", label: "2-digit × 1-digit", tier: 1 },
+  { id: "place", label: "Place value", tier: 1 },
+  { id: "fracof", label: "Fraction of a number", tier: 1 },
+  { id: "sqrt", label: "Square roots", tier: 2 },
+  { id: "pow", label: "Exponents", tier: 2 },
+  { id: "exprule", label: "Exponent rules", tier: 2 },
+  { id: "pyth", label: "Pythagorean triples", tier: 2 },
+  { id: "prop", label: "Proportions", tier: 2 },
+  { id: "gcd", label: "GCD", tier: 2 },
+  { id: "lcm", label: "LCM", tier: 2 },
+  { id: "denom", label: "Common denominator", tier: 2 },
+  { id: "congruence", label: "Triangle congruence", tier: 2 },
 ];
 
 export type TrianglePair = {
@@ -62,7 +91,11 @@ function gcd(a: number, b: number): number {
 }
 const lcm = (a: number, b: number) => (a * b) / gcd(a, b);
 
-/* ---------- band ranges ---------- */
+/** Unicode superscripts for the unicode-inline render entries. */
+const SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+const sup = (n: number) => String(n).split("").map((d) => SUP[+d]).join("");
+
+/* ---------- band ranges (core arithmetic) ---------- */
 
 const R = {
   mul: { g34: [2, 6], g56: [2, 10], g78: [2, 12] },
@@ -76,7 +109,7 @@ const R = {
   lcmCap: { g34: 40, g56: 90, g78: 144 },
 } as const;
 
-/* ---------- generators ---------- */
+/* ---------- core arithmetic ---------- */
 
 function makeMul(a: number, b: number): Problem {
   const [lo, hi] = a <= b ? [a, b] : [b, a];
@@ -88,13 +121,7 @@ function genMul(band: Band): Problem {
 }
 
 function makeDiv(dividend: number, divisor: number): Problem {
-  return {
-    topic: "div",
-    key: `div:${dividend}÷${divisor}`,
-    prompt: `${dividend} ÷ ${divisor}`,
-    answer: String(dividend / divisor),
-    kind: "numeric",
-  };
+  return { topic: "div", key: `div:${dividend}÷${divisor}`, prompt: `${dividend} ÷ ${divisor}`, answer: String(dividend / divisor), kind: "numeric" };
 }
 function genDiv(band: Band): Problem {
   const [lo, hi] = R.mul[band];
@@ -121,6 +148,184 @@ function genSub(band: Band): Problem {
   const a = ri(4, max);
   return makeSub(a, ri(1, a - 1));
 }
+
+/* ---------- Starter Twelve (specs: gauntletcontent.md ranked picks) ---------- */
+
+// fk.perfect-squares — bases ∈ [2,15]
+function makeSq(base: number): Problem {
+  return { topic: "sq", key: `sq:${base}`, prompt: `${base}${sup(2)}`, answer: String(base * base), kind: "numeric" };
+}
+const genSq = () => makeSq(ri(2, 15));
+
+// fk.perfect-cubes — bases ∈ [2,6] core (recall, not computation)
+function makeCube(base: number): Problem {
+  return { topic: "cube", key: `cube:${base}`, prompt: `${base}${sup(3)}`, answer: String(base ** 3), kind: "numeric" };
+}
+const genCube = () => makeCube(ri(2, 6));
+
+// prealg.square-root — radicands the squares of [2,15]
+function makeSqrt(root: number): Problem {
+  return { topic: "sqrt", key: `sqrt:${root * root}`, prompt: `√${root * root}`, answer: String(root), kind: "numeric" };
+}
+const genSqrt = () => makeSqrt(ri(2, 15));
+
+// prealg.evaluate-exponent — base ∈ [2,10], exp ∈ [2,4]; exp-4 restricted to bases 2–5
+function makePow(base: number, exp: number): Problem {
+  return { topic: "pow", key: `pow:${base}^${exp}`, prompt: `${base}${sup(exp)}`, answer: String(base ** exp), kind: "numeric" };
+}
+function genPow(): Problem {
+  const exp = ri(2, 4);
+  const base = exp === 4 ? ri(2, 5) : ri(2, 10);
+  return makePow(base, exp);
+}
+
+// fk.doubling-halving — double n ∈ [13,99]; halve even n ∈ [12,98] + round hundreds ≤ 400
+function makeDbl(op: "double" | "half", n: number): Problem {
+  return {
+    topic: "dbl",
+    key: `dbl:${op}:${n}`,
+    prompt: op === "double" ? `Double ${n}` : `Half of ${n}`,
+    answer: String(op === "double" ? n * 2 : n / 2),
+    kind: "numeric",
+  };
+}
+function genDbl(): Problem {
+  if (Math.random() < 0.5) return makeDbl("double", ri(13, 99));
+  const n = Math.random() < 0.8 ? ri(6, 49) * 2 : pick([100, 200, 300, 400]);
+  return makeDbl("half", n);
+}
+
+// fk.powers-of-ten — place shifts of 1–4; positive-integer answers ≤ 6 digits
+function makePow10(op: "mul" | "div", n: number, p: number): Problem {
+  const t = 10 ** p;
+  return {
+    topic: "pow10",
+    key: `pow10:${op}:${n}:${p}`,
+    prompt: op === "mul" ? `${n} × ${t.toLocaleString("en-CA")}` : `${(n * t).toLocaleString("en-CA")} ÷ ${t.toLocaleString("en-CA")}`,
+    answer: op === "mul" ? String(n * t) : String(n),
+    kind: "numeric",
+  };
+}
+function genPow10(): Problem {
+  const op = Math.random() < 0.5 ? "mul" : "div";
+  const p = ri(1, 4);
+  const nMax = Math.floor(999999 / 10 ** p);
+  return makePow10(op, ri(2, Math.min(99, nMax)), p);
+}
+
+// fk.fraction-of-number — den ∈ [2,10], num ∈ [1,den−1], whole divisible by den, ∈ [6,60]
+function makeFracOf(num: number, den: number, whole: number): Problem {
+  return {
+    topic: "fracof",
+    key: `fracof:${num}/${den}:${whole}`,
+    prompt: `${num}/${den} of ${whole}`,
+    answer: String((whole / den) * num),
+    kind: "numeric",
+  };
+}
+function genFracOf(): Problem {
+  const den = ri(2, 10);
+  const num = ri(1, den - 1);
+  const lo = Math.max(1, Math.ceil(6 / den));
+  const whole = den * ri(lo, Math.floor(60 / den));
+  return makeFracOf(num, den, whole);
+}
+
+// fk.place-value — 3–5 digit whole numbers, ones→thousands; answer is one digit
+const PLACES = ["ones", "tens", "hundreds", "thousands"] as const;
+function makePlace(n: number, placeIdx: number): Problem {
+  const digit = Math.floor(n / 10 ** placeIdx) % 10;
+  return {
+    topic: "place",
+    key: `place:${n}:${placeIdx}`,
+    prompt: `In ${n.toLocaleString("en-CA")}, which digit is in the ${PLACES[placeIdx]} place?`,
+    answer: String(digit),
+    kind: "numeric",
+  };
+}
+function genPlace(): Problem {
+  const digits = ri(3, 5);
+  const n = ri(10 ** (digits - 1), 10 ** digits - 1);
+  return makePlace(n, ri(0, Math.min(3, digits - 1)));
+}
+
+// fk.two-digit-times-one-digit — 2-digit ∈ [13,49] excl. multiples of 10, 1-digit ∈ [3,9]
+function makeMul2x1(a: number, b: number): Problem {
+  return { topic: "mul2x1", key: `mul2x1:${a}×${b}`, prompt: `${a} × ${b}`, answer: String(a * b), kind: "numeric" };
+}
+function genMul2x1(): Problem {
+  let a = ri(13, 49);
+  if (a % 10 === 0) a += 1;
+  return makeMul2x1(a, ri(3, 9));
+}
+
+// prealg.pythagorean-hypotenuse — named triples + integer multiples (hypotenuse ≤ 50)
+const TRIPLES: [number, number, number][] = [
+  [3, 4, 5],
+  [5, 12, 13],
+  [8, 15, 17],
+  [7, 24, 25],
+];
+function makePyth(a: number, b: number, c: number, missing: "hyp" | "leg"): Problem {
+  if (missing === "hyp") {
+    return {
+      topic: "pyth",
+      key: `pyth:${a},${b},${c}:hyp`,
+      prompt: `A right triangle has legs ${a} and ${b}. How long is the hypotenuse?`,
+      answer: String(c),
+      kind: "numeric",
+    };
+  }
+  return {
+    topic: "pyth",
+    key: `pyth:${a},${b},${c}:leg`,
+    prompt: `A right triangle has a leg ${b} and hypotenuse ${c}. How long is the other leg?`,
+    answer: String(a),
+    kind: "numeric",
+  };
+}
+function genPyth(): Problem {
+  const [a0, b0, c0] = pick(TRIPLES);
+  const k = ri(1, Math.max(1, Math.floor(50 / c0)));
+  const [a, b, c] = [a0 * k, b0 * k, c0 * k];
+  return Math.random() < 0.6 ? makePyth(a, b, c, "hyp") : makePyth(a, b, c, "leg");
+}
+
+// prealg.solve-proportion — a/b in lowest terms (a,b ∈ [1,9]), scale ∈ [2,9]; unknown rotates
+function makeProp(a: number, b: number, k: number, pos: 0 | 1 | 2 | 3): Problem {
+  const vals = [a, b, a * k, b * k];
+  const show = vals.map((v, i) => (i === pos ? "x" : String(v)));
+  return {
+    topic: "prop",
+    key: `prop:${a}:${b}:${k}:${pos}`,
+    prompt: `${show[0]}/${show[1]} = ${show[2]}/${show[3]} · x = ?`,
+    answer: String(vals[pos]),
+    kind: "numeric",
+  };
+}
+function genProp(): Problem {
+  let a = ri(1, 9);
+  let b = ri(2, 9);
+  const g = gcd(a, b);
+  a /= g;
+  b /= g;
+  if (a === b) b = a + 1;
+  return makeProp(a, b, ri(2, 9), ri(0, 3) as 0 | 1 | 2 | 3);
+}
+
+// prealg.exponent-product-rule — exponents ∈ [1,9], base from {2,3,5,10,x}
+function makeExpRule(base: string, e1: number, e2: number): Problem {
+  return {
+    topic: "exprule",
+    key: `exprule:${base}:${e1}:${e2}`,
+    prompt: `${base}${sup(e1)} × ${base}${sup(e2)} = ${base}ⁿ · n = ?`,
+    answer: String(e1 + e2),
+    kind: "numeric",
+  };
+}
+const genExpRule = () => makeExpRule(pick(["2", "3", "5", "10", "x"]), ri(1, 9), ri(1, 9));
+
+/* ---------- earlier concept topics ---------- */
 
 function makeGcd(a: number, b: number): Problem {
   const [x, y] = [Math.max(a, b), Math.min(a, b)];
@@ -172,8 +377,6 @@ const CRITERIA = ["SSS", "SAS", "ASA", "AAS"] as const;
 function genCongruence(): Problem {
   const correct = pick([...CRITERIA, "Not enough info"] as const);
   const sides: [number, number, number] = [ri(60, 90), ri(70, 100), ri(80, 110)];
-
-  // random placement: offset which sides/angles carry the marks (B5)
   const o = ri(0, 2);
   const s = (i: number) => `s${(i + o) % 3}`;
   const A = (i: number) => `A${(i + o) % 3}`;
@@ -185,7 +388,6 @@ function genCongruence(): Problem {
     "Not enough info": pick([[s(0), s(1)], [A(0), A(1)], [s(0), A(2)]]),
   };
   const marks = marksFor[correct];
-
   return {
     topic: "congruence",
     key: `congruence:${correct}`,
@@ -200,50 +402,102 @@ function genCongruence(): Problem {
   };
 }
 
-/* ---------- adaptive serving (B1) ---------- */
+/* ---------- registry + adaptive serving ---------- */
 
 const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   mul: genMul,
   div: genDiv,
   add: genAdd,
   sub: genSub,
+  sq: genSq,
+  cube: genCube,
+  sqrt: genSqrt,
+  pow: genPow,
+  dbl: genDbl,
+  pow10: genPow10,
+  fracof: genFracOf,
+  place: genPlace,
+  mul2x1: genMul2x1,
+  pyth: genPyth,
+  prop: genProp,
+  exprule: genExpRule,
   gcd: genGcd,
   lcm: genLcm,
   denom: genDenom,
   congruence: () => genCongruence(),
 };
 
-/** Rebuild a specific fact from its key (arithmetic topics only). */
+/** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
 export function problemFromKey(key: string): Problem | null {
-  const [topic, rest] = key.split(":");
+  const [topic, ...restParts] = key.split(":");
+  const rest = restParts.join(":");
   try {
-    if (topic === "mul") {
-      const [a, b] = rest.split("×").map(Number);
-      return Math.random() < 0.5 ? makeMul(a, b) : makeMul(b, a);
-    }
-    if (topic === "div") {
-      const [a, b] = rest.split("÷").map(Number);
-      return makeDiv(a, b);
-    }
-    if (topic === "add") {
-      const [a, b] = rest.split("+").map(Number);
-      return Math.random() < 0.5 ? makeAdd(a, b) : makeAdd(b, a);
-    }
-    if (topic === "sub") {
-      const [a, b] = rest.split("−").map(Number);
-      return makeSub(a, b);
-    }
-    if (topic === "gcd") {
-      const [a, b] = rest.split(",").map(Number);
-      return makeGcd(a, b);
-    }
-    if (topic === "lcm") {
-      const [a, b] = rest.split(",").map(Number);
-      return makeLcm(a, b);
-    }
-    if (topic === "denom") {
-      const [d1, d2] = rest.split(",").map(Number);
-      return makeDenom(ri(1, d1 - 1), d1, ri(1, d2 - 1), d2);
+    switch (topic) {
+      case "mul": {
+        const [a, b] = rest.split("×").map(Number);
+        return Math.random() < 0.5 ? makeMul(a, b) : makeMul(b, a);
+      }
+      case "div": {
+        const [a, b] = rest.split("÷").map(Number);
+        return makeDiv(a, b);
+      }
+      case "add": {
+        const [a, b] = rest.split("+").map(Number);
+        return Math.random() < 0.5 ? makeAdd(a, b) : makeAdd(b, a);
+      }
+      case "sub": {
+        const [a, b] = rest.split("−").map(Number);
+        return makeSub(a, b);
+      }
+      case "sq":
+        return makeSq(Number(rest));
+      case "cube":
+        return makeCube(Number(rest));
+      case "sqrt":
+        return makeSqrt(Math.round(Math.sqrt(Number(rest))));
+      case "pow": {
+        const [b, e] = rest.split("^").map(Number);
+        return makePow(b, e);
+      }
+      case "dbl":
+        return makeDbl(restParts[0] as "double" | "half", Number(restParts[1]));
+      case "pow10":
+        return makePow10(restParts[0] as "mul" | "div", Number(restParts[1]), Number(restParts[2]));
+      case "fracof": {
+        const [num, den] = restParts[0].split("/").map(Number);
+        return makeFracOf(num, den, Number(restParts[1]));
+      }
+      case "place":
+        return makePlace(Number(restParts[0]), Number(restParts[1]));
+      case "mul2x1": {
+        const [a, b] = rest.split("×").map(Number);
+        return makeMul2x1(a, b);
+      }
+      case "pyth": {
+        const [a, b, c] = restParts[0].split(",").map(Number);
+        return makePyth(a, b, c, restParts[1] as "hyp" | "leg");
+      }
+      case "prop":
+        return makeProp(
+          Number(restParts[0]),
+          Number(restParts[1]),
+          Number(restParts[2]),
+          Number(restParts[3]) as 0 | 1 | 2 | 3
+        );
+      case "exprule":
+        return makeExpRule(restParts[0], Number(restParts[1]), Number(restParts[2]));
+      case "gcd": {
+        const [a, b] = rest.split(",").map(Number);
+        return makeGcd(a, b);
+      }
+      case "lcm": {
+        const [a, b] = rest.split(",").map(Number);
+        return makeLcm(a, b);
+      }
+      case "denom": {
+        const [d1, d2] = rest.split(",").map(Number);
+        return makeDenom(ri(1, d1 - 1), d1, ri(1, d2 - 1), d2);
+      }
     }
   } catch {
     return null;
@@ -256,7 +510,9 @@ export function problemFromKey(key: string): Problem | null {
  * re-serves a weak fact; otherwise generates fresh at the band's difficulty.
  */
 export function nextProblem(topics: TopicId[], band: Band, weakKeys: string[] = []): Problem {
-  const eligible = weakKeys.filter((k) => topics.includes(k.split(":")[0] as TopicId) && !k.startsWith("congruence"));
+  const eligible = weakKeys.filter(
+    (k) => topics.includes(k.split(":")[0] as TopicId) && !k.startsWith("congruence")
+  );
   if (eligible.length && Math.random() < 0.35) {
     const p = problemFromKey(pick(eligible));
     if (p) return p;

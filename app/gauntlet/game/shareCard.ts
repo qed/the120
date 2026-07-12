@@ -20,7 +20,7 @@ export type ShareData =
       best: number;
     };
 
-const SITE = "jointhe120.vercel.app/gauntlet";
+const SITE = "the120.school/gauntlet";
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {

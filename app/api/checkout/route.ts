@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "A deposit is already paid for this child." }, { status: 400 });
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    const origin = req.headers.get("origin") ?? "https://jointhe120.vercel.app";
+    const origin = req.headers.get("origin") ?? "https://the120.school";
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [{ price: process.env.STRIPE_DEPOSIT_PRICE_ID!, quantity: 1 }],

@@ -101,6 +101,9 @@ The funnel counts "interested family" = any CASL-consented email — account, RS
 **GTM-6 · Welcome-email production E2E** *(dev + Peter)* — 🔴 Not started; quick.
 One fresh production signup post-deploy to verify the signup→welcome trigger fires end-to-end (E3 remainder b). Creates a throwaway account — Peter deletes the row after (dev has no dashboard access).
 
+**GTM-7 · Domain reachability on filtered networks** *(Owner: Peter — external, ~15 min)* — 🔴 Not started. **Discovered 2026-07-12.**
+At least one Toronto network (Ethan's) DNS-filters `the120.school` to a FortiGuard block IP — newly-registered domains and the `.school` TLD commonly get caught by school/corporate/family filters, i.e. exactly our audience's networks. Actions: (1) submit categorization requests for the120.school at FortiGuard (fortiguard.com/webfilter) — category "Education"; same at Symantec/Broadcom sitereview and Netcraft if ambitious; (2) keep jointhe120.vercel.app reachable as the fallback it already is; (3) recheck in a week from a filtered network. Consider grabbing the120.ca (still available, S6d) — .ca is rarely filtered and useful on printed materials.
+
 ## 🎮 The Gauntlet (FastMath game — formerly MathRaiders)
 
 **M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/gauntlet` — renamed from `/raiders`, redirect in place; in main nav).

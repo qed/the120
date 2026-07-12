@@ -22,7 +22,7 @@ export const TUITION_FULL_CORE_CAD = 15000;
  * scheduler — no code change needed. Email fallback until then, so no dead clicks.
  */
 export const BOOKING_URL =
-  process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:pkuperman@gmail.com";
+  process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:admissions@the120.school";
 
 export const nav = [
   { label: "The groups", href: "/#groups" },

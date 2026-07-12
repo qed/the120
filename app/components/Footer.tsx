@@ -28,12 +28,11 @@ export default function Footer() {
                 {l.label}
               </Link>
             ))}
-            {/* Interim contact until admissions@the120.school exists (S6) */}
             <a
-              href="mailto:pkuperman@gmail.com"
+              href="mailto:admissions@the120.school"
               className="text-[13px] text-muted transition-colors hover:text-paper"
             >
-              pkuperman@gmail.com
+              admissions@the120.school
             </a>
           </div>
         </div>

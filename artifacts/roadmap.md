@@ -16,6 +16,28 @@ Status markers: 🔴 not started · 🟡 in progress / partially done · ⛔ blo
 - **Positioning (2026-07-09):** The 120 is a general "join a society" product — 120 kids, five groups; GT is just one. GT pages are de-emphasized sub-pages; proof content lives on/from the home page. One 120 nav + footer on all pages. Parent testimonials front and center from home via `/parents`.
 - **Accounts:** Stripe ✅ (test mode, live product pending S10) · Supabase ✅ (live, schema deployed) · booking link, the120.school domain, mailbox — still to create.
 - **Interim contact email** is pkuperman@gmail.com (footer + Book-a-call fallback) until admissions@the120.school exists (S6).
+- **Stripe account (2026-07-12, E2):** The 120 charges on the **Hatch Coding CDN** account with statement descriptor **"THE120"** — no dedicated account. Revisit only if The 120 becomes its own legal entity (the Stripe account must belong to the entity actually charging).
+- **Gauntlet positioning (2026-07-12, E4):** the Gauntlet is a **public lead magnet, permanently** (Summer Tournament per the GTM plan). Never paywall the core game — a $250 school-seat deposit will never be bought to unlock a math game, so gating kills distribution without creating revenue. Free account saves progress + joins the leaderboard (= lead capture); deposit-holders get **additive** member perks only. Supersedes the original post-deposit lock-in framing; M2 reframed accordingly.
+
+## 📬 Ethan Items from July 11 — tracking checklist
+
+From Ethan's 2026-07-11 message. Each item resolves into a canonical roadmap item where one exists; an item is only done when its row below is ✅. Suggested order: **E5 → E6** (minutes each, data hygiene) → **E1** → **E2/S10** → **E3**.
+
+**E1 · Booking link (Ethan Q1)** = **T2**. 🔴 Owner: Peter, ~30 min, GTM-W1 (Jul 13–19). One Cal.com or Calendly event, then `NEXT_PUBLIC_BOOKING_URL` in Vercel + redeploy.
+
+**E2 · Stripe account question (Ethan Q2)** — ✅ **Decided 2026-07-12:** Hatch Coding CDN account + **"THE120"** statement descriptor (see Decisions). Remaining go-live work continues as **S10** steps 1b–4 (descriptor, live keys, live product/webhook, real charge + refund round-trip). Until S10 completes, all deposits stay test-mode.
+
+**E3 · Resend account + welcome email + deposit nurture (Ethan Q3)** — 🔴 New; promoted from Phase 3 with the provider decision made: **Resend**. Owner: Peter creates the account (external); dev wires templates + triggers. Scope per GTM §2/§5: welcome email #1 (the W1 asset), account-created sequence (T+0 welcome → T+2d dossier nudge → T+5d founder story → T+9d book-the-call), deposit-paid sequence (Founding-120 welcome → intensive #1 details → referral note). Production sending domain wants the120.school (S6) — account, templates, and test sends can proceed now on Resend's sandbox domain. **Definition of done includes telling Ethan the account exists** (he asked to be notified).
+
+**E4 · Gauntlet framing clarification (Ethan Q4)** — ✅ **Decided 2026-07-12:** public lead magnet + member perks (see Decisions). M2 reframed below; GTM plan's Summer Tournament proceeds as written.
+
+**E5 · `supabase db push` — attribution columns (Ethan a)** — 🔴 dev, minutes. Migration `supabase/migrations/20260710120000_referral_attribution.sql` is committed but not pushed; until then `heard_about` / `referral_code` land only in auth user metadata, not in `parents`, and ambassador attribution reporting can't query them.
+
+**E6 · QA deposit cleanup (Ethan b)** — 🔴 dev/Peter, minutes. Refund test-mode customer `the120.e2e.07101008@example.com` in the Stripe **test** dashboard (the charge.refunded webhook restores the public seat count 112 → 113), then delete the QA parent/child rows in Supabase (removes the fake dossier from the review queue). Flagged since the 2026-07-10 production E2E.
+
+**Ethan's updates, acknowledged (no action):** funnel E2E-verified in production ✅ (Done 2026-07-10) · Gauntlet visual polish + iteration design done ✅ (M3) · GTM plan + 8-week sprint in repo ✅ (`artifacts/gtm-8-week-sprint.md`) · both GTM-W1 dev tickets shipped ✅ (attribution field + share card) · Gauntlet content nearly in production — full Starter Twelve shipped, 16 of the 28 ranked picks live (tracked in G3 ✅ / G2).
+
+---
 
 ## 🚀 Phase 1 — open work
 
@@ -41,9 +63,9 @@ Licensed photography (hero is a 2165px extraction, soft on retina; four group-pa
 **S9 · Tin Can partnership confirmation** *(Owner: Peter — external)* — 🔴 **Not started.**
 Logo/co-marketing rights before the brand appears beyond the legal line.
 
-**S10 · Stripe go-live: account decision + live mode** *(Owner: Peter + dev)* — 🔴 **Not started; required before accepting real deposits.**
+**S10 · Stripe go-live** *(Owner: Peter + dev)* — 🟡 **Account decision made (E2, 2026-07-12); live-mode work not started. Required before accepting real deposits.**
 Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_103s7v25N9cbf3wU`). To go live:
-  1. **Account decision (Peter)**: dedicated Stripe account for The 120 **or** custom statement descriptor (e.g. "THE120") on Hatch Coding CDN. If switching: recreate product/price/webhook, update env.
+  1. ✅ **Account decision**: stay on Hatch Coding CDN. Remaining 1b: set statement descriptor **"THE120"** (Stripe dashboard → Settings → Public details); confirm it on the step-4 round-trip charge.
   2. **Live keys**: `pk_live_…` / `sk_live_…` into Vercel **production only** (test keys stay on preview/dev so previews can never charge real cards).
   3. **Live product + price + webhook** (test webhook `we_1TrOfg25N9cbf3wUesMLOl9y` targets production URL with test events today).
   4. **Verification**: one real $250 charge + refund round-trip; confirm statement descriptor, receipt email, refund copy.
@@ -55,8 +77,8 @@ Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_10
 **M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/gauntlet` — renamed from `/raiders`, redirect in place; in main nav).
 Boss-battle FastMath: correct answers do damage (speed + streak multipliers), wrong answers cost player HP; 2-minute raids, 4 bosses with generated arenas + sprites (Nano Banana Pro, `scripts/gen-sprites.mjs`), XP + local save. Topics: ×, ÷, +, − plus GCD, LCM, common denominator, and triangle congruence (rendered figures, multiple choice). Fully open demo for now, per direction.
 
-**M2 · Deposit gating + account saves** *(dev)* — 🔴 Not started.
-When product wants it: full topic set / Mastery Trials behind a paid deposit (deposits table already live), progress saved to the family's Supabase account instead of localStorage.
+**M2 · Account saves + member perks** *(dev)* — 🔴 Not started. **Reframed 2026-07-12 (E4): no paywall, ever — core game stays fully public.**
+Free account links Gauntlet progress to the family's Supabase account instead of localStorage (= lead capture, cross-device saves, leaderboard identity). Deposit-holders get **additive** perks only: early access to new bosses, G2 pathway depth, cosmetics/leaderboard flair (doubles as the ambassador incentive in the GTM plan). Lock-in comes from saved progress after the deposit, never from gating acquisition.
 
 **M3 · Game depth round 1** *(dev)* — ✅ **Shipped.**
 Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudio cues (hits, crits, misses, final-seconds ticks, fanfares) with mute; adaptive trainer (per-fact speed/accuracy, weak facts re-served ~35%); teach-on-miss (correct answer shown before advancing); post-raid "Train these" report + waste %; grade bands (3–4/5–6/7–8); boss medals (🥉🥈🥇) + sequential boss unlocks; Mastery Trial survival mode (+2s/−4s, waves, personal best); daily raid streak; XP titles + bar; first-run how-to; leave-raid confirm; tab-hidden timer pause; reduced-motion support; congruence problems rotate + vary marks. Multiplayer deliberately skipped (product call).
@@ -75,7 +97,7 @@ Skill-tree progression: start at foundations, unlock topics by demonstrated mast
 
 ## 🧊 Phase 3 / Later
 
-- CASL-consented nurture email flow (needs an email provider decision — Resend, Customer.io).
+- ~~CASL-consented nurture email flow~~ → promoted to **E3** (provider decided 2026-07-12: Resend).
 - Self-host the two Google fonts (build currently fetches them at build time).
 - Ongoing GT workshop-catalog sync (keep `data.ts` current as GT's catalog evolves).
 - Admin tooling depth: bulk status changes, assessment scheduling, waitlist management once 120 fills.

@@ -153,6 +153,16 @@ export default function AccountModal({
       }
       if (profileError) throw profileError;
 
+      // E3: welcome email #1 — fire-and-forget; the route is idempotent and
+      // a send failure must never block account creation.
+      const accessToken = data.session?.access_token;
+      if (accessToken) {
+        void fetch("/api/welcome", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).catch(() => {});
+      }
+
       setSubmitted(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong — try again.";

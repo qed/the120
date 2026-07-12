@@ -9,6 +9,14 @@ import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
 import { shareScore, type ShareData } from "./game/shareCard";
+import JoinButton from "@/app/components/JoinButton";
+import {
+  cloudUser,
+  fetchLeaderboard,
+  loadCloudSave,
+  pushCloudSave,
+  type LeaderRow,
+} from "./game/cloudSave";
 
 /** Share button with delivered-state feedback (GTM share card). */
 function ShareButton({ data }: { data: ShareData }) {
@@ -53,6 +61,8 @@ type Save = {
   daily: { date: string; count: number };
   facts: Record<string, FactStat>;
   trialBest: number;
+  /** self-chosen leaderboard handle (kid-safe; never a real name) */
+  handle: string;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -67,7 +77,33 @@ const EMPTY_SAVE: Save = {
   daily: { date: "", count: 0 },
   facts: {},
   trialBest: 0,
+  handle: "",
 };
+
+/** Union-merge two saves: keep the best of both (cloud vs local device). */
+function mergeSaves(a: Save, b: Save): Save {
+  const facts: Record<string, FactStat> = { ...a.facts };
+  for (const [k, f] of Object.entries(b.facts)) {
+    facts[k] = !facts[k] || f.n > facts[k].n ? f : facts[k];
+  }
+  const medals: Record<string, number> = { ...a.medals };
+  for (const [k, m] of Object.entries(b.medals)) {
+    medals[k] = Math.max(medals[k] ?? 0, m);
+  }
+  return {
+    xp: Math.max(a.xp, b.xp),
+    bossesBeaten: [...new Set([...a.bossesBeaten, ...b.bossesBeaten])],
+    bestStreak: Math.max(a.bestStreak, b.bestStreak),
+    medals,
+    band: a.xp >= b.xp ? a.band : b.band,
+    muted: a.muted,
+    seenHelp: a.seenHelp || b.seenHelp,
+    daily: a.daily.date >= b.daily.date ? a.daily : b.daily,
+    facts,
+    trialBest: Math.max(a.trialBest, b.trialBest),
+    handle: a.handle || b.handle,
+  };
+}
 
 const loadSave = (): Save => {
   try {
@@ -113,6 +149,10 @@ export default function GauntletGame() {
   const [trialScore, setTrialScore] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
+  const [userId, setUserId] = useState<string | null>(null);
+  const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
+  const [showBoard, setShowBoard] = useState(false);
+
   useEffect(() => {
     const s = loadSave();
     setSave(s);
@@ -123,6 +163,45 @@ export default function GauntletGame() {
   useEffect(() => {
     if (loaded) localStorage.setItem(SAVE_KEY, JSON.stringify(save));
   }, [save, loaded]);
+
+  // Cloud sync (GTM-2): merge cloud+device on sign-in detection; re-check on focus
+  // (players sign up mid-session via the modal, or return from the dashboard).
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    const check = async () => {
+      const uid = await cloudUser();
+      if (cancelled || !uid || uid === userId) return;
+      setUserId(uid);
+      const remote = await loadCloudSave(uid);
+      if (cancelled) return;
+      if (remote && remote.save && typeof remote.save === "object") {
+        setSave((local) => mergeSaves(local, { ...EMPTY_SAVE, ...(remote.save as Partial<Save>) }));
+      }
+    };
+    void check();
+    const onFocus = () => void check();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loaded, userId]);
+
+  // Debounced cloud push whenever the save changes while signed in.
+  useEffect(() => {
+    if (!userId || !loaded || save === EMPTY_SAVE) return;
+    const t = setTimeout(() => {
+      void pushCloudSave(userId, {
+        handle: save.handle,
+        band: save.band,
+        trial_best: save.trialBest,
+        xp: save.xp,
+        save,
+      }).then((ok) => setCloudOk(ok)); // banner only claims sync when writes really land
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [save, userId, loaded]);
 
   const boss = BOSSES[bossIdx];
   const weakKeys = weakKeysOf(save.facts);
@@ -223,15 +302,25 @@ export default function GauntletGame() {
       {phase === "menu" && (
         <Menu
           save={save}
+          userId={cloudOk ? userId : null}
           topics={topics}
           toggleTopic={(id) => setTopics((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]))}
           setBand={(b) => setSave((p) => ({ ...p, band: b }))}
+          setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
           onStart={startBattle}
           onTrial={() => {
             ensureAudio();
             setPhase("trial");
           }}
           onHelp={() => setShowHelp(true)}
+          onBoard={() => setShowBoard(true)}
+        />
+      )}
+      {showBoard && (
+        <LeaderboardPanel
+          band={save.band}
+          ownHandle={save.handle}
+          onClose={() => setShowBoard(false)}
         />
       )}
       {phase === "battle" && (
@@ -283,20 +372,26 @@ export default function GauntletGame() {
 
 function Menu({
   save,
+  userId,
   topics,
   toggleTopic,
   setBand,
+  setHandle,
   onStart,
   onTrial,
   onHelp,
+  onBoard,
 }: {
   save: Save;
+  userId: string | null;
   topics: TopicId[];
   toggleTopic: (id: TopicId) => void;
   setBand: (b: Band) => void;
+  setHandle: (h: string) => void;
   onStart: (bossIdx: number) => void;
   onTrial: () => void;
   onHelp: () => void;
+  onBoard: () => void;
 }) {
   const toggle = (id: TopicId) =>
     toggleTopic(id);
@@ -310,9 +405,14 @@ function Menu({
         <Link href="/" className="font-mono text-[11px] tracking-[0.08em] text-white/50 transition-colors hover:text-white">
           ← THE 120
         </Link>
-        <button onClick={onHelp} className="mr-12 rounded-full bg-white/10 px-3 py-1 font-mono text-[11px] text-white/60 hover:bg-white/20">
-          ? How to play
-        </button>
+        <span className="mr-12 flex items-center gap-2">
+          <button onClick={onBoard} className="rounded-full bg-amber-400/15 px-3 py-1 font-mono text-[11px] text-amber-200 hover:bg-amber-400/25">
+            🏆 Leaderboard
+          </button>
+          <button onClick={onHelp} className="rounded-full bg-white/10 px-3 py-1 font-mono text-[11px] text-white/60 hover:bg-white/20">
+            ? How to play
+          </button>
+        </span>
       </div>
 
       <h1 className="mt-6 text-center text-5xl font-bold tracking-tight sm:text-6xl">
@@ -340,6 +440,31 @@ function Menu({
           <span>{Math.round(save.xp)} XP</span>
           <span>best streak ×{save.bestStreak} · trial best {save.trialBest}</span>
         </div>
+
+        {/* Cloud status: guest banner or handle editor (GTM-2) */}
+        {userId ? (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-emerald-300">
+              ☁ Progress saved to your account
+            </span>
+            <label className="flex items-center gap-2 font-mono text-[10px] text-white/60">
+              HANDLE
+              <input
+                value={save.handle}
+                onChange={(e) => setHandle(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12))}
+                placeholder="RAIDER-X"
+                className="w-28 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-center font-mono text-xs text-white outline-none placeholder:text-white/25 focus:border-amber-400/60"
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/55">
+              Playing as guest — progress saves to this device only
+            </span>
+            <JoinButton className="!h-8 !px-3 !py-0 text-[10px]">Free account</JoinButton>
+          </div>
+        )}
       </div>
 
       {/* Band + topics */}
@@ -611,6 +736,96 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-2xl font-bold text-white">{value}</p>
       <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/50">{label}</p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Leaderboard (GTM-2)                                               */
+/* ------------------------------------------------------------------ */
+
+function LeaderboardPanel({
+  band,
+  ownHandle,
+  onClose,
+}: {
+  band: Band;
+  ownHandle: string;
+  onClose: () => void;
+}) {
+  const [filter, setFilter] = useState<string | null>(band);
+  const [rows, setRows] = useState<LeaderRow[] | null>(null);
+
+  useEffect(() => {
+    let dead = false;
+    setRows(null);
+    fetchLeaderboard(filter).then((r) => !dead && setRows(r));
+    return () => {
+      dead = true;
+    };
+  }, [filter]);
+
+  const bandLabel = (b: string) => BANDS.find((x) => x.id === b)?.label ?? b;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0d1322] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-2xl font-bold">🏆 Mastery Trial leaderboard</h3>
+          <button onClick={onClose} aria-label="Close" className="rounded-full px-2 text-white/50 hover:text-white">✕</button>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[null, ...BANDS.map((b) => b.id)].map((f) => (
+            <button
+              key={f ?? "all"}
+              onClick={() => setFilter(f)}
+              className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-all ${
+                filter === f ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-white/20 text-white/55 hover:border-white/50"
+              }`}
+            >
+              {f ? bandLabel(f) : "All"}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 min-h-[200px]">
+          {rows === null ? (
+            <p className="py-10 text-center font-mono text-xs text-white/40">Loading…</p>
+          ) : rows.length === 0 ? (
+            <p className="py-10 text-center font-mono text-xs text-white/40">
+              No scores yet — run the Mastery Trial and claim the top spot.
+            </p>
+          ) : (
+            <ol className="space-y-1">
+              {rows.map((r, i) => {
+                const mine = ownHandle && r.handle === ownHandle;
+                return (
+                  <li
+                    key={`${r.handle}-${i}`}
+                    className={`flex items-center justify-between rounded-lg px-3 py-1.5 font-mono text-sm ${
+                      mine ? "bg-amber-400/15 text-amber-200" : i % 2 ? "bg-white/[0.03]" : ""
+                    }`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className={`w-6 text-right ${i < 3 ? "text-amber-300" : "text-white/40"}`}>
+                        {i + 1}
+                      </span>
+                      <span className="font-bold">{r.handle}</span>
+                      <span className="text-[10px] uppercase text-white/35">{bandLabel(r.band)}</span>
+                    </span>
+                    <span className="text-lg font-bold text-white">{r.trial_best}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+
+        <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
+          Free account + a handle puts you on the board
+        </p>
+      </div>
     </div>
   );
 }

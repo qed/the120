@@ -78,6 +78,29 @@ Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_10
 
 ---
 
+## 📣 GTM build queue (software to execute artifacts/gtm-8-week-sprint.md)
+
+Per PM direction 2026-07-12: the GTM plan's software needs live here as tickets. Already shipped from the plan: attribution + referral field ✅ · share card ✅ · booking link ✅ (E1) · welcome email #1 ✅ (E3). Content assets (explainer PDF, five group one-sheets, ambassador kit, /parents post, canned objection answers) stay with Peter/content — not tracked as dev tickets.
+
+**GTM-1 · Nurture sequences on Vercel Cron** *(dev; E3 remainder)* — 🔴 Not started. **Needed by W1/W2.**
+Daily cron route: T+2d / T+5d / T+9d account-created sequence, deposit-paid sequence, stalled-dossier nudge (dossier >80% for 3+ days, not submitted) — copy skeletons in the GTM plan §5. Idempotent via a `sent` log (table or user metadata), CASL-consented recipients only, unsubscribe link. `RESEND_API_KEY` already in Vercel.
+
+**GTM-2 · Gauntlet account saves + leaderboard** *(dev; = M2 execution)* — 🟡 **Code shipped 2026-07-12 (Ethan); ⛔ awaiting migration apply.**
+Shipped: cloud save sync (union-merge of device + cloud on sign-in detection, focus re-check, 2.5s debounced push), kid-safe self-chosen handle (A–Z/0–9, 12 chars, never a real name), 🏆 leaderboard panel (top-20 Mastery Trial scores, band filter chips, own-row highlight, empty state), guest banner with "Free account" CTA. Everything degrades to guest/localStorage when signed out, env-less, or pre-migration — and the "saved to your account" banner only shows after a cloud write actually succeeds, so it never lies pre-migration.
+**Action (Peter): apply `supabase/migrations/20260712150000_gauntlet_saves.sql`** (table + RLS own-row policies + `gauntlet_leaderboard()` SECURITY DEFINER RPC, anon-exec, handles only — same Management-API route as E5 works). Until applied, signed-in players correctly see the guest banner. After apply: production check = run a Mastery Trial signed-in, set a handle, confirm the board shows it.
+
+**GTM-3 · Summer Tournament shell** *(dev)* — 🔴 Not started. **Needed by W4 (Aug 3).**
+Tournament window config, rules blurb, weekly boss-theme highlight, parent-facing banner on /gauntlet, Founding Leaderboard snapshot at close (permanent page). Builds on GTM-2.
+
+**GTM-4 · Ambassador reporting** *(dev)* — 🔴 Not started. **Needed by W2 (Jul 20).**
+Signups per referral code (the `parents_referral_code_idx` index exists): simplest viable = an admin-only endpoint or SQL snippet documented here; folds into S5's admin queue when that ships. Plus a lightweight registry of issued codes (who owns AMB-X).
+
+**GTM-5 · Lead capture without an account** *(dev)* — 🔴 Not started. **Needed by W3 (Jul 27).**
+The funnel counts "interested family" = any CASL-consented email — account, RSVP, or opt-in. Build the opt-in: "Get the one-page explainer" email form (footer + /parents), stores consented contact + timestamp (new `leads` table or Resend Audience), sends the explainer by email. Blocked partially on the explainer PDF (content).
+
+**GTM-6 · Welcome-email production E2E** *(dev + Peter)* — 🔴 Not started; quick.
+One fresh production signup post-deploy to verify the signup→welcome trigger fires end-to-end (E3 remainder b). Creates a throwaway account — Peter deletes the row after (dev has no dashboard access).
+
 ## 🎮 The Gauntlet (FastMath game — formerly MathRaiders)
 
 **M1 · Playable v1** *(dev)* — ✅ **Shipped** (`/gauntlet` — renamed from `/raiders`, redirect in place; in main nav).

@@ -14,16 +14,16 @@ Status markers: 🔴 not started · 🟡 in progress / partially done · ⛔ blo
 - **$250 deposit, per child, refundable until September 30, 2026**, paid by Stripe Checkout **inside the dashboard** after account creation and dossier — not a standalone payment link.
 - **Seat-count truth:** live everywhere — `120 − 7 founding commitments − paid deposits` from Supabase (60s cache, truthful constant as fallback). Never show fabricated numbers.
 - **Positioning (2026-07-09):** The 120 is a general "join a society" product — 120 kids, five groups; GT is just one. GT pages are de-emphasized sub-pages; proof content lives on/from the home page. One 120 nav + footer on all pages. Parent testimonials front and center from home via `/parents`.
-- **Accounts:** Stripe ✅ (test mode, live product pending S10) · Supabase ✅ (live, schema deployed) · booking link, the120.school domain, mailbox — still to create.
+- **Accounts:** Stripe ✅ (test mode, live product pending S10) · Supabase ✅ (live, schema deployed) · booking link ✅ (cal.com/peter.k/the120) · the120.school ✅ (live on Vercel, Namecheap-registered, Vercel nameservers) · mailbox 🟡 (Google Workspace verification TXT served; MX + admissions@ next) · Resend — still to create.
 - **Interim contact email** is pkuperman@gmail.com (footer + Book-a-call fallback) until admissions@the120.school exists (S6).
 - **Stripe account (2026-07-12, E2):** The 120 charges on the **Hatch Coding CDN** account with statement descriptor **"THE120"** — no dedicated account. Revisit only if The 120 becomes its own legal entity (the Stripe account must belong to the entity actually charging).
 - **Gauntlet positioning (2026-07-12, E4):** the Gauntlet is a **public lead magnet, permanently** (Summer Tournament per the GTM plan). Never paywall the core game — a $250 school-seat deposit will never be bought to unlock a math game, so gating kills distribution without creating revenue. Free account saves progress + joins the leaderboard (= lead capture); deposit-holders get **additive** member perks only. Supersedes the original post-deposit lock-in framing; M2 reframed accordingly.
 
 ## 📬 Ethan Items from July 11 — tracking checklist
 
-From Ethan's 2026-07-11 message. Each item resolves into a canonical roadmap item where one exists; an item is only done when its row below is ✅. Remaining order: **E1** → **E2/S10** → **E3**.
+From Ethan's 2026-07-11 message. Each item resolves into a canonical roadmap item where one exists; an item is only done when its row below is ✅. Remaining: **E3** (Resend) and the balance of **S10** (live keys → verification charge).
 
-**E1 · Booking link (Ethan Q1)** = **T2**. 🔴 Owner: Peter, ~30 min, GTM-W1 (Jul 13–19). One Cal.com or Calendly event, then `NEXT_PUBLIC_BOOKING_URL` in Vercel + redeploy.
+**E1 · Booking link (Ethan Q1)** = **T2** — ✅ **Done 2026-07-12.** Cal.com event **"The 120 — Intro Call"** at `cal.com/peter.k/the120`: 20 min, Cal Video, 2h minimum notice, 10-min buffer after, max 3/day, synced to Google Calendar. `NEXT_PUBLIC_BOOKING_URL` set in Vercel (all environments), production redeployed, **verified live**: every Book-a-call button now opens the scheduler. Availability = Cal.com defaults; tune windows in Cal.com → Availability if wanted.
 
 **E2 · Stripe account question (Ethan Q2)** — ✅ **Decided 2026-07-12:** Hatch Coding CDN account + **"THE120"** statement descriptor (see Decisions). Remaining go-live work continues as **S10** steps 1b–4 (descriptor, live keys, live product/webhook, real charge + refund round-trip). Until S10 completes, all deposits stay test-mode.
 
@@ -39,10 +39,9 @@ From Ethan's 2026-07-11 message. Each item resolves into a canonical roadmap ite
 
 ---
 
-## 🚀 Phase 1 — open work
+## 🚀 Phase 1 — ✅ COMPLETE (2026-07-12)
 
-**T2 · Create the booking link** *(Owner: Peter — external, ~30 min)* — 🔴 **Not started; last open Phase 1 item.**
-One Cal.com or Calendly event, 20–30 min intro call. Set `NEXT_PUBLIC_BOOKING_URL` in Vercel (all environments) and redeploy — every Book-a-call button switches from the email fallback to the scheduler automatically (T1 code shipped).
+T2 (booking link) was the last open item — shipped as E1. All Phase 1 work done.
 
 ---
 
@@ -51,8 +50,9 @@ One Cal.com or Calendly event, 20–30 min intro call. Set `NEXT_PUBLIC_BOOKING_
 **S5 · Admin review queue with payment visibility** *(dev)* — 🔴 **Not started; now unblocked** (S2/S3 shipped).
 Admin-only view: dossier queue, status changes, notes, and who has paid/refunded (Stripe customer link per family).
 
-**S6 · Domain + mailbox + email** *(Owner: Peter — external)* — 🔴 **Not started.**
-Register the120.school → point at the Vercel project (also permanently fixes the unclaimable `jointhe120` subdomain); defensive domains (the120.ca, 120.school); set up admissions@the120.school, then swap the interim pkuperman@gmail.com contact in `Footer` and `BOOKING_URL` fallback. Custom SMTP for Supabase auth emails + **re-enable email confirmations** (`supabase/config.toml` → `enable_confirmations = true`, `supabase config push`) — signups are currently auto-confirmed because the default sender is rate-limited ~2/hr.
+**S6 · Domain + mailbox + email** *(Owner: Peter — external; dev supports)* — 🟡 **Domain live; mailbox in progress.**
+✅ Done 2026-07-12: the120.school registered (Namecheap) → nameservers `ns1/ns2.vercel-dns.com` → added to the Vercel project → **https://the120.school serves the site** (SSL auto-issued, seat counter + booking link verified). Google Workspace **site-verification TXT record added in Vercel DNS and confirmed resolving** — Workspace domain verification unblocked.
+Remaining: (a) finish Google Workspace signup → add **MX records** in Vercel DNS (modern Workspace uses the single `smtp.google.com` MX) → create admissions@the120.school; (b) swap interim pkuperman@gmail.com in `Footer` + `BOOKING_URL` fallback; (c) custom SMTP for Supabase auth emails + **re-enable email confirmations** (`supabase/config.toml` → `enable_confirmations = true`, `supabase config push`) — signups are currently auto-confirmed because the default sender is rate-limited ~2/hr; (d) decide canonical domain (redirect jointhe120.vercel.app → the120.school) + update share-card URL — small dev ticket; (e) defensive domains (the120.ca, 120.school) if desired — both were still available 2026-07-12.
 
 **S7 · Content overhaul round 2** *(dev + Peter)* — 🔴 **Not started.**
 Remaining site-map pages: How It Works, The Full Program, Our Advisors, Intensives — plus a written deposit/refund terms page linked from checkout (terms currently live only in checkout copy + receipt).
@@ -109,6 +109,14 @@ Skill-tree progression: start at foundations, unlock topics by demonstrated mast
 ---
 
 ## ✅ Done
+
+**2026-07-12 — Ethan items + go-live infrastructure (Phase 1 complete):**
+- **E1/T2 · Booking link** — `cal.com/peter.k/the120` (20 min, buffers, 3/day cap, Google Calendar sync); `NEXT_PUBLIC_BOOKING_URL` in Vercel all environments; production redeployed; verified live on the site. **Closes Phase 1.**
+- **E2/S10-1 · Stripe descriptor** — live statement descriptor set to **"THE120"** on Hatch Coding CDN (dashboard + API-verified). Note: only other live activity on the account is one `past_due` subscription (last charge Sept 2025) — consider cancelling it.
+- **E5 · Attribution columns live** — migration applied (via Management API; stored DB password is stale — see E5 note), `heard_about`/`referral_code` + index on `parents`, history recorded.
+- **E6 · QA deposit cleanup** — test refund `re_3Trf6v25N9cbf3wU0MwbR3Zq` → production webhook flipped deposit to `refunded` in seconds → QA auth user cascade-deleted → live counter back to **113**, fake dossier gone.
+- **S6 (domain half) · the120.school LIVE** — Namecheap registration, nameservers → Vercel, domain on the project, SSL issued, site + counter + booking link verified at https://the120.school. **Google Workspace verification TXT** added in Vercel DNS and confirmed resolving publicly (Workspace email setup unblocked).
+- Decisions recorded: Stripe = Hatch + THE120 descriptor; Gauntlet = public lead magnet + member perks (M2 reframed); email provider = Resend (E3 open).
 
 **2026-07-10 — funnel verified in production + GTM plan:**
 - **GTM W1 dev tickets shipped**: (1) *Attribution on signup* — "How did you hear about us?" select + referral code (AMB-NAME) field in the join modal; values stored in auth user metadata immediately, and in `parents.heard_about`/`parents.referral_code` once the included migration is applied (**action: `supabase db push`** — migration `20260710120000_referral_attribution.sql`; the app degrades gracefully until then). (2) *Gauntlet share card* — victory + trial screens now have "📸 Share score": a generated 1080×1080 card (key art, boss, medal, stats, "Can you beat me?" + URL) via the native share sheet on mobile, PNG download on desktop.

@@ -72,6 +72,7 @@ export default function AccountModal({
   const [form, setForm] = useState<AccountForm>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [submitted, setSubmitted] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
@@ -83,6 +84,7 @@ export default function AccountModal({
     setForm(EMPTY);
     setErrors({});
     setSubmitted(false);
+    setNeedsConfirm(false);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
@@ -119,11 +121,17 @@ export default function AccountModal({
         email: form.email,
         password: form.password,
         options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
           data: {
             first_name: form.firstName,
             last_name: form.lastName,
-            // Attribution is also kept in auth metadata so it's captured even
-            // before the parents-table migration lands.
+            // The full profile lives in auth metadata: with email confirmations
+            // on there is no session at signup, so the dashboard creates the
+            // parents row from this metadata on the first signed-in visit.
+            phone: form.phone,
+            postal_code: form.postalCode.trim().toUpperCase(),
+            casl_consent: form.caslConsent,
+            casl_consent_at: new Date().toISOString(),
             heard_about: heardAbout,
             referral_code: referralCode,
           },
@@ -132,6 +140,15 @@ export default function AccountModal({
       if (error) throw error;
       const userId = data.user?.id;
       if (!userId) throw new Error("Account created but no user returned — try signing in.");
+
+      if (!data.session) {
+        // Email confirmations are on — no session until the link is clicked,
+        // so the parents upsert below would be rejected by RLS. The dashboard
+        // (store.tsx) creates the row post-confirmation and sends welcome #1.
+        setNeedsConfirm(true);
+        setSubmitted(true);
+        return;
+      }
 
       const baseProfile = {
         id: userId,
@@ -219,7 +236,12 @@ export default function AccountModal({
             </button>
 
             {submitted ? (
-              <SuccessView firstName={form.firstName} onClose={onClose} />
+              <SuccessView
+                firstName={form.firstName}
+                email={form.email}
+                needsConfirm={needsConfirm}
+                onClose={onClose}
+              />
             ) : (
               <div className="max-h-[85vh] overflow-y-auto px-7 py-8 sm:px-9">
                 <p className="eyebrow">Founding cohort · Fall 2026</p>
@@ -383,23 +405,41 @@ export default function AccountModal({
 
 /* ---------- success ---------- */
 
-function SuccessView({ firstName, onClose }: { firstName: string; onClose: () => void }) {
-  const steps = [
-    "You're signed in — your account is live.",
-    "Add your child and build their dossier in the dashboard.",
-    "Submit for review → we invite you to a qualifying assessment + call.",
-  ];
+function SuccessView({
+  firstName,
+  email,
+  needsConfirm,
+  onClose,
+}: {
+  firstName: string;
+  email: string;
+  needsConfirm: boolean;
+  onClose: () => void;
+}) {
+  const steps = needsConfirm
+    ? [
+        `Open the confirmation email we just sent to ${email}.`,
+        "Click the link — it signs you in and opens your dashboard.",
+        "Add your child and build their dossier — submit for review when ready.",
+      ]
+    : [
+        "You're signed in — your account is live.",
+        "Add your child and build their dossier in the dashboard.",
+        "Submit for review → we invite you to a qualifying assessment + call.",
+      ];
   return (
     <div className="px-7 py-10 text-center sm:px-9">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red/10 text-2xl text-red">
         ✓
       </div>
       <h2 className="mt-5 font-display text-2xl font-bold tracking-tight text-ink">
-        You&rsquo;re in{firstName ? `, ${firstName}` : ""}.
+        {needsConfirm ? "Check your inbox" : "You're in"}
+        {firstName ? `, ${firstName}` : ""}.
       </h2>
       <p className="mt-2 text-sm leading-6 text-ink-soft">
-        Your account is created and you&rsquo;re in the funnel — nurture updates start now. Here&rsquo;s
-        what happens next:
+        {needsConfirm
+          ? "One step left: confirm your email address to activate your account."
+          : "Your account is created and you're in the funnel — nurture updates start now. Here's what happens next:"}
       </p>
 
       <ol className="mx-auto mt-6 max-w-sm space-y-3 text-left">
@@ -414,20 +454,32 @@ function SuccessView({ firstName, onClose }: { firstName: string; onClose: () =>
       </ol>
 
       <div className="mt-6 flex flex-col items-center gap-3">
-        <Link
-          href="/dashboard"
-          onClick={onClose}
-          className="inline-flex h-12 items-center justify-center rounded-full bg-red px-8 font-mono text-xs uppercase tracking-[0.14em] text-white hover:bg-red-dark"
-        >
-          Go to your dashboard →
-        </Link>
-        <button
-          type="button"
-          onClick={onClose}
-          className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted hover:text-ink"
-        >
-          Later
-        </button>
+        {needsConfirm ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-12 items-center justify-center rounded-full bg-red px-8 font-mono text-xs uppercase tracking-[0.14em] text-white hover:bg-red-dark"
+          >
+            Done — I&rsquo;ll check my email
+          </button>
+        ) : (
+          <>
+            <Link
+              href="/dashboard"
+              onClick={onClose}
+              className="inline-flex h-12 items-center justify-center rounded-full bg-red px-8 font-mono text-xs uppercase tracking-[0.14em] text-white hover:bg-red-dark"
+            >
+              Go to your dashboard →
+            </Link>
+            <button
+              type="button"
+              onClick={onClose}
+              className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted hover:text-ink"
+            >
+              Later
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

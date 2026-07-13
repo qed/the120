@@ -110,13 +110,43 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   const childrenRef = useRef<Child[]>([]);
   childrenRef.current = children;
 
-  const loadFamily = useCallback(async (userId: string) => {
+  const loadFamily = useCallback(async (activeSession: Session) => {
     const supabase = supabaseRef.current;
-    const [{ data: parentRow }, { data: childRows }, { data: depositRows }] = await Promise.all([
-      supabase.from("parents").select("first_name,last_name,email").eq("id", userId).maybeSingle(),
+    const user = activeSession.user;
+    const [parentRes, { data: childRows }, { data: depositRows }] = await Promise.all([
+      supabase.from("parents").select("first_name,last_name,email").eq("id", user.id).maybeSingle(),
       supabase.from("children").select("*").order("created_at"),
       supabase.from("deposits").select("child_id,status"),
     ]);
+    let parentRow = parentRes.data;
+    if (!parentRow && user.user_metadata?.first_name) {
+      // Confirm-email signup flow: the profile was captured in auth metadata
+      // because no session existed at signup (RLS blocks anonymous writes).
+      // Create the parents row on the first signed-in visit, then fire
+      // welcome email #1 (the route is idempotent).
+      const m = user.user_metadata;
+      const { error } = await supabase.from("parents").upsert({
+        id: user.id,
+        first_name: m.first_name ?? "",
+        last_name: m.last_name ?? "",
+        email: user.email ?? "",
+        phone: m.phone ?? "",
+        postal_code: m.postal_code ?? "",
+        casl_consent: Boolean(m.casl_consent),
+        casl_consent_at: m.casl_consent_at ?? new Date().toISOString(),
+        heard_about: m.heard_about ?? "",
+        referral_code: m.referral_code ?? "",
+      });
+      if (error) {
+        console.error("[dashboard] profile create failed:", error.message);
+      } else {
+        parentRow = { first_name: m.first_name ?? "", last_name: m.last_name ?? "", email: user.email ?? "" };
+        void fetch("/api/welcome", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${activeSession.access_token}` },
+        }).catch(() => {});
+      }
+    }
     setParent(
       parentRow
         ? { firstName: parentRow.first_name, lastName: parentRow.last_name, email: parentRow.email }
@@ -135,14 +165,14 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     const supabase = supabaseRef.current;
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
-      if (session) await loadFamily(session.user.id);
+      if (session) await loadFamily(session);
       setReady(true);
     });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
-      if (newSession) await loadFamily(newSession.user.id);
+      if (newSession) await loadFamily(newSession);
       else {
         setParent(null);
         setChildren([]);

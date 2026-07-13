@@ -1,11 +1,15 @@
 /**
  * Gauntlet problem engine.
  * - Grade bands scale ranges for the core arithmetic topics (B4).
- * - Every problem carries a stable `key` so the adaptive trainer can track
- *   per-fact speed/accuracy and re-serve weak facts (B1).
+ * - Every problem carries a stable `key` so the trainer can track per-fact
+ *   speed/accuracy. Topics with a small enough parameter space expose their
+ *   full fact set (factSetFor); serving focuses on unmastered facts and the
+ *   Mastery Trial deals the whole set without replacement.
  * - Starter Twelve topics implement artifacts/gauntletcontent.md's ranked
  *   kernel picks (✦ starter subset) with the params specified there.
  */
+
+import { isMastered, MASTERY_MS, type FactStat } from "./mastery";
 
 export type TopicId =
   // core arithmetic (shipped picks #1/2/3/6)
@@ -355,7 +359,7 @@ function genLcm(band: Band): Problem {
 function makeDenom(n1: number, d1: number, n2: number, d2: number): Problem {
   return {
     topic: "denom",
-    key: `denom:${d1},${d2}`,
+    key: `denom:${Math.min(d1, d2)},${Math.max(d1, d2)}`,
     prompt: `Least common denominator of ${n1}/${d1} and ${n2}/${d2}`,
     answer: String(lcm(d1, d2)),
     kind: "numeric",
@@ -505,18 +509,168 @@ export function problemFromKey(key: string): Problem | null {
   return null;
 }
 
+/* ---------- fact sets (mastery model) ---------- */
+
+/** Above this size a topic is treated as open-ended (no mastery set). */
+const FACT_SET_CAP = 150;
+
+function enumerateFacts(topic: TopicId, band: Band): string[] | null {
+  const keys: string[] = [];
+  switch (topic) {
+    case "mul": {
+      const [lo, hi] = R.mul[band];
+      for (let a = lo; a <= hi; a++) for (let b = a; b <= hi; b++) keys.push(`mul:${a}×${b}`);
+      return keys;
+    }
+    case "div": {
+      const [lo, hi] = R.mul[band];
+      for (let d = lo; d <= hi; d++) for (let q = lo; q <= hi; q++) keys.push(`div:${d * q}÷${d}`);
+      return keys;
+    }
+    case "add": {
+      const max = R.addMax[band];
+      for (let a = 2; a <= max - 2; a++) for (let b = a; b <= max - a; b++) keys.push(`add:${a}+${b}`);
+      return keys;
+    }
+    case "sub": {
+      const max = R.addMax[band];
+      for (let a = 4; a <= max; a++) for (let b = 1; b < a; b++) keys.push(`sub:${a}−${b}`);
+      return keys;
+    }
+    case "sq":
+      for (let n = 2; n <= 15; n++) keys.push(`sq:${n}`);
+      return keys;
+    case "cube":
+      for (let n = 2; n <= 6; n++) keys.push(`cube:${n}`);
+      return keys;
+    case "sqrt":
+      for (let n = 2; n <= 15; n++) keys.push(`sqrt:${n * n}`);
+      return keys;
+    case "pow":
+      for (let b = 2; b <= 10; b++) keys.push(`pow:${b}^2`, `pow:${b}^3`);
+      for (let b = 2; b <= 5; b++) keys.push(`pow:${b}^4`);
+      return keys;
+    case "pyth":
+      for (const [a, b, c] of TRIPLES) {
+        for (let k = 1; k * c <= 50; k++) {
+          keys.push(`pyth:${a * k},${b * k},${c * k}:hyp`, `pyth:${a * k},${b * k},${c * k}:leg`);
+        }
+      }
+      return keys;
+    case "gcd": {
+      const set = new Set<string>();
+      for (const g of R.gcdFactors[band]) {
+        for (const m of [2, 3, 4, 5]) {
+          for (const n of [2, 3, 4, 5, 6]) {
+            const a = g * m;
+            const b = a === g * n ? g * 7 : g * n;
+            set.add(`gcd:${Math.max(a, b)},${Math.min(a, b)}`);
+          }
+        }
+      }
+      return [...set];
+    }
+    case "lcm":
+    case "denom": {
+      const pool: readonly number[] = R.lcmPool[band];
+      const set = new Set<string>();
+      for (const a of pool) {
+        for (const b of pool) {
+          if (a === b || lcm(a, b) > R.lcmCap[band]) continue;
+          set.add(`${topic}:${Math.min(a, b)},${Math.max(a, b)}`);
+        }
+      }
+      return [...set];
+    }
+    default:
+      // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence:
+      // parameter space too large or non-recall — open-ended.
+      return null;
+  }
+}
+
+const setCache = new Map<string, string[] | null>();
+
+/** Full fact-key set for a topic at a band, or null for open-ended topics. */
+export function factSetFor(topic: TopicId, band: Band): string[] | null {
+  const ck = `${topic}:${band}`;
+  if (!setCache.has(ck)) {
+    const keys = enumerateFacts(topic, band);
+    setCache.set(ck, keys && keys.length <= FACT_SET_CAP ? keys : null);
+  }
+  return setCache.get(ck)!;
+}
+
+export function masteryProgress(
+  topic: TopicId,
+  band: Band,
+  facts: Record<string, FactStat>
+): { mastered: number; total: number } | null {
+  const set = factSetFor(topic, band);
+  if (!set) return null;
+  return { mastered: set.filter((k) => isMastered(facts[k])).length, total: set.length };
+}
+
+/** Shuffled union of the selected topics' fact sets (Mastery Trial deck). */
+export function makeTrialDeck(topics: TopicId[], band: Band): string[] {
+  const keys = topics.flatMap((t) => factSetFor(t, band) ?? []);
+  for (let i = keys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+  }
+  return keys;
+}
+
+/** How many problems back a fact must wait before it can be served again. */
+const RECENT_WINDOW = 4;
+
 /**
- * Next problem: ~35% of the time (when weak facts exist for the active topics)
- * re-serves a weak fact; otherwise generates fresh at the band's difficulty.
+ * Next problem for battles.
+ * Topics with a fact set serve ~85% from the unmastered pool (facts you've
+ * struggled with weigh double), ~15% from mastered facts for retention, and
+ * never repeat anything from the last RECENT_WINDOW problems when avoidable.
+ * Open-ended topics generate fresh, with an occasional re-serve of a
+ * struggling (unmastered) fact.
  */
-export function nextProblem(topics: TopicId[], band: Band, weakKeys: string[] = []): Problem {
-  const eligible = weakKeys.filter(
-    (k) => topics.includes(k.split(":")[0] as TopicId) && !k.startsWith("congruence")
-  );
-  if (eligible.length && Math.random() < 0.35) {
-    const p = problemFromKey(pick(eligible));
+export function nextProblem(
+  topics: TopicId[],
+  band: Band,
+  facts: Record<string, FactStat> = {},
+  recent: string[] = []
+): Problem {
+  const topic: TopicId = topics.length ? pick(topics) : "mul";
+  const avoid = new Set(recent.slice(-RECENT_WINDOW));
+
+  const set = factSetFor(topic, band);
+  if (set) {
+    const unmastered = set.filter((k) => !isMastered(facts[k]));
+    const pool =
+      unmastered.length && (unmastered.length === set.length || Math.random() < 0.85)
+        ? unmastered
+        : set;
+    const candidates = pool.filter((k) => !avoid.has(k));
+    const weighted: string[] = [];
+    for (const k of candidates.length ? candidates : pool) {
+      weighted.push(k);
+      const f = facts[k];
+      if (f && (f.miss > 0 || f.avgMs > MASTERY_MS)) weighted.push(k);
+    }
+    const p = problemFromKey(pick(weighted));
     if (p) return p;
   }
-  const id = topics.length ? pick(topics) : "mul";
-  return GENERATORS[id](band);
+
+  const struggling = Object.keys(facts).filter((k) => {
+    if (!k.startsWith(`${topic}:`) || avoid.has(k) || isMastered(facts[k])) return false;
+    const f = facts[k];
+    return f.miss / f.n > 0.2 || f.avgMs > MASTERY_MS;
+  });
+  if (struggling.length && Math.random() < 0.3) {
+    const p = problemFromKey(pick(struggling));
+    if (p) return p;
+  }
+  for (let i = 0; i < 8; i++) {
+    const p = GENERATORS[topic](band);
+    if (!avoid.has(p.key)) return p;
+  }
+  return GENERATORS[topic](band);
 }

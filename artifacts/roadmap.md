@@ -113,13 +113,32 @@ Boss-battle FastMath: correct answers do damage (speed + streak multipliers), wr
 Deposit-holders get **additive** perks only: early access to new bosses, G2 pathway depth, cosmetics/leaderboard flair (doubles as the ambassador incentive in the GTM plan). Lock-in comes from saved progress after the deposit, never from gating acquisition.
 
 **M3 · Game depth round 1** *(dev)* — ✅ **Shipped.**
-Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudio cues (hits, crits, misses, final-seconds ticks, fanfares) with mute; adaptive trainer (per-fact speed/accuracy, weak facts re-served ~35%); teach-on-miss (correct answer shown before advancing); post-raid "Train these" report + waste %; grade bands (3–4/5–6/7–8); boss medals (🥉🥈🥇) + sequential boss unlocks; Mastery Trial survival mode (+2s/−4s, waves, personal best); daily raid streak; XP titles + bar; first-run how-to; leave-raid confirm; tab-hidden timer pause; reduced-motion support; congruence problems rotate + vary marks. Multiplayer deliberately skipped (product call).
+Slash/impact FX + hit flash + boss entrance/death animations; restrained WebAudio cues (hits, crits, misses, final-seconds ticks, fanfares) with mute; ~~adaptive trainer (per-fact speed/accuracy, weak facts re-served ~35%)~~ → superseded by M5's mastery model; teach-on-miss (correct answer shown before advancing); post-raid "Train these" report + waste %; grade bands (3–4/5–6/7–8); boss medals (🥉🥈🥇) + sequential boss unlocks; Mastery Trial survival mode (+2s/−4s, waves, personal best); daily raid streak; XP titles + bar; first-run how-to; leave-raid confirm; tab-hidden timer pause; reduced-motion support; congruence problems rotate + vary marks. Multiplayer deliberately skipped (product call).
 
 **M4 · Later game ideas** *(dev)* — 🔴 Not started.
-More bosses/arenas; cosmetic unlocks by level; multiplayer raid rooms (if ever).
+More bosses/arenas; multiplayer raid rooms (if ever). (Cosmetic unlocks moved to M6.)
 
-**G1 · Playtesters + endgame difficulty** *(Owner: founder — humans; dev supports)* — 🔴 Not started.
-Recruit 3–5 playtesters who will really dig in, including one hardcore math kid and one decidedly non-math kid who aspires to better grades. Goal: tune the last boss to "bragging rights" hard and the 2nd-to-last to "earn your level-up" hard. Dev support ready: damage/HP/speed-window/penalty are single constants in `app/gauntlet/components/Battle.tsx`; per-boss difficulty modifiers + a fifth "bragging rights" boss can ship within a day of first feedback.
+**M5 · Mastery model v2 + 6×6 fix** *(dev; Peter's spec 2026-07-13)* — ✅ **Shipped 2026-07-13.**
+Every topic now has a defined fact set where the parameter space is small enough (multiplication: 15/45/66 facts by band; squares 14; Pythagorean triples 34; 12 of 20 topics have sets — the rest, like place value and powers of ten, stay open-ended generators). Per-fact answer time was already tracked; **mastered = correct in under 3 s, twice in a row** (`fastStreak` in the save; old saves migrate cleanly). Serving: ~85% from the unmastered pool with struggling facts (missed or slow) weighted double, ~15% mastered retention, and a 4-problem no-repeat window. **Mastery Trial now deals the entire fact set** shuffled without replacement ("Testing all N facts · X dealt"), reshuffling after a full pass; the trial is a neutral test (no weighting). UI: topic chips show mastered counts (★ when complete), result screens show "🎯 N new facts mastered", the menu states the mastery rule.
+**The 6×6 bug, root-caused:** the old trainer flagged a fact "weak" after a single miss (1-for-1 = 100% miss rate) or one slow answer (lifetime average), then re-served weak facts 35% of the time with no repeat guard — one bad first answer on 6×6 made it ~35–50% of everything served, sometimes back-to-back. Verified fixed by simulation (2,000-serve runs): the same scenario now serves 6×6 at 3–10% and never twice in a row; with 3 facts left unmastered they get ~86% of serves; all 1,163 enumerated fact keys round-trip through the regenerator; a scripted browser run confirmed badges, full trial-deck coverage, and the mastery pill end-to-end.
+
+**M6 · v2 fun & UX backlog** *(dev; feeds from G1 beta feedback)* — 🟡 **In progress; brainstormed 2026-07-13.**
+Bar (Peter): UTS students say "this is both fun and helpful for my actual math learning." Prioritized:
+1. ✅ Persist topic selection between visits (shipped with M5).
+2. ✅ Post-game "N new facts mastered" pill (shipped with M5).
+3. First-run setup: pick grade band (and starting skills) before the first raid — defaulting a 7th-grader to Grades 3–4 undersells the game.
+4. "My facts" mastery heatmap: the fact set as a grid (multiplication-table layout for ×) colored by mastery/speed — the single biggest "actually helpful for learning" artifact, and shareable with parents.
+5. Mobile custom number pad (big tap targets under the problem card) — thumb typing on the stock keyboard is the worst part of mobile play.
+6. Boss personality: mid-fight barks/taunts, enrage visual state under 25% HP.
+7. Daily quest: "master 5 new facts today" tied to the existing daily streak.
+8. Trial end recap: "tested 45/66 facts — 12 still unseen" (coverage visibility).
+9. Practice/zen mode: no timer, no HP, pure fact practice (warm-up + anxious kids).
+10. Cosmetic unlocks by level (skins/arena palettes) — doubles as M2 member flair + ambassador incentive.
+11. Weekly leaderboard view (feeds GTM-3 tournament shell).
+Sound stays restrained per direction. Order gets re-cut by G1 beta feedback.
+
+**G1 · Beta testers + endgame difficulty** *(Owner: Ethan recruits, dev supports; re-scoped per Peter 2026-07-13)* — 🟡 **In progress.**
+Recruit 3–5 playtesters who'll dig in for fun — UTS students are the bar ("fun AND helpful for my actual math learning"), ideally including one hardcore math kid and one decidedly non-math kid who wants better grades. Loop: they play, suggestions land in M6, ship weekly. Also: tune the last boss to "bragging rights" hard and the 2nd-to-last to "earn your level-up" hard — damage/HP/speed-window/penalty are single constants in `app/gauntlet/components/Battle.tsx`; per-boss difficulty modifiers + a fifth "bragging rights" boss can ship within a day of first feedback.
 
 **G3 · Starter Twelve** *(dev)* — ✅ **Shipped 2026-07-11.**
 All 12 ✦ starter kernels from gauntletcontent.md's ranked picks are live topics with the document's exact params: perfect squares (2–15), perfect cubes (2–6), square roots, evaluate-exponent (exp 2–4, exp-4 capped at base 5), doubling/halving, powers of ten (1–4 place shifts), fraction-of-number, place value, 2-digit × 1-digit, Pythagorean triples (4 named triples + multiples ≤ 50, hyp + missing-leg), solve-proportion (unknown rotates all four positions), exponent product rule (bases {2,3,5,10,x}, answer = n). Per-fact keys follow the doc's scheme (`sq:13` style) so the adaptive trainer covers all of them; unicode-inline rendering (², ³, √, ⁿ) as specified. Menu topics now grouped "Number facts" / "Skills & concepts". With the 4 already-shipped arithmetic picks, **16 of the doc's 28 ranked picks are live**; next actionable band needs the `fraction` / `short-expression` / `two-numbers` answer engines (#7, #21, #23, #25, #26).

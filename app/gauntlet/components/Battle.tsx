@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
 import { nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
@@ -32,19 +33,24 @@ export default function Battle({
   boss,
   topics,
   band,
-  weakKeys,
+  facts,
   onFinish,
 }: {
   boss: Boss;
   topics: TopicId[];
   band: Band;
-  weakKeys: string[];
+  facts: Record<string, FactStat>;
   onFinish: (won: boolean, stats: BattleStats, results: ProblemResult[]) => void;
 }) {
   const [bossHp, setBossHp] = useState(boss.hp);
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [timeLeft, setTimeLeft] = useState(RAID_SECONDS);
-  const [problem, setProblem] = useState<Problem>(() => nextProblem(topics, band, weakKeys));
+  const recentRef = useRef<string[]>([]);
+  const [problem, setProblem] = useState<Problem>(() => {
+    const p = nextProblem(topics, band, facts, recentRef.current);
+    recentRef.current = [p.key];
+    return p;
+  });
   const [input, setInput] = useState("");
   const [streak, setStreak] = useState(0);
   const [fx, setFx] = useState<null | { dmg: number; crit: boolean; angle: number; n: number }>(null);
@@ -123,12 +129,14 @@ export default function Battle({
   };
 
   const advance = useCallback(() => {
-    setProblem(nextProblem(topics, band, weakKeys));
+    const p = nextProblem(topics, band, facts, recentRef.current);
+    recentRef.current = [...recentRef.current.slice(-7), p.key];
+    setProblem(p);
     setInput("");
     setReveal(null);
     askedAt.current = Date.now();
     inputRef.current?.focus();
-  }, [topics, band, weakKeys]);
+  }, [topics, band, facts]);
 
   const handleCorrect = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;

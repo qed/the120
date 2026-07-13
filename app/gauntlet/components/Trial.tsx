@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BOSSES } from "../game/bosses";
-import { nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import {
+  factSetFor,
+  makeTrialDeck,
+  nextProblem,
+  problemFromKey,
+  type Band,
+  type Problem,
+  type TopicId,
+} from "../game/problems";
 import { ensureAudio, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
@@ -16,21 +24,49 @@ const CAP_S = 45;
 /**
  * Mastery Trial (C2): survival gauntlet. Every correct answer adds time,
  * every miss burns it. Waves cycle the boss roster; score = correct answers.
+ * The trial is a TEST: it deals every fact in the selected topics' sets in
+ * shuffled order without replacement (reshuffling after a full pass);
+ * open-ended topics are interleaved with fresh problems.
  */
 export default function Trial({
   topics,
   band,
-  weakKeys,
   onFinish,
 }: {
   topics: TopicId[];
   band: Band;
-  weakKeys: string[];
   onFinish: (score: number, results: ProblemResult[]) => void;
 }) {
+  const deckRef = useRef<string[] | null>(null);
+  if (deckRef.current === null) deckRef.current = makeTrialDeck(topics, band);
+  const idxRef = useRef(0);
+  const recentRef = useRef<string[]>([]);
+
+  const serveNext = useCallback((): Problem => {
+    const deck = deckRef.current!;
+    const openTopics = topics.filter((t) => !factSetFor(t, band));
+    const useOpen =
+      openTopics.length > 0 &&
+      (deck.length === 0 || Math.random() < openTopics.length / Math.max(1, topics.length));
+    if (!useOpen && deck.length) {
+      if (idxRef.current >= deck.length) {
+        deckRef.current = makeTrialDeck(topics, band); // full pass — reshuffle
+        idxRef.current = 0;
+      }
+      const p = problemFromKey(deckRef.current![idxRef.current]);
+      if (p) {
+        idxRef.current += 1;
+        return p;
+      }
+    }
+    const p = nextProblem(openTopics.length ? openTopics : topics, band, {}, recentRef.current);
+    recentRef.current = [...recentRef.current.slice(-7), p.key];
+    return p;
+  }, [topics, band]);
+
   const [msLeft, setMsLeft] = useState(START_SECONDS * 1000);
   const [score, setScore] = useState(0);
-  const [problem, setProblem] = useState<Problem>(() => nextProblem(topics, band, weakKeys));
+  const [problem, setProblem] = useState<Problem>(serveNext);
   const [input, setInput] = useState("");
   const [flash, setFlash] = useState<"" | "good" | "bad">("");
   const resultsRef = useRef<ProblemResult[]>([]);
@@ -74,11 +110,11 @@ export default function Trial({
   const scoreRef = useRef(0);
 
   const advance = useCallback(() => {
-    setProblem(nextProblem(topics, band, weakKeys));
+    setProblem(serveNext());
     setInput("");
     askedAt.current = Date.now();
     inputRef.current?.focus();
-  }, [topics, band, weakKeys]);
+  }, [serveNext]);
 
   const answer = (correct: boolean) => {
     const ms = Date.now() - askedAt.current;
@@ -135,6 +171,11 @@ export default function Trial({
         <p className="mt-2 text-center font-mono text-sm text-white/70">
           Score <span className="text-xl font-bold text-white">{score}</span> · +{GAIN_S}s per hit · −{LOSS_S}s per miss
         </p>
+        {deckRef.current!.length > 0 && (
+          <p className="mt-1 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
+            Testing all {deckRef.current!.length} facts · {Math.min(idxRef.current, deckRef.current!.length)} dealt
+          </p>
+        )}
       </div>
 
       <div className="relative flex min-h-[180px] flex-1 items-center justify-center">

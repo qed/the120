@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { BOSSES, type Boss } from "./game/bosses";
-import { BANDS, TOPICS, type Band, type TopicId } from "./game/problems";
+import { BANDS, TOPICS, masteryProgress, type Band, type TopicId } from "./game/problems";
+import { isMastered, MASTERY_MS, type FactStat } from "./game/mastery";
 import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
@@ -49,7 +50,6 @@ function ShareButton({ data }: { data: ShareData }) {
 /*  Save (v2) — local until account-linked saves (roadmap M2)          */
 /* ------------------------------------------------------------------ */
 
-type FactStat = { n: number; miss: number; avgMs: number };
 type Save = {
   xp: number;
   bossesBeaten: string[];
@@ -63,6 +63,8 @@ type Save = {
   trialBest: number;
   /** self-chosen leaderboard handle (kid-safe; never a real name) */
   handle: string;
+  /** selected skills persist between visits */
+  topics: TopicId[];
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -78,6 +80,7 @@ const EMPTY_SAVE: Save = {
   facts: {},
   trialBest: 0,
   handle: "",
+  topics: ["mul"],
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -102,6 +105,7 @@ function mergeSaves(a: Save, b: Save): Save {
     facts,
     trialBest: Math.max(a.trialBest, b.trialBest),
     handle: a.handle || b.handle,
+    topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
   };
 }
 
@@ -123,15 +127,6 @@ const TITLES: [number, string][] = [
 const levelOf = (xp: number) => Math.floor(xp / 100) + 1;
 const titleOf = (level: number) => TITLES.find(([l]) => level >= l)![1];
 
-/** Weak facts: missed >20% or slow on average. */
-function weakKeysOf(facts: Record<string, FactStat>): string[] {
-  return Object.entries(facts)
-    .filter(([, f]) => f.miss / f.n > 0.2 || f.avgMs > 5000)
-    .sort((a, b) => b[1].miss / b[1].n - a[1].miss / a[1].n || b[1].avgMs - a[1].avgMs)
-    .slice(0, 12)
-    .map(([k]) => k);
-}
-
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
@@ -141,11 +136,11 @@ export default function GauntletGame() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
-  const [topics, setTopics] = useState<TopicId[]>(["mul"]);
   const [bossIdx, setBossIdx] = useState(0);
   const [lastStats, setLastStats] = useState<BattleStats | null>(null);
   const [lastResults, setLastResults] = useState<ProblemResult[]>([]);
   const [lastMedal, setLastMedal] = useState(0);
+  const [lastMastered, setLastMastered] = useState(0);
   const [trialScore, setTrialScore] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -204,14 +199,20 @@ export default function GauntletGame() {
   }, [save, userId, loaded]);
 
   const boss = BOSSES[bossIdx];
-  const weakKeys = weakKeysOf(save.facts);
+  const topics = save.topics;
 
   const applyResults = useCallback((prev: Save, results: ProblemResult[]): Record<string, FactStat> => {
     const facts = { ...prev.facts };
     for (const r of results) {
-      const f = facts[r.key] ?? { n: 0, miss: 0, avgMs: 0 };
+      const f = facts[r.key] ?? { n: 0, miss: 0, avgMs: 0, fastStreak: 0 };
       const n = f.n + 1;
-      facts[r.key] = { n, miss: f.miss + (r.correct ? 0 : 1), avgMs: f.avgMs + (r.ms - f.avgMs) / n };
+      facts[r.key] = {
+        n,
+        miss: f.miss + (r.correct ? 0 : 1),
+        avgMs: f.avgMs + (r.ms - f.avgMs) / n,
+        // mastery = correct under the limit, twice in a row
+        fastStreak: r.correct && r.ms <= MASTERY_MS ? (f.fastStreak ?? 0) + 1 : 0,
+      };
     }
     return facts;
   }, []);
@@ -229,6 +230,13 @@ export default function GauntletGame() {
     setPhase("battle");
   };
 
+  /** newly mastered facts this round (for the result screens) */
+  const countNewlyMastered = useCallback(
+    (before: Record<string, FactStat>, after: Record<string, FactStat>) =>
+      Object.keys(after).filter((k) => isMastered(after[k]) && !isMastered(before[k])).length,
+    []
+  );
+
   const finishBattle = useCallback(
     (won: boolean, stats: BattleStats, results: ProblemResult[]) => {
       const total = stats.correct + stats.wrong;
@@ -237,6 +245,7 @@ export default function GauntletGame() {
       setLastStats(stats);
       setLastResults(results);
       setLastMedal(medal);
+      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
       if (won) sfxVictory();
       else sfxDefeat();
       setSave((prev) => ({
@@ -250,13 +259,14 @@ export default function GauntletGame() {
       }));
       setPhase(won ? "victory" : "defeat");
     },
-    [boss.id, applyResults]
+    [boss.id, applyResults, countNewlyMastered, save]
   );
 
   const finishTrial = useCallback(
     (score: number, results: ProblemResult[]) => {
       setTrialScore(score);
       setLastResults(results);
+      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
       sfxDefeat();
       setSave((prev) => ({
         ...prev,
@@ -267,7 +277,7 @@ export default function GauntletGame() {
       }));
       setPhase("trialEnd");
     },
-    [applyResults]
+    [applyResults, countNewlyMastered, save]
   );
 
   const toggleMute = () => {
@@ -304,7 +314,12 @@ export default function GauntletGame() {
           save={save}
           userId={cloudOk ? userId : null}
           topics={topics}
-          toggleTopic={(id) => setTopics((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]))}
+          toggleTopic={(id) =>
+            setSave((prev) => ({
+              ...prev,
+              topics: prev.topics.includes(id) ? prev.topics.filter((t) => t !== id) : [...prev.topics, id],
+            }))
+          }
           setBand={(b) => setSave((p) => ({ ...p, band: b }))}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
           onStart={startBattle}
@@ -324,10 +339,10 @@ export default function GauntletGame() {
         />
       )}
       {phase === "battle" && (
-        <Battle boss={boss} topics={topics} band={save.band} weakKeys={weakKeys} onFinish={finishBattle} />
+        <Battle boss={boss} topics={topics} band={save.band} facts={save.facts} onFinish={finishBattle} />
       )}
       {phase === "trial" && (
-        <Trial topics={topics} band={save.band} weakKeys={weakKeys} onFinish={finishTrial} />
+        <Trial topics={topics} band={save.band} onFinish={finishTrial} />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result
@@ -335,6 +350,7 @@ export default function GauntletGame() {
           boss={boss}
           stats={lastStats}
           medal={lastMedal}
+          mastered={lastMastered}
           results={lastResults}
           onMenu={() => setPhase("menu")}
           onRetry={() => startBattle(bossIdx)}
@@ -345,6 +361,7 @@ export default function GauntletGame() {
         <TrialResult
           score={trialScore}
           best={save.trialBest}
+          mastered={lastMastered}
           results={lastResults}
           onMenu={() => setPhase("menu")}
           onRetry={() => {
@@ -491,6 +508,8 @@ function Menu({
             <div className="flex flex-wrap gap-2">
               {TOPICS.filter((t) => t.tier === tier).map((t) => {
                 const on = topics.includes(t.id);
+                const prog = masteryProgress(t.id, save.band, save.facts);
+                const complete = prog && prog.mastered === prog.total;
                 return (
                   <button
                     key={t.id}
@@ -500,12 +519,20 @@ function Menu({
                     }`}
                   >
                     {t.label}
+                    {prog && prog.mastered > 0 && (
+                      <span className={`ml-1.5 text-[10px] ${complete ? "text-emerald-300" : on ? "text-cyan-300/70" : "text-white/35"}`}>
+                        {complete ? "★" : ""}{prog.mastered}/{prog.total}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
           </div>
         ))}
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
+          Master a fact: answer it in under 3s, twice in a row. Raids focus on the facts you haven&apos;t mastered.
+        </p>
       </div>
 
       {/* Bosses (gated) + Mastery Trial */}
@@ -567,7 +594,7 @@ function Menu({
 function trainList(results: ProblemResult[]): { prompt: string; answer: string; note: string }[] {
   const misses = results.filter((r) => !r.correct);
   const slow = results
-    .filter((r) => r.correct && r.ms > 4000)
+    .filter((r) => r.correct && r.ms > MASTERY_MS)
     .sort((a, b) => b.ms - a.ms);
   const seen = new Set<string>();
   const out: { prompt: string; answer: string; note: string }[] = [];
@@ -588,6 +615,7 @@ function Result({
   boss,
   stats,
   medal,
+  mastered,
   results,
   onMenu,
   onRetry,
@@ -597,6 +625,7 @@ function Result({
   boss: Boss;
   stats: BattleStats;
   medal: number;
+  mastered: number;
   results: ProblemResult[];
   onMenu: () => void;
   onRetry: () => void;
@@ -629,6 +658,12 @@ function Result({
         <Stat label="Best streak" value={`×${stats.bestStreak}`} />
         <Stat label="Waste" value={`${waste}%`} />
       </div>
+
+      {mastered > 0 && (
+        <p className="mt-5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1.5 font-mono text-sm text-emerald-300">
+          🎯 {mastered} new fact{mastered === 1 ? "" : "s"} mastered
+        </p>
+      )}
 
       {train.length > 0 && (
         <div className="mt-7 w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5 text-left">
@@ -681,12 +716,14 @@ function Result({
 function TrialResult({
   score,
   best,
+  mastered,
   results,
   onMenu,
   onRetry,
 }: {
   score: number;
   best: number;
+  mastered: number;
   results: ProblemResult[];
   onMenu: () => void;
   onRetry: () => void;
@@ -700,6 +737,12 @@ function TrialResult({
       <p className="mt-1 text-white/70">
         {isRecord ? "New personal best!" : `Personal best: ${best}`} · +{score * 2} XP
       </p>
+
+      {mastered > 0 && (
+        <p className="mt-4 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1.5 font-mono text-sm text-emerald-300">
+          🎯 {mastered} new fact{mastered === 1 ? "" : "s"} mastered
+        </p>
+      )}
 
       {train.length > 0 && (
         <div className="mt-7 w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5 text-left">
@@ -850,6 +893,10 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
           </li>
           <li>
             ⏱ <strong>Bring the boss to zero before the clock runs out</strong> — 2 minutes, one raid.
+          </li>
+          <li>
+            🎯 <strong>Master every fact.</strong> Answer a fact in under 3 seconds twice in a row and
+            it&apos;s mastered — raids keep serving the ones you haven&apos;t owned yet.
           </li>
           <li>
             🥇 <strong>Earn medals</strong> for accuracy, unlock tougher bosses, and chase your Mastery

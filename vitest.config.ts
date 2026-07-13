@@ -4,7 +4,10 @@ import path from "path";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["app/crm/__tests__/**/*.test.{ts,tsx}"],
+    include: [
+      "app/crm/__tests__/**/*.test.{ts,tsx}",
+      "app/lib/**/__tests__/**/*.test.{ts,tsx}",
+    ],
   },
   resolve: {
     alias: {

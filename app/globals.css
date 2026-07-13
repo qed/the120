@@ -25,6 +25,22 @@
   --color-blue: #22219b;
   --color-blush: #efc5b8;
 
+  /* CRM palette (staff-only /crm surfaces — brief §11, additive per plan
+     Decision 12). The CRM keeps the handoff's pure #0300ED; the marketing
+     site's deepened --color-blue above is untouched. */
+  --color-crm-blue: #0300ed;
+  --color-crm-bg: #eceae5;
+  --color-crm-card: #f7f6f3;
+  --color-crm-blush: #efc5b8;
+  --color-crm-red: #d92632;
+  --color-crm-ink: #131416;
+  --color-crm-muted: #55585e;
+  --color-crm-faint: #9fa2a7;
+  --color-crm-line: #dddad4;
+  --color-crm-line2: #d8d5cf;
+  --color-crm-green: #0e8a5f;
+  --color-crm-amber: #b85c00;
+
   /* Semantic aliases used by the starter */
   --color-background: var(--color-paper);
   --color-foreground: var(--color-ink);

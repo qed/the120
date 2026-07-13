@@ -51,8 +51,8 @@ T2 (booking link) was the last open item — shipped as E1. All Phase 1 work don
 
 ## 🏗 Phase 2 — open work
 
-**S5 · Admin review queue with payment visibility** *(dev)* — 🔴 **Not started; now unblocked** (S2/S3 shipped).
-Admin-only view: dossier queue, status changes, notes, and who has paid/refunded (Stripe customer link per family).
+**S5 · Admin review queue → absorbed into The 120 CRM** *(dev)* — 🔴 Build not started; **design brief approved 2026-07-13**.
+Staff-only CRM at `/crm` for peter@ + ethan@ to run the GTM sprint: alphahub Pipeline CRM bones re-skinned to The 120 design system, pipeline **derived from live Supabase truth** (parents/children/deposits/attribution) rather than hand-entered. Absorbs S5's dossier queue + payment visibility and the GTM plan's weekly-metrics dashboard. Full spec: `artifacts/crm-design-brief.md` · visual handoff: `artifacts/120 CRM Design Brief/` · GTM sprint decks: `artifacts/The120-GTM-Sprint*.pptx`. Implementation phased by the operator. Note from the brief: ethan@the120.school has no mailbox yet — his staff account must be password-seeded by script until it exists.
 
 **S6 · Domain + mailbox + email** *(Owner: Peter — external; dev supports)* — 🟡 **Domain live; mailbox in progress.**
 ✅ Done 2026-07-12: the120.school registered (Namecheap) → nameservers `ns1/ns2.vercel-dns.com` → added to the Vercel project → **https://the120.school serves the site** (SSL auto-issued, seat counter + booking link verified). **Email live the same day**: Workspace verification TXT + `smtp.google.com` MX (priority 1) in Vercel DNS; the120.school added as a **secondary domain on the existing Hatch/theknetwork.org Workspace org** (no new subscription, Gmail activated); user **peter@the120.school** created (by Peter) with alias **admissions@the120.school**; footer + `BOOKING_URL` fallback swapped off the interim gmail.

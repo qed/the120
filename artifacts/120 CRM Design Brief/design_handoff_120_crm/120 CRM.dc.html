@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>The 120 — Staff CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #ECEAE5; }
+    a { color: #131416; } a:hover { color: #D92632; }
+    input::placeholder, textarea::placeholder { color: #9FA2A7; }
+    input, textarea, select, button { font-family: inherit; }
+    @keyframes pulse120 { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</helmet>
+
+<div style="font-family: 'Space Grotesk', sans-serif; color: #131416; min-height: 100vh;">
+
+<!-- ============ LOGIN ============ -->
+<sc-if value="{{ showLogin }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Login" style="min-height: 100vh; background: #0300ED; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;">
+    <div style="background: #F7F6F3; border-radius: 12px; padding: 36px 36px 30px; width: 380px; max-width: 100%; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 4px 18px rgba(19,20,22,0.14); box-sizing: border-box;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+        <span style="font-weight: 700; font-size: 15px; letter-spacing: -0.02em;">The 120</span>
+        <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #131416; background: #EFC5B8; padding: 4px 10px; border-radius: 100px;">STAFF ONLY</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 28px; letter-spacing: -0.01em;">Staff sign-in</span>
+        <span style="font-size: 13.5px; color: #55585E;">Admissions &amp; sprint operations.</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <input type="email" placeholder="email" value="{{ loginEmail }}" onChange="{{ setLoginEmail }}" style="font-size: 14px; padding: 12px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input type="password" placeholder="password" value="{{ loginPw }}" onChange="{{ setLoginPw }}" style="font-size: 14px; padding: 12px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <sc-if value="{{ loginErr }}" hint-placeholder-val="{{ false }}">
+          <span style="font-size: 12.5px; color: #D92632;">Those details don’t match a staff account.</span>
+        </sc-if>
+        <button onClick="{{ doLogin }}" style="background: #D92632; color: #FFFFFF; border: none; border-radius: 10px; padding: 13px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; cursor: pointer;">SIGN IN</button>
+      </div>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #9FA2A7; line-height: 1.7;">NO SIGN-UP · NO RESET LINK · ACCESS IS PROVISIONED BY SCRIPT</span>
+    </div>
+  </div>
+</sc-if>
+
+<!-- ============ APP ============ -->
+<sc-if value="{{ showApp }}" hint-placeholder-val="{{ true }}">
+  <div>
+    <!-- top bar -->
+    <div style="background: #0300ED; padding: 14px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+      <span style="display: flex; align-items: center; gap: 10px;">
+        <span style="background: #D92632; color: #FFFFFF; font-weight: 700; font-size: 15px; letter-spacing: -0.04em; padding: 5px 8px; line-height: 1;">120</span>
+        <span style="font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: #F7F6F3; white-space: nowrap;">The 120</span>
+      </span>
+      <span style="width: 1px; height: 20px; background: rgba(255,255,255,0.24);"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; color: rgba(255,255,255,0.75);">{{ crumb }}</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #131416; background: #EFC5B8; padding: 4px 10px; border-radius: 100px;">STAFF ONLY</span>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: rgba(255,255,255,0.75);">{{ seatsLabel }}</span>
+    </div>
+
+    <!-- tab row -->
+    <div style="background: #ECEAE5; border-bottom: 1px solid #DDDAD4; padding: 10px 28px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+      <sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="4">
+        <button onClick="{{ tb.go }}" style="{{ tb.style }}">{{ tb.label }}</button>
+      </sc-for>
+      <span style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; color: #55585E;">PETER@THE120.SCHOOL</span>
+        <button onClick="{{ signOut }}" style="background: #F7F6F3; border: 1px solid #D8D5CF; border-radius: 100px; padding: 6px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #55585E; cursor: pointer;">SIGN OUT</button>
+      </span>
+    </div>
+
+    <!-- ============ DASHBOARD ============ -->
+    <sc-if value="{{ vDash }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="GTM Sprint Dashboard" style="padding: 24px 28px 48px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; box-sizing: border-box;">
+
+        <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+          <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; margin: 0;">GTM sprint</h1>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.06em; color: #9FA2A7;">JUL 13 – SEP 4 · 200 FAMILIES · 48 DEPOSITS</span>
+          <span style="margin-left: auto; display: flex; gap: 8px;">
+            <sc-for list="{{ layoutChips }}" as="lc" hint-placeholder-count="2">
+              <button onClick="{{ lc.set }}" style="{{ lc.style }}">{{ lc.label }}</button>
+            </sc-for>
+          </span>
+        </div>
+
+        <!-- week strip -->
+        <div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px;">
+          <sc-for list="{{ weekStrip }}" as="ws" hint-placeholder-count="8">
+            <button onClick="{{ ws.select }}" style="{{ ws.style }}">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; display: flex; align-items: center; gap: 5px; justify-content: center;">{{ ws.label }} <span style="{{ ws.tickStyle }}">{{ ws.tick }}</span></span>
+              <span style="{{ ws.dateStyle }}">{{ ws.dates }}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <!-- this-week card -->
+        <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; color: #D92632;">{{ wk.kicker }}</span>
+            <sc-if value="{{ wk.cleared }}" hint-placeholder-val="{{ false }}">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; background: #EFC5B8; color: #131416; padding: 4px 10px; border-radius: 100px;">WEEK CLEARED</span>
+            </sc-if>
+          </div>
+          <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 26px; letter-spacing: -0.01em;">{{ wk.push }}</span>
+          <div style="display: flex; flex-direction: column;">
+            <sc-for list="{{ wk.actions }}" as="ac" hint-placeholder-count="4">
+              <button onClick="{{ ac.toggle }}" style="display: flex; align-items: flex-start; gap: 11px; background: none; border: none; border-bottom: 1px solid #ECEAE5; padding: 10px 2px; cursor: pointer; text-align: left; width: 100%;">
+                <span style="{{ ac.boxStyle }}">{{ ac.mark }}</span>
+                <span style="{{ ac.textStyle }}">{{ ac.text }}</span>
+                <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: #9FA2A7; white-space: nowrap; padding-top: 2px;">{{ ac.byline }}</span>
+              </button>
+            </sc-for>
+            <div style="display: flex; align-items: flex-start; gap: 11px; padding: 10px 2px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.08em; background: #0300ED; color: #FFFFFF; padding: 3px 7px; border-radius: 100px; flex: none;">ASSET</span>
+              <span style="font-size: 13.5px; color: #55585E; line-height: 1.5;">{{ wk.asset }}</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <sc-for list="{{ wk.chips }}" as="tc" hint-placeholder-count="3">
+              <span style="{{ tc.style }}">{{ tc.label }}
+                <sc-if value="{{ tc.manual }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ tc.dec }}" style="background: none; border: none; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #9FA2A7; padding: 0 2px;">−</button><button onClick="{{ tc.inc }}" style="background: none; border: none; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #D92632; padding: 0 2px;">+</button>
+                </sc-if>
+              </span>
+            </sc-for>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.08em; color: #9FA2A7; border-top: 1px solid #ECEAE5; padding-top: 12px;">MON PUSH + EMAIL · TUE–THU CALLS (2/DAY) · FRI METRICS + THANK-YOUS</span>
+        </div>
+
+        <!-- variant wrap -->
+        <div style="{{ dashWrap }}">
+          <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+
+            <!-- KPI strip -->
+            <div style="{{ kpiGrid }}">
+              <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+                <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632; display: flex; align-items: center; gap: 6px;">{{ k.kicker }}<span style="{{ k.dotStyle }}"></span></span>
+                  <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 30px; letter-spacing: -0.01em;">{{ k.value }}<span style="font-size: 16px; color: #9FA2A7;"> {{ k.denom }}</span></span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.04em; color: #55585E;">{{ k.foot }}</span>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- thermometer -->
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">DEPOSIT THERMOMETER</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.04em; color: #55585E;">48 BY SEP 1 · REFUNDABLE UNTIL SEP 30</span>
+              </div>
+              <div style="position: relative; height: 22px; background: #E0DDD7; border-radius: 100px; overflow: visible;">
+                <div style="{{ thermoFill }}"></div>
+                <div style="position: absolute; left: 87.2%; top: -4px; bottom: -4px; width: 2px; background: #131416;"></div>
+                <span style="position: absolute; left: 88.4%; top: 50%; transform: translateY(-50%); font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #55585E;">48</span>
+              </div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.04em; color: #9FA2A7;">{{ thermoLabel }}</span>
+            </div>
+
+            <!-- funnel vs plan -->
+            <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 8px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">FUNNEL VS PLAN</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.04em; color: #55585E;">{{ funnelWeekLabel }}</span>
+              </div>
+              <div style="display: grid; grid-template-columns: minmax(0,1.6fr) 70px 70px 84px; gap: 8px; padding: 6px 0; border-bottom: 1px solid #ECEAE5;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">STAGE</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7; text-align: right;">ACTUAL</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7; text-align: right;">TARGET</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7; text-align: right;">Δ</span>
+              </div>
+              <sc-for list="{{ funnelRows }}" as="fr" hint-placeholder-count="6">
+                <div style="display: grid; grid-template-columns: minmax(0,1.6fr) 70px 70px 84px; gap: 8px; padding: 10px 0; border-bottom: 1px solid #ECEAE5; align-items: baseline;">
+                  <span style="font-size: 13.5px; font-weight: 500;">{{ fr.label }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right;">{{ fr.actual }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9FA2A7; text-align: right;">{{ fr.target }}</span>
+                  <span style="{{ fr.deltaStyle }}">{{ fr.delta }}</span>
+                </div>
+              </sc-for>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.04em; color: #9FA2A7; padding-top: 10px; line-height: 1.6;">RED = 30% UNDER PLAN → THAT STAGE IS NEXT WEEK’S PRIMARY PUSH. PROTOTYPE DATA IS ILLUSTRATIVE.</span>
+            </div>
+
+            <!-- this-week stats -->
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <sc-for list="{{ weekStats }}" as="st" hint-placeholder-count="5">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #55585E; background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 100px; padding: 7px 13px;">{{ st }}</span>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+
+            <!-- today's briefing -->
+            <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">TODAY’S BRIEFING · {{ todayLabel }}</span>
+              <div style="{{ briefingGrid }}">
+                <sc-for list="{{ briefing }}" as="bl" hint-placeholder-count="3">
+                  <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #9FA2A7;">{{ bl.title }}</span>
+                    <sc-for list="{{ bl.items }}" as="bi" hint-placeholder-count="3">
+                      <button onClick="{{ bi.open }}" style="display: flex; flex-direction: column; gap: 2px; background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 10px; padding: 9px 12px; cursor: pointer; text-align: left; min-width: 0;">
+                        <span style="font-weight: 600; font-size: 13px;">{{ bi.name }}</span>
+                        <span style="font-size: 11.5px; color: #55585E; line-height: 1.45;">{{ bi.note }}</span>
+                      </button>
+                    </sc-for>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="{{ footGrid }}">
+              <!-- source & ambassador tally -->
+              <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">SOURCE &amp; AMBASSADOR TALLY</span>
+                <sc-for list="{{ sourceRows }}" as="sr" hint-placeholder-count="6">
+                  <div style="display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #E5E2DC; padding: 7px 0;">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.04em; color: #55585E;">{{ sr.label }}</span>
+                    <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">{{ sr.leads }}</span>
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #D92632; width: 52px; text-align: right;">{{ sr.deps }}</span>
+                  </div>
+                </sc-for>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.06em; color: #9FA2A7; padding-top: 4px;">AMB-* TALLIED LIVE FROM REFERRAL CODES · FRIDAY REVIEW</span>
+              </div>
+              <!-- seats by group -->
+              <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">SEATS BY GROUP</span>
+                <sc-for list="{{ groupRows }}" as="gr" hint-placeholder-count="6">
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #E5E2DC;">
+                    <span style="font-size: 13px; font-weight: 500; width: 88px; flex: none;">{{ gr.name }}</span>
+                    <span style="flex: 1; height: 6px; background: #E0DDD7; border-radius: 100px; overflow: hidden; display: block;"><span style="{{ gr.barStyle }}"></span></span>
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #55585E; width: 44px; text-align: right;">{{ gr.count }}</span>
+                  </div>
+                </sc-for>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.06em; color: #B85C00; padding-top: 4px;">SCHOLARS PACING TO CAP FIRST (~24) · GTM OPEN Q2</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ============ PIPELINE ============ -->
+    <sc-if value="{{ vPipe }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Pipeline" style="padding: 24px 28px 48px; max-width: 1380px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; margin: 0;">Pipeline</h1>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #9FA2A7;">{{ pipeCount }}</span>
+          <span style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+            <sc-for list="{{ viewToggle }}" as="vt" hint-placeholder-count="2">
+              <button onClick="{{ vt.set }}" style="{{ vt.style }}">{{ vt.label }}</button>
+            </sc-for>
+            <button onClick="{{ openAdd }}" style="background: #D92632; color: #FFFFFF; border: none; border-radius: 10px; padding: 10px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; cursor: pointer;">ADD FAMILY</button>
+          </span>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <sc-for list="{{ stageChips }}" as="sc" hint-placeholder-count="6">
+            <button onClick="{{ sc.set }}" style="{{ sc.style }}">{{ sc.label }}</button>
+          </sc-for>
+          <span style="width: 1px; height: 18px; background: #D8D5CF;"></span>
+          <sc-for list="{{ sourceChips }}" as="so" hint-placeholder-count="4">
+            <button onClick="{{ so.set }}" style="{{ so.style }}">{{ so.label }}</button>
+          </sc-for>
+          <span style="width: 1px; height: 18px; background: #D8D5CF;"></span>
+          <button onClick="{{ toggleAttn }}" style="{{ attnStyle }}">⚠ NEEDS ATTENTION</button>
+        </div>
+
+        <!-- table -->
+        <sc-if value="{{ pipeTable }}" hint-placeholder-val="{{ true }}">
+          <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; overflow-x: auto;">
+            <div style="min-width: 1080px;">
+              <div style="display: grid; grid-template-columns: minmax(0,1.9fr) 128px 92px 118px minmax(0,1.5fr) 86px 96px minmax(0,1.9fr); gap: 10px; padding: 12px 18px; border-bottom: 1px solid #DDDAD4;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">FAMILY</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">STAGE</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">HEAT</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">SOURCE</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">CONCERNS</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">CONSENT</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">LAST TOUCH</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em; color: #9FA2A7;">NEXT ACTION</span>
+              </div>
+              <sc-for list="{{ pipeRows }}" as="r" hint-placeholder-count="8">
+                <button onClick="{{ r.open }}" style="display: grid; grid-template-columns: minmax(0,1.9fr) 128px 92px 118px minmax(0,1.5fr) 86px 96px minmax(0,1.9fr); gap: 10px; padding: 13px 18px; border: none; border-bottom: 1px solid #ECEAE5; background: none; width: 100%; text-align: left; cursor: pointer; align-items: center; font-family: 'Space Grotesk', sans-serif;" style-hover="background: #F7F6F3;">
+                  <span style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                    <span style="width: 30px; height: 30px; border-radius: 100px; background: #E0DDD7; color: #55585E; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 10px; flex: none;">{{ r.initials }}</span>
+                    <span style="display: flex; flex-direction: column; min-width: 0;">
+                      <span style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.name }}</span>
+                      <span style="font-size: 11.5px; color: #9FA2A7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.kids }}</span>
+                    </span>
+                  </span>
+                  <span><span style="{{ r.stagePill }}">{{ r.stage }}</span></span>
+                  <span style="display: flex; gap: 3px;">
+                    <sc-for list="{{ r.pips }}" as="p" hint-placeholder-count="5"><span style="{{ p }}"></span></sc-for>
+                  </span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.04em; color: #55585E; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.source }}</span>
+                  <span style="display: flex; gap: 4px; flex-wrap: wrap;">
+                    <sc-for list="{{ r.concerns }}" as="cc" hint-placeholder-count="2"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.02em; background: #ECEAE5; color: #55585E; border-radius: 100px; padding: 3px 8px; white-space: nowrap;">{{ cc }}</span></sc-for>
+                  </span>
+                  <span style="{{ r.consentStyle }}">{{ r.consent }}</span>
+                  <span style="{{ r.touchStyle }}">{{ r.touch }}</span>
+                  <span style="font-size: 12px; color: #55585E; line-height: 1.4;">{{ r.next }}</span>
+                </button>
+              </sc-for>
+              <sc-if value="{{ pipeEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="padding: 64px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px;">
+                  <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 24px; letter-spacing: -0.01em;">The pipeline starts with one family.</span>
+                  <span style="font-size: 13.5px; color: #55585E;">No families match these filters.</span>
+                  <button onClick="{{ openAdd }}" style="background: #D92632; color: #FFFFFF; border: none; border-radius: 10px; padding: 11px 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; cursor: pointer;">ADD FAMILY</button>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- kanban -->
+        <sc-if value="{{ pipeKanban }}" hint-placeholder-val="{{ false }}">
+          <div style="display: grid; grid-template-columns: repeat(6, minmax(180px, 1fr)); gap: 10px; overflow-x: auto; align-items: start;">
+            <sc-for list="{{ kanbanCols }}" as="kc" hint-placeholder-count="6">
+              <div onDragOver="{{ kc.over }}" onDrop="{{ kc.drop }}" style="{{ kc.style }}">
+                <div style="display: flex; align-items: baseline; gap: 8px; padding: 4px 4px 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #55585E;">{{ kc.title }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #9FA2A7;">{{ kc.count }}</span>
+                  <sc-if value="{{ kc.droppable }}" hint-placeholder-val="{{ false }}"><span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 8px; letter-spacing: 0.06em; color: #0300ED;">DROP OK</span></sc-if>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <sc-for list="{{ kc.cards }}" as="kd" hint-placeholder-count="3">
+                    <div draggable="{{ true }}" onDragStart="{{ kd.drag }}" onClick="{{ kd.open }}" style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 10px; padding: 11px 13px; cursor: grab; display: flex; flex-direction: column; gap: 5px;">
+                      <span style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-weight: 600; font-size: 13px;">{{ kd.name }}</span>
+                        <span style="{{ kd.dotStyle }}"></span>
+                      </span>
+                      <span style="font-size: 11px; color: #9FA2A7;">{{ kd.meta }}</span>
+                      <sc-if value="{{ kd.sub }}" hint-placeholder-val="{{ false }}"><span style="{{ kd.subStyle }}">{{ kd.sub }}</span></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.04em; color: #9FA2A7;">DRAG ONTO “CALL” TO STAMP CALL BOOKED / HELD · OTHER STAGES ARE DERIVED FROM THE ACCOUNT, DOSSIER OR STRIPE · LOST + WAITLIST LIVE IN TABLE FILTERS</span>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ============ DOSSIERS ============ -->
+    <sc-if value="{{ vDoss }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Dossier queue" style="display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: calc(100vh - 110px);">
+        <div style="padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid #DDDAD4; box-sizing: border-box;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 16px;">
+            <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; margin: 0;">Dossier queue</h1>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #9FA2A7;">{{ dossCount }}</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <sc-for list="{{ dossFilters }}" as="df" hint-placeholder-count="4">
+              <button onClick="{{ df.set }}" style="{{ df.style }}">{{ df.label }}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <sc-for list="{{ dossRows }}" as="dr" hint-placeholder-count="5">
+              <button onClick="{{ dr.select }}" style="{{ dr.style }}">
+                <span style="display: flex; flex-direction: column; gap: 2px; text-align: left; min-width: 0;">
+                  <span style="font-weight: 600; font-size: 15.5px;">{{ dr.name }}</span>
+                  <span style="font-size: 12.5px; color: #9FA2A7;">{{ dr.meta }}</span>
+                </span>
+                <span style="margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #9FA2A7; white-space: nowrap;">{{ dr.date }}</span>
+                  <span style="{{ dr.pill }}">{{ dr.status }}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 26px 28px; box-sizing: border-box;">
+          <sc-if value="{{ hasDoss }}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; flex-direction: column; gap: 18px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; color: #D92632;">CANDIDATE DOSSIER</span>
+                  <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 28px; letter-spacing: -0.01em;">{{ dsel.name }}</span>
+                  <span style="font-size: 13.5px; color: #55585E;">{{ dsel.meta }}</span>
+                </div>
+                <span style="{{ dsel.pill }}">{{ dsel.status }}</span>
+              </div>
+
+              <!-- payment strip -->
+              <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <span style="{{ dsel.payPill }}">{{ dsel.payLabel }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.04em; color: #9FA2A7;">{{ dsel.payMeta }}</span>
+                <button onClick="{{ dsel.openStripe }}" style="margin-left: auto; background: none; border: 1px solid #D8D5CF; border-radius: 100px; padding: 6px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: #55585E; cursor: pointer;">OPEN IN STRIPE ↗</button>
+              </div>
+
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;">
+                <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">SUBJECTS</span>
+                  <span style="font-size: 14px;">{{ dsel.subjects }}</span>
+                </div>
+                <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">PARENT</span>
+                  <span style="font-size: 14px;">{{ dsel.parent }}</span>
+                </div>
+              </div>
+
+              <div style="background: #0300ED; border-radius: 12px; padding: 18px 22px; display: flex; flex-direction: column; gap: 8px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #EFC5B8;">PROJECT PITCH</span>
+                <p style="font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 16px; line-height: 1.5; color: #F7F6F3; margin: 0;">“{{ dsel.pitch }}”</p>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; align-items: baseline; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #9FA2A7;">INTERESTS &amp; EVIDENCE</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #0E8A5F;">{{ dsel.pct }}</span>
+                  <button onClick="{{ dsel.print }}" style="margin-left: auto; background: none; border: none; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: #0300ED; cursor: pointer; text-decoration: underline;">PRINTABLE DOSSIER</button>
+                </div>
+                <p style="font-size: 13.5px; line-height: 1.6; color: #55585E; margin: 0;">{{ dsel.interests }}</p>
+                <p style="font-size: 13.5px; line-height: 1.6; color: #55585E; margin: 0;">{{ dsel.scores }}</p>
+              </div>
+
+              <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">MOVE CANDIDATE</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <sc-for list="{{ dsel.stageButtons }}" as="sb" hint-placeholder-count="5">
+                    <button onClick="{{ sb.set }}" style="{{ sb.style }}">{{ sb.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">GROUP</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <sc-for list="{{ dsel.groupButtons }}" as="gb" hint-placeholder-count="5">
+                    <button onClick="{{ gb.set }}" style="{{ gb.style }}">{{ gb.label }}</button>
+                  </sc-for>
+                </div>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.04em; color: #9FA2A7;">FEEDS PER-GROUP SEAT COUNTS · NULLABLE UNTIL S8 SHIPS</span>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #9FA2A7;">TEAM NOTES</span>
+                <textarea value="{{ dsel.notes }}" onChange="{{ dsel.setNotes }}" rows="3" placeholder="Assessment scheduling, call outcomes, flags…" style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; line-height: 1.6; padding: 12px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical; width: 100%; box-sizing: border-box;"></textarea>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ============ LIBRARY ============ -->
+    <sc-if value="{{ vLib }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Library" style="padding: 24px 28px 48px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box;">
+        <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+          <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 28px; letter-spacing: -0.01em; margin: 0;">Library</h1>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #9FA2A7;">{{ libCount }}</span>
+          <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #9FA2A7;">SENDS VIA RESEND · FROM ADMISSIONS@THE120.SCHOOL</span>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <sc-for list="{{ libFilters }}" as="lf" hint-placeholder-count="5">
+            <button onClick="{{ lf.set }}" style="{{ lf.style }}">{{ lf.label }}</button>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px;">
+          <sc-for list="{{ libCards }}" as="li" hint-placeholder-count="6">
+            <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 9px;">
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <span style="{{ li.typeStyle }}">{{ li.type }}</span>
+                <sc-if value="{{ li.tag }}" hint-placeholder-val="{{ false }}"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.04em; background: #ECEAE5; color: #55585E; border-radius: 100px; padding: 3px 8px;">{{ li.tag }}</span></sc-if>
+              </div>
+              <span style="font-weight: 600; font-size: 15px;">{{ li.title }}</span>
+              <span style="font-size: 12.5px; color: #55585E; line-height: 1.55; flex: 1;">{{ li.blurb }}</span>
+              <div style="display: flex; align-items: center; gap: 10px; border-top: 1px solid #ECEAE5; padding-top: 10px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.04em; color: #9FA2A7;">{{ li.stats }}</span>
+                <button onClick="{{ li.vote }}" style="background: none; border: 1px solid #D8D5CF; border-radius: 100px; padding: 4px 10px; font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.04em; color: #55585E; cursor: pointer;">HELPFUL +</button>
+                <button onClick="{{ li.send }}" style="margin-left: auto; background: #0300ED; color: #FFFFFF; border: none; border-radius: 10px; padding: 8px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.08em; cursor: pointer;">SEND</button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</sc-if>
+
+<!-- ============ CONTACT DRAWER ============ -->
+<sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Contact drawer" style="position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end;">
+    <div onClick="{{ closeDrawer }}" style="position: absolute; inset: 0; background: rgba(19,20,22,0.35);"></div>
+    <div style="position: relative; width: min(920px, 100%); background: #ECEAE5; height: 100%; overflow-y: auto; box-shadow: 0 4px 18px rgba(19,20,22,0.14); box-sizing: border-box;">
+      <div style="padding: 22px 26px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;">
+          <div style="display: flex; flex-direction: column; gap: 5px; min-width: 0;">
+            <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 28px; letter-spacing: -0.01em;">{{ fam.name }}</span>
+            <span style="font-size: 13.5px; color: #55585E;">{{ fam.meta }}</span>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span title="{{ fam.stageWhy }}" style="{{ fam.stagePill }}">{{ fam.stage }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.04em; color: #9FA2A7;">{{ fam.stageWhy }}</span>
+              <span style="display: flex; gap: 3px;">
+                <sc-for list="{{ fam.pips }}" as="p" hint-placeholder-count="5"><span style="{{ p }}"></span></sc-for>
+              </span>
+              <span style="{{ fam.touchStyle }}">{{ fam.touch }}</span>
+            </div>
+          </div>
+          <button onClick="{{ closeDrawer }}" style="margin-left: auto; background: #F7F6F3; border: 1px solid #D8D5CF; border-radius: 100px; width: 32px; height: 32px; font-size: 14px; cursor: pointer; color: #55585E; flex: none;">✕</button>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button onClick="{{ fam.logBooked }}" style="{{ fam.bookedBtn }}">{{ fam.bookedLabel }}</button>
+          <button onClick="{{ fam.logHeld }}" style="{{ fam.heldBtn }}">{{ fam.heldLabel }}</button>
+          <button onClick="{{ fam.sendLib }}" style="background: #FFFFFF; border: 1px solid #D8D5CF; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #131416; cursor: pointer;">SEND FROM LIBRARY</button>
+          <button onClick="{{ fam.markLost }}" style="{{ fam.lostBtn }}">{{ fam.lostLabel }}</button>
+          <button onClick="{{ fam.markWait }}" style="{{ fam.waitBtn }}">{{ fam.waitLabel }}</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start;">
+          <div style="display: flex; flex-direction: column; gap: 14px; min-width: 0;">
+            <!-- co-pilot -->
+            <div style="background: #0300ED; border-radius: 12px; padding: 18px 22px; display: flex; flex-direction: column; gap: 10px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #EFC5B8; display: flex; align-items: center; gap: 7px;"><span style="width: 7px; height: 7px; border-radius: 100px; background: #D92632; animation: pulse120 1.6s ease-in-out infinite;"></span>CONVERSATION CO-PILOT</span>
+              <p style="font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 16px; line-height: 1.55; color: #F7F6F3; margin: 0;">{{ fam.copilotSummary }}</p>
+              <span style="align-self: flex-start; background: #FFFFFF; color: #131416; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.05em; padding: 8px 14px; border-radius: 100px;">{{ fam.nextMove }}</span>
+              <sc-if value="{{ fam.hasSuggestions }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 4px;">
+                  <sc-for list="{{ fam.suggestions }}" as="sg" hint-placeholder-count="3">
+                    <button onClick="{{ sg.send }}" style="display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 9px 13px; cursor: pointer; text-align: left; width: 100%;">
+                      <span style="color: #F7F6F3; font-size: 13px; font-weight: 500; font-family: 'Space Grotesk', sans-serif;">{{ sg.title }}</span>
+                      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.04em; color: #EFC5B8; white-space: nowrap;">{{ sg.meta }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <!-- timeline -->
+            <div style="background: #FFFFFF; border: 1px solid #DDDAD4; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">ACTIVITY</span>
+              <div style="display: flex; gap: 8px;">
+                <input placeholder="Log a note…" value="{{ fam.noteDraft }}" onChange="{{ fam.setNote }}" style="flex: 1; font-size: 13.5px; padding: 9px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #F7F6F3; outline: none; min-width: 0;">
+                <button onClick="{{ fam.addNote }}" style="background: #131416; color: #FFFFFF; border: none; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.08em; cursor: pointer; flex: none;">LOG NOTE</button>
+              </div>
+              <div style="display: flex; flex-direction: column;">
+                <sc-for list="{{ fam.timeline }}" as="ev" hint-placeholder-count="5">
+                  <div style="display: flex; gap: 11px; padding: 8px 0; border-bottom: 1px solid #ECEAE5; align-items: baseline;">
+                    <span style="{{ ev.dot }}"></span>
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #9FA2A7; width: 46px; flex: none;">{{ ev.date }}</span>
+                    <span style="{{ ev.textStyle }}">{{ ev.text }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <!-- aside -->
+          <div style="display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 7px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">ABOUT</span>
+              <span style="font-size: 13px; line-height: 1.6; color: #55585E;">{{ fam.about }}</span>
+              <span style="{{ fam.acctStyle }}">{{ fam.acctLabel }}</span>
+              <span style="{{ fam.consentStyle }}">{{ fam.consentLabel }}</span>
+            </div>
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">ENGAGEMENT SIGNALS</span>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                <sc-for list="{{ fam.signalPills }}" as="sp" hint-placeholder-count="8">
+                  <button onClick="{{ sp.toggle }}" style="{{ sp.style }}">{{ sp.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">CONCERNS</span>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <sc-for list="{{ fam.concernPills }}" as="cp" hint-placeholder-count="8">
+                  <button onClick="{{ cp.toggle }}" style="{{ cp.style }}">{{ cp.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">HEAT</span>
+              <div style="display: flex; align-items: center; gap: 5px;">
+                <sc-for list="{{ fam.heatButtons }}" as="hb" hint-placeholder-count="5">
+                  <button onClick="{{ hb.set }}" style="{{ hb.style }}"></button>
+                </sc-for>
+                <span style="margin-left: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.04em; color: #9FA2A7;">{{ fam.heatNote }}</span>
+              </div>
+            </div>
+            <div style="background: #F7F6F3; border: 1px solid #DDDAD4; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 7px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.12em; color: #D92632;">PRIVATE NOTES</span>
+              <textarea value="{{ fam.priv }}" onChange="{{ fam.setPriv }}" rows="3" placeholder="Never leaves the staff wing…" style="font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 14px; line-height: 1.55; padding: 10px 12px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical; width: 100%; box-sizing: border-box; color: #131416;"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<!-- ============ ADD FAMILY MODAL ============ -->
+<sc-if value="{{ addOpen }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Add family" style="position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
+    <div onClick="{{ closeAdd }}" style="position: absolute; inset: 0; background: rgba(19,20,22,0.35);"></div>
+    <div style="position: relative; width: 620px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: #F7F6F3; border-radius: 12px; padding: 26px 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 4px 18px rgba(19,20,22,0.14); box-sizing: border-box;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 24px; letter-spacing: -0.01em;">Add a family</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: #9FA2A7;">MANUAL LEAD · MERGES ON SIGNUP</span>
+        <button onClick="{{ closeAdd }}" style="margin-left: auto; background: none; border: none; font-size: 15px; cursor: pointer; color: #55585E;">✕</button>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <input placeholder="Parent first name *" value="{{ afForm.first }}" onChange="{{ afSet.first }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input placeholder="Parent last name *" value="{{ afForm.last }}" onChange="{{ afSet.last }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input placeholder="Email" value="{{ afForm.email }}" onChange="{{ afSet.email }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input placeholder="Phone" value="{{ afForm.phone }}" onChange="{{ afSet.phone }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input placeholder="Spouse" value="{{ afForm.spouse }}" onChange="{{ afSet.spouse }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <input placeholder="Area (Leaside, Beaches…)" value="{{ afForm.area }}" onChange="{{ afSet.area }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        <select value="{{ afForm.source }}" onChange="{{ afSet.source }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; color: #131416; box-sizing: border-box; width: 100%;">
+          <sc-for list="{{ sourceOptions }}" as="op"><option value="{{ op.id }}">{{ op.label }}</option></sc-for>
+        </select>
+        <input placeholder="Referral code (AMB-…)" value="{{ afForm.ref }}" onChange="{{ afSet.ref }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+      </div>
+      <sc-if value="{{ afDup }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size: 12.5px; color: #B85C00;">⚠ That email already exists in families or parents — this will merge, not duplicate.</span>
+      </sc-if>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: #9FA2A7;">KIDS</span>
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+          <input placeholder="Child name" value="{{ afForm.kid1 }}" onChange="{{ afSet.kid1 }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+          <input placeholder="Grade" value="{{ afForm.kid1g }}" onChange="{{ afSet.kid1g }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+          <input placeholder="Child name" value="{{ afForm.kid2 }}" onChange="{{ afSet.kid2 }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+          <input placeholder="Grade" value="{{ afForm.kid2g }}" onChange="{{ afSet.kid2g }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+        </div>
+      </div>
+      <button onClick="{{ afToggleConsent }}" style="{{ afConsentStyle }}">
+        <span style="{{ afConsentBox }}">{{ afConsentMark }}</span>
+        <span style="display: flex; flex-direction: column; gap: 2px; text-align: left;">
+          <span style="font-size: 13.5px; font-weight: 600;">CASL express consent on file</span>
+          <span style="font-size: 12px; color: #55585E;">RSVP, opt-in form, or account signup. Non-consented leads are never emailed.</span>
+        </span>
+      </button>
+      <sc-if value="{{ afConsentOn }}" hint-placeholder-val="{{ false }}">
+        <input placeholder="Consent source + date (e.g. RSVP’d info session · Jul 22)" value="{{ afForm.consentSrc }}" onChange="{{ afSet.consentSrc }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+      </sc-if>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button onClick="{{ closeAdd }}" style="background: #FFFFFF; border: 1px solid #D8D5CF; border-radius: 10px; padding: 11px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #55585E; cursor: pointer;">CANCEL</button>
+        <button onClick="{{ afCreate }}" style="background: #D92632; color: #FFFFFF; border: none; border-radius: 10px; padding: 11px 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; cursor: pointer;">CREATE FAMILY</button>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<!-- ============ SEND COMPOSER ============ -->
+<sc-if value="{{ compOpen }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Send composer" style="position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
+    <div onClick="{{ closeComp }}" style="position: absolute; inset: 0; background: rgba(19,20,22,0.35);"></div>
+    <div style="position: relative; width: 580px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: #F7F6F3; border-radius: 12px; padding: 26px 28px; display: flex; flex-direction: column; gap: 13px; box-shadow: 0 4px 18px rgba(19,20,22,0.14); box-sizing: border-box;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <span style="font-family: Georgia, 'Times New Roman', serif; font-size: 24px; letter-spacing: -0.01em;">Send from library</span>
+        <button onClick="{{ closeComp }}" style="margin-left: auto; background: none; border: none; font-size: 15px; cursor: pointer; color: #55585E;">✕</button>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <select value="{{ comp.famId }}" onChange="{{ comp.setFam }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; color: #131416; box-sizing: border-box; width: 100%;">
+          <option value="">— pick a family —</option>
+          <sc-for list="{{ comp.famOptions }}" as="fo"><option value="{{ fo.id }}">{{ fo.label }}</option></sc-for>
+        </select>
+        <select value="{{ comp.itemId }}" onChange="{{ comp.setItem }}" style="font-size: 13.5px; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; color: #131416; box-sizing: border-box; width: 100%;">
+          <option value="">— pick an item —</option>
+          <sc-for list="{{ comp.itemOptions }}" as="io"><option value="{{ io.id }}">{{ io.label }}</option></sc-for>
+        </select>
+      </div>
+      <sc-if value="{{ comp.blocked }}" hint-placeholder-val="{{ false }}">
+        <div style="border: 1px solid #D92632; background: #FFFFFF; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 5px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #D92632;">CASL BLOCK — NO EXPRESS CONSENT ON FILE</span>
+          <span style="font-size: 13px; color: #55585E; line-height: 1.55;">This family has never opted in. Record consent (RSVP, opt-in form, signup) on their record before any email leaves the building. Full stop.</span>
+        </div>
+      </sc-if>
+      <input value="{{ comp.subject }}" onChange="{{ comp.setSubject }}" placeholder="Subject" style="font-size: 13.5px; font-weight: 600; padding: 11px 13px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; box-sizing: border-box; width: 100%;">
+      <textarea value="{{ comp.body }}" onChange="{{ comp.setBody }}" rows="7" placeholder="Body…" style="font-family: 'Space Grotesk', sans-serif; font-size: 13.5px; line-height: 1.6; padding: 12px 14px; border: 1px solid #D8D5CF; border-radius: 10px; background: #FFFFFF; outline: none; resize: vertical; width: 100%; box-sizing: border-box;"></textarea>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; letter-spacing: 0.05em; color: #9FA2A7;">FROM ADMISSIONS@THE120.SCHOOL · BCC ADMISSIONS@ · LOGGED TO TIMELINE + LIBRARY_SENDS</span>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button onClick="{{ comp.markElsewhere }}" style="background: #FFFFFF; border: 1px solid #D8D5CF; border-radius: 10px; padding: 11px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; color: #55585E; cursor: pointer;">MARK SENT ELSEWHERE</button>
+        <button onClick="{{ comp.doSend }}" style="{{ comp.sendStyle }}">SEND VIA RESEND</button>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<!-- toast -->
+<sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}">
+  <div style="position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 90; background: #131416; color: #F7F6F3; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.05em; padding: 12px 20px; border-radius: 100px; box-shadow: 0 4px 18px rgba(19,20,22,0.3); max-width: 82vw;">{{ toastMsg }}</div>
+</sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startLoggedIn&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Prototype&quot;}, &quot;dashboardLayout&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;briefing-rail&quot;, &quot;stacked&quot;], &quot;default&quot;: &quot;briefing-rail&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Prototype&quot;}}">
+class Component extends DCLogic {
+  state = {
+    auth: null, view: 'dashboard', week: 4, layout: null,
+    pipeMode: null, stageF: 'ALL', sourceF: 'ALL', attn: false,
+    drawerId: null, addOpen: false, comp: null,
+    dossSel: null, dossF: 'ALL', libF: 'ALL',
+    toast: null, loginEmail: '', loginPw: '', loginErr: false,
+    noteDraft: '', dragId: null,
+    af: null, tick: 0
+  };
+
+  MONO = "font-family: 'IBM Plex Mono', monospace;";
+
+  SOURCES = [
+    ['warm-network','WARM NETWORK'], ['ambassador','AMBASSADOR'], ['gauntlet','GAUNTLET'],
+    ['facebook-group','FB GROUP'], ['abc-ontario','ABC ONTARIO'], ['math-contest','MATH CONTEST'],
+    ['sports-arts','SPORTS/ARTS'], ['info-session','INFO SESSION'], ['coffee-intro','COFFEE'],
+    ['website','WEBSITE'], ['other','OTHER']
+  ];
+  CONCERNS = [
+    ['price-value','PRICE/VALUE'], ['full-core-cost','FULL CORE $15K'], ['refund-terms','REFUND TERMS'],
+    ['time-commitment','TIME'], ['screen-time','SCREEN TIME'], ['socialization','SOCIAL'],
+    ['curriculum-fit','CURRICULUM'], ['selectivity-anxiety','SELECTIVITY'], ['spouse-buy-in','SPOUSE BUY-IN'],
+    ['logistics','LOGISTICS']
+  ];
+  SIGNALS = [
+    ['explainer-sent','EXPLAINER SENT'], ['gauntlet-played','GAUNTLET PLAYED'], ['info-session','INFO SESSION'],
+    ['group-sheet-sent','GROUP SHEET'], ['parents-story-sent','PARENTS STORY'], ['deposit-link-shared','DEPOSIT LINK'],
+    ['ambassador-connected','AMBASSADOR'], ['dossier-nudged','DOSSIER NUDGED']
+  ];
+  REVIEW = ['Submitted','In review','Invited to assessment','Offered a seat','Member of the 120'];
+  GROUPS = ['Athletes','Founders','Makers','Scholars','Givers'];
+
+  TGT = {
+    interested: [25,40,70,105,140,170,190,200],
+    started:    [12,22,39,58,77,94,105,110],
+    submitted:  [5,12,24,40,54,66,73,77],
+    booked:     [10,20,30,40,55,70,85,90],
+    held:       [6,14,22,30,42,56,68,72],
+    deposits:   [0,2,6,15,22,32,45,48]
+  };
+  STATS = { interested: 96, started: 52, submitted: 15, booked: 34, held: 23, deposits: 13 };
+
+  WEEKS = [
+    { n:1, ph:'PHASE 1 · ARM', dates:'JUL 13–19', push:'Machine online + warm 25', result:'hit',
+      actions:['Cal.com booking link live (T2) + NEXT_PUBLIC_BOOKING_URL set','Stripe go-live kicked (S10) — live keys, $250 charge/refund test','Resend wired; welcome email #1 shipping','Personally message the 25 warmest contacts'],
+      asset:'One-page explainer PDF + welcome email #1',
+      chips:[{l:'WARM CONVOS',c:25,t:25,m:false},{l:'CALLS BOOKED',c:10,t:10,m:false}] },
+    { n:2, ph:'PHASE 1 · ARM', dates:'JUL 20–26', push:'Recruit the ambassadors', result:'hit',
+      actions:['Recruit 12–15 grade 7/8 ambassadors via kids’ networks','45-min virtual kickoff — kids + a parent each','Issue AMB- referral codes','Soft-launch Gauntlet tournament to ambassadors only'],
+      asset:'Ambassador kit: 1-pager, code card, 3 share images, parent consent note',
+      chips:[{l:'AMBASSADORS',c:12,t:12,m:true},{l:'INTERESTED',c:41,t:40,m:false}] },
+    { n:3, ph:'PHASE 2 · SEED', dates:'JUL 27–AUG 2', push:'Gifted-parent communities', result:'miss',
+      actions:['Value-first TimeBack posts in gifted FB groups + ABC Ontario','Explainer PDF by DM — never cold links into groups','Three “120 coffees” with connector parents'],
+      asset:'/parents story post + 5 canned objection answers',
+      chips:[{l:'COFFEES',c:2,t:3,m:true},{l:'INTERESTED',c:62,t:70,m:false}] },
+    { n:4, ph:'PHASE 2 · SEED', dates:'AUG 3–9', push:'The Gauntlet goes public', result:'current',
+      actions:['Open the Gauntlet Summer Tournament to all — bands 3–4 / 5–6 / 7–8','Announce Founding Leaderboard + first-demo-slot prizes','Ambassadors challenge classmates; parents share scores','/gauntlet parent banner → join flow live','Dev ticket: shareable score card image'],
+      asset:'Gauntlet share card + tournament rules page + weekly leaderboard email',
+      chips:[{l:'AMBASSADORS SHARING',c:9,t:12,m:true},{l:'INTERESTED Δ',c:26,t:35,m:false},{l:'DEPOSITS',c:13,t:15,m:false}] },
+    { n:5, ph:'PHASE 3 · SURGE', dates:'AUG 10–16', push:'Five-group verticals', result:'future',
+      actions:['Scholars → CEMC / Math Kangaroo circles + math-circle coaches','Athletes → GTHL + rep-team parent reps','Makers → RCM + maker-camp program lists','Founders + Givers → kid-entrepreneur fairs, volunteering orgs'],
+      asset:'Five one-page group sheets — one hero line each',
+      chips:[{l:'INTERESTED',c:0,t:140,m:false},{l:'DEPOSITS',c:0,t:22,m:false}] },
+    { n:6, ph:'PHASE 3 · SURGE', dates:'AUG 17–23', push:'Info sessions week', result:'future',
+      actions:['Two 45-min virtual sessions — Tue evening, Sat morning','One in-person Toronto meetup — Gauntlet on a projector','Next-day recap + booking link to every attendee'],
+      asset:'Info-session deck (10 slides) + RSVP page + recap email',
+      chips:[{l:'RSVPS',c:0,t:60,m:true},{l:'INTERESTED',c:0,t:170,m:false}] },
+    { n:7, ph:'PHASE 4 · LAND', dates:'AUG 24–30', push:'Deposit push', result:'future',
+      actions:['3-email sequence to all consented non-depositors','Personally call every submitted-dossier family without a deposit','Publish the live seat count in emails — it’s truthful, use it','Founding-member cutoff: deposited by Sep 1'],
+      asset:'Deposit-push sequence (3 emails) + refund-terms page (S7)',
+      chips:[{l:'DEPOSITS',c:0,t:45,m:false},{l:'CALLS',c:0,t:85,m:false}] },
+    { n:8, ph:'PHASE 4 · LAND', dates:'AUG 31–SEP 4', push:'September landing', result:'future',
+      actions:['Verify nurture automation end-to-end','Ambassador back-to-school kits delivered','Open 12 call slots/week through October','Send “the year begins” email'],
+      asset:'“The Year Ahead” email + waitlist page copy',
+      chips:[{l:'INTERESTED',c:0,t:200,m:false},{l:'DEPOSITS',c:0,t:48,m:false}] }
+  ];
+
+  componentDidMount() {
+    this.checks = { 1:[1,1,1,1], 2:[1,1,1,1], 3:[1,1,0], 4:[1,0,0,0,0], 5:[0,0,0,0], 6:[0,0,0], 7:[0,0,0,0], 8:[0,0,0,0] };
+    this.chipAdj = {};
+    this.seed();
+    let pm = null; try { pm = localStorage.getItem('the120.crm.viewMode'); } catch(e) {}
+    this.setState({ pipeMode: pm || 'table' });
+    this._pop = () => { if (this.state.drawerId && location.search.indexOf('family=') === -1) this.setState({ drawerId: null }); };
+    window.addEventListener('popstate', this._pop);
+  }
+  componentWillUnmount() { window.removeEventListener('popstate', this._pop); }
+
+  seed() {
+    const K = (n,g,school,st,rev,grp,pct,pitch,subj,intr,scores) => ({n,g,school,st,rev,grp,pct,pitch:pitch||'',subj:subj||'—',intr:intr||'',scores:scores||''});
+    this.fams = [
+      { id:'f1', parent:'Grace Kim', email:'grace.kim@gmail.com', phone:'416-555-0142', area:'Lawrence Park', spouse:'Ed Kim', source:'warm-network', ref:'', consent:true, consentSrc:'Join flow · Jun 12', acct:true,
+        kids:[K('Daniel Kim','6','Hollywood PS','Submitted','Member of the 120','Scholars',100,'Qualify for MATHCOUNTS nationals and publish my practice system so other kids can use it.','Math','Chess 1350 rapid; Math Kangaroo medalist.','AMC 8: 18.')],
+        heatOv:null, concerns:[], sent:[], signals:['ambassador-connected','gauntlet-played','info-session'], touch:3, booked:30, held:27, ov:null, dep:{st:'paid',d:49}, askedRef:false, notes:[{d:5,t:'Founding member #6. Tin Can shipped.'}], recent:false },
+      { id:'f2', parent:'Marc Tremblay', email:'marc.t@gmail.com', phone:'647-555-0186', area:'Leslieville', spouse:'', source:'warm-network', ref:'', consent:true, consentSrc:'Join flow · Jun 30', acct:true,
+        kids:[K('Zoe Tremblay','8','Homeschool','Submitted','Offered a seat','Scholars',100,'Build and launch a high-altitude glider with an onboard flight computer I program myself.','Math, Science','Ham radio licence (basic), Arduino since age 9.','CCAT 99th; MAP Math 251.')],
+        heatOv:5, concerns:['full-core-cost'], sent:['full-core-cost'], signals:['explainer-sent','deposit-link-shared','info-session'], touch:2, booked:21, held:18, ov:null, dep:{st:'paid',d:7}, askedRef:true, notes:[{d:9,t:'Also interested in Full Core — flagged for a follow-up call.'}], recent:false },
+      { id:'f3', parent:'Sofie Vandermeer', email:'sofie.v@gmail.com', phone:'416-555-0117', area:'Summerhill', spouse:'Jan Vandermeer', source:'website', ref:'', consent:true, consentSrc:'Join flow · Jul 18', acct:true,
+        kids:[K('Theo Vandermeer','4','Cottingham Jr PS','Submitted','Submitted',null,92,'A trading-card game where the math is the weapon — you win by solving faster.','Math','Speedcubing (sub-40), Beast Academy self-study two grades ahead.','CCAT 98th percentile.')],
+        heatOv:null, concerns:['selectivity-anxiety'], sent:[], signals:['explainer-sent','gauntlet-played'], touch:1, booked:1, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:true },
+      { id:'f4', parent:'Kwame Osei', email:'k.osei@gmail.com', phone:'416-555-0129', area:'The Beaches', spouse:'Abena Osei', source:'facebook-group', ref:'', consent:true, consentSrc:'Join flow · Jul 10', acct:true,
+        kids:[K('Amara Osei','7','Glen Ames Sr PS','Submitted','In review',null,100,'A podcast season interviewing Toronto elders about neighbourhoods that no longer exist.','Writing, History','School paper editor; NaNoWriMo finisher at 11.','MAP Reading 235.')],
+        heatOv:null, concerns:['price-value'], sent:['price-value'], signals:['explainer-sent','parents-story-sent'], touch:2, booked:5, held:2, ov:null, dep:null, askedRef:false, notes:[{d:2,t:'Great call — Amara joined for ten minutes. Pair with Morgan?'}], recent:false },
+      { id:'f5', parent:'Ana Braga', email:'ana.braga@gmail.com', phone:'647-555-0163', area:'St. Clair West', spouse:'', source:'abc-ontario', ref:'', consent:true, consentSrc:'Join flow · Jul 6', acct:true,
+        kids:[K('Lucas Braga','5','St. Clare CS','Submitted','Invited to assessment',null,100,'Test which balcony vegetables actually grow best in a Toronto condo, with real data.','Science','iNaturalist top-500 observer in Ontario.','Report cards uploaded.')],
+        heatOv:null, concerns:['time-commitment'], sent:[], signals:['info-session'], touch:4, booked:9, held:4, ov:null, dep:null, askedRef:false, notes:[{d:4,t:'Assessment slot pencilled: Aug 12.'}], recent:false },
+      { id:'f6', parent:'Deepa Nair', email:'deepa.n@gmail.com', phone:'416-555-0171', area:'Thorncliffe Park', spouse:'', source:'website', ref:'', consent:true, consentSrc:'Join flow · Jul 25', acct:true,
+        kids:[K('Priya Nair','3','Fraser Mustard ELA','Submitted','Submitted',null,88,'Write and illustrate a chapter book series about a library cat who solves mysteries.','Reading','Reads at Grade 6 level; keeps a review blog with her mom.','Teacher letter uploaded.')],
+        heatOv:null, concerns:[], sent:[], signals:['explainer-sent'], touch:3, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f7', parent:'Jordan Whitfield', email:'j.whitfield@gmail.com', phone:'', area:'High Park', spouse:'', source:'website', ref:'', consent:true, consentSrc:'Join flow · Aug 1', acct:true,
+        kids:[], heatOv:null, concerns:[], sent:[], signals:['explainer-sent'], touch:4, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f8', parent:'Fatima Al-Sayed', email:'fatima.as@gmail.com', phone:'647-555-0155', area:'North York', spouse:'Omar Al-Sayed', source:'info-session', ref:'', consent:true, consentSrc:'RSVP’d info session · Jul 28', acct:false,
+        kids:[], heatOv:4, concerns:['logistics'], sent:['logistics'], signals:['info-session'], touch:6, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f9', parent:'Rob Petrov', email:'rob.petrov@gmail.com', phone:'', area:'Etobicoke', spouse:'', source:'facebook-group', ref:'', consent:false, consentSrc:'', acct:false,
+        kids:[], heatOv:null, concerns:['screen-time'], sent:[], signals:['gauntlet-played'], touch:9, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[{d:9,t:'Asked good questions in the FB thread. DO NOT email until consented.'}], recent:false },
+      { id:'f10', parent:'Naomi Goldstein', email:'n.goldstein@gmail.com', phone:'416-555-0192', area:'Forest Hill', spouse:'Ari Goldstein', source:'abc-ontario', ref:'', consent:true, consentSrc:'Join flow · Jul 22', acct:true,
+        kids:[K('Milo Goldstein','4','Forest Hill Jr PS','Draft',null,null,45,'','Math, Reading','','')],
+        heatOv:null, concerns:['curriculum-fit'], sent:[], signals:['explainer-sent'], touch:6, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f11', parent:'Sam Okafor', email:'s.okafor@gmail.com', phone:'647-555-0138', area:'Liberty Village', spouse:'', source:'gauntlet', ref:'AMB-MAYA', consent:true, consentSrc:'Join flow · Aug 2', acct:true,
+        kids:[K('Jesse Okafor','6','Givins/Shaw PS','Draft',null,null,60,'','Math','','')],
+        heatOv:null, concerns:[], sent:[], signals:['gauntlet-played','ambassador-connected'], touch:1, booked:1, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:true },
+      { id:'f12', parent:'Helena Vasquez', email:'h.vasquez@gmail.com', phone:'416-555-0148', area:'Roncesvalles', spouse:'Pablo Vasquez', source:'gauntlet', ref:'AMB-MAYA', consent:true, consentSrc:'Join flow · Jul 20', acct:true,
+        kids:[K('Rosa Vasquez','7','Fern Ave PS','Submitted','In review','Makers',100,'Direct a stop-motion short with sets I build myself, and screen it for the whole neighbourhood.','Arts, Writing','Two years of claymation experiments on a shelf in the basement.','Portfolio uploaded.')],
+        heatOv:null, concerns:[], sent:[], signals:['gauntlet-played','info-session','deposit-link-shared'], touch:3, booked:13, held:10, ov:null, dep:{st:'paid',d:3}, askedRef:false, notes:[], recent:false },
+      { id:'f13', parent:'Priya Raman', email:'p.raman@gmail.com', phone:'647-555-0121', area:'Leaside', spouse:'Dev Raman', source:'math-contest', ref:'', consent:true, consentSrc:'Join flow · Jul 8', acct:true,
+        kids:[K('Arjun Raman','5','Northlea PS','Submitted','Submitted',null,96,'Crack the Caribou contest top-10 by building my own daily problem generator.','Math','Math circle at U of T; Kangaroo top-5%.','Contest scores uploaded.')],
+        heatOv:2, concerns:['refund-terms','spouse-buy-in'], sent:['refund-terms'], signals:['explainer-sent','deposit-link-shared'], touch:6, booked:19, held:15, ov:'waitlist', dep:{st:'refunded',d:6,paidD:20}, askedRef:false, notes:[{d:6,t:'Refund processed — spouse not on board. Revisit for January.'}], recent:false },
+      { id:'f14', parent:'Ted Lawson', email:'ted.lawson@gmail.com', phone:'', area:'Rosedale', spouse:'', source:'coffee-intro', ref:'', consent:true, consentSrc:'Opt-in at coffee · Jul 15', acct:false,
+        kids:[], heatOv:1, concerns:[], sent:[], signals:[], touch:18, booked:null, held:null, ov:'lost', dep:null, askedRef:false, notes:[{d:18,t:'Chose full-time private school. Gracious pass — keep for events list.'}], recent:false },
+      { id:'f15', parent:'David Nkemelu', email:'d.nkemelu@gmail.com', phone:'416-555-0177', area:'Scarborough', spouse:'', source:'math-contest', ref:'', consent:true, consentSrc:'Opt-in form · Jul 24', acct:false,
+        kids:[], heatOv:null, concerns:['selectivity-anxiety'], sent:['selectivity-anxiety'], signals:['explainer-sent'], touch:12, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f16', parent:'Charlotte Ma', email:'c.ma@gmail.com', phone:'', area:'Markham', spouse:'', source:'abc-ontario', ref:'', consent:true, consentSrc:'Opt-in form · Jul 13', acct:false,
+        kids:[], heatOv:2, concerns:['price-value'], sent:['price-value'], signals:[], touch:23, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f17', parent:'Ben Sasaki', email:'b.sasaki@gmail.com', phone:'647-555-0109', area:'Trinity Bellwoods', spouse:'Mei Sasaki', source:'gauntlet', ref:'AMB-JONAH', consent:true, consentSrc:'Join flow · Jul 29', acct:true,
+        kids:[K('Kai Sasaki','5','Givins/Shaw PS','Draft',null,null,35,'','Math, Science','','')],
+        heatOv:null, concerns:[], sent:[], signals:['gauntlet-played'], touch:8, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f18', parent:'Olivia Reyes', email:'o.reyes@gmail.com', phone:'416-555-0184', area:'Danforth', spouse:'Carlos Reyes', source:'info-session', ref:'', consent:true, consentSrc:'Join flow · Jul 21', acct:true,
+        kids:[K('Mateo Reyes','6','Earl Grey Sr PS','Submitted','Submitted',null,90,'Start a sneaker-restoration micro-business and track every dollar in a real ledger.','Business, Math','Sold 40 friendship bracelets at school before it was “shut down by admin.”','Report cards uploaded.')],
+        heatOv:null, concerns:['spouse-buy-in'], sent:[], signals:['deposit-link-shared','info-session'], touch:2, booked:6, held:2, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f19', parent:'Amir Hosseini', email:'a.hosseini@gmail.com', phone:'647-555-0196', area:'North York', spouse:'', source:'math-contest', ref:'', consent:true, consentSrc:'Join flow · Jul 17', acct:true,
+        kids:[K('Leila Hosseini','7','Avondale PS','Submitted','Submitted',null,95,'Prove I can teach my whole class fractions better than the textbook does — then film it.','Math','Kumon dropout (too slow); Math Academy self-study.','MAP Math 243.')],
+        heatOv:null, concerns:['curriculum-fit'], sent:['curriculum-fit'], signals:['explainer-sent','parents-story-sent'], touch:2, booked:2, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:true },
+      { id:'f20', parent:'Kate O’Neill', email:'kate.oneill@gmail.com', phone:'', area:'Bloor West', spouse:'Declan O’Neill', source:'coffee-intro', ref:'', consent:true, consentSrc:'Opt-in at coffee · Jul 30', acct:false,
+        kids:[], heatOv:null, concerns:['socialization'], sent:[], signals:[], touch:5, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[{d:5,t:'School-council chair at Runnymede — connector. Asked about the five groups.'}], recent:false },
+      { id:'f21', parent:'Wei Zhang', email:'wei.zhang@gmail.com', phone:'416-555-0113', area:'Willowdale', spouse:'Lin Zhang', source:'website', ref:'', consent:true, consentSrc:'Join flow · Jul 27', acct:true,
+        kids:[K('Iris Zhang','4','McKee PS','Submitted','Submitted',null,90,'Compose and perform a piano suite where each movement is a Toronto season.','Music, Math','RCM Level 6 at nine years old.','RCM certificates uploaded.')],
+        heatOv:null, concerns:[], sent:[], signals:['explainer-sent'], touch:2, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f22', parent:'Lauren Fitzgerald', email:'l.fitz@gmail.com', phone:'647-555-0158', area:'The Kingsway', spouse:'Sean Fitzgerald', source:'sports-arts', ref:'', consent:true, consentSrc:'Join flow · Jul 14', acct:true,
+        kids:[K('Jack Fitzgerald','8','Lambton-Kingsway','Submitted','In review','Athletes',100,'Train to make the OHL draft watch-list while keeping a 90 average — and document the system.','Math, Kinesiology','AAA hockey (GTHL); trains 12 hrs/week.','Report cards uploaded.')],
+        heatOv:null, concerns:['time-commitment'], sent:['time-commitment'], signals:['group-sheet-sent','info-session'], touch:4, booked:16, held:12, ov:null, dep:{st:'paid',d:10}, askedRef:true, notes:[], recent:false },
+      { id:'f23', parent:'Marcus Hill', email:'', phone:'416-555-0166', area:'Cabbagetown', spouse:'', source:'sports-arts', ref:'', consent:false, consentSrc:'', acct:false,
+        kids:[], heatOv:2, concerns:[], sent:[], signals:[], touch:15, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[{d:15,t:'Met at rep-soccer pickup. No email yet — get consent before anything.'}], recent:false },
+      { id:'f24', parent:'Anita Desai', email:'a.desai@gmail.com', phone:'647-555-0132', area:'Riverdale', spouse:'Raj Desai', source:'info-session', ref:'', consent:true, consentSrc:'RSVP’d info session · Jul 28', acct:false,
+        kids:[], heatOv:4, concerns:['screen-time'], sent:['screen-time'], signals:['info-session'], touch:1, booked:1, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:true },
+      { id:'f25', parent:'George Papadopoulos', email:'g.pap@gmail.com', phone:'', area:'Greektown', spouse:'', source:'website', ref:'', consent:true, consentSrc:'Join flow · Aug 5', acct:true,
+        kids:[], heatOv:null, concerns:[], sent:[], signals:[], touch:1, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f26', parent:'Hannah Roth', email:'h.roth@gmail.com', phone:'416-555-0151', area:'Leaside', spouse:'Dan Roth', source:'gauntlet', ref:'AMB-MAYA', consent:true, consentSrc:'Join flow · Jul 19', acct:true,
+        kids:[K('Noah Roth','7','Bessborough PS','Submitted','Submitted','Founders',100,'Launch a snow-shovelling co-op where the app assigns driveways and splits pay fairly.','Business, Math','Ran the school bake-sale spreadsheet like a CFO.','Report cards uploaded.')],
+        heatOv:null, concerns:[], sent:[], signals:['gauntlet-played','ambassador-connected','deposit-link-shared'], touch:1, booked:11, held:8, ov:null, dep:{st:'paid',d:1}, askedRef:false, notes:[], recent:true },
+      { id:'f27', parent:'Nick Silva', email:'n.silva@gmail.com', phone:'', area:'Junction', spouse:'', source:'facebook-group', ref:'', consent:true, consentSrc:'Join flow · Jul 26', acct:true,
+        kids:[K('Ana Silva','5','Annette St PS','Draft',null,null,20,'','Reading','','')],
+        heatOv:null, concerns:['price-value'], sent:[], signals:[], touch:9, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false },
+      { id:'f28', parent:'Rachel Adeyemi', email:'r.adeyemi@gmail.com', phone:'647-555-0173', area:'York Mills', spouse:'Femi Adeyemi', source:'gauntlet', ref:'AMB-LIV', consent:true, consentSrc:'Join flow · Jul 31', acct:true,
+        kids:[K('Tobi Adeyemi','6','Owen PS','Draft',null,null,55,'','Math, Science','','')],
+        heatOv:null, concerns:[], sent:[], signals:['gauntlet-played'], touch:5, booked:null, held:null, ov:null, dep:null, askedRef:false, notes:[], recent:false }
+    ];
+
+    this.lib = [
+      { id:'l1', type:'faq', concern:'price-value', title:'What $3,000 actually buys', blurb:'The tuition math, line by line — coaching hours, intensives, the Tin Can, HST-exempt. Ends on cost-per-week vs. one rep-hockey season.', sends:18, help:11, subj:'What the $3,000 actually buys', body:'Hi {first} — you asked the right question. Here’s the full breakdown, line by line…' },
+      { id:'l2', type:'talking', concern:'full-core-cost', title:'The $15,000 Full Core conversation', blurb:'When to raise the Full Academic Core tier, and when not to. Sell Membership everywhere; let the call up-sell.', sends:6, help:4, subj:'The Full Academic Core, honestly', body:'Hi {first} — since you asked about the full-time option, here’s how the two tiers actually differ…' },
+      { id:'l3', type:'faq', concern:'refund-terms', title:'Refund terms, in plain language', blurb:'$250, fully refundable until Sept 30. The only thing you can lose is the seat. Verbatim terms, no asterisks.', sends:14, help:9, subj:'The deposit terms, in plain language', body:'Hi {first} — short version: $250, fully refundable until Sept 30. Long version attached…' },
+      { id:'l4', type:'data', concern:'time-commitment', title:'3–5 hours a week, mapped', blurb:'A real member week on one page: what happens Monday–Friday, on top of school, without breaking the family calendar.', sends:9, help:7, subj:'What 3–5 hours a week really looks like', body:'Hi {first} — here’s an actual member’s week, hour by hour…' },
+      { id:'l5', type:'talking', concern:'screen-time', title:'Tin Can: the screen-free answer', blurb:'The screen-time worry is the pitch. The Tin Can is a phone that only calls the other 119 — no feed, no camera, no app store.', sends:12, help:10, subj:'About screens (and the Tin Can)', body:'Hi {first} — you raised screens. That worry is exactly why we ship the Tin Can…' },
+      { id:'l6', type:'talking', concern:'socialization', title:'Where the 120 actually meet', blurb:'Groups of 24, weekly workshops, quarterly intensives, and the Address Book. Denser social fabric than a class of 30.', sends:7, help:3, subj:'How members actually meet', body:'Hi {first} — fair question. Here’s the honest social picture…' },
+      { id:'l7', type:'data', concern:'curriculum-fit', title:'Ontario alignment + the TimeBack data', blurb:'How members cover the Ontario curriculum in 2 hrs/day (TimeBack, Math Academy), with the founder’s own kids’ results from /parents.', sends:11, help:8, subj:'Ontario curriculum, covered — with data', body:'Hi {first} — here’s exactly how the academics work, with our own kids’ numbers…' },
+      { id:'l8', type:'talking', concern:'selectivity-anxiety', title:'What the assessment really is', blurb:'It’s not an exam. The dossier is the application; the assessment checks readiness for self-direction, not trivia.', sends:8, help:6, subj:'What the assessment actually looks for', body:'Hi {first} — parents worry about this more than kids do. Here’s what we actually look for…' },
+      { id:'l9', type:'talking', concern:'spouse-buy-in', title:'The spouse conversation', blurb:'The three questions the other parent always asks — refunds, academics, screens — with one-line answers and links.', sends:5, help:4, subj:'For the dinner-table conversation', body:'Hi {first} — for when you talk it over at home, here are the three questions that always come up…' },
+      { id:'l10', type:'faq', concern:'logistics', title:'Getting to intensives (and virtual cohorts)', blurb:'Where intensives happen, carpool threads, and how the virtual cohort works for families outside the core.', sends:4, help:2, subj:'Logistics, sorted', body:'Hi {first} — here’s how families make the logistics work…' },
+      { id:'l11', type:'asset', concern:null, title:'One-page explainer PDF', blurb:'Five groups, $3,000, refundable $250, Oct 31–Nov 1 intensive. The W1 asset — the single most-sent thing we have.', sends:26, help:14, subj:'The 120, on one page', body:'Hi {first} — everything on one page, as promised. The PDF is attached…' },
+      { id:'l12', type:'asset', concern:null, title:'Five group one-pagers', blurb:'Athletes, Founders, Makers, Scholars, Givers — same skeleton, one hero line each. Send the one that matches the kid.', sends:9, help:5, subj:'The sheet for your kid’s group', body:'Hi {first} — based on what you told me about {kid}, this is the group sheet to read first…' },
+      { id:'l13', type:'asset', concern:null, title:'/parents — the founder’s TimeBack story', blurb:'300 words, real data, real kids, no hype. The trust asset — link at the end, never the start.', sends:15, help:12, subj:'Why we built this (with data)', body:'Hi {first} — before anything else, here’s our own family’s story, numbers included…' },
+      { id:'l14', type:'asset', concern:null, title:'The Gauntlet (free FastMath trainer)', blurb:'The product that markets itself to the actual member. Tournament runs to Aug 23 — grade bands, boss weeks, real leaderboard.', sends:13, help:9, subj:'A math game your kid will actually fight you for', body:'Hi {first} — no pitch, just a link. See what {kid} does with it…' }
+    ];
+  }
+
+  // ---------- derivation ----------
+  stageOf(f) {
+    if (f.ov === 'lost') return 'lost';
+    if (f.ov === 'waitlist') return 'waitlist';
+    if (f.kids.some(k => k.rev === 'Member of the 120')) return 'member';
+    if (f.dep && f.dep.st === 'paid') return 'deposit';
+    if (f.held != null) return 'call-held';
+    if (f.booked != null) return 'call-booked';
+    if (f.kids.some(k => k.st !== 'Draft')) return 'submitted';
+    if (f.kids.length) return 'started';
+    if (f.acct) return 'account';
+    return 'interested';
+  }
+  STAGE_META = {
+    interested: ['INTERESTED', '#E0DDD7', '#55585E'], account: ['ACCOUNT', '#E0DDD7', '#55585E'],
+    started: ['DOSSIER STARTED', '#0300ED', '#FFFFFF'], submitted: ['DOSSIER SUBMITTED', '#0300ED', '#FFFFFF'],
+    'call-booked': ['CALL BOOKED', '#0300ED', '#FFFFFF'], 'call-held': ['CALL HELD', '#0300ED', '#FFFFFF'],
+    deposit: ['DEPOSIT PAID', '#D92632', '#FFFFFF'], member: ['MEMBER', '#D92632', '#FFFFFF'],
+    lost: ['LOST', 'rgba(19,20,22,0.6)', '#FFFFFF'], waitlist: ['WAITLIST', '#EFC5B8', '#131416']
+  };
+  stagePill(st) {
+    const m = this.STAGE_META[st];
+    return this.MONO + "font-size: 9px; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 100px; white-space: nowrap; background: " + m[1] + "; color: " + m[2] + ";";
+  }
+  stageWhy(f, st) {
+    if (st === 'member') return 'Via dossier queue — review status';
+    if (st === 'deposit') return 'Via Stripe · ' + this.dt(f.dep.d);
+    if (st === 'call-held') return 'Manual stamp · ' + this.dt(f.held);
+    if (st === 'call-booked') return 'Manual stamp · ' + this.dt(f.booked);
+    if (st === 'submitted' || st === 'started') return 'Via children table';
+    if (st === 'account') return 'Via parents table';
+    if (st === 'lost' || st === 'waitlist') return 'Manual override';
+    return 'Manual lead';
+  }
+  suggestHeat(f, st) {
+    const base = { member:5, deposit:5, 'call-held':4, 'call-booked':3, submitted:3, started:3, account:3, interested:2, lost:1, waitlist:2 }[st];
+    let h = base;
+    if (f.signals.length >= 5) h += 2; else if (f.signals.length >= 3) h += 1;
+    if (f.touch > 21) h -= 2; else if (f.touch > 14) h -= 1;
+    return Math.max(1, Math.min(5, h));
+  }
+  heatOf(f, st) { return f.heatOv != null ? f.heatOv : this.suggestHeat(f, st); }
+
+  nextMove(f, st) {
+    const heat = this.heatOf(f, st);
+    if (st === 'lost') return { r:1, msg:'Lost. No action.' };
+    if (st === 'waitlist') return { r:1, msg:'Waitlist. Revisit when a seat opens.' };
+    if (!f.concerns.length && !f.signals.length && (st === 'interested' || st === 'account')) return { r:0, msg:'New family — set concerns and signals to get a next move.' };
+    if ((st === 'member' || st === 'deposit') && !f.askedRef) return { r:2, msg:'Founding 120 welcome — ask for one introduction.' };
+    if (f.held != null && !(f.dep && f.dep.st === 'paid') && st !== 'member' && st !== 'waitlist' && st !== 'lost' && f.held >= 1) return { r:3, msg:'Send the T+1 recap + deposit link. Refundable until Sept 30.' };
+    if (st === 'submitted' && f.booked == null && f.touch >= 2) return { r:4, msg:'Call them personally — submitted dossier, no call.' };
+    const un = f.concerns.find(c => !f.sent.includes(c));
+    if (un) { const lbl = (this.CONCERNS.find(x => x[0] === un) || [un, un])[1]; return { r:5, msg:'Send an answer to their “' + lbl + '” concern.', concern: un }; }
+    if (st === 'account' && !f.kids.length && f.touch >= 2) return { r:6, msg:'Dossier nudge — “the dossier is the application.”' };
+    if (f.touch > 21 && heat <= 2) return { r:7, msg:'Cold. One last info-session invite, then mark lost.' };
+    if ((st === 'interested' || st === 'account') && heat >= 4 && f.touch > 5) return { r:8, msg:'Hot and cooling — offer the 20-min call or a coffee.' };
+    return { r:9, msg:'Check in with a personal note.' };
+  }
+
+  dt(daysAgo) {
+    const D = new Date(2026, 7, 6);
+    const d = new Date(D.getTime() - daysAgo * 86400000);
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate();
+  }
+  touchStyle(days) {
+    const c = days <= 7 ? '#0E8A5F' : (days <= 14 ? '#B85C00' : '#D92632');
+    return this.MONO + "font-size: 10px; letter-spacing: 0.02em; color: " + c + "; white-space: nowrap;";
+  }
+  touchLabel(days) { return days === 0 ? 'today' : days + 'd ago'; }
+  pipStyles(heat) {
+    const out = [];
+    for (let i = 1; i <= 5; i++) out.push("width: 8px; height: 8px; flex: none; display: inline-block; background: " + (i <= heat ? '#D92632' : '#E0DDD7') + ";");
+    return out;
+  }
+  chip(active) {
+    return this.MONO + "font-size: 10px; letter-spacing: 0.04em; padding: 7px 12px; border-radius: 100px; cursor: pointer;" + (active ? " background: #0300ED; color: #FFFFFF; border: 1px solid #0300ED;" : " background: #F7F6F3; color: #55585E; border: 1px solid #D8D5CF;");
+  }
+  toast(msg) {
+    clearTimeout(this._tt);
+    this.setState({ toast: msg });
+    this._tt = setTimeout(() => this.setState({ toast: null }), 2800);
+  }
+  touchFam(f) { f.touch = 0; }
+  timeline(f) {
+    const ev = [];
+    const acctD = Math.max(f.touch, f.held || 0, f.booked || 0, (f.dep ? (f.dep.paidD || f.dep.d) : 0)) + 8;
+    if (f.acct) {
+      ev.push({ d: acctD, type: 'system', text: 'Account created · source: ' + (this.SOURCES.find(s => s[0] === f.source) || ['',''])[1].toLowerCase() + (f.ref ? ' · ' + f.ref : '') });
+      ev.push({ d: acctD, type: 'system', text: 'Welcome email #1 sent · hello@the120.school' });
+    } else {
+      ev.push({ d: acctD, type: 'note', text: 'Added as manual lead' + (f.consent ? ' · consent: ' + f.consentSrc : ' · NO CONSENT — do not email') });
+    }
+    f.kids.forEach(k => {
+      if (k.st !== 'Draft') ev.push({ d: Math.max(f.touch, f.booked || 0) + 3, type: 'system', text: 'Dossier submitted — ' + k.n + ' (' + k.pct + '%)' });
+      else if (k.pct > 0) ev.push({ d: f.touch + 2, type: 'system', text: 'Dossier started — ' + k.n + ' (' + k.pct + '%)' });
+    });
+    if (f.booked != null) ev.push({ d: f.booked, type: 'stage', text: 'Call booked · manual stamp' });
+    if (f.held != null) ev.push({ d: f.held, type: 'stage', text: 'Call held · manual stamp' });
+    if (f.dep) {
+      ev.push({ d: f.dep.paidD || f.dep.d, type: 'system', text: '$250 deposit paid · Stripe checkout' });
+      if (f.dep.st === 'refunded') ev.push({ d: f.dep.d, type: 'stage', text: 'Deposit refunded · webhook — stage demoted' });
+    }
+    f.sent.forEach(c => {
+      const item = this.lib.find(l => l.concern === c);
+      if (item) ev.push({ d: Math.min(f.touch + 1, 7), type: 'send', text: 'Sent from library: “' + item.title + '”' });
+    });
+    if (f.ov === 'lost') ev.push({ d: f.touch, type: 'stage', text: 'Marked lost · manual override' });
+    if (f.ov === 'waitlist') ev.push({ d: f.touch, type: 'stage', text: 'Moved to waitlist · manual override' });
+    (f.notes || []).forEach(n => ev.push({ d: n.d, type: 'note', text: n.t }));
+    (f.extraEv || []).forEach(n => ev.push(n));
+    ev.sort((a, b) => a.d - b.d);
+    const DOT = { system: '#0300ED', stage: '#D92632', send: '#0E8A5F', note: '#9FA2A7' };
+    return ev.map(e => ({
+      date: this.dt(e.d),
+      text: e.text,
+      dot: "width: 8px; height: 8px; border-radius: 100px; flex: none; position: relative; top: 1px; background: " + DOT[e.type] + ";",
+      textStyle: e.type === 'note' ? "font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 13.5px; line-height: 1.5; color: #131416;" : "font-size: 13px; line-height: 1.5; color: #55585E;"
+    }));
+  }
+
+  openDrawer(id) {
+    this.setState({ drawerId: id, noteDraft: '' });
+    try { history.pushState({ family: id }, '', '?family=' + id); } catch (e) {}
+  }
+  closeDrawer() {
+    this.setState({ drawerId: null });
+    try { history.replaceState({}, '', location.pathname); } catch (e) {}
+  }
+
+  renderVals() {
+    const s = this.state;
+    const auth = s.auth != null ? s.auth : (this.props.startLoggedIn ?? true);
+    const seatsTaken = 7 + this.STATS.deposits;
+    const out = {
+      showLogin: !auth, showApp: auth,
+      loginEmail: s.loginEmail, loginPw: s.loginPw, loginErr: s.loginErr,
+      setLoginEmail: e => this.setState({ loginEmail: e.target.value }),
+      setLoginPw: e => this.setState({ loginPw: e.target.value }),
+      doLogin: () => {
+        if (s.loginEmail.trim() && s.loginPw.trim()) this.setState({ auth: true, loginErr: false });
+        else this.setState({ loginErr: true });
+      },
+      signOut: () => this.setState({ auth: false, loginEmail: '', loginPw: '', loginErr: false }),
+      seatsLabel: seatsTaken + ' SEATS FILLED · ' + (120 - seatsTaken) + ' REMAIN',
+      toastOn: !!s.toast, toastMsg: s.toast || ''
+    };
+    if (!auth || !this.fams) {
+      return Object.assign(out, { crumb: '', tabs: [], vDash: false, vPipe: false, vDoss: false, vLib: false, drawerOpen: false, addOpen: false, compOpen: false, fam: {}, wk: {}, dsel: {}, comp: {}, afForm: {}, afSet: {} });
+    }
+
+    const CRUMBS = { dashboard: 'ADMISSIONS · SPRINT DASHBOARD', pipeline: 'ADMISSIONS · PIPELINE', dossiers: 'ADMISSIONS · DOSSIER QUEUE', library: 'ADMISSIONS · LIBRARY' };
+    out.crumb = CRUMBS[s.view];
+    out.tabs = [['dashboard','DASHBOARD'], ['pipeline','PIPELINE'], ['dossiers','DOSSIERS'], ['library','LIBRARY']].map(([id, label]) => ({
+      label, go: () => this.setState({ view: id }), style: this.chip(s.view === id)
+    }));
+    out.vDash = s.view === 'dashboard'; out.vPipe = s.view === 'pipeline';
+    out.vDoss = s.view === 'dossiers'; out.vLib = s.view === 'library';
+
+    // ======== DASHBOARD ========
+    const layout = s.layout || (this.props.dashboardLayout ?? 'briefing-rail');
+    out.layoutChips = [['briefing-rail','BRIEFING RAIL'], ['stacked','STACKED']].map(([id, label]) => ({
+      label, set: () => this.setState({ layout: id }),
+      style: this.MONO + "font-size: 8.5px; letter-spacing: 0.06em; padding: 6px 11px; border-radius: 100px; cursor: pointer;" + (layout === id ? " background: #131416; color: #FFFFFF; border: 1px solid #131416;" : " background: #F7F6F3; color: #9FA2A7; border: 1px solid #D8D5CF;")
+    }));
+    const rail = layout === 'briefing-rail';
+    out.dashWrap = rail ? "display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; align-items: start;" : "display: flex; flex-direction: column; gap: 18px;";
+    out.kpiGrid = rail ? "display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" : "display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;";
+    out.briefingGrid = rail ? "display: flex; flex-direction: column; gap: 14px;" : "display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;";
+    out.footGrid = rail ? "display: flex; flex-direction: column; gap: 18px;" : "display: grid; grid-template-columns: 1fr 1fr; gap: 18px;";
+
+    const wsel = s.week;
+    out.weekStrip = this.WEEKS.map(w => {
+      const cur = w.result === 'current', sel = wsel === w.n, fut = w.result === 'future';
+      let bg = '#F7F6F3', fg = '#55585E', bd = '#D8D5CF';
+      if (cur) { bg = '#0300ED'; fg = '#FFFFFF'; bd = '#0300ED'; }
+      if (fut) { fg = '#9FA2A7'; }
+      return {
+        label: 'W' + w.n + ' ' + w.ph.split('· ')[1],
+        dates: w.dates,
+        tick: w.result === 'hit' ? '✓' : (w.result === 'miss' ? '✕' : ''),
+        tickStyle: this.MONO + "font-size: 9px; color: " + (w.result === 'hit' ? '#0E8A5F' : '#D92632') + ";",
+        dateStyle: this.MONO + "font-size: 8px; letter-spacing: 0.04em; color: " + (cur ? 'rgba(255,255,255,0.7)' : '#9FA2A7') + "; display: block; margin-top: 3px;",
+        select: () => this.setState({ week: w.n }),
+        style: "display: flex; flex-direction: column; gap: 0; padding: 9px 6px; border-radius: 10px; cursor: pointer; text-align: center; background: " + bg + "; color: " + fg + "; border: " + (sel && !cur ? '1px solid #0300ED' : '1px solid ' + bd) + ";" + (sel && !cur ? " box-shadow: 0 2px 10px rgba(3,0,237,0.10);" : "")
+      };
+    });
+
+    const W = this.WEEKS[wsel - 1];
+    const checks = this.checks[wsel];
+    const adj = this.chipAdj;
+    out.wk = {
+      kicker: W.ph + ' · W' + W.n + ' · ' + W.dates + (W.result === 'current' ? ' · THIS WEEK' : ''),
+      push: W.push,
+      cleared: checks.every(Boolean) && checks.length >= W.actions.length,
+      actions: W.actions.map((text, i) => ({
+        text,
+        mark: checks[i] ? '✓' : '',
+        boxStyle: "width: 16px; height: 16px; flex: none; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px;" + (checks[i] ? " background: #0300ED; color: #FFFFFF; border: 1px solid #0300ED;" : " background: #FFFFFF; border: 1px solid #D8D5CF;"),
+        textStyle: "font-size: 13.5px; line-height: 1.5; font-family: 'Space Grotesk', sans-serif;" + (checks[i] ? " color: #9FA2A7; text-decoration: line-through;" : " color: #131416;"),
+        byline: checks[i] ? 'PETER · ' + this.dt(1) : '',
+        toggle: () => { checks[i] = checks[i] ? 0 : 1; this.forceUpdate(); }
+      })),
+      asset: W.asset,
+      chips: W.chips.map((c, i) => {
+        const key = wsel + ':' + i;
+        const cur = c.c + (adj[key] || 0);
+        const on = cur >= c.t;
+        return {
+          label: c.l + ' ' + cur + '/' + c.t + (c.m ? '' : ' · AUTO'),
+          manual: c.m,
+          inc: e => { e.stopPropagation(); adj[key] = (adj[key] || 0) + 1; this.forceUpdate(); },
+          dec: e => { e.stopPropagation(); adj[key] = (adj[key] || 0) - 1; this.forceUpdate(); },
+          style: this.MONO + "font-size: 9.5px; letter-spacing: 0.05em; padding: 7px 12px; border-radius: 100px; display: inline-flex; align-items: center; gap: 4px;" + (on ? " background: #0E8A5F; color: #FFFFFF;" : " background: #ECEAE5; color: #55585E; border: 1px solid #D8D5CF;")
+        };
+      })
+    };
+
+    const A = this.STATS, T = this.TGT, wi = wsel - 1;
+    out.kpis = [
+      { kicker: 'INTERESTED FAMILIES', value: String(A.interested), denom: '/ 200', foot: 'CASL-CONSENTED · +26 THIS WEEK', dotStyle: '' },
+      { kicker: 'CALLS', value: A.booked + ' · ' + A.held, denom: 'BKD · HELD', foot: 'TARGETS 90 BOOKED · 72 HELD', dotStyle: '' },
+      { kicker: 'DEPOSITS PAID', value: String(A.deposits), denom: '/ 48', foot: '+4 THIS WEEK · STRIPE LIVE', dotStyle: '' },
+      { kicker: 'SEATS REMAINING', value: String(120 - seatsTaken), denom: '/ 120', foot: 'LIVE SEATS_CLAIMED() · 7 FOUNDING', dotStyle: "width: 7px; height: 7px; border-radius: 100px; background: #D92632; animation: pulse120 1.6s ease-in-out infinite;" }
+    ];
+    out.thermoFill = "position: absolute; left: 0; top: 0; bottom: 0; width: " + Math.round(A.deposits / 55 * 100) + "%; background: #D92632; border-radius: 100px;";
+    out.thermoLabel = A.deposits + ' PAID · ' + (48 - A.deposits) + ' TO GOAL · STRETCH 55';
+
+    const FUNNEL = [
+      ['Interested (consented)', A.interested, T.interested[wi]],
+      ['Account + dossier started', A.started, T.started[wi]],
+      ['Dossier submitted', A.submitted, T.submitted[wi]],
+      ['Call booked', A.booked, T.booked[wi]],
+      ['Call held', A.held, T.held[wi]],
+      ['$250 deposit paid', A.deposits, T.deposits[wi]]
+    ];
+    out.funnelWeekLabel = 'CUMULATIVE TARGET AT W' + wsel + ' · ' + W.dates;
+    out.funnelRows = FUNNEL.map(([label, a, t]) => {
+      const d = a - t;
+      const pct = t > 0 ? d / t : 0;
+      const color = d >= 0 ? '#0E8A5F' : (pct <= -0.3 ? '#D92632' : '#B85C00');
+      return { label, actual: String(a), target: String(t), delta: (d >= 0 ? '+' + d : String(d)), deltaStyle: this.MONO + "font-size: 12px; text-align: right; font-weight: 500; color: " + color + ";" };
+    });
+    out.weekStats = ['14 NOTES ADDED', '22 SIGNALS TOGGLED', '9 CALLS LOGGED', '11 LIBRARY SENDS', '6 DOSSIERS REVIEWED'];
+    out.todayLabel = 'THU AUG 6';
+
+    const enriched = this.fams.map(f => ({ f, st: this.stageOf(f) }));
+    const active = enriched.filter(x => x.st !== 'lost' && x.st !== 'waitlist');
+    const followups = active.filter(x => { const m = this.nextMove(x.f, x.st); return m.r > 0 && m.r < 9; })
+      .sort((a, b) => b.f.touch - a.f.touch).slice(0, 3);
+    const cooling = active.filter(x => this.heatOf(x.f, x.st) >= 3 && x.f.touch > 7).sort((a, b) => b.f.touch - a.f.touch).slice(0, 3);
+    const warming = active.filter(x => x.f.recent).slice(0, 3);
+    const bItem = x => ({ name: x.f.parent, note: this.nextMove(x.f, x.st).msg, open: () => { this.setState({ view: 'pipeline' }); this.openDrawer(x.f.id); } });
+    const bItem2 = (x, note) => ({ name: x.f.parent, note, open: () => { this.setState({ view: 'pipeline' }); this.openDrawer(x.f.id); } });
+    out.briefing = [
+      { title: 'FOLLOW-UPS DUE', items: followups.map(bItem) },
+      { title: 'COOLING OFF', items: cooling.map(x => bItem2(x, 'Heat ' + this.heatOf(x.f, x.st) + ' · no touch in ' + x.f.touch + 'd')) },
+      { title: 'WARMING UP', items: warming.map(x => bItem2(x, 'Signal toggled in the last 7d · ' + this.STAGE_META[x.st][0].toLowerCase())) }
+    ];
+
+    const srcCount = {};
+    enriched.forEach(x => { const k = x.f.source; srcCount[k] = srcCount[k] || [0, 0]; srcCount[k][0]++; if (x.f.dep && x.f.dep.st === 'paid') srcCount[k][1]++; });
+    const srcRows = this.SOURCES.filter(([id]) => srcCount[id]).map(([id, label]) => ({ label, leads: String(srcCount[id][0]), deps: srcCount[id][1] ? srcCount[id][1] + ' DEP' : '—' }));
+    const ambCount = {};
+    enriched.forEach(x => { if (x.f.ref) { ambCount[x.f.ref] = ambCount[x.f.ref] || [0, 0]; ambCount[x.f.ref][0]++; if (x.f.dep && x.f.dep.st === 'paid') ambCount[x.f.ref][1]++; } });
+    Object.keys(ambCount).forEach(code => srcRows.push({ label: '↳ ' + code, leads: String(ambCount[code][0]), deps: ambCount[code][1] ? ambCount[code][1] + ' DEP' : '—' }));
+    out.sourceRows = srcRows;
+
+    const GROUP_COMMIT = { Athletes: 2, Founders: 2, Makers: 2, Scholars: 5, Givers: 1 };
+    const unassigned = seatsTaken - Object.values(GROUP_COMMIT).reduce((a, b) => a + b, 0);
+    out.groupRows = [...this.GROUPS.map(g => ({ name: g, count: GROUP_COMMIT[g] + ' / 24', barStyle: "display: block; height: 100%; border-radius: 100px; width: " + Math.round(GROUP_COMMIT[g] / 24 * 100) + "%; background: " + (g === 'Scholars' ? '#D92632' : '#0300ED') + ";" })),
+      { name: 'Unassigned', count: unassigned + ' —', barStyle: "display: block; height: 100%; border-radius: 100px; width: " + Math.round(unassigned / 24 * 100) + "%; background: #9FA2A7;" }];
+
+    // ======== PIPELINE ========
+    const mode = s.pipeMode || 'table';
+    out.viewToggle = [['table','TABLE'], ['kanban','KANBAN']].map(([id, label]) => ({
+      label, set: () => { this.setState({ pipeMode: id }); try { localStorage.setItem('the120.crm.viewMode', id); } catch (e) {} },
+      style: this.chip(mode === id)
+    }));
+    out.pipeTable = mode === 'table'; out.pipeKanban = mode === 'kanban';
+    out.openAdd = () => this.setState({ addOpen: true, af: { first: '', last: '', email: '', phone: '', spouse: '', area: '', source: 'coffee-intro', ref: '', kid1: '', kid1g: '', kid2: '', kid2g: '', consent: false, consentSrc: '' } });
+
+    const STAGE_FILTERS = ['ALL', 'INTERESTED', 'ACCOUNT', 'DOSSIER', 'CALL', 'DEPOSIT PAID', 'MEMBER', 'LOST', 'WAITLIST'];
+    const stageGroup = st => st === 'started' || st === 'submitted' ? 'DOSSIER' : (st === 'call-booked' || st === 'call-held' ? 'CALL' : this.STAGE_META[st][0]);
+    out.stageChips = STAGE_FILTERS.map(lbl => ({ label: lbl, set: () => this.setState({ stageF: lbl }), style: this.chip(s.stageF === lbl) }));
+    const usedSources = [...new Set(this.fams.map(f => f.source))];
+    out.sourceChips = [['ALL','ALL SOURCES'], ...this.SOURCES.filter(([id]) => usedSources.includes(id))].map(([id, label]) => ({
+      label, set: () => this.setState({ sourceF: id }), style: this.chip(s.sourceF === id)
+    }));
+    out.toggleAttn = () => this.setState({ attn: !s.attn });
+    out.attnStyle = this.MONO + "font-size: 10px; letter-spacing: 0.04em; padding: 7px 12px; border-radius: 100px; cursor: pointer;" + (s.attn ? " background: #D92632; color: #FFFFFF; border: 1px solid #D92632;" : " background: #F7F6F3; color: #55585E; border: 1px solid #D8D5CF;");
+
+    let vis = enriched;
+    if (s.stageF !== 'ALL') vis = vis.filter(x => stageGroup(x.st) === s.stageF);
+    else vis = vis.filter(x => x.st !== 'lost' && x.st !== 'waitlist' || s.stageF !== 'ALL');
+    if (s.stageF === 'ALL') vis = enriched.filter(x => x.st !== 'lost' && x.st !== 'waitlist');
+    if (s.sourceF !== 'ALL') vis = vis.filter(x => x.f.source === s.sourceF);
+    if (s.attn) vis = vis.filter(x => x.f.touch > 14 || x.f.concerns.some(c => !x.f.sent.includes(c)));
+    const ORDER = ['member','deposit','call-held','call-booked','submitted','started','account','interested','waitlist','lost'];
+    vis.sort((a, b) => ORDER.indexOf(a.st) - ORDER.indexOf(b.st) || a.f.touch - b.f.touch);
+
+    out.pipeCount = vis.length + ' OF ' + this.fams.length + ' FAMILIES · PROTOTYPE SUBSET OF ' + A.interested;
+    out.pipeEmpty = vis.length === 0;
+    out.pipeRows = vis.map(x => {
+      const f = x.f, st = x.st, heat = this.heatOf(f, st);
+      const kidsStr = f.kids.length ? f.kids.length + (f.kids.length > 1 ? ' kids' : ' kid') + ' · ' + f.area : (f.area || 'No kids on file');
+      const cs = f.concerns.slice(0, 2).map(c => (this.CONCERNS.find(y => y[0] === c) || [c, c])[1]);
+      if (f.concerns.length > 2) cs.push('+' + (f.concerns.length - 2));
+      return {
+        initials: f.parent.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+        name: f.parent, kids: kidsStr,
+        stage: this.STAGE_META[st][0], stagePill: this.stagePill(st),
+        pips: this.pipStyles(heat),
+        source: (this.SOURCES.find(y => y[0] === f.source) || ['',''])[1] + (f.ref ? ' · ' + f.ref : ''),
+        concerns: cs,
+        consent: f.consent ? '✓ CASL' : 'NO CASL',
+        consentStyle: f.consent ? this.MONO + "font-size: 9px; color: #0E8A5F;" : this.MONO + "font-size: 8.5px; letter-spacing: 0.02em; background: #EFC5B8; color: #131416; border-radius: 100px; padding: 3px 8px; text-align: center;",
+        touch: this.touchLabel(f.touch), touchStyle: this.touchStyle(f.touch),
+        next: this.nextMove(f, st).msg,
+        open: () => this.openDrawer(f.id)
+      };
+    });
+
+    // kanban
+    const COLS = [
+      { id: 'interested', title: 'INTERESTED', match: ['interested'], droppable: false },
+      { id: 'account', title: 'ACCOUNT', match: ['account'], droppable: false },
+      { id: 'dossier', title: 'DOSSIER', match: ['started', 'submitted'], droppable: false },
+      { id: 'call', title: 'CALL', match: ['call-booked', 'call-held'], droppable: true },
+      { id: 'deposit', title: 'DEPOSIT PAID', match: ['deposit'], droppable: false },
+      { id: 'member', title: 'MEMBER', match: ['member'], droppable: false }
+    ];
+    out.kanbanCols = COLS.map(col => {
+      const cards = enriched.filter(x => col.match.includes(x.st) && (s.sourceF === 'ALL' || x.f.source === s.sourceF));
+      return {
+        title: col.title, count: String(cards.length), droppable: col.droppable,
+        style: "background: rgba(224,221,215,0.5); border: 1px dashed " + (col.droppable ? '#0300ED' : '#D8D5CF') + "; border-radius: 12px; padding: 8px; min-height: 200px; box-sizing: border-box;",
+        over: e => e.preventDefault(),
+        drop: e => {
+          e.preventDefault();
+          const f = this.fams.find(y => y.id === this.state.dragId);
+          if (!f) return;
+          if (col.id === 'call') {
+            if (f.held != null) { this.toast('Call already held for ' + f.parent + '.'); return; }
+            if (f.booked == null) { f.booked = 0; this.toast('Recorded: call booked · ' + f.parent + ' → CALL BOOKED'); }
+            else { f.held = 0; this.toast('Recorded: call held · ' + f.parent + ' → CALL HELD'); }
+            this.touchFam(f); this.forceUpdate();
+          } else {
+            this.toast('“' + col.title + '” is derived from the account, dossier or Stripe — it can’t be dragged.');
+          }
+        },
+        cards: cards.map(x => {
+          const f = x.f, heat = this.heatOf(f, x.st);
+          const tc = f.touch <= 7 ? '#0E8A5F' : (f.touch <= 14 ? '#B85C00' : '#D92632');
+          let sub = '';
+          if (x.st === 'submitted') sub = 'SUBMITTED'; if (x.st === 'started') sub = 'STARTED';
+          if (x.st === 'call-booked') sub = 'BOOKED'; if (x.st === 'call-held') sub = 'HELD';
+          return {
+            name: f.parent,
+            meta: (f.kids.length ? f.kids.length + ' kid' + (f.kids.length > 1 ? 's' : '') + ' · ' : '') + (f.area || '') + ' · heat ' + heat,
+            dotStyle: "width: 7px; height: 7px; border-radius: 100px; flex: none; margin-left: auto; background: " + tc + ";",
+            sub, subStyle: this.MONO + "font-size: 8px; letter-spacing: 0.08em; color: #0300ED; align-self: flex-start; background: #ECEAE5; border-radius: 100px; padding: 2px 7px;",
+            drag: e => { this.setState({ dragId: f.id }); try { e.dataTransfer.setData('text/plain', f.id); } catch (err) {} },
+            open: () => this.openDrawer(f.id)
+          };
+        })
+      };
+    });
+
+    // ======== DOSSIERS ========
+    const dossAll = [];
+    this.fams.forEach(f => f.kids.forEach(k => { if (k.st !== 'Draft') dossAll.push({ f, k }); }));
+    const dPill = rev => {
+      const idx = this.REVIEW.indexOf(rev);
+      const bg = idx <= 0 ? '#E0DDD7' : (idx >= 4 ? '#D92632' : '#0300ED');
+      const fg = idx <= 0 ? '#55585E' : '#FFFFFF';
+      return this.MONO + "font-size: 9px; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 100px; white-space: nowrap; background: " + bg + "; color: " + fg + ";";
+    };
+    out.dossFilters = ['ALL', ...this.REVIEW.map(r => r.toUpperCase())].map(lbl => ({ label: lbl, set: () => this.setState({ dossF: lbl }), style: this.chip(s.dossF === lbl) }));
+    const dVis = dossAll.filter(x => s.dossF === 'ALL' || (x.k.rev || 'Submitted').toUpperCase() === s.dossF);
+    out.dossCount = dVis.length + ' OF ' + dossAll.length + ' DOSSIERS';
+    const dSelKey = s.dossSel || (dVis[0] ? dVis[0].k.n : null);
+    out.dossRows = dVis.map(x => ({
+      name: x.k.n, meta: 'Grade ' + x.k.g + ' · ' + x.k.school, date: this.dt(x.f.touch + 3),
+      status: (x.k.rev || 'Submitted').toUpperCase(), pill: dPill(x.k.rev || 'Submitted'),
+      select: () => this.setState({ dossSel: x.k.n }),
+      style: "display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 13px 16px; border-radius: 12px; cursor: pointer; font-family: 'Space Grotesk', sans-serif;" + (dSelKey === x.k.n ? " background: #FFFFFF; border: 1px solid #0300ED; box-shadow: 0 2px 10px rgba(3,0,237,0.10);" : " background: #F7F6F3; border: 1px solid #DDDAD4;")
+    }));
+    const dCur = dossAll.find(x => x.k.n === dSelKey);
+    out.hasDoss = !!dCur;
+    if (dCur) {
+      const f = dCur.f, k = dCur.k;
+      const dep = f.dep;
+      let payLabel = 'NO DEPOSIT', payBg = '#E0DDD7', payFg = '#55585E', payMeta = 'NO STRIPE CUSTOMER YET';
+      if (dep && dep.st === 'paid') { payLabel = '$250 PAID · ' + this.dt(dep.d).toUpperCase(); payBg = '#0E8A5F'; payFg = '#FFFFFF'; payMeta = 'STRIPE CHECKOUT · WEBHOOK-VERIFIED · DESCRIPTOR “THE120”'; }
+      if (dep && dep.st === 'refunded') { payLabel = 'REFUNDED · ' + this.dt(dep.d).toUpperCase(); payBg = '#D92632'; payFg = '#FFFFFF'; payMeta = 'PAID ' + this.dt(dep.paidD).toUpperCase() + ' · REFUNDED VIA STRIPE — STAGE DEMOTED'; }
+      out.dsel = {
+        name: k.n, meta: 'Grade ' + k.g + ' · ' + k.school + ' · submitted ' + this.dt(f.touch + 3),
+        status: (k.rev || 'Submitted').toUpperCase(), pill: dPill(k.rev || 'Submitted'),
+        payLabel, payMeta,
+        payPill: this.MONO + "font-size: 9.5px; letter-spacing: 0.06em; padding: 6px 12px; border-radius: 100px; white-space: nowrap; background: " + payBg + "; color: " + payFg + ";",
+        openStripe: () => this.toast('Would open the Stripe customer — not wired in the prototype.'),
+        subjects: k.subj, parent: f.parent + ' · ' + (f.email || '—'),
+        pitch: k.pitch || '—', interests: k.intr || '—', scores: k.scores || '—',
+        pct: k.pct + '% COMPLETE',
+        print: () => this.toast('Printable dossier — not wired in the prototype.'),
+        notes: k.teamNotes || '', setNotes: e => { k.teamNotes = e.target.value; this.forceUpdate(); },
+        stageButtons: this.REVIEW.map(st => ({
+          label: st.toUpperCase(),
+          set: () => { k.rev = st; if (st === 'Member of the 120') this.toast(k.n + ' → MEMBER OF THE 120 · family stage flips to MEMBER'); this.forceUpdate(); },
+          style: this.chip((k.rev || 'Submitted') === st)
+        })),
+        groupButtons: this.GROUPS.map(g => ({
+          label: g.toUpperCase(),
+          set: () => { k.grp = k.grp === g ? null : g; this.forceUpdate(); },
+          style: this.chip(k.grp === g)
+        }))
+      };
+    } else out.dsel = {};
+
+    // ======== LIBRARY ========
+    out.libFilters = [['ALL','ALL'], ['faq','FAQ'], ['talking','TALKING POINTS'], ['data','DATA'], ['asset','ASSETS']].map(([id, label]) => ({
+      label, set: () => this.setState({ libF: id }), style: this.chip(s.libF === id)
+    }));
+    const libVis = this.lib.filter(l => s.libF === 'ALL' || l.type === s.libF);
+    out.libCount = libVis.length + ' OF ' + this.lib.length + ' ITEMS';
+    const TYPE_C = { faq: ['FAQ', '#0300ED'], talking: ['TALKING', '#D92632'], data: ['DATA', '#0E8A5F'], asset: ['ASSET', '#131416'] };
+    out.libCards = libVis.map(l => ({
+      type: TYPE_C[l.type][0],
+      typeStyle: this.MONO + "font-size: 8.5px; letter-spacing: 0.08em; color: #FFFFFF; background: " + TYPE_C[l.type][1] + "; border-radius: 100px; padding: 3px 9px;",
+      tag: l.concern ? (this.CONCERNS.find(c => c[0] === l.concern) || ['',''])[1] : false,
+      title: l.title, blurb: l.blurb,
+      stats: l.sends + ' SENDS · HELPFUL ×' + l.help,
+      vote: () => { l.help++; this.toast('“' + l.title + '” marked helpful — feeds suggestion ranking.'); },
+      send: () => this.setState({ comp: { itemId: l.id, famId: '', subject: l.subj, body: l.body } })
+    }));
+
+    // ======== DRAWER ========
+    const df = this.fams.find(f => f.id === s.drawerId);
+    out.drawerOpen = !!df;
+    out.closeDrawer = () => this.closeDrawer();
+    if (df) {
+      const st = this.stageOf(df);
+      const heat = this.heatOf(df, st);
+      const auto = this.suggestHeat(df, st);
+      const move = this.nextMove(df, st);
+      const kidsStr = df.kids.length ? df.kids.map(k => k.n.split(' ')[0] + ' (Gr ' + k.g + ')').join(' · ') : 'No kids on file';
+      const consentTxt = df.consent ? 'CASL ✓ · ' + df.consentSrc : 'NO CASL CONSENT — NEVER EMAIL';
+      const unaddressed = df.concerns.filter(c => !df.sent.includes(c));
+      let summary = df.parent + ' · ' + this.STAGE_META[st][0].toLowerCase() + ' · heat ' + heat + ' · last touch ' + this.touchLabel(df.touch) + '.';
+      if (move.r === 0) summary = 'New family — the co-pilot needs concerns and signals before it can suggest a move.';
+      else if (unaddressed.length) summary += ' Unaddressed: ' + unaddressed.map(c => (this.CONCERNS.find(y => y[0] === c) || [c, c])[1].toLowerCase()).join(', ') + '.';
+      else if (df.concerns.length) summary += ' Every logged concern has an answer on file.';
+      const score = l => l.help * 2 + l.sends;
+      let sugg = [];
+      if (move.concern) sugg = this.lib.filter(l => l.concern === move.concern);
+      if (sugg.length < 3) sugg = sugg.concat(this.lib.filter(l => !sugg.includes(l) && (l.type === 'asset' || df.concerns.includes(l.concern))).sort((a, b) => score(b) - score(a)));
+      sugg = sugg.slice(0, 3);
+      const btnW = "background: #FFFFFF; border: 1px solid #D8D5CF; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #131416; cursor: pointer;";
+      const btnDone = "background: #E0DDD7; border: 1px solid #D8D5CF; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; color: #9FA2A7; cursor: default;";
+      out.fam = {
+        name: df.parent, meta: kidsStr + (df.area ? ' · ' + df.area : ''),
+        stage: this.STAGE_META[st][0], stagePill: this.stagePill(st), stageWhy: this.stageWhy(df, st),
+        pips: this.pipStyles(heat),
+        touch: 'LAST TOUCH ' + this.touchLabel(df.touch).toUpperCase(), touchStyle: this.touchStyle(df.touch),
+        bookedLabel: df.booked != null ? '✓ CALL BOOKED ' + this.dt(df.booked).toUpperCase() : 'LOG CALL BOOKED',
+        bookedBtn: df.booked != null ? btnDone : btnW,
+        logBooked: () => { if (df.booked != null) return; df.booked = 0; this.touchFam(df); this.toast('Recorded: call booked · stage → CALL BOOKED'); this.forceUpdate(); },
+        heldLabel: df.held != null ? '✓ CALL HELD ' + this.dt(df.held).toUpperCase() : 'LOG CALL HELD',
+        heldBtn: df.held != null ? btnDone : btnW,
+        logHeld: () => { if (df.held != null) return; df.held = 0; if (df.booked == null) df.booked = 0; this.touchFam(df); this.toast('Recorded: call held · stage → CALL HELD'); this.forceUpdate(); },
+        sendLib: () => this.setState({ comp: { itemId: sugg[0] ? sugg[0].id : '', famId: df.id, subject: sugg[0] ? sugg[0].subj : '', body: sugg[0] ? sugg[0].body : '' } }),
+        lostLabel: df.ov === 'lost' ? '✓ LOST' : 'MARK LOST',
+        lostBtn: df.ov === 'lost' ? "background: #131416; color: #FFFFFF; border: 1px solid #131416; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; cursor: pointer;" : btnW,
+        markLost: () => { df.ov = df.ov === 'lost' ? null : 'lost'; this.toast(df.ov ? 'Override: LOST — logged to stage history' : 'Override cleared — stage re-derived'); this.forceUpdate(); },
+        waitLabel: df.ov === 'waitlist' ? '✓ WAITLIST' : 'MARK WAITLIST',
+        waitBtn: df.ov === 'waitlist' ? "background: #EFC5B8; color: #131416; border: 1px solid #EFC5B8; border-radius: 10px; padding: 9px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; cursor: pointer;" : btnW,
+        markWait: () => { df.ov = df.ov === 'waitlist' ? null : 'waitlist'; this.toast(df.ov ? 'Override: WAITLIST — logged to stage history' : 'Override cleared — stage re-derived'); this.forceUpdate(); },
+        copilotSummary: summary, nextMove: move.msg.toUpperCase(),
+        hasSuggestions: move.r !== 0 && sugg.length > 0,
+        suggestions: sugg.map(l => ({
+          title: l.title, meta: l.sends + ' SENDS',
+          send: () => this.setState({ comp: { itemId: l.id, famId: df.id, subject: l.subj, body: l.body } })
+        })),
+        noteDraft: s.noteDraft, setNote: e => this.setState({ noteDraft: e.target.value }),
+        addNote: () => {
+          const t = (this.state.noteDraft || '').trim(); if (!t) return;
+          df.notes.push({ d: 0, t }); this.touchFam(df);
+          this.setState({ noteDraft: '' }); this.toast('Note logged · last touch updated');
+        },
+        timeline: this.timeline(df).reverse(),
+        about: (df.email || 'no email') + ' · ' + (df.phone || 'no phone') + (df.spouse ? ' · spouse: ' + df.spouse : '') + ' · ' + (this.SOURCES.find(y => y[0] === df.source) || ['',''])[1] + (df.ref ? ' · ' + df.ref : ''),
+        acctLabel: df.acct ? 'LINKED ACCOUNT ✓ EMAIL VERIFIED' : 'MANUAL LEAD · NO ACCOUNT YET',
+        acctStyle: this.MONO + "font-size: 8.5px; letter-spacing: 0.05em; color: " + (df.acct ? '#0E8A5F' : '#9FA2A7') + ";",
+        consentLabel: consentTxt,
+        consentStyle: df.consent ? this.MONO + "font-size: 8.5px; letter-spacing: 0.05em; color: #0E8A5F;" : this.MONO + "font-size: 8.5px; letter-spacing: 0.05em; background: #EFC5B8; color: #131416; border-radius: 100px; padding: 4px 9px; align-self: flex-start;",
+        signalPills: this.SIGNALS.map(([id, label]) => ({
+          label, toggle: () => {
+            const i = df.signals.indexOf(id);
+            if (i >= 0) df.signals.splice(i, 1); else { df.signals.push(id); df.recent = true; }
+            this.touchFam(df); this.forceUpdate();
+          },
+          style: this.MONO + "font-size: 8.5px; letter-spacing: 0.03em; padding: 7px 8px; border-radius: 100px; cursor: pointer; text-align: center;" + (df.signals.includes(id) ? " background: #0300ED; color: #FFFFFF; border: 1px solid #0300ED;" : " background: #FFFFFF; color: #9FA2A7; border: 1px solid #D8D5CF;")
+        })),
+        concernPills: this.CONCERNS.map(([id, label]) => ({
+          label, toggle: () => {
+            const i = df.concerns.indexOf(id);
+            if (i >= 0) df.concerns.splice(i, 1); else df.concerns.push(id);
+            this.forceUpdate();
+          },
+          style: this.MONO + "font-size: 8.5px; letter-spacing: 0.03em; padding: 7px 10px; border-radius: 100px; cursor: pointer;" + (df.concerns.includes(id) ? " background: #D92632; color: #FFFFFF; border: 1px solid #D92632;" : " background: #FFFFFF; color: #9FA2A7; border: 1px solid #D8D5CF;")
+        })),
+        heatButtons: [1, 2, 3, 4, 5].map(v => ({
+          set: () => { df.heatOv = df.heatOv === v ? null : v; this.forceUpdate(); },
+          style: "width: 18px; height: 18px; border-radius: 4px; cursor: pointer; padding: 0; background: " + (v <= heat ? '#D92632' : '#F7F6F3') + "; border: " + (v === auto && df.heatOv != null ? '2px dashed #D92632' : '1px solid #D8D5CF') + ";"
+        })),
+        heatNote: df.heatOv != null ? 'OVERRIDE · AUTO SAYS ' + auto : 'AUTO-SUGGESTED · CLICK TO OVERRIDE',
+        priv: df.priv || '', setPriv: e => { df.priv = e.target.value; this.forceUpdate(); }
+      };
+    } else out.fam = {};
+
+    // ======== ADD FAMILY ========
+    out.addOpen = !!s.af && s.addOpen;
+    out.closeAdd = () => this.setState({ addOpen: false });
+    const af = s.af || {};
+    out.afForm = af;
+    const setAf = key => e => { const n = Object.assign({}, this.state.af); n[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; this.setState({ af: n }); };
+    out.afSet = { first: setAf('first'), last: setAf('last'), email: setAf('email'), phone: setAf('phone'), spouse: setAf('spouse'), area: setAf('area'), source: setAf('source'), ref: setAf('ref'), kid1: setAf('kid1'), kid1g: setAf('kid1g'), kid2: setAf('kid2'), kid2g: setAf('kid2g'), consentSrc: setAf('consentSrc') };
+    out.sourceOptions = this.SOURCES.map(([id, label]) => ({ id, label }));
+    out.afDup = !!(af.email && this.fams.some(f => f.email && f.email.toLowerCase() === af.email.toLowerCase()));
+    out.afConsentOn = !!af.consent;
+    out.afToggleConsent = () => { const n = Object.assign({}, this.state.af); n.consent = !n.consent; this.setState({ af: n }); };
+    out.afConsentStyle = "display: flex; gap: 12px; align-items: flex-start; background: #FFFFFF; border: 1px solid " + (af.consent ? '#0300ED' : '#D8D5CF') + "; border-radius: 12px; padding: 13px 15px; cursor: pointer; width: 100%; font-family: 'Space Grotesk', sans-serif;";
+    out.afConsentBox = "width: 18px; height: 18px; flex: none; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; margin-top: 1px;" + (af.consent ? " background: #0300ED; color: #FFFFFF; border: 1px solid #0300ED;" : " background: #FFFFFF; border: 1px solid #D8D5CF;");
+    out.afConsentMark = af.consent ? '✓' : '';
+    out.afCreate = () => {
+      if (!(af.first || '').trim() || !(af.last || '').trim()) { this.toast('Parent first and last name are required.'); return; }
+      const kids = [];
+      if ((af.kid1 || '').trim()) kids.push({ n: af.kid1.trim(), g: af.kid1g || '?', school: '—', st: 'Draft', rev: null, grp: null, pct: 0, pitch: '', subj: '—', intr: '', scores: '' });
+      if ((af.kid2 || '').trim()) kids.push({ n: af.kid2.trim(), g: af.kid2g || '?', school: '—', st: 'Draft', rev: null, grp: null, pct: 0, pitch: '', subj: '—', intr: '', scores: '' });
+      this.fams.unshift({
+        id: 'f' + (this.fams.length + 100), parent: af.first.trim() + ' ' + af.last.trim(),
+        email: (af.email || '').trim(), phone: af.phone || '', area: af.area || '', spouse: af.spouse || '',
+        source: af.source || 'other', ref: af.ref || '', consent: !!af.consent, consentSrc: af.consentSrc || '',
+        acct: false, kids, heatOv: null, concerns: [], sent: [], signals: [], touch: 0,
+        booked: null, held: null, ov: null, dep: null, askedRef: false, notes: [], recent: false
+      });
+      this.setState({ addOpen: false });
+      this.toast('Family added · INTERESTED' + (af.consent ? ' · CASL ✓' : ' · NO CONSENT — flagged'));
+    };
+
+    // ======== COMPOSER ========
+    const cp = s.comp;
+    out.compOpen = !!cp;
+    out.closeComp = () => this.setState({ comp: null });
+    if (cp) {
+      const cFam = this.fams.find(f => f.id === cp.famId);
+      const blocked = !!cFam && !cFam.consent;
+      const canSend = !!cFam && !!cp.itemId && !blocked;
+      out.comp = {
+        famId: cp.famId, itemId: cp.itemId, subject: cp.subject || '', body: cp.body || '',
+        famOptions: this.fams.map(f => ({ id: f.id, label: f.parent + (f.consent ? '' : ' — NO CASL') })),
+        itemOptions: this.lib.map(l => ({ id: l.id, label: l.title })),
+        setFam: e => this.setState({ comp: Object.assign({}, cp, { famId: e.target.value }) }),
+        setItem: e => {
+          const it = this.lib.find(l => l.id === e.target.value);
+          this.setState({ comp: Object.assign({}, cp, { itemId: e.target.value, subject: it ? it.subj : cp.subject, body: it ? it.body : cp.body }) });
+        },
+        setSubject: e => this.setState({ comp: Object.assign({}, cp, { subject: e.target.value }) }),
+        setBody: e => this.setState({ comp: Object.assign({}, cp, { body: e.target.value }) }),
+        blocked,
+        sendStyle: "border: none; border-radius: 10px; padding: 11px 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em;" + (canSend ? " background: #D92632; color: #FFFFFF; cursor: pointer;" : " background: #E0DDD7; color: #9FA2A7; cursor: not-allowed;"),
+        doSend: () => {
+          if (!canSend) { this.toast(blocked ? 'Blocked: no CASL consent on file. Full stop.' : 'Pick a family and an item first.'); return; }
+          const it = this.lib.find(l => l.id === cp.itemId);
+          it.sends++;
+          if (it.concern && !cFam.sent.includes(it.concern)) cFam.sent.push(it.concern);
+          cFam.extraEv = cFam.extraEv || [];
+          cFam.extraEv.push({ d: 0, type: 'send', text: 'Sent from library: “' + it.title + '” · via Resend' });
+          this.touchFam(cFam);
+          this.setState({ comp: null });
+          this.toast('Sent via Resend · BCC admissions@ · logged to timeline');
+        },
+        markElsewhere: () => {
+          if (!cFam || !cp.itemId) { this.toast('Pick a family and an item first.'); return; }
+          const it = this.lib.find(l => l.id === cp.itemId);
+          if (it.concern && !cFam.sent.includes(it.concern)) cFam.sent.push(it.concern);
+          cFam.extraEv = cFam.extraEv || [];
+          cFam.extraEv.push({ d: 0, type: 'send', text: 'Marked sent elsewhere: “' + it.title + '” (text/WhatsApp)' });
+          this.touchFam(cFam);
+          this.setState({ comp: null });
+          this.toast('Logged as sent elsewhere — no email dispatched');
+        }
+      };
+    } else out.comp = {};
+
+    return out;
+  }
+}
+
+</script>
+</body>
+</html>

@@ -6,12 +6,15 @@ import { supabaseBrowser } from "@/app/lib/supabase/client";
 import JoinButton from "@/app/components/JoinButton";
 import Wordmark from "@/app/components/Wordmark";
 
-/** S1: email + password sign-in for returning parents. New families use the join modal. */
+/** S1: email + password sign-in for returning parents (with self-serve
+ * password reset → /reset). New families use the join modal. */
 export default function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"signin" | "reset">("signin");
+  const [resetSent, setResetSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +34,19 @@ export default function SignIn() {
     // On success the store's onAuthStateChange swaps in the dashboard.
   };
 
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    // Same copy either way — no account enumeration.
+    await supabaseBrowser()
+      .auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset`,
+      })
+      .catch(() => {});
+    setResetSent(true);
+    setBusy(false);
+  };
+
   const inputCls =
     "h-12 w-full rounded-xl border border-line-strong bg-white px-3.5 text-sm text-ink outline-none transition-all duration-150 placeholder:text-muted focus:border-red focus:ring-4 focus:ring-red/10";
 
@@ -44,48 +60,107 @@ export default function SignIn() {
         <p className="eyebrow">Parent dashboard</p>
         <h1 className="mt-3 font-display text-2xl font-bold tracking-tight text-ink">Sign in</h1>
 
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <label className="block">
-            <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
-              Email
-            </span>
-            <input
-              type="email"
-              className={inputCls}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
-              Password
-            </span>
-            <input
-              type="password"
-              className={inputCls}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
-          </label>
+        {mode === "signin" ? (
+          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+                Email
+              </span>
+              <input
+                type="email"
+                className={inputCls}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+                Password
+              </span>
+              <input
+                type="password"
+                className={inputCls}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </label>
 
-          {error && (
-            <p className="rounded-xl border border-red bg-red/5 p-3 text-xs leading-5 text-red">
-              {error}
+            {error && (
+              <p className="rounded-xl border border-red bg-red/5 p-3 text-xs leading-5 text-red">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-all duration-200 hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
+            >
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode("reset");
+                setResetSent(false);
+                setError(null);
+              }}
+              className="block w-full text-center font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted hover:text-ink"
+            >
+              Forgot password?
+            </button>
+          </form>
+        ) : (
+          <form className="mt-6 space-y-4" onSubmit={handleReset}>
+            <p className="text-sm leading-6 text-ink-soft">
+              Enter your email and we&rsquo;ll send a link to set a new password.
             </p>
-          )}
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft">
+                Email
+              </span>
+              <input
+                type="email"
+                className={inputCls}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </label>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-all duration-200 hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
-          >
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+            {resetSent && (
+              <p
+                role="status"
+                className="rounded-xl border border-line bg-paper-2 p-3 text-xs leading-5 text-ink"
+              >
+                If that address has an account, a reset link is on its way — check the inbox and
+                follow the link.
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy || resetSent}
+              className="inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white transition-all duration-200 hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
+            >
+              {busy ? "Sending…" : resetSent ? "Link sent" : "Send reset link"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMode("signin")}
+              className="block w-full text-center font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted hover:text-ink"
+            >
+              ← Back to sign-in
+            </button>
+          </form>
+        )}
 
         <div className="mt-6 border-t border-line pt-5 text-center">
           <p className="text-sm text-ink-soft">New to The 120?</p>

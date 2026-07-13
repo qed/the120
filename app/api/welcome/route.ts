@@ -85,11 +85,12 @@ export async function POST(req: Request) {
     // Best-effort — no family row (pre-backfill) or a write failure must
     // never affect the response; the backfill script repairs from metadata.
     try {
-      await supabaseAdmin()
+      const { error: crmErr } = await supabaseAdmin()
         .from("families")
         .update({ welcome_email_at: new Date().toISOString() })
         .eq("parent_id", user.id)
         .is("welcome_email_at", null);
+      if (crmErr) console.error("[welcome] families stamp failed:", crmErr);
     } catch (crmErr) {
       console.error("[welcome] families stamp failed:", crmErr);
     }

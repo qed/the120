@@ -17,8 +17,9 @@ export default function CrmChrome({
 }) {
   const filled = SEATS_TOTAL - seatsRemaining;
 
+  // print:hidden — staff chrome never belongs on a printed dossier (Unit 5).
   return (
-    <header>
+    <header className="print:hidden">
       <div className="flex flex-wrap items-center gap-4 bg-crm-blue px-5 py-3.5 sm:px-7">
         <Link href="/crm" className="flex items-center gap-2.5">
           <span className="bg-white px-2 py-[5px] text-[15px] font-bold leading-none tracking-[-0.04em] text-crm-blue">

@@ -26,6 +26,41 @@ export const BTN_PRIMARY =
 export const BTN_SECONDARY =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-crm-line2 bg-white px-3.5 py-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-crm-ink transition-colors hover:border-crm-ink disabled:cursor-not-allowed disabled:opacity-50";
 
+/**
+ * Filter/select chip (brief §11: active = #0300ED filled, inactive bone with
+ * #D8D5CF border). Shared by the pipeline filters and the dossier queue's
+ * status filters / MOVE CANDIDATE / group chips (Unit 5).
+ */
+export function Chip({
+  active,
+  onClick,
+  children,
+  pressed,
+  disabled,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  pressed?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={pressed ?? active}
+      className={`cursor-pointer whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crm-blue disabled:cursor-not-allowed disabled:opacity-50 ${
+        active
+          ? "border border-transparent bg-crm-blue text-white"
+          : "border border-crm-line2 bg-crm-card text-crm-muted hover:text-crm-ink"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function StagePill({ stage, title }: { stage: Stage; title?: string }) {
   const colors = STAGE_COLORS[stage];
   return (

@@ -13,33 +13,7 @@ import {
   STAGE_LABELS,
   type Stage,
 } from "@/app/crm/lib/constants";
-
-function Chip({
-  active,
-  onClick,
-  children,
-  pressed,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  pressed?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={pressed ?? active}
-      className={`cursor-pointer whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crm-blue ${
-        active
-          ? "border border-transparent bg-crm-blue text-white"
-          : "border border-crm-line2 bg-crm-card text-crm-muted hover:text-crm-ink"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
+import { Chip } from "./atoms";
 
 export default function Filters({
   allCount,

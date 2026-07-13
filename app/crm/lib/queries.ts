@@ -12,8 +12,19 @@ import {
   shouldClearOverride,
   type FamilyTruth,
 } from "./engine";
-import { STAGE_LABELS, type OverrideStage, type Stage } from "./constants";
+import {
+  STAGE_LABELS,
+  type OverrideStage,
+  type ReviewStatus,
+  type Stage,
+} from "./constants";
+import {
+  dossierCompleteness,
+  effectiveReviewStatus,
+  type DepositForStrip,
+} from "./reviews-rules";
 import { daysSince, fmtDay } from "./dates";
+import { workshopById } from "@/app/dashboard/data";
 
 /* ------------------------------------------------------------- row types */
 /* Column names match supabase/migrations/20260713110000_crm_core.sql and
@@ -487,6 +498,180 @@ export async function fetchFamilyDetail(
       deposits
     ),
   };
+}
+
+/* -------------------------------------------------------- dossier queue */
+
+/** One dossier-queue entry (plan Unit 5), fully shaped server-side. */
+export interface DossierItem {
+  childId: string;
+  /** Live family id (for the drill-down audit row); null if not synced. */
+  familyId: string | null;
+  name: string;
+  grade: number | null;
+  school: string;
+  birthYear: string;
+  subjects: string[];
+  /** Resolved from the workshop catalog: "Title — Advisor". */
+  workshops: string[];
+  testScores: string;
+  interests: string;
+  projectPitch: string;
+  portfolioLinks: string;
+  reviewStatus: ReviewStatus;
+  reviewNotes: string;
+  group: string | null;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  submittedAt: string | null;
+  createdAt: string;
+  /** Same 8-field checklist as the parent dashboard (reviews-rules). */
+  completeness: number;
+  deposits: DepositForStrip[];
+}
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+
+/**
+ * All non-draft dossiers with parent info, review state, and deposits —
+ * one Promise.all (plan Unit 5). Drafts stay out of the queue: families
+ * appear here when they submit. Newest submission first.
+ */
+export async function fetchDossierQueue(): Promise<DossierItem[]> {
+  const db = supabaseAdmin();
+  const [childrenRes, parentsRes, familiesRes, reviewsRes, depositsRes] =
+    await Promise.all([
+      db
+        .from("children")
+        .select(
+          "id, parent_id, first_name, last_name, grade, birth_year, " +
+            "current_school, subjects, test_scores, workshop_ids, interests, " +
+            "project_pitch, portfolio_links, status, submitted_at, created_at"
+        ),
+      db.from("parents").select("id, first_name, last_name, email, phone"),
+      db.from("families").select("id, parent_id").is("merged_into_id", null),
+      db
+        .from("child_reviews")
+        .select("child_id, review_status, review_notes, group_assignment"),
+      db
+        .from("deposits")
+        .select(
+          "child_id, status, amount, created_at, refunded_at, stripe_payment_intent"
+        ),
+    ]);
+
+  for (const res of [childrenRes, parentsRes, familiesRes, reviewsRes, depositsRes]) {
+    if (res.error) {
+      throw new Error(`Dossier queue fetch failed: ${res.error.message}`);
+    }
+  }
+
+  interface DossierChildRow {
+    id: string;
+    parent_id: string;
+    first_name: string;
+    last_name: string;
+    grade: number | null;
+    birth_year: string;
+    current_school: string;
+    subjects: unknown;
+    test_scores: string;
+    workshop_ids: unknown;
+    interests: string;
+    project_pitch: string;
+    portfolio_links: string;
+    status: string;
+    submitted_at: string | null;
+    created_at: string;
+  }
+  interface DossierReviewRow {
+    child_id: string;
+    review_status: string;
+    review_notes: string;
+    group_assignment: string | null;
+  }
+
+  const parents = new Map(
+    ((parentsRes.data ?? []) as ParentRow[]).map((p) => [p.id, p])
+  );
+  const familyByParent = new Map(
+    ((familiesRes.data ?? []) as { id: string; parent_id: string | null }[])
+      .filter((f) => f.parent_id)
+      .map((f) => [f.parent_id as string, f.id])
+  );
+  const reviewByChild = new Map(
+    ((reviewsRes.data ?? []) as DossierReviewRow[]).map((r) => [r.child_id, r])
+  );
+  const depositsByChild = groupBy(
+    (depositsRes.data ?? []) as (DepositForStrip & { child_id: string })[],
+    (d) => d.child_id
+  );
+
+  // Concatenated select string defeats supabase-js column inference — same
+  // cast idiom as FAMILY_COLUMNS above.
+  const items = ((childrenRes.data ?? []) as unknown as DossierChildRow[])
+    .map((c): DossierItem | null => {
+      const review = reviewByChild.get(c.id) ?? null;
+      const reviewStatus = effectiveReviewStatus(c.status, review);
+      if (reviewStatus === "draft") return null;
+
+      const parent = parents.get(c.parent_id);
+      const workshopIds = asStringArray(c.workshop_ids);
+      return {
+        childId: c.id,
+        familyId: familyByParent.get(c.parent_id) ?? null,
+        name: `${c.first_name} ${c.last_name}`.trim() || "Unnamed child",
+        grade: c.grade,
+        school: c.current_school,
+        birthYear: c.birth_year,
+        subjects: asStringArray(c.subjects),
+        workshops: workshopIds.map((id) => {
+          const w = workshopById(id);
+          return w ? `${w.title} — ${w.advisor}` : id;
+        }),
+        testScores: c.test_scores,
+        interests: c.interests,
+        projectPitch: c.project_pitch,
+        portfolioLinks: c.portfolio_links,
+        reviewStatus,
+        reviewNotes: review?.review_notes ?? "",
+        group: review?.group_assignment ?? null,
+        parentName: parent
+          ? `${parent.first_name} ${parent.last_name}`.trim()
+          : "—",
+        parentEmail: parent?.email ?? "",
+        parentPhone: parent?.phone ?? "",
+        submittedAt: c.submitted_at,
+        createdAt: c.created_at,
+        completeness: dossierCompleteness({
+          firstName: c.first_name,
+          lastName: c.last_name,
+          grade: c.grade,
+          birthYear: c.birth_year,
+          currentSchool: c.current_school,
+          subjects: asStringArray(c.subjects),
+          workshopIds,
+          interests: c.interests,
+          projectPitch: c.project_pitch,
+        }),
+        deposits: (depositsByChild.get(c.id) ?? []).map((d) => ({
+          status: d.status,
+          amount: d.amount,
+          created_at: d.created_at,
+          refunded_at: d.refunded_at,
+          stripe_payment_intent: d.stripe_payment_intent,
+        })),
+      };
+    })
+    .filter((item): item is DossierItem => item !== null);
+
+  return items.sort((a, b) => {
+    const ta = new Date(a.submittedAt ?? a.createdAt).getTime();
+    const tb = new Date(b.submittedAt ?? b.createdAt).getTime();
+    return tb - ta;
+  });
 }
 
 /* -------------------------------------------------------------- timeline */

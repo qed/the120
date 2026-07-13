@@ -64,7 +64,10 @@ export function StatusStepper({ status }: { status: SeatStatus }) {
 /* ---------- dashboard header ---------- */
 
 export function DashHeader() {
-  const { parent, signOut } = useDashboard();
+  const { parent, session, signOut } = useDashboard();
+  // Same JWT-only signal the /crm proxy uses; parents never see this link
+  // (and the CRM's requireStaff() + RLS remain the real gate regardless).
+  const isStaff = session?.user.app_metadata?.role === "admin";
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-paper/90 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
@@ -72,6 +75,14 @@ export function DashHeader() {
           <Wordmark />
         </Link>
         <div className="flex items-center gap-4">
+          {isStaff && (
+            <Link
+              href="/crm"
+              className="font-mono text-xs uppercase tracking-[0.12em] text-blue transition-colors hover:text-red"
+            >
+              Staff CRM →
+            </Link>
+          )}
           {parent && (
             <span className="hidden font-mono text-xs uppercase tracking-[0.1em] text-ink-soft sm:inline">
               {parent.firstName} {parent.lastName}

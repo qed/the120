@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Drawer aside, 360px (brief §7, P1 scope): About (identity from the parents
- * row when linked — display-only + LINKED ACCOUNT badge; editable form for
- * leads via `updateContact`, Decision 4 authority rule), private notes
- * (Georgia italic), and the CASL consent block. Signals/concerns/heat
- * editing arrive in Unit 8.
+ * Drawer aside, 360px (brief §7): About (identity from the parents row when
+ * linked — display-only + LINKED ACCOUNT badge; editable form for leads via
+ * `updateContact`, Decision 4 authority rule), engagement-signal toggles,
+ * concern chips, the heat block (Unit 8), private notes (Georgia italic),
+ * and the CASL consent block.
  */
 
 import { useState } from "react";
@@ -20,6 +20,9 @@ import {
   type Source,
 } from "@/app/crm/lib/constants";
 import { BTN_PRIMARY, BTN_SECONDARY } from "./atoms";
+import SignalGrid from "./SignalGrid";
+import ConcernChips from "./ConcernChips";
+import HeatBlock from "./HeatBlock";
 
 const KICKER =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-muted";
@@ -330,6 +333,13 @@ export default function DrawerAside({ detail }: { detail: FamilyDetail }) {
   return (
     <div className="space-y-4 p-5">
       <AboutCard key={`about-${detail.id}-${detail.parentLinked}`} detail={detail} />
+      <SignalGrid familyId={detail.id} signals={detail.signals} />
+      <ConcernChips familyId={detail.id} concerns={detail.concerns} />
+      <HeatBlock
+        familyId={detail.id}
+        heat={detail.heat}
+        suggestedHeat={detail.suggestedHeat}
+      />
       <NotesCard detail={detail} />
       <ConsentCard detail={detail} />
     </div>

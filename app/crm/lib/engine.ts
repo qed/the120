@@ -239,6 +239,60 @@ export function deriveNextMove(
   return { message: "Check in with a personal note.", ruleId: 9 };
 }
 
+/* ---------------------------------------------------- buildCopilotSummary */
+
+/** The fields the co-pilot summary sentence reads (subset of FamilyForCopilot). */
+export interface CopilotSummaryInput {
+  stage: Stage;
+  heat_score: number;
+  concerns: string[];
+  daysSinceLastTouch: number;
+}
+
+const SUMMARY_STAGE_PHRASE: Record<Stage, string> = {
+  interested: "Interested lead",
+  account_created: "Account created",
+  dossier_started: "Dossier in progress",
+  dossier_submitted: "Dossier submitted",
+  call_booked: "Call on the books",
+  call_held: "Call held",
+  deposit_paid: "Deposit paid",
+  member: "Member of The 120",
+  lost: "Marked lost",
+  waitlist: "On the waitlist",
+};
+
+/**
+ * Deterministic co-pilot summary sentence (plan Unit 8; alphahub R20 style):
+ * stage phrase · staleness · heat read · primary concern, `·`-separated per
+ * the system's mono grammar, rendered in Georgia italic on the blue card.
+ * Pure string synthesis — no LLM (brief §12).
+ */
+export function buildCopilotSummary(family: CopilotSummaryInput): string {
+  const { stage, heat_score: heat, daysSinceLastTouch: days } = family;
+
+  const touch =
+    days === 0
+      ? "touched today"
+      : days === 1
+        ? "quiet for a day"
+        : `quiet for ${days} days`;
+
+  const heatRead =
+    heat >= 4
+      ? `running hot (${heat}/5)`
+      : heat === 3
+        ? "warm (3/5)"
+        : `cooling (${heat}/5)`;
+
+  const primary = family.concerns.find(isConcern);
+  const concern = primary
+    ? `top concern: ${CONCERN_LABELS[primary]}`
+    : "no concerns logged";
+
+  return `${SUMMARY_STAGE_PHRASE[stage]} · ${touch} · ${heatRead} · ${concern}.`;
+}
+
 /* -------------------------------------------------- suggestedLibraryItems */
 
 /** The fields suggestion scoring needs from a `library_items` row. */

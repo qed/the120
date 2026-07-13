@@ -3,8 +3,8 @@
 /**
  * Contact drawer (brief §7, alphahub's crown jewel restyled): 920px
  * slide-over, URL-driven via `?family={id}`, back/Escape closes, full-screen
- * sheet below 768px. P1 scope: header + activity timeline + aside — the
- * co-pilot card and signals/concerns/heat editing land in Unit 8.
+ * sheet below 768px. Body renders the co-pilot card first (Unit 8, per §7),
+ * then the activity timeline; the aside carries signals/concerns/heat.
  */
 
 import { useCallback, useRef } from "react";
@@ -14,6 +14,7 @@ import { useFocusTrap } from "@/app/crm/components/useFocusTrap";
 import DrawerHeader from "./DrawerHeader";
 import DrawerAside from "./DrawerAside";
 import ActivityTimeline from "./ActivityTimeline";
+import CopilotCard from "./CopilotCard";
 
 export default function ContactDrawer({ detail }: { detail: FamilyDetail }) {
   const router = useRouter();
@@ -47,7 +48,8 @@ export default function ContactDrawer({ detail }: { detail: FamilyDetail }) {
 
         <div className="flex-1 overflow-y-auto">
           <div className="flex flex-col md:flex-row">
-            <div className="min-w-0 flex-1 p-6">
+            <div className="min-w-0 flex-1 space-y-6 p-6">
+              <CopilotCard copilot={detail.copilot} familyId={detail.id} />
               <ActivityTimeline entries={detail.timeline} />
             </div>
             <div className="border-t border-crm-line bg-crm-card md:w-[360px] md:flex-none md:border-l md:border-t-0">

@@ -20,16 +20,20 @@ import type { AuditAction, OverrideStage } from "@/app/crm/lib/constants";
 import {
   addFamilySchema,
   addNoteSchema,
+  applySignalToggle,
   checkDuplicatesSchema,
   clearStampSchema,
   familyIdSchema,
   isSimilarFamily,
   mergeFamiliesSchema,
   overrideGuard,
+  overrideHeatSchema,
   resolveMerge,
   setOverrideSchema,
   stampCallSchema,
   stampFloor,
+  toggleSignalSchema,
+  updateConcernsSchema,
   updateContactSchema,
   type MergeSide,
 } from "@/app/crm/lib/families-rules";
@@ -610,6 +614,115 @@ export async function updateContact(input: unknown): Promise<ActionResult> {
   await audit(db, staff.staffId, "contact-update", family.id, {
     fields: Object.keys(update),
   });
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true };
+}
+
+/* ------------------------------------- signals / concerns / heat (Unit 8) */
+
+export async function toggleSignal(input: unknown): Promise<ActionResult> {
+  const staff = await requireStaff();
+  const parsed = toggleSignalSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Invalid input." };
+
+  const db = supabaseAdmin();
+  const family = await loadLiveFamily(db, parsed.data.familyId);
+  if (!family) return { success: false, error: "Family not found." };
+
+  // Idempotent add/remove (families-rules, tested).
+  const { next, active } = applySignalToggle(
+    family.engagement_signals,
+    parsed.data.signal
+  );
+
+  const { error } = await db
+    .from("families")
+    .update({
+      engagement_signals: next,
+      last_touch_at: new Date().toISOString(),
+    })
+    .eq("id", family.id);
+  if (error) return { success: false, error: "Failed to toggle the signal." };
+
+  await audit(db, staff.staffId, "signal-toggle", family.id, {
+    signal: parsed.data.signal,
+    active,
+  });
+
+  const truth = await loadTruth(db, family);
+  await maybeClearSupersededOverride(db, staff, family, truth);
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true };
+}
+
+export async function updateConcerns(input: unknown): Promise<ActionResult> {
+  const staff = await requireStaff();
+  const parsed = updateConcernsSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Invalid input." };
+
+  const db = supabaseAdmin();
+  const family = await loadLiveFamily(db, parsed.data.familyId);
+  if (!family) return { success: false, error: "Family not found." };
+
+  // Full replacement set, deduped (Zod already validated every value).
+  const next: string[] = [...new Set(parsed.data.concerns)];
+  const added = next.filter((c) => !family.concerns.includes(c));
+  const removed = family.concerns.filter((c) => !next.includes(c));
+
+  const { error } = await db
+    .from("families")
+    .update({ concerns: next, last_touch_at: new Date().toISOString() })
+    .eq("id", family.id);
+  if (error) return { success: false, error: "Failed to update concerns." };
+
+  await audit(db, staff.staffId, "concern-update", family.id, {
+    concerns: next,
+    added,
+    removed,
+  });
+
+  const truth = await loadTruth(db, family);
+  await maybeClearSupersededOverride(db, staff, family, truth);
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true };
+}
+
+/**
+ * Heat override (brief §7): `heat_score` is the single effective value —
+ * the engine's `suggestHeat` is display-side (the ghost pip). Clicking pip N
+ * writes N; the aside's AUTO affordance reverts by writing the suggested
+ * value through this same action. A no-change write short-circuits to
+ * success without an audit row.
+ */
+export async function overrideHeat(input: unknown): Promise<ActionResult> {
+  const staff = await requireStaff();
+  const parsed = overrideHeatSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Invalid input." };
+
+  const db = supabaseAdmin();
+  const family = await loadLiveFamily(db, parsed.data.familyId);
+  if (!family) return { success: false, error: "Family not found." };
+  if (family.heat_score === parsed.data.heat) return { success: true };
+
+  const { error } = await db
+    .from("families")
+    .update({
+      heat_score: parsed.data.heat,
+      last_touch_at: new Date().toISOString(),
+    })
+    .eq("id", family.id);
+  if (error) return { success: false, error: "Failed to set heat." };
+
+  await audit(db, staff.staffId, "heat-override", family.id, {
+    old: family.heat_score,
+    new: parsed.data.heat,
+  });
+
+  const truth = await loadTruth(db, family);
+  await maybeClearSupersededOverride(db, staff, family, truth);
 
   revalidatePath(PIPELINE_PATH);
   return { success: true };

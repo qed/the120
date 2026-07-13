@@ -7,9 +7,12 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
+  buildCopilotSummary,
   deriveNextMove,
   deriveStage,
   shouldClearOverride,
+  suggestedLibraryItems,
+  suggestHeat,
   type FamilyTruth,
 } from "./engine";
 import {
@@ -165,6 +168,10 @@ export interface PipelineFamily {
   /** Override present but voided by higher truth (Decision 5 chip). */
   overrideSuperseded: boolean;
   heat: number;
+  /** Engine-suggested heat (brief §7) — the ghost pip under overrides. */
+  suggestedHeat: number;
+  /** Staleness the engine scored with (last touch, else creation). */
+  daysSinceTouch: number;
   concerns: string[];
   /** Known concerns with no matching library send (brief §7 filter rule). */
   unaddressedConcerns: string[];
@@ -193,8 +200,28 @@ export interface TimelineEntry {
   dotColor: string;
 }
 
+/** One co-pilot suggested-item mini-card (brief §7). */
+export interface CopilotSuggestedItem {
+  id: string;
+  title: string;
+  type: string;
+}
+
+/** Server-computed co-pilot card payload (plan Unit 8 — the card itself is
+ *  purely presentational). */
+export interface CopilotPayload {
+  /** Deterministic Georgia-italic summary sentence (`buildCopilotSummary`). */
+  summary: string;
+  /** Next-move pill text — same `deriveNextMove` the table column uses. */
+  nextMove: string;
+  /** R33 gate: false when the family has no concerns AND no signals. */
+  hasData: boolean;
+  suggestedItems: CopilotSuggestedItem[];
+}
+
 export interface FamilyDetail extends PipelineFamily {
   timeline: TimelineEntry[];
+  copilot: CopilotPayload;
 }
 
 /* ---------------------------------------------------------- composition */
@@ -346,6 +373,8 @@ function composeFamily(
     overrideSet: (family.stage_override as OverrideStage | null) ?? null,
     overrideSuperseded: shouldClearOverride(truth),
     heat: family.heat_score,
+    suggestedHeat: suggestHeat(family.engagement_signals, days, stage),
+    daysSinceTouch: days,
     concerns: family.concerns,
     unaddressedConcerns: family.concerns.filter(
       (c) => isConcern(c) && !sentConcerns.has(c)
@@ -526,14 +555,23 @@ export async function fetchFamilyDetail(
         .from("library_sends")
         .select("id, item_id, family_id, channel, subject, sent_at")
         .eq("family_id", family.id),
-      db.from("library_items").select("id, title, concern"),
+      db
+        .from("library_items")
+        .select("id, title, concern, type, helpfulness_score, send_count"),
     ]);
 
   // Pre-migration tolerance, same as fetchPipeline.
   const sends = sendsRes.error ? [] : ((sendsRes.data ?? []) as SendRow[]);
   const libraryItems = itemsRes.error
     ? []
-    : ((itemsRes.data ?? []) as { id: string; title: string; concern: string | null }[]);
+    : ((itemsRes.data ?? []) as {
+        id: string;
+        title: string;
+        concern: string | null;
+        type: string;
+        helpfulness_score: number;
+        send_count: number;
+      }[]);
   const itemTitles = new Map(libraryItems.map((i) => [i.id, i.title]));
 
   const children = (childrenRes.data ?? []) as ChildRow[];
@@ -550,6 +588,7 @@ export async function fetchFamilyDetail(
       ).data ?? []) as ReviewRow[])
     : [];
 
+  const sentConcerns = sentConcernsFrom(sends, libraryItems);
   const base = composeFamily(
     family,
     (parentRes.data as ParentRow | null) ?? undefined,
@@ -557,11 +596,41 @@ export async function fetchFamilyDetail(
     deposits,
     reviews,
     now,
-    sentConcernsFrom(sends, libraryItems)
+    sentConcerns
   );
+
+  // Co-pilot payload (plan Unit 8): all computed server-side — the card is
+  // presentational. R33 gate: no concerns AND no signals = insufficient data
+  // (no pill, no items). Suggestions score `helpfulness*2 + send_count`.
+  const hasData = base.concerns.length > 0 || base.signals.length > 0;
+  const copilot: CopilotPayload = {
+    summary: buildCopilotSummary({
+      stage: base.stage,
+      heat_score: base.heat,
+      concerns: base.concerns,
+      daysSinceLastTouch: base.daysSinceTouch,
+    }),
+    nextMove: base.nextMove,
+    hasData,
+    suggestedItems: hasData
+      ? suggestedLibraryItems(
+          libraryItems.map((i) => ({
+            id: i.id,
+            concern: i.concern,
+            helpfulness: i.helpfulness_score,
+            send_count: i.send_count,
+            title: i.title,
+            type: i.type,
+          })),
+          base.concerns,
+          sentConcerns
+        ).map((i) => ({ id: i.id, title: i.title, type: i.type }))
+      : [],
+  };
 
   return {
     ...base,
+    copilot,
     timeline: buildTimeline(
       family,
       (notesRes.data ?? []) as NoteRow[],

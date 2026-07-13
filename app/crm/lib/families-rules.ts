@@ -6,7 +6,14 @@
  */
 
 import { z } from "zod";
-import { OVERRIDE_STAGES, SOURCES, STAGE_LABELS } from "./constants";
+import {
+  CONCERNS,
+  ENGAGEMENT_SIGNALS,
+  OVERRIDE_STAGES,
+  SOURCES,
+  STAGE_LABELS,
+  type EngagementSignal,
+} from "./constants";
 import { deriveStage, type FamilyTruth } from "./engine";
 import { weekBounds } from "./week";
 
@@ -108,6 +115,39 @@ export const mergeFamiliesSchema = z
   .refine((v) => v.survivorId !== v.loserId, {
     message: "Pick two different families.",
   });
+
+/* --------------------------- signals / concerns / heat (plan Unit 8) ---- */
+
+export const toggleSignalSchema = z.object({
+  familyId: z.uuid(),
+  signal: z.enum(ENGAGEMENT_SIGNALS),
+});
+
+export const updateConcernsSchema = z.object({
+  familyId: z.uuid(),
+  /** Full replacement set — validated against the §7 constant list. */
+  concerns: z.array(z.enum(CONCERNS)).max(CONCERNS.length),
+});
+
+export const overrideHeatSchema = z.object({
+  familyId: z.uuid(),
+  heat: z.number().int().min(1).max(5),
+});
+
+/**
+ * Idempotent signal toggle (plan Unit 8 `toggleSignal`): present → removed
+ * (every occurrence), absent → appended. Unknown strings already stored are
+ * preserved untouched — the action only ever adds validated constants.
+ */
+export function applySignalToggle(
+  current: string[],
+  signal: EngagementSignal
+): { next: string[]; active: boolean } {
+  if (current.includes(signal)) {
+    return { next: current.filter((s) => s !== signal), active: false };
+  }
+  return { next: [...current, signal], active: true };
+}
 
 export const checkDuplicatesSchema = z.object({
   name: z.string().trim().max(200).optional(),

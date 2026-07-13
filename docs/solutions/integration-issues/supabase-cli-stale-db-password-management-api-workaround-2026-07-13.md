@@ -9,9 +9,12 @@ symptoms:
   - "supabase db push against project deolvqnyvhhnavsifgxz fails authentication; stored DB password in ~\\.the120-supabase-db-password.txt is stale"
   - 'Management API returns {"message":"JWT could not be decoded"} when the Credential Manager blob is decoded with Marshal.PtrToStringUni (UTF-16)'
   - "'Unable to find type [Win32.CredMan]' when the Add-Type P/Invoke and its use are split across separate PowerShell invocations"
+  - "Management API rejects with 'query: Expected string, received object' — Get-Content output passed through an untyped function param serializes as an object in ConvertTo-Json"
+  - "Server-side JSON parse errors ('Expected , or } after property value') when the SQL contains em-dashes — PS 5.1 sent the string body as ISO-8859-1"
 root_cause: config_error
 resolution_type: workflow_improvement
 severity: high
+last_updated: 2026-07-13
 related_components:
   - database
   - development_workflow
@@ -43,6 +46,8 @@ On Windows 11 / PowerShell 5.1, `supabase db push` against production project `d
 1. **`supabase db push`** — password auth failure. The stored password is stale; resetting it was deliberately avoided because sessions were mid-flight and a password-free path (Management API) exists.
 2. **Decoding the Credential Manager blob with `[Marshal]::PtrToStringUni($cred.CredentialBlob, $cred.CredentialBlobSize / 2)`** — produced a corrupt token; the Management API responded `{"message":"JWT could not be decoded"}`. The Supabase CLI writes its access token into Windows Credential Manager as **UTF-8 bytes**; `PtrToStringUni` reinterprets those bytes as UTF-16 code units, mangling every character pair.
 3. **Calling `[Win32.CredMan]::CredRead` in a later invocation without re-running `Add-Type`** — failed with `Unable to find type [Win32.CredMan]`. PowerShell tool-call/shell state does not persist between invocations; the P/Invoke type must be defined in the same command that uses it.
+4. **Passing a plain string body to `Invoke-RestMethod`** — the SQL contained em-dashes in comments; PS 5.1 encodes string bodies as ISO-8859-1, the multi-byte characters arrived mangled, and the server answered with a JSON parse error (`Expected ',' or '}' after property value`). Bodies must be UTF-8 **bytes** with an explicit charset.
+5. **Feeding `Get-Content -Raw` output through an untyped function parameter** — `Get-Content` attaches note properties (PSPath etc.) to its output string; through an untyped `$q` param, `ConvertTo-Json` serialized it as an object (`{"query": {"value": "..."}}`), and the API rejected with `query: Expected string, received object`. A typed `[string]$q` parameter (or `[string](Get-Content ...)` cast) strips the note properties.
 
 ## Solution
 
@@ -67,9 +72,19 @@ $bytes = New-Object byte[] $cred.CredentialBlobSize
 [Win32.CredMan]::CredFree($ptr)
 $token = [System.Text.Encoding]::UTF8.GetString($bytes).Trim()   # UTF-8, NOT PtrToStringUni
 
-# Run SQL (incl. DDL migrations) against production:
-$body = @{ query = "select count(*) from public.gtm_weeks;" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "https://api.supabase.com/v1/projects/deolvqnyvhhnavsifgxz/database/query" -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } -Body $body
+# Run SQL (incl. DDL migrations) against production. Two hard-won rules
+# (both bit in practice — see What Didn't Work #4 and #5):
+#   1. the param MUST be typed [string] — Get-Content output carries note
+#      properties that ConvertTo-Json otherwise serializes as an object;
+#   2. send the body as UTF-8 BYTES with an explicit charset — PS 5.1
+#      encodes string bodies ISO-8859-1 and mangles em-dashes in SQL.
+function Invoke-SbQuery([string]$q) {
+  $json = @{ query = $q } | ConvertTo-Json
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+  Invoke-RestMethod -Method Post -Uri "https://api.supabase.com/v1/projects/deolvqnyvhhnavsifgxz/database/query" -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json; charset=utf-8' -Body $bytes
+}
+Invoke-SbQuery "select count(*) from public.gtm_weeks;"
+Invoke-SbQuery ([string](Get-Content -Raw -Encoding UTF8 'supabase\migrations\<migration>.sql'))
 
 # Read auth config:
 Invoke-RestMethod -Uri "https://api.supabase.com/v1/projects/deolvqnyvhhnavsifgxz/config/auth" -Headers @{ Authorization = "Bearer $token" }
@@ -113,11 +128,13 @@ Verified working 2026-07-13: applied all three CRM migrations, ran verification 
 
 - **Credential blobs from Go/Node CLIs: always `Marshal.Copy` to `byte[]` then decode UTF-8.** Never `PtrToStringUni` unless you know the writer used UTF-16 (e.g. `cmdkey`, some .NET apps).
 - **Keep `Add-Type` in the same invocation as its use** — PowerShell tool-call state does not persist across invocations.
+- **Type every PowerShell function parameter that will be JSON-serialized (`[string]$q`)** — cmdlet output strings carry note properties that turn into objects under `ConvertTo-Json`.
+- **Always send REST bodies as UTF-8 bytes with `charset=utf-8`** — never a bare string on PS 5.1. This is the same family as the BOM-on-pipe trap: assume PowerShell mangles byte encodings at every process/marshaling boundary unless bytes are handled explicitly.
 - **Test the token with a cheap GET first** (e.g. `/v1/projects/{ref}/config/auth`) before any mutating POST — a corrupt token fails fast and harmlessly.
 - **Record manually applied migrations in `supabase_migrations.schema_migrations`** immediately, so `supabase db push` bookkeeping never drifts.
 - **Verify every migration with row-count SELECTs** through the same query endpoint.
 - This is the project's **second** PowerShell-encoding trap (the first: PS 5.1 prefixes a BOM when piping strings into native CLIs, which once corrupted Vercel env vars — prefer REST APIs or `--value` flags for secrets; see `artifacts/roadmap.md` env-hygiene note). Working rule: assume PowerShell will mangle byte encodings at every process/marshaling boundary unless you handle bytes explicitly. (auto memory [claude])
-- Standing to-do (tracked in `artifacts/roadmap.md` §T6): rotate the stale DB password into a password manager and delete `~\.the120-supabase-db-password.txt`.
+- ✅ Resolved 2026-07-13: the DB password was rotated into a password manager and `~\.the120-supabase-db-password.txt` deleted (§T6). No DB password exists on disk — the Management-API path in this doc is the standard for all agent-driven production SQL.
 
 ## Related Issues
 

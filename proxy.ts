@@ -18,9 +18,15 @@ import type { NextRequest } from "next/server";
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // The two unguarded /crm routes — matching them would loop the redirect
-  // (login) or defeat the 404 rewrite (staff-only).
-  if (pathname === "/crm/login" || pathname === "/crm/staff-only") {
+  // The three unguarded /crm routes — matching them would loop the redirect
+  // (login), defeat the 404 rewrite (staff-only), or strand the recovery
+  // flow (reset arrives without a session; the emailed link's code becomes
+  // one client-side).
+  if (
+    pathname === "/crm/login" ||
+    pathname === "/crm/staff-only" ||
+    pathname === "/crm/reset"
+  ) {
     return NextResponse.next();
   }
 

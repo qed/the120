@@ -35,6 +35,7 @@ import {
   toggleSignalSchema,
   updateConcernsSchema,
   updateContactSchema,
+  updateKidCountSchema,
   type MergeSide,
 } from "@/app/crm/lib/families-rules";
 
@@ -613,6 +614,40 @@ export async function updateContact(input: unknown): Promise<ActionResult> {
 
   await audit(db, staff.staffId, "contact-update", family.id, {
     fields: Object.keys(update),
+  });
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true };
+}
+
+/**
+ * GTM W1: kid count (potential signups) — CRM-owned, so editable for linked
+ * AND lead families (it isn't identity; Decision 4 doesn't apply). Not a
+ * touch: last_touch_at stays put.
+ */
+export async function updateKidCount(input: unknown): Promise<ActionResult> {
+  const staff = await requireStaff();
+  const parsed = updateKidCountSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input.",
+    };
+  }
+
+  const db = supabaseAdmin();
+  const family = await loadLiveFamily(db, parsed.data.familyId);
+  if (!family) return { success: false, error: "Family not found." };
+
+  const { error } = await db
+    .from("families")
+    .update({ kid_count: parsed.data.kidCount })
+    .eq("id", family.id);
+  if (error) return { success: false, error: "Failed to update the kid count." };
+
+  await audit(db, staff.staffId, "contact-update", family.id, {
+    field: "kid_count",
+    value: parsed.data.kidCount,
   });
 
   revalidatePath(PIPELINE_PATH);

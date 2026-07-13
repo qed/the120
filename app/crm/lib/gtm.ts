@@ -118,13 +118,14 @@ export function stampEffectiveMs(
   return ms(createdAt);
 }
 
-/** DISTINCT families with a positive stamp-minus-clear balance by `endMs`. */
-function countCallFamilies(
+/** DISTINCT family ids with a positive stamp-minus-clear balance by `endMs`
+ *  — exported so the Sprint tab can kid-weight calls booked/held. */
+export function callFamilyIds(
   events: GtmStampEventInput[],
   toStage: "call_booked" | "call_held",
   sprintStartMs: number,
   endMs: number
-): number {
+): Set<string> {
   const net = new Map<string, number>();
   for (const e of events) {
     if (e.to_stage !== toStage) continue;
@@ -141,9 +142,18 @@ function countCallFamilies(
     }
     // Other history rows for these stages (none today) are ignored.
   }
-  let count = 0;
-  for (const balance of net.values()) if (balance > 0) count += 1;
-  return count;
+  const ids = new Set<string>();
+  for (const [id, balance] of net) if (balance > 0) ids.add(id);
+  return ids;
+}
+
+function countCallFamilies(
+  events: GtmStampEventInput[],
+  toStage: "call_booked" | "call_held",
+  sprintStartMs: number,
+  endMs: number
+): number {
+  return callFamilyIds(events, toStage, sprintStartMs, endMs).size;
 }
 
 /**

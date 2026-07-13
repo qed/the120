@@ -11,7 +11,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FamilyDetail } from "@/app/crm/lib/queries";
-import { addNote, updateContact } from "@/app/crm/lib/actions/families";
+import {
+  addNote,
+  updateContact,
+  updateKidCount,
+} from "@/app/crm/lib/actions/families";
 import { useToast } from "@/app/crm/components/Toast";
 import { fmtDay } from "@/app/crm/lib/dates";
 import {
@@ -42,6 +46,65 @@ function Row({ label, value }: { label: string; value: string | null }) {
       </span>
       <span className="min-w-0 break-words text-[13px] text-crm-ink">
         {value || <span className="text-crm-faint">—</span>}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Kid count (GTM W1: potential signups) — CRM-owned, editable for linked and
+ * lead families alike. The floor is the observed kid count (dossiers /
+ * lead-kid entries), mirroring the server's max() display rule.
+ */
+function KidCountRow({ detail }: { detail: FamilyDetail }) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const setCount = async (next: number) => {
+    if (next < Math.max(1, detail.kidsCount) || next > 12) return;
+    setBusy(true);
+    const result = await updateKidCount({ familyId: detail.id, kidCount: next });
+    setBusy(false);
+    if (result.success) {
+      router.refresh();
+    } else {
+      toast("error", result.error ?? "Failed to update the kid count.");
+    }
+  };
+
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="w-16 flex-none font-mono text-[9px] uppercase tracking-[0.1em] text-crm-faint">
+        Kids
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          aria-label="One fewer kid"
+          onClick={() => setCount(detail.kidCount - 1)}
+          disabled={busy || detail.kidCount <= Math.max(1, detail.kidsCount)}
+          className="h-5 w-5 cursor-pointer rounded-full border border-crm-line2 font-mono text-[11px] leading-none text-crm-muted hover:text-crm-ink disabled:cursor-default disabled:opacity-40"
+        >
+          −
+        </button>
+        <span className="min-w-[1.25rem] text-center text-[13px] text-crm-ink">
+          {detail.kidCount}
+        </span>
+        <button
+          type="button"
+          aria-label="One more kid"
+          onClick={() => setCount(detail.kidCount + 1)}
+          disabled={busy || detail.kidCount >= 12}
+          className="h-5 w-5 cursor-pointer rounded-full border border-crm-line2 font-mono text-[11px] leading-none text-crm-muted hover:text-crm-ink disabled:cursor-default disabled:opacity-40"
+        >
+          +
+        </button>
+        {detail.kidsLabel && (
+          <span className="truncate text-[11px] text-crm-faint">
+            {detail.kidsLabel}
+          </span>
+        )}
       </span>
     </div>
   );
@@ -229,6 +292,7 @@ function AboutCard({ detail }: { detail: FamilyDetail }) {
           <Row label="Email" value={detail.email} />
           <Row label="Phone" value={detail.phone} />
           <Row label="Spouse" value={detail.spouseName} />
+          <KidCountRow detail={detail} />
           <Row label="Area" value={detail.area} />
           <Row
             label="Source"

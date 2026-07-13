@@ -49,6 +49,12 @@ export const addFamilySchema = z.object({
 
 export type AddFamilyInput = z.infer<typeof addFamilySchema>;
 
+/** GTM W1: potential signups per family, staff-set (1–12, like kids[]). */
+export const updateKidCountSchema = z.object({
+  familyId: z.uuid(),
+  kidCount: z.number().int().min(1).max(12),
+});
+
 export const stampCallSchema = z.object({
   familyId: z.uuid(),
   kind: z.enum(["booked", "held"]),

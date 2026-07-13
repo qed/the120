@@ -124,11 +124,10 @@ export default function PipelineTable({
                     <div className="truncate text-[13.5px] font-semibold text-crm-ink">
                       {f.name || "Unnamed family"}
                     </div>
-                    {f.kidsCount > 0 && (
-                      <div className="text-[11px] text-crm-muted">
-                        {f.kidsCount === 1 ? "1 kid" : `${f.kidsCount} kids`}
-                      </div>
-                    )}
+                    <div className="text-[11px] text-crm-muted">
+                      {f.kidCount === 1 ? "1 kid" : `${f.kidCount} kids`}
+                      {f.kidsLabel ? ` · ${f.kidsLabel}` : ""}
+                    </div>
                   </div>
                 </div>
               </td>

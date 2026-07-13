@@ -106,8 +106,10 @@ export function isConcern(value: string): value is Concern {
 
 /* --------------------------------------------------------------- signals */
 
-/** The 120 engagement-signal set (brief §7). */
+/** The 120 engagement-signal set (brief §7; warm-convo added for GTM W1 —
+ *  every warm conversation is recorded on the family, never a bare tally). */
 export const ENGAGEMENT_SIGNALS = [
+  "warm-convo",
   "explainer-sent",
   "gauntlet-played",
   "info-session",
@@ -121,6 +123,7 @@ export const ENGAGEMENT_SIGNALS = [
 export type EngagementSignal = (typeof ENGAGEMENT_SIGNALS)[number];
 
 export const SIGNAL_LABELS: Record<EngagementSignal, string> = {
+  "warm-convo": "Warm convo held",
   "explainer-sent": "Explainer sent",
   "gauntlet-played": "Gauntlet played",
   "info-session": "Info session",

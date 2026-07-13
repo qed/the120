@@ -6,6 +6,7 @@ import { SPRINT_WEEKS, weekBounds, weekOf } from "@/app/crm/lib/week";
 import {
   asNonFunnelTargets,
   asWeekActions,
+  callFamilyIds,
   computeFunnelActuals,
   computeThisWeekStats,
   funnelDelta,
@@ -43,6 +44,8 @@ interface SprintFamilyRow {
   signup_at: string | null;
   dossier_submitted_at: string | null;
   created_at: string;
+  kid_count: number;
+  engagement_signals: string[];
 }
 
 interface SprintChildRow {
@@ -124,7 +127,7 @@ export default async function CrmSprintPage({
     db
       .from("families")
       .select(
-        "id, parent_id, consent_given, consent_revoked_at, signup_at, dossier_submitted_at, created_at"
+        "id, parent_id, consent_given, consent_revoked_at, signup_at, dossier_submitted_at, created_at, kid_count, engagement_signals"
       )
       .is("merged_into_id", null),
     db.from("children").select("id, parent_id, status, submitted_at"),
@@ -210,16 +213,56 @@ export default async function CrmSprintPage({
         doneAtLabel: a.done_at ? fmtDay(a.done_at).toUpperCase() : null,
       }))
     : [];
+  /* -------------------------------------- kid-weighted counters (GTM W1) */
+
+  // Every warm convo and call is recorded ON a family; each family is worth
+  // its kid count. Effective kids = max(staff-set kid_count, dossiers).
+  const kidsByFamily = new Map<string, number>();
+  const childCountByParent = new Map<string, number>();
+  for (const c of children) {
+    childCountByParent.set(
+      c.parent_id,
+      (childCountByParent.get(c.parent_id) ?? 0) + 1
+    );
+  }
+  for (const f of families) {
+    const observed = f.parent_id ? (childCountByParent.get(f.parent_id) ?? 0) : 0;
+    kidsByFamily.set(f.id, Math.max(f.kid_count ?? 1, observed));
+  }
+  const warmConvoKids = families
+    .filter((f) => (f.engagement_signals ?? []).includes("warm-convo"))
+    .reduce((sum, f) => sum + (kidsByFamily.get(f.id) ?? 1), 0);
+  const sprintStartMs = weekBounds(1).start.getTime();
+  const callsBookedKids = [
+    ...callFamilyIds(stampEvents, "call_booked", sprintStartMs, bounds.end.getTime()),
+  ].reduce((sum, id) => sum + (kidsByFamily.get(id) ?? 1), 0);
+
   const cardChips: WeekCardChip[] = weekRow
     ? asNonFunnelTargets(weekRow.non_funnel_targets).map((t) => ({
         key: t.key,
-        label: t.label,
+        label: t.key === "warm-convos" ? `${t.label} · KIDS` : t.label,
         target: t.target,
         manual: t.manual,
-        // Manual chips are the hand-kept tally; funnel-derived ones compute.
-        value: t.manual ? t.count : (actuals[t.key as FunnelField] ?? 0),
+        // warm-convos derives from CRM truth (kid-weighted warm-convo
+        // signals) — never the hand-kept tally; manual chips keep their
+        // tally; funnel-derived ones compute.
+        value:
+          t.key === "warm-convos"
+            ? warmConvoKids
+            : t.manual
+              ? t.count
+              : (actuals[t.key as FunnelField] ?? 0),
       }))
     : [];
+  // Always-on kid-weighted calls chip: the funnel table stays family-based;
+  // this shows how many KIDS the booked calls cover.
+  cardChips.push({
+    key: "calls-booked-kids",
+    label: "CALLS BOOKED · KIDS",
+    target: targets?.calls_booked ?? 0,
+    manual: false,
+    value: callsBookedKids,
+  });
   const kicker = weekRow
     ? `PHASE ${phaseNumber(week)} · ${weekRow.phase} · W${week} · ${weekRow.label}`
     : `PHASE ${phaseNumber(week)} · ${WEEK_PHASES[week - 1]} · W${week}`;

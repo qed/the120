@@ -43,6 +43,7 @@ export interface FamilyRow {
   phone: string;
   spouse_name: string;
   kids: unknown;
+  kid_count: number;
   source: string;
   referral_code: string;
   area: string | null;
@@ -141,7 +142,7 @@ export interface LibraryItemRow {
 }
 
 const FAMILY_COLUMNS =
-  "id, parent_id, parent_name, email, phone, spouse_name, kids, source, " +
+  "id, parent_id, parent_name, email, phone, spouse_name, kids, kid_count, source, " +
   "referral_code, area, consent_given, consent_at, consent_source, " +
   "consent_revoked_at, heat_score, concerns, engagement_signals, " +
   "last_touch_at, call_booked_at, call_held_at, stage_override, " +
@@ -187,6 +188,9 @@ export interface PipelineFamily {
   callHeldAt: string | null;
   kidsCount: number;
   kidsLabel: string;
+  /** Staff-set potential signups, floored by observed kids (dossiers /
+   *  lead-kid entries) — truth pushes it up, never down. */
+  kidCount: number;
   nextMove: string;
   createdAt: string;
 }
@@ -390,6 +394,7 @@ function composeFamily(
     callHeldAt: family.call_held_at,
     kidsCount: kids.count,
     kidsLabel: kids.label,
+    kidCount: Math.max(family.kid_count ?? 1, kids.count),
     nextMove,
     createdAt: family.created_at,
   };

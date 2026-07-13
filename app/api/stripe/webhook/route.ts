@@ -60,7 +60,7 @@ export async function POST(req: Request) {
     if (paymentIntent) {
       await supabaseAdmin()
         .from("deposits")
-        .update({ status: "refunded" })
+        .update({ status: "refunded", refunded_at: new Date().toISOString() })
         .eq("stripe_payment_intent", paymentIntent);
     }
   }

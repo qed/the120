@@ -22,7 +22,9 @@ export default function SignIn() {
       setError(
         /invalid login credentials/i.test(error.message)
           ? "Email or password doesn't match — try again."
-          : error.message
+          : /email not confirmed/i.test(error.message)
+            ? "Confirm your email first — check your inbox for the link we sent."
+            : error.message
       );
       setBusy(false);
     }

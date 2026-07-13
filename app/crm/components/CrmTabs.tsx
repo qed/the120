@@ -6,6 +6,7 @@ import { supabaseBrowser } from "@/app/lib/supabase/client";
 
 const TABS = [
   { label: "DASHBOARD", href: "/crm" },
+  { label: "SPRINT", href: "/crm/sprint" },
   { label: "PIPELINE", href: "/crm/pipeline" },
   { label: "DOSSIERS", href: "/crm/dossiers" },
   { label: "LIBRARY", href: "/crm/library" },

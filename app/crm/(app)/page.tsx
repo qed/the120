@@ -9,43 +9,24 @@ import {
 } from "@/app/crm/lib/engine";
 import type { OverrideStage } from "@/app/crm/lib/constants";
 import { sentConcernsFrom } from "@/app/crm/lib/library-rules";
-import { daysSince, fmtDay } from "@/app/crm/lib/dates";
+import { daysSince } from "@/app/crm/lib/dates";
 import { SPRINT_WEEKS, weekBounds, weekOf } from "@/app/crm/lib/week";
 import {
-  asNonFunnelTargets,
-  asWeekActions,
   computeFunnelActuals,
   computeSeatsByGroup,
   computeSourceTally,
-  computeThisWeekStats,
   coolingOff,
   followUpsDue,
-  funnelDelta,
-  phaseNumber,
   warmingUp,
-  weekTick,
-  WEEK_PHASES,
-  FUNNEL_FIELDS,
   type BriefingFamily,
-  type FunnelActuals,
-  type FunnelField,
   type GtmStampEventInput,
   type GtmTargetsRow,
 } from "@/app/crm/lib/gtm";
-import WeekStrip, { type WeekSegment } from "@/app/crm/components/dashboard/WeekStrip";
-import ThisWeekCard, {
-  type WeekCardAction,
-  type WeekCardChip,
-} from "@/app/crm/components/dashboard/ThisWeekCard";
 import KpiStrip from "@/app/crm/components/dashboard/KpiStrip";
 import DepositThermometer from "@/app/crm/components/dashboard/DepositThermometer";
-import FunnelVsPlan, {
-  type FunnelPlanRow,
-} from "@/app/crm/components/dashboard/FunnelVsPlan";
 import TodaysBriefing from "@/app/crm/components/dashboard/TodaysBriefing";
 import SourceTally from "@/app/crm/components/dashboard/SourceTally";
 import SeatsByGroup from "@/app/crm/components/dashboard/SeatsByGroup";
-import ThisWeekStats from "@/app/crm/components/dashboard/ThisWeekStats";
 import SyncHealth from "@/app/crm/components/dashboard/SyncHealth";
 
 export const metadata: Metadata = {
@@ -96,63 +77,32 @@ interface DashReviewRow {
   group_assignment: string | null;
 }
 
-interface GtmWeekRow {
-  week: number;
-  phase: string;
-  label: string;
-  primary_push: string;
-  actions: unknown;
-  non_funnel_targets: unknown;
-}
-
 const FAMILY_COLS =
   "id, parent_id, parent_name, source, referral_code, consent_given, " +
   "consent_revoked_at, heat_score, concerns, last_touch_at, call_booked_at, " +
   "call_held_at, stage_override, deposit_asked_referral, signup_at, " +
   "dossier_submitted_at, created_at";
 
-/** Selected week from ?week={n}: parse, clamp to 1–8, default to today's. */
-function resolveWeek(raw: string | undefined, fallback: number): number {
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) return fallback;
-  return Math.min(SPRINT_WEEKS, Math.max(1, parsed));
-}
-
-const emailLabel = (email: string | undefined): string | null =>
-  email ? email.split("@")[0].toUpperCase() : null;
-
 /**
- * GTM Sprint Dashboard (plan Unit 6; brief §8) — the Friday-review machine.
- * One Promise.all of parallel service-role reads; every number derives from
- * truth (never hand-entered): funnel actuals per plan Decision 2, seats via
- * the `seats_claimed()` pipeline, activity from audit rows.
+ * CRM Dashboard (plan Unit 6; brief §8) — the today-focused half after the
+ * 2026-07-13 split: KPIs, deposit thermometer, today's briefing, sources,
+ * seats, sync health. The 8-week sprint machinery (week selector, weekly
+ * checklist, funnel vs plan, weekly activity) lives on /crm/sprint.
+ * Every number derives from truth (never hand-entered).
  */
-export default async function CrmDashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
+export default async function CrmDashboardPage() {
   await requireStaff();
 
   const now = new Date();
   const sprintStart = weekBounds(1).start.getTime();
   const sprintEnd = weekBounds(SPRINT_WEEKS).end.getTime();
-  const sprintEnded = now.getTime() >= sprintEnd;
-  // Tick-math position: 0 before the sprint (all weeks future), 9 after it
-  // (all weeks past) — plan Decision 11's clamp + "sprint ended" state.
-  const currentWeek = sprintEnded
-    ? SPRINT_WEEKS + 1
-    : now.getTime() < sprintStart
-      ? 0
-      : weekOf(now).week;
-
-  const params = await searchParams;
-  const defaultWeek = sprintEnded ? SPRINT_WEEKS : weekOf(now).week;
-  const week = resolveWeek(
-    typeof params.week === "string" ? params.week : undefined,
-    defaultWeek
-  );
-  const bounds = weekBounds(week);
+  // Effective week for cumulative KPIs: clamped to the sprint window.
+  const week =
+    now.getTime() >= sprintEnd
+      ? SPRINT_WEEKS
+      : now.getTime() < sprintStart
+        ? 1
+        : weekOf(now).week;
 
   const db = supabaseAdmin();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000).toISOString();
@@ -164,10 +114,7 @@ export default async function CrmDashboardPage({
     depositsRes,
     reviewsRes,
     stampsRes,
-    gtmWeeksRes,
     gtmTargetsRes,
-    staffRes,
-    auditWeekRes,
     signalAuditRes,
     sendsRes,
     libraryItemsRes,
@@ -184,15 +131,7 @@ export default async function CrmDashboardPage({
       .from("family_stage_history")
       .select("family_id, to_stage, note, created_at")
       .in("to_stage", ["call_booked", "call_held"]),
-    db.from("gtm_weeks").select("*").order("week"),
     db.from("gtm_weekly_targets").select("*").order("week"),
-    db.from("staff").select("id, email"),
-    db
-      .from("crm_audit_log")
-      .select("action")
-      .gte("created_at", bounds.start.toISOString())
-      .lt("created_at", bounds.end.toISOString())
-      .in("action", ["note-add", "stamp-call", "review-move", "family-add"]),
     db
       .from("crm_audit_log")
       .select("family_id")
@@ -203,8 +142,8 @@ export default async function CrmDashboardPage({
     getSeatsRemaining(),
   ]);
 
-  // Truth tables must never silently render zeros; the two gtm_* results are
-  // deliberately tolerated (pre-migration they error → "not seeded" states).
+  // Truth tables must never silently render zeros; the gtm_* result is
+  // deliberately tolerated (pre-migration it errors → "not seeded" state).
   for (const res of [
     familiesRes,
     parentsRes,
@@ -212,8 +151,6 @@ export default async function CrmDashboardPage({
     depositsRes,
     reviewsRes,
     stampsRes,
-    staffRes,
-    auditWeekRes,
     signalAuditRes,
   ]) {
     if (res.error) {
@@ -235,83 +172,17 @@ export default async function CrmDashboardPage({
   const deposits = (depositsRes.data ?? []) as DashDepositRow[];
   const reviews = (reviewsRes.data ?? []) as DashReviewRow[];
   const stampEvents = (stampsRes.data ?? []) as GtmStampEventInput[];
-  const gtmWeeks = new Map(
-    ((gtmWeeksRes.data ?? []) as GtmWeekRow[]).map((w) => [w.week, w])
-  );
   const targetsByWeek = new Map(
     ((gtmTargetsRes.data ?? []) as GtmTargetsRow[]).map((t) => [t.week, t])
   );
-  const staffEmails = new Map(
-    ((staffRes.data ?? []) as { id: string; email: string }[]).map((s) => [
-      s.id,
-      s.email,
-    ])
-  );
 
-  /* -------------------------------------------- funnel actuals, all weeks */
+  /* ------------------------------------------- cumulative funnel actuals */
 
   const truth = { families, children, deposits, stampEvents };
-  const actualsByWeek = new Map<number, FunnelActuals>();
-  for (let w = 1; w <= SPRINT_WEEKS; w++) {
-    actualsByWeek.set(w, computeFunnelActuals(w, truth));
-  }
-  const actuals = actualsByWeek.get(week)!;
-  const prevDeposits = week > 1 ? actualsByWeek.get(week - 1)!.deposits : 0;
-  const targets = targetsByWeek.get(week) ?? null;
+  const actuals = computeFunnelActuals(week, truth);
+  const prevDeposits =
+    week > 1 ? computeFunnelActuals(week - 1, truth).deposits : 0;
   const finalTargets = targetsByWeek.get(SPRINT_WEEKS) ?? null;
-
-  /* ---------------------------------------------------------- week strip */
-
-  const segments: WeekSegment[] = [];
-  for (let w = 1; w <= SPRINT_WEEKS; w++) {
-    segments.push({
-      week: w,
-      phase: gtmWeeks.get(w)?.phase ?? WEEK_PHASES[w - 1],
-      tick: weekTick(
-        w,
-        currentWeek,
-        actualsByWeek.get(w)!,
-        targetsByWeek.get(w) ?? null
-      ),
-    });
-  }
-
-  /* ------------------------------------------------------ this-week card */
-
-  const weekRow = gtmWeeks.get(week) ?? null;
-  const cardActions: WeekCardAction[] = weekRow
-    ? asWeekActions(weekRow.actions).map((a) => ({
-        id: a.id,
-        text: a.text,
-        done: a.done,
-        isAsset: a.kind === "asset",
-        doneByLabel: a.done_by ? emailLabel(staffEmails.get(a.done_by)) : null,
-        doneAtLabel: a.done_at ? fmtDay(a.done_at).toUpperCase() : null,
-      }))
-    : [];
-  const cardChips: WeekCardChip[] = weekRow
-    ? asNonFunnelTargets(weekRow.non_funnel_targets).map((t) => ({
-        key: t.key,
-        label: t.label,
-        target: t.target,
-        manual: t.manual,
-        // Manual chips are the hand-kept tally; funnel-derived ones compute.
-        value: t.manual ? t.count : (actuals[t.key as FunnelField] ?? 0),
-      }))
-    : [];
-  const kicker = weekRow
-    ? `PHASE ${phaseNumber(week)} · ${weekRow.phase} · W${week} · ${weekRow.label}`
-    : `PHASE ${phaseNumber(week)} · ${WEEK_PHASES[week - 1]} · W${week}`;
-
-  /* -------------------------------------------------------- funnel table */
-
-  const funnelRows: FunnelPlanRow[] = FUNNEL_FIELDS.map(({ key, label }) => ({
-    field: key,
-    label,
-    actual: actuals[key],
-    target: targets ? targets[key] : null,
-    delta: funnelDelta(actuals[key], targets ? targets[key] : null),
-  }));
 
   /* ------------------------------------------------------------ briefing */
 
@@ -413,9 +284,6 @@ export default async function CrmDashboardPage({
     reviews,
     new Set(paidDeposits.map((d) => d.child_id))
   );
-  const weekStats = computeThisWeekStats(
-    (auditWeekRes.data ?? []) as { action: string }[]
-  );
   const parentCount = parents.size;
   const linkedFamilyCount = familyByParent.size;
 
@@ -429,27 +297,6 @@ export default async function CrmDashboardPage({
 
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4 px-5 py-6 sm:px-7">
-      {sprintEnded && (
-        <div className="rounded-[12px] border border-crm-ink bg-crm-ink px-5 py-3.5">
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-white">
-            SPRINT ENDED · SEP 4 — the 8-week window has closed. Numbers below
-            are final as of the selected week&apos;s end.
-          </p>
-        </div>
-      )}
-
-      {/* 0 — week strip */}
-      <WeekStrip segments={segments} selected={week} />
-
-      {/* 0b — this-week card */}
-      <ThisWeekCard
-        week={week}
-        kicker={kicker}
-        primaryPush={weekRow?.primary_push ?? "Week plan not seeded"}
-        actions={cardActions}
-        chips={cardChips}
-      />
-
       {/* 1 — KPI strip */}
       <KpiStrip
         interested={actuals.interested}
@@ -471,10 +318,7 @@ export default async function CrmDashboardPage({
         stretch={55}
       />
 
-      {/* 3 — funnel vs plan */}
-      <FunnelVsPlan week={week} rows={funnelRows} />
-
-      {/* 4 — today's briefing */}
+      {/* 3 — today's briefing */}
       <TodaysBriefing
         dateLabel={dateLabel}
         followUps={followUpsDue(briefingFamilies, now)}
@@ -482,7 +326,7 @@ export default async function CrmDashboardPage({
         warming={warmingUp(briefingFamilies, warmIds)}
       />
 
-      {/* 5 — two-column footer */}
+      {/* 4 — two-column footer */}
       <div className="grid gap-4 lg:grid-cols-2">
         <SourceTally
           rows={sourceTally.rows}
@@ -491,9 +335,8 @@ export default async function CrmDashboardPage({
         <SeatsByGroup data={seatsByGroup} />
       </div>
 
-      {/* 6 — activity + sync health */}
+      {/* 5 — sync health */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <ThisWeekStats week={week} stats={weekStats} />
         <SyncHealth
           parentCount={parentCount}
           linkedFamilyCount={linkedFamilyCount}

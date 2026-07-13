@@ -21,7 +21,7 @@ import {
 } from "@/app/crm/lib/gtm";
 import type { ActionResult } from "./families";
 
-const DASHBOARD_PATH = "/crm";
+const SPRINT_PATH = "/crm/sprint";
 
 type Db = ReturnType<typeof supabaseAdmin>;
 
@@ -70,7 +70,8 @@ export async function toggleWeekAction(input: unknown): Promise<ActionResult> {
     done: applied.done,
   });
 
-  revalidatePath(DASHBOARD_PATH);
+  revalidatePath(SPRINT_PATH);
+  revalidatePath("/crm"); // final targets also feed the dashboard KPI strip
   return { success: true };
 }
 
@@ -111,7 +112,8 @@ export async function bumpCounter(input: unknown): Promise<ActionResult> {
     count: applied.count,
   });
 
-  revalidatePath(DASHBOARD_PATH);
+  revalidatePath(SPRINT_PATH);
+  revalidatePath("/crm"); // final targets also feed the dashboard KPI strip
   return { success: true };
 }
 
@@ -148,6 +150,7 @@ export async function updateTarget(input: unknown): Promise<ActionResult> {
     new: parsed.data.value,
   });
 
-  revalidatePath(DASHBOARD_PATH);
+  revalidatePath(SPRINT_PATH);
+  revalidatePath("/crm"); // final targets also feed the dashboard KPI strip
   return { success: true };
 }

@@ -35,7 +35,7 @@ export default function WeekStrip({
         return (
           <Link
             key={s.week}
-            href={`/crm?week=${s.week}`}
+            href={`/crm/sprint?week=${s.week}`}
             scroll={false}
             aria-current={isSelected ? "page" : undefined}
             className={`flex items-center justify-center gap-1.5 rounded-[10px] border px-2 py-2.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crm-blue ${

@@ -3,9 +3,9 @@
 /**
  * Drawer aside, 360px (brief §7): About (identity from the parents row when
  * linked — display-only + LINKED ACCOUNT badge; editable form for leads via
- * `updateContact`, Decision 4 authority rule), engagement-signal toggles,
- * concern chips, the heat block (Unit 8), private notes (Georgia italic),
- * and the CASL consent block.
+ * `updateContact`, Decision 4 authority rule), private notes right below it
+ * (quick capture while reading a card), engagement-signal toggles, concern
+ * chips, the heat block (Unit 8), and the CASL consent block.
  */
 
 import { useState } from "react";
@@ -33,11 +33,14 @@ const INPUT =
 const FIELD_LABEL =
   "mb-0.5 block font-mono text-[9px] uppercase tracking-[0.1em] text-crm-faint";
 
+/** One line per fact: label left, value right — keeps About short. */
 function Row({ label, value }: { label: string; value: string | null }) {
   return (
-    <div>
-      <span className={FIELD_LABEL}>{label}</span>
-      <span className="block break-words text-[13px] text-crm-ink">
+    <div className="flex items-baseline gap-2">
+      <span className="w-16 flex-none font-mono text-[9px] uppercase tracking-[0.1em] text-crm-faint">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-[13px] text-crm-ink">
         {value || <span className="text-crm-faint">—</span>}
       </span>
     </div>
@@ -222,7 +225,7 @@ function AboutCard({ detail }: { detail: FamilyDetail }) {
           </div>
         </div>
       ) : (
-        <div className="mt-3 space-y-2.5">
+        <div className="mt-3 space-y-1.5">
           <Row label="Email" value={detail.email} />
           <Row label="Phone" value={detail.phone} />
           <Row label="Spouse" value={detail.spouseName} />
@@ -333,6 +336,7 @@ export default function DrawerAside({ detail }: { detail: FamilyDetail }) {
   return (
     <div className="space-y-4 p-5">
       <AboutCard key={`about-${detail.id}-${detail.parentLinked}`} detail={detail} />
+      <NotesCard detail={detail} />
       <SignalGrid familyId={detail.id} signals={detail.signals} />
       <ConcernChips familyId={detail.id} concerns={detail.concerns} />
       <HeatBlock
@@ -340,7 +344,6 @@ export default function DrawerAside({ detail }: { detail: FamilyDetail }) {
         heat={detail.heat}
         suggestedHeat={detail.suggestedHeat}
       />
-      <NotesCard detail={detail} />
       <ConsentCard detail={detail} />
     </div>
   );

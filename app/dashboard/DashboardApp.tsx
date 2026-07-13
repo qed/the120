@@ -232,7 +232,7 @@ export default function DashboardApp({
               account. */}
           <Link
             href="/gauntlet"
-            className="mt-8 flex flex-col gap-4 rounded-3xl border border-line bg-ink p-8 transition-shadow hover:shadow-[0_20px_50px_-30px_rgba(19,20,22,0.7)] sm:flex-row sm:items-center sm:justify-between"
+            className="mt-8 flex flex-col gap-4 rounded-3xl border border-line bg-crm-blue p-8 transition-shadow hover:shadow-[0_20px_50px_-30px_rgba(3,0,237,0.6)] sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
               <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-white/70">

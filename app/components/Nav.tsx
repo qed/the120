@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "motion/react";
 import Wordmark from "./Wordmark";
 import Cta from "./Cta";
 import JoinButton from "./JoinButton";
+import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { nav as defaultLinks, BOOKING_URL } from "@/app/lib/site";
 
 /**
@@ -13,10 +14,28 @@ import { nav as defaultLinks, BOOKING_URL } from "@/app/lib/site";
  * with side margins, over hero imagery. One nav for every page — The 120 is
  * the product; groups (including GT/Scholars) are sub-pages with no variant
  * chrome. Links are identical site-wide by design.
+ *
+ * Session-aware CTA: signed-in families see "My dashboard" where "Join the
+ * 120" sits (and no redundant "Sign in" link). Defaults to the signed-out
+ * state so the static render never flashes for anonymous visitors.
  */
 export default function Nav() {
   const [open, setOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const items = [...defaultLinks];
+
+  useEffect(() => {
+    const supabase = supabaseBrowser();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSignedIn(Boolean(session));
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session));
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -55,22 +74,24 @@ export default function Nav() {
                 {item.label}
               </Link>
             ))}
-            <Link
-              href="/dashboard"
-              className="whitespace-nowrap text-sm text-muted transition-colors hover:text-ink"
-            >
-              Sign in
-            </Link>
             <Cta href={BOOKING_URL} variant="ghost">
               Book a call
             </Cta>
-            <JoinButton>Join the 120</JoinButton>
+            {signedIn ? (
+              <Cta href="/dashboard">My dashboard</Cta>
+            ) : (
+              <JoinButton>Join the 120</JoinButton>
+            )}
           </span>
 
           {/* Mobile: join + hamburger */}
           <span className="flex items-center gap-3 lg:hidden">
             <span className="hidden sm:inline-flex">
-              <JoinButton>Join the 120</JoinButton>
+              {signedIn ? (
+                <Cta href="/dashboard">My dashboard</Cta>
+              ) : (
+                <JoinButton>Join the 120</JoinButton>
+              )}
             </span>
             <button
               type="button"
@@ -124,20 +145,28 @@ export default function Nav() {
                   </Link>
                 ))}
                 <div className="mt-5 flex flex-col gap-3">
-                  <JoinButton className="w-full" onClick={close}>
-                    Join the 120
-                  </JoinButton>
+                  {signedIn ? (
+                    <Cta href="/dashboard" className="w-full" onClick={close}>
+                      My dashboard
+                    </Cta>
+                  ) : (
+                    <JoinButton className="w-full" onClick={close}>
+                      Join the 120
+                    </JoinButton>
+                  )}
                   <Cta href={BOOKING_URL} variant="ghost" className="w-full" onClick={close}>
                     Book a call
                   </Cta>
                 </div>
-                <Link
-                  href="/dashboard"
-                  onClick={close}
-                  className="mt-5 block border-t border-line pt-5 text-center font-mono text-xs uppercase tracking-[0.12em] text-muted hover:text-ink"
-                >
-                  Already started? Sign in
-                </Link>
+                {!signedIn && (
+                  <Link
+                    href="/dashboard"
+                    onClick={close}
+                    className="mt-5 block border-t border-line pt-5 text-center font-mono text-xs uppercase tracking-[0.12em] text-muted hover:text-ink"
+                  >
+                    Already started? Sign in
+                  </Link>
+                )}
               </nav>
             </motion.div>
           )}

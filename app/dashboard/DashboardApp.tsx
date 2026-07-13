@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
 import { childName, completeness, statusMeta } from "./data";
 import { useDashboard } from "./store";
@@ -225,6 +226,30 @@ export default function DashboardApp({
               })}
             </div>
           )}
+
+          {/* The Gauntlet (moved off the marketing nav 2026-07-13): the
+              family's game — progress and leaderboard identity save to this
+              account. */}
+          <Link
+            href="/gauntlet"
+            className="mt-8 flex flex-col gap-4 rounded-3xl border border-line bg-ink p-8 transition-shadow hover:shadow-[0_20px_50px_-30px_rgba(19,20,22,0.7)] sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-white/70">
+                For the kids
+              </p>
+              <p className="mt-2 font-display text-2xl font-bold tracking-tight text-white">
+                The Gauntlet
+              </p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-white/80">
+                Boss-battle FastMath. Progress and leaderboard handle save to this account —
+                cross-device, always free.
+              </p>
+            </div>
+            <span className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white">
+              Enter the Gauntlet →
+            </span>
+          </Link>
 
           <p className="mt-10 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
             Saved to your account as you type. PIPEDA: children&rsquo;s info is collected only for

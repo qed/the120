@@ -24,11 +24,10 @@ export const TUITION_FULL_CORE_CAD = 15000;
 export const BOOKING_URL =
   process.env.NEXT_PUBLIC_BOOKING_URL || "mailto:admissions@the120.school";
 
+// Streamlined 2026-07-13: the landing page reads top-to-bottom (groups, how
+// it works, parents proof all live there); the Gauntlet moved to the
+// signed-in dashboard. Footer keeps the full sitemap.
 export const nav = [
-  { label: "The groups", href: "/#groups" },
-  { label: "How it works", href: "/#how" },
-  { label: "Parents", href: "/parents" },
-  { label: "The Gauntlet", href: "/gauntlet" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;

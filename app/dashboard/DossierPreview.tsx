@@ -22,7 +22,7 @@ export default function DossierPreview({
         </button>
         <button
           onClick={() => window.print()}
-          className="inline-flex h-11 items-center justify-center rounded-full bg-ink px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-black"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-blue px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-blue-dark"
         >
           Print / Save as PDF
         </button>
@@ -61,7 +61,7 @@ export default function DossierPreview({
                 {child.subjects.map((s) => (
                   <span
                     key={s}
-                    className="rounded-full bg-ink px-3 py-1 font-mono text-xs uppercase tracking-[0.08em] text-white"
+                    className="rounded-full bg-blue px-3 py-1 font-mono text-xs uppercase tracking-[0.08em] text-white"
                   >
                     {s}
                   </span>

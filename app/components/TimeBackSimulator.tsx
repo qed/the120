@@ -167,7 +167,7 @@ export default function TimeBackSimulator() {
                     onClick={() => setStatus(s)}
                     className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors ${
                       status.id === s.id
-                        ? "border-ink bg-ink text-white"
+                        ? "border-blue bg-blue text-white"
                         : "border-line-strong text-ink-soft hover:border-ink"
                     }`}
                   >
@@ -233,7 +233,7 @@ export default function TimeBackSimulator() {
           </div>
 
           {/* ---- Graph ---- */}
-          <div className="relative bg-ink p-8 text-paper">
+          <div className="relative bg-blue p-8 text-paper">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-xs uppercase tracking-[0.14em] text-white/60">
                 Learning velocity · {subject.label}

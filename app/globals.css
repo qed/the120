@@ -23,6 +23,7 @@
      Blue deepened from the handoff's #0300ED — the pure RGB blue vibrated
      against the warm palette; deep indigo chosen from side-by-side variants. */
   --color-blue: #22219b;
+  --color-blue-dark: #191877; /* hover state for blue surfaces */
   --color-blush: #efc5b8;
 
   /* CRM palette (staff-only /crm surfaces — brief §11, additive per plan

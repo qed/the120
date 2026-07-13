@@ -77,7 +77,7 @@ export default function ProductPillars() {
         </div>
 
         {/* Network outcomes — attributed, never claimed as The 120's own (brief §9) */}
-        <div className="mt-16 rounded-2xl border border-line bg-ink px-8 py-10 text-paper">
+        <div className="mt-16 rounded-2xl border border-line bg-blue px-8 py-10 text-paper">
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             {proofStats.map((s) => (
               <div key={s.label}>

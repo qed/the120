@@ -40,7 +40,7 @@ export function StatusStepper({ status }: { status: SeatStatus }) {
                 active
                   ? "bg-red text-white"
                   : done
-                    ? "bg-ink text-white"
+                    ? "bg-blue text-white"
                     : "bg-line text-muted"
               }`}
             >

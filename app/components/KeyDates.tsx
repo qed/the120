@@ -2,7 +2,7 @@ import { intensives } from "@/app/lib/site";
 
 export default function KeyDates() {
   return (
-    <section className="border-b border-line bg-ink text-paper">
+    <section className="border-b border-line bg-blue text-paper">
       <div className="mx-auto w-full max-w-6xl px-6 py-16 lg:py-20">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
@@ -19,7 +19,7 @@ export default function KeyDates() {
 
         <ol className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
           {intensives.map((d, i) => (
-            <li key={d.label} className="bg-ink p-6">
+            <li key={d.label} className="bg-blue p-6">
               <span className="font-mono text-xs text-muted">0{i + 1}</span>
               <p className="mt-3 font-display text-lg font-semibold text-white">{d.label}</p>
               <p className="mt-1 font-mono text-sm text-red">{d.date}</p>

@@ -445,7 +445,7 @@ function SuccessView({
       <ol className="mx-auto mt-6 max-w-sm space-y-3 text-left">
         {steps.map((s, i) => (
           <li key={i} className="flex gap-3 text-sm text-ink-soft">
-            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-ink font-mono text-xs text-white">
+            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-blue font-mono text-xs text-white">
               {i + 1}
             </span>
             {s}

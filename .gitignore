@@ -47,3 +47,6 @@ next-env.d.ts
 # supabase CLI local state
 supabase/.temp
 .gstack/
+
+# CRM staff seeding — generated passwords, never committed
+scripts/.staff-passwords.local.txt

@@ -81,6 +81,19 @@ export async function POST(req: Request) {
       user_metadata: { ...user.user_metadata, welcome_sent_at: new Date().toISOString() },
     });
 
+    // CRM (plan Unit 2): stamp the family's welcome_email_at snapshot.
+    // Best-effort — no family row (pre-backfill) or a write failure must
+    // never affect the response; the backfill script repairs from metadata.
+    try {
+      await supabaseAdmin()
+        .from("families")
+        .update({ welcome_email_at: new Date().toISOString() })
+        .eq("parent_id", user.id)
+        .is("welcome_email_at", null);
+    } catch (crmErr) {
+      console.error("[welcome] families stamp failed:", crmErr);
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[welcome]", err);

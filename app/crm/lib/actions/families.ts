@@ -674,13 +674,19 @@ export async function mergeFamilies(input: unknown): Promise<ActionResult> {
   // Move child records to the survivor. `crm_audit_log` rows are immutable
   // by design (Unit 2 trigger raises on UPDATE), so audit references stay
   // put — the 'merge' audit row below records the loser id for tracing.
-  // TODO(Unit 7): move library_sends rows once the table exists.
   await db
     .from("family_notes")
     .update({ family_id: survivor.id })
     .eq("family_id", loser.id);
   await db
     .from("family_stage_history")
+    .update({ family_id: survivor.id })
+    .eq("family_id", loser.id);
+  // Sends follow the family (Unit 7): the survivor keeps the CASL paper
+  // trail and the co-pilot's sent-concerns state — a merge must not make
+  // an addressed concern look unaddressed.
+  await db
+    .from("library_sends")
     .update({ family_id: survivor.id })
     .eq("family_id", loser.id);
 

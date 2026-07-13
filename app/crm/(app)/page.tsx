@@ -8,6 +8,7 @@ import {
   type FamilyTruth,
 } from "@/app/crm/lib/engine";
 import type { OverrideStage } from "@/app/crm/lib/constants";
+import { sentConcernsFrom } from "@/app/crm/lib/library-rules";
 import { daysSince, fmtDay } from "@/app/crm/lib/dates";
 import { SPRINT_WEEKS, weekBounds, weekOf } from "@/app/crm/lib/week";
 import {
@@ -168,6 +169,8 @@ export default async function CrmDashboardPage({
     staffRes,
     auditWeekRes,
     signalAuditRes,
+    sendsRes,
+    libraryItemsRes,
     seatsRemaining,
   ] = await Promise.all([
     db.from("families").select(FAMILY_COLS).is("merged_into_id", null),
@@ -195,6 +198,8 @@ export default async function CrmDashboardPage({
       .select("family_id")
       .eq("action", "signal-toggle")
       .gte("created_at", sevenDaysAgo),
+    db.from("library_sends").select("family_id, item_id"),
+    db.from("library_items").select("id, concern"),
     getSeatsRemaining(),
   ]);
 
@@ -324,6 +329,21 @@ export default async function CrmDashboardPage({
   }
   const reviewsByChild = new Map(reviews.map((r) => [r.child_id, r]));
 
+  // Library reads are tolerated like the gtm_* ones (pre-migration → no
+  // sends yet); sent concerns feed co-pilot rule 5 (Unit 7).
+  const libSends = sendsRes.error
+    ? []
+    : ((sendsRes.data ?? []) as { family_id: string; item_id: string }[]);
+  const libItems = libraryItemsRes.error
+    ? []
+    : ((libraryItemsRes.data ?? []) as { id: string; concern: string | null }[]);
+  const sendsByFamily = new Map<string, { item_id: string }[]>();
+  for (const s of libSends) {
+    const list = sendsByFamily.get(s.family_id);
+    if (list) list.push(s);
+    else sendsByFamily.set(s.family_id, [s]);
+  }
+
   const briefingFamilies: BriefingFamily[] = families.map((f) => {
     const kids = f.parent_id ? (childrenByParent.get(f.parent_id) ?? []) : [];
     const familyTruth: FamilyTruth = {
@@ -344,7 +364,6 @@ export default async function CrmDashboardPage({
       : f.parent_name;
     const days =
       daysSince(f.last_touch_at, now) ?? daysSince(f.created_at, now) ?? 0;
-    // TODO(Unit 7): pass the real sent-concerns set from library_sends.
     const nextMove = deriveNextMove(
       {
         stage,
@@ -353,7 +372,7 @@ export default async function CrmDashboardPage({
         daysSinceLastTouch: days,
         deposit_asked_referral: f.deposit_asked_referral,
       },
-      new Set()
+      sentConcernsFrom(sendsByFamily.get(f.id) ?? [], libItems)
     ).message;
     return {
       id: f.id,

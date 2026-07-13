@@ -224,6 +224,17 @@ export default function DrawerHeader({
         {stampButton("booked", detail.callBookedAt)}
         {stampButton("held", detail.callHeldAt)}
 
+        {/* Unit 7: routes to the library with this family pre-selected in
+            the composer (?family= param). */}
+        <button
+          type="button"
+          className={BTN_SECONDARY}
+          disabled={busy}
+          onClick={() => router.push(`/crm/library?family=${detail.id}`)}
+        >
+          Send from library
+        </button>
+
         {detail.overrideSet ? (
           <button
             type="button"

@@ -37,16 +37,16 @@ export const TOUCH_TONE_HEX: Record<TouchTone, string> = {
 };
 
 /**
- * "Needs attention" filter rule (plan Unit 4): red last-touch OR any concern.
- * TODO(Unit 7): once `library_sends` exists, only count concerns with no
- * matching send ("unaddressed concern" per the brief §7 filter definition).
+ * "Needs attention" filter rule (brief §7): red last-touch OR an
+ * unaddressed concern — a known concern with no matching library send
+ * (Unit 7: the server computes `unaddressedConcerns` from `library_sends`).
  */
 export function needsAttention(
-  family: { lastTouchAt: string | null; concerns: string[] },
+  family: { lastTouchAt: string | null; unaddressedConcerns: string[] },
   now: Date = new Date()
 ): boolean {
   const days = daysSince(family.lastTouchAt, now);
-  return days === null || days > 14 || family.concerns.length > 0;
+  return days === null || days > 14 || family.unaddressedConcerns.length > 0;
 }
 
 /** "Jul 20" — short display date. */

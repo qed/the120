@@ -215,4 +215,37 @@ describe("buildTimeline", () => {
     const b = buildTimeline(family(), [note("a", ts), note("b", ts)], [], [], []);
     expect(a.map((e) => e.id)).toEqual(b.map((e) => e.id));
   });
+
+  it("renders library sends by channel (Unit 7)", () => {
+    const entries = buildTimeline(
+      family(),
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          id: "s1",
+          channel: "email",
+          subject: "DEPOSIT + REFUND TERMS",
+          itemTitle: "DEPOSIT + REFUND TERMS",
+          sent_at: "2026-07-16T10:00:00Z",
+        },
+        {
+          id: "s2",
+          channel: "other",
+          subject: null,
+          itemTitle: "SCREENS: THE TIN CAN IS THE ANSWER",
+          sent_at: "2026-07-15T10:00:00Z",
+        },
+      ]
+    );
+    expect(entries.map((e) => e.type)).toEqual(["send", "send"]);
+    expect(entries[0].label).toBe("Library send · DEPOSIT + REFUND TERMS");
+    expect(entries[0].detail).toBe("DEPOSIT + REFUND TERMS");
+    expect(entries[1].label).toBe(
+      "Sent elsewhere · SCREENS: THE TIN CAN IS THE ANSWER"
+    );
+    expect(entries[1].detail).toBeUndefined();
+  });
 });

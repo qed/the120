@@ -13,11 +13,13 @@ import {
   type FamilyTruth,
 } from "./engine";
 import {
+  isConcern,
   STAGE_LABELS,
   type OverrideStage,
   type ReviewStatus,
   type Stage,
 } from "./constants";
+import { sentConcernsFrom } from "./library-rules";
 import {
   dossierCompleteness,
   effectiveReviewStatus,
@@ -114,6 +116,27 @@ export interface HistoryRow {
   created_at: string;
 }
 
+export interface SendRow {
+  id: string;
+  item_id: string;
+  family_id: string;
+  channel: string;
+  subject: string | null;
+  sent_at: string;
+}
+
+/** The `library_items` fields the pipeline/library reads (Unit 7). */
+export interface LibraryItemRow {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  concern: string | null;
+  url: string | null;
+  helpfulness_score: number;
+  send_count: number;
+}
+
 const FAMILY_COLUMNS =
   "id, parent_id, parent_name, email, phone, spouse_name, kids, source, " +
   "referral_code, area, consent_given, consent_at, consent_source, " +
@@ -143,6 +166,8 @@ export interface PipelineFamily {
   overrideSuperseded: boolean;
   heat: number;
   concerns: string[];
+  /** Known concerns with no matching library send (brief §7 filter rule). */
+  unaddressedConcerns: string[];
   signals: string[];
   /** Effective consent: given AND not revoked. */
   consented: boolean;
@@ -162,7 +187,7 @@ export interface PipelineFamily {
 export interface TimelineEntry {
   id: string;
   ts: string;
-  type: "system" | "note" | "stage" | "deposit";
+  type: "system" | "note" | "stage" | "deposit" | "send";
   label: string;
   detail?: string;
   dotColor: string;
@@ -266,7 +291,9 @@ function composeFamily(
   children: ChildRow[],
   deposits: DepositRow[],
   reviews: ReviewRow[],
-  now: Date
+  now: Date,
+  /** Concerns already addressed via library sends (Unit 7). */
+  sentConcerns: Set<string> = new Set()
 ): PipelineFamily {
   const truth: FamilyTruth = {
     override: (family.stage_override as OverrideStage | null) ?? null,
@@ -293,7 +320,6 @@ function composeFamily(
     daysSince(family.created_at, now) ??
     0;
 
-  // TODO(Unit 7): pass the real sent-concerns set from library_sends.
   const nextMove = deriveNextMove(
     {
       stage,
@@ -302,7 +328,7 @@ function composeFamily(
       daysSinceLastTouch: days,
       deposit_asked_referral: family.deposit_asked_referral,
     },
-    new Set()
+    sentConcerns
   ).message;
 
   return {
@@ -321,6 +347,9 @@ function composeFamily(
     overrideSuperseded: shouldClearOverride(truth),
     heat: family.heat_score,
     concerns: family.concerns,
+    unaddressedConcerns: family.concerns.filter(
+      (c) => isConcern(c) && !sentConcerns.has(c)
+    ),
     signals: family.engagement_signals,
     consented: family.consent_given && !family.consent_revoked_at,
     consentGiven: family.consent_given,
@@ -355,22 +384,40 @@ export async function fetchPipeline(
   now: Date = new Date()
 ): Promise<PipelineFamily[]> {
   const db = supabaseAdmin();
-  const [familiesRes, parentsRes, childrenRes, depositsRes, reviewsRes] =
-    await Promise.all([
-      db.from("families").select(FAMILY_COLUMNS).is("merged_into_id", null),
-      db.from("parents").select("id, first_name, last_name, email, phone"),
-      db
-        .from("children")
-        .select("id, parent_id, first_name, grade, status, submitted_at, created_at"),
-      db
-        .from("deposits")
-        .select("id, parent_id, child_id, status, amount, created_at, refunded_at"),
-      db.from("child_reviews").select("id, child_id, review_status, updated_at"),
-    ]);
+  const [
+    familiesRes,
+    parentsRes,
+    childrenRes,
+    depositsRes,
+    reviewsRes,
+    sendsRes,
+    itemsRes,
+  ] = await Promise.all([
+    db.from("families").select(FAMILY_COLUMNS).is("merged_into_id", null),
+    db.from("parents").select("id, first_name, last_name, email, phone"),
+    db
+      .from("children")
+      .select("id, parent_id, first_name, grade, status, submitted_at, created_at"),
+    db
+      .from("deposits")
+      .select("id, parent_id, child_id, status, amount, created_at, refunded_at"),
+    db.from("child_reviews").select("id, child_id, review_status, updated_at"),
+    db
+      .from("library_sends")
+      .select("id, item_id, family_id, channel, subject, sent_at"),
+    db.from("library_items").select("id, concern"),
+  ]);
 
   for (const res of [familiesRes, parentsRes, childrenRes, depositsRes, reviewsRes]) {
     if (res.error) throw new Error(`Pipeline fetch failed: ${res.error.message}`);
   }
+  // Library tables are deliberately tolerated (pre-migration they error →
+  // no sends recorded yet) — same posture as the dashboard's gtm_* reads.
+  const sends = sendsRes.error ? [] : ((sendsRes.data ?? []) as SendRow[]);
+  const itemConcerns = itemsRes.error
+    ? []
+    : ((itemsRes.data ?? []) as { id: string; concern: string | null }[]);
+  const sendsByFamily = groupBy(sends, (s) => s.family_id);
 
   const families = (familiesRes.data ?? []) as unknown as FamilyRow[];
   const parents = new Map(
@@ -399,7 +446,19 @@ export async function fetchPipeline(
     const reviews = children.flatMap(
       (c) => reviewsByChild.get(c.id) ?? []
     );
-    return composeFamily(family, parents.get(family.parent_id ?? ""), children, deposits, reviews, now);
+    const sentConcerns = sentConcernsFrom(
+      sendsByFamily.get(family.id) ?? [],
+      itemConcerns
+    );
+    return composeFamily(
+      family,
+      parents.get(family.parent_id ?? ""),
+      children,
+      deposits,
+      reviews,
+      now,
+      sentConcerns
+    );
   });
 
   // Freshest touch first; untouched rows fall back to creation recency.
@@ -430,7 +489,7 @@ export async function fetchFamilyDetail(
   if (error || !familyData) return null;
   const family = familyData as unknown as FamilyRow;
 
-  const [parentRes, childrenRes, depositsRes, notesRes, historyRes] =
+  const [parentRes, childrenRes, depositsRes, notesRes, historyRes, sendsRes, itemsRes] =
     await Promise.all([
       family.parent_id
         ? db
@@ -463,7 +522,19 @@ export async function fetchFamilyDetail(
         .from("family_stage_history")
         .select("id, family_id, from_stage, to_stage, actor, note, created_at")
         .eq("family_id", family.id),
+      db
+        .from("library_sends")
+        .select("id, item_id, family_id, channel, subject, sent_at")
+        .eq("family_id", family.id),
+      db.from("library_items").select("id, title, concern"),
     ]);
+
+  // Pre-migration tolerance, same as fetchPipeline.
+  const sends = sendsRes.error ? [] : ((sendsRes.data ?? []) as SendRow[]);
+  const libraryItems = itemsRes.error
+    ? []
+    : ((itemsRes.data ?? []) as { id: string; title: string; concern: string | null }[]);
+  const itemTitles = new Map(libraryItems.map((i) => [i.id, i.title]));
 
   const children = (childrenRes.data ?? []) as ChildRow[];
   const deposits = (depositsRes.data ?? []) as DepositRow[];
@@ -485,7 +556,8 @@ export async function fetchFamilyDetail(
     children,
     deposits,
     reviews,
-    now
+    now,
+    sentConcernsFrom(sends, libraryItems)
   );
 
   return {
@@ -495,7 +567,14 @@ export async function fetchFamilyDetail(
       (notesRes.data ?? []) as NoteRow[],
       (historyRes.data ?? []) as HistoryRow[],
       children,
-      deposits
+      deposits,
+      sends.map((s) => ({
+        id: s.id,
+        channel: s.channel,
+        subject: s.subject,
+        itemTitle: itemTitles.get(s.item_id) ?? "Library item",
+        sent_at: s.sent_at,
+      }))
     ),
   };
 }
@@ -711,12 +790,21 @@ export interface TimelineDepositInput {
   refunded_at: string | null;
 }
 
+export interface TimelineSendInput {
+  id: string;
+  channel: string;
+  subject: string | null;
+  itemTitle: string;
+  sent_at: string;
+}
+
 const DOT = {
   system: "#0300ED",
   note: "#55585E",
   stage: "#131416",
   depositPaid: "#0E8A5F",
   depositRefunded: "#D92632",
+  send: "#EFC5B8",
 } as const;
 
 function stageLabel(value: string | null): string {
@@ -800,7 +888,8 @@ export function buildTimeline(
   notes: TimelineNoteInput[],
   history: TimelineHistoryInput[],
   children: TimelineChildInput[],
-  deposits: TimelineDepositInput[]
+  deposits: TimelineDepositInput[],
+  sends: TimelineSendInput[] = []
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   const childName = new Map(children.map((c) => [c.id, c.first_name]));
@@ -866,6 +955,22 @@ export function buildTimeline(
     });
   }
 
+  // Library sends (Unit 7) — logged only after Resend accepted (Decision
+  // 10), so every entry here is a real touch, never a phantom one.
+  for (const s of sends) {
+    entries.push({
+      id: `send-${s.id}`,
+      ts: s.sent_at,
+      type: "send",
+      label:
+        s.channel === "email"
+          ? `Library send · ${s.itemTitle}`
+          : `Sent elsewhere · ${s.itemTitle}`,
+      detail: s.subject ?? undefined,
+      dotColor: DOT.send,
+    });
+  }
+
   for (const h of history) {
     entries.push({ ...historyEntry(h), ts: h.created_at });
   }
@@ -874,4 +979,133 @@ export function buildTimeline(
     const diff = new Date(b.ts).getTime() - new Date(a.ts).getTime();
     return diff !== 0 ? diff : a.id.localeCompare(b.id);
   });
+}
+
+/* --------------------------------------------------------------- library */
+
+/** One library card, shaped for the grid + composer (plan Unit 7). */
+export interface LibraryItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  concern: string | null;
+  url: string | null;
+  helpfulness: number;
+  sendCount: number;
+}
+
+/**
+ * One row of the composer's family picker: name/email follow the Decision 4
+ * authority rule (parents row while linked), consent state drives the UI
+ * gate — the server action re-checks it regardless.
+ */
+export interface ComposerFamily {
+  id: string;
+  name: string;
+  email: string | null;
+  /** Raw consent fields — the composer runs the same `sendGate` the server
+   *  enforces, so UI verdicts can't drift from the law. */
+  consentGiven: boolean;
+  consentRevokedAt: string | null;
+  consentSource: string | null;
+  consentAt: string | null;
+}
+
+/**
+ * Library grid + composer data in one Promise.all (plan Unit 7). Items sort
+ * suggestion-style (helpfulness*2 + send_count desc) so the proven answers
+ * float; families sort by name for the picker.
+ */
+export async function fetchLibrary(): Promise<{
+  items: LibraryItem[];
+  families: ComposerFamily[];
+}> {
+  const db = supabaseAdmin();
+  const [itemsRes, familiesRes, parentsRes] = await Promise.all([
+    db
+      .from("library_items")
+      .select(
+        "id, type, title, body, concern, url, helpfulness_score, send_count"
+      ),
+    db
+      .from("families")
+      .select(
+        "id, parent_id, parent_name, email, consent_given, consent_revoked_at, consent_source, consent_at"
+      )
+      .is("merged_into_id", null),
+    db.from("parents").select("id, first_name, last_name, email"),
+  ]);
+
+  if (familiesRes.error || parentsRes.error) {
+    throw new Error(
+      `Library fetch failed: ${
+        (familiesRes.error ?? parentsRes.error)!.message
+      }`
+    );
+  }
+  // Items tolerate a pre-migration error (renders the not-seeded state).
+  const itemRows = itemsRes.error
+    ? []
+    : ((itemsRes.data ?? []) as unknown as LibraryItemRow[]);
+
+  const items: LibraryItem[] = itemRows
+    .map((i) => ({
+      id: i.id,
+      type: i.type,
+      title: i.title,
+      body: i.body,
+      concern: i.concern,
+      url: i.url,
+      helpfulness: i.helpfulness_score,
+      sendCount: i.send_count,
+    }))
+    .sort(
+      (a, b) =>
+        b.helpfulness * 2 + b.sendCount - (a.helpfulness * 2 + a.sendCount)
+    );
+
+  interface ComposerFamilyRow {
+    id: string;
+    parent_id: string | null;
+    parent_name: string;
+    email: string | null;
+    consent_given: boolean;
+    consent_revoked_at: string | null;
+    consent_source: string | null;
+    consent_at: string | null;
+  }
+
+  const parents = new Map(
+    (
+      (parentsRes.data ?? []) as {
+        id: string;
+        first_name: string;
+        last_name: string;
+        email: string;
+      }[]
+    ).map((p) => [p.id, p])
+  );
+
+  const families: ComposerFamily[] = (
+    (familiesRes.data ?? []) as unknown as ComposerFamilyRow[]
+  )
+    .map((f) => {
+      const parent = f.parent_id ? parents.get(f.parent_id) : undefined;
+      const name = parent
+        ? `${parent.first_name} ${parent.last_name}`.trim() || f.parent_name
+        : f.parent_name;
+      return {
+        id: f.id,
+        name: name || "Unnamed family",
+        email: parent ? parent.email : f.email,
+        consentGiven: f.consent_given,
+        consentRevokedAt: f.consent_revoked_at,
+        consentSource: f.consent_source,
+        consentAt: f.consent_at,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { items, families };
 }

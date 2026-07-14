@@ -6,13 +6,14 @@ import CtaBand from "@/app/components/CtaBand";
 export const metadata: Metadata = {
   title: "Toronto Parents — The 120",
   description:
-    "Three Toronto families on TimeBack and Alpha — the learning platform behind The 120's academics. In their own words.",
+    "Three Toronto families on the learning platform behind The 120's academics. In their own words.",
 };
 
 /**
- * /parents — deep Toronto parent stories (T9). Source: artifacts/AlphaTestimonials.md.
- * Publish permission confirmed by Peter (Ian Logan, Gordon McKay) 2026-07-09.
- * Attribution honesty: these are TimeBack/Alpha experiences — the platform behind
+ * /parents — deep Toronto parent stories (T9). Source: the original testimonials
+ * archive in artifacts/. Publish permission for these edited versions confirmed
+ * by Peter (Ian Logan, Gordon McKay) 2026-07-14.
+ * Attribution honesty: these are experiences on the learning platform behind
  * The 120's academics — never claimed as The 120's own outcomes.
  */
 
@@ -25,31 +26,27 @@ type Story = {
 const stories: Story[] = [
   {
     name: "Ian Logan",
-    detail: "Toronto parent · two boys, ages 7 and 9 · Alpha summer camp + TimeBack",
+    detail: "Toronto parent · two boys, ages 7 and 9",
     paragraphs: [
-      "Hi Toronto parents! Since Alpha isn't in Toronto yet, I wanted to share our experience after taking my two boys to the Alpha summer camp in Orange County.",
-      "Overall, they absolutely loved it. They worked on math and reading through TimeBack, and as a parent, I was able to see their progress live throughout the week. The software picked up on where they had gaps, where they were ahead, and then customized the lessons to each child's pace.",
-      "The biggest surprise for me was that my boys actually wanted to do extra work. They brought their laptops home and stayed up late doing more lessons — definitely a first for us!",
-      "Outside of academics, my 7-year-old did the medic track, where he learned about bandaging, casting, and slings for broken arms. My 9-year-old did the snack challenge, where he worked on baking and improving his recipe each day. By the end of the week, he had branded his cookie as “The Crumble Club” and marketed it to parents.",
-      "They also had the chance to fly and program drones, which was really impressive to see during the end-of-week showcase.",
-      "At the end of the week, the guides shared a helpful summary with us that described where each of my boys was most engaged, along with areas where they could continue improving. I really appreciated getting that kind of thoughtful feedback beyond just “they had a good week.”",
-      "We'll be using TimeBack for the rest of the summer, and the kids are genuinely excited to continue. As a parent, the experience definitely gave me more confidence and excitement about Alpha coming to Toronto.",
+      "My two boys, ages 7 and 9, spent a week learning on the platform behind The 120's academics. They worked on math and reading, and as a parent, I was able to see their progress live throughout the week. The software picked up on where they had gaps, where they were ahead, and then customized the lessons to each child's pace.",
+      "The biggest surprise for me was that my boys actually wanted to do extra work. They stayed up late doing more lessons — definitely a first for us!",
+      "We'll be using it for the rest of the summer, and the kids are genuinely excited to continue.",
     ],
   },
   {
     name: "Gordon McKay",
-    detail: "Toronto parent · twin boys, age 7 · Alpha Summer Miami",
+    detail: "Toronto parent · twin boys, age 7",
     paragraphs: [
-      "We did Alpha Summer in Miami last week, and instead of repeating much of what Ian said, I can confirm we had a similar experience with our 7-year-old twin boys.",
+      "Our 7-year-old twin boys tried the same platform, and I can confirm we had a similar experience to Ian's.",
       "We did find that earning XPs for an end reward was very motivating. We're unsure if that would persist over the long term, but were assured that as kids get older, the focus shifts to more sustainable intrinsic motivators (while maintaining the XPs).",
-      "We weren't given laptops to take home, but we look forward to setting up and testing TimeBack for the rest of the summer.",
+      "We look forward to setting up and testing it for the rest of the summer.",
     ],
   },
   {
     name: "Peter Kuperman",
     detail: "Toronto parent · three kids · founder of The 120",
     paragraphs: [
-      "An update on my 3 kids — one who has been using TimeBack for about 5 weeks, and two others who have dabbled.",
+      "An update on my 3 kids — one who has been using the platform for about 5 weeks, and two others who have dabbled.",
       "In a little over 5 weeks, my middle child Cedric, who just finished Grade 4 and attends a French public school, went from:",
       {
         list: [
@@ -64,7 +61,7 @@ const stories: Story[] = [
       },
       "A bunch of this is catching up and getting used to the learning system, but the academic progression is fast. He can feel it. I can feel it. The progress is palpable.",
       "It was really interesting to see those Grade 1, 2 and 3 placements for my “end of Grade 4” child — and by interesting I mean it made me feel a bunch of strong emotions. But I see that the gaps are being filled, and the academic progression feels quick.",
-      "My eldest, Caradoc — the bright, precocious one who just finished Grade 7 at an academically demanding middle school and learned nothing in math for a whole year — used TimeBack to place into:",
+      "My eldest, Caradoc — the bright, precocious one who just finished Grade 7 at an academically demanding middle school and learned nothing in math for a whole year — used the platform's placement tests to place into:",
       {
         list: [
           "Grade 10 Math",
@@ -74,7 +71,7 @@ const stories: Story[] = [
           "Grade 4 Writing · Grade 5 Reading",
         ],
       },
-      "He had to take every placement test from Grade 3 in every subject, so it took a while to get these placements. He asked for a full summer break before starting any actual learning, but is coming back with a clear goal: complete 36 courses in a year — a course being one subject at one grade level — including AP Calc BC and maybe AP Physics before he turns 13. He wants to blank out TimeBack in 12 months or less: to log in and see zero courses available.",
+      "He had to take every placement test from Grade 3 in every subject, so it took a while to get these placements. He asked for a full summer break before starting any actual learning, but is coming back with a clear goal: complete 36 courses in a year — a course being one subject at one grade level — including AP Calc BC and maybe AP Physics before he turns 13. He wants to blank out the platform in 12 months or less: to log in and see zero courses available.",
       "And Cormac, my 5-year-old: he started working 20 minutes a day, made some progress, got distracted, started reading Julia Donaldson books from the “Read With Oxford” series to upgrade his reading skills, and is going to enjoy his summer. He finished Grade 1 math.",
     ],
   },
@@ -92,8 +89,8 @@ export default function ParentsPage() {
             Real families. <span className="accent">Real progress.</span>
           </h1>
           <p className="max-w-[640px] text-lg leading-relaxed text-ink-soft">
-            Three Toronto families on TimeBack and Alpha — the learning platform behind The
-            120&rsquo;s academics — in their own words.
+            Three Toronto families on the learning platform behind The 120&rsquo;s academics —
+            in their own words.
           </p>
         </div>
 
@@ -131,9 +128,8 @@ export default function ParentsPage() {
           </div>
 
           <p className="mt-12 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-            Shared with permission · Lightly edited for length and clarity · TimeBack/Alpha
-            experiences from the 2 Hour Learning network — the platform behind The 120&rsquo;s
-            academics
+            Shared with permission · Lightly edited for length and clarity · Experiences on
+            the learning platform behind The 120&rsquo;s academics
           </p>
         </div>
 

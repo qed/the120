@@ -252,7 +252,7 @@ export default function DashboardApp({
           </Link>
 
           <p className="mt-10 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-            Saved to your account as you type. PIPEDA: children&rsquo;s info is collected only for
+            Saved as you go — every Next click saves your progress. PIPEDA: children&rsquo;s info is collected only for
             admissions and stays access-controlled.
           </p>
         </main>

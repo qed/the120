@@ -74,9 +74,16 @@ export function reviewPillColors(status: ReviewStatus): {
 /**
  * The dossier fields completeness counts — a 1:1 mirror of the parent
  * dashboard's checklist (`app/dashboard/data.ts` `checklist()`), so both
- * sides of the product report the same number: name (first+last), grade,
- * birth year (4 digits), current school, ≥1 subject, ≥1 workshop,
- * interests (≥3 chars), project pitch (≥10 chars). 8 items, equal weight.
+ * sides of the product report the same number. Group-aware (R14): name
+ * (first+last), grade, birth year (4 digits), current school, a group,
+ * academics (an entry with subject+plan, or legacy ≥1 subject), a workshop
+ * (Scholars only), interests (≥3 chars), project pitch (≥10 chars) —
+ * 8 items (9 for Scholars), equal weight.
+ *
+ * LOCKSTEP MIRRORS (R14): this definition is duplicated in
+ * `app/dashboard/data.ts` (checklist — parent meter) and
+ * `app/lib/nurture/rules.ts` (dossierCompleteness — stall nudge). Change
+ * all three together or the parent meter, nudge, and queue % disagree.
  */
 export interface DossierFields {
   firstName: string;
@@ -84,25 +91,64 @@ export interface DossierFields {
   grade: number | null;
   birthYear: string;
   currentSchool: string;
+  /** The parent's group pick; "" (or a missing column) = not chosen yet. */
+  groupSlug: string;
+  /** jsonb array of {subject, plan, goal} — tolerant-parsed, never trusted. */
+  academics: unknown;
   subjects: string[];
   workshopIds: string[];
   interests: string;
   projectPitch: string;
 }
 
+/** One structured academics entry, post tolerant parse. */
+export interface DossierAcademic {
+  subject: string;
+  plan: string;
+  goal: string;
+}
+
+/** Tolerant jsonb parse — non-arrays and junk entries render as empty. */
+export function asAcademics(value: unknown): DossierAcademic[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((a): a is Record<string, unknown> => typeof a === "object" && a !== null)
+    .map((a) => ({
+      subject: typeof a.subject === "string" ? a.subject : "",
+      plan: typeof a.plan === "string" ? a.plan : "",
+      goal: typeof a.goal === "string" ? a.goal : "",
+    }));
+}
+
+/** An academics entry counts toward completeness when subject AND plan are set. */
+const academicEntryComplete = (a: DossierAcademic): boolean =>
+  a.subject.trim() !== "" && a.plan.trim() !== "";
+
 export function dossierChecklist(
   f: DossierFields
 ): { label: string; done: boolean }[] {
-  return [
+  const groupSlug = f.groupSlug ?? "";
+  const items = [
     { label: "Name", done: !!f.firstName.trim() && !!f.lastName.trim() },
     { label: "Grade", done: f.grade !== null },
     { label: "Birth year", done: /^\d{4}$/.test(f.birthYear.trim()) },
     { label: "Current school", done: !!f.currentSchool.trim() },
-    { label: "1–2 subjects to accelerate", done: f.subjects.length >= 1 },
-    { label: "A workshop of interest", done: f.workshopIds.length >= 1 },
-    { label: "The kid's interests", done: f.interests.trim().length >= 3 },
-    { label: "A project pitch", done: f.projectPitch.trim().length >= 10 },
+    { label: "A group", done: groupSlug !== "" },
+    {
+      label: "Academics (a subject + plan)",
+      done:
+        asAcademics(f.academics).some(academicEntryComplete) ||
+        f.subjects.length >= 1,
+    },
   ];
+  if (groupSlug === "scholars") {
+    items.push({ label: "A workshop of interest", done: f.workshopIds.length >= 1 });
+  }
+  items.push(
+    { label: "The kid's interests", done: f.interests.trim().length >= 3 },
+    { label: "A project pitch", done: f.projectPitch.trim().length >= 10 }
+  );
+  return items;
 }
 
 /** 0–100, rounded — same math as the parent dashboard's meter. */

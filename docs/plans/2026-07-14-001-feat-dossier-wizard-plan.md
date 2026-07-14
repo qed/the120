@@ -1,7 +1,7 @@
 ---
 title: "feat: Dossier wizard — stepped, group-aware application flow"
 type: feat
-status: active
+status: completed
 date: 2026-07-14
 origin: docs/brainstorms/2026-07-13-dossier-wizard-requirements.md
 ---
@@ -108,7 +108,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 ## Implementation Units
 
-- [ ] **Unit 1: Schema + triggers migration (production-applied)**
+- [x] **Unit 1: Schema + triggers migration (production-applied)**
 
 **Goal:** Additive children columns and the two DB-side rules: group seeding at submission, group lock at deposit.
 
@@ -141,7 +141,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** All SEL./checks above pass against production; old deployed app (pre-wizard) still saves dossiers unaffected.
 
-- [ ] **Unit 2: Data model, checklist, catalog structure, store save path**
+- [x] **Unit 2: Data model, checklist, catalog structure, store save path**
 
 **Goal:** The Child model gains groupSlug + academics; the parent checklist becomes group-aware; the catalog becomes filterable; the store gains an awaited explicit save.
 
@@ -169,7 +169,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** Suite green; a hand-built Child object round-trips through childToRow/rowToChild preserving group + academics.
 
-- [ ] **Unit 3: Wizard shell**
+- [x] **Unit 3: Wizard shell**
 
 **Goal:** The stepped frame: progress rail, Next/Back with save states, resume, locked post-submit behavior, Review step.
 
@@ -197,7 +197,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** A draft can be driven end-to-end through the wizard in the browser; killing the tab mid-flow and reopening resumes at the right step with data intact.
 
-- [ ] **Unit 4: Group step**
+- [x] **Unit 4: Group step**
 
 **Goal:** The binding group pick with honest affordances.
 
@@ -222,7 +222,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** All five groups selectable with keyboard alone; the binding + editable-until-deposit semantics render correctly pre/post-submit.
 
-- [ ] **Unit 5: Academics step**
+- [x] **Unit 5: Academics step**
 
 **Goal:** The renamed, restructured Academics capture.
 
@@ -248,7 +248,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** Entries persist through Next and round-trip on reload; CRM sees them after Unit 7.
 
-- [ ] **Unit 6: Workshops explore (Scholars) + Project & Interests**
+- [x] **Unit 6: Workshops explore (Scholars) + Project & Interests**
 
 **Goal:** The GT-style explore rebuild and the group-aware project step.
 
@@ -273,7 +273,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 **Verification:** Scholars flow shows the explore grid with working filters and audition badges; a Makers kid goes Academics → Project directly with Makers examples.
 
-- [ ] **Unit 7: Consumers cutover — preview, nurture mirror, CRM (one deploy with Units 2–6)**
+- [x] **Unit 7: Consumers cutover — preview, nurture mirror, CRM (one deploy with Units 2–6)**
 
 **Goal:** Every reader of the legacy subjects list reads Academics; the three checklists agree; staff see group + plan + goal; the obsolete Scholars cap warning goes.
 

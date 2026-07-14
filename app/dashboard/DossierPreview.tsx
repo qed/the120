@@ -1,6 +1,14 @@
 "use client";
 
-import { childName, statusMeta, workshopById, type Child } from "./data";
+import { groupBySlug } from "@/app/lib/site";
+import {
+  academicComplete,
+  childName,
+  planLabel,
+  statusMeta,
+  workshopById,
+  type Child,
+} from "./data";
 
 export default function DossierPreview({
   child,
@@ -10,6 +18,12 @@ export default function DossierPreview({
   onBack: () => void;
 }) {
   const grade = child.grade === "" ? "—" : `Grade ${child.grade}`;
+  const group = groupBySlug(child.groupSlug);
+  // Cutover (R15): academics entries with any content render; the legacy
+  // subject pills only show for pre-cutover rows with no academics at all.
+  const academics = child.academics.filter(
+    (a) => academicComplete(a) || a.subject.trim() !== ""
+  );
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
       {/* controls — hidden when printing */}
@@ -51,12 +65,32 @@ export default function DossierPreview({
               {child.birthYear ? ` · b. ${child.birthYear}` : ""}
               {child.currentSchool ? ` · ${child.currentSchool}` : ""}
             </p>
+            {group && (
+              <p className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-blue">
+                {group.name}
+              </p>
+            )}
           </div>
         </header>
 
         <div className="grid gap-8 p-8 sm:grid-cols-2">
-          <Block title="Subjects to accelerate">
-            {child.subjects.length ? (
+          <Block title="Academics">
+            {academics.length ? (
+              <ul className="space-y-2">
+                {academics.map((a, i) => (
+                  <li key={i}>
+                    <p className="text-sm font-medium text-ink">
+                      {a.subject.trim()}
+                      {planLabel(a.plan) ? ` — ${planLabel(a.plan)}` : ""}
+                    </p>
+                    {a.goal.trim() && (
+                      <p className="mt-0.5 text-sm leading-6 text-ink-soft">{a.goal}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : child.subjects.length ? (
+              // Legacy pre-cutover rows: the old subject pills.
               <div className="flex flex-wrap gap-2">
                 {child.subjects.map((s) => (
                   <span
@@ -72,23 +106,24 @@ export default function DossierPreview({
             )}
           </Block>
 
-          <Block title="Workshop interests">
-            {child.workshopIds.length ? (
+          {child.workshopIds.length > 0 && (
+            <Block title="Workshop interests">
               <ul className="space-y-1 text-sm text-ink-soft">
                 {child.workshopIds.map((id) => (
                   <li key={id}>{workshopById(id)?.title ?? id}</li>
                 ))}
               </ul>
-            ) : (
-              <Empty />
-            )}
-          </Block>
+            </Block>
+          )}
 
           <Block title="Interests" full>
             {child.interests ? <p className="text-sm leading-6 text-ink-soft">{child.interests}</p> : <Empty />}
           </Block>
 
-          <Block title="Year-long project idea" full>
+          <Block
+            title={child.groupSlug === "scholars" ? "Year-long project idea" : "Project idea"}
+            full
+          >
             {child.projectPitch ? (
               <p className="text-sm leading-6 text-ink-soft">{child.projectPitch}</p>
             ) : (
@@ -110,7 +145,7 @@ export default function DossierPreview({
         </div>
 
         <footer className="flex items-center justify-between border-t border-line px-8 py-5 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-          <span>The 120 · GT Toronto — dossier</span>
+          <span>{group ? `The 120 · ${group.name} — dossier` : "The 120 — dossier"}</span>
           <span className="text-red">{statusMeta(child.status).label}</span>
         </footer>
       </article>

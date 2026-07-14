@@ -25,7 +25,63 @@ export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id 
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-export const SUBJECTS = ["Math", "Reading", "Writing", "Science", "History"] as const;
+
+/**
+ * Structured academics entry (replaces the legacy `subjects` list — R7–R9b).
+ * `subject` is free text: the 7 standard subjects come from ACADEMIC_SUBJECTS
+ * but an "Other" custom subject is allowed (R9b).
+ */
+export type Academic = {
+  subject: string;
+  plan: "catch-up" | "reach-ahead" | "get-solid" | "";
+  goal: string;
+};
+
+export const ACADEMIC_SUBJECTS = [
+  "Fast Math",
+  "Math",
+  "Science",
+  "Reading",
+  "Writing",
+  "Language",
+  "Vocabulary",
+] as const;
+
+export const ACADEMIC_PLANS: { id: Exclude<Academic["plan"], "">; label: string; blurb: string }[] = [
+  { id: "catch-up", label: "Catch-Up", blurb: "Close the gaps and get back to grade level." },
+  { id: "reach-ahead", label: "Reach Ahead", blurb: "Accelerate past grade level — mastery with no ceiling." },
+  { id: "get-solid", label: "Get Solid", blurb: "Lock in the fundamentals until they're automatic." },
+];
+
+/** Display label for a plan id — "" for unknown/unset (shared by the parent
+ *  preview and the CRM dossier pane so they can never drift). */
+export function planLabel(plan: string): string {
+  return ACADEMIC_PLANS.find((p) => p.id === plan)?.label ?? "";
+}
+
+/**
+ * Tolerant per-element parse of the `academics` jsonb column: non-objects are
+ * dropped, subject/goal coerce to strings, plan coerces to one of the three
+ * plan ids or "". DB rows are never trusted to match `Academic[]`.
+ */
+export function parseAcademics(value: unknown): Academic[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((a): a is Record<string, unknown> => typeof a === "object" && a !== null)
+    .map((a) => ({
+      subject: typeof a.subject === "string" ? a.subject : "",
+      plan: ACADEMIC_PLANS.some((p) => p.id === a.plan)
+        ? (a.plan as Academic["plan"])
+        : "",
+      goal: typeof a.goal === "string" ? a.goal : "",
+    }));
+}
+
+/** An academics entry counts toward completeness only when subject AND plan
+ *  are set. Structurally typed so the CRM's tolerant-parsed entries (plan as
+ *  plain string) can share the exact same predicate. */
+export const academicComplete = (a: { subject: string; plan: string }) =>
+  a.subject.trim() !== "" && a.plan !== "";
 
 export type Workshop = {
   id: string;
@@ -494,6 +550,29 @@ export const WORKSHOPS: Workshop[] = [
 
 export const workshopById = (id: string) => WORKSHOPS.find((w) => w.id === id);
 
+/**
+ * Parse a catalog `grades` display string ("K–2", "3–5", "K–8+") into a
+ * numeric range for the wizard's grade filter. K = 0; a trailing "+" means
+ * "and up" (max 12). Derived from the display string at module load rather
+ * than hand-annotated per entry, so the two can never drift. The catalog
+ * uses an en-dash (–); a plain hyphen is tolerated too.
+ */
+export function parseGradeRange(grades: string): { gradeMin: number; gradeMax: number } {
+  const parts = grades.split(/[–-]/);
+  const num = (s: string) => (s.trim().toUpperCase().startsWith("K") ? 0 : parseInt(s, 10));
+  const last = parts[parts.length - 1].trim();
+  return {
+    gradeMin: num(parts[0]),
+    gradeMax: last.endsWith("+") ? 12 : num(last),
+  };
+}
+
+/** Precomputed once at module load — one parse per catalog entry. */
+const GRADE_RANGES = new Map(WORKSHOPS.map((w) => [w.id, parseGradeRange(w.grades)]));
+
+export const workshopGradeRange = (w: Workshop) =>
+  GRADE_RANGES.get(w.id) ?? parseGradeRange(w.grades);
+
 export type Child = {
   id: string;
   // Basics
@@ -503,7 +582,11 @@ export type Child = {
   birthYear: string;
   currentSchool: string;
   photo?: string; // data URL (V1); real uploads → Supabase storage (V2)
-  // Academic picks (1–2 subjects) + optional shared scores
+  // Group pick ("" until chosen; athletes/founders/makers/scholars/givers)
+  groupSlug: string;
+  // Structured academics (max 2 entries); replaces `subjects`
+  academics: Academic[];
+  // Legacy subject picks — read-only fallback, no longer written (cutover)
   subjects: string[];
   testScores: string;
   // Workshop selections
@@ -536,6 +619,8 @@ export function emptyChild(id: string): Child {
     grade: "",
     birthYear: "",
     currentSchool: "",
+    groupSlug: "",
+    academics: [],
     subjects: [],
     testScores: "",
     workshopIds: [],
@@ -546,18 +631,37 @@ export function emptyChild(id: string): Child {
   };
 }
 
-/** Dossier checklist drives the per-child completeness meter (§13.3.2). */
+/**
+ * Dossier checklist drives the per-child completeness meter (§13.3.2).
+ * Group-aware (R14): 8 items for everyone, plus a Scholars-only workshops
+ * item (9 total). The academics item keeps a legacy fallback on `subjects`
+ * so pre-cutover drafts don't lose credit.
+ *
+ * LOCKSTEP MIRRORS (R14): this definition is duplicated in
+ * `app/lib/nurture/rules.ts` (dossierCompleteness — stall nudge) and
+ * `app/crm/lib/reviews-rules.ts` (dossierChecklist — CRM queue). Change
+ * all three together or the parent meter, nudge, and queue % disagree.
+ */
 export function checklist(c: Child): { label: string; done: boolean }[] {
-  return [
+  const items = [
     { label: "Name", done: !!c.firstName.trim() && !!c.lastName.trim() },
     { label: "Grade", done: c.grade !== "" },
     { label: "Birth year", done: /^\d{4}$/.test(c.birthYear.trim()) },
     { label: "Current school", done: !!c.currentSchool.trim() },
-    { label: "1–2 subjects to accelerate", done: c.subjects.length >= 1 },
-    { label: "A workshop of interest", done: c.workshopIds.length >= 1 },
-    { label: "The kid's interests", done: c.interests.trim().length >= 3 },
-    { label: "A project pitch", done: c.projectPitch.trim().length >= 10 },
+    { label: "A group", done: c.groupSlug !== "" },
+    {
+      label: "Academics (a subject + plan)",
+      done: c.academics.some(academicComplete) || c.subjects.length >= 1,
+    },
   ];
+  if (c.groupSlug === "scholars") {
+    items.push({ label: "A workshop of interest", done: c.workshopIds.length >= 1 });
+  }
+  items.push(
+    { label: "The kid's interests", done: c.interests.trim().length >= 3 },
+    { label: "A project pitch", done: c.projectPitch.trim().length >= 10 }
+  );
+  return items;
 }
 
 export function completeness(c: Child): number {

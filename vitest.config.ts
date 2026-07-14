@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "app/crm/__tests__/**/*.test.{ts,tsx}",
+      "app/dashboard/__tests__/**/*.test.{ts,tsx}",
       "app/lib/**/__tests__/**/*.test.{ts,tsx}",
     ],
   },

@@ -3,7 +3,7 @@
 /**
  * Dossier detail — right pane (plan Unit 5; brief §6 / Admin.dc.html):
  * red mono CANDIDATE DOSSIER kicker, Georgia name, meta + completeness %,
- * payment strip, two bone info cards (SUBJECTS / PARENT), the blue PROJECT
+ * payment strip, two bone info cards (ACADEMICS / PARENT), the blue PROJECT
  * PITCH card (Georgia italic on #F7F6F3), INTERESTS & EVIDENCE, GROUP
  * ASSIGNMENT chips, MOVE CANDIDATE stage chips, TEAM NOTES textarea.
  *
@@ -17,9 +17,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  GROUP_LABELS,
+  GROUPS,
   REVIEW_STATUS_LABELS,
+  type Group,
   type ReviewStatus,
 } from "@/app/crm/lib/constants";
+import { academicComplete, planLabel } from "@/app/dashboard/data";
 import type { DossierItem } from "@/app/crm/lib/queries";
 import { moveCandidate, saveReviewNotes } from "@/app/crm/lib/actions/reviews";
 import { fmtDay } from "@/app/crm/lib/dates";
@@ -42,6 +46,12 @@ const KICKER_RED =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-red";
 const KICKER_FAINT =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-faint";
+
+/** "The Makers" for a valid parent pick; "" for unset/garbage slugs. */
+const parentPickLabel = (slug: string) =>
+  (GROUPS as readonly string[]).includes(slug)
+    ? `The ${GROUP_LABELS[slug as Group]}`
+    : "";
 
 function InfoCard({ kicker, children }: { kicker: string; children: React.ReactNode }) {
   return (
@@ -97,6 +107,12 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
     }
   };
 
+  // Same predicate as the parent DossierPreview: entries with any subject
+  // content render; a stray blank entry never renders as a bare "—" line.
+  const academics = item.academics.filter(
+    (a) => academicComplete(a) || a.subject.trim() !== ""
+  );
+
   const meta = [
     item.grade != null ? `Grade ${item.grade}` : null,
     item.school || null,
@@ -140,8 +156,25 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
 
       {/* info cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <InfoCard kicker="Subjects">
-          {item.subjects.length > 0 ? item.subjects.join(", ") : "—"}
+        <InfoCard kicker="Academics">
+          {academics.length > 0 ? (
+            academics.map((a, i) => (
+              <span key={i} className="block">
+                {a.subject || "—"}
+                {planLabel(a.plan) ? ` — ${planLabel(a.plan)}` : ""}
+                {a.goal ? (
+                  <span className="block text-[12.5px] text-crm-muted">
+                    {a.goal}
+                  </span>
+                ) : null}
+              </span>
+            ))
+          ) : item.subjects.length > 0 ? (
+            // Legacy pre-cutover rows: the old joined subjects list.
+            item.subjects.join(", ")
+          ) : (
+            "—"
+          )}
         </InfoCard>
         <InfoCard kicker="Parent">
           {item.parentName}
@@ -190,6 +223,11 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
       {/* group assignment (brief §6 addition) */}
       <div className="no-print flex flex-col gap-2.5 rounded-[12px] border border-crm-line bg-crm-card px-[18px] py-4">
         <span className={KICKER_RED}>Group assignment</span>
+        {parentPickLabel(item.parentGroupSlug) && (
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted">
+            Parent picked: {parentPickLabel(item.parentGroupSlug)}
+          </span>
+        )}
         <GroupChips childId={item.childId} group={item.group} />
       </div>
 

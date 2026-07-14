@@ -564,11 +564,7 @@ export interface SeatsByGroupResult {
   rows: SeatsGroupRow[];
   /** Committed children with no group assignment yet. */
   unassignedCommitted: number;
-  /** GTM Open Q2: Scholars likely caps first at ~24. */
-  scholarsWarning: boolean;
 }
-
-export const SCHOLARS_CAP = 24;
 
 export function computeSeatsByGroup(
   reviews: {
@@ -608,11 +604,8 @@ export function computeSeatsByGroup(
     assigned: assigned.get(g) ?? 0,
   }));
 
-  return {
-    rows,
-    unassignedCommitted,
-    scholarsWarning: (assigned.get("scholars") ?? 0) > SCHOLARS_CAP,
-  };
+  // No per-group caps (decision 2026-07-13) — groups fill without warnings.
+  return { rows, unassignedCommitted };
 }
 
 /* --------------------------------------------------------- week activity */

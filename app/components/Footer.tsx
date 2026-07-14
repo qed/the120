@@ -38,8 +38,8 @@ export default function Footer() {
         </div>
         <div className="border-t border-white/25 pt-5">
           <span className="text-xs leading-relaxed text-white/70">
-            © 2026 The 120 · A learning centre, part of the 2 Hour Learning Network. Not an
-            accredited school. TIN CAN is a trademark of Tin Can Untechnologies, Inc.
+            © 2026 The 120 · A learning centre. Not an accredited school. TIN CAN is a
+            trademark of Tin Can Untechnologies, Inc.
           </span>
         </div>
       </div>

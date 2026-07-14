@@ -16,7 +16,7 @@ const excerpts = [
     quote:
       "In a little over 5 weeks, my middle child went from Grade 3 to Grade 5 in Math. He can feel it. I can feel it. The progress is palpable.",
     name: "Peter Kuperman",
-    detail: "Toronto parent · three kids",
+    detail: "Toronto parent · three kids · founder of The 120",
   },
   {
     quote:
@@ -65,7 +65,7 @@ export default function ParentStoriesBand() {
         </div>
 
         <p className="mt-8 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-          TimeBack/Alpha experiences — the platform behind The 120&rsquo;s academics
+          Experiences on the learning platform behind The 120&rsquo;s academics
         </p>
       </div>
     </section>

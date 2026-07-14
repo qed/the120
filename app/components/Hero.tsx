@@ -40,7 +40,7 @@ export default function Hero() {
             engaged kids, ages 8&ndash;17, building interesting lives together.
           </span>
           <span className="whitespace-nowrap font-mono text-[11px] tracking-[0.08em] text-white/85">
-            PART OF THE 2 HOUR LEARNING NETWORK
+            FOUNDING COHORT · FALL 2026 · TORONTO
           </span>
         </div>
       </div>

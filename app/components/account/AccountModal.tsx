@@ -351,7 +351,7 @@ export default function AccountModal({
                     </Field>
                   </div>
 
-                  {/* CASL express opt-in (brief §13.2, §14.7) — Canadian, not GT's US SMS text */}
+                  {/* CASL express opt-in (brief §13.2, §14.7) — Canadian consent language, not a US-style SMS opt-in */}
                   <label
                     className={`flex cursor-pointer gap-3 rounded-xl border p-3.5 text-xs leading-5 transition-colors ${
                       errors.caslConsent ? "border-red bg-red/5" : "border-line bg-white"
@@ -364,7 +364,7 @@ export default function AccountModal({
                       onChange={(e) => set("caslConsent", e.target.checked)}
                     />
                     <span className="text-ink-soft">
-                      Yes — The 120 (GT Toronto) may email and text me about my application, seat
+                      Yes — The 120 may email and text me about my application, seat
                       status, events, and enrolment. I can withdraw consent anytime via the
                       unsubscribe link or by emailing{" "}
                       <span className="text-ink">admissions@the120.school</span>.

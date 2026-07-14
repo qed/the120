@@ -32,7 +32,7 @@ export const nav = [
   { label: "FAQ", href: "/faq" },
 ] as const;
 
-/** The five groups (handoff Home + group pages). Scholars route to the GT sub-site. */
+/** The five groups (handoff Home + group pages). Scholars route to their own program page. */
 export type Group = {
   slug: string;
   name: string;
@@ -85,8 +85,8 @@ export const groups: Group[] = [
     accent: "Scholars",
     category: "GIFTED & TALENTED",
     kicker: "GROUP 04 · GIFTED & TALENTED · ENROLLING NOW",
-    blurb: "Accelerated academics with GT. Mastery with no ceiling.",
-    body: "For gifted kids who love to learn. Accelerated academics on the GT platform with mastery and no ceiling, run as GT Toronto.",
+    blurb: "Accelerated academics. Mastery with no ceiling.",
+    body: "For gifted kids who love to learn. Accelerated, mastery-based academics with no ceiling.",
     href: "/scholars",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
   },

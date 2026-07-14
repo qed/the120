@@ -26,7 +26,7 @@ export default function HowItWorks() {
           <h2 className="display text-3xl sm:text-[40px] sm:leading-[1.12]">Joining the 120</h2>
           <p className="text-[15px] leading-[1.65] text-ink-soft">
             Book a call and join the group. That&rsquo;s the heart of it. Each group qualifies
-            its members its own way; the Scholars&rsquo; assessment is run by GT.
+            its members its own way.
           </p>
         </div>
         <div className="flex flex-col">

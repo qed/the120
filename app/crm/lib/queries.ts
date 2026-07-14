@@ -674,7 +674,6 @@ export interface DossierItem {
   parentGroupSlug: string;
   /** Resolved from the workshop catalog: "Title — Advisor". */
   workshops: string[];
-  testScores: string;
   interests: string;
   projectPitch: string;
   portfolioLinks: string;
@@ -707,7 +706,7 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
         .from("children")
         .select(
           "id, parent_id, first_name, last_name, grade, birth_year, " +
-            "current_school, group_slug, academics, subjects, test_scores, " +
+            "current_school, group_slug, academics, subjects, " +
             "workshop_ids, interests, project_pitch, portfolio_links, " +
             "status, submitted_at, created_at"
         ),
@@ -740,7 +739,6 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
     group_slug: string;
     academics: unknown;
     subjects: unknown;
-    test_scores: string;
     workshop_ids: unknown;
     interests: string;
     project_pitch: string;
@@ -796,7 +794,6 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
           const w = workshopById(id);
           return w ? `${w.title} — ${w.advisor}` : id;
         }),
-        testScores: c.test_scores,
         interests: c.interests,
         projectPitch: c.project_pitch,
         portfolioLinks: c.portfolio_links,

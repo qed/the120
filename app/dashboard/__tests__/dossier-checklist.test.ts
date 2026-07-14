@@ -117,7 +117,6 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     group_slug: "scholars",
     academics: [{ subject: "Math", plan: "reach-ahead", goal: "Finish grade 7 math" }],
     subjects: ["Math"],
-    test_scores: "",
     workshop_ids: ["competitive-chess"],
     interests: "robots",
     project_pitch: "Build a difference engine.",

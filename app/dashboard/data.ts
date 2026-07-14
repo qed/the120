@@ -604,7 +604,6 @@ export type Child = {
   academics: Academic[];
   // Legacy subject picks — read-only fallback, no longer written (cutover)
   subjects: string[];
-  testScores: string;
   // Workshop selections
   workshopIds: string[];
   // Project pitch & interests
@@ -638,7 +637,6 @@ export function emptyChild(id: string): Child {
     groupSlug: "",
     academics: [],
     subjects: [],
-    testScores: "",
     workshopIds: [],
     interests: "",
     projectPitch: "",

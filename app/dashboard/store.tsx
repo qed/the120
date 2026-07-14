@@ -51,7 +51,6 @@ export type ChildRow = {
   group_slug: string;
   academics: unknown; // jsonb — tolerant-parsed to Academic[]
   subjects: string[];
-  test_scores: string;
   workshop_ids: string[];
   interests: string;
   project_pitch: string;
@@ -72,7 +71,6 @@ export function rowToChild(r: ChildRow): Child {
     groupSlug: r.group_slug ?? "",
     academics: parseAcademics(r.academics),
     subjects: r.subjects ?? [],
-    testScores: r.test_scores,
     workshopIds: r.workshop_ids ?? [],
     interests: r.interests,
     projectPitch: r.project_pitch,
@@ -100,8 +98,9 @@ export function childToRow(
     academics: c.academics,
     // `subjects` round-trips state truth so the Academics prefill can clear
     // legacy entries once and have the clear persist (new rows insert []).
+    // test_scores is retired (R3): never read or written — the column's
+    // stored values are purged post-deploy (see the purge migration).
     subjects: c.subjects,
-    test_scores: c.testScores,
     workshop_ids: c.workshopIds,
     interests: c.interests,
     project_pitch: c.projectPitch,

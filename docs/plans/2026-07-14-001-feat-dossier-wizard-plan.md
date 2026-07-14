@@ -108,7 +108,7 @@ Step count is group-dependent (6 for Scholars, 5 otherwise); the three checklist
 
 ## Implementation Units
 
-- [ ] **Unit 1: Schema + triggers migration (production-applied)**
+- [x] **Unit 1: Schema + triggers migration (production-applied)**
 
 **Goal:** Additive children columns and the two DB-side rules: group seeding at submission, group lock at deposit.
 

@@ -20,6 +20,12 @@ import {
   type DepositForStrip,
   type DossierFields,
 } from "@/app/crm/lib/reviews-rules";
+import {
+  checklist,
+  completeness,
+  emptyChild,
+  type Child,
+} from "@/app/dashboard/data";
 
 const UUID = "3f9f2a44-9a31-4e6c-8f01-2b1a5c7d9e00";
 
@@ -180,7 +186,9 @@ const fullDossier: DossierFields = {
   grade: 8,
   birthYear: "2013",
   currentSchool: "Homeschool",
-  subjects: ["Math", "Science"],
+  groupSlug: "scholars",
+  academics: [{ subject: "Math", plan: "reach-ahead", goal: "AMC 8 by spring." }],
+  subjects: [],
   workshopIds: ["botball-robotics"],
   interests: "Ham radio licence (basic), Arduino since age 9.",
   projectPitch: "Build and launch a high-altitude glider.",
@@ -192,6 +200,8 @@ const emptyDossier: DossierFields = {
   grade: null,
   birthYear: "",
   currentSchool: "",
+  groupSlug: "",
+  academics: [],
   subjects: [],
   workshopIds: [],
   interests: "",
@@ -199,8 +209,10 @@ const emptyDossier: DossierFields = {
 };
 
 describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
-  it("counts 8 checklist items", () => {
-    expect(dossierChecklist(fullDossier)).toHaveLength(8);
+  it("counts 9 checklist items for Scholars, 8 otherwise (R14)", () => {
+    expect(dossierChecklist(fullDossier)).toHaveLength(9);
+    expect(dossierChecklist({ ...fullDossier, groupSlug: "makers" })).toHaveLength(8);
+    expect(dossierChecklist(emptyDossier)).toHaveLength(8);
   });
 
   it("full dossier = 100", () => {
@@ -212,8 +224,8 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
   });
 
   it("half-done dossier rounds like the dashboard meter", () => {
-    // name + grade + school + subjects done; birth year, workshop,
-    // interests, pitch missing → 4/8 = 50.
+    // name + grade + school + academics (legacy subjects) done; birth year,
+    // group, interests, pitch missing → 4/8 = 50.
     const half: DossierFields = {
       ...emptyDossier,
       firstName: "Theo",
@@ -238,6 +250,88 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
     // "too short" is 9 chars — below the 10-char pitch threshold.
     expect(items.find((i) => i.label === "A project pitch")?.done).toBe(false);
   });
+
+  it("academics needs subject AND plan; legacy subjects satisfy via fallback", () => {
+    const academicsItem = (f: DossierFields) =>
+      dossierChecklist(f).find((i) => i.label === "Academics (a subject + plan)")!;
+    const planless = {
+      ...fullDossier,
+      academics: [{ subject: "Math", plan: "", goal: "" }],
+    };
+    expect(academicsItem(planless).done).toBe(false);
+    const legacy = { ...fullDossier, academics: [], subjects: ["Math"] };
+    expect(academicsItem(legacy).done).toBe(true);
+  });
+
+  it("tolerates junk academics jsonb (non-array → no credit, no crash)", () => {
+    expect(dossierCompleteness({ ...fullDossier, academics: "garbage" })).toBe(89);
+    expect(dossierCompleteness({ ...fullDossier, academics: null })).toBe(89);
+  });
+});
+
+/* -------------------------------------- parity with the parent dashboard */
+
+/**
+ * The three-mirror lockstep contract (R14): identical child data must
+ * produce identical item counts and done-counts in the parent dashboard's
+ * `checklist()` and the CRM's `dossierChecklist()`. Table-driven over the
+ * plan's parity-critical cases.
+ */
+describe("dossierChecklist ≡ dashboard checklist (R14 lockstep)", () => {
+  const parityChild = (overrides: Partial<Child> = {}): Child => ({
+    ...emptyChild("kid-parity"),
+    firstName: "Zoe",
+    lastName: "Tremblay",
+    grade: 8,
+    birthYear: "2013",
+    currentSchool: "Homeschool",
+    groupSlug: "makers",
+    academics: [{ subject: "Math", plan: "reach-ahead", goal: "AMC 8 by spring." }],
+    interests: "Ham radio licence (basic), Arduino since age 9.",
+    projectPitch: "Build and launch a high-altitude glider.",
+    ...overrides,
+  });
+
+  const toFields = (c: Child): DossierFields => ({
+    firstName: c.firstName,
+    lastName: c.lastName,
+    grade: c.grade === "" ? null : c.grade,
+    birthYear: c.birthYear,
+    currentSchool: c.currentSchool,
+    groupSlug: c.groupSlug,
+    academics: c.academics,
+    subjects: c.subjects,
+    workshopIds: c.workshopIds,
+    interests: c.interests,
+    projectPitch: c.projectPitch,
+  });
+
+  const cases: [name: string, child: Child][] = [
+    [
+      "complete Scholars",
+      parityChild({ groupSlug: "scholars", workshopIds: ["botball-robotics"] }),
+    ],
+    ["complete non-Scholars", parityChild()],
+    ["missing one (Scholars without a workshop)", parityChild({ groupSlug: "scholars" })],
+    [
+      "missing two (Scholars without workshop or pitch)",
+      parityChild({ groupSlug: "scholars", projectPitch: "" }),
+    ],
+    ["legacy subjects-only", parityChild({ academics: [], subjects: ["Math"] })],
+    ["empty child", emptyChild("kid-empty")],
+  ];
+
+  for (const [name, c] of cases) {
+    it(`agrees item-for-item: ${name}`, () => {
+      const parent = checklist(c);
+      const crm = dossierChecklist(toFields(c));
+      expect(crm.map((i) => i.label)).toEqual(parent.map((i) => i.label));
+      expect(crm.filter((i) => i.done).length).toBe(
+        parent.filter((i) => i.done).length
+      );
+      expect(dossierCompleteness(toFields(c))).toBe(completeness(c));
+    });
+  }
 });
 
 /* ---------------------------------------------------------- payment strip */

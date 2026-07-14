@@ -24,9 +24,11 @@ import {
 } from "./constants";
 import { sentConcernsFrom } from "./library-rules";
 import {
+  asAcademics,
   dossierCompleteness,
   effectiveReviewStatus,
   type DepositForStrip,
+  type DossierAcademic,
 } from "./reviews-rules";
 import { daysSince, fmtDay } from "./dates";
 import { workshopById } from "@/app/dashboard/data";
@@ -665,6 +667,11 @@ export interface DossierItem {
   school: string;
   birthYear: string;
   subjects: string[];
+  /** Structured academics entries (tolerant-parsed jsonb — R15 cutover). */
+  academics: DossierAcademic[];
+  /** The parent's own group pick ("" = none) — distinct from the staff-set
+   *  review `group` (child_reviews.group_assignment). */
+  parentGroupSlug: string;
   /** Resolved from the workshop catalog: "Title — Advisor". */
   workshops: string[];
   testScores: string;
@@ -679,7 +686,7 @@ export interface DossierItem {
   parentPhone: string;
   submittedAt: string | null;
   createdAt: string;
-  /** Same 8-field checklist as the parent dashboard (reviews-rules). */
+  /** Same group-aware checklist as the parent dashboard (reviews-rules). */
   completeness: number;
   deposits: DepositForStrip[];
 }
@@ -700,8 +707,9 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
         .from("children")
         .select(
           "id, parent_id, first_name, last_name, grade, birth_year, " +
-            "current_school, subjects, test_scores, workshop_ids, interests, " +
-            "project_pitch, portfolio_links, status, submitted_at, created_at"
+            "current_school, group_slug, academics, subjects, test_scores, " +
+            "workshop_ids, interests, project_pitch, portfolio_links, " +
+            "status, submitted_at, created_at"
         ),
       db.from("parents").select("id, first_name, last_name, email, phone"),
       db.from("families").select("id, parent_id").is("merged_into_id", null),
@@ -729,6 +737,8 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
     grade: number | null;
     birth_year: string;
     current_school: string;
+    group_slug: string;
+    academics: unknown;
     subjects: unknown;
     test_scores: string;
     workshop_ids: unknown;
@@ -780,6 +790,8 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
         school: c.current_school,
         birthYear: c.birth_year,
         subjects: asStringArray(c.subjects),
+        academics: asAcademics(c.academics),
+        parentGroupSlug: c.group_slug ?? "",
         workshops: workshopIds.map((id) => {
           const w = workshopById(id);
           return w ? `${w.title} — ${w.advisor}` : id;
@@ -804,6 +816,8 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
           grade: c.grade,
           birthYear: c.birth_year,
           currentSchool: c.current_school,
+          groupSlug: c.group_slug ?? "",
+          academics: c.academics,
           subjects: asStringArray(c.subjects),
           workshopIds,
           interests: c.interests,

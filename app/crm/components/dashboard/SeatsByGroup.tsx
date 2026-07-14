@@ -1,11 +1,10 @@
 import type { SeatsByGroupResult } from "@/app/crm/lib/gtm";
-import { SCHOLARS_CAP } from "@/app/crm/lib/gtm";
 
 /**
  * Seats by group (brief §8 unit 5): five groups × committed/assigned from
- * `child_reviews.group_assignment` + member-review/paid-deposit truth, an
- * "unassigned" bucket for committed kids without a group, and the Scholars
- * cap warning (GTM Open Q2: Scholars will likely cap first at ~24).
+ * `child_reviews.group_assignment` + member-review/paid-deposit truth, and
+ * an "unassigned" bucket for committed kids without a group. No per-group
+ * caps (decision 2026-07-13) — no warnings here.
  */
 
 export default function SeatsByGroup({ data }: { data: SeatsByGroupResult }) {
@@ -30,11 +29,6 @@ export default function SeatsByGroup({ data }: { data: SeatsByGroupResult }) {
             <tr key={r.group} className="border-b border-crm-line">
               <td className="px-5 py-2 font-mono text-[10px] uppercase tracking-[0.06em] text-crm-ink sm:px-6">
                 {r.label}
-                {r.group === "scholars" && data.scholarsWarning && (
-                  <span className="ml-2 rounded-full border border-crm-red px-1.5 py-[2px] font-mono text-[8.5px] tracking-[0.06em] text-crm-red">
-                    OVER {SCHOLARS_CAP} — WAITLIST OR STEER
-                  </span>
-                )}
               </td>
               <td className="px-3 py-2 text-right font-mono text-[11px] text-crm-ink">
                 {r.committed}

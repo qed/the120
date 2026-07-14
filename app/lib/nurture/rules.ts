@@ -44,6 +44,9 @@ export type NurtureChildRow = {
   grade: number | null;
   birth_year: string | null;
   current_school: string | null;
+  group_slug: string;
+  /** jsonb array of {subject, plan, goal} — tolerant-parsed, never trusted. */
+  academics: unknown;
   subjects: string[] | null;
   workshop_ids: string[] | null;
   interests: string | null;
@@ -99,18 +102,35 @@ const ms = (iso: string | null): number | null => {
   return Number.isNaN(t) ? null : t;
 };
 
+/** An academics jsonb entry counts when subject AND plan are both set. */
+const academicEntryComplete = (a: unknown): boolean =>
+  typeof a === "object" &&
+  a !== null &&
+  String((a as { subject?: unknown }).subject ?? "").trim() !== "" &&
+  String((a as { plan?: unknown }).plan ?? "").trim() !== "";
+
 /**
- * Dossier completeness for a raw children row, 0–100. Mirrors the 8-item
- * checklist in app/dashboard/data.ts `checklist()` — keep the two in sync.
+ * Dossier completeness for a raw children row, 0–100. Group-aware (R14):
+ * 8 items for everyone, plus a Scholars-only workshops item (9 total); the
+ * academics item keeps a legacy fallback on `subjects`. A row fetched
+ * without the new columns (old select) classifies as group-unset — no crash.
+ *
+ * LOCKSTEP MIRRORS (R14): this definition is duplicated in
+ * `app/dashboard/data.ts` (checklist — parent meter) and
+ * `app/crm/lib/reviews-rules.ts` (dossierChecklist — CRM queue). Change
+ * all three together or the parent meter, nudge, and queue % disagree.
  */
 export function dossierCompleteness(c: NurtureChildRow): number {
+  const groupSlug = c.group_slug ?? "";
+  const academics = Array.isArray(c.academics) ? c.academics : [];
   const checks = [
     Boolean(c.first_name?.trim()) && Boolean(c.last_name?.trim()),
     c.grade !== null,
     /^\d{4}$/.test((c.birth_year ?? "").trim()),
     Boolean(c.current_school?.trim()),
-    (c.subjects ?? []).length >= 1,
-    (c.workshop_ids ?? []).length >= 1,
+    groupSlug !== "",
+    academics.some(academicEntryComplete) || (c.subjects ?? []).length >= 1,
+    ...(groupSlug === "scholars" ? [(c.workshop_ids ?? []).length >= 1] : []),
     (c.interests ?? "").trim().length >= 3,
     (c.project_pitch ?? "").trim().length >= 10,
   ];

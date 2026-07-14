@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     db
       .from("children")
       .select(
-        "parent_id,first_name,last_name,grade,birth_year,current_school,subjects,workshop_ids,interests,project_pitch,status,updated_at"
+        "parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,workshop_ids,interests,project_pitch,status,updated_at"
       ),
     db.from("deposits").select("parent_id,status,refunded_at,created_at"),
     db.from("nurture_sends").select("family_id,sequence,step"),

@@ -564,16 +564,17 @@ describe("computeSeatsByGroup", () => {
     expect(makers).toMatchObject({ committed: 0, assigned: 1 });
     // c3 (paid, reviewed, no group) + c4 (paid, no review row at all)
     expect(result.unassignedCommitted).toBe(2);
-    expect(result.scholarsWarning).toBe(false);
   });
 
-  it("raises the Scholars warning past 24 assigned", () => {
+  it("carries no per-group cap warning (no-caps decision, 2026-07-13)", () => {
     const reviews = Array.from({ length: 25 }, (_, i) => ({
       child_id: `c${i}`,
       review_status: "in_review",
       group_assignment: "scholars",
     }));
-    expect(computeSeatsByGroup(reviews, new Set()).scholarsWarning).toBe(true);
+    const result = computeSeatsByGroup(reviews, new Set());
+    expect(result.rows.find((r) => r.group === "scholars")!.assigned).toBe(25);
+    expect("scholarsWarning" in result).toBe(false);
   });
 });
 

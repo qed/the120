@@ -30,7 +30,8 @@ function family(overrides: Partial<NurtureFamilyRow> = {}): NurtureFamilyRow {
 }
 
 function child(overrides: Partial<NurtureChildRow> = {}): NurtureChildRow {
-  // Complete on all 8 checklist items unless overridden.
+  // A Scholars child, complete on all 9 checklist items unless overridden
+  // (post-cutover shape: structured academics, legacy subjects unwritten).
   return {
     parent_id: "par-1",
     first_name: "Ada",
@@ -38,7 +39,9 @@ function child(overrides: Partial<NurtureChildRow> = {}): NurtureChildRow {
     grade: 5,
     birth_year: "2016",
     current_school: "Maple PS",
-    subjects: ["Math"],
+    group_slug: "scholars",
+    academics: [{ subject: "Math", plan: "reach-ahead", goal: "Grade 7 math by June" }],
+    subjects: [],
     workshop_ids: ["competitive-chess"],
     interests: "chess, robots",
     project_pitch: "Build a chess robot that trash-talks politely.",
@@ -207,14 +210,20 @@ describe("stalled-dossier nudge", () => {
     expect(run({ families: [family()], children: [quietChild(2.5)] })).toHaveLength(0);
   });
 
-  it("requires completeness strictly above 80% (6/8 = 75% is not enough)", () => {
-    const sixOfEight = quietChild(3.5, { subjects: [], workshop_ids: [] });
-    expect(dossierCompleteness(sixOfEight)).toBe(75);
-    expect(run({ families: [family()], children: [sixOfEight] })).toHaveLength(0);
+  it("requires completeness strictly above 80% (Scholars: 7/9 = 78 is not enough)", () => {
+    const sevenOfNine = quietChild(3.5, { academics: [], workshop_ids: [] });
+    expect(dossierCompleteness(sevenOfNine)).toBe(78);
+    expect(run({ families: [family()], children: [sevenOfNine] })).toHaveLength(0);
 
-    const sevenOfEight = quietChild(3.5, { subjects: [] });
-    expect(dossierCompleteness(sevenOfEight)).toBe(88);
-    expect(run({ families: [family()], children: [sevenOfEight] })).toHaveLength(1);
+    const eightOfNine = quietChild(3.5, { workshop_ids: [] });
+    expect(dossierCompleteness(eightOfNine)).toBe(89);
+    expect(run({ families: [family()], children: [eightOfNine] })).toHaveLength(1);
+  });
+
+  it("non-Scholars missing one item (7/8 = 88) stays eligible", () => {
+    const makersMissingOne = quietChild(3.5, { group_slug: "makers", current_school: "" });
+    expect(dossierCompleteness(makersMissingOne)).toBe(88);
+    expect(run({ families: [family()], children: [makersMissingOne] })).toHaveLength(1);
   });
 
   it("only ever fires once per family", () => {
@@ -288,6 +297,8 @@ describe("helpers", () => {
           grade: null,
           birth_year: "16",
           current_school: "",
+          group_slug: "",
+          academics: [],
           subjects: [],
           workshop_ids: null,
           interests: "a",
@@ -295,5 +306,31 @@ describe("helpers", () => {
         })
       )
     ).toBe(0);
+  });
+
+  it("group-aware totals: Scholars 9 items, everyone else 8", () => {
+    // Scholars missing only the workshop → 8/9 = 89 (stall-eligible, >80);
+    // missing two → 7/9 = 78 (not); non-Scholars missing one → 7/8 = 88.
+    expect(dossierCompleteness(child({ workshop_ids: [] }))).toBe(89);
+    expect(dossierCompleteness(child({ workshop_ids: [], project_pitch: "" }))).toBe(78);
+    expect(dossierCompleteness(child({ group_slug: "makers", project_pitch: "" }))).toBe(88);
+  });
+
+  it("an academics entry needs subject AND plan; legacy subjects still complete", () => {
+    const planless = child({ academics: [{ subject: "Math", plan: "", goal: "" }] });
+    expect(dossierCompleteness(planless)).toBe(89); // academics item undone
+    const legacy = child({ academics: [], subjects: ["Math"] });
+    expect(dossierCompleteness(legacy)).toBe(100); // pre-cutover fallback
+  });
+
+  it("tolerates rows without the new columns (old select) — group unset, no crash", () => {
+    const oldRow = child({ subjects: ["Math"] }) as Partial<NurtureChildRow>;
+    delete oldRow.group_slug;
+    delete oldRow.academics;
+    // 8-item list (no workshops item), group undone, academics via legacy
+    // subjects → 7/8 = 88.
+    expect(dossierCompleteness(oldRow as NurtureChildRow)).toBe(88);
+    const garbage = child({ academics: "garbage" });
+    expect(dossierCompleteness(garbage)).toBe(89); // non-array → [] → item undone
   });
 });

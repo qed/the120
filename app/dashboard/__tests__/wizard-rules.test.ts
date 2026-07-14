@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { RETIRED_WORKSHOPS, WORKSHOPS, checklist, emptyChild, workshopById, type Child } from "../data";
+import {
+  RETIRED_WORKSHOPS,
+  WORKSHOPS,
+  checklist,
+  emptyChild,
+  hasLiveWorkshopPick,
+  workshopById,
+  type Child,
+} from "../data";
 import {
   DEFAULT_TRACK,
   TRACK_FILTERS,
@@ -165,12 +173,27 @@ describe("sanitizeWorkshopSelection (R8 cap + retired-id cleanup)", () => {
     expect(sanitizeWorkshopSelection(["the-peace-table", ...live])).toEqual(live);
   });
 
-  it("an all-retired selection empties — and the checklist re-flags workshops for Scholars", () => {
-    const sanitized = sanitizeWorkshopSelection(["the-peace-table", "toy-inventors"]);
-    expect(sanitized).toEqual([]);
-    const c = child({ groupSlug: "scholars", workshopIds: sanitized });
+  it("an all-retired selection empties", () => {
+    expect(sanitizeWorkshopSelection(["the-peace-table", "toy-inventors"])).toEqual([]);
+  });
+
+  it("the checklist re-flags workshops for a RAW retired-only selection (unsanitized store state)", () => {
+    // The production path: checklist/completeness read the raw stored ids,
+    // not the wizard's sanitized view. A legacy Scholars row whose only picks
+    // are retired must NOT count as complete, or the meter reads 100% while
+    // the workshops step shows "0 of 3".
+    const c = child({ groupSlug: "scholars", workshopIds: ["the-peace-table", "toy-inventors"] });
     const item = checklist(c).find((i) => i.label === "A workshop of interest")!;
     expect(item.done).toBe(false);
+  });
+
+  it("hasLiveWorkshopPick: one live id among retired ids satisfies the item", () => {
+    const live = WORKSHOPS[0].id;
+    expect(hasLiveWorkshopPick(["the-peace-table", live])).toBe(true);
+    expect(hasLiveWorkshopPick(["the-peace-table"])).toBe(false);
+    expect(hasLiveWorkshopPick([])).toBe(false);
+    const c = child({ groupSlug: "scholars", workshopIds: ["the-peace-table", live] });
+    expect(checklist(c).find((i) => i.label === "A workshop of interest")!.done).toBe(true);
   });
 
   it("cap is count-based, not track-based — a cross-track selection survives", () => {

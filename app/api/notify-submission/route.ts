@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { sendEmail } from "@/app/lib/email";
+import { escapeHtml } from "@/app/crm/lib/library-rules";
 
 /**
  * R15: best-effort admissions notification, fired once per child when a
@@ -66,44 +67,60 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, already: true });
     }
 
-    // Child name and school fields are parent-controlled text: bracketed and
-    // truncated (guard-hardening precedent), newlines stripped from the subject.
+    // Child and parent names are parent-controlled text: bracketed, truncated
+    // (guard-hardening precedent), newlines stripped from the subject — and
+    // HTML-escaped before interpolation into the html body, or a crafted name
+    // becomes live markup in the admissions inbox.
     const rawName = `${child.first_name ?? ""} ${child.last_name ?? ""}`.trim() || "a child";
     const safeName = rawName.replace(/[\r\n]+/g, " ").slice(0, 80);
     const parentName =
       `${(user.user_metadata?.first_name as string | undefined) ?? ""} ${
         (user.user_metadata?.last_name as string | undefined) ?? ""
       }`.trim() || "—";
+    const safeParent = parentName.slice(0, 120);
+    const parentEmail = user.email ?? "—";
     const grade = child.grade != null ? `Grade ${child.grade}` : "Grade —";
     const group = child.group_slug || "—";
     const crmUrl = `https://the120.school/crm/dossiers?child=${child.id}`;
 
-    const result = await sendEmail({
-      to: "admissions@the120.school",
-      subject: `New dossier submitted — [${safeName}]`,
-      text: [
-        "A new dossier was submitted for review.",
-        "",
-        `Candidate: [${safeName}] · ${grade} · group: ${group}`,
-        `Parent: ${parentName.slice(0, 120)} · ${user.email ?? "—"}`,
-        "",
-        `Review it in the CRM: ${crmUrl}`,
-        "",
-        "— The 120 (automated submission notice)",
-      ].join("\n"),
-      html: `
+    // sendEmail never throws by contract, but its fetch can reject at the
+    // network layer — normalize to {ok:false} so the unclaim below always runs.
+    const result = await (async () => {
+      try {
+        return await doSend();
+      } catch (sendErr) {
+        return { ok: false as const, error: sendErr instanceof Error ? sendErr.message : "send threw" };
+      }
+    })();
+
+    function doSend() {
+      return sendEmail({
+        to: "admissions@the120.school",
+        subject: `New dossier submitted — [${safeName}]`,
+        text: [
+          "A new dossier was submitted for review.",
+          "",
+          `Candidate: [${safeName}] · ${grade} · group: ${group}`,
+          `Parent: ${safeParent} · ${parentEmail}`,
+          "",
+          `Review it in the CRM: ${crmUrl}`,
+          "",
+          "— The 120 (automated submission notice)",
+        ].join("\n"),
+        html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; color: #16233b; max-width: 560px; margin: 0 auto; padding: 32px 24px; line-height: 1.6;">
   <p style="font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: #5a6b8a; margin: 0 0 24px;">The 120 · Admissions</p>
   <p style="margin: 0 0 16px;">A new dossier was submitted for review.</p>
-  <p style="margin: 0 0 16px;"><strong>[${safeName}]</strong> · ${grade} · group: ${group}<br/>
-  Parent: ${parentName.slice(0, 120)} · ${user.email ?? "—"}</p>
+  <p style="margin: 0 0 16px;"><strong>[${escapeHtml(safeName)}]</strong> · ${grade} · group: ${escapeHtml(group)}<br/>
+  Parent: ${escapeHtml(safeParent)} · ${escapeHtml(parentEmail)}</p>
   <p style="margin: 24px 0;">
     <a href="${crmUrl}" style="background: #16233b; color: #ffffff; text-decoration: none; padding: 12px 22px; font-size: 15px;">Open in the dossier queue</a>
   </p>
   <hr style="border: none; border-top: 1px solid #d9dee8; margin: 28px 0 16px;"/>
   <p style="font-size: 12px; color: #5a6b8a; margin: 0;">Automated submission notice — the CRM needs-review badge is the source of truth.</p>
 </div>`,
-    });
+      });
+    }
 
     if (!result.ok) {
       console.error("[notify-submission]", result.error);

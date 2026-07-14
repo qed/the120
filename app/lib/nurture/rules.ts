@@ -18,7 +18,12 @@
  *   burst of stale emails — late steps are dropped, not batched.
  * - One email per family per run: if several steps are due, only the
  *   earliest-due one goes out; the rest wait for later runs.
+ *
+ * The sole import (hasLiveWorkshopPick) is itself pure data — the engine
+ * stays I/O-free and directly unit-testable.
  */
+
+import { hasLiveWorkshopPick } from "@/app/dashboard/data";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const CATCH_UP_DAYS = 3;
@@ -130,7 +135,7 @@ export function dossierCompleteness(c: NurtureChildRow): number {
     Boolean(c.current_school?.trim()),
     groupSlug !== "",
     academics.some(academicEntryComplete) || (c.subjects ?? []).length >= 1,
-    ...(groupSlug === "scholars" ? [(c.workshop_ids ?? []).length >= 1] : []),
+    ...(groupSlug === "scholars" ? [hasLiveWorkshopPick(c.workshop_ids ?? [])] : []),
     (c.interests ?? "").trim().length >= 3,
     (c.project_pitch ?? "").trim().length >= 10,
   ];

@@ -222,7 +222,7 @@ export default function DossierEditor({
    *  locked state renders only on a confirmed {ok: true}; on failure the
    *  local status reverts to draft with a retryable inline error. */
   const doSubmit = async () => {
-    if (pct !== 100 || locked) return;
+    if (pct !== 100 || locked || submitState === "saving") return;
     setSubmitState("saving");
     setSubmitError(null);
     // updateChild updates the store's ref synchronously, so the explicit save
@@ -328,6 +328,7 @@ export default function DossierEditor({
             items={items}
             pct={pct}
             locked={locked}
+            depositPaid={depositPaid}
             n={n}
             submitState={submitState}
             submitError={submitError}

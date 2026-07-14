@@ -264,7 +264,19 @@ export default function DashboardProvider({ children: reactChildren }: { childre
               console.error("[dashboard] save failed:", error.message);
               return { ok: false, error: error.message };
             }
-            if ((data as { status: string } | null)?.status !== current.status) {
+            const echoed = (data as { status: Child["status"] } | null)?.status;
+            if (echoed && echoed !== current.status && echoed !== "draft") {
+              // Staff advanced the row past 'submitted' in the race window —
+              // the write is fine and the row is further along than the
+              // client thinks. Adopt the authoritative status: reporting
+              // failure here would revert the local status to draft and
+              // unlock the whole wizard against a dossier already in review.
+              applyChildren(
+                childrenRef.current.map((c) => (c.id === id ? { ...c, status: echoed } : c))
+              );
+              return { ok: true };
+            }
+            if (echoed !== current.status) {
               return { ok: false, error: "The submission didn't go through" };
             }
             return { ok: true };
@@ -286,7 +298,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
       chains.set(id, next);
       return next;
     },
-    []
+    [applyChildren]
   );
 
   /** Persist one child row soon (fire-and-forget; RLS scopes to this parent). */

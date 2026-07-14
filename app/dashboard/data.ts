@@ -24,9 +24,9 @@ export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
 export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id === s);
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
-/** Gate-rejection copy shared verbatim by the checkout route and the
- *  dashboard client, so the UI can tell "not approved yet" (don't retry)
- *  apart from transient checkout failures (do retry). */
+/** Gate-rejection copy shared by the checkout route and the dashboard client.
+ *  The client renders the route's error verbatim, so this exact sentence (which
+ *  deliberately doesn't suggest retrying) is what a gated family sees. */
 export const RESERVE_GATE_MESSAGE =
   "Your application is still under review — checkout opens once it's approved.";
 
@@ -589,6 +589,14 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
 export const workshopById = (id: string) =>
   WORKSHOPS.find((w) => w.id === id) ?? RETIRED_WORKSHOPS.find((w) => w.id === id);
 
+/** A stored selection satisfies the Scholars checklist item only when at
+ *  least one pick is still in the LIVE catalog — retired K–2 ids must not
+ *  count, or the meter would read 100% while the wizard's sanitized view
+ *  shows zero selections. Shared by all three lockstep completeness mirrors
+ *  (this checklist, nurture rules, CRM reviews-rules) so they can't drift. */
+export const hasLiveWorkshopPick = (ids: string[]) =>
+  ids.some((id) => WORKSHOPS.some((w) => w.id === id));
+
 export type Child = {
   id: string;
   // Basics
@@ -669,7 +677,7 @@ export function checklist(c: Child): { label: string; done: boolean }[] {
     },
   ];
   if (c.groupSlug === "scholars") {
-    items.push({ label: "A workshop of interest", done: c.workshopIds.length >= 1 });
+    items.push({ label: "A workshop of interest", done: hasLiveWorkshopPick(c.workshopIds) });
   }
   items.push(
     { label: "The kid's interests", done: c.interests.trim().length >= 3 },

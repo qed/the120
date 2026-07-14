@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod";
+import { hasLiveWorkshopPick } from "@/app/dashboard/data";
 import { GROUPS, REVIEW_STATUSES, type ReviewStatus } from "./constants";
 
 /* ---------------------------------------------------------------- schemas */
@@ -169,7 +170,7 @@ export function dossierChecklist(
     },
   ];
   if (groupSlug === "scholars") {
-    items.push({ label: "A workshop of interest", done: f.workshopIds.length >= 1 });
+    items.push({ label: "A workshop of interest", done: hasLiveWorkshopPick(f.workshopIds) });
   }
   items.push(
     { label: "The kid's interests", done: f.interests.trim().length >= 3 },

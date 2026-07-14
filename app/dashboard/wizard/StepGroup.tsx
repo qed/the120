@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BOOKING_URL, groups } from "@/app/lib/site";
+import { sanitizeWorkshopSelection } from "../wizard-rules";
 import { StepSection, focusRing, type StepProps } from "./shared";
 
 /**
@@ -17,13 +18,19 @@ export default function StepGroup({ child, set, n }: StepProps) {
   // Switch-away-from-Scholars confirm (R6): nothing mutates until confirmed.
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
 
+  // Confirm against the SANITIZED count — the picks the parent has actually
+  // seen as selected in the workshops step. A legacy row holding only retired
+  // ids shows zero selections there, so warning about clearing them would
+  // read as nonsense (the clear still wipes the whole stored array either way).
+  const visiblePicks = sanitizeWorkshopSelection(child.workshopIds).length;
+
   const pick = (slug: string) => {
     if (slug === child.groupSlug) {
       // Re-affirming the current group cancels any pending switch.
       setPendingSwitch(null);
       return;
     }
-    if (child.groupSlug === "scholars" && child.workshopIds.length > 0) {
+    if (child.groupSlug === "scholars" && visiblePicks > 0) {
       setPendingSwitch(slug);
       return;
     }
@@ -101,8 +108,8 @@ export default function StepGroup({ child, set, n }: StepProps) {
       {pendingSwitch && (
         <div className="mt-4 rounded-xl border border-red bg-red/5 p-4">
           <p className="text-sm font-semibold text-ink">
-            Switching from The Scholars clears {child.workshopIds.length} workshop selection
-            {child.workshopIds.length === 1 ? "" : "s"}.
+            Switching from The Scholars clears {visiblePicks} workshop selection
+            {visiblePicks === 1 ? "" : "s"}.
           </p>
           <p className="mt-1 text-xs leading-5 text-ink-soft">
             Workshops belong to The Scholars — you can always switch back later, but the picks

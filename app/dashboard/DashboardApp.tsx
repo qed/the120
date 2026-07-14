@@ -34,7 +34,8 @@ export default function DashboardApp({
       if (result === "success") {
         refreshDeposits();
         // The webhook can lag the redirect by a moment — refresh once more.
-        setTimeout(refreshDeposits, 4000);
+        const t = setTimeout(refreshDeposits, 4000);
+        return () => clearTimeout(t);
       }
     }
   }, [refreshDeposits]);

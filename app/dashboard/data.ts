@@ -112,8 +112,10 @@ export const ADVISORS: Advisor[] = [
 
 /** The 120's workshop roster — forked from GT's Fall 2026 offerings and
  *  curated for The 120 community (last diffed against the live
- *  community.gt.school/workshops 2026-07-14: +5 K–2 workshops, audition
- *  flags on Competition, Lawrence Bernstein leading recreational chess). */
+ *  community.gt.school/workshops 2026-07-14: audition flags on Competition,
+ *  Lawrence Bernstein leading recreational chess). The 120 runs grades 3+,
+ *  so GT's K–2-only workshops live in RETIRED_WORKSHOPS below — resolvable
+ *  for display on legacy selections, never selectable. */
 export const WORKSHOPS: Workshop[] = [
   {
     id: "become-the-character",
@@ -257,15 +259,6 @@ export const WORKSHOPS: Workshop[] = [
     grades: "3–5",
     length: "60 min · 2×/week",
     description: "Create original content, use AI feedback to improve it, and learn how creators capture attention.",
-  },
-  {
-    id: "the-peace-table",
-    title: "The Peace Table",
-    advisor: "Andreea Musat",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
   },
   {
     id: "hidden-stories",
@@ -430,42 +423,6 @@ export const WORKSHOPS: Workshop[] = [
     description: "Design an original attraction, prove the guest-flow and budget math, and field-test it on an earned Disney trip.",
   },
   {
-    id: "board-game-masters",
-    title: "Board Game Masters",
-    advisor: "Ruchi Shukla",
-    track: "Sciences",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
-  },
-  {
-    id: "food-lab-challenge",
-    title: "Food Lab Challenge",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
-  },
-  {
-    id: "passport-mission",
-    title: "Passport Mission",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
-  },
-  {
-    id: "toy-inventors",
-    title: "Toy Inventors",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
-  },
-  {
     id: "board-game-designer",
     title: "Board Game Designer",
     advisor: "Ruchi Shukla",
@@ -548,30 +505,64 @@ export const WORKSHOPS: Workshop[] = [
   },
 ];
 
-export const workshopById = (id: string) => WORKSHOPS.find((w) => w.id === id);
-
 /**
- * Parse a catalog `grades` display string ("K–2", "3–5", "K–8+") into a
- * numeric range for the wizard's grade filter. K = 0; a trailing "+" means
- * "and up" (max 12). Derived from the display string at module load rather
- * than hand-annotated per entry, so the two can never drift. The catalog
- * uses an en-dash (–); a plain hyphen is tolerated too.
+ * Retired catalog entries (GT's K–2-only workshops — The 120 runs grades 3+).
+ * Tombstones only: never selectable, but `workshopById` still resolves them
+ * so legacy selections keep rendering titles (CRM detail, printable preview,
+ * wizard chips) instead of degrading to raw slugs.
  */
-export function parseGradeRange(grades: string): { gradeMin: number; gradeMax: number } {
-  const parts = grades.split(/[–-]/);
-  const num = (s: string) => (s.trim().toUpperCase().startsWith("K") ? 0 : parseInt(s, 10));
-  const last = parts[parts.length - 1].trim();
-  return {
-    gradeMin: num(parts[0]),
-    gradeMax: last.endsWith("+") ? 12 : num(last),
-  };
-}
+export const RETIRED_WORKSHOPS: Workshop[] = [
+  {
+    id: "the-peace-table",
+    title: "The Peace Table",
+    advisor: "Andreea Musat",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
+  },
+  {
+    id: "board-game-masters",
+    title: "Board Game Masters",
+    advisor: "Ruchi Shukla",
+    track: "Sciences",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
+  },
+  {
+    id: "food-lab-challenge",
+    title: "Food Lab Challenge",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
+  },
+  {
+    id: "passport-mission",
+    title: "Passport Mission",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
+  },
+  {
+    id: "toy-inventors",
+    title: "Toy Inventors",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
+  },
+];
 
-/** Precomputed once at module load — one parse per catalog entry. */
-const GRADE_RANGES = new Map(WORKSHOPS.map((w) => [w.id, parseGradeRange(w.grades)]));
-
-export const workshopGradeRange = (w: Workshop) =>
-  GRADE_RANGES.get(w.id) ?? parseGradeRange(w.grades);
+/** Resolve a workshop id for display: live catalog first, then retired
+ *  tombstones. Selectable UIs must iterate WORKSHOPS, never this lookup. */
+export const workshopById = (id: string) =>
+  WORKSHOPS.find((w) => w.id === id) ?? RETIRED_WORKSHOPS.find((w) => w.id === id);
 
 export type Child = {
   id: string;

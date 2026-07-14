@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { checklist, childName, completeness, statusMeta, type Child } from "./data";
+import { checklist, childName, completeness, statusMeta, workshopById, type Child } from "./data";
 import { useDashboard } from "./store";
 import { Meter } from "./ui";
 import {
   STEP_LABELS,
+  WORKSHOP_MAX,
   firstIncompleteStep,
   resolveStep,
+  sanitizeWorkshopSelection,
   stepsForGroup,
   type WizardStepId,
 } from "./wizard-rules";
@@ -233,6 +235,15 @@ export default function DossierEditor({
   const nextDisabled =
     saveState === "saving" || (!locked && step === "group" && child.groupSlug === "");
 
+  /** Sticky selection bar state (workshops step only, R8/R9): the editable
+   *  wizard views the selection through sanitize (legacy >3 / retired ids
+   *  converge on the next save); the deposit-locked browse shows raw truth. */
+  const workshopsEditable = stepEditable("workshops");
+  const workshopSelection = workshopsEditable
+    ? sanitizeWorkshopSelection(child.workshopIds)
+    : child.workshopIds;
+  const savingNow = saveState === "saving" || submitState === "saving";
+
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
       <button
@@ -312,15 +323,66 @@ export default function DossierEditor({
             {step === "basics" && <StepBasics child={child} set={set} n={n} />}
             {step === "group" && <StepGroup child={child} set={set} n={n} />}
             {step === "academics" && <StepAcademics child={child} set={set} n={n} />}
-            {step === "workshops" && <StepWorkshops child={child} set={set} n={n} />}
+            {step === "workshops" && (
+              <StepWorkshops child={child} set={set} n={n} editable={workshopsEditable} />
+            )}
             {step === "project" && <StepProject child={child} set={set} n={n} />}
           </fieldset>
         )}
       </div>
 
-      {/* Step navigation */}
+      {/* Step navigation — on the workshops step it becomes a sticky bottom
+          bar (R9): selected-workshop chips + the forward/save actions stay
+          reachable without scrolling the card list. */}
       {step !== "review" && (
-        <div className="mt-6 flex flex-wrap items-center gap-3">
+        <div
+          className={
+            step === "workshops"
+              ? "sticky bottom-0 z-40 -mx-6 mt-6 border-t border-line bg-paper/90 px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+              : "mt-6"
+          }
+        >
+          {step === "workshops" && (
+            <div className="mb-3">
+              <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
+                Selected · {workshopSelection.length} of {WORKSHOP_MAX}
+              </p>
+              {workshopSelection.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {workshopSelection.map((id) => {
+                    const title = workshopById(id)?.title ?? id;
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded-full border border-red/40 bg-red/5 py-1 pl-3 pr-1.5 text-xs text-ink"
+                      >
+                        {title}
+                        {workshopsEditable && (
+                          <button
+                            type="button"
+                            disabled={savingNow}
+                            onClick={() =>
+                              set({ workshopIds: workshopSelection.filter((x) => x !== id) })
+                            }
+                            aria-label={`Remove ${title}`}
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-muted hover:bg-red/10 hover:text-red disabled:cursor-wait ${focusRing}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {workshopsEditable && workshopSelection.length >= WORKSHOP_MAX && (
+                <p role="status" className="mt-2 font-mono text-[0.7rem] text-muted">
+                  Pick up to {WORKSHOP_MAX} — remove one to add another.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
           {idx > 0 && (
             <button
               onClick={goBackStep}
@@ -369,6 +431,7 @@ export default function DossierEditor({
               {locked ? "Save" : "Next"} to retry.
             </p>
           )}
+          </div>
         </div>
       )}
     </div>

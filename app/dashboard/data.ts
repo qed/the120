@@ -116,36 +116,20 @@ export type Workshop = {
   grades: string;
   length: string;
   description: string;
-  /** Competition workshops require an audition (GT Fall 2026 roster). */
+  /** Competition workshops require an audition. */
   audition?: boolean;
 };
 
-/** Real GT advisor roster (from the design handoff gt-workshops.json). */
-export type Advisor = { id: string; name: string; bio: string };
-
-export const ADVISORS: Advisor[] = [
-  { id: "am", name: "Andreea Musat", bio: "A certified NLP coach and artist with 5 years running workshops and art classes for kids. She blends creative instinct with structured thinking, helping students find their footing, take creative risks, and discover they're capable of more than they imagined." },
-  { id: "aj", name: "Anjelina Belakovskaia", bio: "A 3-Time U.S. Women’s Chess Champion, Woman Grandmaster, finance professor, and former derivatives trader. Trained at the Botvinnik-Kasparov Chess Academy, she helps students develop critical thinking, creativity, confidence, and resilience through chess." },
-  { id: "cr", name: "Craig Lundberg", bio: "An educator, former principal, coach, and learning designer with 15+ years of experience helping students discover their potential. Craig believes the best learning happens when students are challenged to solve real problems, ask big questions, and work together. His GT Anywhere workshops combine hands-on experiences with meaningful challenges that inspire curiosity, confidence, and lifelong learning." },
-  { id: "dz", name: "David Zook", bio: "Has coached robotics teams (winning multiple world championships), taught cars to drive themselves at Tesla, founded a high school, and raised two genuinely gifted kids who keep him appropriately humble. He's spent his career in rooms full of smart people trying to do hard things. When he's not at GT, he's probably on a plane, at a table with exceptional food, or recruiting another smart person into his orbit." },
-  { id: "mm", name: "Melissa Muir", bio: "M.A.T. — a bilingual educator with 15+ years across public, private, online, and homeschool classrooms, raising four trilingual kids in Quito. She takes every opportunity to get kids reading and surprising themselves with what they can do." },
-  { id: "nt", name: "Norberto Troncoso", bio: "A coach of hundreds of national and state champions, international keynote speaker, and creator of the P.O.W.E.R. Framework, Norberto teaches students that courage isn't the absence of fear, it's doing it scared. He helps kids build fearless communication, emotional intelligence, and leadership identity so they speak up, lead themselves, and rise to any room they walk into." },
-  { id: "ru", name: "Ruchi Shukla", bio: "An educator for 15 years, working in school systems around the world. She builds workshops that help kids learn about important global issues through hands-on play and activities." },
-  { id: "sl", name: "Sarah Langdon", bio: "An educator, advisor, and learning designer who believes students rise to the level of authentic challenge. She creates GT Anywhere workshops that blend academic rigor with real-world projects, helping kids discover they're capable of more than they imagined." },
-  { id: "p1783114067812", name: "Yash Mehta", bio: "International Olympiad Medallist, with a decade of experience selecting, training, and mentoring national teams to top ranks at International Olympiads. He coaches with the philosophy that problem-solving is the most fundamental skill one must be equipped with." },
-];
-
-/** The 120's workshop roster — forked from GT's Fall 2026 offerings and
- *  curated for The 120 community (last diffed against the live
- *  community.gt.school/workshops 2026-07-14: audition flags on Competition,
- *  Lawrence Bernstein leading recreational chess). The 120 runs grades 3+,
- *  so GT's K–2-only workshops live in RETIRED_WORKSHOPS below — resolvable
- *  for display on legacy selections, never selectable. */
+/** The 120's workshop roster, curated for The 120 community. The 120 runs
+ *  grades 3+, so K–2-only workshops live in RETIRED_WORKSHOPS below —
+ *  resolvable for display on legacy selections, never selectable. Advisor
+ *  names ship as The 120 confirms its own roster ("Advisor to be announced"
+ *  until then). */
 export const WORKSHOPS: Workshop[] = [
   {
     id: "become-the-character",
     title: "Become the Character",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "6–8+",
     length: "Year-long",
@@ -155,17 +139,17 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "botball-robotics",
     title: "Botball Robotics Team: Become a Founding Member",
-    advisor: "David Zook",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "5–8+",
     length: "Year-long",
-    description: "Found GT's first competition robotics team — fully autonomous robots, building toward the Botball World Championship.",
+    description: "Be a founding member of a competition robotics team — fully autonomous robots, building toward the Botball World Championship.",
     audition: true,
   },
   {
     id: "competitive-chess",
     title: "Competitive Chess",
-    advisor: "Anjelina Belakovskaia",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "K–8+",
     length: "Year-long",
@@ -175,7 +159,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "history-on-trial",
     title: "History on Trial",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "3–8+",
     length: "Year-long",
@@ -185,7 +169,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "i-said-what-i-said",
     title: "I Said What I Said",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "4–5",
     length: "Year-long",
@@ -195,7 +179,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "math-competitor-academy",
     title: "Math Competitor Academy",
-    advisor: "Yash Mehta",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "4–8+",
     length: "Year-long",
@@ -205,7 +189,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "math-elite-academy",
     title: "Math Elite Academy",
-    advisor: "Yash Mehta",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "4–8+",
     length: "Year-long",
@@ -215,7 +199,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-verdict",
     title: "The Verdict",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Competition",
     grades: "6–8+",
     length: "Year-long",
@@ -225,7 +209,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "change-makers",
     title: "Change Makers",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -234,7 +218,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "chess-foundations",
     title: "Chess Foundations",
-    advisor: "Anjelina Belakovskaia",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -243,7 +227,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "chess-mastery",
     title: "Chess Mastery",
-    advisor: "Anjelina Belakovskaia",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -252,7 +236,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "codebreakers",
     title: "Codebreakers",
-    advisor: "Melissa Muir",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "2–5",
     length: "60 min · 2×/week",
@@ -261,7 +245,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "glitch-and-grow",
     title: "Glitch and Grow",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -270,7 +254,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "global-host-challenge",
     title: "Global Host Challenge",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -279,7 +263,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "going-viral",
     title: "Going Viral",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -288,7 +272,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "hidden-stories",
     title: "Hidden Stories",
-    advisor: "Andreea Musat",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -297,7 +281,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "japanese-black-belt",
     title: "Japanese Black Belt: Reverse-Engineering a Language",
-    advisor: "David Zook",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -306,7 +290,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "literary-league",
     title: "Literary League",
-    advisor: "Melissa Muir",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -315,7 +299,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "on-the-record",
     title: "On the Record",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -324,7 +308,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "one-idea",
     title: "One Idea",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -333,7 +317,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "page-turners",
     title: "Page Turners",
-    advisor: "Melissa Muir",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "2–5",
     length: "45 min · 2×/week",
@@ -342,7 +326,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "rewrite-history",
     title: "Rewrite History",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -351,7 +335,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "say-that-again",
     title: "Say That Again",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -360,7 +344,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sky-tower-challenge",
     title: "Sky Tower Challenge",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -369,7 +353,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sold",
     title: "Sold!",
-    advisor: "Andreea Musat",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "2–5",
     length: "60 min · 2×/week",
@@ -378,7 +362,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "soy-un-experto",
     title: "Soy un Experto",
-    advisor: "Melissa Muir",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -387,7 +371,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "strategic-chess",
     title: "Strategic Chess",
-    advisor: "Anjelina Belakovskaia",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -396,7 +380,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-deal",
     title: "The Deal",
-    advisor: "Norberto Troncoso",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -405,7 +389,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-greenlight",
     title: "The Greenlight",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -414,7 +398,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "venture-lab",
     title: "Venture Lab",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -423,7 +407,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "young-inventors-challenge",
     title: "Young Inventors Challenge",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -432,7 +416,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "ai-robot-coach-academy",
     title: "AI Robot Coach Academy",
-    advisor: "David Zook",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -441,7 +425,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "attractions-in-action",
     title: "Attractions in Action",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -450,7 +434,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "board-game-designer",
     title: "Board Game Designer",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "3–8+",
     length: "45 min · 2×/week",
@@ -459,7 +443,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "deep-time",
     title: "Deep Time",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -468,7 +452,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "future-champion-lab",
     title: "Future Champion Lab",
-    advisor: "David Zook",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -477,7 +461,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "mind-lab",
     title: "Mind Lab",
-    advisor: "Sarah Langdon",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -486,7 +470,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sound-the-alarm",
     title: "Sound the Alarm",
-    advisor: "Andreea Musat",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -495,7 +479,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-caldera",
     title: "The Caldera",
-    advisor: "Craig Lundberg",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -504,7 +488,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "unbuyable-product-lab",
     title: "The Unbuyable Product Lab",
-    advisor: "Melissa Muir",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -513,7 +497,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "think-like-a-scientist",
     title: "Think like a Scientist",
-    advisor: "Andreea Musat",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "K–4",
     length: "45 min · 2×/week",
@@ -522,7 +506,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "vex-all-stars",
     title: "VEX All-Stars: Rebuild the Legends",
-    advisor: "David Zook",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -531,7 +515,7 @@ export const WORKSHOPS: Workshop[] = [
 ];
 
 /**
- * Retired catalog entries (GT's K–2-only workshops — The 120 runs grades 3+).
+ * Retired catalog entries (K–2-only workshops — The 120 runs grades 3+).
  * Tombstones only: never selectable, but `workshopById` still resolves them
  * so legacy selections keep rendering titles (CRM detail, printable preview,
  * wizard chips) instead of degrading to raw slugs.
@@ -540,7 +524,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "the-peace-table",
     title: "The Peace Table",
-    advisor: "Andreea Musat",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -549,7 +533,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "board-game-masters",
     title: "Board Game Masters",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Sciences",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -558,7 +542,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "food-lab-challenge",
     title: "Food Lab Challenge",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -567,7 +551,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "passport-mission",
     title: "Passport Mission",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -576,7 +560,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "toy-inventors",
     title: "Toy Inventors",
-    advisor: "Ruchi Shukla",
+    advisor: "Advisor to be announced",
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",

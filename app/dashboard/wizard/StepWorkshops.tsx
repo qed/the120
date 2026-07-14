@@ -84,6 +84,11 @@ export default function StepWorkshops({
         ))}
       </div>
 
+      <p className="mt-4 font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
+        We&rsquo;re assembling The 120&rsquo;s own advisor roster — advisors announced as
+        they&rsquo;re confirmed.
+      </p>
+
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {matches.map((w) => {
           const on = selected.includes(w.id);

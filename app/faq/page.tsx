@@ -25,11 +25,11 @@ const faqs = [
   },
   {
     q: "How do the five groups work?",
-    a: "The 120 is 120 kids across five groups: the Athletes, the Founders, the Makers, the Scholars, and the Givers. Your child joins the group that fits their thing. Each group qualifies its members its own way; the Scholars' assessment is run by GT.",
+    a: "The 120 is 120 kids across five groups: the Athletes, the Founders, the Makers, the Scholars, and the Givers. Your child joins the group that fits their thing. Each group qualifies its members its own way.",
   },
   {
     q: "What does it cost, and in what currency?",
-    a: "$3,000 CAD a year for Membership — the network, the project, the Tin Can, all four intensives, and math acceleration through Math Academy. The Full Academic Core, with 5 hours a week of TimeBack for 1 to 3 subjects, is $15,000. Prices in CAD; HST-exempt.",
+    a: "$3,000 CAD a year for Membership — the network, the project, the Tin Can, all four intensives, and math acceleration through Math Academy. The Full Academic Core, with 5 hours a week of AI-adaptive, mastery-based academics for 1 to 3 subjects, is $15,000. Prices in CAD; HST-exempt.",
   },
   {
     q: "What if the 120 seats are full?",
@@ -57,7 +57,7 @@ const faqs = [
   },
   {
     q: "Do Canadian universities recognize SAT and AP results?",
-    a: "Yes — SAT and AP are the international gold standard, recognized by U of T, Waterloo, McGill, and universities worldwide. For Scholars accelerating with GT, they're objective, external proof of mastery years early.",
+    a: "Yes — SAT and AP are the international gold standard, recognized by U of T, Waterloo, McGill, and universities worldwide. For Scholars on an accelerated path, they're objective, external proof of mastery years early.",
   },
   {
     q: "We're outside Toronto. Can we still join?",

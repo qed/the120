@@ -10,6 +10,7 @@ symptoms:
   - "Legitimate post-submission edits (group choice, workshops) are lost along with the rejected row until the parent reloads the page and refreshes local status"
   - "Guard raises on a status echo (client re-sending its stale status='submitted' while the DB is already 'in_review'), not on an actual parent-initiated status change"
   - "Targeted-column SQL verification passed while the app's real full-row write shape failed — the scenario suite never exercised the client's actual upsert payload"
+  - "After the coerce fix: a write the guard rewrote still reports ok — a submit can 'succeed' while the row stays draft, or a naive echo comparison can report failure when staff legitimately advanced the row mid-submit"
 root_cause: logic_error
 resolution_type: migration
 severity: high
@@ -24,7 +25,7 @@ tags:
   - full-row-upsert
   - stale-client-state
   - coerce-dont-raise
-  - debounced-save
+  - status-echo-verification
   - verification
 ---
 
@@ -154,6 +155,35 @@ where id = '<child-id>';
 
 Also asserted: tamper to `'member'` coerced back; legit draft→submitted passes; non-service-role INSERT at `'submitted'` coerced to `'draft'`; service_role transitions unaffected.
 
+**3. Client — verify the echo; a coerced write still reports ok** (`app/dashboard/store.tsx`, submit path; shipped in PR #5, refined by the 13-reviewer pass and again by the upsert/EXCLUDED follow-up incident under Related Issues).
+
+Coercion (item 2) fixes collateral rejection but creates a failure family the rest of this doc doesn't cover: **PostgREST reports success for a statement the trigger silently rewrote**, so `{ error: null }` no longer means "the row is what I asked for." The submit path therefore reads the status back and interprets the echo three ways — the current code (post-follow-up: status flips via a targeted UPDATE, never an upsert):
+
+```tsx
+const { data, error } = await supabaseRef.current
+  .from("children")
+  .update(submitStatusPatch(current))   // targeted UPDATE: status/submitted_at/updated_at only
+  .eq("id", id)
+  .select("status")
+  .maybeSingle();                       // zero rows falls through to the retryable mismatch
+if (error) return { ok: false, error: error.message };
+const echoed = (data as { status: Child["status"] } | null)?.status;
+if (echoed && echoed !== current.status && echoed !== "draft") {
+  // Staff advanced the row past 'submitted' in the race window — the write
+  // is fine and the row is further along than the client thinks. Adopt the
+  // authoritative status: reporting failure here would revert local status
+  // to draft and unlock the whole wizard against a dossier already in review.
+  applyChildren(childrenRef.current.map((c) => (c.id === id ? { ...c, status: echoed } : c)));
+  return { ok: true };
+}
+if (echoed !== current.status) {
+  return { ok: false, error: "The submission didn't go through" };
+}
+return { ok: true };
+```
+
+Three-way, not two-way: (1) echo matches → real success; (2) echo is `'draft'`/absent → the guard ate the write, report a retryable failure (without this check, a coerced submit shows the family a thank-you banner while the row stays a draft invisible to staff); (3) echo is a *further-along* real status → another actor legitimately moved the row first — adopt the DB's value into local state and report success. Branch (3) was a P1 catch: the first version treated any mismatch as failure, which would have reverted authoritative server state to the client's stale belief and looped forever on retry.
+
 ## Why This Works
 
 Root cause: **privileged columns round-tripping through an unprivileged write path.** `status` is server-owned (staff advance it via service-role RPC), but the client's full-row upsert re-asserted the tab's last-known value on every debounced save, guaranteeing eventual staleness the moment the server moved the column independently.
@@ -168,10 +198,18 @@ Root cause: **privileged columns round-tripping through an unprivileged write pa
 2. **Restrictive BEFORE triggers on tables written by full-row upserts should coerce, not raise** — unless the whole write is illegitimate. `NEW.col := OLD.col; return NEW;` preserves the invariant without collateral rejection. Reserve `raise exception` for writes where no part should land (e.g., the deposit group-lock, where the *edit itself* is the violation). Keep companion columns consistent: `submitted_at` travels with `status`, so coerce both.
 3. **`BEFORE UPDATE OF col` only fires when col is in the SET list.** This cuts both ways: omitting the column client-side silently skips the guard (a feature here; a hazard if the trigger is your audit trail), and adding a column to a payload can newly activate triggers you forgot existed.
 4. **Verify triggers with the application's real write shape.** `UPDATE t SET only_the_column_under_test` proves the rule in isolation and nothing about production traffic. Replay the client's actual payload — every column it sends, with realistically stale values — under the client's actual role (`set_config('request.jwt.claims', json_build_object(...)::text, true)`), and assert both the coercion (status preserved) and the acceptance (sibling edit landed). The original 10-scenario suite passed while the bug shipped; the full-row replay caught it in one statement.
-5. **Surface debounced-save failures to the UI — never just `console.error`.** The blackhole was silent for exactly as long as the tab stayed open. Explicit saves now return `{ ok, error }` through `friendlySaveError` and gate wizard navigation; residual todo 011 (`.context/compound-engineering/todos/`) tracks timeout/error surfacing for the fire-and-forget path. Anything a user types and believes saved must either confirm persistence or visibly fail.
+5. **Surface debounced-save failures to the UI — never just `console.error`.** The blackhole was silent for exactly as long as the tab stayed open. Explicit saves now return `{ ok, error }` through `friendlySaveError` and gate wizard navigation. Anything a user types and believes saved must either confirm persistence or visibly fail. *(The submit-path half of this closed 2026-07-14 via the echo verification in Solution §3.)*
+6. **A coercing guard turns rejected writes into false successes — critical transitions must verify the echoed value, not just the absence of an error.** Coerce-not-raise (rule 2) fixes collateral rejection but reopens a different hole: PostgREST reports ok for a statement the trigger silently rewrote. Any client gate on a coercible column (locking a wizard, firing a notification, flipping a banner) must `.select()` the column back and compare it against intent.
+7. **An echo mismatch is not always failure — distinguish coerced-back (retryable failure) from advanced-beyond (adopt the authoritative value).** Both look identical as `echoed !== expected` but demand opposite responses. Echo behind intent → the guard ate the write, report and retry. Echo ahead of intent → another actor legitimately moved the row; the write is fine — adopt the DB's value locally. Treating the second case as failure is worse than the original bug: it reverts authoritative server state to a stale client belief and loops forever on retry.
 
 ## Related Issues
 
+- `docs/solutions/database-issues/upsert-insert-arm-poisons-excluded-status-guard-coercion-submit-fails-2026-07-14.md`
+  — **follow-up incident caused by this fix**: the hardened guard's INSERT
+  branch coerces the insert arm of the submit path's upsert, `EXCLUDED`
+  inherits the coercion, and every "Submit for review" landed as `'draft'`
+  (the Clay Kliman bug). Lesson #4 below (replay the real write shape) must
+  include the real *statement* shape — the upsert, not just a full-row UPDATE.
 - `docs/solutions/security-issues/supabase-autoconfirm-forged-consent-email-confirmation-signup-retrofit-2026-07-13.md` — sibling incident in the same pattern family: a server-side tightening (email confirmation there, trigger strictness here) breaking a deployed `app/dashboard/store.tsx` client write path that assumed the old regime. Its "deploy code, then flip config" rule generalizes here to "ship the client payload whitelist alongside/before the guard tightening."
 - `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md` — the Management-API channel through which the fix migration and both verification suites were applied.
 - `docs/plans/2026-07-14-001-feat-dossier-wizard-plan.md` — the plan under which the guard was tightened (Unit 1) and the review that caught the collision.

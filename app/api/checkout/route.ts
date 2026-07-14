@@ -2,11 +2,18 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
+import { RESERVE_GATE_MESSAGE, canReserveSeat, hasPaidDeposit } from "@/app/dashboard/data";
 
 /**
  * S3: create a Stripe Checkout session for a child's $250 refundable seat deposit.
  * Auth: the parent's Supabase session cookie (browser) or a Bearer token (API).
  * RLS guarantees the child lookup only succeeds for the parent's own children.
+ *
+ * Approval gate (R11): checkout opens only at `offered` or later — the same
+ * canReserveSeat predicate the dashboard CTA uses, enforced here so a direct
+ * API call can't pay early. `children.status` is safe to gate on: only the
+ * staff-side move_candidate RPC can advance it (parents are limited to
+ * draft → submitted by the DB status guard).
  */
 export async function POST(req: Request) {
   try {
@@ -41,14 +48,20 @@ export async function POST(req: Request) {
         { status: 400 }
       );
 
-    const { data: existing } = await supabase
+    const { data: depositRows } = await supabase
       .from("deposits")
-      .select("id, status")
-      .eq("child_id", childId)
-      .eq("status", "paid")
-      .maybeSingle();
-    if (existing)
-      return NextResponse.json({ error: "A deposit is already paid for this child." }, { status: 400 });
+      .select("status")
+      .eq("child_id", childId);
+    const deposits = depositRows ?? [];
+    if (!canReserveSeat(child.status, deposits)) {
+      if (hasPaidDeposit(deposits))
+        return NextResponse.json(
+          { error: "A deposit is already paid for this child." },
+          { status: 400 }
+        );
+      // Not yet approved — a distinct, non-retry message the client renders verbatim.
+      return NextResponse.json({ error: RESERVE_GATE_MESSAGE }, { status: 400 });
+    }
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
     const origin = req.headers.get("origin") ?? "https://the120.school";

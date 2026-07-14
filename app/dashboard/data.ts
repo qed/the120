@@ -24,6 +24,31 @@ export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
 export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id === s);
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
+/** Gate-rejection copy shared verbatim by the checkout route and the
+ *  dashboard client, so the UI can tell "not approved yet" (don't retry)
+ *  apart from transient checkout failures (do retry). */
+export const RESERVE_GATE_MESSAGE =
+  "Your application is still under review — checkout opens once it's approved.";
+
+/** A live paid deposit exists. Always derive from the FULL deposit list —
+ *  a refund-then-repay child has multiple rows and a single find() can grab
+ *  the refunded one while a paid one exists. */
+export const hasPaidDeposit = (deposits: { status: string }[]) =>
+  deposits.some((d) => d.status === "paid");
+
+/**
+ * The seat-deposit approval gate (R11–R13), consumed by BOTH the dashboard
+ * CTA and the checkout route so UI and server can never drift. Allow-list:
+ * reservable only once staff move the child to `offered` — or any LATER
+ * status, so a candidate advanced straight to `member` before paying is
+ * never locked out — and only while no live paid deposit exists. Unknown
+ * status strings fail closed.
+ */
+export function canReserveSeat(status: string, deposits: { status: string }[]): boolean {
+  const idx = statusIndex(status as SeatStatus);
+  return idx >= statusIndex("offered") && !hasPaidDeposit(deposits);
+}
+
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 /**

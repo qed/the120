@@ -168,6 +168,7 @@ setError(
 ## Related Issues
 
 - `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md` — the Management-API playbook the E2E's SQL confirmation-simulation and the config PATCHes run through.
+- `docs/solutions/database-issues/stale-status-echo-full-row-upsert-vs-trigger-guard-coerce-not-raise-2026-07-14.md` — second incident in the same pattern family: a server-side tightening breaking the deployed `store.tsx` client write path (trigger guard vs full-row upsert; coerce-don't-raise + payload whitelisting).
 - `artifacts/roadmap.md` §S5 — the P0 resolution record (email confirmations enabled 2026-07-13, E2E-verified).
 - `docs/plans/2026-07-13-001-feat-the120-crm-plan.md` — the plan whose 11-reviewer autofix review surfaced the P0 (adversarial reviewer, confirmed live via `GET /config/auth`).
 - Implementation: `app/components/account/AccountModal.tsx`, `app/dashboard/store.tsx`, `app/dashboard/SignIn.tsx`.

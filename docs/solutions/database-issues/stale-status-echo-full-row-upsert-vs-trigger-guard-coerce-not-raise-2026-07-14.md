@@ -160,15 +160,26 @@ Also asserted: tamper to `'member'` coerced back; legit draft→submitted passes
 Coercion (item 2) fixes collateral rejection but creates a failure family the rest of this doc doesn't cover: **PostgREST reports success for a statement the trigger silently rewrote**, so `{ error: null }` no longer means "the row is what I asked for." The submit path therefore reads the status back and interprets the echo three ways — the current code (post-follow-up: status flips via a targeted UPDATE, never an upsert):
 
 ```tsx
-const { data, error } = await supabaseRef.current
-  .from("children")
-  .update(submitStatusPatch(current))   // targeted UPDATE: status/submitted_at/updated_at only
-  .eq("id", id)
-  .select("status")
-  .maybeSingle();                       // zero rows falls through to the retryable mismatch
-if (error) return { ok: false, error: error.message };
-const echoed = (data as { status: Child["status"] } | null)?.status;
-if (echoed && echoed !== current.status && echoed !== "draft") {
+const patch = submitStatusPatch(current); // hardcodes status: 'submitted' — the flip's only legitimate value
+let echoed: Child["status"] | undefined;
+try {
+  const { data, error } = await supabaseRef.current
+    .from("children")
+    .update(patch)                        // targeted UPDATE — never an upsert (see Related)
+    .eq("id", id)
+    .select("status")
+    .maybeSingle();                       // zero rows falls through to the retryable mismatch
+  if (error) throw new Error(error.message);
+  echoed = (data as { status: Child["status"] } | null)?.status;
+} catch (e) {
+  // A two-request submit can COMMIT while its response is lost — re-read
+  // once and adopt the row's real status before reporting failure.
+  const { data: reread } = await supabaseRef.current
+    .from("children").select("status").eq("id", id).maybeSingle();
+  echoed = (reread as { status: Child["status"] } | null)?.status;
+  if (!echoed || echoed === "draft") return { ok: false, error: /* message */ };
+}
+if (echoed && echoed !== patch.status && echoed !== "draft") {
   // Staff advanced the row past 'submitted' in the race window — the write
   // is fine and the row is further along than the client thinks. Adopt the
   // authoritative status: reporting failure here would revert local status
@@ -176,13 +187,15 @@ if (echoed && echoed !== current.status && echoed !== "draft") {
   applyChildren(childrenRef.current.map((c) => (c.id === id ? { ...c, status: echoed } : c)));
   return { ok: true };
 }
-if (echoed !== current.status) {
+if (echoed !== patch.status) {
   return { ok: false, error: "The submission didn't go through" };
 }
 return { ok: true };
 ```
 
 Three-way, not two-way: (1) echo matches → real success; (2) echo is `'draft'`/absent → the guard ate the write, report a retryable failure (without this check, a coerced submit shows the family a thank-you banner while the row stays a draft invisible to staff); (3) echo is a *further-along* real status → another actor legitimately moved the row first — adopt the DB's value into local state and report success. Branch (3) was a P1 catch: the first version treated any mismatch as failure, which would have reverted authoritative server state to the client's stale belief and looped forever on retry.
+
+Two hardening nuances from the follow-up pass (`3ddc8a9`, PR #6): the patch **hardcodes** `'submitted'` rather than passing local state through (a transition payload with exactly one legitimate value should not be parameterizable by a stale caller), and **an errored response is not proof the write failed** — in a two-request flow the UPDATE can commit while its response is lost, so the client re-reads once and only reports failure on a draft/absent echo.
 
 ## Why This Works
 

@@ -10,7 +10,7 @@ symptoms:
   - "children row stays status='draft', submitted_at=null after submit; updated_at advances (the rest of the row saved fine)"
   - "No error in the network response — the upsert succeeds, the status echo just comes back 'draft'"
 root_cause: logic_error
-resolution_type: code_change
+resolution_type: code_fix
 severity: high
 last_updated: 2026-07-14
 related_components:
@@ -95,6 +95,20 @@ anti-tamper control for genuine inserts. The bug was the client pushing a
 server-guarded column through a write shape whose insert arm launders the
 coercion into `EXCLUDED`.
 
+Shipped as PR #6 (fix `3dc806c`, this doc `947a27b`), with two regression
+tests pinning the contract (`childToRow` NEVER emits status/submitted_at;
+`submitStatusPatch` shape — `app/dashboard/__tests__/dossier-checklist.test.ts`)
+and an adversarial-review hardening pass (`3ddc8a9`):
+
+- `submitStatusPatch` now **hardcodes `status: 'submitted'`** — the flip's
+  only legitimate value — so a stale or misused caller can't smuggle
+  whatever local state a tab holds into the transition.
+- The targeted UPDATE **recovers a lost response**: a two-request submit
+  can commit while its response is lost, and reporting failure then would
+  unlock the wizard against a row staff already see as submitted. On an
+  errored response the client re-reads the row's status once and only
+  reports failure on a draft/absent echo.
+
 ## Why This Works
 
 The guard's contract is per-operation: INSERTs are always draft; UPDATEs may
@@ -136,4 +150,8 @@ again — with no loss of protection, since a crafted upsert at
   real write shape) was under-applied (UPDATE replayed, upsert not).
 - `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md`
   — the Management API channel used for the rolled-back production repro.
+- `docs/solutions/best-practices/atomic-claim-then-send-db-guarded-stamp-column-dedupes-best-effort-email-2026-07-14.md`
+  — sibling pattern doc that cites this incident for the same underlying
+  rule: state transitions belong in targeted UPDATEs (or RPCs); upserts are
+  for content.
 - GitHub issues: none (repo has zero issues; checked 2026-07-14).

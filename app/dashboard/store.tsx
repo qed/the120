@@ -248,6 +248,28 @@ export default function DashboardProvider({ children: reactChildren }: { childre
             data: { user },
           } = await supabaseRef.current.auth.getUser();
           if (!user) return { ok: false, error: "Not signed in" };
+          if (opts?.includeStatus) {
+            // Submit path: verify the DB's status echo. The status guard
+            // COERCES (never raises) non-service-role writes — if this upsert
+            // landed as the row's first-ever INSERT the guard silently keeps
+            // 'draft' while the write reports success, and the family would
+            // believe they applied while staff never see them. Surface that
+            // as a retryable failure instead (the retry is an UPDATE, which
+            // the guard permits for draft → submitted).
+            const { data, error } = await supabaseRef.current
+              .from("children")
+              .upsert(childToRow(current, user.id, opts))
+              .select("status")
+              .single();
+            if (error) {
+              console.error("[dashboard] save failed:", error.message);
+              return { ok: false, error: error.message };
+            }
+            if ((data as { status: string } | null)?.status !== current.status) {
+              return { ok: false, error: "The submission didn't go through" };
+            }
+            return { ok: true };
+          }
           const { error } = await supabaseRef.current
             .from("children")
             .upsert(childToRow(current, user.id, opts));

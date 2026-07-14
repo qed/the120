@@ -1,6 +1,6 @@
 "use client";
 
-import { childName, type Child } from "../data";
+import { childName, statusIndex, type Child } from "../data";
 import { stepForChecklistLabel, type WizardStepId } from "../wizard-rules";
 import { StepSection, focusRing } from "./shared";
 
@@ -42,7 +42,9 @@ export default function StepReview({
       title="Review & submit"
       hint={
         locked
-          ? "This dossier is with the review team."
+          ? statusIndex(child.status) >= statusIndex("offered")
+            ? "Your application has been accepted — reserve your seat from your dashboard."
+            : "We will review your submission and be in touch."
           : "Everything below must be checked off before the dossier can go in."
       }
     >

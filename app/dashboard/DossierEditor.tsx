@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { checklist, childName, completeness, statusMeta, workshopById, type Child } from "./data";
+import {
+  checklist,
+  childName,
+  completeness,
+  statusIndex,
+  statusMeta,
+  workshopById,
+  type Child,
+} from "./data";
 import { useDashboard } from "./store";
 import { Meter } from "./ui";
 import {
@@ -274,11 +282,20 @@ export default function DossierEditor({
               This dossier is locked for review and the seat deposit is in — contact{" "}
               <span className="text-ink">admissions@the120.school</span> for any changes.
             </>
-          ) : (
+          ) : statusIndex(child.status) >= statusIndex("offered") ? (
+            // Accepted, deposit pending — never say "we will review" here: the
+            // dashboard CTA is simultaneously asking this family to pay (R12/R13).
             <>
-              This dossier is locked for review. Your group choice can still be changed until a
-              deposit is paid — contact <span className="text-ink">admissions@the120.school</span>{" "}
-              for anything else.
+              Your application has been accepted — reserve your seat from your dashboard. Your
+              group choice can still be changed until a deposit is paid.
+            </>
+          ) : (
+            // R10 — exact confirmation copy for submitted / in_review / invited.
+            <>
+              Thank you for your interest in joining The 120. We will review your submission and
+              be in touch. Feel free to contact{" "}
+              <span className="text-ink">admissions@the120.school</span> for anything else. Your
+              group choice can still be changed until a deposit is paid.
             </>
           )}
         </p>

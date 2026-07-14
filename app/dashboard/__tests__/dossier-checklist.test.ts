@@ -140,14 +140,16 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     expect("submitted_at" in r).toBe(false);
   });
 
-  it("submitStatusPatch carries status + submitted_at for the targeted submit UPDATE", () => {
+  it("submitStatusPatch always emits 'submitted' (never passes through local state)", () => {
     const p = submitStatusPatch(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }));
     expect(p.status).toBe("submitted");
     expect(p.submitted_at).toBe("2026-07-01T00:00:00Z");
     expect(typeof p.updated_at).toBe("string");
+    // A stale/misused caller can't smuggle another status into the flip,
+    // and submitted_at is never null alongside status='submitted'.
     const draft = submitStatusPatch(child());
-    expect(draft.status).toBe("draft");
-    expect(draft.submitted_at).toBeNull();
+    expect(draft.status).toBe("submitted");
+    expect(typeof draft.submitted_at).toBe("string");
   });
 
   it("rowToChild maps group_slug and academics", () => {

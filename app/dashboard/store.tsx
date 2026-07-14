@@ -113,11 +113,14 @@ export function childToRow(c: Child, parentId: string) {
 }
 
 /** The submit path's status flip — a targeted UPDATE payload, deliberately
- *  separate from childToRow so status can never ride along in an upsert. */
+ *  separate from childToRow so status can never ride along in an upsert.
+ *  'submitted' is hardcoded: this patch has exactly one legitimate value,
+ *  and passing through local state would let a future caller silently
+ *  write whatever a stale tab holds. */
 export function submitStatusPatch(c: Child) {
   return {
-    status: c.status,
-    submitted_at: c.submittedAt ?? null,
+    status: "submitted" as const,
+    submitted_at: c.submittedAt ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }
@@ -274,18 +277,35 @@ export default function DashboardProvider({ children: reactChildren }: { childre
             // non-service-role writes, so a silently-kept status must surface
             // as a retryable failure, not fake success. maybeSingle: zero
             // rows (RLS-invisible / missing) falls through to the mismatch.
-            const { data, error } = await supabaseRef.current
-              .from("children")
-              .update(submitStatusPatch(current))
-              .eq("id", id)
-              .select("status")
-              .maybeSingle();
-            if (error) {
-              console.error("[dashboard] save failed:", error.message);
-              return { ok: false, error: error.message };
+            const patch = submitStatusPatch(current);
+            let echoed: Child["status"] | undefined;
+            try {
+              const { data, error } = await supabaseRef.current
+                .from("children")
+                .update(patch)
+                .eq("id", id)
+                .select("status")
+                .maybeSingle();
+              if (error) throw new Error(error.message);
+              echoed = (data as { status: Child["status"] } | null)?.status;
+            } catch (e) {
+              // Two-request submit hazard: the UPDATE can commit while its
+              // response is lost. Reporting failure would unlock the wizard
+              // against a row staff already see as submitted — re-read once
+              // and adopt the row's real status before giving up.
+              const message = e instanceof Error ? e.message : "Could not save.";
+              console.error("[dashboard] save failed:", message);
+              const { data: reread } = await supabaseRef.current
+                .from("children")
+                .select("status")
+                .eq("id", id)
+                .maybeSingle();
+              echoed = (reread as { status: Child["status"] } | null)?.status;
+              if (!echoed || echoed === "draft") {
+                return { ok: false, error: message };
+              }
             }
-            const echoed = (data as { status: Child["status"] } | null)?.status;
-            if (echoed && echoed !== current.status && echoed !== "draft") {
+            if (echoed && echoed !== patch.status && echoed !== "draft") {
               // Staff advanced the row past 'submitted' in the race window —
               // the write is fine and the row is further along than the
               // client thinks. Adopt the authoritative status: reporting
@@ -296,7 +316,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
               );
               return { ok: true };
             }
-            if (echoed !== current.status) {
+            if (echoed !== patch.status) {
               return { ok: false, error: "The submission didn't go through" };
             }
             return { ok: true };

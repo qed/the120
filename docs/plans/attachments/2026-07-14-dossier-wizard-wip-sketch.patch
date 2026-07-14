@@ -1,0 +1,98 @@
+diff --git a/app/dashboard/data.ts b/app/dashboard/data.ts
+index 47e39cf..1ab3c70 100644
+--- a/app/dashboard/data.ts
++++ b/app/dashboard/data.ts
+@@ -27,6 +27,35 @@ export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
+ export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+ export const SUBJECTS = ["Math", "Reading", "Writing", "Science", "History"] as const;
+ 
++/* ---------- Academics (wizard step 3) ---------- */
++
++export const ACADEMIC_SUBJECTS = [
++  "Fast Math",
++  "Math",
++  "Science",
++  "Reading",
++  "Writing",
++  "Language",
++  "Vocabulary",
++] as const;
++
++export const ACADEMIC_PLANS = [
++  { id: "catch-up", label: "Catch-Up", blurb: "Close the gaps and get back to grade level with confidence." },
++  { id: "reach-ahead", label: "Reach Ahead", blurb: "Accelerate past grade level — mastery with no ceiling." },
++  { id: "get-solid", label: "Get Solid", blurb: "Lock in fundamentals until they're automatic." },
++] as const;
++
++export type AcademicPlan = (typeof ACADEMIC_PLANS)[number]["id"];
++
++export type Academic = {
++  subject: string;
++  plan: AcademicPlan | "";
++  /** Optional: "What do you want to accomplish with this Academic Project" */
++  goal: string;
++};
++
++export const academicComplete = (a: Academic) => Boolean(a.subject && a.plan);
++
+ export type Workshop = {
+   id: string;
+   title: string;
+@@ -445,7 +474,11 @@ export type Child = {
+   birthYear: string;
+   currentSchool: string;
+   photo?: string; // data URL (V1); real uploads → Supabase storage (V2)
+-  // Academic picks (1–2 subjects) + optional shared scores
++  // Group (one of the five — site.ts `groups`)
++  groupSlug: string;
++  // Academics (1–2 subject+plan entries); `subjects` mirrors the subject
++  // names for the CRM + preview and stays the legacy source for old rows.
++  academics: Academic[];
+   subjects: string[];
+   testScores: string;
+   // Workshop selections
+@@ -478,6 +511,8 @@ export function emptyChild(id: string): Child {
+     grade: "",
+     birthYear: "",
+     currentSchool: "",
++    groupSlug: "",
++    academics: [],
+     subjects: [],
+     testScores: "",
+     workshopIds: [],
+@@ -488,18 +523,31 @@ export function emptyChild(id: string): Child {
+   };
+ }
+ 
+-/** Dossier checklist drives the per-child completeness meter (§13.3.2). */
++/** Dossier checklist drives the per-child completeness meter (§13.3.2).
++ *  Workshops apply to Scholars only — every other group skips that step.
++ *  Mirrored by `dossierCompleteness` in app/lib/nurture/rules.ts — keep in sync. */
+ export function checklist(c: Child): { label: string; done: boolean }[] {
+-  return [
++  const items = [
+     { label: "Name", done: !!c.firstName.trim() && !!c.lastName.trim() },
+     { label: "Grade", done: c.grade !== "" },
+     { label: "Birth year", done: /^\d{4}$/.test(c.birthYear.trim()) },
+     { label: "Current school", done: !!c.currentSchool.trim() },
+-    { label: "1–2 subjects to accelerate", done: c.subjects.length >= 1 },
+-    { label: "A workshop of interest", done: c.workshopIds.length >= 1 },
++    { label: "A group", done: !!c.groupSlug },
++    {
++      label: "Academics (a subject + plan)",
++      // Legacy rows predate academics — their subject picks still count.
++      done: c.academics.some(academicComplete) || c.subjects.length >= 1,
++    },
+     { label: "The kid's interests", done: c.interests.trim().length >= 3 },
+     { label: "A project pitch", done: c.projectPitch.trim().length >= 10 },
+   ];
++  if (c.groupSlug === "scholars") {
++    items.splice(6, 0, {
++      label: "A workshop of interest",
++      done: c.workshopIds.length >= 1,
++    });
++  }
++  return items;
+ }
+ 
+ export function completeness(c: Child): number {

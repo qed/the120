@@ -9,7 +9,7 @@ import {
   parseAcademics,
   planLabel,
 } from "../data";
-import { type ChildRow, childToRow, rowToChild } from "../store";
+import { type ChildRow, childToRow, rowToChild, submitStatusPatch } from "../store";
 
 /** A complete non-Scholars child — every checklist item satisfied. */
 const child = (overrides: Partial<Child> = {}): Child => ({
@@ -134,21 +134,18 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     expect(r.academics).toEqual([{ subject: "Math", plan: "reach-ahead", goal: "Finish grade 7 math" }]);
   });
 
-  it("childToRow omits status/submitted_at by default (never collides with the DB's one-way guard)", () => {
+  it("childToRow NEVER emits status/submitted_at — upserts must not carry them (the guard's INSERT arm poisons EXCLUDED.status to 'draft')", () => {
     const r = childToRow(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }), "parent-1");
     expect("status" in r).toBe(false);
     expect("submitted_at" in r).toBe(false);
   });
 
-  it("childToRow includeStatus: true emits status + submitted_at (explicit submit only)", () => {
-    const r = childToRow(
-      child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }),
-      "parent-1",
-      { includeStatus: true }
-    );
-    expect(r.status).toBe("submitted");
-    expect(r.submitted_at).toBe("2026-07-01T00:00:00Z");
-    const draft = childToRow(child(), "parent-1", { includeStatus: true });
+  it("submitStatusPatch carries status + submitted_at for the targeted submit UPDATE", () => {
+    const p = submitStatusPatch(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }));
+    expect(p.status).toBe("submitted");
+    expect(p.submitted_at).toBe("2026-07-01T00:00:00Z");
+    expect(typeof p.updated_at).toBe("string");
+    const draft = submitStatusPatch(child());
     expect(draft.status).toBe("draft");
     expect(draft.submitted_at).toBeNull();
   });

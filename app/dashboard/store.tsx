@@ -80,11 +80,7 @@ export function rowToChild(r: ChildRow): Child {
   };
 }
 
-export function childToRow(
-  c: Child,
-  parentId: string,
-  opts?: { includeStatus?: boolean }
-) {
+export function childToRow(c: Child, parentId: string) {
   return {
     id: c.id,
     parent_id: parentId,
@@ -105,13 +101,23 @@ export function childToRow(
     interests: c.interests,
     project_pitch: c.projectPitch,
     portfolio_links: c.portfolioLinks,
-    // status/submitted_at are sent ONLY on an explicit submit (includeStatus).
-    // Ordinary saves never round-trip status, so a stale local status can't
-    // collide with the DB's one-way status guard after staff advance the
-    // child. New-row inserts default to 'draft' in the DB.
-    ...(opts?.includeStatus
-      ? { status: c.status, submitted_at: c.submittedAt ?? null }
-      : {}),
+    // status/submitted_at are NEVER serialized into an upsert row. A
+    // PostgREST upsert is INSERT ... ON CONFLICT DO UPDATE; the status
+    // guard's BEFORE INSERT branch coerces any non-draft status on the
+    // proposed row, and Postgres reflects BEFORE INSERT trigger effects in
+    // EXCLUDED — so an upsert carrying status='submitted' lands as 'draft'
+    // even when the row already exists. The explicit submit writes status
+    // via submitStatusPatch in a targeted UPDATE instead (enqueueWrite).
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/** The submit path's status flip — a targeted UPDATE payload, deliberately
+ *  separate from childToRow so status can never ride along in an upsert. */
+export function submitStatusPatch(c: Child) {
+  return {
+    status: c.status,
+    submitted_at: c.submittedAt ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -248,18 +254,32 @@ export default function DashboardProvider({ children: reactChildren }: { childre
           } = await supabaseRef.current.auth.getUser();
           if (!user) return { ok: false, error: "Not signed in" };
           if (opts?.includeStatus) {
-            // Submit path: verify the DB's status echo. The status guard
-            // COERCES (never raises) non-service-role writes — if this upsert
-            // landed as the row's first-ever INSERT the guard silently keeps
-            // 'draft' while the write reports success, and the family would
-            // believe they applied while staff never see them. Surface that
-            // as a retryable failure instead (the retry is an UPDATE, which
-            // the guard permits for draft → submitted).
+            // Submit path: two writes, deliberately NOT one upsert. An upsert
+            // carrying status='submitted' ALWAYS lands as 'draft': its INSERT
+            // arm fires the status guard's BEFORE INSERT coercion on the
+            // proposed row, EXCLUDED inherits the coerced 'draft', and the
+            // DO UPDATE writes that back even when the row already exists —
+            // so every retry failed identically (the Clay Kliman bug).
+            // Instead: persist content with the ordinary status-free upsert,
+            // then flip status in a targeted UPDATE, which fires only the
+            // guard's UPDATE branch (draft → submitted is permitted).
+            const { error: rowError } = await supabaseRef.current
+              .from("children")
+              .upsert(childToRow(current, user.id));
+            if (rowError) {
+              console.error("[dashboard] save failed:", rowError.message);
+              return { ok: false, error: rowError.message };
+            }
+            // Verify the DB's status echo: the guard COERCES (never raises)
+            // non-service-role writes, so a silently-kept status must surface
+            // as a retryable failure, not fake success. maybeSingle: zero
+            // rows (RLS-invisible / missing) falls through to the mismatch.
             const { data, error } = await supabaseRef.current
               .from("children")
-              .upsert(childToRow(current, user.id, opts))
+              .update(submitStatusPatch(current))
+              .eq("id", id)
               .select("status")
-              .single();
+              .maybeSingle();
             if (error) {
               console.error("[dashboard] save failed:", error.message);
               return { ok: false, error: error.message };
@@ -283,7 +303,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
           }
           const { error } = await supabaseRef.current
             .from("children")
-            .upsert(childToRow(current, user.id, opts));
+            .upsert(childToRow(current, user.id));
           if (error) {
             console.error("[dashboard] save failed:", error.message);
             return { ok: false, error: error.message };
@@ -311,7 +331,8 @@ export default function DashboardProvider({ children: reactChildren }: { childre
 
   /** Explicit awaited save (wizard Next/Submit): flush any pending debounce
    *  for this child and enqueue the write now, so the caller can gate on the
-   *  result. `includeStatus` (submit only) adds status + submitted_at. */
+   *  result. `includeStatus` (submit only) additionally flips status +
+   *  submitted_at via a targeted UPDATE after the content upsert. */
   const saveChildNow = useCallback(
     async (
       id: string,

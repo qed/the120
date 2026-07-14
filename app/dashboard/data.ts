@@ -24,6 +24,31 @@ export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
 export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id === s);
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
+/** Gate-rejection copy shared by the checkout route and the dashboard client.
+ *  The client renders the route's error verbatim, so this exact sentence (which
+ *  deliberately doesn't suggest retrying) is what a gated family sees. */
+export const RESERVE_GATE_MESSAGE =
+  "Your application is still under review — checkout opens once it's approved.";
+
+/** A live paid deposit exists. Always derive from the FULL deposit list —
+ *  a refund-then-repay child has multiple rows and a single find() can grab
+ *  the refunded one while a paid one exists. */
+export const hasPaidDeposit = (deposits: { status: string }[]) =>
+  deposits.some((d) => d.status === "paid");
+
+/**
+ * The seat-deposit approval gate (R11–R13), consumed by BOTH the dashboard
+ * CTA and the checkout route so UI and server can never drift. Allow-list:
+ * reservable only once staff move the child to `offered` — or any LATER
+ * status, so a candidate advanced straight to `member` before paying is
+ * never locked out — and only while no live paid deposit exists. Unknown
+ * status strings fail closed.
+ */
+export function canReserveSeat(status: string, deposits: { status: string }[]): boolean {
+  const idx = statusIndex(status as SeatStatus);
+  return idx >= statusIndex("offered") && !hasPaidDeposit(deposits);
+}
+
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 /**
@@ -112,8 +137,10 @@ export const ADVISORS: Advisor[] = [
 
 /** The 120's workshop roster — forked from GT's Fall 2026 offerings and
  *  curated for The 120 community (last diffed against the live
- *  community.gt.school/workshops 2026-07-14: +5 K–2 workshops, audition
- *  flags on Competition, Lawrence Bernstein leading recreational chess). */
+ *  community.gt.school/workshops 2026-07-14: audition flags on Competition,
+ *  Lawrence Bernstein leading recreational chess). The 120 runs grades 3+,
+ *  so GT's K–2-only workshops live in RETIRED_WORKSHOPS below — resolvable
+ *  for display on legacy selections, never selectable. */
 export const WORKSHOPS: Workshop[] = [
   {
     id: "become-the-character",
@@ -257,15 +284,6 @@ export const WORKSHOPS: Workshop[] = [
     grades: "3–5",
     length: "60 min · 2×/week",
     description: "Create original content, use AI feedback to improve it, and learn how creators capture attention.",
-  },
-  {
-    id: "the-peace-table",
-    title: "The Peace Table",
-    advisor: "Andreea Musat",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
   },
   {
     id: "hidden-stories",
@@ -430,42 +448,6 @@ export const WORKSHOPS: Workshop[] = [
     description: "Design an original attraction, prove the guest-flow and budget math, and field-test it on an earned Disney trip.",
   },
   {
-    id: "board-game-masters",
-    title: "Board Game Masters",
-    advisor: "Ruchi Shukla",
-    track: "Sciences",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
-  },
-  {
-    id: "food-lab-challenge",
-    title: "Food Lab Challenge",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
-  },
-  {
-    id: "passport-mission",
-    title: "Passport Mission",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
-  },
-  {
-    id: "toy-inventors",
-    title: "Toy Inventors",
-    advisor: "Ruchi Shukla",
-    track: "Humanities",
-    grades: "K–2",
-    length: "45 min · 2×/week",
-    description: "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
-  },
-  {
     id: "board-game-designer",
     title: "Board Game Designer",
     advisor: "Ruchi Shukla",
@@ -548,30 +530,72 @@ export const WORKSHOPS: Workshop[] = [
   },
 ];
 
-export const workshopById = (id: string) => WORKSHOPS.find((w) => w.id === id);
-
 /**
- * Parse a catalog `grades` display string ("K–2", "3–5", "K–8+") into a
- * numeric range for the wizard's grade filter. K = 0; a trailing "+" means
- * "and up" (max 12). Derived from the display string at module load rather
- * than hand-annotated per entry, so the two can never drift. The catalog
- * uses an en-dash (–); a plain hyphen is tolerated too.
+ * Retired catalog entries (GT's K–2-only workshops — The 120 runs grades 3+).
+ * Tombstones only: never selectable, but `workshopById` still resolves them
+ * so legacy selections keep rendering titles (CRM detail, printable preview,
+ * wizard chips) instead of degrading to raw slugs.
  */
-export function parseGradeRange(grades: string): { gradeMin: number; gradeMax: number } {
-  const parts = grades.split(/[–-]/);
-  const num = (s: string) => (s.trim().toUpperCase().startsWith("K") ? 0 : parseInt(s, 10));
-  const last = parts[parts.length - 1].trim();
-  return {
-    gradeMin: num(parts[0]),
-    gradeMax: last.endsWith("+") ? 12 : num(last),
-  };
-}
+export const RETIRED_WORKSHOPS: Workshop[] = [
+  {
+    id: "the-peace-table",
+    title: "The Peace Table",
+    advisor: "Andreea Musat",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
+  },
+  {
+    id: "board-game-masters",
+    title: "Board Game Masters",
+    advisor: "Ruchi Shukla",
+    track: "Sciences",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
+  },
+  {
+    id: "food-lab-challenge",
+    title: "Food Lab Challenge",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
+  },
+  {
+    id: "passport-mission",
+    title: "Passport Mission",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
+  },
+  {
+    id: "toy-inventors",
+    title: "Toy Inventors",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
+  },
+];
 
-/** Precomputed once at module load — one parse per catalog entry. */
-const GRADE_RANGES = new Map(WORKSHOPS.map((w) => [w.id, parseGradeRange(w.grades)]));
+/** Resolve a workshop id for display: live catalog first, then retired
+ *  tombstones. Selectable UIs must iterate WORKSHOPS, never this lookup. */
+export const workshopById = (id: string) =>
+  WORKSHOPS.find((w) => w.id === id) ?? RETIRED_WORKSHOPS.find((w) => w.id === id);
 
-export const workshopGradeRange = (w: Workshop) =>
-  GRADE_RANGES.get(w.id) ?? parseGradeRange(w.grades);
+/** A stored selection satisfies the Scholars checklist item only when at
+ *  least one pick is still in the LIVE catalog — retired K–2 ids must not
+ *  count, or the meter would read 100% while the wizard's sanitized view
+ *  shows zero selections. Shared by all three lockstep completeness mirrors
+ *  (this checklist, nurture rules, CRM reviews-rules) so they can't drift. */
+export const hasLiveWorkshopPick = (ids: string[]) =>
+  ids.some((id) => WORKSHOPS.some((w) => w.id === id));
 
 export type Child = {
   id: string;
@@ -588,7 +612,6 @@ export type Child = {
   academics: Academic[];
   // Legacy subject picks — read-only fallback, no longer written (cutover)
   subjects: string[];
-  testScores: string;
   // Workshop selections
   workshopIds: string[];
   // Project pitch & interests
@@ -622,7 +645,6 @@ export function emptyChild(id: string): Child {
     groupSlug: "",
     academics: [],
     subjects: [],
-    testScores: "",
     workshopIds: [],
     interests: "",
     projectPitch: "",
@@ -655,7 +677,7 @@ export function checklist(c: Child): { label: string; done: boolean }[] {
     },
   ];
   if (c.groupSlug === "scholars") {
-    items.push({ label: "A workshop of interest", done: c.workshopIds.length >= 1 });
+    items.push({ label: "A workshop of interest", done: hasLiveWorkshopPick(c.workshopIds) });
   }
   items.push(
     { label: "The kid's interests", done: c.interests.trim().length >= 3 },

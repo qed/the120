@@ -3,7 +3,7 @@
  * No React in here — everything is unit-testable in the node vitest env.
  */
 
-import { checklist, workshopGradeRange, type Child, type Workshop } from "./data";
+import { WORKSHOPS, checklist, type Child, type Workshop } from "./data";
 
 /* ---------- steps ---------- */
 
@@ -88,37 +88,35 @@ export function resolveStep(current: WizardStepId, groupSlug: string): WizardSte
   return stepsForGroup(groupSlug).includes(current) ? current : "project";
 }
 
-/* ---------- workshops filter (Unit 6) ---------- */
+/* ---------- workshops filter + selection rules (Unit 6, R5–R9) ---------- */
 
-export type TrackFilter = "all" | "Sciences" | "Humanities" | "Competition";
-export type GradeBandId = "all" | "k-2" | "3-5" | "6-8";
+/** One track always active — "All tracks" was removed (R7) so the list stays
+ *  short; grade filtering is gone entirely (R6, The 120 runs grades 3+). */
+export type TrackFilter = "Sciences" | "Humanities" | "Competition";
 
 export const TRACK_FILTERS: { id: TrackFilter; label: string }[] = [
-  { id: "all", label: "All tracks" },
   { id: "Sciences", label: "Sciences" },
   { id: "Humanities", label: "Humanities" },
   { id: "Competition", label: "Competition" },
 ];
 
-/** Filter bands mirror GT's. A workshop matches a band when its parsed
- *  [gradeMin, gradeMax] range overlaps the band's range (K = 0, "8+" = 12). */
-export const GRADE_BANDS: { id: GradeBandId; label: string; min: number; max: number }[] = [
-  { id: "all", label: "All grades", min: 0, max: 12 },
-  { id: "k-2", label: "K–2", min: 0, max: 2 },
-  { id: "3-5", label: "3–5", min: 3, max: 5 },
-  { id: "6-8", label: "6–8", min: 6, max: 8 },
-];
+export const DEFAULT_TRACK: TrackFilter = "Sciences";
 
-export function workshopMatches(w: Workshop, track: TrackFilter, band: GradeBandId): boolean {
-  if (track !== "all" && w.track !== track) return false;
-  const b = GRADE_BANDS.find((x) => x.id === band);
-  if (!b) return false;
-  const { gradeMin, gradeMax } = workshopGradeRange(w);
-  return gradeMin <= b.max && gradeMax >= b.min;
+export const filterWorkshops = (workshops: Workshop[], track: TrackFilter): Workshop[] =>
+  workshops.filter((w) => w.track === track);
+
+/** Interest-gathering cap (R8): pick up to 3. A UI/selection constraint only —
+ *  deliberately NOT a checklist/completeness rule (the three lockstep mirrors
+ *  keep their ≥1 minimum; raising it there would break parity). */
+export const WORKSHOP_MAX = 3;
+
+/**
+ * Sanitize a stored selection against the live catalog (R5/R8): drop ids that
+ * no longer exist in WORKSHOPS (retired K–2 entries, junk) and trim to the
+ * cap. Applied in-memory where the selection is editable — never as an eager
+ * write on load; the sanitized set persists through the next normal save.
+ */
+export function sanitizeWorkshopSelection(ids: string[]): string[] {
+  const live = new Set(WORKSHOPS.map((w) => w.id));
+  return ids.filter((id) => live.has(id)).slice(0, WORKSHOP_MAX);
 }
-
-export const filterWorkshops = (
-  workshops: Workshop[],
-  track: TrackFilter,
-  band: GradeBandId
-): Workshop[] => workshops.filter((w) => workshopMatches(w, track, band));

@@ -14,7 +14,7 @@ import {
   REVIEW_STATUS_LABELS,
   type ReviewStatus,
 } from "@/app/crm/lib/constants";
-import { reviewPillColors } from "@/app/crm/lib/reviews-rules";
+import { queueCounts, reviewPillColors } from "@/app/crm/lib/reviews-rules";
 import { fmtDay } from "@/app/crm/lib/dates";
 import type { DossierItem } from "@/app/crm/lib/queries";
 import { Chip } from "@/app/crm/components/pipeline/atoms";
@@ -57,6 +57,9 @@ export default function QueueList({
   const visible = filter
     ? items.filter((i) => i.reviewStatus === filter)
     : items;
+  // R14: badge = everyone still gated from the deposit (pre-`offered`);
+  // per-chip counts break the total down by stage.
+  const { needsReview, byStage } = queueCounts(items);
 
   return (
     <div className="flex flex-col gap-4">
@@ -64,9 +67,16 @@ export default function QueueList({
         <h1 className="font-serif text-[28px] font-normal tracking-[-0.01em] text-crm-ink">
           Dossier queue
         </h1>
-        <span className="font-mono text-[10.5px] uppercase text-crm-faint">
-          {visible.length} of {items.length}{" "}
-          {items.length === 1 ? "dossier" : "dossiers"}
+        <span className="flex items-baseline gap-2.5">
+          {needsReview > 0 && (
+            <span className="whitespace-nowrap rounded-full bg-crm-red px-2.5 py-[3px] font-mono text-[10px] uppercase tracking-[0.06em] text-white">
+              Needs review · {needsReview}
+            </span>
+          )}
+          <span className="whitespace-nowrap font-mono text-[10.5px] uppercase text-crm-faint">
+            {visible.length} of {items.length}{" "}
+            {items.length === 1 ? "dossier" : "dossiers"}
+          </span>
         </span>
       </div>
 
@@ -81,6 +91,7 @@ export default function QueueList({
             onClick={() => setFilter(filter === stage ? null : stage)}
           >
             {REVIEW_STATUS_LABELS[stage]}
+            {byStage[stage] > 0 ? ` · ${byStage[stage]}` : ""}
           </Chip>
         ))}
       </div>

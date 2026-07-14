@@ -67,26 +67,32 @@ export default function StepAcademics({ child, set, n }: StepProps) {
               )}
             </div>
 
-            {/* Subject pills + custom "Other" (R9b) */}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {ACADEMIC_SUBJECTS.map((s) => {
-                const on = entry.subject === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => updateEntry(i, { subject: on ? "" : s })}
-                    aria-pressed={on}
-                    className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors ${focusRing} ${
-                      on
-                        ? "border-red bg-red text-white"
-                        : "border-line-strong text-ink-soft hover:border-ink"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                );
-              })}
+            {/* Subject pills in two rows (R4): math/science subjects first,
+                language subjects second — ACADEMIC_SUBJECTS is ordered to
+                match, so the rows are plain slices. Custom "Other" below. */}
+            <div className="mt-3 space-y-2">
+              {[ACADEMIC_SUBJECTS.slice(0, 3), ACADEMIC_SUBJECTS.slice(3)].map((row, r) => (
+                <div key={r} className="flex flex-wrap gap-2">
+                  {row.map((s) => {
+                    const on = entry.subject === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => updateEntry(i, { subject: on ? "" : s })}
+                        aria-pressed={on}
+                        className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors ${focusRing} ${
+                          on
+                            ? "border-red bg-red text-white"
+                            : "border-line-strong text-ink-soft hover:border-ink"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
             <input
               value={isListedSubject(entry.subject) ? "" : entry.subject}
@@ -153,14 +159,6 @@ export default function StepAcademics({ child, set, n }: StepProps) {
             + Add another subject
           </button>
         )}
-
-        <TextArea
-          label="Test scores / assessments (optional)"
-          value={child.testScores}
-          onChange={(v) => set({ testScores: v })}
-          placeholder="MAP, CCAT, recent report cards — anything you'd like to share."
-          rows={3}
-        />
       </div>
     </StepSection>
   );

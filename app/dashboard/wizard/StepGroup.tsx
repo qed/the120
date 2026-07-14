@@ -2,17 +2,27 @@
 
 import { useState } from "react";
 import { BOOKING_URL, groups } from "@/app/lib/site";
+import { sanitizeWorkshopSelection } from "../wizard-rules";
 import { StepSection, focusRing, type StepProps } from "./shared";
 
 /**
- * Unit 4 — the binding group pick. Five cards from site.ts as a semantic
- * radiogroup (buttons carry role="radio", so Enter/Space work natively and
- * every card is keyboard-reachable). No availability states — there are no
- * per-group caps, only the global 120 pool (R16).
+ * The group pick (R1/R2). Five compact cards from site.ts as a semantic
+ * radiogroup — all five visible on one mobile screen. Each card is a compact
+ * select row (name + category + check circle); the long blurb/body collapses
+ * into a native <details>/<summary> disclosure (the Faq.tsx idiom) that is a
+ * SIBLING of the radio button, never nested inside it — expanding details can
+ * never change the selection. No availability states — there are no
+ * per-group caps, only the global 120 pool.
  */
 export default function StepGroup({ child, set, n }: StepProps) {
   // Switch-away-from-Scholars confirm (R6): nothing mutates until confirmed.
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
+
+  // Confirm against the SANITIZED count — the picks the parent has actually
+  // seen as selected in the workshops step. A legacy row holding only retired
+  // ids shows zero selections there, so warning about clearing them would
+  // read as nonsense (the clear still wipes the whole stored array either way).
+  const visiblePicks = sanitizeWorkshopSelection(child.workshopIds).length;
 
   const pick = (slug: string) => {
     if (slug === child.groupSlug) {
@@ -20,7 +30,7 @@ export default function StepGroup({ child, set, n }: StepProps) {
       setPendingSwitch(null);
       return;
     }
-    if (child.groupSlug === "scholars" && child.workshopIds.length > 0) {
+    if (child.groupSlug === "scholars" && visiblePicks > 0) {
       setPendingSwitch(slug);
       return;
     }
@@ -39,39 +49,58 @@ export default function StepGroup({ child, set, n }: StepProps) {
     <StepSection
       n={n}
       title="Group"
-      hint="Pick the group where your kid belongs. This seeds their review — and stays editable until a deposit is paid."
+      hint="Pick a group that makes sense for your kid. This can be changed at any time."
     >
-      <div role="radiogroup" aria-label="Choose a group" className="grid gap-3 sm:grid-cols-2">
+      <div role="radiogroup" aria-label="Choose a group" className="grid gap-2 sm:grid-cols-2">
         {groups.map((g) => {
           const on = child.groupSlug === g.slug;
           return (
-            <button
+            <div
               key={g.slug}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => pick(g.slug)}
-              className={`rounded-xl border p-4 text-left transition-colors ${focusRing} ${
-                on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
+              className={`rounded-xl border transition-colors ${
+                on ? "border-red bg-red/5" : "border-line-strong bg-white"
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-display text-sm font-bold text-ink">{g.name}</span>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => pick(g.slug)}
+                className={`flex w-full items-center justify-between gap-2 rounded-t-xl p-3 text-left ${focusRing} ${
+                  on ? "" : "hover:bg-paper-2"
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block font-display text-sm font-bold text-ink">{g.name}</span>
+                  <span className="block font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted">
+                    {g.category}
+                  </span>
+                </span>
                 <span
                   aria-hidden
-                  className={`mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full border text-[0.55rem] ${
+                  className={`flex h-4 w-4 flex-none items-center justify-center rounded-full border text-[0.55rem] ${
                     on ? "border-red bg-red text-white" : "border-line-strong text-transparent"
                   }`}
                 >
                   ✓
                 </span>
-              </div>
-              <p className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-muted">
-                {g.category}
-              </p>
-              <p className="mt-2 text-xs font-semibold leading-5 text-ink">{g.blurb}</p>
-              <p className="mt-1.5 text-xs leading-5 text-ink-soft">{g.body}</p>
-            </button>
+              </button>
+              {/* Disclosure is a sibling of the radio — reading never selects. */}
+              <details className="group border-t border-line/60 px-3">
+                <summary
+                  className={`cursor-pointer list-none rounded py-1.5 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted hover:text-ink ${focusRing}`}
+                >
+                  Details{" "}
+                  <span aria-hidden className="inline-block transition-transform group-open:rotate-90">
+                    ›
+                  </span>
+                </summary>
+                <div className="pb-3">
+                  <p className="text-xs font-semibold leading-5 text-ink">{g.blurb}</p>
+                  <p className="mt-1.5 text-xs leading-5 text-ink-soft">{g.body}</p>
+                </div>
+              </details>
+            </div>
           );
         })}
       </div>
@@ -79,8 +108,8 @@ export default function StepGroup({ child, set, n }: StepProps) {
       {pendingSwitch && (
         <div className="mt-4 rounded-xl border border-red bg-red/5 p-4">
           <p className="text-sm font-semibold text-ink">
-            Switching from The Scholars clears {child.workshopIds.length} workshop selection
-            {child.workshopIds.length === 1 ? "" : "s"}.
+            Switching from The Scholars clears {visiblePicks} workshop selection
+            {visiblePicks === 1 ? "" : "s"}.
           </p>
           <p className="mt-1 text-xs leading-5 text-ink-soft">
             Workshops belong to The Scholars — you can always switch back later, but the picks

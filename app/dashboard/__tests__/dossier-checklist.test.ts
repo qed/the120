@@ -2,15 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   type Academic,
   type Child,
-  WORKSHOPS,
   academicComplete,
   checklist,
   completeness,
   emptyChild,
   parseAcademics,
-  parseGradeRange,
   planLabel,
-  workshopGradeRange,
 } from "../data";
 import { type ChildRow, childToRow, rowToChild } from "../store";
 
@@ -108,37 +105,6 @@ describe("completeness at the >80% stall-nudge boundary", () => {
   });
 });
 
-describe("parseGradeRange", () => {
-  it("parses every catalog entry to a sane range", () => {
-    for (const w of WORKSHOPS) {
-      const { gradeMin, gradeMax } = parseGradeRange(w.grades);
-      expect(Number.isInteger(gradeMin), `${w.id}: min ${gradeMin}`).toBe(true);
-      expect(Number.isInteger(gradeMax), `${w.id}: max ${gradeMax}`).toBe(true);
-      expect(gradeMin, `${w.id}: min ≥ 0`).toBeGreaterThanOrEqual(0);
-      expect(gradeMax, `${w.id}: max ≤ 12`).toBeLessThanOrEqual(12);
-      expect(gradeMin, `${w.id}: min ≤ max`).toBeLessThanOrEqual(gradeMax);
-    }
-  });
-
-  it("spot-checks the catalog's range shapes (K = 0, trailing + = 12)", () => {
-    expect(parseGradeRange("K–8+")).toEqual({ gradeMin: 0, gradeMax: 12 });
-    expect(parseGradeRange("3–5")).toEqual({ gradeMin: 3, gradeMax: 5 });
-    expect(parseGradeRange("6–8+")).toEqual({ gradeMin: 6, gradeMax: 12 });
-    expect(parseGradeRange("K–4")).toEqual({ gradeMin: 0, gradeMax: 4 });
-    expect(parseGradeRange("2–5")).toEqual({ gradeMin: 2, gradeMax: 5 });
-  });
-
-  it("tolerates a plain hyphen alongside the catalog's en-dash", () => {
-    expect(parseGradeRange("3-5")).toEqual({ gradeMin: 3, gradeMax: 5 });
-    expect(parseGradeRange("K-8+")).toEqual({ gradeMin: 0, gradeMax: 12 });
-  });
-
-  it("workshopGradeRange serves the precomputed range for catalog entries", () => {
-    const chess = WORKSHOPS.find((w) => w.id === "competitive-chess")!;
-    expect(workshopGradeRange(chess)).toEqual({ gradeMin: 0, gradeMax: 12 });
-  });
-});
-
 describe("store row mapping (group_slug / academics cutover)", () => {
   const row = (overrides: Partial<ChildRow> = {}): ChildRow => ({
     id: "kid-1",
@@ -151,7 +117,6 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     group_slug: "scholars",
     academics: [{ subject: "Math", plan: "reach-ahead", goal: "Finish grade 7 math" }],
     subjects: ["Math"],
-    test_scores: "",
     workshop_ids: ["competitive-chess"],
     interests: "robots",
     project_pitch: "Build a difference engine.",

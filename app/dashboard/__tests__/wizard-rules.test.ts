@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { WORKSHOPS, checklist, emptyChild, type Child, type Workshop } from "../data";
 import {
-  GRADE_BANDS,
+  RETIRED_WORKSHOPS,
+  WORKSHOPS,
+  checklist,
+  emptyChild,
+  hasLiveWorkshopPick,
+  workshopById,
+  type Child,
+} from "../data";
+import {
+  DEFAULT_TRACK,
+  TRACK_FILTERS,
+  WORKSHOP_MAX,
   filterWorkshops,
   firstIncompleteStep,
   resolveStep,
+  sanitizeWorkshopSelection,
   stepForChecklistLabel,
   stepsForGroup,
-  workshopMatches,
 } from "../wizard-rules";
 
 /** A complete non-Scholars draft — every checklist item satisfied. */
@@ -105,71 +115,89 @@ describe("resolveStep (current step invalid after a group switch)", () => {
   });
 });
 
-describe("workshop filter predicate (Unit 6)", () => {
-  const ids = (ws: Workshop[]) => ws.map((w) => w.id).sort();
+describe("workshop track filter (R5–R7)", () => {
+  const RETIRED_IDS = [
+    "the-peace-table",
+    "board-game-masters",
+    "food-lab-challenge",
+    "passport-mission",
+    "toy-inventors",
+  ];
 
-  it("Competition × 3–5 → exactly the six overlapping workshops", () => {
-    expect(ids(filterWorkshops(WORKSHOPS, "Competition", "3-5"))).toEqual(
-      [
-        "botball-robotics",
-        "competitive-chess",
-        "history-on-trial",
-        "i-said-what-i-said",
-        "math-competitor-academy",
-        "math-elite-academy",
-      ].sort()
+  it("defaults to Sciences and offers exactly the three tracks — no 'all'", () => {
+    expect(DEFAULT_TRACK).toBe("Sciences");
+    expect(TRACK_FILTERS.map((t) => t.id)).toEqual(["Sciences", "Humanities", "Competition"]);
+  });
+
+  it("each track returns only its own, non-empty slice of the catalog", () => {
+    for (const t of TRACK_FILTERS) {
+      const ws = filterWorkshops(WORKSHOPS, t.id);
+      expect(ws.length, t.id).toBeGreaterThan(0);
+      expect(ws.every((w) => w.track === t.id), t.id).toBe(true);
+    }
+  });
+
+  it("the three tracks partition the whole catalog (no workshop is orphaned)", () => {
+    const total = TRACK_FILTERS.reduce(
+      (sum, t) => sum + filterWorkshops(WORKSHOPS, t.id).length,
+      0
     );
+    expect(total).toBe(WORKSHOPS.length);
   });
 
-  it("Sciences × K–2 → exactly {board-game-masters, think-like-a-scientist}", () => {
-    expect(ids(filterWorkshops(WORKSHOPS, "Sciences", "k-2"))).toEqual([
-      "board-game-masters",
-      "think-like-a-scientist",
-    ]);
-  });
-
-  it("a K–8+ workshop appears in every band", () => {
-    const chess = WORKSHOPS.find((w) => w.id === "competitive-chess")!;
-    for (const band of GRADE_BANDS) {
-      expect(workshopMatches(chess, "all", band.id), band.id).toBe(true);
+  it("the 5 retired K–2 workshops are tombstones: resolvable for display, never selectable", () => {
+    expect(RETIRED_WORKSHOPS.map((w) => w.id).sort()).toEqual([...RETIRED_IDS].sort());
+    for (const id of RETIRED_IDS) {
+      expect(WORKSHOPS.some((w) => w.id === id), id).toBe(false);
+      expect(workshopById(id)?.title, id).toBeTruthy();
     }
+    expect(workshopById("no-such-workshop")).toBeUndefined();
+  });
+});
+
+describe("sanitizeWorkshopSelection (R8 cap + retired-id cleanup)", () => {
+  it("passes through 1–3 valid ids unchanged", () => {
+    const picks = WORKSHOPS.slice(0, 3).map((w) => w.id);
+    expect(sanitizeWorkshopSelection(picks)).toEqual(picks);
+    expect(sanitizeWorkshopSelection(picks.slice(0, 1))).toEqual(picks.slice(0, 1));
+    expect(sanitizeWorkshopSelection([])).toEqual([]);
   });
 
-  it("a 6–8+ workshop is excluded from K–2 and 3–5 but matches 6–8", () => {
-    const w = WORKSHOPS.find((w) => w.id === "become-the-character")!;
-    expect(w.grades).toBe("6–8+");
-    expect(workshopMatches(w, "all", "k-2")).toBe(false);
-    expect(workshopMatches(w, "all", "3-5")).toBe(false);
-    expect(workshopMatches(w, "all", "6-8")).toBe(true);
-    expect(workshopMatches(w, "all", "all")).toBe(true);
+  it("trims more than WORKSHOP_MAX valid ids to the first 3", () => {
+    const picks = WORKSHOPS.slice(0, 5).map((w) => w.id);
+    expect(sanitizeWorkshopSelection(picks)).toEqual(picks.slice(0, WORKSHOP_MAX));
   });
 
-  it("zero-match case (synthetic fixture — no real Track × Grade combination is empty)", () => {
-    const synthetic: Workshop[] = [
-      {
-        id: "synthetic-upper",
-        title: "Synthetic Upper",
-        advisor: "Nobody",
-        track: "Sciences",
-        grades: "6–8",
-        length: "60 min",
-        description: "Fixture.",
-      },
-    ];
-    expect(filterWorkshops(synthetic, "Sciences", "k-2")).toEqual([]);
-    expect(filterWorkshops(synthetic, "Competition", "6-8")).toEqual([]);
-    // Clearing filters (all × all) restores it.
-    expect(filterWorkshops(synthetic, "all", "all")).toHaveLength(1);
+  it("drops retired ids before trimming", () => {
+    const live = WORKSHOPS.slice(0, 3).map((w) => w.id);
+    expect(sanitizeWorkshopSelection(["the-peace-table", ...live])).toEqual(live);
   });
 
-  it("no real Track × Grade combination on the live catalog is empty", () => {
-    for (const track of ["Sciences", "Humanities", "Competition"] as const) {
-      for (const band of GRADE_BANDS) {
-        expect(
-          filterWorkshops(WORKSHOPS, track, band.id).length,
-          `${track} × ${band.id}`
-        ).toBeGreaterThan(0);
-      }
-    }
+  it("an all-retired selection empties", () => {
+    expect(sanitizeWorkshopSelection(["the-peace-table", "toy-inventors"])).toEqual([]);
+  });
+
+  it("the checklist re-flags workshops for a RAW retired-only selection (unsanitized store state)", () => {
+    // The production path: checklist/completeness read the raw stored ids,
+    // not the wizard's sanitized view. A legacy Scholars row whose only picks
+    // are retired must NOT count as complete, or the meter reads 100% while
+    // the workshops step shows "0 of 3".
+    const c = child({ groupSlug: "scholars", workshopIds: ["the-peace-table", "toy-inventors"] });
+    const item = checklist(c).find((i) => i.label === "A workshop of interest")!;
+    expect(item.done).toBe(false);
+  });
+
+  it("hasLiveWorkshopPick: one live id among retired ids satisfies the item", () => {
+    const live = WORKSHOPS[0].id;
+    expect(hasLiveWorkshopPick(["the-peace-table", live])).toBe(true);
+    expect(hasLiveWorkshopPick(["the-peace-table"])).toBe(false);
+    expect(hasLiveWorkshopPick([])).toBe(false);
+    const c = child({ groupSlug: "scholars", workshopIds: ["the-peace-table", live] });
+    expect(checklist(c).find((i) => i.label === "A workshop of interest")!.done).toBe(true);
+  });
+
+  it("cap is count-based, not track-based — a cross-track selection survives", () => {
+    const picks = TRACK_FILTERS.map((t) => filterWorkshops(WORKSHOPS, t.id)[0].id);
+    expect(sanitizeWorkshopSelection(picks)).toEqual(picks);
   });
 });

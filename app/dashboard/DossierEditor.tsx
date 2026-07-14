@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { checklist, childName, completeness, statusMeta, type Child } from "./data";
+import {
+  checklist,
+  childName,
+  completeness,
+  statusIndex,
+  statusMeta,
+  workshopById,
+  type Child,
+} from "./data";
 import { useDashboard } from "./store";
 import { Meter } from "./ui";
 import {
   STEP_LABELS,
+  WORKSHOP_MAX,
   firstIncompleteStep,
   resolveStep,
+  sanitizeWorkshopSelection,
   stepsForGroup,
   type WizardStepId,
 } from "./wizard-rules";
@@ -212,7 +222,7 @@ export default function DossierEditor({
    *  locked state renders only on a confirmed {ok: true}; on failure the
    *  local status reverts to draft with a retryable inline error. */
   const doSubmit = async () => {
-    if (pct !== 100 || locked) return;
+    if (pct !== 100 || locked || submitState === "saving") return;
     setSubmitState("saving");
     setSubmitError(null);
     // updateChild updates the store's ref synchronously, so the explicit save
@@ -222,6 +232,14 @@ export default function DossierEditor({
     const res = await saveChildNow(child.id, { includeStatus: true });
     if (res.ok) {
       setSubmitState("idle");
+      // R15: best-effort admissions notification — fire-and-forget (auth via
+      // session cookie, like /api/checkout). A send failure must never affect
+      // the submit UX; the CRM needs-review badge is the reliable signal.
+      void fetch("/api/notify-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ childId: child.id }),
+      }).catch(() => {});
     } else {
       updateChild(child.id, { status: "draft", submittedAt: undefined });
       setSubmitState("error");
@@ -232,6 +250,15 @@ export default function DossierEditor({
   const n = String(idx + 1).padStart(2, "0");
   const nextDisabled =
     saveState === "saving" || (!locked && step === "group" && child.groupSlug === "");
+
+  /** Sticky selection bar state (workshops step only, R8/R9): the editable
+   *  wizard views the selection through sanitize (legacy >3 / retired ids
+   *  converge on the next save); the deposit-locked browse shows raw truth. */
+  const workshopsEditable = stepEditable("workshops");
+  const workshopSelection = workshopsEditable
+    ? sanitizeWorkshopSelection(child.workshopIds)
+    : child.workshopIds;
+  const savingNow = saveState === "saving" || submitState === "saving";
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
@@ -263,11 +290,20 @@ export default function DossierEditor({
               This dossier is locked for review and the seat deposit is in — contact{" "}
               <span className="text-ink">admissions@the120.school</span> for any changes.
             </>
-          ) : (
+          ) : statusIndex(child.status) >= statusIndex("offered") ? (
+            // Accepted, deposit pending — never say "we will review" here: the
+            // dashboard CTA is simultaneously asking this family to pay (R12/R13).
             <>
-              This dossier is locked for review. Your group choice can still be changed until a
-              deposit is paid — contact <span className="text-ink">admissions@the120.school</span>{" "}
-              for anything else.
+              Your application has been accepted — reserve your seat from your dashboard. Your
+              group choice can still be changed until a deposit is paid.
+            </>
+          ) : (
+            // R10 — exact confirmation copy for submitted / in_review / invited.
+            <>
+              Thank you for your interest in joining The 120. We will review your submission and
+              be in touch. Feel free to contact{" "}
+              <span className="text-ink">admissions@the120.school</span> for anything else. Your
+              group choice can still be changed until a deposit is paid.
             </>
           )}
         </p>
@@ -292,6 +328,7 @@ export default function DossierEditor({
             items={items}
             pct={pct}
             locked={locked}
+            depositPaid={depositPaid}
             n={n}
             submitState={submitState}
             submitError={submitError}
@@ -312,15 +349,66 @@ export default function DossierEditor({
             {step === "basics" && <StepBasics child={child} set={set} n={n} />}
             {step === "group" && <StepGroup child={child} set={set} n={n} />}
             {step === "academics" && <StepAcademics child={child} set={set} n={n} />}
-            {step === "workshops" && <StepWorkshops child={child} set={set} n={n} />}
+            {step === "workshops" && (
+              <StepWorkshops child={child} set={set} n={n} editable={workshopsEditable} />
+            )}
             {step === "project" && <StepProject child={child} set={set} n={n} />}
           </fieldset>
         )}
       </div>
 
-      {/* Step navigation */}
+      {/* Step navigation — on the workshops step it becomes a sticky bottom
+          bar (R9): selected-workshop chips + the forward/save actions stay
+          reachable without scrolling the card list. */}
       {step !== "review" && (
-        <div className="mt-6 flex flex-wrap items-center gap-3">
+        <div
+          className={
+            step === "workshops"
+              ? "sticky bottom-0 z-40 -mx-6 mt-6 border-t border-line bg-paper/90 px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+              : "mt-6"
+          }
+        >
+          {step === "workshops" && (
+            <div className="mb-3">
+              <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
+                Selected · {workshopSelection.length} of {WORKSHOP_MAX}
+              </p>
+              {workshopSelection.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {workshopSelection.map((id) => {
+                    const title = workshopById(id)?.title ?? id;
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded-full border border-red/40 bg-red/5 py-1 pl-3 pr-1.5 text-xs text-ink"
+                      >
+                        {title}
+                        {workshopsEditable && (
+                          <button
+                            type="button"
+                            disabled={savingNow}
+                            onClick={() =>
+                              set({ workshopIds: workshopSelection.filter((x) => x !== id) })
+                            }
+                            aria-label={`Remove ${title}`}
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-muted hover:bg-red/10 hover:text-red disabled:cursor-wait ${focusRing}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {workshopsEditable && workshopSelection.length >= WORKSHOP_MAX && (
+                <p role="status" className="mt-2 font-mono text-[0.7rem] text-muted">
+                  Pick up to {WORKSHOP_MAX} — remove one to add another.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
           {idx > 0 && (
             <button
               onClick={goBackStep}
@@ -369,6 +457,7 @@ export default function DossierEditor({
               {locked ? "Save" : "Next"} to retry.
             </p>
           )}
+          </div>
         </div>
       )}
     </div>

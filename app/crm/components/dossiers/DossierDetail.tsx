@@ -203,11 +203,6 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
         <p className="text-[13.5px] leading-relaxed text-crm-muted">
           {item.interests || "—"}
         </p>
-        {item.testScores && (
-          <p className="text-[13.5px] leading-relaxed text-crm-muted">
-            {item.testScores}
-          </p>
-        )}
         {item.workshops.length > 0 && (
           <p className="text-[13.5px] leading-relaxed text-crm-muted">
             Workshops: {item.workshops.join(" · ")}

@@ -1,6 +1,6 @@
 "use client";
 
-import { childName, type Child } from "../data";
+import { childName, statusIndex, type Child } from "../data";
 import { stepForChecklistLabel, type WizardStepId } from "../wizard-rules";
 import { StepSection, focusRing } from "./shared";
 
@@ -14,6 +14,7 @@ export default function StepReview({
   items,
   pct,
   locked,
+  depositPaid,
   n,
   submitState,
   submitError,
@@ -26,6 +27,7 @@ export default function StepReview({
   items: { label: string; done: boolean }[];
   pct: number;
   locked: boolean;
+  depositPaid: boolean;
   n: string;
   submitState: "idle" | "saving" | "error";
   submitError: string | null;
@@ -42,7 +44,11 @@ export default function StepReview({
       title="Review & submit"
       hint={
         locked
-          ? "This dossier is with the review team."
+          ? depositPaid
+            ? "Your seat is reserved — the deposit is in."
+            : statusIndex(child.status) >= statusIndex("offered")
+              ? "Your application has been accepted — reserve your seat from your dashboard."
+              : "We will review your submission and be in touch."
           : "Everything below must be checked off before the dossier can go in."
       }
     >
@@ -103,10 +109,14 @@ export default function StepReview({
       <div className="mt-8 border-t border-line pt-4">
         <button
           type="button"
+          // Frozen while the submit save is in flight: a remove racing the
+          // submit could otherwise fire the admissions notification for a
+          // child the parent just deleted.
+          disabled={submitState === "saving"}
           onClick={() => {
             if (confirm(`Remove ${childName(child)}'s dossier? This cannot be undone.`)) onRemove();
           }}
-          className={`rounded font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red ${focusRing}`}
+          className={`rounded font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
         >
           Remove this child
         </button>

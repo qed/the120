@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
-import { childName, completeness, statusMeta } from "./data";
+import { canReserveSeat, childName, completeness, hasPaidDeposit, statusMeta } from "./data";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
 import DossierEditor from "./DossierEditor";
@@ -34,7 +34,8 @@ export default function DashboardApp({
       if (result === "success") {
         refreshDeposits();
         // The webhook can lag the redirect by a moment — refresh once more.
-        setTimeout(refreshDeposits, 4000);
+        const t = setTimeout(refreshDeposits, 4000);
+        return () => clearTimeout(t);
       }
     }
   }, [refreshDeposits]);
@@ -56,7 +57,10 @@ export default function DashboardApp({
     }
   };
 
-  const depositFor = (childId: string) => deposits.find((d) => d.childId === childId);
+  // Always the FULL per-child deposit list: a refund-then-repay child has
+  // multiple rows, and a single find() can grab the refunded one while a
+  // paid one exists (the gate + paid banner would then disagree with the API).
+  const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
 
   // Auth gate: everything below assumes a signed-in parent.
   if (ready && !session) return <SignIn />;
@@ -159,8 +163,11 @@ export default function DashboardApp({
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               {children.map((c) => {
                 const pct = completeness(c);
-                const deposit = depositFor(c.id);
-                const canReserve = c.status !== "draft" && (!deposit || deposit.status === "refunded");
+                const childDeposits = depositsFor(c.id);
+                const paid = hasPaidDeposit(childDeposits);
+                // Approval gate (R11–R13): the same predicate the checkout
+                // route enforces — reservable only at `offered` or later.
+                const canReserve = canReserveSeat(c.status, childDeposits);
                 return (
                   <div
                     key={c.id}
@@ -196,9 +203,12 @@ export default function DashboardApp({
                       </p>
                     </button>
 
-                    {/* Seat deposit (S3): available once the dossier is submitted. */}
+                    {/* Seat deposit CTA (R11–R13): paid always wins; the
+                        deposit unlocks only once admissions approves
+                        (status `offered` or later); every pre-approval
+                        stage shows the same blanket under-review message. */}
                     <div className="mt-4 border-t border-line pt-4">
-                      {deposit && deposit.status === "paid" ? (
+                      {paid ? (
                         <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
                           ✓ Seat reserved · $250 deposit paid
                         </p>
@@ -213,6 +223,15 @@ export default function DashboardApp({
                           </button>
                           <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
                             Fully refundable until Sept 30, 2026
+                          </p>
+                        </>
+                      ) : c.status !== "draft" ? (
+                        <>
+                          <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
+                            Application Under Review
+                          </p>
+                          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+                            Upon Acceptance, the next step is a fully refundable $250 deposit.
                           </p>
                         </>
                       ) : (

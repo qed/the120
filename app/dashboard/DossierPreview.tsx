@@ -131,12 +131,6 @@ export default function DossierPreview({
             )}
           </Block>
 
-          {child.testScores && (
-            <Block title="Scores & assessments" full>
-              <p className="whitespace-pre-line text-sm leading-6 text-ink-soft">{child.testScores}</p>
-            </Block>
-          )}
-
           {child.portfolioLinks && (
             <Block title="Portfolio" full>
               <p className="break-words text-sm leading-6 text-ink-soft">{child.portfolioLinks}</p>

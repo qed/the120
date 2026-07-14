@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
-import { type Child, type Parent, emptyChild } from "./data";
+import { type Academic, type Child, type Parent, emptyChild } from "./data";
 
 /**
  * S1/S2: Supabase-backed dashboard store (replaces localStorage V1).
@@ -23,6 +23,7 @@ type Store = {
   updateChild: (id: string, patch: Partial<Child>) => void;
   removeChild: (id: string) => void;
   submitChild: (id: string) => void;
+  saveChildNow: (id: string) => Promise<{ ok: boolean; error?: string }>;
   refreshDeposits: () => Promise<void>;
   signOut: () => void;
 };
@@ -37,7 +38,7 @@ export function useDashboard() {
 
 /* ---------- row mapping (snake_case DB ↔ camelCase app) ---------- */
 
-type ChildRow = {
+export type ChildRow = {
   id: string;
   first_name: string;
   last_name: string;
@@ -45,6 +46,8 @@ type ChildRow = {
   birth_year: string;
   current_school: string;
   photo: string | null;
+  group_slug: string;
+  academics: unknown; // jsonb — tolerant-parsed to Academic[]
   subjects: string[];
   test_scores: string;
   workshop_ids: string[];
@@ -55,7 +58,7 @@ type ChildRow = {
   submitted_at: string | null;
 };
 
-function rowToChild(r: ChildRow): Child {
+export function rowToChild(r: ChildRow): Child {
   return {
     id: r.id,
     firstName: r.first_name,
@@ -64,6 +67,8 @@ function rowToChild(r: ChildRow): Child {
     birthYear: r.birth_year,
     currentSchool: r.current_school,
     photo: r.photo ?? undefined,
+    groupSlug: r.group_slug ?? "",
+    academics: Array.isArray(r.academics) ? (r.academics as Academic[]) : [],
     subjects: r.subjects ?? [],
     testScores: r.test_scores,
     workshopIds: r.workshop_ids ?? [],
@@ -75,7 +80,7 @@ function rowToChild(r: ChildRow): Child {
   };
 }
 
-function childToRow(c: Child, parentId: string) {
+export function childToRow(c: Child, parentId: string) {
   return {
     id: c.id,
     parent_id: parentId,
@@ -85,7 +90,9 @@ function childToRow(c: Child, parentId: string) {
     birth_year: c.birthYear,
     current_school: c.currentSchool,
     photo: c.photo ?? null,
-    subjects: c.subjects,
+    group_slug: c.groupSlug,
+    academics: c.academics,
+    // `subjects` is legacy: still read for old drafts, no longer written (cutover).
     test_scores: c.testScores,
     workshop_ids: c.workshopIds,
     interests: c.interests,
@@ -197,6 +204,29 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     });
   }, []);
 
+  /** Explicit awaited save (wizard Next/Submit): flush any pending debounce
+   *  for this child and upsert now, so the caller can gate on the result. */
+  const saveChildNow = useCallback(async (id: string): Promise<{ ok: boolean; error?: string }> => {
+    const timers = saveTimers.current;
+    const pending = timers.get(id);
+    if (pending) {
+      clearTimeout(pending);
+      timers.delete(id);
+    }
+    const current = childrenRef.current.find((c) => c.id === id);
+    if (!current) return { ok: false, error: "Child not found" };
+    const {
+      data: { user },
+    } = await supabaseRef.current.auth.getUser();
+    if (!user) return { ok: false, error: "Not signed in" };
+    const { error } = await supabaseRef.current.from("children").upsert(childToRow(current, user.id));
+    if (error) {
+      console.error("[dashboard] save failed:", error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  }, []);
+
   const schedulePersist = useCallback(
     (id: string) => {
       const timers = saveTimers.current;
@@ -274,6 +304,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         updateChild,
         removeChild,
         submitChild,
+        saveChildNow,
         refreshDeposits,
         signOut,
       }}

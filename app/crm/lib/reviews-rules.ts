@@ -69,6 +69,33 @@ export function reviewPillColors(status: ReviewStatus): {
   return { bg: "#0300ED", text: "#FFFFFF" };
 }
 
+/* ------------------------------------------------------------ queue counts */
+
+/**
+ * R14 — dossier-queue visibility derivation. "Needs review" counts every
+ * candidate still gated from the seat deposit: all statuses after `draft`
+ * and before `offered` (submitted, in_review, invited) — so a family staff
+ * touched and then stalled on can't go invisible mid-process. `byStage`
+ * feeds the per-chip counts that break the badge total down.
+ */
+export function queueCounts(items: { reviewStatus: ReviewStatus }[]): {
+  needsReview: number;
+  byStage: Record<ReviewStatus, number>;
+} {
+  const byStage = Object.fromEntries(REVIEW_STATUSES.map((s) => [s, 0])) as Record<
+    ReviewStatus,
+    number
+  >;
+  for (const i of items) byStage[i.reviewStatus] += 1;
+  const draftIdx = REVIEW_STATUSES.indexOf("draft");
+  const offeredIdx = REVIEW_STATUSES.indexOf("offered");
+  const needsReview = items.filter((i) => {
+    const idx = REVIEW_STATUSES.indexOf(i.reviewStatus);
+    return idx > draftIdx && idx < offeredIdx;
+  }).length;
+  return { needsReview, byStage };
+}
+
 /* ------------------------------------------------------------ completeness */
 
 /**

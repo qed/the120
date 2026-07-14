@@ -4,7 +4,7 @@ import { GRADES } from "../data";
 import { Label, TextField, inputCls } from "../ui";
 import { StepSection, focusRing, type StepProps } from "./shared";
 
-export default function StepBasics({ child, set, n }: StepProps & { n: string }) {
+export default function StepBasics({ child, set, n }: StepProps) {
   const onPhoto = (file?: File) => {
     if (!file) return;
     const reader = new FileReader();

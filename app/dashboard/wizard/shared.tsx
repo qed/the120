@@ -7,6 +7,8 @@ export type StepProps = {
   child: Child;
   /** Local-state setter (debounced persist); explicit saves happen on Next. */
   set: (patch: Partial<Child>) => void;
+  /** Step number for the section header ("01", "02", …). */
+  n: string;
 };
 
 /** Repo-wide visible-focus pattern (site palette: blue outline). */

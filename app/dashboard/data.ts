@@ -25,7 +25,6 @@ export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id 
 export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
 
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-export const SUBJECTS = ["Math", "Reading", "Writing", "Science", "History"] as const;
 
 /**
  * Structured academics entry (replaces the legacy `subjects` list — R7–R9b).
@@ -54,8 +53,35 @@ export const ACADEMIC_PLANS: { id: Exclude<Academic["plan"], "">; label: string;
   { id: "get-solid", label: "Get Solid", blurb: "Lock in the fundamentals until they're automatic." },
 ];
 
-/** An academics entry counts toward completeness only when subject AND plan are set. */
-export const academicComplete = (a: Academic) => a.subject.trim() !== "" && a.plan !== "";
+/** Display label for a plan id — "" for unknown/unset (shared by the parent
+ *  preview and the CRM dossier pane so they can never drift). */
+export function planLabel(plan: string): string {
+  return ACADEMIC_PLANS.find((p) => p.id === plan)?.label ?? "";
+}
+
+/**
+ * Tolerant per-element parse of the `academics` jsonb column: non-objects are
+ * dropped, subject/goal coerce to strings, plan coerces to one of the three
+ * plan ids or "". DB rows are never trusted to match `Academic[]`.
+ */
+export function parseAcademics(value: unknown): Academic[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((a): a is Record<string, unknown> => typeof a === "object" && a !== null)
+    .map((a) => ({
+      subject: typeof a.subject === "string" ? a.subject : "",
+      plan: ACADEMIC_PLANS.some((p) => p.id === a.plan)
+        ? (a.plan as Academic["plan"])
+        : "",
+      goal: typeof a.goal === "string" ? a.goal : "",
+    }));
+}
+
+/** An academics entry counts toward completeness only when subject AND plan
+ *  are set. Structurally typed so the CRM's tolerant-parsed entries (plan as
+ *  plain string) can share the exact same predicate. */
+export const academicComplete = (a: { subject: string; plan: string }) =>
+  a.subject.trim() !== "" && a.plan !== "";
 
 export type Workshop = {
   id: string;

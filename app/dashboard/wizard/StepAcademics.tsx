@@ -17,8 +17,11 @@ const isListedSubject = (s: string) =>
  * prefilled as plan-less entries on first render (written as academics —
  * `subjects` is never written again).
  */
-export default function StepAcademics({ child, set, n }: StepProps & { n: string }) {
+export default function StepAcademics({ child, set, n }: StepProps) {
   // Legacy prefill (R14 old-shape drafts) — once per mount of this step.
+  // One update carries both halves: the entries move into `academics` AND the
+  // legacy `subjects` column empties, so the persisted row can never re-fire
+  // this prefill (deleted legacy subjects stay deleted across remounts).
   const prefilled = useRef(false);
   useEffect(() => {
     if (prefilled.current) return;
@@ -26,6 +29,7 @@ export default function StepAcademics({ child, set, n }: StepProps & { n: string
     if (child.academics.length === 0 && child.subjects.length > 0) {
       set({
         academics: child.subjects.slice(0, 2).map((s) => ({ subject: s, plan: "", goal: "" })),
+        subjects: [],
       });
     }
   }, [child.academics.length, child.subjects, set]);
@@ -133,6 +137,7 @@ export default function StepAcademics({ child, set, n }: StepProps & { n: string
                 onChange={(v) => updateEntry(i, { goal: v })}
                 placeholder="Where should this subject be a year from now?"
                 rows={2}
+                maxLength={1500}
               />
             </div>
           </div>
@@ -142,7 +147,8 @@ export default function StepAcademics({ child, set, n }: StepProps & { n: string
           <button
             type="button"
             onClick={addEntry}
-            className={`rounded-full border border-dashed border-line-strong px-4 py-2 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink ${focusRing}`}
+            disabled={entries[0].subject.trim() === ""}
+            className={`rounded-full border border-dashed border-line-strong px-4 py-2 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong ${focusRing}`}
           >
             + Add another subject
           </button>

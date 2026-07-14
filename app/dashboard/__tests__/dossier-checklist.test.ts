@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  type Academic,
   type Child,
   WORKSHOPS,
   academicComplete,
   checklist,
   completeness,
   emptyChild,
+  parseAcademics,
   parseGradeRange,
+  planLabel,
   workshopGradeRange,
 } from "../data";
 import { type ChildRow, childToRow, rowToChild } from "../store";
@@ -158,11 +161,31 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     ...overrides,
   });
 
-  it("childToRow no longer emits a `subjects` key (cutover — column stays, unwritten)", () => {
-    const r = childToRow(child(), "parent-1");
-    expect("subjects" in r).toBe(false);
+  it("childToRow round-trips `subjects` (state truth — the prefill-clear must persist)", () => {
+    const r = childToRow(child({ subjects: ["Math", "Reading"] }), "parent-1");
+    expect(r.subjects).toEqual(["Math", "Reading"]);
+    expect(childToRow(child(), "parent-1").subjects).toEqual([]);
     expect(r.group_slug).toBe("makers");
     expect(r.academics).toEqual([{ subject: "Math", plan: "reach-ahead", goal: "Finish grade 7 math" }]);
+  });
+
+  it("childToRow omits status/submitted_at by default (never collides with the DB's one-way guard)", () => {
+    const r = childToRow(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }), "parent-1");
+    expect("status" in r).toBe(false);
+    expect("submitted_at" in r).toBe(false);
+  });
+
+  it("childToRow includeStatus: true emits status + submitted_at (explicit submit only)", () => {
+    const r = childToRow(
+      child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }),
+      "parent-1",
+      { includeStatus: true }
+    );
+    expect(r.status).toBe("submitted");
+    expect(r.submitted_at).toBe("2026-07-01T00:00:00Z");
+    const draft = childToRow(child(), "parent-1", { includeStatus: true });
+    expect(draft.status).toBe("draft");
+    expect(draft.submitted_at).toBeNull();
   });
 
   it("rowToChild maps group_slug and academics", () => {
@@ -185,5 +208,60 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     expect(back.groupSlug).toBe(original.groupSlug);
     expect(back.academics).toEqual(original.academics);
     expect(back.workshopIds).toEqual(original.workshopIds);
+  });
+});
+
+describe("parseAcademics (tolerant per-element jsonb parse)", () => {
+  it("non-arrays → []", () => {
+    expect(parseAcademics(null)).toEqual([]);
+    expect(parseAcademics(undefined)).toEqual([]);
+    expect(parseAcademics("garbage")).toEqual([]);
+    expect(parseAcademics(42)).toEqual([]);
+    expect(parseAcademics({ subject: "Math" })).toEqual([]);
+  });
+
+  it("[{}] → one fully-empty entry (all fields coerced)", () => {
+    expect(parseAcademics([{}])).toEqual([{ subject: "", plan: "", goal: "" }]);
+  });
+
+  it("[null] → dropped (typeof null is 'object' but it is not an entry)", () => {
+    expect(parseAcademics([null])).toEqual([]);
+  });
+
+  it('["x"] → non-object elements dropped', () => {
+    expect(parseAcademics(["x"])).toEqual([]);
+  });
+
+  it("wrong-typed fields coerce safely: {subject:123, plan:true, goal:null}", () => {
+    expect(parseAcademics([{ subject: 123, plan: true, goal: null }])).toEqual([
+      { subject: "", plan: "", goal: "" },
+    ]);
+  });
+
+  it("unknown plan strings clamp to ''", () => {
+    expect(parseAcademics([{ subject: "Math", plan: "world-domination", goal: "" }])).toEqual([
+      { subject: "Math", plan: "", goal: "" },
+    ]);
+  });
+
+  it("a valid mix parses: junk dropped, good entries preserved verbatim", () => {
+    const good: Academic = { subject: "Math", plan: "reach-ahead", goal: "AMC 8" };
+    expect(parseAcademics([null, "x", good, { subject: "Art" }])).toEqual([
+      good,
+      { subject: "Art", plan: "", goal: "" },
+    ]);
+  });
+});
+
+describe("planLabel", () => {
+  it("maps each known plan id to its display label", () => {
+    expect(planLabel("catch-up")).toBe("Catch-Up");
+    expect(planLabel("reach-ahead")).toBe("Reach Ahead");
+    expect(planLabel("get-solid")).toBe("Get Solid");
+  });
+
+  it("unknown and empty ids → ''", () => {
+    expect(planLabel("world-domination")).toBe("");
+    expect(planLabel("")).toBe("");
   });
 });

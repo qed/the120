@@ -10,7 +10,7 @@ import { StepSection, focusRing, type StepProps } from "./shared";
  * every card is keyboard-reachable). No availability states — there are no
  * per-group caps, only the global 120 pool (R16).
  */
-export default function StepGroup({ child, set, n }: StepProps & { n: string }) {
+export default function StepGroup({ child, set, n }: StepProps) {
   // Switch-away-from-Scholars confirm (R6): nothing mutates until confirmed.
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
 

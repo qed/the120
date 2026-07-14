@@ -16,7 +16,7 @@ import { StepSection, focusRing, type StepProps } from "./shared";
  * Two combinable single-select filter axes (Track × Grade band, range-overlap
  * matching) over a flat tap-to-select card grid with audition badges.
  */
-export default function StepWorkshops({ child, set, n }: StepProps & { n: string }) {
+export default function StepWorkshops({ child, set, n }: StepProps) {
   const [track, setTrack] = useState<TrackFilter>("all");
   const [band, setBand] = useState<GradeBandId>("all");
 

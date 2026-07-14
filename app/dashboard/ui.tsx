@@ -150,12 +150,14 @@ export function TextArea({
   onChange,
   placeholder,
   rows = 4,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   rows?: number;
+  maxLength?: number;
 }) {
   return (
     <label className="block">
@@ -163,6 +165,7 @@ export function TextArea({
       <textarea
         value={value}
         rows={rows}
+        maxLength={maxLength}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="w-full resize-y rounded-xl border border-line-strong bg-white px-3.5 py-3 text-sm leading-6 text-ink outline-none transition-colors placeholder:text-muted focus:border-red"

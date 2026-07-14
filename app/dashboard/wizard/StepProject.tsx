@@ -30,7 +30,7 @@ const GROUP_PROJECT_EXAMPLES: Record<string, string[]> = {
   ],
 };
 
-export default function StepProject({ child, set, n }: StepProps & { n: string }) {
+export default function StepProject({ child, set, n }: StepProps) {
   const scholars = child.groupSlug === "scholars";
   const group = groupBySlug(child.groupSlug);
   const examples = GROUP_PROJECT_EXAMPLES[child.groupSlug];

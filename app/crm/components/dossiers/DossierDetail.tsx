@@ -23,7 +23,7 @@ import {
   type Group,
   type ReviewStatus,
 } from "@/app/crm/lib/constants";
-import { ACADEMIC_PLANS } from "@/app/dashboard/data";
+import { academicComplete, planLabel } from "@/app/dashboard/data";
 import type { DossierItem } from "@/app/crm/lib/queries";
 import { moveCandidate, saveReviewNotes } from "@/app/crm/lib/actions/reviews";
 import { fmtDay } from "@/app/crm/lib/dates";
@@ -46,9 +46,6 @@ const KICKER_RED =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-red";
 const KICKER_FAINT =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-faint";
-
-const planLabel = (plan: string) =>
-  ACADEMIC_PLANS.find((p) => p.id === plan)?.label ?? "";
 
 /** "The Makers" for a valid parent pick; "" for unset/garbage slugs. */
 const parentPickLabel = (slug: string) =>
@@ -110,6 +107,12 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
     }
   };
 
+  // Same predicate as the parent DossierPreview: entries with any subject
+  // content render; a stray blank entry never renders as a bare "—" line.
+  const academics = item.academics.filter(
+    (a) => academicComplete(a) || a.subject.trim() !== ""
+  );
+
   const meta = [
     item.grade != null ? `Grade ${item.grade}` : null,
     item.school || null,
@@ -154,8 +157,8 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
       {/* info cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <InfoCard kicker="Academics">
-          {item.academics.length > 0 ? (
-            item.academics.map((a, i) => (
+          {academics.length > 0 ? (
+            academics.map((a, i) => (
               <span key={i} className="block">
                 {a.subject || "—"}
                 {planLabel(a.plan) ? ` — ${planLabel(a.plan)}` : ""}

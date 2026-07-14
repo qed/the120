@@ -326,12 +326,26 @@ describe("dossierChecklist ≡ dashboard checklist (R14 lockstep)", () => {
       const parent = checklist(c);
       const crm = dossierChecklist(toFields(c));
       expect(crm.map((i) => i.label)).toEqual(parent.map((i) => i.label));
-      expect(crm.filter((i) => i.done).length).toBe(
-        parent.filter((i) => i.done).length
-      );
+      // Per-item done parity — not just equal counts (a swap of one done and
+      // one undone item would keep counts equal while the mirrors disagree).
+      expect(crm.map((i) => i.done)).toEqual(parent.map((i) => i.done));
       expect(dossierCompleteness(toFields(c))).toBe(completeness(c));
     });
   }
+
+  it("tolerates fields without the new columns (old select) — 8 items, no crash", () => {
+    // Mirrors the nurture-rules missing-columns case: groupSlug/academics
+    // keys absent entirely (pre-migration select), legacy subjects carry.
+    const oldFields = { ...fullDossier, subjects: ["Math"] } as Partial<DossierFields>;
+    delete oldFields.groupSlug;
+    delete oldFields.academics;
+    const items = dossierChecklist(oldFields as DossierFields);
+    expect(items).toHaveLength(8); // group unset → no Scholars workshops item
+    expect(items.find((i) => i.label === "A group")?.done).toBe(false);
+    expect(items.find((i) => i.label === "Academics (a subject + plan)")?.done).toBe(true);
+    // Everything except the group item is satisfied → 7/8 = 88.
+    expect(dossierCompleteness(oldFields as DossierFields)).toBe(88);
+  });
 });
 
 /* ---------------------------------------------------------- payment strip */

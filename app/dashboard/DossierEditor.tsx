@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { checklist, childName, completeness, statusMeta, type Child } from "./data";
 import { useDashboard } from "./store";
 import { Meter } from "./ui";
@@ -131,6 +131,14 @@ export default function DossierEditor({
   const idx = steps.indexOf(step);
   const nextStep = steps[idx + 1];
 
+  // Stale-continuation guard: async save handlers compare the step they
+  // started on against this ref after their await — if the user navigated
+  // meanwhile (Back/rail), the finishing save must not yank navigation.
+  const stepRef = useRef(step);
+  useEffect(() => {
+    stepRef.current = step;
+  });
+
   const pct = completeness(child);
   const items = checklist(child);
   // The submitted/locked state renders only once the submit save confirmed
@@ -153,16 +161,21 @@ export default function DossierEditor({
   };
 
   /** Next: idle → saving (disabled) → advance on ok / stay with a retryable
-   *  inline error on failure. In the locked wizard Next is free navigation. */
+   *  inline error on failure. In the locked wizard Next is free navigation —
+   *  except on the still-editable steps (Group/Workshops pre-deposit), which
+   *  save-then-advance like the unlocked wizard so a quick edit-then-Next
+   *  never rides on the debounce with no error surfacing. */
   const goNext = async () => {
     if (!nextStep) return;
-    if (locked) {
+    if (locked && !stepEditable(step)) {
       goTo(nextStep);
       return;
     }
     setSaveState("saving");
     setSaveError(null);
+    const startedOn = step;
     const res = await saveChildNow(child.id);
+    if (stepRef.current !== startedOn) return; // user navigated during the save
     if (res.ok) {
       goTo(nextStep);
     } else {
@@ -183,10 +196,12 @@ export default function DossierEditor({
     setSaveState("saving");
     setSaveError(null);
     setLockedSavedStep(null);
+    const startedOn = step;
     const res = await saveChildNow(child.id);
+    if (stepRef.current !== startedOn) return; // user navigated during the save
     if (res.ok) {
       setSaveState("idle");
-      setLockedSavedStep(step);
+      setLockedSavedStep(startedOn);
     } else {
       setSaveState("error");
       setSaveError(res.error ?? "Could not save.");
@@ -200,11 +215,11 @@ export default function DossierEditor({
     if (pct !== 100 || locked) return;
     setSubmitState("saving");
     setSubmitError(null);
+    // updateChild updates the store's ref synchronously, so the explicit save
+    // below sees the submitted status immediately. Only this save carries
+    // status (includeStatus) — ordinary saves never round-trip it.
     updateChild(child.id, { status: "submitted", submittedAt: new Date().toISOString() });
-    // The store reads state from a ref assigned at render — yield a macrotask
-    // so saveChildNow sees the submitted status.
-    await new Promise((r) => setTimeout(r, 0));
-    const res = await saveChildNow(child.id);
+    const res = await saveChildNow(child.id, { includeStatus: true });
     if (res.ok) {
       setSubmitState("idle");
     } else {
@@ -286,7 +301,14 @@ export default function DossierEditor({
             onRemove={() => removeChild(child.id)}
           />
         ) : (
-          <fieldset disabled={!stepEditable(step)} className="disabled:opacity-70">
+          <fieldset
+            // Frozen while an explicit save is in flight (no new edits and no
+            // new debounce can start mid-save), and on non-editable locked steps.
+            disabled={
+              !stepEditable(step) || saveState === "saving" || submitState === "saving"
+            }
+            className="disabled:opacity-70"
+          >
             {step === "basics" && <StepBasics child={child} set={set} n={n} />}
             {step === "group" && <StepGroup child={child} set={set} n={n} />}
             {step === "academics" && <StepAcademics child={child} set={set} n={n} />}
@@ -312,7 +334,7 @@ export default function DossierEditor({
             disabled={nextDisabled}
             className={`inline-flex h-12 items-center justify-center rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
           >
-            {saveState === "saving" && !locked
+            {saveState === "saving"
               ? "Saving…"
               : nextStep === "review"
                 ? "Review →"

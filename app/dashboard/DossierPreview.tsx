@@ -2,16 +2,13 @@
 
 import { groupBySlug } from "@/app/lib/site";
 import {
-  ACADEMIC_PLANS,
   academicComplete,
   childName,
+  planLabel,
   statusMeta,
   workshopById,
   type Child,
 } from "./data";
-
-const planLabel = (plan: string) =>
-  ACADEMIC_PLANS.find((p) => p.id === plan)?.label ?? "";
 
 export default function DossierPreview({
   child,
@@ -123,7 +120,10 @@ export default function DossierPreview({
             {child.interests ? <p className="text-sm leading-6 text-ink-soft">{child.interests}</p> : <Empty />}
           </Block>
 
-          <Block title="Year-long project idea" full>
+          <Block
+            title={child.groupSlug === "scholars" ? "Year-long project idea" : "Project idea"}
+            full
+          >
             {child.projectPitch ? (
               <p className="text-sm leading-6 text-ink-soft">{child.projectPitch}</p>
             ) : (

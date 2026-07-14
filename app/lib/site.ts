@@ -112,11 +112,3 @@ export const intensives = [
   { label: "Spring Intensive", date: "Apr 3 – 4, 2027" },
   { label: "Summer Intensive", date: "Jun 12 – 13, 2027" },
 ] as const;
-
-/** GT / 2 Hour Learning network outcomes — attributed to the network, never claimed as The 120's own. */
-export const proofStats = [
-  { value: "3x", label: "learning velocity vs. traditional school" },
-  { value: "1400+", label: "SAT scores by 8th grade" },
-  { value: "91%", label: "outperform their national peers" },
-  { value: "AP 5s", label: "earned before high school" },
-] as const;

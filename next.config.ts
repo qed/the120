@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
     return [
       // The game was briefly live as /raiders before the Gauntlet rename.
       { source: "/raiders", destination: "/gauntlet", permanent: false },
+      // The old GT sub-site was retired in the 2026-07 rebrand; the Scholars
+      // program page at /scholars is its permanent home.
+      { source: "/gt", destination: "/scholars", permanent: true },
       // Canonical domain: the120.school. The old jointhe120.vercel.app alias
       // stays reachable but 308s here so links, SEO, and share cards converge.
       {

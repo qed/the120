@@ -1,5 +1,3 @@
-import { proofStats } from "@/app/lib/site";
-
 const pillars = [
   {
     id: "network",
@@ -22,14 +20,14 @@ const pillars = [
     n: "03",
     name: "The Subject",
     lede: "Get super advanced in one subject. Or two.",
-    body: "AI-adaptive acceleration on the GT / TimeBack platform, paired with a bi-weekly 30 min 1:1 from an expert Academic Advisor. Mastery-based, no ceiling — members routinely learn at 3x the pace of a traditional classroom.",
-    tags: ["TimeBack platform", "Academic Advisor 1:1s", "Mastery before progression"],
+    body: "AI-adaptive, mastery-based acceleration, paired with a bi-weekly 30 min 1:1 from an expert Academic Advisor. No ceiling — members move exactly as fast as their mastery allows.",
+    tags: ["AI-adaptive platform", "Academic Advisor 1:1s", "Mastery before progression"],
   },
 ];
 
 export default function ProductPillars() {
   return (
-    <section className="border-b border-line bg-paper">
+    <section className="bg-paper">
       <div className="mx-auto w-full max-w-6xl px-6 py-20 lg:py-28">
         <div className="max-w-2xl">
           <p className="eyebrow">What a family joins</p>
@@ -74,24 +72,6 @@ export default function ProductPillars() {
               </ul>
             </div>
           ))}
-        </div>
-
-        {/* Network outcomes — attributed, never claimed as The 120's own (brief §9) */}
-        <div className="mt-16 rounded-2xl border border-line bg-blue px-8 py-10 text-paper">
-          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {proofStats.map((s) => (
-              <div key={s.label}>
-                <p className="font-display text-4xl font-bold tracking-tight text-white">
-                  {s.value}
-                </p>
-                <p className="mt-2 text-sm leading-5 text-muted">{s.label}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-8 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-            Results from the GT School / 2 Hour Learning network — 51+ campuses. Not yet claimed as
-            The 120&rsquo;s own outcomes.
-          </p>
         </div>
       </div>
     </section>

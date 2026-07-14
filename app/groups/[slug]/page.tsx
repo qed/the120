@@ -6,7 +6,7 @@ import Cta from "@/app/components/Cta";
 import JoinButton from "@/app/components/JoinButton";
 import { BOOKING_URL, groupBySlug, groups } from "@/app/lib/site";
 
-// The Scholars route to /gt, so only the four network groups render here.
+// The Scholars have their own program page at /scholars, so only the four network groups render here.
 const NETWORK_GROUPS = groups.filter((g) => g.slug !== "scholars");
 
 export function generateStaticParams() {

@@ -123,7 +123,7 @@ export default async function TuitionPage() {
                 </span>
               ))}
             </div>
-            <Cta href="/gt" variant="ghost" className="py-[15px]">
+            <Cta href="/scholars" variant="ghost" className="py-[15px]">
               See the full program
             </Cta>
             <span className="text-center text-[13px] text-muted">

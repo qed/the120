@@ -120,16 +120,19 @@ export type Workshop = {
   audition?: boolean;
 };
 
+/** Placeholder shown until The 120 confirms its own advisor roster —
+ *  replace per-workshop as advisors are announced. */
+export const ADVISOR_TBA = "Advisor to be announced";
+
 /** The 120's workshop roster, curated for The 120 community. The 120 runs
  *  grades 3+, so K–2-only workshops live in RETIRED_WORKSHOPS below —
  *  resolvable for display on legacy selections, never selectable. Advisor
- *  names ship as The 120 confirms its own roster ("Advisor to be announced"
- *  until then). */
+ *  names ship as The 120 confirms its own roster (ADVISOR_TBA until then). */
 export const WORKSHOPS: Workshop[] = [
   {
     id: "become-the-character",
     title: "Become the Character",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "6–8+",
     length: "Year-long",
@@ -139,7 +142,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "botball-robotics",
     title: "Botball Robotics Team: Become a Founding Member",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "5–8+",
     length: "Year-long",
@@ -149,7 +152,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "competitive-chess",
     title: "Competitive Chess",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "K–8+",
     length: "Year-long",
@@ -159,7 +162,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "history-on-trial",
     title: "History on Trial",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "3–8+",
     length: "Year-long",
@@ -169,7 +172,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "i-said-what-i-said",
     title: "I Said What I Said",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "4–5",
     length: "Year-long",
@@ -179,7 +182,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "math-competitor-academy",
     title: "Math Competitor Academy",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "4–8+",
     length: "Year-long",
@@ -189,7 +192,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "math-elite-academy",
     title: "Math Elite Academy",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "4–8+",
     length: "Year-long",
@@ -199,7 +202,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-verdict",
     title: "The Verdict",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Competition",
     grades: "6–8+",
     length: "Year-long",
@@ -209,7 +212,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "change-makers",
     title: "Change Makers",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -218,7 +221,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "chess-foundations",
     title: "Chess Foundations",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -227,7 +230,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "chess-mastery",
     title: "Chess Mastery",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -236,7 +239,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "codebreakers",
     title: "Codebreakers",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "2–5",
     length: "60 min · 2×/week",
@@ -245,7 +248,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "glitch-and-grow",
     title: "Glitch and Grow",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -254,7 +257,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "global-host-challenge",
     title: "Global Host Challenge",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -263,7 +266,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "going-viral",
     title: "Going Viral",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -272,7 +275,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "hidden-stories",
     title: "Hidden Stories",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -281,7 +284,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "japanese-black-belt",
     title: "Japanese Black Belt: Reverse-Engineering a Language",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -290,7 +293,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "literary-league",
     title: "Literary League",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -299,7 +302,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "on-the-record",
     title: "On the Record",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -308,7 +311,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "one-idea",
     title: "One Idea",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -317,7 +320,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "page-turners",
     title: "Page Turners",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "2–5",
     length: "45 min · 2×/week",
@@ -326,7 +329,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "rewrite-history",
     title: "Rewrite History",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -335,7 +338,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "say-that-again",
     title: "Say That Again",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -344,7 +347,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sky-tower-challenge",
     title: "Sky Tower Challenge",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -353,7 +356,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sold",
     title: "Sold!",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "2–5",
     length: "60 min · 2×/week",
@@ -362,7 +365,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "soy-un-experto",
     title: "Soy un Experto",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -371,7 +374,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "strategic-chess",
     title: "Strategic Chess",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
@@ -380,7 +383,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-deal",
     title: "The Deal",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "6–8+",
     length: "45 min · 2×/week",
@@ -389,7 +392,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-greenlight",
     title: "The Greenlight",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -398,7 +401,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "venture-lab",
     title: "Venture Lab",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -407,7 +410,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "young-inventors-challenge",
     title: "Young Inventors Challenge",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -416,7 +419,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "ai-robot-coach-academy",
     title: "AI Robot Coach Academy",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -425,7 +428,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "attractions-in-action",
     title: "Attractions in Action",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -434,7 +437,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "board-game-designer",
     title: "Board Game Designer",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "3–8+",
     length: "45 min · 2×/week",
@@ -443,7 +446,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "deep-time",
     title: "Deep Time",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -452,7 +455,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "future-champion-lab",
     title: "Future Champion Lab",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -461,7 +464,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "mind-lab",
     title: "Mind Lab",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "6–8+",
     length: "60 min · 2×/week",
@@ -470,7 +473,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "sound-the-alarm",
     title: "Sound the Alarm",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -479,7 +482,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "the-caldera",
     title: "The Caldera",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "3–5",
     length: "60 min · 2×/week",
@@ -488,7 +491,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "unbuyable-product-lab",
     title: "The Unbuyable Product Lab",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "3–8+",
     length: "60 min · 2×/week",
@@ -497,7 +500,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "think-like-a-scientist",
     title: "Think like a Scientist",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "K–4",
     length: "45 min · 2×/week",
@@ -506,7 +509,7 @@ export const WORKSHOPS: Workshop[] = [
   {
     id: "vex-all-stars",
     title: "VEX All-Stars: Rebuild the Legends",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "5–8+",
     length: "60 min · 2×/week",
@@ -524,7 +527,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "the-peace-table",
     title: "The Peace Table",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -533,7 +536,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "board-game-masters",
     title: "Board Game Masters",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Sciences",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -542,7 +545,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "food-lab-challenge",
     title: "Food Lab Challenge",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -551,7 +554,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "passport-mission",
     title: "Passport Mission",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",
@@ -560,7 +563,7 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
   {
     id: "toy-inventors",
     title: "Toy Inventors",
-    advisor: "Advisor to be announced",
+    advisor: ADVISOR_TBA,
     track: "Humanities",
     grades: "K–2",
     length: "45 min · 2×/week",

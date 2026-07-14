@@ -1,41 +1,106 @@
 "use client";
 
 import { useState } from "react";
-import {
-  GRADES,
-  SUBJECTS,
-  WORKSHOPS,
-  checklist,
-  childName,
-  completeness,
-  statusMeta,
-  type Child,
-} from "./data";
+import { checklist, childName, completeness, statusMeta, type Child } from "./data";
 import { useDashboard } from "./store";
-import { Label, Meter, TextArea, TextField, inputCls } from "./ui";
+import { Meter } from "./ui";
+import {
+  STEP_LABELS,
+  firstIncompleteStep,
+  resolveStep,
+  stepsForGroup,
+  type WizardStepId,
+} from "./wizard-rules";
+import { focusRing } from "./wizard/shared";
+import StepBasics from "./wizard/StepBasics";
+import StepGroup from "./wizard/StepGroup";
+import StepAcademics from "./wizard/StepAcademics";
+import StepWorkshops from "./wizard/StepWorkshops";
+import StepProject from "./wizard/StepProject";
+import StepReview from "./wizard/StepReview";
 
-function Section({
-  n,
-  title,
-  hint,
-  children,
+type SaveState = "idle" | "saving" | "error";
+
+/* ---------- progress rail ---------- */
+
+function WizardRail({
+  steps,
+  activeIdx,
+  allNavigable,
+  onSelect,
 }: {
-  n: string;
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
+  steps: WizardStepId[];
+  activeIdx: number;
+  /** Locked wizard: every step stays clickable (read-only browse). */
+  allNavigable: boolean;
+  onSelect: (s: WizardStepId) => void;
 }) {
   return (
-    <section className="rounded-2xl border border-line bg-white p-6 sm:p-7">
-      <div className="flex items-baseline gap-3">
-        <span className="font-mono text-xs text-red">{n}</span>
-        <h3 className="font-display text-lg font-bold tracking-tight text-ink">{title}</h3>
-      </div>
-      {hint && <p className="mt-1 text-sm text-ink-soft">{hint}</p>}
-      <div className="mt-5">{children}</div>
-    </section>
+    <nav aria-label="Dossier steps" className="mt-6">
+      {/* Full rail ≥480px */}
+      <ol className="hidden flex-wrap gap-x-2 gap-y-3 min-[480px]:flex">
+        {steps.map((s, i) => {
+          const done = i < activeIdx;
+          const active = i === activeIdx;
+          // Completed (already-passed) steps are revisitable; in the locked
+          // wizard everything is.
+          const clickable = allNavigable ? !active : done;
+          const inner = (
+            <>
+              <span
+                aria-hidden
+                className={`flex h-6 w-6 flex-none items-center justify-center rounded-full font-mono text-[0.65rem] ${
+                  active ? "bg-red text-white" : done ? "bg-blue text-white" : "bg-line text-muted"
+                }`}
+              >
+                {done ? "✓" : i + 1}
+              </span>
+              <span
+                className={`font-mono text-[0.65rem] uppercase tracking-[0.1em] ${
+                  active ? "text-ink" : "text-muted"
+                }`}
+              >
+                {STEP_LABELS[s]}
+              </span>
+            </>
+          );
+          return (
+            <li key={s} className="flex items-center gap-2">
+              {clickable ? (
+                <button
+                  type="button"
+                  onClick={() => onSelect(s)}
+                  aria-current={active ? "step" : undefined}
+                  className={`flex items-center gap-2 rounded-full hover:opacity-80 ${focusRing}`}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <span aria-current={active ? "step" : undefined} className="flex items-center gap-2">
+                  {inner}
+                </span>
+              )}
+              {i < steps.length - 1 && (
+                <span aria-hidden className="text-line-strong">
+                  ·
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {/* Condensed under 480px */}
+      <p
+        aria-current="step"
+        className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-ink min-[480px]:hidden"
+      >
+        Step {activeIdx + 1} of {steps.length} · {STEP_LABELS[steps[activeIdx]]}
+      </p>
+    </nav>
   );
 }
+
+/* ---------- wizard shell ---------- */
 
 export default function DossierEditor({
   child,
@@ -46,47 +111,118 @@ export default function DossierEditor({
   onBack: () => void;
   onPreview: () => void;
 }) {
-  const { updateChild, submitChild, removeChild } = useDashboard();
-  const [otherSubject, setOtherSubject] = useState("");
+  const { updateChild, removeChild, saveChildNow, deposits } = useDashboard();
+
+  // Resume: land on the first incomplete step (complete draft → Review).
+  const [currentId, setCurrentId] = useState<WizardStepId>(() => firstIncompleteStep(child));
+  // Set when a step was reached via a Review deep-link → "Back to review".
+  const [reviewOrigin, setReviewOrigin] = useState<WizardStepId | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [submitState, setSubmitState] = useState<SaveState>("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Post-submit Group/Workshops save confirmation ("… updated ✓").
+  const [lockedSavedStep, setLockedSavedStep] = useState<WizardStepId | null>(null);
+
+  // Steps re-derive whenever the group changes; if the current step vanished
+  // (Workshops after switching away from Scholars) route to its successor.
+  const steps = stepsForGroup(child.groupSlug);
+  const step = resolveStep(currentId, child.groupSlug);
+  const idx = steps.indexOf(step);
+  const nextStep = steps[idx + 1];
+
   const pct = completeness(child);
   const items = checklist(child);
-  const locked = child.status !== "draft";
+  // The submitted/locked state renders only once the submit save confirmed
+  // {ok: true} — while the Submit write is in flight the wizard stays open.
+  const locked = child.status !== "draft" && submitState !== "saving";
+  const depositPaid = deposits.some((d) => d.childId === child.id && d.status === "paid");
+  /** Post-submit, only Group (and with it Workshops) stays editable until a
+   *  paid deposit exists (R5/R6) — the DB group-lock guard is the real gate. */
+  const stepEditable = (s: WizardStepId) =>
+    !locked || (!depositPaid && (s === "group" || s === "workshops"));
 
   const set = (patch: Partial<Child>) => updateChild(child.id, patch);
 
-  const toggleSubject = (s: string) => {
-    if (child.subjects.includes(s)) set({ subjects: child.subjects.filter((x) => x !== s) });
-    else if (child.subjects.length < 2) set({ subjects: [...child.subjects, s] });
+  const goTo = (s: WizardStepId, opts?: { fromReview?: boolean }) => {
+    setCurrentId(s);
+    setReviewOrigin(opts?.fromReview ? s : null);
+    setSaveState("idle");
+    setSaveError(null);
+    setLockedSavedStep(null);
   };
-  const addOther = () => {
-    const v = otherSubject.trim();
-    if (v && !child.subjects.includes(v) && child.subjects.length < 2) {
-      set({ subjects: [...child.subjects, v] });
-      setOtherSubject("");
+
+  /** Next: idle → saving (disabled) → advance on ok / stay with a retryable
+   *  inline error on failure. In the locked wizard Next is free navigation. */
+  const goNext = async () => {
+    if (!nextStep) return;
+    if (locked) {
+      goTo(nextStep);
+      return;
+    }
+    setSaveState("saving");
+    setSaveError(null);
+    const res = await saveChildNow(child.id);
+    if (res.ok) {
+      goTo(nextStep);
+    } else {
+      setSaveState("error");
+      setSaveError(res.error ?? "Could not save.");
     }
   };
 
-  const toggleWorkshop = (id: string) =>
-    set({
-      workshopIds: child.workshopIds.includes(id)
-        ? child.workshopIds.filter((x) => x !== id)
-        : [...child.workshopIds, id],
-    });
-
-  const onPhoto = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => set({ photo: String(reader.result) });
-    reader.readAsDataURL(file);
+  const goBackStep = () => {
+    if (idx > 0) goTo(steps[idx - 1]);
   };
 
-  const canSubmit = pct === 100 && !locked;
+  /** Explicit save for the locked-but-editable steps (post-submit group
+   *  change): its own confirmation, since Next's advance feedback doesn't
+   *  apply in the locked wizard. A paid-deposit group change is rejected by
+   *  the DB guard and surfaces here as the inline error. */
+  const saveLockedStep = async () => {
+    setSaveState("saving");
+    setSaveError(null);
+    setLockedSavedStep(null);
+    const res = await saveChildNow(child.id);
+    if (res.ok) {
+      setSaveState("idle");
+      setLockedSavedStep(step);
+    } else {
+      setSaveState("error");
+      setSaveError(res.error ?? "Could not save.");
+    }
+  };
+
+  /** Submit: same state machine as Next. Status flips locally first, but the
+   *  locked state renders only on a confirmed {ok: true}; on failure the
+   *  local status reverts to draft with a retryable inline error. */
+  const doSubmit = async () => {
+    if (pct !== 100 || locked) return;
+    setSubmitState("saving");
+    setSubmitError(null);
+    updateChild(child.id, { status: "submitted", submittedAt: new Date().toISOString() });
+    // The store reads state from a ref assigned at render — yield a macrotask
+    // so saveChildNow sees the submitted status.
+    await new Promise((r) => setTimeout(r, 0));
+    const res = await saveChildNow(child.id);
+    if (res.ok) {
+      setSubmitState("idle");
+    } else {
+      updateChild(child.id, { status: "draft", submittedAt: undefined });
+      setSubmitState("error");
+      setSubmitError(res.error ?? "Could not submit.");
+    }
+  };
+
+  const n = String(idx + 1).padStart(2, "0");
+  const nextDisabled =
+    saveState === "saving" || (!locked && step === "group" && child.groupSlug === "");
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
       <button
         onClick={onBack}
-        className="font-mono text-xs uppercase tracking-[0.12em] text-muted hover:text-ink"
+        className={`rounded font-mono text-xs uppercase tracking-[0.12em] text-muted hover:text-ink ${focusRing}`}
       >
         ← All children
       </button>
@@ -107,285 +243,112 @@ export default function DossierEditor({
 
       {locked && (
         <p className="mt-4 rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink-soft">
-          This dossier has been submitted and is locked for review. Contact{" "}
-          <span className="text-ink">admissions@the120.school</span> to make changes.
+          {depositPaid ? (
+            <>
+              This dossier is locked for review and the seat deposit is in — contact{" "}
+              <span className="text-ink">admissions@the120.school</span> for any changes.
+            </>
+          ) : (
+            <>
+              This dossier is locked for review. Your group choice can still be changed until a
+              deposit is paid — contact <span className="text-ink">admissions@the120.school</span>{" "}
+              for anything else.
+            </>
+          )}
         </p>
       )}
 
-      <fieldset disabled={locked} className="mt-6 space-y-5 disabled:opacity-70">
-        {/* 1 · Basics */}
-        <Section n="01" title="Basics" hint="Who is this candidate for the 120?">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField label="First name" value={child.firstName} onChange={(v) => set({ firstName: v })} />
-            <TextField label="Last name" value={child.lastName} onChange={(v) => set({ lastName: v })} />
-            <label className="block">
-              <Label>Grade (Fall 2026)</Label>
-              <select
-                value={child.grade}
-                onChange={(e) => set({ grade: e.target.value ? Number(e.target.value) : "" })}
-                className={inputCls}
-              >
-                <option value="">Select…</option>
-                {GRADES.map((g) => (
-                  <option key={g} value={g}>
-                    Grade {g}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <TextField
-              label="Birth year"
-              value={child.birthYear}
-              onChange={(v) => set({ birthYear: v.replace(/\D/g, "").slice(0, 4) })}
-              placeholder="2016"
-            />
-            <div className="sm:col-span-2">
-              <TextField
-                label="Current school"
-                value={child.currentSchool}
-                onChange={(v) => set({ currentSchool: v })}
-                placeholder="Where they go today"
-              />
-            </div>
-          </div>
+      <WizardRail steps={steps} activeIdx={idx} allNavigable={locked} onSelect={(s) => goTo(s)} />
 
-          <div className="mt-4">
-            <Label>Photo (optional)</Label>
-            <div className="flex items-center gap-4">
-              <div className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
-                {child.photo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={child.photo} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="font-mono text-lg">
-                    {(child.firstName[0] || "?").toUpperCase()}
-                  </span>
-                )}
-              </div>
-              <label className="cursor-pointer rounded-full border border-line-strong px-4 py-2 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink">
-                {child.photo ? "Replace" : "Upload"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(e) => onPhoto(e.target.files?.[0])}
-                />
-              </label>
-              {child.photo && (
-                <button
-                  onClick={() => set({ photo: undefined })}
-                  className="font-mono text-xs uppercase tracking-[0.1em] text-muted hover:text-red"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        </Section>
-
-        {/* 2 · Academic picks */}
-        <Section
-          n="02"
-          title="Academic picks"
-          hint="Choose 1–2 subjects to get super advanced in via TimeBack."
+      {reviewOrigin === step && (
+        <button
+          onClick={() => goTo("review")}
+          className={`mt-4 rounded font-mono text-xs uppercase tracking-[0.12em] text-blue hover:text-red ${focusRing}`}
         >
-          <div className="flex flex-wrap gap-2">
-            {SUBJECTS.map((s) => {
-              const on = child.subjects.includes(s);
-              const disabled = !on && child.subjects.length >= 2;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleSubject(s)}
-                  disabled={disabled}
-                  className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors disabled:opacity-40 ${
-                    on ? "border-red bg-red text-white" : "border-line-strong text-ink-soft hover:border-ink"
-                  }`}
-                >
-                  {s}
-                </button>
-              );
-            })}
-          </div>
+          ← Back to review
+        </button>
+      )}
 
-          {/* custom subject + selected chips */}
-          <div className="mt-3 flex gap-2">
-            <input
-              value={otherSubject}
-              onChange={(e) => setOtherSubject(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addOther())}
-              placeholder="Other subject…"
-              className={`${inputCls} h-10`}
-              disabled={child.subjects.length >= 2}
-            />
+      {/* Step content */}
+      <div className="mt-5">
+        {step === "review" ? (
+          <StepReview
+            child={child}
+            items={items}
+            pct={pct}
+            locked={locked}
+            n={n}
+            submitState={submitState}
+            submitError={submitError}
+            onJump={(s) => goTo(s, { fromReview: true })}
+            onPreview={onPreview}
+            onSubmit={doSubmit}
+            onRemove={() => removeChild(child.id)}
+          />
+        ) : (
+          <fieldset disabled={!stepEditable(step)} className="disabled:opacity-70">
+            {step === "basics" && <StepBasics child={child} set={set} n={n} />}
+            {step === "group" && <StepGroup child={child} set={set} n={n} />}
+            {step === "academics" && <StepAcademics child={child} set={set} n={n} />}
+            {step === "workshops" && <StepWorkshops child={child} set={set} n={n} />}
+            {step === "project" && <StepProject child={child} set={set} n={n} />}
+          </fieldset>
+        )}
+      </div>
+
+      {/* Step navigation */}
+      {step !== "review" && (
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          {idx > 0 && (
             <button
-              type="button"
-              onClick={addOther}
-              disabled={child.subjects.length >= 2 || !otherSubject.trim()}
-              className="flex-none rounded-xl border border-line-strong px-4 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink disabled:opacity-40"
+              onClick={goBackStep}
+              className={`inline-flex h-12 items-center justify-center rounded-full border border-line-strong px-6 font-mono text-xs uppercase tracking-[0.12em] text-ink hover:border-ink ${focusRing}`}
             >
-              Add
+              ← Back
             </button>
-          </div>
-          {child.subjects.some((s) => !SUBJECTS.includes(s as (typeof SUBJECTS)[number])) && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {child.subjects
-                .filter((s) => !SUBJECTS.includes(s as (typeof SUBJECTS)[number]))
-                .map((s) => (
-                  <span
-                    key={s}
-                    className="flex items-center gap-1.5 rounded-full bg-red/10 px-3 py-1 font-mono text-xs text-red"
-                  >
-                    {s}
-                    <button onClick={() => toggleSubject(s)} aria-label={`Remove ${s}`}>
-                      ✕
-                    </button>
-                  </span>
-                ))}
-            </div>
           )}
-
-          <div className="mt-5">
-            <TextArea
-              label="Test scores / assessments (optional)"
-              value={child.testScores}
-              onChange={(v) => set({ testScores: v })}
-              placeholder="MAP, CCAT, recent report cards — anything you'd like to share."
-              rows={3}
-            />
-          </div>
-        </Section>
-
-        {/* 3 · Workshops */}
-        <Section
-          n="03"
-          title="Workshops of interest"
-          hint={`Express interest — this isn't scheduling. Selected: ${child.workshopIds.length}`}
-        >
-          {[...new Set(WORKSHOPS.map((w) => w.track))].map((track) => (
-            <details key={track} className="group mt-3 first:mt-0" open>
-              <summary className="mb-3 flex cursor-pointer list-none items-center gap-2 font-mono text-[0.7rem] uppercase tracking-[0.14em] text-muted">
-                <span className="text-red transition-transform group-open:rotate-90">▸</span>
-                {track} · {WORKSHOPS.filter((w) => w.track === track).length} workshops
-              </summary>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {WORKSHOPS.filter((w) => w.track === track).map((w) => {
-                  const on = child.workshopIds.includes(w.id);
-                  return (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={() => toggleWorkshop(w.id)}
-                      className={`rounded-xl border p-4 text-left transition-colors ${
-                        on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-display text-sm font-bold text-ink">{w.title}</span>
-                        <span
-                          className={`mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-full border text-[0.55rem] ${
-                            on ? "border-red bg-red text-white" : "border-line-strong text-transparent"
-                          }`}
-                        >
-                          ✓
-                        </span>
-                      </div>
-                      <p className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-muted">
-                        {w.track} · Grades {w.grades} · {w.length}
-                      </p>
-                      <p className="mt-2 text-xs leading-5 text-ink-soft">{w.description}</p>
-                      <p className="mt-2 font-mono text-[0.65rem] text-red">{w.advisor}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </details>
-          ))}
-        </Section>
-
-        {/* 4 · Project & interests */}
-        <Section
-          n="04"
-          title="Project & interests"
-          hint="The kid's own words are encouraged."
-        >
-          <div className="space-y-4">
-            <TextArea
-              label="What is your child into?"
-              value={child.interests}
-              onChange={(v) => set({ interests: v })}
-              placeholder="Dinosaurs, chess, building things, marine biology…"
-              rows={3}
-            />
-            <TextArea
-              label="A year-long project idea"
-              value={child.projectPitch}
-              onChange={(v) => set({ projectPitch: v })}
-              placeholder="One super interesting thing they'd love to spend a year building, researching, or shipping."
-              rows={4}
-            />
-            <TextField
-              label="Portfolio / achievement links (optional)"
-              value={child.portfolioLinks}
-              onChange={(v) => set({ portfolioLinks: v })}
-              placeholder="A website, a video, a competition result…"
-            />
-          </div>
-        </Section>
-      </fieldset>
-
-      {/* Checklist + actions */}
-      <div className="mt-6 rounded-2xl border border-line bg-white p-6">
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
-          What&rsquo;s left
-        </p>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          {items.map((i) => (
-            <li key={i.label} className="flex items-center gap-2 text-sm">
-              <span
-                className={`flex h-4 w-4 flex-none items-center justify-center rounded-full text-[0.6rem] ${
-                  i.done ? "bg-red text-white" : "border border-line-strong text-transparent"
-                }`}
-              >
-                ✓
-              </span>
-              <span className={i.done ? "text-muted line-through" : "text-ink-soft"}>{i.label}</span>
-            </li>
-          ))}
-        </ul>
-
-        <div className="mt-6 flex flex-wrap gap-3">
           <button
-            onClick={onPreview}
-            className="inline-flex h-12 items-center justify-center rounded-full border border-line-strong px-6 font-mono text-xs uppercase tracking-[0.12em] text-ink hover:border-ink"
+            onClick={goNext}
+            disabled={nextDisabled}
+            className={`inline-flex h-12 items-center justify-center rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
           >
-            Preview dossier
+            {saveState === "saving" && !locked
+              ? "Saving…"
+              : nextStep === "review"
+                ? "Review →"
+                : "Next →"}
           </button>
-          <button
-            onClick={() => submitChild(child.id)}
-            disabled={!canSubmit}
-            className="inline-flex h-12 items-center justify-center rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {locked ? "Submitted" : "Submit for review"}
-          </button>
-          {!canSubmit && !locked && (
+          {locked && stepEditable(step) && (
+            <button
+              onClick={saveLockedStep}
+              disabled={saveState === "saving"}
+              className={`inline-flex h-12 items-center justify-center rounded-full bg-blue px-6 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-blue-dark disabled:cursor-wait disabled:opacity-60 ${focusRing}`}
+            >
+              {saveState === "saving"
+                ? "Saving…"
+                : step === "group"
+                  ? "Save group choice"
+                  : "Save workshop picks"}
+            </button>
+          )}
+          {!locked && step === "group" && child.groupSlug === "" && (
             <p className="w-full font-mono text-[0.7rem] text-muted">
-              Complete the dossier (100%) to submit for review.
+              Pick a group to continue — it shapes the rest of the dossier.
+            </p>
+          )}
+          {lockedSavedStep === step && (
+            <p className="w-full text-sm text-ink" role="status">
+              {step === "group" ? "Group choice updated ✓" : "Workshop picks updated ✓"}
+            </p>
+          )}
+          {saveState === "error" && (
+            <p role="alert" className="w-full text-sm text-red">
+              {saveError ?? "Could not save."} — nothing was lost; press{" "}
+              {locked ? "Save" : "Next"} to retry.
             </p>
           )}
         </div>
-
-        <button
-          onClick={() => {
-            if (confirm(`Remove ${childName(child)}'s dossier? This cannot be undone.`))
-              removeChild(child.id);
-          }}
-          className="mt-6 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red"
-        >
-          Remove this child
-        </button>
-      </div>
+      )}
     </div>
   );
 }

@@ -78,6 +78,13 @@ Everything Stripe is **test mode** on the **Hatch Coding CDN** account (`acct_10
   3. **Live product + price + webhook** (test webhook `we_1TrOfg25N9cbf3wUesMLOl9y` targets production URL with test events today).
   4. **Verification**: one real $250 charge + refund round-trip; confirm statement descriptor, receipt email, refund copy.
 
+**S11 · Dossier approval-gate post-deploy ops** *(dev — agent-runnable)* — 🟡 **Deploy live + purge #1 done 2026-07-14; two follow-ups open.**
+Context: PR #5 (feat/dossier-intake-approval-gate, merged 2026-07-14, prod deploy `dpl_C6wBqRSemn6pREP7vxex9HEHkxkg` READY) retired the test-scores field and gated the $250 deposit behind admissions approval (`children.status` = `offered`-or-later). Both migrations are applied to production and recorded in `schema_migrations`: `20260714200000_add_submission_notified_at` (pre-deploy, trigger verified by parent-JWT replay) and `20260714210000_purge_test_scores` (post-deploy 2026-07-14, count verified 0 before/after — no rows held scores).
+  1. **🔴 Purge re-run — do ON/AFTER 2026-07-16** (24–48h after the 2026-07-14 deploy): browser tabs opened before the deploy still run the old bundle, whose autosave round-trips `test_scores` and could re-upload a value after purge #1. Via the Management API playbook (`docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md`, token in Windows Credential Manager `Supabase CLI:supabase`), run:
+     `update public.children set test_scores = '' where test_scores <> '';`
+     then verify `select count(*) from public.children where test_scores <> '';` → **must be 0**. This second clean count is the gate for any future `test_scores` column drop (optional follow-up, not scheduled). Memory note: `purge-test-scores-pending.md` — update/delete it when this closes.
+  2. **🟡 Launch triage (R16)** *(Owner: Peter/admissions)*: families already in `submitted` lost the instant "Reserve seat · $250" button and now see "Application Under Review". Open `/crm/dossiers` (needs-review badge shows the count) and move clear admits to **Offered** — that's what re-unlocks their deposit CTA. Also smoke-check one test family end-to-end when convenient: submit → admissions email arrives → CRM approve → Reserve → Stripe test payment (use `delivered+x@resend.dev` to black-hole the email if preferred).
+
 ---
 
 ## 📣 GTM build queue (software to execute artifacts/gtm-8-week-sprint.md)

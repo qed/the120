@@ -12,7 +12,7 @@ import { nav as defaultLinks } from "@/app/lib/site";
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
  * with side margins, over hero imagery. One nav for every page — The 120 is
- * the product; groups (including GT/Scholars) are sub-pages with no variant
+ * the product; groups (including the Scholars) are sub-pages with no variant
  * chrome. Links are identical site-wide by design.
  *
  * Session-aware CTA: signed-in families see "My dashboard" where "Join the

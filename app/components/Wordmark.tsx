@@ -1,6 +1,6 @@
 /**
  * The 120 lockup (handoff): square red chip "120" + stacked wordmark
- * over a letterspaced red sublabel ("TORONTO", or "GT TORONTO" on the GT sub-site).
+ * over a letterspaced red sublabel ("TORONTO").
  */
 export default function Wordmark({
   tone = "dark",

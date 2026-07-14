@@ -65,15 +65,15 @@ function useCountUp(target: number, active: boolean, duration = 1200) {
 
 const BASELINE = { x: 44, y: 156 };
 const MASTERY_Y = 34;
-// Traditional: slow, near-linear. TimeBack: steep then plateaus at mastery.
+// Traditional: slow, near-linear. Mastery path: steep then plateaus at mastery.
 const TRADITIONAL_PATH = `M${BASELINE.x},${BASELINE.y} C 150,148 260,132 380,118`;
-const TIMEBACK_PATH = `M${BASELINE.x},${BASELINE.y} C 120,156 150,70 236,50 C 300,36 344,${MASTERY_Y} 380,${MASTERY_Y}`;
+const MASTERY_PATH = `M${BASELINE.x},${BASELINE.y} C 120,156 150,70 236,50 C 300,36 344,${MASTERY_Y} 380,${MASTERY_Y}`;
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                         */
 /* ------------------------------------------------------------------ */
 
-export default function TimeBackSimulator() {
+export default function PaceSimulator() {
   const [subject, setSubject] = useState<(typeof SUBJECTS)[number]>(SUBJECTS[0]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>(STATUSES[0]);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -113,20 +113,21 @@ export default function TimeBackSimulator() {
     mapping: "Mapping the baseline…",
     deleting: "Deleting the busywork…",
     accelerating: "Fast-forwarding to mastery…",
-    done: "This is TimeBack.",
+    done: "This is mastery pace.",
   };
 
   return (
     <section id="subject" className="scroll-mt-24 border-b border-line bg-paper-2">
       <div className="mx-auto w-full max-w-6xl px-6 py-20 lg:py-28">
         <div className="max-w-2xl">
-          <p className="eyebrow">The Subject · TimeBack</p>
+          <p className="eyebrow">The Subject · The Simulator</p>
           <h2 className="mt-4 font-display text-3xl font-bold tracking-tight text-ink sm:text-4xl">
             Get super advanced in one subject. Watch how.
           </h2>
           <p className="mt-4 text-lg leading-8 text-ink-soft">
-            TimeBack maps exactly what your child already knows, deletes the repetition, and lets
-            them move at their real pace — mastery-based, no ceiling. Pick a subject and press play.
+            The platform maps exactly what your child already knows, deletes the repetition, and
+            lets them move at their real pace — mastery-based, no ceiling. Pick a subject and
+            press play.
           </p>
         </div>
 
@@ -182,7 +183,7 @@ export default function TimeBackSimulator() {
               onClick={run}
               className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-red px-6 font-mono text-xs font-medium uppercase tracking-[0.14em] text-white shadow-sm shadow-red/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-red-dark hover:shadow-md hover:shadow-red/30 active:translate-y-0"
             >
-              {phase === "done" ? "↻ Run it again" : started ? "Running…" : "▶ Run TimeBack"}
+              {phase === "done" ? "↻ Run it again" : started ? "Running…" : "▶ Run the simulation"}
             </button>
 
             {/* Busywork list */}
@@ -276,9 +277,9 @@ export default function TimeBackSimulator() {
                 SCHOOL
               </text>
 
-              {/* TimeBack curve, drawn on accelerate */}
+              {/* mastery curve, drawn on accelerate */}
               <motion.path
-                d={TIMEBACK_PATH}
+                d={MASTERY_PATH}
                 fill="none"
                 stroke="#d92632"
                 strokeWidth="3.5"
@@ -306,7 +307,7 @@ export default function TimeBackSimulator() {
                 )}
               </AnimatePresence>
 
-              {/* mastery marker at end of TimeBack curve */}
+              {/* mastery marker at end of the mastery curve */}
               <AnimatePresence>
                 {accelerating && (
                   <motion.circle
@@ -358,8 +359,7 @@ export default function TimeBackSimulator() {
         </div>
 
         <p className="mt-4 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-ink-soft">
-          Illustrative. Velocity figures reflect GT / 2 Hour Learning network results, not
-          guaranteed outcomes.
+          Illustrative simulation of mastery-based pacing — not a promised outcome.
         </p>
       </div>
     </section>

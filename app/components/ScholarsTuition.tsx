@@ -3,15 +3,15 @@ import JoinButton from "./JoinButton";
 import SeatsDot from "./SeatsDot";
 
 const checklist = [
-  "5 hours a week of TimeBack, your academic core",
+  "5 hours a week of adaptive academics, your academic core",
   "1–3 subjects, your choice, mastery-based",
   "Bi-weekly 30 min 1:1 with an expert Academic Advisor",
   "Everything in Membership: Tin Can, project, intensives",
   "Supports Ontario homeschool registration",
 ];
 
-/** GT-Home tuition split (handoff): copy left, Full Academic Core card right. */
-export default function GtTuition({ seatsRemaining }: { seatsRemaining?: number }) {
+/** Scholars tuition split: copy left, Full Academic Core card right. */
+export default function ScholarsTuition({ seatsRemaining }: { seatsRemaining?: number }) {
   return (
     <section id="tuition" className="scroll-mt-24 border-t border-line bg-paper-2">
       <div className="mx-auto grid w-full max-w-[1240px] grid-cols-1 items-center gap-10 px-6 py-24 sm:px-8 lg:grid-cols-2 lg:gap-14">
@@ -22,8 +22,8 @@ export default function GtTuition({ seatsRemaining }: { seatsRemaining?: number 
           </h2>
           <p className="max-w-[520px] text-[15px] leading-[1.65] text-ink-soft">
             Membership in the 120 is $3,000 CAD a year. Scholars who want the complete academic
-            core upgrade to TimeBack: the full GT program, 5 hours a week, for $15,000 all-in.
-            All tuition is HST-exempt.
+            core upgrade to the Full Academic Core: 5 hours a week of AI-adaptive, mastery-based
+            academics, for $15,000 all-in. All tuition is HST-exempt.
           </p>
           <Cta href="/tuition" variant="ghost" className="self-start px-[26px] py-[15px]">
             Compare the tiers →

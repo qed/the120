@@ -11,7 +11,7 @@ import { getSeatsRemaining } from "@/app/lib/seats";
 export const metadata: Metadata = {
   title: "Tuition — The 120",
   description:
-    "Two price points, one network. $3,000 CAD a year for Membership, or $15,000 for the Full Academic Core with TimeBack.",
+    "Two price points, one network. $3,000 CAD a year for Membership, or $15,000 for the Full Academic Core.",
 };
 
 const membership = [
@@ -24,10 +24,10 @@ const membership = [
 
 const fullcore = [
   "Everything in Membership, plus:",
-  "5 hours a week of TimeBack, your academic core",
+  "5 hours a week of adaptive academics, your academic core",
   "1–3 subjects, your choice",
   "Bi-weekly 30 min 1:1 with an expert Academic Advisor",
-  "Academics via Alpha Anywhere or GT Anywhere, by group",
+  "AI-adaptive, mastery-based academics, by group",
   "Supports Ontario homeschool registration",
 ];
 
@@ -60,8 +60,8 @@ export default async function TuitionPage() {
           </h1>
           <p className="max-w-[640px] text-lg leading-relaxed text-ink-soft">
             $3,000 CAD a year for Membership, with math acceleration through Math Academy. Or
-            $15,000 for the Full Academic Core: 5 hours a week of TimeBack for 1 to 3 subjects
-            of your choice.
+            $15,000 for the Full Academic Core: 5 hours a week of AI-adaptive, mastery-based
+            academics for 1 to 3 subjects of your choice.
           </p>
         </div>
 
@@ -83,7 +83,7 @@ export default async function TuitionPage() {
             </span>
             <span className="text-[15px] leading-relaxed text-muted">
               3&ndash;5 hours a week, alongside any school. Everything the network offers, with
-              math acceleration through Math Academy. No TimeBack academics.
+              math acceleration through Math Academy. No academic core.
             </span>
             <div className="flex flex-col gap-3 border-t border-white/25 pt-[22px]">
               {membership.map((m) => (
@@ -112,8 +112,8 @@ export default async function TuitionPage() {
               <span className="font-mono text-[13px] text-muted">CAD / YEAR</span>
             </span>
             <span className="text-[15px] leading-relaxed text-ink-soft">
-              The complete academic core: 5 hours a week of TimeBack for 1 to 3 subjects, your
-              choice. Academics through Alpha Anywhere or GT Anywhere, depending on your group.
+              The complete academic core: 5 hours a week of AI-adaptive, mastery-based
+              academics for 1 to 3 subjects, your choice.
             </span>
             <div className="flex flex-col gap-3 border-t border-line pt-[22px]">
               {fullcore.map((f) => (
@@ -123,7 +123,7 @@ export default async function TuitionPage() {
                 </span>
               ))}
             </div>
-            <Cta href="/gt" variant="ghost" className="py-[15px]">
+            <Cta href="/scholars" variant="ghost" className="py-[15px]">
               See the full program
             </Cta>
             <span className="text-center text-[13px] text-muted">

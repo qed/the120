@@ -32,7 +32,7 @@ export const nav = [
   { label: "FAQ", href: "/faq" },
 ] as const;
 
-/** The five groups (handoff Home + group pages). Scholars route to the GT sub-site. */
+/** The five groups (handoff Home + group pages). Scholars route to their own program page. */
 export type Group = {
   slug: string;
   name: string;
@@ -85,8 +85,8 @@ export const groups: Group[] = [
     accent: "Scholars",
     category: "GIFTED & TALENTED",
     kicker: "GROUP 04 · GIFTED & TALENTED · ENROLLING NOW",
-    blurb: "Accelerated academics with GT. Mastery with no ceiling.",
-    body: "For gifted kids who love to learn. Accelerated academics on the GT platform with mastery and no ceiling, run as GT Toronto.",
+    blurb: "Accelerated academics. Mastery with no ceiling.",
+    body: "For gifted kids who love to learn. Accelerated, mastery-based academics with no ceiling.",
     href: "/scholars",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
   },
@@ -111,12 +111,4 @@ export const intensives = [
   { label: "Winter Intensive", date: "Jan 30 – 31, 2027" },
   { label: "Spring Intensive", date: "Apr 3 – 4, 2027" },
   { label: "Summer Intensive", date: "Jun 12 – 13, 2027" },
-] as const;
-
-/** GT / 2 Hour Learning network outcomes — attributed to the network, never claimed as The 120's own. */
-export const proofStats = [
-  { value: "3x", label: "learning velocity vs. traditional school" },
-  { value: "1400+", label: "SAT scores by 8th grade" },
-  { value: "91%", label: "outperform their national peers" },
-  { value: "AP 5s", label: "earned before high school" },
 ] as const;

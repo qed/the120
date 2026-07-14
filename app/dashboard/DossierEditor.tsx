@@ -232,6 +232,14 @@ export default function DossierEditor({
     const res = await saveChildNow(child.id, { includeStatus: true });
     if (res.ok) {
       setSubmitState("idle");
+      // R15: best-effort admissions notification — fire-and-forget (auth via
+      // session cookie, like /api/checkout). A send failure must never affect
+      // the submit UX; the CRM needs-review badge is the reliable signal.
+      void fetch("/api/notify-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ childId: child.id }),
+      }).catch(() => {});
     } else {
       updateChild(child.id, { status: "draft", submittedAt: undefined });
       setSubmitState("error");

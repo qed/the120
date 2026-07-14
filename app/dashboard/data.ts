@@ -35,6 +35,8 @@ export type Workshop = {
   grades: string;
   length: string;
   description: string;
+  /** Competition workshops require an audition (GT Fall 2026 roster). */
+  audition?: boolean;
 };
 
 /** Real GT advisor roster (from the design handoff gt-workshops.json). */
@@ -52,7 +54,10 @@ export const ADVISORS: Advisor[] = [
   { id: "p1783114067812", name: "Yash Mehta", bio: "International Olympiad Medallist, with a decade of experience selecting, training, and mentoring national teams to top ranks at International Olympiads. He coaches with the philosophy that problem-solving is the most fundamental skill one must be equipped with." },
 ];
 
-/** Real workshop catalog (design handoff gt-workshops.json), grades 3-8 slice. */
+/** The 120's workshop roster — forked from GT's Fall 2026 offerings and
+ *  curated for The 120 community (last diffed against the live
+ *  community.gt.school/workshops 2026-07-14: +5 K–2 workshops, audition
+ *  flags on Competition, Lawrence Bernstein leading recreational chess). */
 export const WORKSHOPS: Workshop[] = [
   {
     id: "become-the-character",
@@ -62,6 +67,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "6–8+",
     length: "Year-long",
     description: "Cut a published script to a solo 10-minute dramatic interpretation and perform live for theater pros (NSDA criteria).",
+    audition: true,
   },
   {
     id: "botball-robotics",
@@ -71,6 +77,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "5–8+",
     length: "Year-long",
     description: "Found GT's first competition robotics team — fully autonomous robots, building toward the Botball World Championship.",
+    audition: true,
   },
   {
     id: "competitive-chess",
@@ -80,6 +87,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "K–8+",
     length: "Year-long",
     description: "USCF-rated competitive chess across five levels — Rookies, Intermediate, Advanced, National, Grandmaster — matched to each player’s rating.",
+    audition: true,
   },
   {
     id: "history-on-trial",
@@ -89,6 +97,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "3–8+",
     length: "Year-long",
     description: "Research a historical topic you love using primary sources and present at the National History Day competition.",
+    audition: true,
   },
   {
     id: "i-said-what-i-said",
@@ -98,6 +107,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "4–5",
     length: "Year-long",
     description: "Pick a side, say it clearly with the Point-Reason frame, and hold your ground when a peer pushes back.",
+    audition: true,
   },
   {
     id: "math-competitor-academy",
@@ -107,6 +117,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "4–8+",
     length: "Year-long",
     description: "Students train like math athletes, mastering competition strategies, tackling challenging problems, and competing in AMC 8, MOEMS, Math Kangaroo, and MathCounts.",
+    audition: true,
   },
   {
     id: "math-elite-academy",
@@ -116,6 +127,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "4–8+",
     length: "Year-long",
     description: "Students tackle advanced competition mathematics, train for AMC 8, MathCounts, AMC 10, and AIME pathways, and prove their skills in nationally recognized contests.",
+    audition: true,
   },
   {
     id: "the-verdict",
@@ -125,6 +137,7 @@ export const WORKSHOPS: Workshop[] = [
     grades: "6–8+",
     length: "Year-long",
     description: "Build a real case, cross-examine witnesses, and argue before outside judges who deliver a binding verdict.",
+    audition: true,
   },
   {
     id: "change-makers",
@@ -142,7 +155,7 @@ export const WORKSHOPS: Workshop[] = [
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
-    description: "Recreational chess for beginners: rules, piece movement, and core tactics in a fun, low-pressure setting.",
+    description: "Recreational chess for beginners: rules, piece movement, and core tactics in a fun, low-pressure setting. Led by Lawrence Bernstein.",
   },
   {
     id: "chess-mastery",
@@ -151,7 +164,7 @@ export const WORKSHOPS: Workshop[] = [
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
-    description: "Advanced recreational players deepen positional understanding and competitive skill.",
+    description: "Advanced recreational players deepen positional understanding and competitive skill. Led by Lawrence Bernstein.",
   },
   {
     id: "codebreakers",
@@ -188,6 +201,15 @@ export const WORKSHOPS: Workshop[] = [
     grades: "3–5",
     length: "60 min · 2×/week",
     description: "Create original content, use AI feedback to improve it, and learn how creators capture attention.",
+  },
+  {
+    id: "the-peace-table",
+    title: "The Peace Table",
+    advisor: "Andreea Musat",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Learn to work together and resolve conflicts — listen, understand both sides, and earn a Peace-Maker badge.",
   },
   {
     id: "hidden-stories",
@@ -295,7 +317,7 @@ export const WORKSHOPS: Workshop[] = [
     track: "Humanities",
     grades: "K–8+",
     length: "60 min · 2×/week",
-    description: "Developing players sharpen strategy, tactics, and game planning.",
+    description: "Developing players sharpen strategy, tactics, and game planning. Led by Lawrence Bernstein.",
   },
   {
     id: "the-deal",
@@ -350,6 +372,42 @@ export const WORKSHOPS: Workshop[] = [
     grades: "6–8+",
     length: "60 min · 2×/week",
     description: "Design an original attraction, prove the guest-flow and budget math, and field-test it on an earned Disney trip.",
+  },
+  {
+    id: "board-game-masters",
+    title: "Board Game Masters",
+    advisor: "Ruchi Shukla",
+    track: "Sciences",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Build strategic thinking and confidence through learning, practicing, and improving at board games.",
+  },
+  {
+    id: "food-lab-challenge",
+    title: "Food Lab Challenge",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Become a food scientist and recipe creator — explore flavor, nutrition, kitchen skills, and food science.",
+  },
+  {
+    id: "passport-mission",
+    title: "Passport Mission",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Explore countries through hands-on cultural experiences, building global awareness and curiosity.",
+  },
+  {
+    id: "toy-inventors",
+    title: "Toy Inventors",
+    advisor: "Ruchi Shukla",
+    track: "Humanities",
+    grades: "K–2",
+    length: "45 min · 2×/week",
+    description: "Turn recycled materials into playable toys while learning to invent, test, and improve ideas.",
   },
   {
     id: "board-game-designer",

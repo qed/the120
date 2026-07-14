@@ -66,7 +66,7 @@ Staff-only CRM at `/crm` for peter@ + ethan@ to run the GTM sprint: alphahub Pip
 Remaining site-map pages: How It Works, The Full Program, Our Advisors, Intensives — plus a written deposit/refund terms page linked from checkout (terms currently live only in checkout copy + receipt).
 
 **S8 · Visual/asset debt** *(dev + Peter)* — 🔴 **Not started.**
-Licensed photography (hero is a 2165px extraction, soft on retina; four group-page background slots are blue; Tin Can product imagery). Mission video. Restyle dashboard + join modal to the handoff identity. Dashboard "group" picker (data model + UI). Move dossier photos from data-URL column to a Supabase storage bucket.
+Licensed photography (hero is a 2165px extraction, soft on retina; four group-page background slots are blue; Tin Can product imagery). Mission video. Restyle dashboard + join modal to the handoff identity. ✅ Dashboard "group" picker shipped 2026-07-14 as part of the dossier wizard (feat/dossier-wizard: binding per-kid group step, `children.group_slug` + review-queue seeding). Move dossier photos from data-URL column to a Supabase storage bucket.
 
 **S9 · Tin Can partnership confirmation** *(Owner: Peter — external)* — 🔴 **Not started.**
 Logo/co-marketing rights before the brand appears beyond the legal line.

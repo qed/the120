@@ -110,6 +110,8 @@ if (!result.ok) {
 
 Without the never-throw contract, a rejected fetch throws *between* claim and unclaim, leaving the row permanently claimed-but-unsent — the reliability reviewer caught exactly this in the original draft.
 
+> ⚠ **Caveat (2026-07-15): this unconditional unclaim is only safe when the flow never resends.** If re-sends are possible, a failed racer's blind restore can clobber a concurrent successful resend's stamp (erasing the record of a real email and re-arming a double send). Guard the restore with `.eq(stampColumn, theStampYouClaimed)` and treat zero-rows-restored as "superseded — adopt the newer stamp, no warning". See [resend-safe-atomic-claim-then-send-cas-guarded-claim-and-unclaim-2026-07-15.md](resend-safe-atomic-claim-then-send-cas-guarded-claim-and-unclaim-2026-07-15.md) for the CAS-guarded variant (`sendOfferEmail` in `app/crm/lib/actions/reviews.ts`, `unclaimOutcome` in `app/crm/lib/offer-rules.ts`).
+
 **4. Invoke fire-and-forget from the client, after the confirmed save — never before:**
 
 ```ts
@@ -157,6 +159,7 @@ await admin.from("children").update({ notified_at: now }).eq("id", id);
 
 ## Related
 
+- [resend-safe-atomic-claim-then-send-cas-guarded-claim-and-unclaim-2026-07-15.md](resend-safe-atomic-claim-then-send-cas-guarded-claim-and-unclaim-2026-07-15.md) — **the resend extension of this pattern**: CAS claims on the last-seen stamp, CAS-guarded unclaim (see the §3 caveat above), opaque-string stamp round-trip, stamp-table disambiguation.
 - `docs/solutions/database-issues/stale-status-echo-full-row-upsert-vs-trigger-guard-coerce-not-raise-2026-07-14.md` — shares the server-owned-column principle (payload whitelist + coerce-not-raise trigger), applied there to `status` against a different failure. Overlap on the prevention dimension only.
 - `docs/solutions/database-issues/upsert-insert-arm-poisons-excluded-status-guard-coercion-submit-fails-2026-07-14.md` — reinforces §2's deeper rule: state transitions belong in **targeted UPDATEs**, never upserts, when coercing BEFORE INSERT guards exist (`EXCLUDED` inherits the coercion).
 - `docs/solutions/security-issues/admissions-notification-email-html-injection-via-unescaped-child-parent-names-2026-07-14.md` — same route, different lesson (escaping user text in the email body).

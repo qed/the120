@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   demoteWarning,
+  effectiveEmail,
   interpretClaimMiss,
   offerButtonState,
   offerEmailTemplate,
@@ -50,6 +51,14 @@ describe("offerEmailTemplate", () => {
     // Plaintext part carries the raw value — HTML escaping there would
     // render literal entities in plain-text clients.
     expect(evil.text).toContain('<img src=x onerror="pwn()">');
+  });
+
+  it("falls back to neutral copy on empty/whitespace names — a conscious F1 relaxation for garbage data, never blank text", () => {
+    const blank = offerEmailTemplate({ childFirstName: "   ", parentName: "" });
+    expect(blank.subject).toContain("your child");
+    expect(blank.text).toContain("Hi there,");
+    expect(blank.text).toContain("your child");
+    expect(blank.html).toContain("your child");
   });
 
   it("strips CR/LF and truncates names in the subject (header defense, distinct from HTML escaping)", () => {
@@ -161,6 +170,24 @@ describe("demoteWarning", () => {
     expect(demoteWarning({ targetStatus: "offered", offerSentAt: stamp, deposits: [] })).toBe(
       false
     );
+  });
+});
+
+describe("effectiveEmail (send-address authority rule, one shared helper)", () => {
+  it("parent account email wins over the family snapshot", () => {
+    expect(effectiveEmail("kevin@real.com", "old@snapshot.com")).toBe("kevin@real.com");
+  });
+
+  it("EMPTY-STRING parent email falls through to the snapshot (|| not ??)", () => {
+    expect(effectiveEmail("", "old@snapshot.com")).toBe("old@snapshot.com");
+    expect(effectiveEmail(null, "old@snapshot.com")).toBe("old@snapshot.com");
+    expect(effectiveEmail(undefined, "old@snapshot.com")).toBe("old@snapshot.com");
+  });
+
+  it("trims, and whitespace-only resolves to empty (no_contact / fail closed)", () => {
+    expect(effectiveEmail("  kevin@real.com  ", null)).toBe("kevin@real.com");
+    expect(effectiveEmail("   ", null)).toBe("");
+    expect(effectiveEmail(null, null)).toBe("");
   });
 });
 

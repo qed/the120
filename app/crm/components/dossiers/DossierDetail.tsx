@@ -62,6 +62,12 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
   const { toast } = useToast();
   const [moving, setMoving] = useState(false);
   const [sendingOffer, setSendingOffer] = useState(false);
+  /** Optimistic offer-sent stamp bridging the send → router.refresh() gap.
+   *  Owned HERE (not in OfferEmailButton) because the demote warning below
+   *  must see a just-sent offer too — reading item.offerSentAt alone would
+   *  silently skip the F2 confirm during that window (review P1). */
+  const [optimisticSentAt, setOptimisticSentAt] = useState<string | null>(null);
+  const offerSentAt = item.offerSentAt ?? optimisticSentAt;
   const [notes, setNotes] = useState(item.reviewNotes);
   const [savingNotes, setSavingNotes] = useState(false);
 
@@ -77,15 +83,17 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
       return;
     }
     // F2 guardrail: demoting a child whose offer email is out (and unpaid)
-    // kills the "Reserve seat" button that email points at.
+    // kills the "Reserve seat" button that email points at. Uses the
+    // overlay-aware stamp, never raw props (see optimisticSentAt above).
     if (
+      offerSentAt &&
       demoteWarning({
         targetStatus: stage,
-        offerSentAt: item.offerSentAt,
+        offerSentAt,
         deposits: item.deposits,
       }) &&
       !window.confirm(
-        `An offer email went to ${item.parentName} on ${fmtDay(item.offerSentAt!)} and no deposit is paid. ` +
+        `An offer email went to ${item.parentName} on ${fmtDay(offerSentAt)} and no deposit is paid. ` +
           `Moving ${item.name} back to ${REVIEW_STATUS_LABELS[stage]} removes the "Reserve seat" button that email points at. Move anyway?`
       )
     ) {
@@ -158,6 +166,8 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
           <OfferEmailButton
             item={item}
             disabled={moving}
+            sentAtOverlay={optimisticSentAt}
+            onSentAtChange={setOptimisticSentAt}
             onSendingChange={setSendingOffer}
           />
         </div>

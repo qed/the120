@@ -101,17 +101,35 @@ export function offerButtonState(opts: {
 /**
  * F2: warn before moving a child PRE-Offered while an offer email is out and
  * no deposit is paid — the parent holds an email pointing at a "Reserve
- * seat" button the move would kill. Unknown target statuses warn (fail-safe:
- * statusIndex(unknown) = -1 < offered).
+ * seat" button the move would kill. `targetStatus` is typed (menu targets
+ * are always a known stage), so the compiler owns validity — unlike
+ * `offerButtonState`, which deliberately accepts raw DB strings.
  */
 export function demoteWarning(opts: {
-  targetStatus: string;
+  targetStatus: SeatStatus;
   offerSentAt: string | null;
   deposits: { status: string }[];
 }): boolean {
   if (!opts.offerSentAt) return false;
   if (hasPaidDeposit(opts.deposits)) return false;
-  return statusIndex(opts.targetStatus as SeatStatus) < statusIndex("offered");
+  return statusIndex(opts.targetStatus) < statusIndex("offered");
+}
+
+/* --------------------------------------------------------- effective email */
+
+/**
+ * The send-address authority rule in ONE place for the offer path (Decision
+ * 4 shape: the linked parent account's email wins; the family snapshot only
+ * serves the edge where the parents row carries no usable address). `||`
+ * (not `??`) is deliberate: an empty-string parent email must fall through.
+ * Consumed by both `fetchDossierQueue` (the button/dialog) and
+ * `sendOfferEmail` (the server verdict) so the two can never disagree.
+ */
+export function effectiveEmail(
+  parentEmail: string | null | undefined,
+  familyEmail: string | null | undefined
+): string {
+  return (parentEmail || familyEmail || "").trim();
 }
 
 /* ----------------------------------------------- claim/unclaim interpretation */

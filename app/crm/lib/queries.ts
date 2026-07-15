@@ -23,6 +23,7 @@ import {
   type Stage,
 } from "./constants";
 import { sentConcernsFrom } from "./library-rules";
+import { effectiveEmail } from "./offer-rules";
 import {
   asAcademics,
   dossierCompleteness,
@@ -663,6 +664,10 @@ export interface DossierItem {
   /** Live family id (for the drill-down audit row); null if not synced. */
   familyId: string | null;
   name: string;
+  /** Raw first_name column — the offer email's preview must use the same
+   *  value the server template uses, never a split of `name` (compound
+   *  first names would diverge). */
+  childFirstName: string;
   grade: number | null;
   school: string;
   birthYear: string;
@@ -801,6 +806,7 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
         childId: c.id,
         familyId: family?.id ?? null,
         name: `${c.first_name} ${c.last_name}`.trim() || "Unnamed child",
+        childFirstName: c.first_name,
         grade: c.grade,
         school: c.current_school,
         birthYear: c.birth_year,
@@ -822,10 +828,9 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
           : "—",
         parentEmail: parent?.email ?? "",
         parentPhone: parent?.phone ?? "",
-        // Authority rule (Decision 4 / loadSendFamily): the linked parent
-        // account's email wins; the family snapshot only serves the edge
-        // where the parents row carries no address.
-        effectiveParentEmail: parent?.email || family?.email || "",
+        // Shared authority-rule helper — same function the send action uses,
+        // so the button verdict and server verdict can never disagree.
+        effectiveParentEmail: effectiveEmail(parent?.email, family?.email),
         offerSentAt: review?.offer_email_sent_at ?? null,
         submittedAt: c.submitted_at,
         createdAt: c.created_at,

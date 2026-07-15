@@ -19,6 +19,7 @@ import {
   sendOfferEmailSchema,
 } from "@/app/crm/lib/reviews-rules";
 import {
+  effectiveEmail,
   interpretClaimMiss,
   offerEmailTemplate,
   unclaimOutcome,
@@ -152,24 +153,32 @@ export async function sendOfferEmail(input: unknown): Promise<OfferSendResult> {
 
   const db = supabaseAdmin();
 
-  // Re-fetch truth server-side — the disabled button is convenience, not the gate.
-  const { data: child } = await db
+  // Re-fetch truth server-side — the disabled button is convenience, not the
+  // gate. A failed READ is a retryable send_failed, never not_found: a
+  // transient DB blip must not tell staff a real candidate doesn't exist.
+  const { data: child, error: childError } = await db
     .from("children")
     .select("id, parent_id, first_name, status")
     .eq("id", childId)
     .maybeSingle();
+  if (childError) {
+    return { status: "send_failed", error: "Couldn't load the candidate — try again." };
+  }
   if (!child) return { status: "not_found", error: "Candidate not found." };
 
-  const { data: review } = await db
-    .from("child_reviews")
-    .select("review_status, offer_email_sent_at")
-    .eq("child_id", childId)
-    .maybeSingle();
-  const { data: depositRows } = await db
-    .from("deposits")
-    .select("status")
-    .eq("child_id", childId);
-  const deposits = depositRows ?? [];
+  const [reviewRes, depositsRes] = await Promise.all([
+    db
+      .from("child_reviews")
+      .select("review_status, offer_email_sent_at")
+      .eq("child_id", childId)
+      .maybeSingle(),
+    db.from("deposits").select("status").eq("child_id", childId),
+  ]);
+  if (reviewRes.error || depositsRes.error) {
+    return { status: "send_failed", error: "Couldn't verify eligibility — try again." };
+  }
+  const review = reviewRes.data;
+  const deposits = depositsRes.data ?? [];
 
   if (!canReserveSeat(effectiveReviewStatus(child.status, review), deposits)) {
     return {
@@ -195,7 +204,7 @@ export async function sendOfferEmail(input: unknown): Promise<OfferSendResult> {
   if (!family) {
     return { status: "not_found", error: "No linked live family record." };
   }
-  const email = (parent?.email || family.email || "").trim();
+  const email = effectiveEmail(parent?.email, family.email);
   if (!email) {
     return { status: "gate_closed", error: "No email on file for this family." };
   }
@@ -218,11 +227,18 @@ export async function sendOfferEmail(input: unknown): Promise<OfferSendResult> {
   if ((claim.data ?? []).length === 0) {
     // Zero rows claimed — probe child_reviews (NOT children: a child with no
     // review row was never sent anything; 'already_sent' there would lie).
-    const { data: probe } = await db
+    const { data: probe, error: probeError } = await db
       .from("child_reviews")
       .select("offer_email_sent_at")
       .eq("child_id", childId)
       .maybeSingle();
+    if (probeError) {
+      // The disambiguation read itself failed — retryable, never a verdict.
+      return {
+        status: "send_failed",
+        error: "Couldn't verify the sent-state — try again.",
+      };
+    }
     const miss = interpretClaimMiss({
       exists: Boolean(probe),
       stamp: probe?.offer_email_sent_at ?? null,
@@ -291,14 +307,19 @@ export async function sendOfferEmail(input: unknown): Promise<OfferSendResult> {
     };
   }
 
-  // Audit on success only (Decision 10).
-  await db.from("crm_audit_log").insert({
+  // Audit on success only (Decision 10). The email DID go out — an audit
+  // failure must not fail the send, but a silent compliance gap must at
+  // least be observable server-side.
+  const { error: auditError } = await db.from("crm_audit_log").insert({
     actor: staff.staffId,
     action: "offer-email",
     family_id: family.id,
     child_id: childId,
     metadata: { to: email, resend: Boolean(resendOf) },
   });
+  if (auditError) {
+    console.error("[offer-email] audit insert failed:", auditError.message);
+  }
 
   revalidatePath(DOSSIERS_PATH);
   return { status: "sent", sentAt: stamp };

@@ -23,31 +23,37 @@ const FROM = "The 120 <admissions@the120.school>";
 const REPLY_TO = "admissions@the120.school";
 const BCC = "admissions@the120.school";
 
+/** CASL identification block (sender identity + contact) — the part every
+ *  variant carries. HTML is composed open + close so both variants build by
+ *  concatenation (never a `.replace` splice that silently no-ops if the
+ *  markup shape changes). */
 const IDENTIFICATION_TEXT =
   "—\n" + "The 120 · the120.school · admissions@the120.school · Toronto";
 
-const IDENTIFICATION_HTML =
+const IDENTIFICATION_HTML_OPEN =
   '<hr style="margin:24px 0 12px;border:none;border-top:1px solid #DDDAD4" />' +
   '<p style="font-size:12px;line-height:1.6;color:#55585E;margin:0">' +
   "The 120 · <a href=\"https://the120.school\" style=\"color:#55585E\">the120.school</a> · " +
-  '<a href="mailto:admissions@the120.school" style="color:#55585E">admissions@the120.school</a> · Toronto' +
-  "</p>";
+  '<a href="mailto:admissions@the120.school" style="color:#55585E">admissions@the120.school</a> · Toronto';
 
-/** CASL identification + unsubscribe block (Decision 9). */
+/** Unsubscribe mechanism sentence (Decision 9) — appended ONLY on the
+ *  standard (CEM/marketing) variant; the transactional variant must not
+ *  promise an opt-out it wouldn't honor. */
 const UNSUBSCRIBE_TEXT =
   "\nReply STOP or email admissions@the120.school to stop receiving these messages.";
 
 const UNSUBSCRIBE_HTML =
   "<br />Reply STOP or email admissions@the120.school to stop receiving these messages.";
 
-const FOOTERS = {
+/** Exported for the footer-parity tests (crm-email-footers.test.ts). */
+export const FOOTERS = {
   standard: {
     text: `${IDENTIFICATION_TEXT}${UNSUBSCRIBE_TEXT}`,
-    html: IDENTIFICATION_HTML.replace("</p>", `${UNSUBSCRIBE_HTML}</p>`),
+    html: `${IDENTIFICATION_HTML_OPEN}${UNSUBSCRIBE_HTML}</p>`,
   },
   identification: {
     text: IDENTIFICATION_TEXT,
-    html: IDENTIFICATION_HTML,
+    html: `${IDENTIFICATION_HTML_OPEN}</p>`,
   },
 } as const;
 

@@ -23,9 +23,9 @@ Working surface for Gauntlet iteration (per Peter, 2026-07-15). High-churn game 
 ## Phase A — Beta hardening (now → Jul 19)
 
 - **A1 · Discord server + testers in** *(Ethan, human task)* — 🔴 server up, 3–5 UTS testers invited (one hardcore math kid, one not), #bugs / #ideas channels. Blocks the whole loop.
-- **A2 · First-run setup** *(S)* — 🔴 pick grade band (and starting skills) before the first raid. A 7th-grader landing on Grades 3–4 quits before the second problem. Biggest single first-impression fix. *(M6 #3)*
+- **A2 · First-run setup** *(S)* — 🔴 pick grade band (and starting skills) before the first raid. Everyone should start in Grade 3 with an initial way to fast-track up the skills. One of the differences between The Gauntlet and traditional school is a focus on hole-filling and closing gaps from concepts you haven't yet mastered. The software should show its purpose through its UI and encourage Grade 7 students to do Grade 4 skills if that is what it takes to fill the holes and close the gaps. *(M6 #3)*
 - **A3 · Mobile number pad** *(M)* — 🔴 big tap targets under the problem card. Testers will play on phones; the stock keyboard is the worst part of mobile play. *(M6 #5)*
-- **A4 · "My facts" mastery heatmap** *(M)* — 🔴 the fact set as a grid (multiplication-table layout for ×) colored by mastery/speed. The proof-of-learning artifact — the "helpful for my actual math learning" half of the bar, and screenshot-able for parents. *(M6 #4)*
+- **A4 · "My facts" mastery heatmap** *(M)* — 🔴 the fact set as a grid (multiplication-table layout for ×) colored by mastery/speed. The proof-of-learning artifact — the "helpful for my actual math learning" half of the bar, and screenshot-able for parents. This is for all exercises. The My Facts heatmap should be intuitive and layered so you can get more detail if you dig in, with more surface-area knowledge near the top. *(M6 #4)*
 - **A5 · GTM-2 smoke test** *(S; needs a signed-in run)* — 🔴 Mastery Trial signed in → handle → confirm the leaderboard shows it. Last unchecked box on cloud saves.
 
 ## Phase B — Tournament integrity + shell (must be live for W2 soft launch, hardened by Aug 3)
@@ -55,14 +55,15 @@ Working surface for Gauntlet iteration (per Peter, 2026-07-15). High-churn game 
 ## Phase E — After close (not before Sept)
 
 - G2 pathway system (skill-tree unlocks — mastery tracking already measures readiness) · M2 member perks (early-access bosses, flair) · multiplayer if ever (M4).
+- **G2 is a priority.** Lower-grade subjects should be unlocked and available before higher-grade subjects. The current UX — clicking on and off topics — is clunky; this needs to feel like a multi-stage video game.
 
-## ❓ Open questions for Peter
+## ✅ Decisions from Peter (2026-07-15)
 
-1. **Prizes** — what exactly, per band? (Earlier proposal: named spot on the permanent Founding Leaderboard + first-demo slot at the October intensive. Cash/gift cards raise stakes on B1.)
-2. **Exact tournament window** — Aug 3 open is fixed by the sprint; is close Sun Aug 23 EOD Toronto?
-3. **Do ambassador soft-run scores carry into the public tournament, or does the board reset Aug 3?** (Recommend: reset, ambassadors keep a "founding raider" cosmetic — seeding a board they can't lose feels rigged to newcomers.)
-4. **One combined leaderboard with band filter (current) or separate prize pools per band?** (Recommend: prizes per band, one board with filters — a 3rd-grader can't beat a 8th-grader's raw trial score.)
-5. Migration timing for B1/B2 (needs your Management API run once the SQL is committed).
+1. **Prizes** — $50 / $25 / $10 for Grade School / Middle School / High School, plus a named spot on the permanent Founding Leaderboard. If you join The 120, you get priority for stage time when students demo their projects at the Fall Intensive (Nov 7–8, 2026) or a similar event. *(Cash prizes raise the stakes on B1 — treat integrity as non-negotiable.)*
+2. **Tournament window** — Mon Aug 3 → Sun Aug 23.
+3. **Board reset** — The board resets Aug 3. Ambassadors keep a "founding raider" cosmetic.
+4. **Leaderboard structure** — Three prize pools (one per band), per #1 above.
+5. **Migration timing (B1/B2)** — Ethan and Dev to ask Peter for help with databases and other parts when needed.
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 

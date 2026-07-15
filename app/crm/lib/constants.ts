@@ -240,6 +240,7 @@ export const AUDIT_ACTIONS = [
   "library-send",
   "gtm-edit",
   "drill-down",
+  "offer-email",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

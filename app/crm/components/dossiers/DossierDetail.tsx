@@ -8,11 +8,12 @@
  * italic on #F7F6F3), INTERESTS & EVIDENCE, GROUP ASSIGNMENT chips (two-line
  * card), TEAM NOTES textarea.
  *
- * Print (documented v1): the parent dashboard's printable dossier is
- * parent-authed, so the PRINT button simply `window.print()`s this pane —
- * the CRM chrome and queue pane carry `print:hidden`/`no-print`, and every
- * interactive section here is `no-print`, so what prints is the dossier
- * content itself (globals.css `@media print` conventions).
+ * Print (documented v1, revised 2026-07-15): the header PRINT button was
+ * replaced by SEND OFFER EMAIL (OfferEmailButton.tsx) — printing still works
+ * via the browser's native print (Ctrl+P): the CRM chrome and queue pane
+ * carry `print:hidden`/`no-print`, every interactive section here is
+ * `no-print`, and the status pill + offer-sent badge deliberately print
+ * (globals.css `@media print` conventions).
  */
 
 import { useState } from "react";
@@ -30,10 +31,11 @@ import { moveCandidate, saveReviewNotes } from "@/app/crm/lib/actions/reviews";
 import { demoteWarning } from "@/app/crm/lib/offer-rules";
 import { fmtDay } from "@/app/crm/lib/dates";
 import { useToast } from "@/app/crm/components/Toast";
-import { BTN_PRIMARY, BTN_SECONDARY } from "@/app/crm/components/pipeline/atoms";
+import { BTN_PRIMARY } from "@/app/crm/components/pipeline/atoms";
 import PaymentStrip from "./PaymentStrip";
 import GroupChips from "./GroupChips";
 import StatusMenu from "./StatusMenu";
+import OfferEmailButton from "./OfferEmailButton";
 
 const KICKER_RED =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-red";
@@ -59,6 +61,7 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
   const router = useRouter();
   const { toast } = useToast();
   const [moving, setMoving] = useState(false);
+  const [sendingOffer, setSendingOffer] = useState(false);
   const [notes, setNotes] = useState(item.reviewNotes);
   const [savingNotes, setSavingNotes] = useState(false);
 
@@ -147,15 +150,16 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
           </span>
         </div>
         <div className="flex flex-none flex-col items-end gap-2.5">
-          <StatusMenu status={item.reviewStatus} disabled={moving} onSelect={move} />
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className={`${BTN_SECONDARY} no-print`}
-            title="Print this dossier (the queue and chrome stay off the page)"
-          >
-            Print
-          </button>
+          <StatusMenu
+            status={item.reviewStatus}
+            disabled={moving || sendingOffer}
+            onSelect={move}
+          />
+          <OfferEmailButton
+            item={item}
+            disabled={moving}
+            onSendingChange={setSendingOffer}
+          />
         </div>
       </div>
 

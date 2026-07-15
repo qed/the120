@@ -10,6 +10,7 @@ const TABS = [
   { label: "PIPELINE", href: "/crm/pipeline" },
   { label: "DOSSIERS", href: "/crm/dossiers" },
   { label: "LIBRARY", href: "/crm/library" },
+  { label: "AMBASSADORS", href: "/crm/ambassadors" },
 ] as const;
 
 /**

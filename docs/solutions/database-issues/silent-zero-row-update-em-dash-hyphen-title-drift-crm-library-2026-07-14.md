@@ -6,7 +6,7 @@ module: crm-library-copy
 problem_type: database_issue
 component: database
 symptoms:
-  - "20260714210000_debrand_library_copy.sql reports success via the Management API, but a verification SELECT shows 2 of 4 targeted public.library_items rows still carry retired brand copy"
+  - "20260714213000_debrand_library_copy.sql reports success via the Management API, but a verification SELECT shows 2 of 4 targeted public.library_items rows still carry retired brand copy"
   - "The two unmatched rows are exactly the two whose seed-file titles contain an em-dash (U+2014); their exact-match `where title = '...'` clauses matched 0 rows and the UPDATE reported success anyway"
   - "PowerShell 5.1's Invoke-RestMethod mis-decodes response text, rendering freshly-written em-dashes as mojibake while unmatched titles display a plain hyphen — masking whether the DB, the request encoding, or the display was at fault"
   - "encode(convert_to(title,'UTF8'),'hex') proves live titles hold a plain ASCII hyphen (0x2d) where the seed migration file has an em-dash (e2 80 94) — the original 2026-07-13 seed application flattened them, so seed-file text ≠ live DB text"
@@ -33,7 +33,7 @@ tags:
 
 ## Problem
 
-A data-fix migration (`supabase/migrations/20260714210000_debrand_library_copy.sql`) updated `public.library_items` rows keyed on `title = '<exact string copied from the seed migration file>'`. Two of four `UPDATE`s silently matched zero rows because the live titles' em-dashes had been flattened to plain hyphens when the seed migration was originally applied — the migration *file* text and the live *data* had diverged without anyone changing either on purpose.
+A data-fix migration (`supabase/migrations/20260714213000_debrand_library_copy.sql`) updated `public.library_items` rows keyed on `title = '<exact string copied from the seed migration file>'`. Two of four `UPDATE`s silently matched zero rows because the live titles' em-dashes had been flattened to plain hyphens when the seed migration was originally applied — the migration *file* text and the live *data* had diverged without anyone changing either on purpose.
 
 ## Symptoms
 
@@ -131,6 +131,7 @@ A negative-space count catches *any* row still matching the bad state, regardles
 - **Never key a data-fix `UPDATE`/`DELETE` on an exact string literal copied out of a seed or migration file.** File text is not a live-data guarantee — any prior application (encoding mismatch, manual edit, trigger, earlier bugged migration) can have silently altered what's stored. Prefer stable identifiers; when text matching is unavoidable, use prefix/suffix `LIKE` patterns excluding encoding-fragile characters (dashes, smart quotes, non-breaking spaces; escape `%`/`_` if titles ever contain them), or normalize both sides (e.g. `regexp_replace(title, '[-—–]', '-', 'g')` — illustrative, not an exhaustive dash class).
 - **Check cardinality before running any fuzzy predicate.** Run the identical `WHERE` as a `SELECT count(*)` first and confirm it equals the intended row count. A `LIKE` pattern that matches exactly one row today isn't guaranteed to stay unique — over-matching corrupts rows you never meant to touch, which is *harder* to catch than the zero-row no-op this doc addresses.
 - **Verify data migrations with negative-space count queries, not absence of error.** `UPDATE` matching 0 rows is silent success in Postgres — count how many rows *still* match the bad condition after the migration, expecting zero, with the same token list applied to every text column.
+- **Check the migrations directory for version collisions before naming a new file, and never record versions with `on conflict do nothing`.** This migration originally shipped as `20260714210000` — colliding with `20260714210000_purge_test_scores.sql` from a parallel work stream — and the `on conflict do nothing` version insert silently "succeeded" against the *other* migration's row, leaving this one unrecorded (the same silent-no-op failure shape as the UPDATE, in bookkeeping form). Renamed to `20260714213000`; use a plain `insert` (or verify with a `select` after) so a conflict surfaces instead of vanishing.
 - **Diagnose encoding questions at the source with `encode(convert_to(col, 'UTF8'), 'hex')`, never through a client display.** Terminal/response decoding (PowerShell, psql client encoding, browser rendering) is not a trustworthy oracle for stored bytes. (auto memory [claude]: this repo's standing rule — assume PowerShell mangles byte encodings at every process/marshaling boundary — now extends to display boundaries and to text columns whose write history you don't control.)
 - **This is the third member of the repo's PowerShell-encoding trap family:** (1) BOM prefixed on piped strings into native CLIs (corrupted a Vercel env var); (2) ISO-8859-1 REST string bodies mangling em-dashes in transit (stale-db-password doc); (3) seeded data drifting from source text at rest, masked by response-display mojibake.
 
@@ -138,5 +139,5 @@ A negative-space count catches *any* row still matching the bad state, regardles
 
 - `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md` — the Management API playbook this migration used, and trap #2 of the encoding family; its Prevention section now points here.
 - `docs/solutions/workflow-issues/split-phase-migrations-pre-deploy-schema-post-deploy-purge-separate-files-rerun-2026-07-14.md` — sibling "verify the migration actually did what you assumed" lesson (phase ordering / re-runs).
-- `supabase/migrations/20260714210000_debrand_library_copy.sql` — the corrected migration with inline rationale.
+- `supabase/migrations/20260714213000_debrand_library_copy.sql` — the corrected migration with inline rationale.
 - GitHub issues: none related (searched encoding/migration/em-dash/supabase; zero results).

@@ -1,4 +1,4 @@
----
+﻿---
 title: "feat: Dossier header status mover + send-offer-email"
 type: feat
 status: active
@@ -103,7 +103,7 @@ Added during planning (flow analysis, consistent with origin intent):
 
 ## Implementation Units
 
-- [ ] **Unit 1: Pre-deploy migration + enum constants**
+- [x] **Unit 1: Pre-deploy migration + enum constants**
 
 **Goal:** The DB can store the offer-sent stamp and accept the new audit action.
 
@@ -127,7 +127,7 @@ Added during planning (flow analysis, consistent with origin intent):
 **Verification:**
 - Live DB shows the column and the widened CHECK; `schema_migrations` records the version; existing audit inserts still pass.
 
-- [ ] **Unit 2: Shared constants + offer rules module (template, gate, states)**
+- [x] **Unit 2: Shared constants + offer rules module (template, gate, states)**
 
 **Goal:** All decision logic and the email template exist as pure, tested functions.
 
@@ -161,7 +161,7 @@ Added during planning (flow analysis, consistent with origin intent):
 **Verification:**
 - `npm test` green; template snapshot reviewed by eye for voice.
 
-- [ ] **Unit 3: `sendOfferEmail` server action + data plumbing + email infra amendments**
+- [x] **Unit 3: `sendOfferEmail` server action + data plumbing + email infra amendments**
 
 **Goal:** The server can send the offer email exactly once per confirmation, with truth re-checks, and the queue ships the fields the UI needs.
 
@@ -192,7 +192,7 @@ Added during planning (flow analysis, consistent with origin intent):
 **Verification:**
 - Two rapid concurrent invocations for the same child (manual or scripted) produce exactly one email + one audit row; the loser reports `already_sent`.
 
-- [ ] **Unit 4: Header status-pill dropdown (replaces the Move card)**
+- [x] **Unit 4: Header status-pill dropdown (replaces the Move card)**
 
 **Goal:** Status is readable and changeable in one place, top right.
 
@@ -217,7 +217,7 @@ Added during planning (flow analysis, consistent with origin intent):
 **Verification:**
 - Bottom card gone; every stage reachable from the header; queue pill + needs-review badge update after a move; print preview shows the pill without ▾ or menu.
 
-- [ ] **Unit 5: Group Assignment two-line compaction**
+- [x] **Unit 5: Group Assignment two-line compaction**
 
 **Goal:** R4 — the card is exactly two lines.
 
@@ -234,7 +234,7 @@ Added during planning (flow analysis, consistent with origin intent):
 **Verification:**
 - With and without a parent pick, the card renders two lines at desktop widths.
 
-- [ ] **Unit 6: Send-offer button, confirm-with-preview dialog, sent-state UI**
+- [x] **Unit 6: Send-offer button, confirm-with-preview dialog, sent-state UI**
 
 **Goal:** The full staff-facing send experience per R5/R6/R9 and the discriminated post-result client contract.
 

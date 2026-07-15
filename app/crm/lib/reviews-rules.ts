@@ -32,6 +32,20 @@ export const saveReviewNotesSchema = z.object({
   notes: z.string().max(8000),
 });
 
+/**
+ * Send-offer-email input (plan 2026-07-15-001 Unit 3). `resendOf` is the
+ * stamp the confirming staff member saw, passed back VERBATIM as an opaque
+ * string for the compare-and-swap resend claim — `{ offset: true }` because
+ * PostgREST serializes timestamptz with `+00:00`, which Zod's strict
+ * datetime default would reject (breaking every legitimate resend). Never
+ * coerce this to a Date: a re-serialization can change precision/format and
+ * silently defeat the CAS equality.
+ */
+export const sendOfferEmailSchema = z.object({
+  childId: z.uuid(),
+  resendOf: z.iso.datetime({ offset: true }).optional(),
+});
+
 /* -------------------------------------------------- effective review status */
 
 /**

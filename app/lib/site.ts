@@ -16,6 +16,16 @@ export const seatsLabel = (remaining: number = SEATS_REMAINING) =>
 export const TUITION_MEMBERSHIP_CAD = 3000;
 export const TUITION_FULL_CORE_CAD = 15000;
 
+/** Canonical absolute origin for links in outbound email. */
+export const SITE_URL = "https://the120.school";
+
+/**
+ * Seat-deposit refund deadline — single source of truth for copy.
+ * (Adopting sites: offer email. Known hardcoded stragglers that could adopt
+ * it: welcome route, nurture copy, DashboardApp ×2, crm engine nudge.)
+ */
+export const DEPOSIT_REFUND_DEADLINE_LABEL = "September 30, 2026";
+
 /**
  * Booking target for every "Book a call" CTA (T1/T2).
  * Set NEXT_PUBLIC_BOOKING_URL in Vercel (Cal.com/Calendly) to activate the real

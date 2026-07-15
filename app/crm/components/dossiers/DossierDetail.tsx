@@ -3,15 +3,17 @@
 /**
  * Dossier detail — right pane (plan Unit 5; brief §6 / Admin.dc.html):
  * red mono CANDIDATE DOSSIER kicker, Georgia name, meta + completeness %,
- * payment strip, two bone info cards (ACADEMICS / PARENT), the blue PROJECT
- * PITCH card (Georgia italic on #F7F6F3), INTERESTS & EVIDENCE, GROUP
- * ASSIGNMENT chips, MOVE CANDIDATE stage chips, TEAM NOTES textarea.
+ * header status-pill menu (the mover — StatusMenu.tsx), payment strip, two
+ * bone info cards (ACADEMICS / PARENT), the blue PROJECT PITCH card (Georgia
+ * italic on #F7F6F3), INTERESTS & EVIDENCE, GROUP ASSIGNMENT chips (two-line
+ * card), TEAM NOTES textarea.
  *
- * Print (documented v1): the parent dashboard's printable dossier is
- * parent-authed, so the PRINT button simply `window.print()`s this pane —
- * the CRM chrome and queue pane carry `print:hidden`/`no-print`, and every
- * interactive section here is `no-print`, so what prints is the dossier
- * content itself (globals.css `@media print` conventions).
+ * Print (documented v1, revised 2026-07-15): the header PRINT button was
+ * replaced by SEND OFFER EMAIL (OfferEmailButton.tsx) — printing still works
+ * via the browser's native print (Ctrl+P): the CRM chrome and queue pane
+ * carry `print:hidden`/`no-print`, every interactive section here is
+ * `no-print`, and the status pill + offer-sent badge deliberately print
+ * (globals.css `@media print` conventions).
  */
 
 import { useState } from "react";
@@ -26,21 +28,14 @@ import {
 import { academicComplete, planLabel } from "@/app/dashboard/data";
 import type { DossierItem } from "@/app/crm/lib/queries";
 import { moveCandidate, saveReviewNotes } from "@/app/crm/lib/actions/reviews";
+import { demoteWarning } from "@/app/crm/lib/offer-rules";
 import { fmtDay } from "@/app/crm/lib/dates";
 import { useToast } from "@/app/crm/components/Toast";
-import { BTN_PRIMARY, BTN_SECONDARY, Chip } from "@/app/crm/components/pipeline/atoms";
-import { ReviewPill } from "./QueueList";
+import { BTN_PRIMARY } from "@/app/crm/components/pipeline/atoms";
 import PaymentStrip from "./PaymentStrip";
 import GroupChips from "./GroupChips";
-
-/** The five chips staff can move a candidate to (drafts never show here). */
-const MOVE_STAGES: ReviewStatus[] = [
-  "submitted",
-  "in_review",
-  "invited",
-  "offered",
-  "member",
-];
+import StatusMenu from "./StatusMenu";
+import OfferEmailButton from "./OfferEmailButton";
 
 const KICKER_RED =
   "font-mono text-[9.5px] uppercase tracking-[0.12em] text-crm-red";
@@ -66,6 +61,13 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
   const router = useRouter();
   const { toast } = useToast();
   const [moving, setMoving] = useState(false);
+  const [sendingOffer, setSendingOffer] = useState(false);
+  /** Optimistic offer-sent stamp bridging the send → router.refresh() gap.
+   *  Owned HERE (not in OfferEmailButton) because the demote warning below
+   *  must see a just-sent offer too — reading item.offerSentAt alone would
+   *  silently skip the F2 confirm during that window (review P1). */
+  const [optimisticSentAt, setOptimisticSentAt] = useState<string | null>(null);
+  const offerSentAt = item.offerSentAt ?? optimisticSentAt;
   const [notes, setNotes] = useState(item.reviewNotes);
   const [savingNotes, setSavingNotes] = useState(false);
 
@@ -76,6 +78,23 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
       stage === "member" &&
       !window.confirm(
         `Make ${item.name} a Member of the 120? This flips the family's pipeline stage to MEMBER.`
+      )
+    ) {
+      return;
+    }
+    // F2 guardrail: demoting a child whose offer email is out (and unpaid)
+    // kills the "Reserve seat" button that email points at. Uses the
+    // overlay-aware stamp, never raw props (see optimisticSentAt above).
+    if (
+      offerSentAt &&
+      demoteWarning({
+        targetStatus: stage,
+        offerSentAt,
+        deposits: item.deposits,
+      }) &&
+      !window.confirm(
+        `An offer email went to ${item.parentName} on ${fmtDay(offerSentAt)} and no deposit is paid. ` +
+          `Moving ${item.name} back to ${REVIEW_STATUS_LABELS[stage]} removes the "Reserve seat" button that email points at. Move anyway?`
       )
     ) {
       return;
@@ -139,15 +158,18 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
           </span>
         </div>
         <div className="flex flex-none flex-col items-end gap-2.5">
-          <ReviewPill status={item.reviewStatus} />
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className={`${BTN_SECONDARY} no-print`}
-            title="Print this dossier (the queue and chrome stay off the page)"
-          >
-            Print
-          </button>
+          <StatusMenu
+            status={item.reviewStatus}
+            disabled={moving || sendingOffer}
+            onSelect={move}
+          />
+          <OfferEmailButton
+            item={item}
+            disabled={moving}
+            sentAtOverlay={optimisticSentAt}
+            onSentAtChange={setOptimisticSentAt}
+            onSendingChange={setSendingOffer}
+          />
         </div>
       </div>
 
@@ -215,32 +237,19 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
         )}
       </div>
 
-      {/* group assignment (brief §6 addition) */}
+      {/* group assignment (brief §6 addition) — exactly two lines (R4):
+          kicker + optional parent-pick note share the first. */}
       <div className="no-print flex flex-col gap-2.5 rounded-[12px] border border-crm-line bg-crm-card px-[18px] py-4">
-        <span className={KICKER_RED}>Group assignment</span>
-        {parentPickLabel(item.parentGroupSlug) && (
-          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted">
-            Parent picked: {parentPickLabel(item.parentGroupSlug)}
-          </span>
-        )}
+        <span className={KICKER_RED}>
+          Group assignment
+          {parentPickLabel(item.parentGroupSlug) && (
+            <span className="text-crm-muted">
+              {" · Parent picked: "}
+              {parentPickLabel(item.parentGroupSlug)}
+            </span>
+          )}
+        </span>
         <GroupChips childId={item.childId} group={item.group} />
-      </div>
-
-      {/* move candidate */}
-      <div className="no-print flex flex-col gap-2.5 rounded-[12px] border border-crm-line bg-crm-card px-[18px] py-4">
-        <span className={KICKER_RED}>Move candidate</span>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Move candidate">
-          {MOVE_STAGES.map((stage) => (
-            <Chip
-              key={stage}
-              active={item.reviewStatus === stage}
-              disabled={moving}
-              onClick={() => move(stage)}
-            >
-              {REVIEW_STATUS_LABELS[stage]}
-            </Chip>
-          ))}
-        </div>
       </div>
 
       {/* team notes */}

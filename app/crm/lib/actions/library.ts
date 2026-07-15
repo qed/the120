@@ -202,6 +202,7 @@ export async function sendFromLibrary(input: unknown): Promise<ActionResult> {
     subject,
     html: bodyToHtml(body),
     text: body,
+    footer: "standard",
   });
 
   // Decision 10: failure logs NOTHING — no send row, no last-touch, no

@@ -683,6 +683,13 @@ export interface DossierItem {
   parentName: string;
   parentEmail: string;
   parentPhone: string;
+  /** The address the offer send actually targets (authority rule: parents-row
+   *  email wins, family-snapshot fallback) — resolved server-side so the
+   *  disabled reason, confirm recipient, and send verdict can never disagree. */
+  effectiveParentEmail: string;
+  /** Offer-email stamp (claim-then-send). Pass back VERBATIM as `resendOf`
+   *  for the compare-and-swap resend — never re-parse through Date. */
+  offerSentAt: string | null;
   submittedAt: string | null;
   createdAt: string;
   /** Same group-aware checklist as the parent dashboard (reviews-rules). */
@@ -711,10 +718,12 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
             "status, submitted_at, created_at"
         ),
       db.from("parents").select("id, first_name, last_name, email, phone"),
-      db.from("families").select("id, parent_id").is("merged_into_id", null),
+      db.from("families").select("id, parent_id, email").is("merged_into_id", null),
       db
         .from("child_reviews")
-        .select("child_id, review_status, review_notes, group_assignment"),
+        .select(
+          "child_id, review_status, review_notes, group_assignment, offer_email_sent_at"
+        ),
       db
         .from("deposits")
         .select(
@@ -752,15 +761,22 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
     review_status: string;
     review_notes: string;
     group_assignment: string | null;
+    offer_email_sent_at: string | null;
   }
 
   const parents = new Map(
     ((parentsRes.data ?? []) as ParentRow[]).map((p) => [p.id, p])
   );
   const familyByParent = new Map(
-    ((familiesRes.data ?? []) as { id: string; parent_id: string | null }[])
+    (
+      (familiesRes.data ?? []) as {
+        id: string;
+        parent_id: string | null;
+        email: string | null;
+      }[]
+    )
       .filter((f) => f.parent_id)
-      .map((f) => [f.parent_id as string, f.id])
+      .map((f) => [f.parent_id as string, { id: f.id, email: f.email ?? "" }])
   );
   const reviewByChild = new Map(
     ((reviewsRes.data ?? []) as DossierReviewRow[]).map((r) => [r.child_id, r])
@@ -779,10 +795,11 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
       if (reviewStatus === "draft") return null;
 
       const parent = parents.get(c.parent_id);
+      const family = familyByParent.get(c.parent_id);
       const workshopIds = asStringArray(c.workshop_ids);
       return {
         childId: c.id,
-        familyId: familyByParent.get(c.parent_id) ?? null,
+        familyId: family?.id ?? null,
         name: `${c.first_name} ${c.last_name}`.trim() || "Unnamed child",
         grade: c.grade,
         school: c.current_school,
@@ -805,6 +822,11 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
           : "—",
         parentEmail: parent?.email ?? "",
         parentPhone: parent?.phone ?? "",
+        // Authority rule (Decision 4 / loadSendFamily): the linked parent
+        // account's email wins; the family snapshot only serves the edge
+        // where the parents row carries no address.
+        effectiveParentEmail: parent?.email || family?.email || "",
+        offerSentAt: review?.offer_email_sent_at ?? null,
         submittedAt: c.submitted_at,
         createdAt: c.created_at,
         completeness: dossierCompleteness({

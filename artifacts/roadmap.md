@@ -168,6 +168,11 @@ Skill-tree progression: start at foundations, unlock topics by demonstrated mast
 
 ## ✅ Done
 
+**2026-07-15 — CRM dossier mover + send-offer-email (PR #8, merged + deployed `962a7f6`):**
+- Header status pill is now the mover (five-stage ARIA menu; bottom "Move candidate" card removed; Member confirm kept; NEW demote-warning confirm when an offer email is out and unpaid). Group Assignment compacted to two lines. Print button → **Send offer email** (Ctrl+P still prints).
+- Offer email: gated by the shared `canReserveSeat` (client + server), confirm-with-rendered-preview, transactional CASL classification with **identification-only footer**, atomic claim-then-send on `child_reviews.offer_email_sent_at` with CAS resends + CAS-guarded unclaim, `offer-email` audit action. Migration `20260715090000` applied pre-deploy via Management API (recorded + verified). 426 unit tests; 12-persona review, 16 findings fixed pre-merge (run artifact in `.context/compound-engineering/ce-review/2026-07-15-…`).
+- **R10 E2E status:** parent side ✅ verified live 2026-07-15 (Cedric at OFFERED, "Reserve seat · $250" + refundable-note visible on the dashboard). Staff side ⛔ **pending Peter signing into /crm in Chrome** (agent can then drive: menu move → send → inbox/BCC/audit/sent-state checks). Real-family sends remain gated on S10 (plan R11 process gate). Plan: `docs/plans/2026-07-15-001-feat-dossier-mover-offer-email-plan.md` (Unit 7 open).
+
 **2026-07-12 — Ethan items + go-live infrastructure (Phase 1 complete):**
 - **E1/T2 · Booking link** — `cal.com/peter.k/the120` (20 min, buffers, 3/day cap, Google Calendar sync); `NEXT_PUBLIC_BOOKING_URL` in Vercel all environments; production redeployed; verified live on the site. **Closes Phase 1.**
 - **E2/S10-1 · Stripe descriptor** — live statement descriptor set to **"THE120"** on Hatch Coding CDN (dashboard + API-verified). Note: only other live activity on the account is one `past_due` subscription (last charge Sept 2025) — consider cancelling it.

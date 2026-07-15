@@ -14,7 +14,7 @@ symptoms:
 root_cause: config_error
 resolution_type: workflow_improvement
 severity: high
-last_updated: 2026-07-13
+last_updated: 2026-07-15
 related_components:
   - database
   - development_workflow
@@ -88,6 +88,14 @@ Invoke-SbQuery ([string](Get-Content -Raw -Encoding UTF8 'supabase\migrations\<m
 
 # Read auth config:
 Invoke-RestMethod -Uri "https://api.supabase.com/v1/projects/deolvqnyvhhnavsifgxz/config/auth" -Headers @{ Authorization = "Bearer $token" }
+
+# Query API edge logs (BigQuery-flavored SQL over edge_logs). GOTCHA:
+# iso_timestamp_start / iso_timestamp_end are REQUIRED — without them the
+# endpoint silently returns an empty result set, not an error. Playbook +
+# write-shape-fingerprinting use case: docs/solutions/workflow-issues/
+# stale-rereport-of-fixed-bug-prove-code-version-db-state-deploy-timeline-edge-log-fingerprint-2026-07-15.md
+$sql = [uri]::EscapeDataString("select cast(timestamp as datetime) as ts, event_message from edge_logs where event_message like '%/rest/v1/children%' order by timestamp desc limit 40")
+Invoke-RestMethod -Uri "https://api.supabase.com/v1/projects/deolvqnyvhhnavsifgxz/analytics/endpoints/logs.all?iso_timestamp_start=2026-07-15T05:00:00Z&iso_timestamp_end=2026-07-15T13:00:00Z&sql=$sql" -Headers @{ Authorization = "Bearer $token" }
 ```
 
 **The decoding fix — before/after:**

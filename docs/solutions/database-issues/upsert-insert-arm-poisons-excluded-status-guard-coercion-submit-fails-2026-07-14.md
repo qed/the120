@@ -12,7 +12,7 @@ symptoms:
 root_cause: logic_error
 resolution_type: code_fix
 severity: high
-last_updated: 2026-07-14
+last_updated: 2026-07-15
 related_components:
   - app/dashboard/store.tsx (enqueueWrite submit branch, childToRow/submitStatusPatch)
   - supabase/migrations/20260714160000_children_guard_hardening.sql (children_status_guard INSERT branch)
@@ -144,6 +144,13 @@ again — with no loss of protection, since a crafted upsert at
 
 ## Related Issues
 
+- **Recurrence note (2026-07-15):** a report of this exact error message (Abe
+  Goldlist) surfaced the day after this fix deployed. Evidence-chain triage proved
+  the failures predated the fix deploy (old write shape in edge logs,
+  2026-07-14 18:52 UTC — 67 minutes before the fix went live) and the retry on the
+  fixed bundle had already succeeded; it was closed with ZERO code changes. Before
+  re-fixing this bug, read
+  `docs/solutions/workflow-issues/stale-rereport-of-fixed-bug-prove-code-version-db-state-deploy-timeline-edge-log-fingerprint-2026-07-15.md`.
 - `docs/solutions/database-issues/stale-status-echo-full-row-upsert-vs-trigger-guard-coerce-not-raise-2026-07-14.md`
   — the direct predecessor: its guard hardening (coerce-not-raise + INSERT
   coverage) introduced this bug, and its own Prevention lesson #4 (replay the

@@ -58,13 +58,17 @@ export default function StatusMenu({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Focus the current stage when the menu opens (roving tabindex home).
+  // Focus follows the roving tabindex whenever the menu is open; the home
+  // index is set in the trigger's click handler, not here (no setState in
+  // effects — react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (!open) return;
-    const idx = Math.max(0, MOVE_STAGES.indexOf(status));
-    setFocusIdx(idx);
-    itemRefs.current[idx]?.focus();
-  }, [open, status]);
+    if (open) itemRefs.current[focusIdx]?.focus();
+  }, [open, focusIdx]);
+
+  const openMenu = () => {
+    setFocusIdx(Math.max(0, MOVE_STAGES.indexOf(status)));
+    setOpen(true);
+  };
 
   const onMenuKeyDown = (e: React.KeyboardEvent) => {
     const last = MOVE_STAGES.length - 1;
@@ -94,7 +98,7 @@ export default function StatusMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Candidate stage: ${REVIEW_STATUS_LABELS[status]}. Move candidate`}
-        onClick={() => (open ? close(false) : setOpen(true))}
+        onClick={() => (open ? close(false) : openMenu())}
         className="flex items-center gap-1.5 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crm-blue disabled:opacity-50"
       >
         <ReviewPill status={status} />

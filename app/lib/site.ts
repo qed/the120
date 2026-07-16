@@ -38,6 +38,9 @@ export const BOOKING_URL =
 // it works, parents proof all live there); the Gauntlet moved to the
 // signed-in dashboard. Footer keeps the full sitemap.
 export const nav = [
+  // GPF-1: The Gauntlet is a permanent nav pillar (noun, not "Play the
+  // Gauntlet" — the verb lives in the CTAs). The wordmark covers "The 120".
+  { label: "The Gauntlet", href: "/gauntlet" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;

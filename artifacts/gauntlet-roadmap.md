@@ -59,7 +59,7 @@ Working surface for Gauntlet iteration (per Peter, 2026-07-15). High-churn game 
 
 ## ✅ Decisions from Peter (2026-07-15)
 
-1. **Prizes** — $50 / $25 / $10 for Grade School / Middle School / High School, plus a named spot on the permanent Founding Leaderboard. If you join The 120, you get priority for stage time when students demo their projects at the Fall Intensive (Nov 7–8, 2026) or a similar event. *(Cash prizes raise the stakes on B1 — treat integrity as non-negotiable.)*
+1. **Prizes** — $50 / $25 / $10 for Grades 3–6 / Grades 7–8 / Grades 9–12 (the confirmed prize bands; "Grade School / Middle School / High School" was the earlier framing), plus a named spot on the permanent Founding Leaderboard. If you join The 120, you get priority for stage time when students demo their projects at the Fall Intensive (Nov 7–8, 2026) or a similar event. *(Cash prizes raise the stakes on B1 — treat integrity as non-negotiable.)*
 2. **Tournament window** — Mon Aug 3 → Sun Aug 23.
 3. **Board reset** — The board resets Aug 3. Ambassadors keep a "founding raider" cosmetic.
 4. **Leaderboard structure** — Three prize pools (one per band), per #1 above.

@@ -115,6 +115,13 @@ export default function TournamentRulesPage() {
               No real names, nothing else. You can unsubscribe or ask us to remove an entry at any time by
               replying to any email.
             </p>
+            <p className="mt-3">
+              <strong>How long we keep it:</strong> entries that a parent never confirms are deleted
+              after the tournament closes; confirmed entries are kept only through the season (for
+              standings and prizes) and then removed. Ask us to delete yours sooner by replying to any
+              email &mdash; we&rsquo;ll remove the parent email and attribution and keep nothing but what a
+              prize payout legally requires.
+            </p>
           </Section>
 
           <div className="flex flex-wrap gap-3 pt-2">

@@ -57,7 +57,7 @@ export default function TournamentEntryModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0d1322] p-6 text-white"
+        className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/15 bg-[#0d1322] p-6 text-white"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">

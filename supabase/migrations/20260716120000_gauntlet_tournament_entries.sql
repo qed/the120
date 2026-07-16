@@ -30,6 +30,8 @@ create table if not exists public.gauntlet_tournament_entries (
   user_id uuid references auth.users (id) on delete set null,
   -- GPF-10: weekly standings-email idempotency gate (null = never sent)
   last_standings_at timestamptz,
+  -- abuse control: throttle confirmation-email resends per entry (null = never sent)
+  last_email_at timestamptz,
   created_at timestamptz not null default now()
 );
 

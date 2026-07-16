@@ -112,7 +112,9 @@ At least one Toronto network (Ethan's) DNS-filters `the120.school` to a FortiGua
 
 ## 🎪 The Gauntlet — Public Front Door (GPF series)
 
-The marketing/website layer over the Summer Tournament (brief: `artifacts/public-gauntlet-marketing.md`; stories: `artifacts/gauntlet-public-front-door-stories.md`). Built 2026-07-16 in one PR, **wired dormant** so the whole tournament ships now in Tease state and is **turned on with a config flip**. Game-integrity work (score caps, handle word-filter) stays Ethan's B1/B2 — this layer ships the *surfaces*, not the integrity.
+The marketing/website layer over the Summer Tournament (brief: `artifacts/public-gauntlet-marketing.md`; stories: `artifacts/gauntlet-public-front-door-stories.md`). Built 2026-07-16 in one PR, **wired dormant** so the surfaces ship now in Tease state. Game-integrity work (score caps, handle word-filter) stays Ethan's B1/B2 — this layer ships the *surfaces*, not the integrity.
+
+**⚠️ Review outcome (2026-07-16):** a full compound-engineering pass (7-persona brainstorm-review → plan → 5-persona plan-review) **refuted the ranking data model** and it was NOT built. Plan + full reasoning: `docs/plans/2026-07-16-001-feat-gauntlet-tournament-hardening-plan.md`. Two findings: (D2) prize bands can't rank on the single band-agnostic, content-unscoped, client-writable `gauntlet_saves.trial_best` — done right this **converges with Ethan's B1**; (D1) "account-to-rank" routes through the full admissions `AccountModal`, not a lightweight identity. **Ranking is deferred to a B1-joined design.** What DID land 2026-07-16 (independent, review-driven safety fixes): handle-hijack fix + latent `upsert onConflict:"handle"` expression-index bug (explicit select-then-branch; a confirmed entry is never overwritten; email is not accepted as ownership proof), per-parent-email abuse cap + resend throttle, `referral_code` validated against `ambassador_codes`, confirm moved off GET to a POST button (email-scanner prefetch can't false-confirm) with constant-time compare, shared HMAC token util, PIPEDA retention/deletion copy, entry-modal mobile scroll.
 
 **The keystone — `app/lib/tournament.ts`:** one server-side state machine drives every surface (homepage section, /gauntlet banner, in-game Enter CTA + modal, rules page, standings email, founding leaderboard). Phase resolves in priority order: `TOURNAMENT_KILL=1` → **off** (B4 kill switch) → `TOURNAMENT_STATE=tease|live|after` override → **date-derived default** (tease < Aug 3 ≤ live ≤ Aug 23 < after). Evaluated per-request on the server, so it **auto-flips to Live on Aug 3 and to After on Aug 24 with no redeploy**; env vars only override or kill. 11 unit tests cover every branch.
 
@@ -131,12 +133,23 @@ The marketing/website layer over the Summer Tournament (brief: `artifacts/public
 - **GPF-12 · Post-close handoff** — 🔴 Aug-24 ops step (not code): the data-driven nurture engine references a kid's tournament run in the back-to-school deposit sequence.
 
 ### 🔌 TURN-ON CHECKLIST (flip the tournament on)
-1. **Apply the migration** `supabase/migrations/20260716120000_gauntlet_tournament_entries.sql` via the Management API playbook (`docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md`, token in Windows Credential Manager `Supabase CLI:supabase`). Until then the entry table is absent and the gate degrades gracefully (no 500s).
-2. **State:** do nothing and it auto-flips to Live on **Aug 3** by date. To force early / test, set `TOURNAMENT_STATE=live` in Vercel (Production). To pull the tournament in an emergency, set `TOURNAMENT_KILL=1` (hides every surface, no redeploy).
-3. **Standings email:** set `STANDINGS_ENABLED=1` and confirm `CRON_SECRET` is set in Vercel Production (shared with the nurture cron — still ⛔ pending per GTM-1). Cron is already registered in `vercel.json`.
-4. **Verify:** `/gauntlet` shows the Enter CTA when Live → entry → parent confirmation email (Resend) → confirm link stamps the entry; `/gauntlet/rules` + `/gauntlet/founding-leaderboard` render.
-5. **Integrity gate (Ethan, non-negotiable before public Aug 3):** B1 score plausibility caps + B2 handle word-filter/uniqueness must be live — cash prizes + public board.
-6. **Confirm the prize-band assumption:** 3–6 / 7–8 / 9–12 (brief §9). The rules page is the single source of truth; a 9–12 entrant currently plays 7–8 content but competes in the 9–12 pool.
+
+⚠️ **A 7-persona document review (2026-07-16) found the flip lights the *surfaces* but does NOT yield a runnable tournament until the blocking gaps below are resolved. Full findings: `artifacts/gauntlet-public-front-door-stories.md`.**
+
+**Blocking — a working tournament cannot exist until these are done:**
+1. **D1 · Entry↔score linkage (P0):** guest entries write to `gauntlet_tournament_entries` (email, no score); scores live only in account-bound `gauntlet_saves`. An email-only entrant currently **cannot appear on the leaderboard they entered**. Decide: require a free account to rank (modal drives sign-in) OR build an entries-keyed scoring path.
+2. **D2 · Prize-band winners (P0):** entry `prize_band` (b36/b78/b912) has no join to score `band` (g34/g56/g78), and there's **no 9–12 game bucket** — per-band winners/payouts are uncomputable and the founding board can only group by game band. Needs a prize-band-aware RPC + a 9–12 decision.
+3. **Integrity (Ethan, B1/B2):** score plausibility caps + unique handles + **name/profanity handle filter** (enforces "handles never real names").
+4. **Fix the enter-route P0 (handle hijack):** it upserts `onConflict:"handle"`, so one family can overwrite another family's email/consent — reject taken handles unless ownership is proven.
+5. **Abuse controls:** rate-limit the public enter endpoint (sends real email per call) + validate `referral_code` against the ambassador registry.
+
+**Then, to actually flip it on:**
+6. **Apply the migration** `supabase/migrations/20260716120000_gauntlet_tournament_entries.sql` via the Management API playbook (`docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md`, token in `Supabase CLI:supabase`) — *before* enabling standings (the cron 500s on a missing table).
+7. **Provision `UNSUBSCRIBE_SECRET`** in Vercel (distinct from `SUPABASE_SERVICE_ROLE_KEY`).
+8. **State (redeploy-gated):** the *date* auto-flips to Live on **Aug 3** with no redeploy. Env overrides are NOT instant — `TOURNAMENT_STATE=live` / `TOURNAMENT_KILL=1` take effect only on the next Vercel deploy. Decide D3: mark `app/page.tsx` `force-dynamic` for an instant homepage kill, or accept ~60s ISR lag on the homepage section.
+9. **Standings:** set `STANDINGS_ENABLED=1` + confirm `CRON_SECRET` (GTM-1). Note the email carries no real rank until D1 lands — reframe as a nudge or hold.
+10. **PII ops:** state a retention/deletion process for entries on the rules page.
+11. **Verify:** `/gauntlet` Enter CTA when Live → entry → confirmation email → confirm-link states; rules + founding-leaderboard render.
 
 ## 🎮 The Gauntlet (FastMath game — formerly MathRaiders)
 

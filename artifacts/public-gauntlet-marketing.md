@@ -130,7 +130,7 @@ Share card already prints `the120.school/gauntlet`. Confirm the shared image →
 > **Enter the Summer Tournament**
 > Aug 3–23 · Grades 3–8 · Three bands · Real prizes
 > Pick your handle (not your real name — that's the rule): `[________]`
-> Grade band: `[3–4] [5–6] [7–8]`
+> Grade band: `[3–6] [7–8] [9–12]`  *(confirmed prize bands — see §9 Confirmed details (1); supersedes the earlier 3–4/5–6/7–8)*
 > A parent's email (they get your standings — and they have to say yes): `[________]`
 > ☐ *Parent consent:* Email me my child's tournament standings and news from The 120. Unsubscribe anytime.
 > [**Lock it in**]

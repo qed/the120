@@ -10,6 +10,8 @@ import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
 import { shareScore, type ShareData } from "./game/shareCard";
+import TournamentEntryModal from "./components/TournamentEntryModal";
+import type { TournamentState } from "@/app/lib/tournament";
 import JoinButton from "@/app/components/JoinButton";
 import {
   cloudUser,
@@ -132,7 +134,7 @@ const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0
 
 type Phase = "menu" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
 
-export default function GauntletGame() {
+export default function GauntletGame({ tournament }: { tournament: TournamentState }) {
   const [phase, setPhase] = useState<Phase>("menu");
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
@@ -147,6 +149,7 @@ export default function GauntletGame() {
   const [userId, setUserId] = useState<string | null>(null);
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
   const [showBoard, setShowBoard] = useState(false);
+  const [showEntry, setShowEntry] = useState(false); // GPF-5 tournament gate
 
   useEffect(() => {
     const s = loadSave();
@@ -329,6 +332,8 @@ export default function GauntletGame() {
           }}
           onHelp={() => setShowHelp(true)}
           onBoard={() => setShowBoard(true)}
+          tournamentLive={tournament.isLive}
+          onEnter={() => setShowEntry(true)}
         />
       )}
       {showBoard && (
@@ -336,6 +341,19 @@ export default function GauntletGame() {
           band={save.band}
           ownHandle={save.handle}
           onClose={() => setShowBoard(false)}
+          tournamentLive={tournament.isLive}
+          onEnter={() => {
+            setShowBoard(false);
+            setShowEntry(true);
+          }}
+        />
+      )}
+      {showEntry && (
+        <TournamentEntryModal
+          tournament={tournament}
+          defaultHandle={save.handle}
+          onClose={() => setShowEntry(false)}
+          onHandleSet={(h) => setSave((p) => ({ ...p, handle: h }))}
         />
       )}
       {phase === "battle" && (
@@ -398,6 +416,8 @@ function Menu({
   onTrial,
   onHelp,
   onBoard,
+  tournamentLive,
+  onEnter,
 }: {
   save: Save;
   userId: string | null;
@@ -409,6 +429,8 @@ function Menu({
   onTrial: () => void;
   onHelp: () => void;
   onBoard: () => void;
+  tournamentLive: boolean;
+  onEnter: () => void;
 }) {
   const toggle = (id: TopicId) =>
     toggleTopic(id);
@@ -423,6 +445,11 @@ function Menu({
           ← THE 120
         </Link>
         <span className="mr-12 flex items-center gap-2">
+          {tournamentLive && (
+            <button onClick={onEnter} className="rounded-full bg-red px-3 py-1 font-mono text-[11px] font-medium text-white hover:bg-red-dark">
+              ⚔️ Enter the Tournament
+            </button>
+          )}
           <button onClick={onBoard} className="rounded-full bg-amber-400/15 px-3 py-1 font-mono text-[11px] text-amber-200 hover:bg-amber-400/25">
             🏆 Leaderboard
           </button>
@@ -791,10 +818,14 @@ function LeaderboardPanel({
   band,
   ownHandle,
   onClose,
+  tournamentLive,
+  onEnter,
 }: {
   band: Band;
   ownHandle: string;
   onClose: () => void;
+  tournamentLive: boolean;
+  onEnter: () => void;
 }) {
   const [filter, setFilter] = useState<string | null>(band);
   const [rows, setRows] = useState<LeaderRow[] | null>(null);
@@ -865,9 +896,18 @@ function LeaderboardPanel({
           )}
         </div>
 
-        <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Free account + a handle puts you on the board
-        </p>
+        {tournamentLive ? (
+          <button
+            onClick={onEnter}
+            className="mt-4 w-full rounded-xl bg-red px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.04em] text-white transition-all hover:bg-red-dark"
+          >
+            ⚔️ Enter the Summer Tournament
+          </button>
+        ) : (
+          <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
+            Free account + a handle puts you on the board
+          </p>
+        )}
       </div>
     </div>
   );

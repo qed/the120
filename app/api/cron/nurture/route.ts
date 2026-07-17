@@ -44,7 +44,7 @@ export async function GET(req: Request) {
     db
       .from("families")
       .select(
-        "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at,deposit_asked_referral"
+        "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at,deposit_asked_referral,consent_expires_at"
       )
       .is("merged_into_id", null),
     db

@@ -1,7 +1,7 @@
 ---
 title: "feat: CRM external-events ingestion & fast capture"
 type: feat
-status: active
+status: completed
 date: 2026-07-17
 origin: docs/brainstorms/2026-07-17-crm-external-events-and-capture-improvements-requirements.md
 ---
@@ -342,7 +342,7 @@ flowchart TD
 
 ## Implementation Units
 
-- [ ] **Unit 1: Phase-1 foundation (referral-asked audit action)**
+- [x] **Unit 1: Phase-1 foundation (referral-asked audit action)**
 
 **Goal:** Land only the schema/constant change Phase 1 actually uses. (The Cal.com
 schema moves to a Phase-3 foundation migration — see Unit 7 — to honor the "one
@@ -379,7 +379,7 @@ proportional to its goal.)
 
 ---
 
-- [ ] **Unit 2: `matchOrCreateLead` shared primitive**
+- [x] **Unit 2: `matchOrCreateLead` shared primitive**
 
 **Goal:** One safe create-or-match-by-email function for all ingestion/capture
 paths.
@@ -447,7 +447,7 @@ still behaves identically through the shared matcher.
 
 ---
 
-- [ ] **Unit 3: Referral-nudge fix (R1 manual + R2 auto)**
+- [x] **Unit 3: Referral-nudge fix (R1 manual + R2 auto)**
 
 **Goal:** Give `deposit_asked_referral` its missing setter so Rule 2 can be
 dismissed, and self-dismiss when the robot sends the T+10 ask.
@@ -509,7 +509,7 @@ simulated `d10` cron send flips the flag; unit tests green.
 
 ---
 
-- [ ] **Unit 4: Nurture emails on the family timeline (R8, R9)**
+- [x] **Unit 4: Nurture emails on the family timeline (R8, R9)**
 
 **Goal:** Surface automated `nurture_sends` as a distinct robot event on the
 family timeline, without touching the staleness clock.
@@ -556,7 +556,7 @@ timeline, styled distinctly from staff sends; `last_touch_at` unchanged.
 
 ---
 
-- [ ] **Unit 5: "Log warm convo" capture (R4, R5, R6, R7)**
+- [x] **Unit 5: "Log warm convo" capture (R4, R5, R6, R7)**
 
 **Goal:** One-step warm-conversation capture, both globally (create-or-match) and
 inside an open drawer.
@@ -614,7 +614,7 @@ writes; heat never regresses.
 
 ---
 
-- [ ] **Unit 6: Gauntlet → CRM bridge (R10, R11, R12)**
+- [x] **Unit 6: Gauntlet → CRM bridge (R10, R11, R12)**
 
 **Goal:** On tournament confirmation, create-or-match a `gauntlet`-source lead
 with the `gauntlet-played` signal.
@@ -671,7 +671,7 @@ bridge failure still confirms.
 
 ---
 
-- [ ] **Unit 7: Cal.com booking webhook (R13, R14, R15, R16)**
+- [x] **Unit 7: Cal.com booking webhook (R13, R14, R15, R16)**
 
 **Goal:** Stamp/clear `call_booked` from Cal.com bookings, safely and
 idempotently, creating implied-consent leads for unmatched bookers.
@@ -786,7 +786,7 @@ foreign cancel; replays are no-ops.
 
 ---
 
-- [ ] **Unit 8: Nurture send-gate honors consent expiry**
+- [x] **Unit 8: Nurture send-gate honors consent expiry**
 
 **Goal:** Stop nurturing implied-consent (booking) leads after their 6-month
 window, without affecting express-consent families.

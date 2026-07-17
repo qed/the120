@@ -79,46 +79,23 @@ describe("decideReconcileLink — email-unconfirmed reject (forged-consent lesso
   });
 });
 
-describe("decideReconcileLink — handle-claim fallback (different email)", () => {
-  it("claims by handle when no email matches but the requested handle does", () => {
+describe("decideReconcileLink — no handle-claim hijack (security regression guard)", () => {
+  it("does NOT link a confirmed, unlinked entry when the email doesn't match, even though the handle would", () => {
+    // Handles are PUBLIC (leaderboard). An attacker signed in under a different
+    // proven email must never claim a victim's entry just because they know the
+    // handle — the only match is proven email, so this is a no_match.
     const d = decideReconcileLink({
-      callerUserId: "u1",
-      callerEmail: "newaccount@example.com", // account email != entry.parent_email
+      callerUserId: "attacker",
+      callerEmail: "attacker@example.com", // proven, but != entry.parent_email
       emailConfirmed: true,
-      requestedHandle: "raider-x", // normalizes to RAIDER-X
-      entries: [entry({ parent_email: "otherparent@example.com" })],
-    });
-    expect(d).toEqual({ action: "link", entryId: "e1", via: "handle" });
-  });
-
-  it("prefers an email match over a handle claim", () => {
-    const d = decideReconcileLink({
-      callerUserId: "u1",
-      callerEmail: "parent@example.com",
-      emailConfirmed: true,
-      requestedHandle: "OTHER-HANDLE",
-      entries: [
-        entry({ id: "byhandle", parent_email: "x@y.com", handle: "OTHER-HANDLE" }),
-        entry({ id: "byemail", handle: "RAIDER-X" }),
-      ],
-    });
-    expect(d).toEqual({ action: "link", entryId: "byemail", via: "email" });
-  });
-
-  it("does not claim an already-linked entry by handle", () => {
-    const d = decideReconcileLink({
-      callerUserId: "u1",
-      callerEmail: "newaccount@example.com",
-      emailConfirmed: true,
-      requestedHandle: "RAIDER-X",
-      entries: [entry({ user_id: "u2", parent_email: "x@y.com" })],
+      entries: [entry({ parent_email: "victim@example.com", handle: "RAIDER-X" })],
     });
     expect(d).toEqual({ action: "skip", reason: "no_match" });
   });
 });
 
 describe("decideReconcileLink — no match", () => {
-  it("skips when nothing matches the caller's email or handle", () => {
+  it("skips when nothing matches the caller's proven email", () => {
     const d = decideReconcileLink({
       callerUserId: "u1",
       callerEmail: "nobody@example.com",

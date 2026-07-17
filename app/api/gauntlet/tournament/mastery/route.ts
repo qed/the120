@@ -27,7 +27,10 @@ import type { Band } from "@/app/gauntlet/game/problems";
  */
 
 const VALID_BANDS: readonly Band[] = ["g34", "g56", "g78", "g912"];
-const RATE_WINDOW_MS = 60_000; // recent rolling window for the per-minute cap
+// The client posts a whole run's newly-mastered facts in ONE run-end batch, so
+// the rate window is the real elapsed play this batch covers: the gap since the
+// user's LAST recorded event. With no prior event we assume a generous window.
+const DEFAULT_WINDOW_MS = 300_000; // 5 min — first batch of a fresh entrant
 const MAX_BATCH = 200; // guard against absurd payloads before we touch the DB
 
 interface MasteryBody {
@@ -118,48 +121,63 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, credited: 0, rejected: 0 });
     }
 
-    // 5. Read the caller's recent + daily mastery counts for the plausibility
-    //    caps. Best-effort: a count hiccup falls back to 0 (the unique index
-    //    still enforces first-master-once), it must not block a legit player.
+    // 5. Read the caller's most-recent event + daily mastery count for the
+    //    plausibility caps. Best-effort: a read hiccup falls back to credit 0
+    //    (the unique index still enforces first-master-once), it must not block
+    //    a legit player.
+    //
+    //    The rate window is the real gap this batch covers: now − the user's
+    //    last event. A 2-min gap → a 2-min window (≈30-fact allowance, all of a
+    //    normal run credits); a sub-second re-post of a huge batch → a tiny
+    //    window → impossible/clamped. With no prior event, use a generous
+    //    default. `priorInWindow` is 0: the window STARTS at the last event, so
+    //    nothing prior sits inside it.
     const nowMs = Date.now();
-    const windowStartIso = new Date(nowMs - RATE_WINDOW_MS).toISOString();
     const dayStartIso = new Date(new Date().setUTCHours(0, 0, 0, 0)).toISOString();
 
-    let priorInWindow = 0;
+    let windowMs = DEFAULT_WINDOW_MS;
     let priorToday = 0;
     try {
-      const [windowRes, dayRes] = await Promise.all([
+      const [lastRes, dayRes] = await Promise.all([
         db
           .from("gauntlet_tournament_events")
-          .select("id", { count: "exact", head: true })
+          .select("created_at")
           .eq("user_id", user.id)
-          .gte("created_at", windowStartIso),
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
         db
           .from("gauntlet_tournament_events")
           .select("id", { count: "exact", head: true })
           .eq("user_id", user.id)
           .gte("created_at", dayStartIso),
       ]);
-      if (windowRes.error || dayRes.error) {
+      if (lastRes.error || dayRes.error) {
         // Table missing / read failure — degrade gracefully, credit nothing.
         console.error(
           "[gauntlet-mastery] count",
-          windowRes.error?.message ?? dayRes.error?.message
+          lastRes.error?.message ?? dayRes.error?.message
         );
         return NextResponse.json({ ok: true, credited: 0, rejected: facts.length });
       }
-      priorInWindow = windowRes.count ?? 0;
+      const lastMs = lastRes.data?.created_at
+        ? new Date(lastRes.data.created_at as string).getTime()
+        : null;
+      if (lastMs != null && Number.isFinite(lastMs)) {
+        windowMs = Math.max(0, nowMs - lastMs);
+      }
       priorToday = dayRes.count ?? 0;
     } catch (err) {
       console.error("[gauntlet-mastery] count", err);
       return NextResponse.json({ ok: true, credited: 0, rejected: facts.length });
     }
 
-    // 6. Apply the plausibility caps (pure).
+    // 6. Apply the plausibility caps (pure). The window starts at the last event,
+    //    so nothing prior is inside it → priorInWindow: 0.
     const { credited, rejected } = masteryCaps({
       facts,
-      priorInWindow,
-      windowMs: RATE_WINDOW_MS,
+      priorInWindow: 0,
+      windowMs,
       priorToday,
     });
 

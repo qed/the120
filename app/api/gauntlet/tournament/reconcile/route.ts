@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { normalizeHandle } from "@/app/gauntlet/game/tournamentEntry";
 import { decideReconcileLink, type ReconcileEntry } from "@/app/lib/gauntlet/reconcile";
 
 /**
@@ -19,8 +18,11 @@ import { decideReconcileLink, type ReconcileEntry } from "@/app/lib/gauntlet/rec
  *    identity (forged-consent lesson).
  *  - Stamp AT MOST ONE entry; skip if the caller already ranks (one prize band
  *    per identity, mirrors the partial unique index).
- *  - Optional `{ handle }` enables a handle-claim when the entry's parent_email
- *    differs from the account email (parent-enters-for-child).
+ *  - Match by PROVEN EMAIL ONLY. No handle-claim: handles are public (on the
+ *    leaderboard) and the client holds no ownership secret, so linking by handle
+ *    would let anyone hijack a victim's entry. An entrant whose entry email
+ *    differs from their account email isn't auto-linked (re-enter with the
+ *    account email) — a safe non-link over an insecure auto-claim.
  *  - Never throws to the client: opaque 500 + prefixed console.error; degrade to
  *    { linked:false } if the table is missing.
  */
@@ -46,15 +48,6 @@ export async function POST(req: Request) {
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
 
-    // 2. Optional handle-claim from the body (for parent-enters-with-different-email).
-    let requestedHandle: string | null = null;
-    try {
-      const body = (await req.json()) as { handle?: unknown };
-      if (typeof body?.handle === "string" && body.handle.trim()) requestedHandle = body.handle;
-    } catch {
-      // No/invalid body → email-only reconcile. Not an error.
-    }
-
     const email = user.email?.trim().toLowerCase() ?? null;
     const emailConfirmed = Boolean(user.email_confirmed_at);
 
@@ -66,9 +59,8 @@ export async function POST(req: Request) {
     const db = supabaseAdmin();
 
     // 4. Gather the entries relevant to this identity:
-    //    (a) any confirmed row already linked to us (already-linked guard),
-    //    (b) unlinked confirmed rows matching our proven email, and
-    //    (c) the unlinked confirmed row for the requested handle, if any.
+    //    (a) any confirmed row already linked to us (already-linked guard), and
+    //    (b) unlinked confirmed rows matching our proven email.
     //    A missing table / read failure degrades to { linked:false }, never a 500.
     const relevant = new Map<string, ReconcileEntry>();
     const add = (rows: ReconcileEntry[] | null | undefined) => {
@@ -94,22 +86,11 @@ export async function POST(req: Request) {
       .is("user_id", null);
     if (!byEmail.error) add(byEmail.data as ReconcileEntry[]);
 
-    if (requestedHandle) {
-      const byHandle = await db
-        .from("gauntlet_tournament_entries")
-        .select(COLS)
-        .eq("handle", normalizeHandle(requestedHandle))
-        .not("confirmed_at", "is", null)
-        .is("user_id", null);
-      if (!byHandle.error) add(byHandle.data as ReconcileEntry[]);
-    }
-
     // 5. Decide (pure) which entry — if any — to link.
     const decision = decideReconcileLink({
       callerUserId: user.id,
       callerEmail: email,
       emailConfirmed,
-      requestedHandle,
       entries: [...relevant.values()],
     });
 

@@ -226,17 +226,13 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   // returning confirmed entrant's entry to this account (the email-confirm gap
   // means user_id often can't be stamped at entry time). Fire-and-forget; the
   // route is session-authed and proven-email-gated, so a no-op/403 is harmless.
-  // Sending the current handle enables the handle-claim fallback (parent entered
-  // with a different email than the account).
+  // No body — reconciliation is by proven email only (handles carry no ownership
+  // proof, so a handle-claim would be a hijack vector).
   useEffect(() => {
     if (!userId || reconciledRef.current) return;
     reconciledRef.current = true;
-    void fetch("/api/gauntlet/tournament/reconcile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle: save.handle || undefined }),
-    }).catch(() => {});
-  }, [userId, save.handle]);
+    void fetch("/api/gauntlet/tournament/reconcile", { method: "POST" }).catch(() => {});
+  }, [userId]);
 
   const boss = BOSSES[bossIdx];
   const topics = save.topics;

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { normalizeHandle } from "@/app/gauntlet/game/tournamentEntry";
+import { runGauntletBridge } from "./bridge";
 
 /**
  * GPF-5 — double opt-in confirm target.
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
   const db = supabaseAdmin();
   const { data, error } = await db
     .from("gauntlet_tournament_entries")
-    .select("id, confirm_token, confirmed_at")
+    .select("id, confirm_token, confirmed_at, handle, parent_email, consent_given, consent_at")
     .ilike("handle", handle)
     .maybeSingle();
 
@@ -70,6 +71,17 @@ export async function POST(req: Request) {
       .from("gauntlet_tournament_entries")
       .update({ confirmed_at: new Date().toISOString() })
       .eq("id", data.id);
+
+    // GPF/Unit 6: on the confirm transition only (R12 — never for pending
+    // entries, once per confirmation), bridge the entry into the CRM as a
+    // gauntlet lead. Fully isolated: runGauntletBridge never throws, so the
+    // parent still sees the success shell even if the CRM write fails.
+    await runGauntletBridge(db, {
+      handle: data.handle,
+      parent_email: data.parent_email,
+      consent_given: data.consent_given,
+      consent_at: data.consent_at,
+    });
   }
 
   return shell(

@@ -585,14 +585,9 @@ export async function fetchFamilyDetail(
 
   // Pre-migration tolerance, same as fetchPipeline.
   const sends = sendsRes.error ? [] : ((sendsRes.data ?? []) as SendRow[]);
-  const nurtureSends = nurtureRes.error
+  const nurtureSends: TimelineNurtureInput[] = nurtureRes.error
     ? []
-    : ((nurtureRes.data ?? []) as {
-        id: string;
-        sequence: string;
-        step: string;
-        sent_at: string;
-      }[]);
+    : ((nurtureRes.data ?? []) as TimelineNurtureInput[]);
   const libraryItems = itemsRes.error
     ? []
     : ((itemsRes.data ?? []) as {
@@ -675,12 +670,7 @@ export async function fetchFamilyDetail(
         itemTitle: itemTitles.get(s.item_id) ?? "Library item",
         sent_at: s.sent_at,
       })),
-      nurtureSends.map((n) => ({
-        id: n.id,
-        sequence: n.sequence,
-        step: n.step,
-        sent_at: n.sent_at,
-      }))
+      nurtureSends
     ),
   };
 }

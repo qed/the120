@@ -73,6 +73,12 @@ body {
 }
 
 /* ---- MathRaiders (app/raiders) ---- */
+
+/* Mid-raid/trial: GauntletGame stamps this class on <body> so page chrome
+   above the game (the parent banner) yields the viewport to the arena —
+   crucial on phones, where the touch pad needs every vertical pixel. */
+body.gauntlet-playing .gauntlet-page-chrome { display: none; }
+
 @keyframes mr-shake {
   0%, 100% { transform: translate(0, 0); }
   20% { transform: translate(-7px, 2px) rotate(-2deg); }

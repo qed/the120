@@ -7,6 +7,7 @@ import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
+import NumberPad, { useCoarsePointer } from "./NumberPad";
 
 export const RAID_SECONDS = 120;
 const PLAYER_MAX_HP = 100;
@@ -62,6 +63,7 @@ export default function Battle({
   const [dying, setDying] = useState(false);
   const [entering, setEntering] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const coarse = useCoarsePointer(); // A3: touch devices get the game pad, not the OS keyboard
 
   const statsRef = useRef<BattleStats>({ correct: 0, wrong: 0, damage: 0, bestStreak: 0, wasteMs: 0, activeMs: 0, timeLeft: 0 });
   const resultsRef = useRef<ProblemResult[]>([]);
@@ -71,8 +73,13 @@ export default function Battle({
   const endAtRef = useRef(Date.now() + RAID_SECONDS * 1000);
   const lastTickRef = useRef(RAID_SECONDS);
 
+  const rootRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     sfxEnter();
+    // The parent banner above the game pushes the page 1 banner-height past
+    // 100vh — scroll the arena flush so the pad's bottom row isn't cut off.
+    rootRef.current?.scrollIntoView({ block: "start" });
     const t = setTimeout(() => setEntering(false), 600);
     return () => clearTimeout(t);
   }, []);
@@ -203,7 +210,10 @@ export default function Battle({
 
   return (
     <div
-      className={`relative flex min-h-screen flex-col ${wrongFlash ? "mr-wrong" : ""}`}
+      ref={rootRef}
+      // dvh, not vh: on phones the URL bar shrinks the visible viewport and
+      // 100vh would push the pad's bottom row off-screen
+      className={`relative flex min-h-dvh flex-col ${wrongFlash ? "mr-wrong" : ""}`}
       style={{
         background: `linear-gradient(rgba(5,8,15,0.5), rgba(5,8,15,0.72)), url(/raiders/arena-${boss.id}.jpg) center / cover no-repeat, ${boss.arena}`,
       }}
@@ -232,7 +242,7 @@ export default function Battle({
                 }}
               />
             ))}
-            <span className={`ml-1.5 font-mono text-[11px] ${mult > 1 ? "text-amber-300" : "text-white/45"}`}>
+            <span className={`ml-1.5 whitespace-nowrap font-mono text-[11px] ${mult > 1 ? "text-amber-300" : "text-white/45"}`}>
               ×{mult} {streak > 0 && `· ${streak} streak`}
             </span>
           </div>
@@ -269,8 +279,8 @@ export default function Battle({
         </button>
       </div>
 
-      {/* Boss stage */}
-      <div className="relative flex min-h-[260px] flex-1 items-center justify-center">
+      {/* Boss stage — shorter when the pad claims screen space */}
+      <div className={`relative flex flex-1 items-center justify-center ${coarse ? "min-h-[112px]" : "min-h-[260px]"}`}>
         <div className="absolute h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: boss.glow }} />
         <div className={dying ? "mr-death" : entering ? "mr-enter" : shake || "mr-float"}>
           <span key={hitFlash} className={hitFlash ? "mr-hit inline-block" : "inline-block"}>
@@ -324,8 +334,8 @@ export default function Battle({
       </div>
 
       {/* Problem card */}
-      <div className="mx-auto mb-5 w-full max-w-xl px-4 sm:mb-8 sm:px-5">
-        <div key={rightPulse} className={`rounded-2xl border p-4 backdrop-blur-md sm:p-6 ${rightPulse ? "mr-right" : ""} ${reveal ? "border-red-400/60 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
+      <div className={`mx-auto w-full max-w-xl px-4 sm:mb-8 sm:px-5 ${coarse ? "mb-3" : "mb-5"}`}>
+        <div key={rightPulse} className={`rounded-2xl border backdrop-blur-md sm:p-6 ${coarse ? "p-3" : "p-4"} ${rightPulse ? "mr-right" : ""} ${reveal ? "border-red-400/60 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
           {problem.triangle && (
             <div className="mb-3">
               <TriangleFigure pair={problem.triangle} />
@@ -349,16 +359,29 @@ export default function Battle({
           )}
 
           {problem.kind === "numeric" ? (
-            <input
-              ref={inputRef}
-              autoFocus
-              inputMode="numeric"
-              value={input}
-              onChange={(e) => onType(e.target.value)}
-              placeholder={reveal ? "" : "Type the answer!"}
-              disabled={!!reveal}
-              className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
-            />
+            coarse ? (
+              <>
+                <div
+                  className={`mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border px-4 py-2 text-center text-2xl font-bold tracking-wider text-white ${reveal ? "border-white/20 bg-white/5 opacity-50" : "border-cyan-400/40 bg-white/5"}`}
+                >
+                  {input || (
+                    <span className="text-base font-normal text-white/30">{reveal ? "" : "Tap the answer!"}</span>
+                  )}
+                </div>
+                <NumberPad value={input} onInput={onType} disabled={!!reveal} accent={boss.glow} />
+              </>
+            ) : (
+              <input
+                ref={inputRef}
+                autoFocus
+                inputMode="numeric"
+                value={input}
+                onChange={(e) => onType(e.target.value)}
+                placeholder={reveal ? "" : "Type the answer!"}
+                disabled={!!reveal}
+                className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
+              />
+            )
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               {problem.choices!.map((c) => (

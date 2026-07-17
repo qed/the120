@@ -39,7 +39,9 @@ export default function ParentBanner({
   };
 
   return (
-    <div className="flex items-center gap-3 bg-[#0d1322] px-4 py-2.5 text-white sm:px-6">
+    // gauntlet-page-chrome: hidden mid-raid/trial (globals.css) so the arena
+    // gets the full viewport; back the moment the player returns to the menu.
+    <div className="gauntlet-page-chrome flex items-center gap-3 bg-[#0d1322] px-4 py-2.5 text-white sm:px-6">
       <p className="flex-1 text-[12.5px] leading-snug text-white/85 sm:text-[13px]">
         Free to play, built by <span className="font-semibold text-white">The 120</span> &mdash;
         Toronto&rsquo;s selective network for kids who ask for more.

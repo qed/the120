@@ -14,7 +14,10 @@ import Wordmark from "@/app/components/Wordmark";
  */
 export default function ResetForm() {
   const router = useRouter();
-  const supabaseRef = useRef(supabaseBrowser());
+  // Lazy: creating the client needs NEXT_PUBLIC_SUPABASE_* — deferred to the
+  // browser so env-less builds can prerender this page (repo convention).
+  const supabaseRef = useRef<ReturnType<typeof supabaseBrowser> | null>(null);
+  const getSupabase = () => (supabaseRef.current ??= supabaseBrowser());
   const [sessionState, setSessionState] = useState<"checking" | "ready" | "missing">("checking");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -23,7 +26,7 @@ export default function ResetForm() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    const supabase = supabaseRef.current;
+    const supabase = getSupabase();
     let settled = false;
 
     const {
@@ -67,7 +70,7 @@ export default function ResetForm() {
       return;
     }
     setBusy(true);
-    const { error: updateError } = await supabaseRef.current.auth.updateUser({ password });
+    const { error: updateError } = await getSupabase().auth.updateUser({ password });
     if (updateError) {
       setError(updateError.message);
       setBusy(false);

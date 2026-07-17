@@ -14,6 +14,7 @@ import {
 import { ensureAudio, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
+import NumberPad, { useCoarsePointer } from "./NumberPad";
 import type { ProblemResult } from "./Battle";
 
 const START_SECONDS = 30;
@@ -75,9 +76,18 @@ export default function Trial({
   const doneRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastTickRef = useRef(0);
+  const coarse = useCoarsePointer(); // A3: touch devices get the game pad, not the OS keyboard
 
   const wave = Math.floor(score / 10);
   const boss = BOSSES[wave % BOSSES.length];
+
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Same as Battle: scroll the banner above the game out of view so the
+  // full trial (and the touch pad's bottom row) fits the viewport.
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ block: "start" });
+  }, []);
 
   useEffect(() => {
     let hiddenAt = 0;
@@ -148,7 +158,9 @@ export default function Trial({
 
   return (
     <div
-      className="relative flex min-h-screen flex-col"
+      ref={rootRef}
+      // dvh, not vh: see Battle — keeps the pad's bottom row on-screen on phones
+      className="relative flex min-h-dvh flex-col"
       style={{
         background: `linear-gradient(rgba(5,8,15,0.6), rgba(5,8,15,0.8)), url(/raiders/arena-${boss.id}.jpg) center / cover no-repeat`,
       }}
@@ -178,14 +190,14 @@ export default function Trial({
         )}
       </div>
 
-      <div className="relative flex min-h-[180px] flex-1 items-center justify-center">
+      <div className={`relative flex flex-1 items-center justify-center ${coarse ? "min-h-[110px]" : "min-h-[180px]"}`}>
         <div className="mr-float">
           <BossSprite id={boss.id} size={170} useImage />
         </div>
       </div>
 
-      <div className="mx-auto mb-6 w-full max-w-xl px-4">
-        <div className={`rounded-2xl border p-4 backdrop-blur-md sm:p-6 ${flash === "good" ? "mr-right border-white/15 bg-black/45" : flash === "bad" ? "border-red-400/60 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
+      <div className={`mx-auto w-full max-w-xl px-4 ${coarse ? "mb-3" : "mb-6"}`}>
+        <div className={`rounded-2xl border backdrop-blur-md sm:p-6 ${coarse ? "p-3" : "p-4"} ${flash === "good" ? "mr-right border-white/15 bg-black/45" : flash === "bad" ? "border-red-400/60 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
           {problem.triangle && (
             <div className="mb-3">
               <TriangleFigure pair={problem.triangle} />
@@ -198,15 +210,24 @@ export default function Trial({
             )}
           </p>
           {problem.kind === "numeric" ? (
-            <input
-              ref={inputRef}
-              autoFocus
-              inputMode="numeric"
-              value={input}
-              onChange={(e) => onType(e.target.value)}
-              placeholder="Type the answer!"
-              className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
-            />
+            coarse ? (
+              <>
+                <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-amber-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
+                  {input || <span className="text-base font-normal text-white/30">Tap the answer!</span>}
+                </div>
+                <NumberPad value={input} onInput={onType} accent="#fbbf24" />
+              </>
+            ) : (
+              <input
+                ref={inputRef}
+                autoFocus
+                inputMode="numeric"
+                value={input}
+                onChange={(e) => onType(e.target.value)}
+                placeholder="Type the answer!"
+                className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
+              />
+            )
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               {problem.choices!.map((c) => (

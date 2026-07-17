@@ -9,6 +9,7 @@ import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/au
 import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
+import { useCoarsePointer } from "./components/NumberPad";
 import { shareScore, type ShareData } from "./game/shareCard";
 import TournamentEntryModal from "./components/TournamentEntryModal";
 import type { TournamentState } from "@/app/lib/tournament";
@@ -136,6 +137,7 @@ type Phase = "menu" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
 
 export default function GauntletGame({ tournament }: { tournament: TournamentState }) {
   const [phase, setPhase] = useState<Phase>("menu");
+  const coarse = useCoarsePointer(); // A3: the touch number pad owns bottom-left in battle/trial
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
   const [bossIdx, setBossIdx] = useState(0);
@@ -233,6 +235,14 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     setPhase("battle");
   };
 
+  // Mid-raid/trial the page chrome above the game (parent banner) hides via
+  // this body class (globals.css) so the arena gets the whole viewport.
+  useEffect(() => {
+    const playing = phase === "battle" || phase === "trial";
+    document.body.classList.toggle("gauntlet-playing", playing);
+    return () => document.body.classList.remove("gauntlet-playing");
+  }, [phase]);
+
   /** newly mastered facts this round (for the result screens) */
   const countNewlyMastered = useCallback(
     (before: Record<string, FactStat>, after: Record<string, FactStat>) =>
@@ -306,7 +316,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         onClick={toggleMute}
         aria-label={save.muted ? "Unmute" : "Mute"}
         className={`fixed z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-mono text-sm text-white/70 backdrop-blur hover:bg-white/20 ${
-          phase === "battle" || phase === "trial" ? "bottom-4 left-4" : "right-4 top-4"
+          phase === "battle" || phase === "trial"
+            ? coarse
+              ? "left-3 top-[38%]" // pad owns bottom-left on touch; park over the arena's clear left edge
+              : "bottom-4 left-4"
+            : "right-4 top-4"
         }`}
       >
         {save.muted ? "🔇" : "🔊"}

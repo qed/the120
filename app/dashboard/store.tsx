@@ -141,7 +141,10 @@ function friendlySaveError(message?: string): string {
 /* ---------- provider ---------- */
 
 export default function DashboardProvider({ children: reactChildren }: { children: React.ReactNode }) {
-  const supabaseRef = useRef(supabaseBrowser());
+  // Lazy: creating the client needs NEXT_PUBLIC_SUPABASE_* — deferred to the
+  // browser so env-less builds can prerender this page (repo convention).
+  const supabaseRef = useRef<ReturnType<typeof supabaseBrowser> | null>(null);
+  const getSupabase = () => (supabaseRef.current ??= supabaseBrowser());
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [parent, setParent] = useState<Parent | null>(null);
@@ -165,7 +168,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   }, []);
 
   const loadFamily = useCallback(async (activeSession: Session) => {
-    const supabase = supabaseRef.current;
+    const supabase = getSupabase();
     const user = activeSession.user;
     const [parentRes, { data: childRows }, { data: depositRows }] = await Promise.all([
       supabase.from("parents").select("first_name,last_name,email").eq("id", user.id).maybeSingle(),
@@ -216,7 +219,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   }, [applyChildren]);
 
   useEffect(() => {
-    const supabase = supabaseRef.current;
+    const supabase = getSupabase();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       if (session) await loadFamily(session);
@@ -254,7 +257,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         try {
           const {
             data: { user },
-          } = await supabaseRef.current.auth.getUser();
+          } = await getSupabase().auth.getUser();
           if (!user) return { ok: false, error: "Not signed in" };
           if (opts?.includeStatus) {
             // Submit path: two writes, deliberately NOT one upsert. An upsert
@@ -266,7 +269,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
             // Instead: persist content with the ordinary status-free upsert,
             // then flip status in a targeted UPDATE, which fires only the
             // guard's UPDATE branch (draft → submitted is permitted).
-            const { error: rowError } = await supabaseRef.current
+            const { error: rowError } = await getSupabase()
               .from("children")
               .upsert(childToRow(current, user.id));
             if (rowError) {
@@ -280,7 +283,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
             const patch = submitStatusPatch(current);
             let echoed: Child["status"] | undefined;
             try {
-              const { data, error } = await supabaseRef.current
+              const { data, error } = await getSupabase()
                 .from("children")
                 .update(patch)
                 .eq("id", id)
@@ -295,7 +298,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
               // and adopt the row's real status before giving up.
               const message = e instanceof Error ? e.message : "Could not save.";
               console.error("[dashboard] save failed:", message);
-              const { data: reread } = await supabaseRef.current
+              const { data: reread } = await getSupabase()
                 .from("children")
                 .select("status")
                 .eq("id", id)
@@ -321,7 +324,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
             }
             return { ok: true };
           }
-          const { error } = await supabaseRef.current
+          const { error } = await getSupabase()
             .from("children")
             .upsert(childToRow(current, user.id));
           if (error) {
@@ -417,14 +420,14 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     chains.set(
       id,
       prev.then(async () => {
-        const { error } = await supabaseRef.current.from("children").delete().eq("id", id);
+        const { error } = await getSupabase().from("children").delete().eq("id", id);
         if (error) console.error("[dashboard] delete failed:", error.message);
       })
     );
   };
 
   const refreshDeposits = useCallback(async () => {
-    const { data } = await supabaseRef.current.from("deposits").select("child_id,status");
+    const { data } = await getSupabase().from("deposits").select("child_id,status");
     setDeposits(
       ((data as { child_id: string; status: string }[]) ?? []).map((d) => ({
         childId: d.child_id,
@@ -434,7 +437,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   }, []);
 
   const signOut = () => {
-    supabaseRef.current.auth.signOut();
+    getSupabase().auth.signOut();
   };
 
   return (

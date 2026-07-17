@@ -9,14 +9,20 @@ export const FOUNDING_COMMITMENTS = 7;
  * so the site never shows a broken or missing number.
  */
 export async function getSeatsRemaining(): Promise<number> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Env-less (local builds/dev): fall back immediately. Without this guard the
+  // fetch below gets a "undefined/…" URL, which static generation stalls on
+  // for the full 60s page timeout instead of throwing — killing the build.
+  if (!url || !key) return SEATS_REMAINING;
   try {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/seats_claimed`,
+      `${url}/rest/v1/rpc/seats_claimed`,
       {
         method: "POST",
         headers: {
-          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+          apikey: key,
+          Authorization: `Bearer ${key}`,
           "Content-Type": "application/json",
         },
         body: "{}",

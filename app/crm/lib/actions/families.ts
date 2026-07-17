@@ -23,6 +23,7 @@ import {
   applySignalToggle,
   checkDuplicatesSchema,
   clearStampSchema,
+  escapeIlike,
   familyIdSchema,
   isSimilarFamily,
   mergeFamiliesSchema,
@@ -158,9 +159,6 @@ async function maybeClearSupersededOverride(
 }
 
 /* ------------------------------------------------------------ duplicates */
-
-const escapeIlike = (value: string): string =>
-  value.replace(/([\\%_])/g, "\\$1");
 
 async function findEmailConflict(
   db: Db,

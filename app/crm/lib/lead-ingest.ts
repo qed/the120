@@ -30,6 +30,14 @@ import {
   type FamilyConsentState,
   type MatchOrCreateInput,
 } from "@/app/crm/lib/families-rules";
+import {
+  bookingConsentInput,
+  cancelUidMatches,
+  decideConsentUpgrade,
+  deriveEventKey,
+  isFresh,
+  type CalcomBookingEvent,
+} from "@/app/lib/calcom/events";
 
 type Db = ReturnType<typeof supabaseAdmin>;
 
@@ -190,4 +198,301 @@ export async function matchOrCreateLead(
   throw new Error(
     `matchOrCreateLead: failed to insert lead (${error?.message ?? "unknown error"}).`
   );
+}
+
+/* ============================================ Cal.com booking webhook (Unit 7)
+
+ * SECURITY — MODULE BOUNDARY: `stampCallBookedFromWebhook` and
+ * `runCalcomWebhook` take a `db` argument and skip staff auth by design, so
+ * they live HERE (a plain server-only module), never in a `"use server"` file
+ * where every export becomes a client-callable Server Action. The ONLY caller
+ * is the HMAC-gated `app/api/webhooks/calcom/route.ts`. See the module header.
+ * -------------------------------------------------------------------------- */
+
+/** The `families` columns the booking effect reads (consent + provenance). */
+interface BookingFamilyRow {
+  id: string;
+  consent_given: boolean;
+  consent_revoked_at: string | null;
+  call_booked_uid: string | null;
+  call_booked_event_at: string | null;
+}
+
+const BOOKING_COLUMNS =
+  "id, consent_given, consent_revoked_at, call_booked_uid, call_booked_event_at";
+
+async function loadBookingFamilyById(
+  db: Db,
+  id: string
+): Promise<BookingFamilyRow | null> {
+  const { data } = await db
+    .from("families")
+    .select(BOOKING_COLUMNS)
+    .eq("id", id)
+    .is("merged_into_id", null)
+    .maybeSingle();
+  return (data as BookingFamilyRow | null) ?? null;
+}
+
+async function findBookingFamilyByEmail(
+  db: Db,
+  email: string
+): Promise<BookingFamilyRow | null> {
+  const pattern = escapeIlike(email);
+  if (!pattern) return null;
+  const { data } = await db
+    .from("families")
+    .select(BOOKING_COLUMNS)
+    .is("merged_into_id", null)
+    .ilike("email", pattern)
+    .limit(1)
+    .maybeSingle();
+  return (data as BookingFamilyRow | null) ?? null;
+}
+
+/** Reschedule lookup key (R15): the family whose stored webhook uid equals the
+ *  reschedule's prior uid. Email is the fallback (handled by the caller). */
+async function findBookingFamilyByUid(
+  db: Db,
+  uid: string
+): Promise<BookingFamilyRow | null> {
+  const { data } = await db
+    .from("families")
+    .select(BOOKING_COLUMNS)
+    .eq("call_booked_uid", uid)
+    .is("merged_into_id", null)
+    .limit(1)
+    .maybeSingle();
+  return (data as BookingFamilyRow | null) ?? null;
+}
+
+/**
+ * Write the staff-less booking stamp: mirror `stampCall`'s `family_stage_history`
+ * shape (`from_stage: null`, `to_stage: "call_booked"`, `note: "stamp · {iso}"`)
+ * but with `actor: null` (external ingest — the nullable-actor path, no
+ * `crm_audit_log`). `iso` is the booking's call time, matching stampCall's
+ * `stamp · ${at.toISOString()}` semantics.
+ */
+async function writeBookingStampHistory(
+  db: Db,
+  familyId: string,
+  callTimeIso: string
+): Promise<void> {
+  await db.from("family_stage_history").insert({
+    family_id: familyId,
+    from_stage: null,
+    to_stage: "call_booked",
+    actor: null,
+    note: `stamp · ${callTimeIso}`,
+  });
+}
+
+export type BookingWebhookResult =
+  | { kind: "stamped"; familyId: string; matched: boolean }
+  | { kind: "rescheduled"; familyId: string }
+  | { kind: "cleared"; familyId: string }
+  | { kind: "noop"; reason: string };
+
+/**
+ * BOOKING_CREATED: resolve the family by email (create a `booking` lead if
+ * unmatched), establish/upgrade implied-EBR consent BY THE BOOKING EVENT, then
+ * stamp `call_booked` under the out-of-order guard.
+ */
+async function handleBookingCreated(
+  db: Db,
+  event: CalcomBookingEvent
+): Promise<BookingWebhookResult> {
+  const email = event.email;
+  if (!email) return { kind: "noop", reason: "created-without-email" };
+
+  // matchOrCreateLead handles the UNMATCHED insert (implied-EBR consent set
+  // from `bookingConsentInput`) and the MATCHED add-signals path (which, by
+  // design, never grants consent — the upgrade below covers matched leads).
+  const { familyId, matched } = await matchOrCreateLead(db, {
+    email,
+    source: "booking",
+    signals: [],
+    consent: bookingConsentInput(event.createdAt),
+    identity: { parentName: event.bookerName ?? `Booking: ${email}` },
+  });
+
+  const family = await loadBookingFamilyById(db, familyId);
+  if (!family) return { kind: "noop", reason: "family-vanished" };
+
+  // Consent upgrade applies only to a matched lead with no consent + no
+  // revocation; a just-inserted booking lead already has consent_given=true, so
+  // this returns null there (no double write). Never downgrades / re-subscribes.
+  const consentUpdate = decideConsentUpgrade(family, event.createdAt) ?? {};
+
+  const fresh = isFresh(event.createdAt, family.call_booked_event_at);
+  if (!fresh) {
+    // Stale CREATED: don't move the stamp, but still honor the consent upgrade
+    // (the inquiry happened regardless of delivery order).
+    if (Object.keys(consentUpdate).length > 0) {
+      await db.from("families").update(consentUpdate).eq("id", family.id);
+    }
+    return { kind: "noop", reason: "stale-created" };
+  }
+
+  const callTimeIso = event.startTime ?? event.createdAt;
+  await db
+    .from("families")
+    .update({
+      ...consentUpdate,
+      call_booked_at: callTimeIso,
+      call_booked_uid: event.uid,
+      call_booked_event_at: event.createdAt,
+    })
+    .eq("id", family.id);
+  await writeBookingStampHistory(db, family.id, callTimeIso);
+
+  return { kind: "stamped", familyId: family.id, matched };
+}
+
+/**
+ * BOOKING_RESCHEDULED: find the family by the prior stamped uid
+ * (`rescheduleUid`), falling back to booker email; update the call time and
+ * swap in the new uid, under the same out-of-order guard.
+ */
+async function handleBookingRescheduled(
+  db: Db,
+  event: CalcomBookingEvent
+): Promise<BookingWebhookResult> {
+  let family: BookingFamilyRow | null = null;
+  if (event.rescheduleUid) {
+    family = await findBookingFamilyByUid(db, event.rescheduleUid);
+  }
+  if (!family && event.email) {
+    family = await findBookingFamilyByEmail(db, event.email);
+  }
+  if (!family) return { kind: "noop", reason: "reschedule-no-match" };
+
+  if (!isFresh(event.createdAt, family.call_booked_event_at)) {
+    return { kind: "noop", reason: "stale-reschedule" };
+  }
+
+  const callTimeIso = event.startTime ?? event.createdAt;
+  await db
+    .from("families")
+    .update({
+      call_booked_at: callTimeIso,
+      call_booked_uid: event.uid,
+      call_booked_event_at: event.createdAt,
+    })
+    .eq("id", family.id);
+  await writeBookingStampHistory(db, family.id, callTimeIso);
+
+  return { kind: "rescheduled", familyId: family.id };
+}
+
+/**
+ * BOOKING_CANCELLED: clear the stamp ONLY when the cancelled uid matches the
+ * webhook-stored uid (R15 — a manual/null-uid stamp is never wiped) AND the
+ * out-of-order guard passes (a stale cancel after a newer rebook is ignored).
+ */
+async function handleBookingCancelled(
+  db: Db,
+  event: CalcomBookingEvent
+): Promise<BookingWebhookResult> {
+  if (!event.email) return { kind: "noop", reason: "cancel-without-email" };
+  const family = await findBookingFamilyByEmail(db, event.email);
+  if (!family) return { kind: "noop", reason: "cancel-no-match" };
+
+  if (!cancelUidMatches(family.call_booked_uid, event.uid)) {
+    return { kind: "noop", reason: "cancel-uid-mismatch" };
+  }
+  if (!isFresh(event.createdAt, family.call_booked_event_at)) {
+    return { kind: "noop", reason: "stale-cancel" };
+  }
+
+  await db
+    .from("families")
+    .update({
+      call_booked_at: null,
+      call_booked_uid: null,
+      call_booked_event_at: null,
+    })
+    .eq("id", family.id);
+  await db.from("family_stage_history").insert({
+    family_id: family.id,
+    from_stage: null,
+    to_stage: "call_booked",
+    actor: null,
+    note: "stamp-cleared",
+  });
+
+  return { kind: "cleared", familyId: family.id };
+}
+
+/**
+ * The booking EFFECT (db-taking, staff-less). Dispatches on `triggerEvent`;
+ * every branch is an idempotent set-to-value, so a redelivery re-applies the
+ * same result. Throws on an unexpected DB error so the route returns 500 and
+ * Cal.com retries safely. Pure decisions live in `app/lib/calcom/events.ts`.
+ */
+export async function stampCallBookedFromWebhook(
+  db: Db,
+  event: CalcomBookingEvent
+): Promise<BookingWebhookResult> {
+  switch (event.triggerEvent) {
+    case "BOOKING_CREATED":
+      return handleBookingCreated(db, event);
+    case "BOOKING_RESCHEDULED":
+      return handleBookingRescheduled(db, event);
+    case "BOOKING_CANCELLED":
+      return handleBookingCancelled(db, event);
+    default:
+      return { kind: "noop", reason: "unknown-trigger" };
+  }
+}
+
+export type CalcomWebhookOutcome =
+  | { status: "deduped" }
+  | { status: "applied"; effect: BookingWebhookResult };
+
+/**
+ * Orchestrate one verified booking event (R16 idempotency + ordering).
+ *
+ * Ordering-SAFE dedupe: because PostgREST statements are not transactional
+ * across calls, we do NOT insert the dedupe key first and lean on a 500-retry —
+ * a transient failure after the key insert would turn the retry into a no-op and
+ * PERMANENTLY drop the stamp. Instead we record the key AFTER the effect
+ * succeeds; safe because every effect is an idempotent set-to-value, so a
+ * concurrent redelivery at worst re-applies the same value. On an
+ * already-present key we short-circuit (already handled).
+ *
+ * A DB error inside the effect propagates (the route → 500 → Cal.com retries);
+ * the key is not recorded, so the retry re-applies the effect.
+ */
+export async function runCalcomWebhook(
+  db: Db,
+  event: CalcomBookingEvent
+): Promise<CalcomWebhookOutcome> {
+  const eventKey = deriveEventKey(
+    event.triggerEvent,
+    event.uid,
+    event.createdAt
+  );
+
+  const { data: seen } = await db
+    .from("processed_webhook_events")
+    .select("event_key")
+    .eq("event_key", eventKey)
+    .maybeSingle();
+  if (seen) return { status: "deduped" };
+
+  const effect = await stampCallBookedFromWebhook(db, event);
+
+  // Record AFTER the effect. A duplicate key from a concurrent redelivery is a
+  // benign no-op (the effect was idempotent) — swallow the unique violation.
+  const { error } = await db
+    .from("processed_webhook_events")
+    .insert({ event_key: eventKey });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(
+      `runCalcomWebhook: failed to record event_key (${error.message ?? "unknown"}).`
+    );
+  }
+
+  return { status: "applied", effect };
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { sendEmail } from "@/app/lib/email";
 import { SITE_URL } from "@/app/lib/site";
@@ -46,6 +48,33 @@ export async function POST(req: Request) {
   const parentEmail = body.parentEmail.trim().toLowerCase();
   const nowIso = new Date().toISOString();
   const db = supabaseAdmin();
+
+  // B6 (additive): if the caller carries a valid session (bearer and/or the
+  // @supabase/ssr cookie, like app/api/welcome/route.ts), capture user_id from
+  // the VERIFIED session ONLY — never from the body — so a signed-in entrant is
+  // linked to their account. Guests (no session) keep working with user_id null;
+  // the reconcile route links them later. This does NOT alter any hardening
+  // branch below; it only adds user_id to the write payloads.
+  let userId: string | null = null;
+  try {
+    const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const auth = bearer
+      ? createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            global: { headers: { Authorization: `Bearer ${bearer}` } },
+            auth: { persistSession: false, autoRefreshToken: false },
+          }
+        )
+      : await supabaseServer();
+    const {
+      data: { user },
+    } = await auth.auth.getUser();
+    userId = user?.id ?? null;
+  } catch {
+    userId = null; // no/invalid session → guest entry, exactly as before
+  }
 
   // Validate referral_code against the ambassador registry — unauthenticated
   // callers must not be able to credit an arbitrary code. Unknown → store null.
@@ -96,6 +125,9 @@ export async function POST(req: Request) {
         referral_code: referralCode,
         heard_about: body.heardAbout?.trim() || null,
         last_email_at: nowIso,
+        // Stamp user_id only when we have a verified session — never null out an
+        // existing link on a guest re-entry of a still-pending handle.
+        ...(userId ? { user_id: userId } : {}),
       })
       .eq("id", existing.id);
     if (updErr) {
@@ -122,6 +154,9 @@ export async function POST(req: Request) {
       referral_code: referralCode,
       heard_about: body.heardAbout?.trim() || null,
       last_email_at: nowIso,
+      // B6: link to the signed-in account when a verified session is present
+      // (null for pure guests — reconciled later by proven email).
+      ...(userId ? { user_id: userId } : {}),
     });
     if (insErr) {
       console.error("[tournament/enter] insert", insErr.message);

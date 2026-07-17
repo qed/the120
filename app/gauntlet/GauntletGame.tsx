@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { BOSSES, type Boss } from "./game/bosses";
 import { BANDS, TOPICS, masteryProgress, type Band, type TopicId } from "./game/problems";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
@@ -151,6 +152,25 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
   const [showBoard, setShowBoard] = useState(false);
   const [showEntry, setShowEntry] = useState(false); // GPF-5 tournament gate
+  const { openAccountModal } = useAccountModal();
+  const reconciledRef = useRef(false);
+
+  // B6 · account-to-rank: entering requires an account (guest *play* is untouched).
+  // If not signed in, the "Enter" CTA opens the full AccountModal first; on
+  // onAuthed (immediate-session signup) we capture the user_id and continue to
+  // the entry modal. Under email confirmation there's no session/onAuthed — the
+  // modal shows its confirm screen and reconciliation links the entry on the
+  // next signed-in visit. Already signed in → straight to the entry modal.
+  const openEntry = useCallback(() => {
+    if (userId) {
+      setShowEntry(true);
+      return;
+    }
+    openAccountModal((newUserId) => {
+      setUserId(newUserId);
+      setShowEntry(true);
+    });
+  }, [userId, openAccountModal]);
 
   useEffect(() => {
     const s = loadSave();
@@ -201,6 +221,22 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     }, 2500);
     return () => clearTimeout(t);
   }, [save, userId, loaded]);
+
+  // B6 · reconciliation: once per mount when signed in, best-effort link a
+  // returning confirmed entrant's entry to this account (the email-confirm gap
+  // means user_id often can't be stamped at entry time). Fire-and-forget; the
+  // route is session-authed and proven-email-gated, so a no-op/403 is harmless.
+  // Sending the current handle enables the handle-claim fallback (parent entered
+  // with a different email than the account).
+  useEffect(() => {
+    if (!userId || reconciledRef.current) return;
+    reconciledRef.current = true;
+    void fetch("/api/gauntlet/tournament/reconcile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: save.handle || undefined }),
+    }).catch(() => {});
+  }, [userId, save.handle]);
 
   const boss = BOSSES[bossIdx];
   const topics = save.topics;
@@ -358,7 +394,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           onHelp={() => setShowHelp(true)}
           onBoard={() => setShowBoard(true)}
           tournamentLive={tournament.isLive}
-          onEnter={() => setShowEntry(true)}
+          onEnter={openEntry}
         />
       )}
       {showBoard && (
@@ -369,7 +405,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           tournamentLive={tournament.isLive}
           onEnter={() => {
             setShowBoard(false);
-            setShowEntry(true);
+            openEntry();
           }}
         />
       )}

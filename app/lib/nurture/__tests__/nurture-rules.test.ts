@@ -25,6 +25,7 @@ function family(overrides: Partial<NurtureFamilyRow> = {}): NurtureFamilyRow {
     merged_into_id: null,
     signup_at: null,
     dossier_submitted_at: null,
+    deposit_asked_referral: false,
     ...overrides,
   };
 }
@@ -193,6 +194,33 @@ describe("deposit sequence", () => {
     // No live deposit → back on the account sequence.
     expect(due).toHaveLength(1);
     expect(due[0].sequence).toBe("account");
+  });
+
+  it("sends the T+10 referral ask when it comes due", () => {
+    const due = run({
+      families: [family()],
+      deposits: [deposit({ created_at: iso(-10) })],
+      priorSends: [
+        { family_id: "fam-1", sequence: "deposit", step: "d0" },
+        { family_id: "fam-1", sequence: "deposit", step: "d3" },
+      ],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ sequence: "deposit", step: "d10", template: "deposit-referral" });
+  });
+
+  it("suppresses the T+10 referral ask once deposit_asked_referral is set (R1/R2)", () => {
+    const due = run({
+      families: [family({ deposit_asked_referral: true })],
+      deposits: [deposit({ created_at: iso(-10) })],
+      priorSends: [
+        { family_id: "fam-1", sequence: "deposit", step: "d0" },
+        { family_id: "fam-1", sequence: "deposit", step: "d3" },
+      ],
+    });
+    // The referral ask has already been made (by staff or a prior robot send),
+    // so no d10 email — the robot and co-pilot never double-ask.
+    expect(due).toHaveLength(0);
   });
 });
 

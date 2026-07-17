@@ -797,6 +797,41 @@ export async function revokeConsent(input: unknown): Promise<ActionResult> {
   return { success: true };
 }
 
+/* -------------------------------------------------------- referral asked */
+
+/**
+ * R1 (plan 2026-07-17-002): the missing setter for `deposit_asked_referral`.
+ * Co-pilot Rule 2 ("ask for one introduction") reads this flag but nothing
+ * ever wrote it, so the nudge nagged every deposit-paid/member family forever.
+ * Setting it dismisses Rule 2 and — via the nurture rules — suppresses the
+ * robot's T+10 referral ask, so staff and the robot never double-ask.
+ * Idempotent: a no-op write short-circuits to success without an audit row.
+ */
+export async function markReferralAsked(input: unknown): Promise<ActionResult> {
+  const staff = await requireStaff();
+  const parsed = familyIdSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Invalid input." };
+
+  const db = supabaseAdmin();
+  const family = await loadLiveFamily(db, parsed.data.familyId);
+  if (!family) return { success: false, error: "Family not found." };
+  if (family.deposit_asked_referral) return { success: true };
+
+  const { error } = await db
+    .from("families")
+    .update({
+      deposit_asked_referral: true,
+      last_touch_at: new Date().toISOString(),
+    })
+    .eq("id", family.id);
+  if (error) return { success: false, error: "Failed to record the referral ask." };
+
+  await audit(db, staff.staffId, "referral-asked", family.id, {});
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true };
+}
+
 /* ----------------------------------------------------------------- merge */
 
 export async function mergeFamilies(input: unknown): Promise<ActionResult> {

@@ -195,6 +195,8 @@ export interface PipelineFamily {
    *  lead-kid entries) — truth pushes it up, never down. */
   kidCount: number;
   nextMove: string;
+  /** R1: drives the drawer's "Mark referral asked" control + its asked state. */
+  depositAskedReferral: boolean;
   createdAt: string;
 }
 
@@ -399,6 +401,7 @@ function composeFamily(
     kidsLabel: kids.label,
     kidCount: Math.max(family.kid_count ?? 1, kids.count),
     nextMove,
+    depositAskedReferral: family.deposit_asked_referral,
     createdAt: family.created_at,
   };
 }

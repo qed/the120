@@ -203,7 +203,7 @@ export interface PipelineFamily {
 export interface TimelineEntry {
   id: string;
   ts: string;
-  type: "system" | "note" | "stage" | "deposit" | "send";
+  type: "system" | "note" | "stage" | "deposit" | "send" | "nurture";
   label: string;
   detail?: string;
   dotColor: string;
@@ -529,8 +529,16 @@ export async function fetchFamilyDetail(
   if (error || !familyData) return null;
   const family = familyData as unknown as FamilyRow;
 
-  const [parentRes, childrenRes, depositsRes, notesRes, historyRes, sendsRes, itemsRes] =
-    await Promise.all([
+  const [
+    parentRes,
+    childrenRes,
+    depositsRes,
+    notesRes,
+    historyRes,
+    sendsRes,
+    itemsRes,
+    nurtureRes,
+  ] = await Promise.all([
       family.parent_id
         ? db
             .from("parents")
@@ -569,10 +577,22 @@ export async function fetchFamilyDetail(
       db
         .from("library_items")
         .select("id, title, concern, type, helpfulness_score, send_count"),
+      db
+        .from("nurture_sends")
+        .select("id, sequence, step, sent_at")
+        .eq("family_id", family.id),
     ]);
 
   // Pre-migration tolerance, same as fetchPipeline.
   const sends = sendsRes.error ? [] : ((sendsRes.data ?? []) as SendRow[]);
+  const nurtureSends = nurtureRes.error
+    ? []
+    : ((nurtureRes.data ?? []) as {
+        id: string;
+        sequence: string;
+        step: string;
+        sent_at: string;
+      }[]);
   const libraryItems = itemsRes.error
     ? []
     : ((itemsRes.data ?? []) as {
@@ -654,6 +674,12 @@ export async function fetchFamilyDetail(
         subject: s.subject,
         itemTitle: itemTitles.get(s.item_id) ?? "Library item",
         sent_at: s.sent_at,
+      })),
+      nurtureSends.map((n) => ({
+        id: n.id,
+        sequence: n.sequence,
+        step: n.step,
+        sent_at: n.sent_at,
       }))
     ),
   };
@@ -913,6 +939,19 @@ export interface TimelineSendInput {
   sent_at: string;
 }
 
+/**
+ * Automated nurture send (Unit 4 / R8). `nurture_sends` has no subject column,
+ * so the label is derived from sequence + step (see `nurtureLabel`). These are
+ * DISPLAY-ONLY: they never move `last_touch_at` (R9), so the co-pilot's
+ * day-based staleness rules stay human-driven.
+ */
+export interface TimelineNurtureInput {
+  id: string;
+  sequence: string;
+  step: string;
+  sent_at: string;
+}
+
 const DOT = {
   system: "#0300ED",
   note: "#55585E",
@@ -920,7 +959,24 @@ const DOT = {
   depositPaid: "#0E8A5F",
   depositRefunded: "#D92632",
   send: "#EFC5B8",
+  // Robot/automated — a muted violet, distinct from the blush staff-send dot.
+  nurture: "#7A5AF8",
 } as const;
+
+/** Human label for an automated nurture send, from its sequence + step. */
+function nurtureLabel(sequence: string, step: string): string {
+  const key = `${sequence}/${step}`;
+  const LABELS: Record<string, string> = {
+    "account/d2": "Automated · Dossier nudge",
+    "account/d5": "Automated · Founder story",
+    "account/d9": "Automated · Book-the-call nudge",
+    "deposit/d0": "Automated · Founding 120 welcome",
+    "deposit/d3": "Automated · Intensive details",
+    "deposit/d10": "Automated · T+10 referral ask",
+    "stall/nudge-1": "Automated · Dossier stall nudge",
+  };
+  return LABELS[key] ?? `Automated · ${sequence} ${step}`;
+}
 
 function stageLabel(value: string | null): string {
   if (!value) return "";
@@ -1004,7 +1060,8 @@ export function buildTimeline(
   history: TimelineHistoryInput[],
   children: TimelineChildInput[],
   deposits: TimelineDepositInput[],
-  sends: TimelineSendInput[] = []
+  sends: TimelineSendInput[] = [],
+  nurture: TimelineNurtureInput[] = []
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   const childName = new Map(children.map((c) => [c.id, c.first_name]));
@@ -1083,6 +1140,19 @@ export function buildTimeline(
           : `Sent elsewhere · ${s.itemTitle}`,
       detail: s.subject ?? undefined,
       dotColor: DOT.send,
+    });
+  }
+
+  // Automated nurture sends (R8) — a distinct robot event type, visually set
+  // apart from staff library sends. Display-only: these are the same
+  // nurture_sends rows the cron writes; they never touch last_touch_at (R9).
+  for (const n of nurture) {
+    entries.push({
+      id: `nurture-${n.id}`,
+      ts: n.sent_at,
+      type: "nurture",
+      label: nurtureLabel(n.sequence, n.step),
+      dotColor: DOT.nurture,
     });
   }
 

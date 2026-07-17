@@ -248,4 +248,59 @@ describe("buildTimeline", () => {
     );
     expect(entries[1].detail).toBeUndefined();
   });
+
+  it("renders automated nurture sends as a distinct robot event (R8)", () => {
+    const entries = buildTimeline(
+      family(),
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        { id: "z1", sequence: "deposit", step: "d10", sent_at: "2026-07-17T10:00:00Z" },
+        { id: "z2", sequence: "account", step: "d2", sent_at: "2026-07-15T10:00:00Z" },
+      ]
+    );
+    expect(entries.map((e) => e.type)).toEqual(["nurture", "nurture"]);
+    // d10 label lets staff see the referral ask that dismissed the nudge.
+    expect(entries[0].label).toBe("Automated · T+10 referral ask");
+    expect(entries[1].label).toBe("Automated · Dossier nudge");
+    expect(entries[0].id).toBe("nurture-z1");
+  });
+
+  it("distinguishes a robot nurture send from a same-time staff library send", () => {
+    const entries = buildTimeline(
+      family(),
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          id: "s1",
+          channel: "email",
+          subject: "Founding 120",
+          itemTitle: "WELCOME",
+          sent_at: "2026-07-16T10:00:00Z",
+        },
+      ],
+      [{ id: "z1", sequence: "deposit", step: "d0", sent_at: "2026-07-16T10:00:00Z" }]
+    );
+    const send = entries.find((e) => e.type === "send")!;
+    const nurture = entries.find((e) => e.type === "nurture")!;
+    expect(send).toBeDefined();
+    expect(nurture).toBeDefined();
+    // Same timestamp, but different type + dot color = visually separable.
+    expect(send.dotColor).not.toBe(nurture.dotColor);
+    // Deterministic tie-break by id keeps ordering stable.
+    expect(new Set(entries.map((e) => e.id)).size).toBe(entries.length);
+  });
+
+  it("falls back to a generic label for an unknown sequence/step", () => {
+    const entries = buildTimeline(family(), [], [], [], [], [], [
+      { id: "z9", sequence: "winback", step: "d99", sent_at: "2026-07-16T10:00:00Z" },
+    ]);
+    expect(entries[0].label).toBe("Automated · winback d99");
+  });
 });

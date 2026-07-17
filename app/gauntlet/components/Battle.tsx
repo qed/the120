@@ -145,6 +145,14 @@ export default function Battle({
     inputRef.current?.focus();
   }, [topics, band, facts]);
 
+  // The focus() in advance() is a no-op after a miss: the reveal freeze
+  // disables the input, the browser drops focus, and the element is still
+  // disabled when advance() runs (React hasn't re-rendered yet). Refocus
+  // once the reveal actually clears so the kid can keep typing.
+  useEffect(() => {
+    if (!reveal) inputRef.current?.focus();
+  }, [reveal]);
+
   const handleCorrect = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
     record(true, elapsed);

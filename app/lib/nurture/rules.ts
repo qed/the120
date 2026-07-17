@@ -40,6 +40,8 @@ export type NurtureFamilyRow = {
   merged_into_id: string | null;
   signup_at: string | null;
   dossier_submitted_at: string | null;
+  /** Once the referral ask has been made (robot T+10 or staff), suppress d10. */
+  deposit_asked_referral: boolean;
 };
 
 export type NurtureChildRow = {
@@ -204,6 +206,10 @@ export function computeDueSends(input: {
       );
       if (Number.isFinite(anchorMs)) {
         for (const s of DEPOSIT_STEPS) {
+          // The T+10 referral ask is suppressed once the ask has been made —
+          // by staff (R1 "Mark referral asked") or a prior robot send — so the
+          // robot and the co-pilot never double-ask the same family.
+          if (s.step === "d10" && family.deposit_asked_referral) continue;
           const dueAtMs = anchorMs + s.offsetDays * DAY_MS;
           if (!inWindow(nowMs, dueAtMs)) continue;
           if (sent.has(`${family.id}|deposit|${s.step}`)) continue;

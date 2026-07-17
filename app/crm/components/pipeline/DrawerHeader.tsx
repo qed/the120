@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import type { FamilyDetail } from "@/app/crm/lib/queries";
 import {
   clearStamp,
+  markReferralAsked,
   reopenFamily,
   revokeConsent,
   setOverride,
@@ -276,6 +277,33 @@ export default function DrawerHeader({
             </button>
           </>
         )}
+
+        {/* R1: referral ask — only for the stages co-pilot Rule 2 targets.
+            Shows a persistent "asked" state once the flag is set (by staff here
+            or the robot's T+10 nurture send). */}
+        {(detail.stage === "member" || detail.stage === "deposit_paid") &&
+          (detail.depositAskedReferral ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-crm-line2 px-2.5 py-[5px] font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted">
+              <span aria-hidden className="text-crm-green">
+                ✓
+              </span>
+              Referral asked
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => markReferralAsked({ familyId: detail.id }),
+                  "Referral ask recorded"
+                )
+              }
+            >
+              Mark referral asked
+            </button>
+          ))}
 
         {/* Overflow menu */}
         <div className="relative ml-auto">

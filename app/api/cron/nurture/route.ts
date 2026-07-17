@@ -44,7 +44,7 @@ export async function GET(req: Request) {
     db
       .from("families")
       .select(
-        "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at"
+        "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at,deposit_asked_referral"
       )
       .is("merged_into_id", null),
     db
@@ -109,6 +109,20 @@ export async function GET(req: Request) {
 
     if (result.ok) {
       sent += 1;
+      // R2: the T+10 referral ask has now gone out, so dismiss the co-pilot
+      // Rule 2 nudge and suppress any future d10 for this family. Keyed to the
+      // step id, not email copy. Only on send success — the failure branch
+      // below releases the claim so tomorrow retries. A failed flag-write is
+      // non-fatal: the nurture_sends row is the durable record of the ask.
+      if (item.sequence === "deposit" && item.step === "d10") {
+        const { error: flagError } = await db
+          .from("families")
+          .update({ deposit_asked_referral: true })
+          .eq("id", item.familyId);
+        if (flagError) {
+          console.error("[nurture] failed to set deposit_asked_referral:", flagError.message);
+        }
+      }
     } else {
       failures.push({ familyId: item.familyId, step: `${item.sequence}/${item.step}`, error: result.error ?? "unknown" });
       const { error: releaseError } = await db

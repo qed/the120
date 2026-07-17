@@ -14,11 +14,12 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import type { FamilyDetail, PipelineFamily } from "@/app/crm/lib/queries";
 import { needsAttention } from "@/app/crm/lib/dates";
 import type { Stage } from "@/app/crm/lib/constants";
-import { BTN_PRIMARY } from "./atoms";
+import { BTN_PRIMARY, BTN_SECONDARY } from "./atoms";
 import Filters from "./Filters";
 import PipelineTable from "./PipelineTable";
 import KanbanBoard from "./KanbanBoard";
 import AddFamilyModal from "./AddFamilyModal";
+import LogWarmConvoModal from "./LogWarmConvoModal";
 import ContactDrawer from "./ContactDrawer";
 
 type PipelineView = "table" | "kanban";
@@ -81,6 +82,7 @@ export default function PipelineShell({
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [warmModalOpen, setWarmModalOpen] = useState(false);
 
   // View toggle (Unit 8): everything derives — no view state to reconcile.
   // A narrowed/touch viewport forces the table WITHOUT clobbering the
@@ -198,6 +200,16 @@ export default function PipelineShell({
             </div>
           )}
 
+          {/* Warm-convo fast capture (Unit 5) — SECONDARY weight; the red
+              "Add family" stays the single primary CTA. */}
+          <button
+            type="button"
+            onClick={() => setWarmModalOpen(true)}
+            className={BTN_SECONDARY}
+          >
+            Log warm convo
+          </button>
+
           <button
             type="button"
             onClick={() => setModalOpen(true)}
@@ -261,6 +273,10 @@ export default function PipelineShell({
       {detail && <ContactDrawer detail={detail} />}
 
       <AddFamilyModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <LogWarmConvoModal
+        open={warmModalOpen}
+        onClose={() => setWarmModalOpen(false)}
+      />
     </div>
   );
 }

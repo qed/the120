@@ -184,6 +184,51 @@ export const checkDuplicatesSchema = z.object({
   email: z.string().trim().max(254).optional(),
 });
 
+/* ------------------------------------------- warm-convo capture (Unit 5) */
+
+/**
+ * The heat "warm floor" (plan 2026-07-17-002 Unit 5, R6): a logged warm
+ * conversation is worth at least a 4 (warm) — tunable. Kept as a named
+ * constant so the floor is changed in one place, never a scattered literal.
+ */
+export const WARM_FLOOR = 4;
+
+/**
+ * R6 — apply the warm floor without ever regressing heat: raise a cooler
+ * family to the floor, leave an already-hotter family exactly where it is
+ * (`max(current, floor)`). Pure; the action only writes when this differs
+ * from the stored value.
+ */
+export function warmFloorHeat(current: number): number {
+  return Math.max(current, WARM_FLOOR);
+}
+
+/**
+ * `logWarmConvo` input (plan Unit 5). Two shapes in one schema:
+ * - In-drawer (R5): `familyId` present → operate on that family; `note`
+ *   optional.
+ * - Global (R4): no `familyId` → create-or-match a lead. `name` is then
+ *   required (a warm convo is with a named person; it also keeps a new lead
+ *   from being an "Unnamed family"). `email` is the optional match key;
+ *   `force` skips the no-email soft "did you mean?" probe when the staffer
+ *   has chosen to create a new lead anyway.
+ * `email` accepts "" (the empty modal field) and is normalized away by the
+ * action.
+ */
+export const logWarmConvoSchema = z
+  .object({
+    familyId: z.uuid().optional(),
+    name: z.string().trim().max(200).optional(),
+    email: z.union([z.email("Enter a valid email."), z.literal("")]).optional(),
+    note: z.string().trim().max(4000).optional(),
+    force: z.boolean().optional(),
+  })
+  .refine((v) => Boolean(v.familyId) || Boolean(v.name && v.name.length > 0), {
+    message: "Add the contact's name (or open a family to log against).",
+  });
+
+export type LogWarmConvoInput = z.infer<typeof logWarmConvoSchema>;
+
 /* -------------------------------------------------------- stamp clamping */
 
 /** UTC instant of the sprint's first Toronto-local midnight (Jul 13 2026). */

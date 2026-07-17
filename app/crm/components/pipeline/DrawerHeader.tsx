@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import type { FamilyDetail } from "@/app/crm/lib/queries";
 import {
   clearStamp,
+  logWarmConvo,
   markReferralAsked,
   reopenFamily,
   revokeConsent,
@@ -52,6 +53,8 @@ export default function DrawerHeader({
   const [openStamp, setOpenStamp] = useState<StampKind | null>(null);
   const [stampDate, setStampDate] = useState(todayStr());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [warmOpen, setWarmOpen] = useState(false);
+  const [warmNote, setWarmNote] = useState("");
 
   const run = useCallback(
     async (fn: () => Promise<ActionResult>, successMessage: string) => {
@@ -96,6 +99,21 @@ export default function DrawerHeader({
       `Call ${kind} stamp cleared`
     );
     if (ok) setOpenStamp(null);
+  };
+
+  // R5 — in-drawer warm-convo capture: one action tags the signal, applies
+  // the heat floor, adds the (optional) note, and bumps last-touch.
+  const handleWarmConvo = async () => {
+    const note = warmNote.trim();
+    const ok = await run(
+      () =>
+        logWarmConvo({ familyId: detail.id, ...(note ? { note } : {}) }),
+      "Warm convo logged"
+    );
+    if (ok) {
+      setWarmNote("");
+      setWarmOpen(false);
+    }
   };
 
   const handleRevoke = async () => {
@@ -235,6 +253,58 @@ export default function DrawerHeader({
         >
           Send from library
         </button>
+
+        {/* R5: log a warm conversation on this family — a small note popover
+            (mirrors the call-stamp backdate popover above). */}
+        <div className="relative">
+          <button
+            type="button"
+            className={BTN_SECONDARY}
+            disabled={busy}
+            onClick={() => setWarmOpen((v) => !v)}
+          >
+            Log warm convo
+          </button>
+          {warmOpen && (
+            <div className="absolute left-0 top-full z-10 mt-1.5 w-72 rounded-[12px] border border-crm-line2 bg-white p-3.5 shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
+              <label
+                htmlFor="warm-convo-note"
+                className="mb-1 block font-mono text-[9.5px] uppercase tracking-[0.1em] text-crm-muted"
+              >
+                Note (optional)
+              </label>
+              <textarea
+                id="warm-convo-note"
+                rows={3}
+                maxLength={4000}
+                placeholder="What did you talk about?"
+                value={warmNote}
+                onChange={(e) => setWarmNote(e.target.value)}
+                className="w-full resize-y rounded-[12px] border border-crm-line2 bg-white px-3 py-2 text-[13px] focus:border-crm-blue focus:outline-none"
+              />
+              <p className="mt-2 text-[11px] text-crm-muted">
+                Tags “warm convo held” and sets heat to at least warm.
+              </p>
+              <div className="mt-2.5 flex items-center gap-2">
+                <button
+                  type="button"
+                  className={BTN_PRIMARY}
+                  disabled={busy}
+                  onClick={handleWarmConvo}
+                >
+                  Log
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWarmOpen(false)}
+                  className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted hover:text-crm-ink"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {detail.overrideSet ? (
           <button

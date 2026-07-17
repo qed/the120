@@ -23,9 +23,11 @@ import {
   applySignalToggle,
   checkDuplicatesSchema,
   clearStampSchema,
+  ensureSignals,
   escapeIlike,
   familyIdSchema,
   isSimilarFamily,
+  logWarmConvoSchema,
   mergeFamiliesSchema,
   overrideGuard,
   overrideHeatSchema,
@@ -37,8 +39,10 @@ import {
   updateConcernsSchema,
   updateContactSchema,
   updateKidCountSchema,
+  warmFloorHeat,
   type MergeSide,
 } from "@/app/crm/lib/families-rules";
+import { matchOrCreateLead } from "@/app/crm/lib/lead-ingest";
 
 const PIPELINE_PATH = "/crm/pipeline";
 
@@ -828,6 +832,125 @@ export async function markReferralAsked(input: unknown): Promise<ActionResult> {
 
   revalidatePath(PIPELINE_PATH);
   return { success: true };
+}
+
+/* ------------------------------------------------- log warm convo (Unit 5) */
+
+export interface WarmConvoResult extends ActionResult {
+  familyId?: string;
+  /** true when an existing family was matched/targeted; false for a new lead. */
+  matched?: boolean;
+  /** Set on the no-email soft-match path: a similar family the staffer can
+   *  attach to instead of creating a duplicate ("did you mean?"). */
+  candidate?: { id: string; name: string };
+}
+
+/**
+ * The shared warm-convo effect (R5/R6/R7): ensure the `warm-convo` signal
+ * (idempotent), raise heat to the warm floor without ever lowering it, insert
+ * the note only when non-blank, and bump `last_touch_at` — collapsed into a
+ * single `families` UPDATE (+ at most one note insert). Audit reuses the
+ * allowed `signal-toggle` action with a `metadata.kind` discriminator (never a
+ * new audit action — the CHECK/enum drift is a documented footgun).
+ */
+async function applyWarmConvo(
+  db: Db,
+  staff: StaffSession,
+  family: FamilyActionRow,
+  note: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const { next: signals, added } = ensureSignals(family.engagement_signals, [
+    "warm-convo",
+  ]);
+  const heat = warmFloorHeat(family.heat_score);
+  const heatRaised = heat !== family.heat_score;
+
+  const update: Record<string, unknown> = { last_touch_at: nowIso };
+  if (added.length > 0) update.engagement_signals = signals;
+  if (heatRaised) update.heat_score = heat;
+  await db.from("families").update(update).eq("id", family.id);
+
+  if (note) {
+    await db.from("family_notes").insert({
+      family_id: family.id,
+      author: staff.staffId,
+      body: note,
+    });
+  }
+
+  await audit(db, staff.staffId, "signal-toggle", family.id, {
+    kind: "warm-convo",
+    signal_added: added.length > 0,
+    heat: heatRaised ? { from: family.heat_score, to: heat } : "unchanged",
+    note: Boolean(note),
+  });
+}
+
+/**
+ * R4/R5: one-step warm-conversation capture. In-drawer (`familyId` given)
+ * operates on that family; globally it create-or-matches a `warm-network`
+ * lead by email — reusing the EXISTING source, since the `warm-convo` signal
+ * is what distinguishes the interaction. A warm convo is NOT opt-in, so NO
+ * consent is passed to `matchOrCreateLead` (the lead is created with
+ * `consent_given=false` — visible in the pipeline, not nurture-eligible).
+ *
+ * No-email global capture runs the soft `findSimilarFamily` probe and returns
+ * a `candidate` for an attach-or-create choice rather than silently creating a
+ * duplicate; `force` bypasses that once the staffer has chosen to create new.
+ */
+export async function logWarmConvo(input: unknown): Promise<WarmConvoResult> {
+  const staff = await requireStaff();
+  const parsed = logWarmConvoSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input.",
+    };
+  }
+  const { familyId, name, email, note, force } = parsed.data;
+  const cleanNote = note?.trim() ?? "";
+  const db = supabaseAdmin();
+
+  // R5 — in-drawer: operate on the already-open family.
+  if (familyId) {
+    const family = await loadLiveFamily(db, familyId);
+    if (!family) return { success: false, error: "Family not found." };
+    await applyWarmConvo(db, staff, family, cleanNote);
+    revalidatePath(PIPELINE_PATH);
+    return { success: true, familyId: family.id, matched: true };
+  }
+
+  // R4 — global: create-or-match by email.
+  const cleanEmail = email?.trim() ?? "";
+
+  // R7 — no email: don't create a duplicate blind. Offer the closest match.
+  if (!cleanEmail && !force) {
+    const similar = await findSimilarFamily(db, name ?? "", "");
+    if (similar) {
+      return {
+        success: true,
+        warning: `A similar family already exists: ${similar.name}. Attach this conversation to them, or create a new lead.`,
+        candidate: similar,
+      };
+    }
+  }
+
+  const { familyId: resolvedId, matched } = await matchOrCreateLead(db, {
+    email: cleanEmail || null,
+    source: "warm-network",
+    signals: ["warm-convo"],
+    identity: { parentName: name ?? "" },
+  });
+
+  const family = await loadLiveFamily(db, resolvedId);
+  if (!family) {
+    return { success: false, error: "Capture failed — family not found." };
+  }
+  await applyWarmConvo(db, staff, family, cleanNote);
+
+  revalidatePath(PIPELINE_PATH);
+  return { success: true, familyId: resolvedId, matched };
 }
 
 /* ----------------------------------------------------------------- merge */

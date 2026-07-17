@@ -86,8 +86,10 @@ export default function TournamentRulesPage() {
 
           <Section title="Winners are verified">
             <p>
-              Because there&rsquo;s real prize money, top scores are verified with a screen-recorded re-run
-              before prizes go out. This keeps the board fair for every kid who earns their spot honestly.
+              Because there&rsquo;s real prize money, top players verify their standing by{" "}
+              <strong>re-answering a sample of their mastered facts</strong> &mdash; live, under the same
+              3-second speed bar they mastered them at. Mastery you can show again on the spot keeps the
+              board fair for every kid who earns their spot honestly.
             </p>
           </Section>
 

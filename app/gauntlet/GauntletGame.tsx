@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { BOSSES, type Boss } from "./game/bosses";
 import { BANDS, TOPICS, masteryProgress, type Band, type TopicId } from "./game/problems";
-import { isMastered, MASTERY_MS, type FactStat } from "./game/mastery";
+import { MASTERY_MS, type FactStat } from "./game/mastery";
+import { buildMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
 import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
@@ -236,8 +237,28 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   /** newly mastered facts this round (for the result screens) */
   const countNewlyMastered = useCallback(
     (before: Record<string, FactStat>, after: Record<string, FactStat>) =>
-      Object.keys(after).filter((k) => isMastered(after[k]) && !isMastered(before[k])).length,
+      newlyMasteredKeys(before, after).length,
     []
+  );
+
+  // B1 · tournament mastery — post newly-mastered facts so they count on the
+  // tournament board. Fire-and-forget, best-effort (mirrors pushCloudSave):
+  // only while the tournament is Live and the player is signed in; the route
+  // also gates on a confirmed entry + session, so a 403 is fine to ignore and
+  // never blocks play. The casual `pushCloudSave` path stays untouched.
+  const postTournamentMastery = useCallback(
+    (before: Record<string, FactStat>, after: Record<string, FactStat>, band: Band) => {
+      if (!tournament.isLive || !userId) return;
+      const keys = newlyMasteredKeys(before, after);
+      if (keys.length === 0) return;
+      const batch = buildMasteryBatch(keys, band, crypto.randomUUID());
+      void fetch("/api/gauntlet/tournament/mastery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(batch),
+      }).catch(() => {}); // best-effort; tournament posting never disrupts play
+    },
+    [tournament.isLive, userId]
   );
 
   const finishBattle = useCallback(
@@ -245,10 +266,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       const total = stats.correct + stats.wrong;
       const acc = total ? stats.correct / total : 0;
       const medal = won ? (acc >= 0.9 && stats.timeLeft >= 30 ? 3 : acc >= 0.75 ? 2 : 1) : 0;
+      const after = applyResults(save, results);
       setLastStats(stats);
       setLastResults(results);
       setLastMedal(medal);
-      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
+      setLastMastered(countNewlyMastered(save.facts, after));
       if (won) sfxVictory();
       else sfxDefeat();
       setSave((prev) => ({
@@ -261,15 +283,17 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         daily: bumpDaily(prev, won),
       }));
       setPhase(won ? "victory" : "defeat");
+      postTournamentMastery(save.facts, after, save.band);
     },
-    [boss.id, applyResults, countNewlyMastered, save]
+    [boss.id, applyResults, countNewlyMastered, postTournamentMastery, save]
   );
 
   const finishTrial = useCallback(
     (score: number, results: ProblemResult[]) => {
+      const after = applyResults(save, results);
       setTrialScore(score);
       setLastResults(results);
-      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
+      setLastMastered(countNewlyMastered(save.facts, after));
       sfxDefeat();
       setSave((prev) => ({
         ...prev,
@@ -279,8 +303,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         daily: bumpDaily(prev, score >= 10),
       }));
       setPhase("trialEnd");
+      postTournamentMastery(save.facts, after, save.band);
     },
-    [applyResults, countNewlyMastered, save]
+    [applyResults, countNewlyMastered, postTournamentMastery, save]
   );
 
   const toggleMute = () => {

@@ -1,15 +1,12 @@
 import Link from "next/link";
 import Wordmark from "./Wordmark";
+import { nav as links } from "@/app/lib/site";
 
-const links = [
-  { label: "The groups", href: "/#groups" },
-  { label: "Parents", href: "/parents" },
-  { label: "Tuition", href: "/tuition" },
-  { label: "FAQ", href: "/faq" },
-  { label: "Sign in", href: "/dashboard" },
-];
-
-/** Handoff footer: electric blue, lockup, muted links, hairline + legal line. */
+/**
+ * Handoff footer: electric blue, lockup, muted links, hairline + legal line.
+ * Nav links come from the shared `nav` in `app/lib/site.ts` — the same source
+ * the header `Nav` renders — so the footer and nav bar stay identical globally.
+ */
 export default function Footer() {
   return (
     <footer className="bg-blue px-6 pb-9 pt-12 sm:px-11">

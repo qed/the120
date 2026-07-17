@@ -65,9 +65,17 @@ function validate(f: AccountForm): Errors {
 export default function AccountModal({
   isOpen,
   onClose,
+  onAuthed,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Fired once a session/user id is available for the new account (immediate-session
+   * signup). Lets a caller (e.g. the tournament entry flow) capture the `user_id`.
+   * Deliberately NOT fired under email confirmation (no session yet) — that gap is
+   * closed by proven-email reconciliation on the next signed-in visit.
+   */
+  onAuthed?: (userId: string) => void;
 }) {
   const [form, setForm] = useState<AccountForm>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
@@ -149,6 +157,12 @@ export default function AccountModal({
         setSubmitted(true);
         return;
       }
+
+      // A session exists — the account is immediately usable. Hand the new
+      // user_id back so a caller (e.g. the tournament entry flow) can link to it.
+      // (Under email confirmation above there is no session, so this is skipped;
+      // reconciliation stamps user_id on the next signed-in visit instead.)
+      onAuthed?.(userId);
 
       const baseProfile = {
         id: userId,

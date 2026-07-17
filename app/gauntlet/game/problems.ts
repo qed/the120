@@ -34,14 +34,25 @@ export type TopicId =
   | "gcd"
   | "lcm"
   | "denom"
-  | "congruence";
+  | "congruence"
+  // Grade 9–12 (g912) — reuse numeric/choice engines only
+  | "slope"
+  | "linfn"
+  | "evalquad"
+  | "expquot"
+  | "disc"
+  | "dist"
+  | "srt"
+  | "sqrtbig"
+  | "midpoint";
 
-export type Band = "g34" | "g56" | "g78";
+export type Band = "g34" | "g56" | "g78" | "g912";
 
 export const BANDS: { id: Band; label: string }[] = [
   { id: "g34", label: "Grades 3–4" },
   { id: "g56", label: "Grades 5–6" },
   { id: "g78", label: "Grades 7–8" },
+  { id: "g912", label: "Grades 9–12" },
 ];
 
 export type Topic = { id: TopicId; label: string; tier: 1 | 2 };
@@ -68,6 +79,16 @@ export const TOPICS: Topic[] = [
   { id: "lcm", label: "LCM", tier: 2 },
   { id: "denom", label: "Common denominator", tier: 2 },
   { id: "congruence", label: "Triangle congruence", tier: 2 },
+  // Grade 9–12
+  { id: "slope", label: "Slope from two points", tier: 2 },
+  { id: "linfn", label: "Evaluate linear function", tier: 2 },
+  { id: "evalquad", label: "Evaluate quadratic", tier: 2 },
+  { id: "expquot", label: "Exponent quotient rule", tier: 2 },
+  { id: "disc", label: "Discriminant & real roots", tier: 2 },
+  { id: "dist", label: "Distance between points", tier: 2 },
+  { id: "srt", label: "Special right triangles", tier: 2 },
+  { id: "sqrtbig", label: "Simplify square roots", tier: 1 },
+  { id: "midpoint", label: "Midpoint x-coordinate", tier: 2 },
 ];
 
 export type TrianglePair = {
@@ -102,15 +123,21 @@ const sup = (n: number) => String(n).split("").map((d) => SUP[+d]).join("");
 /* ---------- band ranges (core arithmetic) ---------- */
 
 const R = {
-  mul: { g34: [2, 6], g56: [2, 10], g78: [2, 12] },
-  addMax: { g34: 12, g56: 20, g78: 50 },
-  gcdFactors: { g34: [2, 3, 4, 5], g56: [2, 3, 4, 5, 6, 7], g78: [2, 3, 4, 5, 6, 7, 8, 9] },
+  mul: { g34: [2, 6], g56: [2, 10], g78: [2, 12], g912: [2, 15] },
+  addMax: { g34: 12, g56: 20, g78: 50, g912: 100 },
+  gcdFactors: {
+    g34: [2, 3, 4, 5],
+    g56: [2, 3, 4, 5, 6, 7],
+    g78: [2, 3, 4, 5, 6, 7, 8, 9],
+    g912: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  },
   lcmPool: {
     g34: [2, 3, 4, 5, 6],
     g56: [2, 3, 4, 5, 6, 8, 10],
     g78: [2, 3, 4, 5, 6, 8, 9, 10, 12],
+    g912: [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15],
   },
-  lcmCap: { g34: 40, g56: 90, g78: 144 },
+  lcmCap: { g34: 40, g56: 90, g78: 144, g912: 240 },
 } as const;
 
 /* ---------- core arithmetic ---------- */
@@ -406,9 +433,171 @@ function genCongruence(): Problem {
   };
 }
 
+/* ---------- Grade 9–12 (numeric/choice engines only) ---------- */
+
+/** Signed term for readable prompts, e.g. 3 → "+ 3", -3 → "− 3" (unicode minus). */
+const signed = (n: number) => (n < 0 ? `− ${-n}` : `+ ${n}`);
+
+// slope from two points — integer slope only (dy divisible by dx)
+function makeSlope(x1: number, y1: number, x2: number, y2: number): Problem {
+  return {
+    topic: "slope",
+    key: `slope:${x1},${y1},${x2},${y2}`,
+    prompt: `Slope of the line through (${x1}, ${y1}) and (${x2}, ${y2})`,
+    answer: String((y2 - y1) / (x2 - x1)),
+    kind: "numeric",
+  };
+}
+function genSlope(): Problem {
+  const m = pick([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5]);
+  const x1 = ri(-6, 6);
+  const dx = ri(1, 6);
+  const x2 = x1 + dx;
+  const y1 = ri(-9, 9);
+  return makeSlope(x1, y1, x2, y1 + m * dx);
+}
+
+// evaluate linear function f(x) = a·x + b at x0 (a,b nonzero for clean prompts)
+function makeLinfn(a: number, b: number, x0: number): Problem {
+  return {
+    topic: "linfn",
+    key: `linfn:${a},${b},${x0}`,
+    prompt: `If f(x) = ${a}x ${signed(b)}, what is f(${x0})?`,
+    answer: String(a * x0 + b),
+    kind: "numeric",
+  };
+}
+function genLinfn(): Problem {
+  const a = ri(2, 9);
+  const b = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  return makeLinfn(a, b, ri(-6, 9));
+}
+
+// evaluate quadratic f(x) = x² + b·x + c at x0
+function makeEvalquad(b: number, c: number, x0: number): Problem {
+  return {
+    topic: "evalquad",
+    key: `evalquad:${b},${c},${x0}`,
+    prompt: `If f(x) = x² ${signed(b)}x ${signed(c)}, what is f(${x0})?`,
+    answer: String(x0 * x0 + b * x0 + c),
+    kind: "numeric",
+  };
+}
+function genEvalquad(): Problem {
+  const b = pick([-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6]);
+  const c = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  return makeEvalquad(b, c, ri(-5, 5));
+}
+
+// exponent quotient rule — base^e1 ÷ base^e2 = base^n · n = e1 − e2
+function makeExpQuot(base: string, e1: number, e2: number): Problem {
+  return {
+    topic: "expquot",
+    key: `expquot:${base}:${e1}:${e2}`,
+    prompt: `${base}${sup(e1)} ÷ ${base}${sup(e2)} = ${base}ⁿ · n = ?`,
+    answer: String(e1 - e2),
+    kind: "numeric",
+  };
+}
+function genExpQuot(): Problem {
+  const e1 = ri(3, 9);
+  const e2 = ri(1, e1 - 1);
+  return makeExpQuot(pick(["2", "3", "5", "10", "x"]), e1, e2);
+}
+
+// discriminant sign / real-root count (choice: 0, 1, or 2 real roots)
+const ROOTCOUNTS = ["0", "1", "2"] as const;
+function makeDisc(a: number, b: number, c: number): Problem {
+  const d = b * b - 4 * a * c;
+  return {
+    topic: "disc",
+    key: `disc:${a},${b},${c}`,
+    prompt: `How many real solutions does ${a}x² ${signed(b)}x ${signed(c)} = 0 have?`,
+    answer: d > 0 ? "2" : d === 0 ? "1" : "0",
+    kind: "choice",
+    choices: [...ROOTCOUNTS],
+  };
+}
+function genDisc(): Problem {
+  const a = ri(1, 5);
+  const b = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const c = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  return makeDisc(a, b, c);
+}
+
+// distance between two grid points — integer distance via Pythagorean triples
+function makeDist(x1: number, y1: number, x2: number, y2: number): Problem {
+  const d = Math.round(Math.hypot(x2 - x1, y2 - y1));
+  return {
+    topic: "dist",
+    key: `dist:${x1},${y1},${x2},${y2}`,
+    prompt: `Distance between (${x1}, ${y1}) and (${x2}, ${y2})`,
+    answer: String(d),
+    kind: "numeric",
+  };
+}
+function genDist(): Problem {
+  const [a0, b0, c0] = pick(TRIPLES);
+  const k = ri(1, Math.max(1, Math.floor(50 / c0)));
+  const [dx, dy] = [a0 * k * pick([1, -1]), b0 * k * pick([1, -1])];
+  const x1 = ri(-9, 9);
+  const y1 = ri(-9, 9);
+  return makeDist(x1, y1, x1 + dx, y1 + dy);
+}
+
+// special right triangle (30-60-90): short leg s, hypotenuse 2s (closed set)
+function makeSrt(given: "short" | "hyp", s: number): Problem {
+  if (given === "short") {
+    return {
+      topic: "srt",
+      key: `srt:short:${s}`,
+      prompt: `In a 30-60-90 right triangle the shorter leg is ${s}. How long is the hypotenuse?`,
+      answer: String(2 * s),
+      kind: "numeric",
+    };
+  }
+  return {
+    topic: "srt",
+    key: `srt:hyp:${s}`,
+    prompt: `In a 30-60-90 right triangle the hypotenuse is ${2 * s}. How long is the shorter leg?`,
+    answer: String(s),
+    kind: "numeric",
+  };
+}
+const genSrt = () => makeSrt(pick(["short", "hyp"] as const), ri(1, 12));
+
+// simplify a perfect-square radical to an integer — larger radicands than sqrt
+function makeSqrtBig(root: number): Problem {
+  return {
+    topic: "sqrtbig",
+    key: `sqrtbig:${root * root}`,
+    prompt: `√${root * root}`,
+    answer: String(root),
+    kind: "numeric",
+  };
+}
+const genSqrtBig = () => makeSqrtBig(ri(12, 30));
+
+// midpoint x-coordinate — pick coords whose x-sum is even (integer answer)
+function makeMidpoint(x1: number, y1: number, x2: number, y2: number): Problem {
+  return {
+    topic: "midpoint",
+    key: `midpoint:${x1},${y1},${x2},${y2}`,
+    prompt: `What is the x-coordinate of the midpoint of (${x1}, ${y1}) and (${x2}, ${y2})?`,
+    answer: String((x1 + x2) / 2),
+    kind: "numeric",
+  };
+}
+function genMidpoint(): Problem {
+  const x1 = ri(-9, 9);
+  let x2 = ri(-9, 9);
+  if ((x1 + x2) % 2 !== 0) x2 += x2 < 9 ? 1 : -1;
+  return makeMidpoint(x1, ri(-9, 9), x2, ri(-9, 9));
+}
+
 /* ---------- registry + adaptive serving ---------- */
 
-const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
+export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   mul: genMul,
   div: genDiv,
   add: genAdd,
@@ -429,6 +618,15 @@ const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   lcm: genLcm,
   denom: genDenom,
   congruence: () => genCongruence(),
+  slope: genSlope,
+  linfn: genLinfn,
+  evalquad: genEvalquad,
+  expquot: genExpQuot,
+  disc: genDisc,
+  dist: genDist,
+  srt: genSrt,
+  sqrtbig: genSqrtBig,
+  midpoint: genMidpoint,
 };
 
 /** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
@@ -502,6 +700,10 @@ export function problemFromKey(key: string): Problem | null {
         const [d1, d2] = rest.split(",").map(Number);
         return makeDenom(ri(1, d1 - 1), d1, ri(1, d2 - 1), d2);
       }
+      case "srt":
+        return makeSrt(restParts[0] as "short" | "hyp", Number(restParts[1]));
+      case "sqrtbig":
+        return makeSqrtBig(Math.round(Math.sqrt(Number(rest))));
     }
   } catch {
     return null;
@@ -546,6 +748,12 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
     case "sqrt":
       for (let n = 2; n <= 15; n++) keys.push(`sqrt:${n * n}`);
       return keys;
+    case "sqrtbig":
+      for (let n = 12; n <= 30; n++) keys.push(`sqrtbig:${n * n}`);
+      return keys;
+    case "srt":
+      for (let s = 1; s <= 12; s++) keys.push(`srt:short:${s}`, `srt:hyp:${s}`);
+      return keys;
     case "pow":
       for (let b = 2; b <= 10; b++) keys.push(`pow:${b}^2`, `pow:${b}^3`);
       for (let b = 2; b <= 5; b++) keys.push(`pow:${b}^4`);
@@ -583,8 +791,9 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
       return [...set];
     }
     default:
-      // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence:
-      // parameter space too large or non-recall — open-ended.
+      // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, and the
+      // g912 open generators (slope, linfn, evalquad, expquot, disc, dist,
+      // midpoint): parameter space too large or non-recall — open-ended.
       return null;
   }
 }

@@ -1,44 +1,61 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BANDS } from "../game/problems";
-import { fetchLeaderboard, type LeaderRow } from "../game/cloudSave";
+import { PRIZE_BANDS, type PrizeBandId } from "@/app/lib/tournament";
+import {
+  fetchTournamentLeaderboard,
+  type TournamentLeaderRow,
+} from "../game/cloudSave";
+
+/** Label for a prize (age) band id, falling back to the raw id. Pure — tested. */
+export function prizeBandLabel(id: string): string {
+  return PRIZE_BANDS.find((b) => b.id === id)?.label ?? id;
+}
+
+/** "N facts mastered", singular-aware. Pure — tested. */
+export function factsMasteredLabel(n: number): string {
+  return `${n} ${n === 1 ? "fact" : "facts"} mastered`;
+}
+
+/** Default chip: the first prize band (b36). */
+const DEFAULT_BAND: PrizeBandId = PRIZE_BANDS[0].id;
 
 /**
- * GPF-11 — the Founding Leaderboard board. Reads the existing public top-20 RPC
- * (GTM-2), so it lights up with real data and degrades to an empty state when
- * unavailable. The at-close snapshot (D5) freezes this into the permanent
+ * GPF-11 — the Founding Leaderboard board. Reads the tournament prize-band RPC
+ * (`gauntlet_tournament_leaderboard`), which ranks confirmed+consented entrants
+ * by difficulty-weighted mastery (distinct facts mastered × band weight) within
+ * their age bracket. Handles only — emails/names never surface. Degrades to an
+ * intentional empty state when unavailable or when a pool has no ranked
+ * entrants yet. The at-close snapshot (D5) freezes this into the permanent
  * record; until then it shows live standings.
  */
 export default function FoundingBoard() {
-  const [filter, setFilter] = useState<string | null>(null);
-  const [rows, setRows] = useState<LeaderRow[] | null>(null);
+  const [band, setBand] = useState<PrizeBandId>(DEFAULT_BAND);
+  const [rows, setRows] = useState<TournamentLeaderRow[] | null>(null);
 
   useEffect(() => {
     let dead = false;
     setRows(null);
-    fetchLeaderboard(filter).then((r) => !dead && setRows(r));
+    fetchTournamentLeaderboard(band).then((r) => !dead && setRows(r));
     return () => {
       dead = true;
     };
-  }, [filter]);
-
-  const bandLabel = (b: string) => BANDS.find((x) => x.id === b)?.label ?? b;
+  }, [band]);
 
   return (
     <div className="rounded-3xl border border-white/10 bg-[#0a0f1a] p-6 text-white sm:p-8">
       <div className="flex flex-wrap gap-2">
-        {[null, ...BANDS.map((b) => b.id)].map((f) => (
+        {PRIZE_BANDS.map((b) => (
           <button
-            key={f ?? "all"}
-            onClick={() => setFilter(f)}
+            key={b.id}
+            onClick={() => setBand(b.id)}
             className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-all ${
-              filter === f
+              band === b.id
                 ? "border-amber-400 bg-amber-400/20 text-amber-200"
                 : "border-white/20 text-white/55 hover:border-white/50"
             }`}
           >
-            {f ? bandLabel(f) : "All bands"}
+            {b.label}
           </button>
         ))}
       </div>
@@ -48,7 +65,8 @@ export default function FoundingBoard() {
           <p className="py-12 text-center font-mono text-xs text-white/40">Loading…</p>
         ) : rows.length === 0 ? (
           <p className="py-12 text-center font-mono text-xs text-white/40">
-            The board is empty for now — the first names go up when the tournament runs.
+            No one&rsquo;s on the board yet — be the first to master a fact in this
+            bracket.
           </p>
         ) : (
           <ol className="space-y-1">
@@ -64,9 +82,11 @@ export default function FoundingBoard() {
                     {i + 1}
                   </span>
                   <span className="font-bold">{r.handle}</span>
-                  <span className="text-[10px] uppercase text-white/35">{bandLabel(r.band)}</span>
+                  <span className="text-[10px] uppercase text-white/35">
+                    {factsMasteredLabel(r.facts)}
+                  </span>
                 </span>
-                <span className="text-lg font-bold text-white">{r.trial_best}</span>
+                <span className="text-lg font-bold text-white">{r.mastery_score}</span>
               </li>
             ))}
           </ol>

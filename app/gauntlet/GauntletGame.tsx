@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { BOSSES, type Boss } from "./game/bosses";
 import { BANDS, TOPICS, masteryProgress, type Band, type TopicId } from "./game/problems";
-import { isMastered, MASTERY_MS, type FactStat } from "./game/mastery";
+import { MASTERY_MS, type FactStat } from "./game/mastery";
+import { buildMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
 import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
@@ -152,6 +154,25 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
   const [showBoard, setShowBoard] = useState(false);
   const [showEntry, setShowEntry] = useState(false); // GPF-5 tournament gate
+  const { openAccountModal } = useAccountModal();
+  const reconciledRef = useRef(false);
+
+  // B6 · account-to-rank: entering requires an account (guest *play* is untouched).
+  // If not signed in, the "Enter" CTA opens the full AccountModal first; on
+  // onAuthed (immediate-session signup) we capture the user_id and continue to
+  // the entry modal. Under email confirmation there's no session/onAuthed — the
+  // modal shows its confirm screen and reconciliation links the entry on the
+  // next signed-in visit. Already signed in → straight to the entry modal.
+  const openEntry = useCallback(() => {
+    if (userId) {
+      setShowEntry(true);
+      return;
+    }
+    openAccountModal((newUserId) => {
+      setUserId(newUserId);
+      setShowEntry(true);
+    });
+  }, [userId, openAccountModal]);
 
   useEffect(() => {
     const s = loadSave();
@@ -203,6 +224,18 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     return () => clearTimeout(t);
   }, [save, userId, loaded]);
 
+  // B6 · reconciliation: once per mount when signed in, best-effort link a
+  // returning confirmed entrant's entry to this account (the email-confirm gap
+  // means user_id often can't be stamped at entry time). Fire-and-forget; the
+  // route is session-authed and proven-email-gated, so a no-op/403 is harmless.
+  // No body — reconciliation is by proven email only (handles carry no ownership
+  // proof, so a handle-claim would be a hijack vector).
+  useEffect(() => {
+    if (!userId || reconciledRef.current) return;
+    reconciledRef.current = true;
+    void fetch("/api/gauntlet/tournament/reconcile", { method: "POST" }).catch(() => {});
+  }, [userId]);
+
   const boss = BOSSES[bossIdx];
   const topics = save.topics;
 
@@ -246,8 +279,28 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   /** newly mastered facts this round (for the result screens) */
   const countNewlyMastered = useCallback(
     (before: Record<string, FactStat>, after: Record<string, FactStat>) =>
-      Object.keys(after).filter((k) => isMastered(after[k]) && !isMastered(before[k])).length,
+      newlyMasteredKeys(before, after).length,
     []
+  );
+
+  // B1 · tournament mastery — post newly-mastered facts so they count on the
+  // tournament board. Fire-and-forget, best-effort (mirrors pushCloudSave):
+  // only while the tournament is Live and the player is signed in; the route
+  // also gates on a confirmed entry + session, so a 403 is fine to ignore and
+  // never blocks play. The casual `pushCloudSave` path stays untouched.
+  const postTournamentMastery = useCallback(
+    (before: Record<string, FactStat>, after: Record<string, FactStat>, band: Band) => {
+      if (!tournament.isLive || !userId) return;
+      const keys = newlyMasteredKeys(before, after);
+      if (keys.length === 0) return;
+      const batch = buildMasteryBatch(keys, band, crypto.randomUUID());
+      void fetch("/api/gauntlet/tournament/mastery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(batch),
+      }).catch(() => {}); // best-effort; tournament posting never disrupts play
+    },
+    [tournament.isLive, userId]
   );
 
   const finishBattle = useCallback(
@@ -255,10 +308,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       const total = stats.correct + stats.wrong;
       const acc = total ? stats.correct / total : 0;
       const medal = won ? (acc >= 0.9 && stats.timeLeft >= 30 ? 3 : acc >= 0.75 ? 2 : 1) : 0;
+      const after = applyResults(save, results);
       setLastStats(stats);
       setLastResults(results);
       setLastMedal(medal);
-      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
+      setLastMastered(countNewlyMastered(save.facts, after));
       if (won) sfxVictory();
       else sfxDefeat();
       setSave((prev) => ({
@@ -271,15 +325,17 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         daily: bumpDaily(prev, won),
       }));
       setPhase(won ? "victory" : "defeat");
+      postTournamentMastery(save.facts, after, save.band);
     },
-    [boss.id, applyResults, countNewlyMastered, save]
+    [boss.id, applyResults, countNewlyMastered, postTournamentMastery, save]
   );
 
   const finishTrial = useCallback(
     (score: number, results: ProblemResult[]) => {
+      const after = applyResults(save, results);
       setTrialScore(score);
       setLastResults(results);
-      setLastMastered(countNewlyMastered(save.facts, applyResults(save, results)));
+      setLastMastered(countNewlyMastered(save.facts, after));
       sfxDefeat();
       setSave((prev) => ({
         ...prev,
@@ -289,8 +345,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         daily: bumpDaily(prev, score >= 10),
       }));
       setPhase("trialEnd");
+      postTournamentMastery(save.facts, after, save.band);
     },
-    [applyResults, countNewlyMastered, save]
+    [applyResults, countNewlyMastered, postTournamentMastery, save]
   );
 
   const toggleMute = () => {
@@ -347,7 +404,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           onHelp={() => setShowHelp(true)}
           onBoard={() => setShowBoard(true)}
           tournamentLive={tournament.isLive}
-          onEnter={() => setShowEntry(true)}
+          onEnter={openEntry}
         />
       )}
       {showBoard && (
@@ -358,7 +415,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           tournamentLive={tournament.isLive}
           onEnter={() => {
             setShowBoard(false);
-            setShowEntry(true);
+            openEntry();
           }}
         />
       )}

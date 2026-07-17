@@ -8,6 +8,8 @@ export default defineConfig({
       "app/crm/__tests__/**/*.test.{ts,tsx}",
       "app/dashboard/__tests__/**/*.test.{ts,tsx}",
       "app/lib/**/__tests__/**/*.test.{ts,tsx}",
+      "app/gauntlet/**/__tests__/**/*.test.{ts,tsx}",
+      "app/api/**/__tests__/**/*.test.{ts,tsx}",
     ],
   },
   resolve: {

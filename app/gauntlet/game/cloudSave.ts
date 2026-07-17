@@ -24,6 +24,16 @@ export type CloudRow = {
 
 export type LeaderRow = { handle: string; band: string; trial_best: number };
 
+/** One row of the difficulty-weighted-mastery tournament board. Handles only —
+ *  the RPC never projects emails/names. `mastery_score` is Σ band-weights over
+ *  distinct mastered facts (bigint → number); `facts` is that distinct count. */
+export type TournamentLeaderRow = {
+  handle: string;
+  prize_band: string;
+  mastery_score: number;
+  facts: number;
+};
+
 /** Signed-in user id, or null (also null when Supabase isn't configured). */
 export async function cloudUser(): Promise<string | null> {
   if (!configured()) return null;
@@ -74,6 +84,35 @@ export async function fetchLeaderboard(band: string | null): Promise<LeaderRow[]
     });
     if (error) return [];
     return (data as LeaderRow[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tournament (prize-band) top-20, ranked by difficulty-weighted mastery.
+ * Mirrors `fetchLeaderboard`'s guest/env/error degradation → `[]`. All args
+ * optional: `prizeBand` null = all bands; the window bounds scope the score to
+ * the tournament window (defaults null → the RPC's own default window). The RPC
+ * inner-joins to mastery events, so a brand-new 0-fact entrant does not appear.
+ */
+export async function fetchTournamentLeaderboard(
+  prizeBand?: string,
+  windowStart?: string,
+  windowEnd?: string
+): Promise<TournamentLeaderRow[]> {
+  if (!configured()) return [];
+  try {
+    const { data, error } = await supabaseBrowser().rpc(
+      "gauntlet_tournament_leaderboard",
+      {
+        prize_band_in: prizeBand ?? null,
+        window_start: windowStart ?? null,
+        window_end: windowEnd ?? null,
+      }
+    );
+    if (error) return [];
+    return (data as TournamentLeaderRow[]) ?? [];
   } catch {
     return [];
   }

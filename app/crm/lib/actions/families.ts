@@ -363,9 +363,22 @@ export async function stampCall(input: unknown): Promise<ActionResult> {
     parsed.data.kind === "booked" ? "call_booked" : "call_held";
   const overwrite = Boolean(family[column]);
 
+  // R15 (plan 2026-07-17-002, Unit 7): a manual booked stamp restores the
+  // null-uid provenance invariant the Cal.com cancel-guard relies on — so a
+  // stale foreign BOOKING_CANCELLED (which clears only when its uid matches the
+  // stored uid) can never wipe a manually-set stamp.
+  const update: Record<string, unknown> = {
+    [column]: at.toISOString(),
+    last_touch_at: now.toISOString(),
+  };
+  if (parsed.data.kind === "booked") {
+    update.call_booked_uid = null;
+    update.call_booked_event_at = null;
+  }
+
   const { error } = await db
     .from("families")
-    .update({ [column]: at.toISOString(), last_touch_at: now.toISOString() })
+    .update(update)
     .eq("id", family.id);
   if (error) return { success: false, error: "Failed to record the call." };
 
@@ -409,9 +422,18 @@ export async function clearStamp(input: unknown): Promise<ActionResult> {
   }
 
   const nowIso = new Date().toISOString();
+  // R15 (plan 2026-07-17-002, Unit 7): clearing the booked stamp also nulls the
+  // webhook provenance columns, so a stale Cal.com uid can't survive a manual
+  // clear and let a later foreign cancel wipe a manual re-stamp.
+  const update: Record<string, unknown> = { [column]: null, last_touch_at: nowIso };
+  if (parsed.data.kind === "booked") {
+    update.call_booked_uid = null;
+    update.call_booked_event_at = null;
+  }
+
   const { error } = await db
     .from("families")
-    .update({ [column]: null, last_touch_at: nowIso })
+    .update(update)
     .eq("id", family.id);
   if (error) return { success: false, error: "Failed to clear the stamp." };
 

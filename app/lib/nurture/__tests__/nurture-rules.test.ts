@@ -26,6 +26,7 @@ function family(overrides: Partial<NurtureFamilyRow> = {}): NurtureFamilyRow {
     signup_at: null,
     dossier_submitted_at: null,
     deposit_asked_referral: false,
+    consent_expires_at: null,
     ...overrides,
   };
 }
@@ -166,6 +167,24 @@ describe("CASL / liveness gate", () => {
   it("skips families without an email", () => {
     expect(run({ families: [{ ...eligible(), email: "  " }] })).toHaveLength(0);
     expect(run({ families: [{ ...eligible(), email: null }] })).toHaveLength(0);
+  });
+
+  it("skips a family whose implied-consent window has expired (R14)", () => {
+    expect(
+      run({ families: [{ ...eligible(), consent_expires_at: iso(-1) }] })
+    ).toHaveLength(0);
+  });
+
+  it("still sends within the implied-consent window", () => {
+    expect(
+      run({ families: [{ ...eligible(), consent_expires_at: iso(30) }] })
+    ).toHaveLength(1);
+  });
+
+  it("null consent_expires_at = no expiry (existing/express consent unaffected)", () => {
+    expect(
+      run({ families: [{ ...eligible(), consent_expires_at: null }] })
+    ).toHaveLength(1);
   });
 });
 

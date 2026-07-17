@@ -42,6 +42,9 @@ export type NurtureFamilyRow = {
   dossier_submitted_at: string | null;
   /** Once the referral ask has been made (robot T+10 or staff), suppress d10. */
   deposit_asked_referral: boolean;
+  /** CASL implied-consent expiry (R14): null = no expiry (express/existing
+   *  consent). A booking-sourced lead expires 6 months after the inquiry. */
+  consent_expires_at: string | null;
 };
 
 export type NurtureChildRow = {
@@ -168,6 +171,12 @@ export function computeDueSends(input: {
     // CASL + liveness gate — non-negotiable.
     if (family.merged_into_id) continue;
     if (!family.consent_given || family.consent_revoked_at) continue;
+    // Implied-consent expiry (R14): stop at the 6-month window. Null = no
+    // expiry (express/existing consent), so existing families are unaffected.
+    if (family.consent_expires_at) {
+      const expiresMs = ms(family.consent_expires_at);
+      if (expiresMs !== null && nowMs >= expiresMs) continue;
+    }
     const email = family.email?.trim();
     if (!email) continue;
 

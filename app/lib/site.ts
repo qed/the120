@@ -38,12 +38,23 @@ export const BOOKING_URL =
 // it works, parents proof all live there); the Gauntlet moved to the
 // signed-in dashboard. Footer keeps the full sitemap.
 export const nav = [
+  // The 2026-27 founding-year program page leads the nav (recruitment front door).
+  { label: "2026–27", href: "/2026-27" },
   // GPF-1: The Gauntlet is a permanent nav pillar (noun, not "Play the
   // Gauntlet" — the verb lives in the CTAs). The wordmark covers "The 120".
   { label: "The Gauntlet", href: "/gauntlet" },
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;
+
+/**
+ * Exact-match active-link test for the shared `nav`. Returns true only when the
+ * current pathname equals the link's href — so `/2026-27` never activates on
+ * `/2026-27x` or a sibling route. Null pathname (pre-hydration) is never active.
+ */
+export function isActiveNav(pathname: string | null, href: string): boolean {
+  return pathname === href;
+}
 
 /** The five groups (handoff Home + group pages). Scholars route to their own program page. */
 export type Group = {

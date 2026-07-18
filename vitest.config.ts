@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: [
+      "app/2026-27/**/__tests__/**/*.test.{ts,tsx}",
       "app/crm/__tests__/**/*.test.{ts,tsx}",
       "app/dashboard/__tests__/**/*.test.{ts,tsx}",
       "app/lib/**/__tests__/**/*.test.{ts,tsx}",

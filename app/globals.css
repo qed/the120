@@ -19,16 +19,16 @@
   --color-red-dark: #b31d28;
   --color-red-ink: #2a1215;
   --color-coral: #ff8a80;
-  /* Handoff identity (design_handoff_the120).
-     Blue deepened from the handoff's #0300ED — the pure RGB blue vibrated
-     against the warm palette; deep indigo chosen from side-by-side variants. */
-  --color-blue: #22219b;
-  --color-blue-dark: #191877; /* hover state for blue surfaces */
+  /* Handoff identity (design_handoff_the120). Marketing blue is unified to
+     electric #0300ED — the handoff identity — matching the CRM, per the
+     2026-07-18 design-system direction (one blue across every surface). */
+  --color-blue: #0300ed;
+  --color-blue-dark: #0200bd; /* hover state for blue surfaces */
   --color-blush: #efc5b8;
 
   /* CRM palette (staff-only /crm surfaces — brief §11, additive per plan
-     Decision 12). The CRM keeps the handoff's pure #0300ED; the marketing
-     site's deepened --color-blue above is untouched. */
+     Decision 12). Marketing and CRM blue are now unified at #0300ED; this
+     --color-crm-blue token remains only as a staff-surface alias. */
   --color-crm-blue: #0300ed;
   --color-crm-bg: #eceae5;
   --color-crm-card: #f7f6f3;

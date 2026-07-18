@@ -40,9 +40,9 @@ export const BOOKING_URL =
 export const nav = [
   // The 2026-27 founding-year program page leads the nav (recruitment front door).
   { label: "2026–27", href: "/2026-27" },
-  // GPF-1: The Gauntlet is a permanent nav pillar (noun, not "Play the
-  // Gauntlet" — the verb lives in the CTAs). The wordmark covers "The 120".
-  { label: "The Gauntlet", href: "/gauntlet" },
+  // The Gauntlet nav pillar (GPF-1) is PULLED until launch (Peter 2026-07-18:
+  // strangers were meeting a v1 game as their first impression). Restore the
+  // entry when GAUNTLET_OPEN=1 flips /gauntlet from Coming Soon to the game.
   { label: "Tuition", href: "/tuition" },
   { label: "FAQ", href: "/faq" },
 ] as const;

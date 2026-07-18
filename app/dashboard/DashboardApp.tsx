@@ -248,9 +248,10 @@ export default function DashboardApp({
 
           {/* The Gauntlet (moved off the marketing nav 2026-07-13): the
               family's game — progress and leaderboard identity save to this
-              account. */}
+              account. Points at the beta door while the public page is
+              Coming Soon (2026-07-18) — signed-in families are insiders. */}
           <Link
-            href="/gauntlet"
+            href="/gauntlet/beta"
             className="mt-8 flex flex-col gap-4 rounded-3xl border border-line bg-blue p-8 transition-shadow hover:shadow-[0_20px_50px_-30px_rgba(3,0,237,0.7)] sm:flex-row sm:items-center sm:justify-between"
           >
             <div>

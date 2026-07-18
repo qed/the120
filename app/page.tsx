@@ -3,7 +3,6 @@ import Hero from "@/app/components/Hero";
 import GroupsBand from "@/app/components/GroupsBand";
 import ThreeThings from "@/app/components/ThreeThings";
 import HowItWorks from "@/app/components/HowItWorks";
-import GauntletBand from "@/app/components/GauntletBand";
 import ParentStoriesBand from "@/app/components/ParentStoriesBand";
 import TuitionTeaser from "@/app/components/TuitionTeaser";
 import CtaBand from "@/app/components/CtaBand";
@@ -20,7 +19,7 @@ export default async function Home() {
         <GroupsBand seatsRemaining={seatsRemaining} />
         <ThreeThings />
         <HowItWorks />
-        <GauntletBand />
+        {/* GauntletBand pulled until launch (Peter 2026-07-18) — restore with GAUNTLET_OPEN */}
         <ParentStoriesBand />
         <TuitionTeaser />
         <CtaBand />

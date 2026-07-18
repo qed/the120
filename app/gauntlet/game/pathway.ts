@@ -69,13 +69,29 @@ export const PATHWAY: Skill[] = [
   { id: "distance", label: "Distance between points", area: "geo", topic: "dist", band: "g912" },
   { id: "midpoints", label: "Midpoints", area: "geo", topic: "midpoint", band: "g912" },
   { id: "special-rt", label: "Special right triangles", area: "geo", topic: "srt", band: "g912" },
+  // Trigonometry (P4, from gauntletcontent.md's Trig/Precalc pass)
+  { id: "ref-angles", label: "Reference angles", area: "trig", topic: "refangle", band: "g912" },
+  { id: "trig-values", label: "Exact trig values", area: "trig", topic: "trigval", band: "g912" },
+  { id: "cofunctions", label: "Cofunction complements", area: "trig", topic: "cofunc", band: "g912" },
+  // Pre-Calculus
+  { id: "logs", label: "Evaluate logarithms", area: "precalc", topic: "evallog", band: "g912" },
+  { id: "determinants", label: "2×2 determinants", area: "precalc", topic: "det2", band: "g912" },
+  { id: "limits", label: "Limits by substitution", area: "precalc", topic: "limitsub", band: "g912" },
+  { id: "geo-series", label: "Geometric series", area: "precalc", topic: "geoseries", band: "g912" },
+  // Calculus (AP Calc AB entries; BC series tests are next)
+  { id: "deriv-table", label: "Derivative table", area: "calc", topic: "dstd", band: "g912" },
+  { id: "chain-rule", label: "Chain rule", area: "calc", topic: "chain", band: "g912" },
+  { id: "deriv-at-point", label: "Derivative at a point", area: "calc", topic: "dpoint", band: "g912" },
+  { id: "crit-points", label: "Critical points", area: "calc", topic: "critpt", band: "g912" },
+  { id: "def-integrals", label: "Definite integrals", area: "calc", topic: "defint", band: "g912" },
 ];
 
-/** P4 — areas on the map that exist but have no playable skills yet. */
+/** P4 — authored in gauntletcontent.md, not yet in the engine; shown as
+ *  dashed "coming" chips after an area's playable skills. */
 export const COMING_SOON: Record<string, string[]> = {
-  trig: ["Reference angles", "Exact trig values", "Radians ↔ degrees"],
-  precalc: ["Logarithms", "Function composition", "Sequences & series"],
-  calc: ["Limits by substitution", "Power-rule derivatives", "Derivative at a point"],
+  trig: ["Exact values beyond Q1", "Amplitude & period reads", "Solve sin θ = k"],
+  precalc: ["Coterminal angles", "Asymptotes of rationals", "Vectors & matrices"],
+  calc: ["Tangent lines", "u-substitution", "Series tests (BC)"],
 };
 
 /* ------------------------------------------------------------------ */

@@ -769,6 +769,14 @@ function Menu({
                     </button>
                   );
                 })}
+                {(COMING_SOON[area.id] ?? []).map((p) => (
+                  <span
+                    key={p}
+                    className="self-center rounded-xl border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] text-white/30"
+                  >
+                    {p} · soon
+                  </span>
+                ))}
               </div>
             </div>
           );

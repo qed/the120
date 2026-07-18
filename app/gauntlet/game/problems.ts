@@ -44,7 +44,21 @@ export type TopicId =
   | "dist"
   | "srt"
   | "sqrtbig"
-  | "midpoint";
+  | "midpoint"
+  // P4 — trig / precalc / calc (gauntletcontent.md forward inventory;
+  // numeric/choice engines only — TF entries render as 2-option choice)
+  | "refangle"
+  | "trigval"
+  | "cofunc"
+  | "evallog"
+  | "det2"
+  | "limitsub"
+  | "geoseries"
+  | "dstd"
+  | "chain"
+  | "dpoint"
+  | "critpt"
+  | "defint";
 
 export type Band = "g34" | "g56" | "g78" | "g912";
 
@@ -89,6 +103,19 @@ export const TOPICS: Topic[] = [
   { id: "srt", label: "Special right triangles", tier: 2 },
   { id: "sqrtbig", label: "Simplify square roots", tier: 1 },
   { id: "midpoint", label: "Midpoint x-coordinate", tier: 2 },
+  // P4 — trig / precalc / calc
+  { id: "refangle", label: "Reference angles", tier: 2 },
+  { id: "trigval", label: "Exact trig values", tier: 1 },
+  { id: "cofunc", label: "Cofunction complements", tier: 2 },
+  { id: "evallog", label: "Evaluate logarithms", tier: 1 },
+  { id: "det2", label: "2×2 determinants", tier: 2 },
+  { id: "limitsub", label: "Limits by substitution", tier: 2 },
+  { id: "geoseries", label: "Geometric series convergence", tier: 2 },
+  { id: "dstd", label: "Derivative table", tier: 1 },
+  { id: "chain", label: "Chain rule (linear inner)", tier: 2 },
+  { id: "dpoint", label: "Derivative at a point", tier: 2 },
+  { id: "critpt", label: "Critical points", tier: 2 },
+  { id: "defint", label: "Definite integrals", tier: 2 },
 ];
 
 export type TrianglePair = {
@@ -595,6 +622,285 @@ function genMidpoint(): Problem {
   return makeMidpoint(x1, ri(-9, 9), x2, ri(-9, 9));
 }
 
+/* ---------- P4 · trig / precalc / calc (gauntletcontent.md) ---------- */
+
+const SUB = "₀₁₂₃₄₅₆₇₈₉";
+const subs = (n: number) => String(n).split("").map((d) => SUB[+d]).join("");
+
+// trig.reference-angle — angles multiples of 5 in (90°, 360°) off the axes;
+// Quadrant I excluded (answer would be the angle itself, a giveaway)
+function makeRefangle(theta: number): Problem {
+  const ref = theta < 180 ? 180 - theta : theta < 270 ? theta - 180 : 360 - theta;
+  return {
+    topic: "refangle",
+    key: `refangle:${theta}`,
+    prompt: `What is the reference angle of ${theta}°?`,
+    answer: String(ref),
+    kind: "numeric",
+  };
+}
+function genRefangle(): Problem {
+  let theta = 0;
+  do theta = ri(19, 71) * 5; // 95°..355°
+  while (theta === 180 || theta === 270);
+  return makeRefangle(theta);
+}
+
+// geo.exact-trig-values — the 0°/30°/45°/60°/90° table with fixed option pools
+const TRIGTABLE: Record<string, Record<number, string>> = {
+  sin: { 0: "0", 30: "1/2", 45: "√2/2", 60: "√3/2", 90: "1" },
+  cos: { 0: "1", 30: "√3/2", 45: "√2/2", 60: "1/2", 90: "0" },
+  tan: { 0: "0", 30: "√3/3", 45: "1", 60: "√3" },
+};
+const TRIGPOOL: Record<string, string[]> = {
+  sin: ["0", "1/2", "√2/2", "√3/2", "1"],
+  cos: ["0", "1/2", "√2/2", "√3/2", "1"],
+  tan: ["0", "√3/3", "1", "√3"],
+};
+function makeTrigval(fn: string, angle: number): Problem {
+  const answer = TRIGTABLE[fn][angle];
+  const others = TRIGPOOL[fn].filter((v) => v !== answer);
+  for (let i = others.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [others[i], others[j]] = [others[j], others[i]];
+  }
+  const choices = [answer, ...others.slice(0, 3)].sort(() => Math.random() - 0.5);
+  return {
+    topic: "trigval",
+    key: `trigval:${fn}:${angle}`,
+    prompt: `${fn} ${angle}° = ?`,
+    answer,
+    kind: "choice",
+    choices,
+  };
+}
+function genTrigval(): Problem {
+  const fn = pick(["sin", "cos", "tan"]);
+  const angle = pick(fn === "tan" ? [0, 30, 45, 60] : [0, 30, 45, 60, 90]);
+  return makeTrigval(fn, angle);
+}
+
+// geo.trig-cofunction — sin θ = cos(90° − θ), both directions
+function makeCofunc(fn: "sin" | "cos", angle: number): Problem {
+  const other = fn === "sin" ? "cos" : "sin";
+  return {
+    topic: "cofunc",
+    key: `cofunc:${fn}:${angle}`,
+    prompt: `${fn} ${angle}° = ${other} ?°`,
+    answer: String(90 - angle),
+    kind: "numeric",
+  };
+}
+function genCofunc(): Problem {
+  return makeCofunc(pick(["sin", "cos"]), ri(1, 17) * 5);
+}
+
+// alg2.evaluate-log — memorized powers; negative band (log₂ ½) rides the ± key
+const LOGBASES: Record<number, [number, number]> = { 2: [-2, 6], 3: [-1, 4], 5: [-1, 3], 10: [0, 3] };
+function makeEvallog(base: number, exp: number): Problem {
+  const arg = exp >= 0 ? String(Math.pow(base, exp)) : `1/${Math.pow(base, -exp)}`;
+  return {
+    topic: "evallog",
+    key: `evallog:${base}^${exp}`,
+    prompt: `log${subs(base)} ${arg} = ?`,
+    answer: String(exp),
+    kind: "numeric",
+  };
+}
+function genEvallog(): Problem {
+  const base = pick([2, 3, 5, 10]);
+  const [lo, hi] = LOGBASES[base];
+  return makeEvallog(base, ri(lo, hi));
+}
+
+// trig.determinant-2x2 — ad − bc, nonzero in the base band
+function makeDet2(a: number, b: number, c: number, d: number): Problem {
+  return {
+    topic: "det2",
+    key: `det2:${a},${b},${c},${d}`,
+    prompt: `det [${a} ${b}; ${c} ${d}] = ?`,
+    answer: String(a * d - b * c),
+    kind: "numeric",
+  };
+}
+function genDet2(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const [a, b, c, d] = [ri(-9, 9), ri(-9, 9), ri(-9, 9), ri(-9, 9)];
+    const det = a * d - b * c;
+    if (det !== 0 && Math.abs(det) <= 99) return makeDet2(a, b, c, d);
+  }
+  return makeDet2(3, 1, 4, 2);
+}
+
+// trig.limit-by-substitution — continuity recognition + substitute-and-evaluate
+function makeLimitsub(a: number, b: number, c: number, p: number): Problem {
+  const terms =
+    (a === 0 ? "" : a === 1 ? "x²" : a === -1 ? "−x²" : `${a}x²`) +
+    (b === 0 ? "" : ` ${signed(b)}x`) +
+    (c === 0 ? "" : ` ${signed(c)}`);
+  return {
+    topic: "limitsub",
+    key: `limitsub:${a},${b},${c},${p}`,
+    prompt: `lim (x → ${p}) of ${terms.trim()}`,
+    answer: String(a * p * p + b * p + c),
+    kind: "numeric",
+  };
+}
+function genLimitsub(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const a = pick([-2, -1, 1, 1, 2]); // degree ≤ 2, keep x² common
+    const b = ri(-5, 5);
+    const c = pick([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5]);
+    const p = ri(-4, 4);
+    const ans = a * p * p + b * p + c;
+    if (ans >= -40 && ans <= 60) return makeLimitsub(a, b, c, p);
+  }
+  return makeLimitsub(1, 3, -1, 2);
+}
+
+// trig.geometric-series-converges — |r| < 1 judgment; r = ±1 is the trap.
+// First terms fixed per |r| so 4 leading terms stay integers.
+const GEOSERIES: Record<string, [number, number, number, number]> = {
+  "1/2": [8, 4, 2, 1],
+  "1/3": [27, 9, 3, 1],
+  "2/3": [27, 18, 12, 8],
+  "3/4": [64, 48, 36, 27],
+  "1": [5, 5, 5, 5],
+  "3/2": [8, 12, 18, 27],
+  "2": [1, 2, 4, 8],
+  "3": [1, 3, 9, 27],
+};
+function makeGeoseries(ratio: string, negative: boolean): Problem {
+  const terms = GEOSERIES[ratio];
+  const shown = terms
+    .map((t, i) => (i === 0 ? String(t) : negative && i % 2 === 1 ? `− ${t}` : `+ ${t}`))
+    .join(" ");
+  const converges = ["1/2", "1/3", "2/3", "3/4"].includes(ratio);
+  return {
+    topic: "geoseries",
+    key: `geoseries:${negative ? "-" : ""}${ratio}`,
+    prompt: `True or false: ${shown} + ⋯ converges`,
+    answer: converges ? "True" : "False",
+    kind: "choice",
+    choices: ["True", "False"],
+  };
+}
+function genGeoseries(): Problem {
+  return makeGeoseries(pick(Object.keys(GEOSERIES)), Math.random() < 0.5);
+}
+
+// calcab.derivative-standard-table — fixed option pools per fact family
+const DSTD: Record<string, { prompt: string; answer: string; pool: string[] }> = {
+  sin: { prompt: "d/dx sin x = ?", answer: "cos x", pool: ["cos x", "−cos x", "sin x", "−sin x"] },
+  cos: { prompt: "d/dx cos x = ?", answer: "−sin x", pool: ["−sin x", "sin x", "cos x", "−cos x"] },
+  tan: { prompt: "d/dx tan x = ?", answer: "sec²x", pool: ["sec²x", "sec x tan x", "cot x", "−sec²x"] },
+  exp: { prompt: "d/dx eˣ = ?", answer: "eˣ", pool: ["eˣ", "x·eˣ", "eˣ⁻¹", "ln x"] },
+  ln: { prompt: "d/dx ln x = ?", answer: "1/x", pool: ["1/x", "x", "ln x", "1/x²"] },
+  recip: { prompt: "d/dx 1/x = ?", answer: "−1/x²", pool: ["−1/x²", "1/x²", "−1/x", "ln x"] },
+  sqrt: { prompt: "d/dx √x = ?", answer: "1/(2√x)", pool: ["1/(2√x)", "2√x", "√x/2", "1/√x"] },
+};
+function makeDstd(fam: string): Problem {
+  const f = DSTD[fam];
+  return {
+    topic: "dstd",
+    key: `dstd:${fam}`,
+    prompt: f.prompt,
+    answer: f.answer,
+    kind: "choice",
+    choices: [...f.pool].sort(() => Math.random() - 0.5),
+  };
+}
+const genDstd = (): Problem => makeDstd(pick(Object.keys(DSTD)));
+
+// calcab.chain-rule-linear-inner — outer from the table, inner ax; options
+// permute the coefficient (missing/present), sign, and inner argument
+function makeChain(outer: "sin" | "cos" | "exp", a: number): Problem {
+  if (outer === "exp") {
+    return {
+      topic: "chain",
+      key: `chain:exp:${a}`,
+      prompt: `d/dx e^(${a}x) = ?`,
+      answer: `${a}e^(${a}x)`,
+      kind: "choice",
+      choices: [`${a}e^(${a}x)`, `e^(${a}x)`, `${a}eˣ`, `${a}x·e^(${a}x)`].sort(() => Math.random() - 0.5),
+    };
+  }
+  const other = outer === "sin" ? "cos" : "sin";
+  const sign = outer === "sin" ? "" : "−";
+  const flip = outer === "sin" ? "−" : "";
+  return {
+    topic: "chain",
+    key: `chain:${outer}:${a}`,
+    prompt: `d/dx ${outer}(${a}x) = ?`,
+    answer: `${sign}${a} ${other} ${a}x`,
+    kind: "choice",
+    choices: [
+      `${sign}${a} ${other} ${a}x`,
+      `${sign}${other} ${a}x`,
+      `${flip}${a} ${other} ${a}x`,
+      `${sign}${a} ${other} x`,
+    ].sort(() => Math.random() - 0.5),
+  };
+}
+const genChain = (): Problem => makeChain(pick(["sin", "cos", "exp"]), ri(2, 9));
+
+// calcab.derivative-at-point — monomials axⁿ; f′(x₀) = a·n·x₀ⁿ⁻¹
+function makeDpoint(a: number, n: number, x0: number): Problem {
+  return {
+    topic: "dpoint",
+    key: `dpoint:${a},${n},${x0}`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}. f′(${x0}) = ?`,
+    answer: String(a * n * Math.pow(x0, n - 1)),
+    kind: "numeric",
+  };
+}
+function genDpoint(): Problem {
+  const a = ri(1, 5);
+  const n = ri(2, 4);
+  const x0 = pick([-3, -2, -1, 1, 2, 3]);
+  return makeDpoint(a, n, x0);
+}
+
+// calcab.critical-point-quadratic — x = −b/2a; c is decorative but the key
+// must rebuild the exact prompt, so c derives deterministically from (a, x*)
+function makeCritpt(a: number, xstar: number): Problem {
+  const b = -2 * a * xstar;
+  const c = ((a + Math.abs(xstar)) % 9) + 1;
+  return {
+    topic: "critpt",
+    key: `critpt:${a},${xstar}`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x² ${signed(b)}x ${signed(c)}. Critical point at x = ?`,
+    answer: String(xstar),
+    kind: "numeric",
+  };
+}
+function genCritpt(): Problem {
+  return makeCritpt(ri(1, 4), pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+}
+
+// calcab.definite-integral-power — ∫₀ᵇ axⁿ dx with a = k(n+1) (integer
+// antiderivative), zero lower bound, answers ∈ [1, 99]
+function makeDefint(a: number, n: number, bnd: number): Problem {
+  const k = a / (n + 1);
+  return {
+    topic: "defint",
+    key: `defint:${a},${n},${bnd}`,
+    prompt: `∫${subs(0)}${sup(bnd)} ${a === 1 ? "" : a}x${n === 1 ? "" : sup(n)} dx = ?`,
+    answer: String(k * Math.pow(bnd, n + 1)),
+    kind: "numeric",
+  };
+}
+function genDefint(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const n = ri(1, 3);
+    const k = ri(1, 4);
+    const bnd = ri(1, 4);
+    const ans = k * Math.pow(bnd, n + 1);
+    if (ans >= 1 && ans <= 99) return makeDefint(k * (n + 1), n, bnd);
+  }
+  return makeDefint(3, 2, 2);
+}
+
 /* ---------- registry + adaptive serving ---------- */
 
 export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
@@ -627,6 +933,18 @@ export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   srt: genSrt,
   sqrtbig: genSqrtBig,
   midpoint: genMidpoint,
+  refangle: genRefangle,
+  trigval: genTrigval,
+  cofunc: genCofunc,
+  evallog: genEvallog,
+  det2: genDet2,
+  limitsub: genLimitsub,
+  geoseries: genGeoseries,
+  dstd: genDstd,
+  chain: genChain,
+  dpoint: genDpoint,
+  critpt: genCritpt,
+  defint: genDefint,
 };
 
 /** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
@@ -704,6 +1022,42 @@ export function problemFromKey(key: string): Problem | null {
         return makeSrt(restParts[0] as "short" | "hyp", Number(restParts[1]));
       case "sqrtbig":
         return makeSqrtBig(Math.round(Math.sqrt(Number(rest))));
+      case "refangle":
+        return makeRefangle(Number(rest));
+      case "trigval":
+        return makeTrigval(restParts[0], Number(restParts[1]));
+      case "cofunc":
+        return makeCofunc(restParts[0] as "sin" | "cos", Number(restParts[1]));
+      case "evallog": {
+        const [b, e] = rest.split("^").map(Number);
+        return makeEvallog(b, e);
+      }
+      case "det2": {
+        const [a, b, c, d] = rest.split(",").map(Number);
+        return makeDet2(a, b, c, d);
+      }
+      case "limitsub": {
+        const [a, b, c, p] = rest.split(",").map(Number);
+        return makeLimitsub(a, b, c, p);
+      }
+      case "geoseries":
+        return makeGeoseries(rest.replace(/^-/, ""), rest.startsWith("-"));
+      case "dstd":
+        return makeDstd(rest);
+      case "chain":
+        return makeChain(restParts[0] as "sin" | "cos" | "exp", Number(restParts[1]));
+      case "dpoint": {
+        const [a, n, x0] = rest.split(",").map(Number);
+        return makeDpoint(a, n, x0);
+      }
+      case "critpt": {
+        const [a, x] = rest.split(",").map(Number);
+        return makeCritpt(a, x);
+      }
+      case "defint": {
+        const [a, n, bnd] = rest.split(",").map(Number);
+        return makeDefint(a, n, bnd);
+      }
     }
   } catch {
     return null;
@@ -790,10 +1144,61 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
       }
       return [...set];
     }
+    case "refangle":
+      for (let t = 95; t <= 355; t += 5) {
+        if (t !== 180 && t !== 270) keys.push(`refangle:${t}`);
+      }
+      return keys;
+    case "trigval":
+      for (const a of [0, 30, 45, 60, 90]) keys.push(`trigval:sin:${a}`, `trigval:cos:${a}`);
+      for (const a of [0, 30, 45, 60]) keys.push(`trigval:tan:${a}`);
+      return keys;
+    case "cofunc":
+      for (let a = 5; a <= 85; a += 5) keys.push(`cofunc:sin:${a}`, `cofunc:cos:${a}`);
+      return keys;
+    case "evallog":
+      for (const [b, [lo, hi]] of Object.entries(LOGBASES)) {
+        for (let e = lo; e <= hi; e++) keys.push(`evallog:${b}^${e}`);
+      }
+      return keys;
+    case "geoseries":
+      for (const r of Object.keys(GEOSERIES)) keys.push(`geoseries:${r}`, `geoseries:-${r}`);
+      return keys;
+    case "dstd":
+      return Object.keys(DSTD).map((f) => `dstd:${f}`);
+    case "chain":
+      for (const outer of ["sin", "cos", "exp"]) {
+        for (let a = 2; a <= 9; a++) keys.push(`chain:${outer}:${a}`);
+      }
+      return keys;
+    case "dpoint":
+      for (let a = 1; a <= 5; a++) {
+        for (let n = 2; n <= 4; n++) {
+          for (const x of [-3, -2, -1, 1, 2, 3]) keys.push(`dpoint:${a},${n},${x}`);
+        }
+      }
+      return keys; // 90 keys — under the cap
+    case "critpt":
+      for (let a = 1; a <= 4; a++) {
+        for (let x = -9; x <= 9; x++) {
+          if (x !== 0) keys.push(`critpt:${a},${x}`);
+        }
+      }
+      return keys; // 72 keys
+    case "defint":
+      for (let n = 1; n <= 3; n++) {
+        for (let k = 1; k <= 4; k++) {
+          for (let b = 1; b <= 4; b++) {
+            if (k * Math.pow(b, n + 1) <= 99) keys.push(`defint:${k * (n + 1)},${n},${b}`);
+          }
+        }
+      }
+      return keys;
     default:
-      // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, and the
+      // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, the
       // g912 open generators (slope, linfn, evalquad, expquot, disc, dist,
-      // midpoint): parameter space too large or non-recall — open-ended.
+      // midpoint), and the P4 open generators (det2, limitsub): parameter
+      // space too large or non-recall — open-ended.
       return null;
   }
 }

@@ -3,14 +3,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccountModal } from "@/app/components/account/AccountModalProvider";
-import { BOSSES, type Boss } from "./game/bosses";
-import { BANDS, TOPICS, masteryProgress, type Band, type TopicId } from "./game/problems";
+import { type Boss } from "./game/bosses";
+import { BANDS, type Band, type TopicId } from "./game/problems";
+import BossSprite from "./components/BossSprite";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
+import {
+  AREAS,
+  bossForLevel,
+  COMING_SOON,
+  currentSkillIdx,
+  isUnlocked,
+  PASS_LEVEL,
+  PATHWAY,
+  placementProgress,
+  seedProgressFromFacts,
+  SKILL_LEVELS,
+  skillLevel,
+  skillMastery,
+  startableLevels,
+  unlockedTopics,
+  type SkillProgress,
+} from "./game/pathway";
 import { buildMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
 import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
-import BossSprite from "./components/BossSprite";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
+import PlacementTrial from "./components/PlacementTrial";
+import SkillPanel from "./components/SkillPanel";
 import { useCoarsePointer } from "./components/NumberPad";
 import { shareScore, type ShareData } from "./game/shareCard";
 import TournamentEntryModal from "./components/TournamentEntryModal";
@@ -68,8 +87,12 @@ type Save = {
   trialBest: number;
   /** self-chosen leaderboard handle (kid-safe; never a real name) */
   handle: string;
-  /** selected skills persist between visits */
+  /** selected skills persist between visits (legacy; kept for cloud merges) */
   topics: TopicId[];
+  /** pathway progression (P2): skill id -> highest boss level beaten (0–5) */
+  skillProgress: SkillProgress;
+  /** placement done, skipped, or seeded — gates the first-run assessment */
+  placed: boolean;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -86,6 +109,8 @@ const EMPTY_SAVE: Save = {
   trialBest: 0,
   handle: "",
   topics: ["mul"],
+  skillProgress: {},
+  placed: false,
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -97,6 +122,10 @@ function mergeSaves(a: Save, b: Save): Save {
   const medals: Record<string, number> = { ...a.medals };
   for (const [k, m] of Object.entries(b.medals)) {
     medals[k] = Math.max(medals[k] ?? 0, m);
+  }
+  const skillProgress: SkillProgress = { ...(a.skillProgress ?? {}) };
+  for (const [k, v] of Object.entries(b.skillProgress ?? {})) {
+    skillProgress[k] = Math.max(skillProgress[k] ?? 0, v);
   }
   return {
     xp: Math.max(a.xp, b.xp),
@@ -111,6 +140,8 @@ function mergeSaves(a: Save, b: Save): Save {
     trialBest: Math.max(a.trialBest, b.trialBest),
     handle: a.handle || b.handle,
     topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
+    skillProgress,
+    placed: (a.placed ?? false) || (b.placed ?? false),
   };
 }
 
@@ -135,14 +166,16 @@ const titleOf = (level: number) => TITLES.find(([l]) => level >= l)![1];
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
-type Phase = "menu" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
+type Phase = "menu" | "placement" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
 
 export default function GauntletGame({ tournament }: { tournament: TournamentState }) {
   const [phase, setPhase] = useState<Phase>("menu");
   const coarse = useCoarsePointer(); // A3: the touch number pad owns bottom-left in battle/trial
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
-  const [bossIdx, setBossIdx] = useState(0);
+  const [skillIdx, setSkillIdx] = useState(0); // pathway skill being raided
+  const [battleLevel, setBattleLevel] = useState(1); // boss level within the skill (1–5)
+  const [openSkill, setOpenSkill] = useState<number | null>(null); // SkillPanel
   const [lastStats, setLastStats] = useState<BattleStats | null>(null);
   const [lastResults, setLastResults] = useState<ProblemResult[]>([]);
   const [lastMedal, setLastMedal] = useState(0);
@@ -176,6 +209,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 
   useEffect(() => {
     const s = loadSave();
+    // Returning players from before the pathway: credit levels their fact
+    // stats already prove, so nobody restarts a road they've walked (P1).
+    if (!s.placed && Object.keys(s.facts).length > 0) {
+      s.skillProgress = { ...seedProgressFromFacts(s.facts), ...s.skillProgress };
+      s.placed = true;
+    }
     setSave(s);
     setMuted(s.muted);
     setLoaded(true);
@@ -236,8 +275,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     void fetch("/api/gauntlet/tournament/reconcile", { method: "POST" }).catch(() => {});
   }, [userId]);
 
-  const boss = BOSSES[bossIdx];
-  const topics = save.topics;
+  const skill = PATHWAY[skillIdx];
+  const boss: Boss = bossForLevel(battleLevel);
+  const curIdx = currentSkillIdx(save.skillProgress);
+  const trialTopics = unlockedTopics(save.skillProgress);
+  const trialBand = PATHWAY[curIdx].band;
 
   const applyResults = useCallback((prev: Save, results: ProblemResult[]): Record<string, FactStat> => {
     const facts = { ...prev.facts };
@@ -262,16 +304,21 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     return { date: t, count: prev.daily.date === yesterdayStr() ? prev.daily.count + 1 : 1 };
   };
 
-  const startBattle = (idx: number) => {
+  const startSkillBattle = (idx: number, level: number) => {
     ensureAudio();
-    setBossIdx(idx);
+    setSkillIdx(idx);
+    setBattleLevel(level);
+    setOpenSkill(null);
+    // band follows the pathway frontier (leaderboard band + mastery weight);
+    // topics mirrors unlocked skills for cloud-merge back-compat
+    setSave((p) => ({ ...p, band: PATHWAY[idx].band, topics: unlockedTopics(p.skillProgress) }));
     setPhase("battle");
   };
 
   // Mid-raid/trial the page chrome above the game (parent banner) hides via
   // this body class (globals.css) so the arena gets the whole viewport.
   useEffect(() => {
-    const playing = phase === "battle" || phase === "trial";
+    const playing = phase === "battle" || phase === "trial" || phase === "placement";
     document.body.classList.toggle("gauntlet-playing", playing);
     return () => document.body.classList.remove("gauntlet-playing");
   }, [phase]);
@@ -323,11 +370,16 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         medals: medal > (prev.medals[boss.id] ?? 0) ? { ...prev.medals, [boss.id]: medal } : prev.medals,
         facts: applyResults(prev, results),
         daily: bumpDaily(prev, won),
+        // P2: a win claims the skill's boss level (never regresses)
+        skillProgress:
+          won && battleLevel > (prev.skillProgress[skill.id] ?? 0)
+            ? { ...prev.skillProgress, [skill.id]: battleLevel }
+            : prev.skillProgress,
       }));
       setPhase(won ? "victory" : "defeat");
-      postTournamentMastery(save.facts, after, save.band);
+      postTournamentMastery(save.facts, after, skill.band);
     },
-    [boss.id, applyResults, countNewlyMastered, postTournamentMastery, save]
+    [boss.id, skill.id, skill.band, battleLevel, applyResults, countNewlyMastered, postTournamentMastery, save]
   );
 
   const finishTrial = useCallback(
@@ -345,9 +397,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         daily: bumpDaily(prev, score >= 10),
       }));
       setPhase("trialEnd");
-      postTournamentMastery(save.facts, after, save.band);
+      postTournamentMastery(save.facts, after, trialBand);
     },
-    [applyResults, countNewlyMastered, postTournamentMastery, save]
+    [applyResults, countNewlyMastered, postTournamentMastery, save, trialBand]
   );
 
   const toggleMute = () => {
@@ -387,16 +439,18 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         <Menu
           save={save}
           userId={cloudOk ? userId : null}
-          topics={topics}
-          toggleTopic={(id) =>
-            setSave((prev) => ({
-              ...prev,
-              topics: prev.topics.includes(id) ? prev.topics.filter((t) => t !== id) : [...prev.topics, id],
-            }))
-          }
-          setBand={(b) => setSave((p) => ({ ...p, band: b }))}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
-          onStart={startBattle}
+          onContinue={() => {
+            if (!save.placed) {
+              ensureAudio();
+              setPhase("placement");
+              return;
+            }
+            const target = PATHWAY[curIdx];
+            const lvl = startableLevels(save.skillProgress, target.id)[0];
+            if (lvl) startSkillBattle(curIdx, lvl);
+          }}
+          onSkill={(idx) => setOpenSkill(idx)}
           onTrial={() => {
             ensureAudio();
             setPhase("trial");
@@ -405,6 +459,33 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           onBoard={() => setShowBoard(true)}
           tournamentLive={tournament.isLive}
           onEnter={openEntry}
+        />
+      )}
+      {phase === "placement" && (
+        <PlacementTrial
+          onDone={(landing) => {
+            setSave((p) => ({
+              ...p,
+              placed: true,
+              skillProgress: { ...placementProgress(landing), ...p.skillProgress },
+              topics: unlockedTopics({ ...placementProgress(landing), ...p.skillProgress }),
+            }));
+            setPhase("menu");
+          }}
+          onSkip={() => {
+            setSave((p) => ({ ...p, placed: true }));
+            setPhase("menu");
+          }}
+        />
+      )}
+      {openSkill !== null && phase === "menu" && (
+        <SkillPanel
+          skill={PATHWAY[openSkill]}
+          level={skillLevel(save.skillProgress, PATHWAY[openSkill].id)}
+          locked={!isUnlocked(save.skillProgress, openSkill)}
+          facts={save.facts}
+          onStart={(lvl) => startSkillBattle(openSkill, lvl)}
+          onClose={() => setOpenSkill(null)}
         />
       )}
       {showBoard && (
@@ -428,10 +509,10 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         />
       )}
       {phase === "battle" && (
-        <Battle boss={boss} topics={topics} band={save.band} facts={save.facts} onFinish={finishBattle} />
+        <Battle boss={boss} topics={[skill.topic]} band={skill.band} facts={save.facts} onFinish={finishBattle} />
       )}
       {phase === "trial" && (
-        <Trial topics={topics} band={save.band} onFinish={finishTrial} />
+        <Trial topics={trialTopics} band={trialBand} onFinish={finishTrial} />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result
@@ -442,8 +523,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           mastered={lastMastered}
           results={lastResults}
           onMenu={() => setPhase("menu")}
-          onRetry={() => startBattle(bossIdx)}
-          onNext={phase === "victory" && bossIdx < BOSSES.length - 1 ? () => startBattle(bossIdx + 1) : undefined}
+          onRetry={() => startSkillBattle(skillIdx, battleLevel)}
+          onNext={
+            phase === "victory" && battleLevel < SKILL_LEVELS
+              ? () => startSkillBattle(skillIdx, battleLevel + 1)
+              : undefined
+          }
         />
       )}
       {phase === "trialEnd" && (
@@ -479,11 +564,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 function Menu({
   save,
   userId,
-  topics,
-  toggleTopic,
-  setBand,
   setHandle,
-  onStart,
+  onContinue,
+  onSkill,
   onTrial,
   onHelp,
   onBoard,
@@ -492,22 +575,24 @@ function Menu({
 }: {
   save: Save;
   userId: string | null;
-  topics: TopicId[];
-  toggleTopic: (id: TopicId) => void;
-  setBand: (b: Band) => void;
   setHandle: (h: string) => void;
-  onStart: (bossIdx: number) => void;
+  onContinue: () => void;
+  onSkill: (idx: number) => void;
   onTrial: () => void;
   onHelp: () => void;
   onBoard: () => void;
   tournamentLive: boolean;
   onEnter: () => void;
 }) {
-  const toggle = (id: TopicId) =>
-    toggleTopic(id);
   const level = levelOf(save.xp);
   const xpIntoLevel = save.xp - (level - 1) * 100;
   const dailyActive = save.daily.date === todayStr();
+  const progress = save.skillProgress;
+  const curIdx = currentSkillIdx(progress);
+  const curSkill = PATHWAY[curIdx];
+  const nextLvl = startableLevels(progress, curSkill.id)[0] ?? SKILL_LEVELS;
+  const fresh = !save.placed;
+  const passedTotal = PATHWAY.filter((s) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
 
   return (
     <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-6 py-8">
@@ -582,100 +667,116 @@ function Menu({
         )}
       </div>
 
-      {/* Band + topics */}
-      <div className="mt-6 w-full max-w-3xl">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/50">Level</span>
-          {BANDS.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => setBand(b.id)}
-              className={`rounded-full border px-3 py-1 font-mono text-xs transition-all ${
-                save.band === b.id ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-white/20 text-white/60 hover:border-white/50"
-              }`}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-        {([1, 2] as const).map((tier) => (
-          <div key={tier} className="mt-3">
-            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
-              {tier === 1 ? "Number facts" : "Skills & concepts"}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {TOPICS.filter((t) => t.tier === tier).map((t) => {
-                const on = topics.includes(t.id);
-                const prog = masteryProgress(t.id, save.band, save.facts);
-                const complete = prog && prog.mastered === prog.total;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => toggle(t.id)}
-                    className={`rounded-full border px-3.5 py-1.5 font-mono text-xs transition-all ${
-                      on ? "border-cyan-400 bg-cyan-400/20 text-cyan-200" : "border-white/20 text-white/60 hover:border-white/50"
-                    }`}
-                  >
-                    {t.label}
-                    {prog && prog.mastered > 0 && (
-                      <span className={`ml-1.5 text-[10px] ${complete ? "text-emerald-300" : on ? "text-cyan-300/70" : "text-white/35"}`}>
-                        {complete ? "★" : ""}{prog.mastered}/{prog.total}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-        <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Master a fact: answer it in under 3s, twice in a row. Raids focus on the facts you haven&apos;t mastered.
-        </p>
+      {/* P1 — one button. New players get placed; everyone else continues the road. */}
+      <div className="mt-7 flex w-full max-w-md flex-col items-stretch gap-2">
+        <button
+          onClick={onContinue}
+          className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-4 text-center font-mono text-base font-bold text-black shadow-lg shadow-cyan-500/20 transition-transform hover:scale-[1.02]"
+        >
+          {fresh ? "▶ START LEARNING" : `⚔️ CONTINUE — ${curSkill.label} · Level ${nextLvl}`}
+        </button>
+        {fresh ? (
+          <p className="text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
+            A quick placement finds your start on the pathway — answer fast and clean to place higher
+          </p>
+        ) : (
+          <button
+            onClick={onTrial}
+            className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-2.5 font-mono text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/20"
+          >
+            🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
+          </button>
+        )}
       </div>
 
-      {/* Bosses (gated) + Mastery Trial */}
-      <div className="mt-7 grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {BOSSES.map((b, i) => {
-          const medal = save.medals[b.id] ?? 0;
-          const locked = i > 0 && !save.bossesBeaten.includes(BOSSES[i - 1].id);
-          return (
-            <button
-              key={b.id}
-              onClick={() => !locked && topics.length && onStart(i)}
-              disabled={locked || !topics.length}
-              className={`group relative flex flex-col items-center rounded-2xl border p-4 transition-all ${
-                locked
-                  ? "border-white/5 bg-white/[0.03] opacity-50"
-                  : "border-white/10 bg-white/5 hover:-translate-y-1 hover:border-white/30 hover:bg-white/10"
-              } disabled:cursor-not-allowed`}
-            >
-              {medal > 0 && (
-                <span className="absolute right-2 top-2 text-lg">{["", "🥉", "🥈", "🥇"][medal]}</span>
-              )}
-              <div className={locked ? "grayscale" : "transition-transform group-hover:scale-105"}>
-                <BossSprite id={b.id} size={96} useImage />
+      {/* The pathway map (P1/P2/P3): seven areas, one road. */}
+      <div className="mt-8 w-full max-w-3xl">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-mono text-xs uppercase tracking-[0.16em] text-white/50">The pathway</h2>
+          <span className="font-mono text-[10px] text-white/40">
+            {passedTotal}/{PATHWAY.length} skills passed
+          </span>
+        </div>
+        {AREAS.map((area) => {
+          const nodes = PATHWAY.map((s, i) => ({ s, i })).filter(({ s }) => s.area === area.id);
+          if (nodes.length === 0) {
+            const planned = COMING_SOON[area.id] ?? [];
+            return (
+              <div key={area.id} className="mt-4 opacity-50">
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/45">
+                  {area.icon} {area.label} <span className="text-white/30">· coming soon</span>
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {planned.map((p) => (
+                    <span key={p} className="rounded-lg border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] text-white/35">
+                      {p}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <span className="mt-1 text-base font-bold">{b.name}</span>
-              <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-white/50">
-                {locked ? `Defeat ${BOSSES[i - 1].name} first` : `${b.title} · ${b.hp} HP`}
-              </span>
-            </button>
+            );
+          }
+          const areaPassed = nodes.filter(({ s }) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
+          return (
+            <div key={area.id} className="mt-4">
+              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/45">
+                {area.icon} {area.label}{" "}
+                <span className={areaPassed === nodes.length ? "text-emerald-300" : "text-white/30"}>
+                  · {areaPassed}/{nodes.length}
+                </span>
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {nodes.map(({ s, i }) => {
+                  const lvl = skillLevel(progress, s.id);
+                  const locked = !isUnlocked(progress, i);
+                  const mastered = lvl >= SKILL_LEVELS;
+                  const passed = lvl >= PASS_LEVEL;
+                  const current = i === curIdx && !fresh;
+                  const m = skillMastery(s, save.facts);
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => onSkill(i)}
+                      className={`rounded-xl border px-2.5 py-1.5 text-left transition-all ${
+                        current
+                          ? "border-cyan-400 bg-cyan-400/15 ring-1 ring-cyan-400/50"
+                          : mastered
+                            ? "border-amber-400/50 bg-amber-400/10"
+                            : passed
+                              ? "border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10"
+                              : locked
+                                ? "border-white/10 bg-white/[0.02] opacity-45"
+                                : "border-white/15 bg-white/5 hover:border-white/40"
+                      }`}
+                    >
+                      <span className="font-mono text-[11px] text-white/85">
+                        {mastered ? "👑 " : locked ? "🔒 " : current ? "▶ " : ""}
+                        {s.label}
+                      </span>
+                      <span className="mt-0.5 flex items-center gap-1">
+                        {Array.from({ length: SKILL_LEVELS }, (_, k) => (
+                          <span
+                            key={k}
+                            className={`h-1.5 w-1.5 rounded-full ${k < lvl ? (mastered ? "bg-amber-400" : "bg-emerald-400") : "bg-white/15"}`}
+                          />
+                        ))}
+                        {m && (
+                          <span className="ml-1 font-mono text-[9px] text-white/40">
+                            {m.mastered}/{m.total}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
-
-        <button
-          onClick={() => topics.length && onTrial()}
-          disabled={!topics.length}
-          className="group flex flex-col items-center justify-center rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 transition-all hover:-translate-y-1 hover:border-amber-400/60 hover:bg-amber-400/15 disabled:opacity-40"
-        >
-          <span className="text-4xl transition-transform group-hover:scale-110">🏆</span>
-          <span className="mt-2 text-base font-bold text-amber-200">Mastery Trial</span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-amber-200/60">
-            Survive · best {save.trialBest}
-          </span>
-        </button>
+        <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
+          Master a fact: answer it in under 3s, twice in a row · pass a skill: clear boss level {PASS_LEVEL} · tap any skill for its facts
+        </p>
       </div>
-      {!topics.length && <p className="mt-4 font-mono text-xs text-amber-400">Pick at least one skill to raid.</p>}
 
       <p className="mt-auto pt-8 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
         FastMath training · part of membership in The 120

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { COPY, pathSteps } from "../data";
 import type { Audience } from "../cta-source";
 import { criteriaFor } from "../path-criteria";
@@ -45,10 +45,15 @@ export default function ThePath({ audience }: { audience: Audience }) {
   const wasKids = useRef(audience === "kids");
   const ids = useId();
 
-  // Reset the sub-toggle to KID VOICE whenever Kids is (re-)entered.
-  useEffect(() => {
+  // Reset the sub-toggle to KID VOICE whenever Kids is (re-)entered — the
+  // React-recommended "adjust state during render when a prop changes" pattern
+  // (https://react.dev/learn/you-might-not-need-an-effect), so no effect is
+  // needed and there is no extra render/flash.
+  const [prevAudience, setPrevAudience] = useState(audience);
+  if (audience !== prevAudience) {
+    setPrevAudience(audience);
     if (audience === "kids") setKidVoice(true);
-  }, [audience]);
+  }
 
   // Focus remedy (self-contained): when the Kids-only sub-toggle unmounts on a
   // Kids→Parents switch while it held focus, the browser drops focus to <body>.

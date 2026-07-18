@@ -47,26 +47,30 @@ export default function ProgramContent({ seatsRemaining }: { seatsRemaining: num
   const [group, setGroup] = useState<GroupKey>("the120");
   const activeId = useScrollSpy(SECTION_IDS);
 
-  // Voice-swap scroll anchoring: record the toggle's viewport top the instant a
-  // switch is requested, then after the DOM reflows to the other voice, scroll by
-  // the delta so the toggle (and the reader's place) stay put despite the height
-  // change. The toggle is sticky, so in practice this holds it exactly steady.
-  const anchorTopBeforeSwap = useRef<number | null>(null);
+  // Voice-swap scroll anchoring: record the reader's current section's viewport
+  // top the instant a switch is requested, then after the DOM reflows to the
+  // other voice, scroll by the delta so that section (and the reader's place)
+  // stays put despite the height change. We anchor to the active *section* (in
+  // normal flow), not the sticky toggle — a sticky element's viewport top never
+  // moves, so it can't preserve the reading position. Falls back to the toggle
+  // only if the active section can't be found.
+  const swapAnchor = useRef<{ id: string; top: number } | null>(null);
 
   const changeAudience = (next: Audience) => {
     if (next === audience) return;
-    const el = document.getElementById(ANCHOR_ID);
-    anchorTopBeforeSwap.current = el ? el.getBoundingClientRect().top : null;
+    const anchorId = document.getElementById(activeId) ? activeId : ANCHOR_ID;
+    const el = document.getElementById(anchorId);
+    swapAnchor.current = el ? { id: anchorId, top: el.getBoundingClientRect().top } : null;
     setAudience(next);
   };
 
   useIsomorphicLayoutEffect(() => {
-    const before = anchorTopBeforeSwap.current;
-    anchorTopBeforeSwap.current = null;
-    if (before == null) return; // initial mount / no pending swap
-    const el = document.getElementById(ANCHOR_ID);
+    const anchor = swapAnchor.current;
+    swapAnchor.current = null;
+    if (!anchor) return; // initial mount / no pending swap
+    const el = document.getElementById(anchor.id);
     if (!el) return;
-    const delta = el.getBoundingClientRect().top - before;
+    const delta = el.getBoundingClientRect().top - anchor.top;
     if (delta !== 0) window.scrollBy(0, delta);
   }, [audience]);
 

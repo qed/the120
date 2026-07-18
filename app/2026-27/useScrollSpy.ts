@@ -47,14 +47,27 @@ export function useScrollSpy(ids: string[]): string {
     // Sync the highlight after first paint (also handles deep-link landing on a
     // `#section`). Deferred to a frame so it is not a synchronous setState in the
     // effect body. `measure` is a stable effect event, so we subscribe once.
+    //
+    // Scroll/resize handling is coalesced to at most one measurement per animation
+    // frame — scroll events can fire several times per frame, and each measurement
+    // reads every section's layout, so an unthrottled handler would thrash layout
+    // on a long page.
+    let pending = 0;
+    const schedule = () => {
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = 0;
+        measure();
+      });
+    };
     const raf = requestAnimationFrame(() => measure());
-    const onScrollOrResize = () => measure();
-    window.addEventListener("scroll", onScrollOrResize, { passive: true });
-    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", onScrollOrResize);
-      window.removeEventListener("resize", onScrollOrResize);
+      if (pending) cancelAnimationFrame(pending);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
     };
   }, []);
 

@@ -1,0 +1,33 @@
+/* The 120 — base resets + shared utility classes lifted from app/globals.css.
+   Consumers get these for free by linking styles.css. */
+
+body {
+  background: var(--surface-page);
+  color: var(--text-strong);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Default link colours (light surfaces). Dark surfaces override locally. */
+a { color: var(--ink); text-decoration: none; transition: color var(--dur) var(--ease); }
+a:hover { color: var(--red); }
+
+/* Mono eyebrow/label used throughout the site */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: var(--tracking-mono);
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+/* Georgia display headline. Pair with .accent for the italic word. */
+.display {
+  font-family: var(--font-display);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-display);
+}
+.display .accent { font-style: italic; color: var(--red); }
+.display .accent-blush { font-style: italic; color: var(--blush); }

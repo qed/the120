@@ -1,0 +1,43 @@
+/* The 120 — Spacing, radius, shadow, layout tokens */
+:root {
+  /* Radius (handoff scale — squared, not soft) */
+  --radius-button: 10px;
+  --radius-card: 14px;      /* nav bar, marketing cards */
+  --radius-card-crm: 12px;  /* CRM cards + inputs */
+  --radius-image: 18px;     /* image slots */
+  --radius-pill: 100px;     /* pills, chips, seat dot labels */
+  --radius-chip: 8px;       /* square heat pips / logo chip feel */
+
+  /* Shadows */
+  --shadow-nav: 0 4px 18px rgba(19, 20, 22, 0.14);
+  --shadow-card: 0 2px 14px rgba(19, 20, 22, 0.06);
+  --shadow-card-hover: 0 18px 40px -18px rgba(0, 0, 0, 0.5);
+  --shadow-selected: 0 2px 10px rgba(3, 0, 237, 0.1); /* CRM selected glow */
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 14px;
+  --space-5: 18px;
+  --space-6: 22px;
+  --space-7: 28px;
+  --space-8: 36px;
+  --space-9: 44px;
+  --space-10: 64px;
+  --space-section: 88px;    /* section vertical padding (80–96) */
+
+  /* Layout */
+  --content-max: 1240px;
+  --content-pad: 32px;      /* side padding (32–44) */
+  --content-pad-lg: 44px;
+
+  /* Hairlines */
+  --hairline: 1px;
+  --border-medium: 1.5px;   /* form fields, secondary buttons */
+
+  /* Motion — restrained: short ease-out fades + a 1px lift, no bounces */
+  --ease: cubic-bezier(0.2, 0.8, 0.3, 1); /* @kind other */
+  --dur-fast: 0.15s; /* @kind other */
+  --dur: 0.2s; /* @kind other */
+}

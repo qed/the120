@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import Wordmark from "./Wordmark";
 import Cta from "./Cta";
 import JoinButton from "./JoinButton";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
-import { nav as defaultLinks } from "@/app/lib/site";
+import { nav as defaultLinks, isActiveNav } from "@/app/lib/site";
 
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
@@ -23,6 +24,7 @@ export default function Nav() {
   const [open, setOpen] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const items = [...defaultLinks];
+  const pathname = usePathname();
 
   useEffect(() => {
     const supabase = supabaseBrowser();
@@ -65,15 +67,23 @@ export default function Nav() {
 
           {/* Desktop links */}
           <span className="hidden items-center gap-[18px] lg:flex">
-            {items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="whitespace-nowrap text-sm text-ink transition-colors hover:text-red"
-              >
-                {item.label}
-              </Link>
-            ))}
+            {items.map((item) => {
+              const active = isActiveNav(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`whitespace-nowrap text-sm transition-colors ${
+                    active
+                      ? "text-red font-semibold"
+                      : "text-ink hover:text-red"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
             {signedIn ? (
               <Cta href="/dashboard">My dashboard</Cta>
             ) : (
@@ -136,16 +146,24 @@ export default function Nav() {
               className="overflow-hidden border-t border-line lg:hidden"
             >
               <nav className="flex flex-col px-[22px] py-4">
-                {items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={close}
-                    className="border-b border-line py-3.5 text-[15px] text-ink transition-colors hover:text-red"
-                  >
-                    {item.label}
-                  </Link>
-                ))}
+                {items.map((item) => {
+                  const active = isActiveNav(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={close}
+                      aria-current={active ? "page" : undefined}
+                      className={`border-b border-line py-3.5 text-[15px] transition-colors ${
+                        active
+                          ? "text-red font-semibold"
+                          : "text-ink hover:text-red"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
                 <div className="mt-5 flex flex-col gap-3">
                   {signedIn ? (
                     <Cta href="/dashboard" className="w-full" onClick={close}>

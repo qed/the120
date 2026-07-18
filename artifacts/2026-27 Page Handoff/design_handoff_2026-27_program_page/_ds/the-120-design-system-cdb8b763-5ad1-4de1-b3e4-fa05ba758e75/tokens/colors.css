@@ -1,0 +1,61 @@
+/* The 120 — Colour tokens
+   Light base (bone paper), ink dark bands, one loud red, and two blues:
+   deep indigo for the marketing site, electric blue for staff surfaces.
+   Values are the codebase's ground truth (app/globals.css). */
+:root {
+  /* ---- Neutrals ---- */
+  --paper: #f7f6f3;        /* bone — the page */
+  --paper-2: #efece6;      /* warmer paper tint */
+  --white: #ffffff;        /* cards, nav bar */
+  --ink: #131416;          /* primary text, dark bands, primary buttons */
+  --ink-soft: #55585e;     /* slate — body copy */
+  --muted: #9fa2a7;        /* fog — faint text, footer links */
+  --line: #e4e2dd;         /* hairline on light */
+  --line-strong: #d8d5cf;  /* stronger hairline / borders */
+  --ink-hairline: #2a2c30; /* hairline on ink */
+
+  /* ---- Brand ---- */
+  --red: #d92632;          /* Canadian red — CTA, key numbers, one accent per view */
+  --red-dark: #b31d28;     /* red hover on light */
+  --red-bright: #e8404b;   /* red hover on dark */
+  --red-ink: #2a1215;      /* deep red-black */
+  --red-tint: #ffd9dc;     /* red label on red */
+  --coral: #ff8a80;
+  --blush: #efc5b8;        /* italic accents + mono labels on dark surfaces */
+
+  /* Electric blue — the single brand blue across every surface (statement
+     bands, footer, dashboard, CRM). */
+  --blue: #0300ed;
+  --blue-dark: #0200bd;    /* hover on blue surfaces */
+  --crm-blue: #0300ed;     /* alias — same electric blue */
+  --crm-bg: #eceae5;       /* admin app background */
+  --crm-card: #f7f6f3;
+  --crm-line: #dddad4;
+  --crm-line-2: #d8d5cf;
+
+  /* Functional (used sparingly — not brand colours) */
+  --green: #0e8a5f;        /* on-track / paid */
+  --amber: #b85c00;        /* warning / cooling */
+
+  /* ---- Semantic aliases ---- */
+  --surface-page: var(--paper);
+  --surface-card: var(--white);
+  --surface-ink: var(--ink);
+  --surface-blue: var(--blue);
+  --surface-blue-electric: var(--crm-blue);
+  --surface-admin: var(--crm-bg);
+
+  --text-strong: var(--ink);
+  --text-body: var(--ink-soft);
+  --text-faint: var(--muted);
+  --text-on-dark: var(--paper);
+  --text-on-dark-soft: rgba(255, 255, 255, 0.75);
+  --text-accent: var(--red);
+  --text-accent-on-dark: var(--blush);
+
+  --border-hairline: var(--line);
+  --border-strong: var(--line-strong);
+  --border-on-dark: rgba(255, 255, 255, 0.24);
+
+  --focus-ring: var(--ink);
+}

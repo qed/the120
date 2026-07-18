@@ -1,0 +1,24 @@
+<!-- @dsCard group="Spacing" viewport="700x170" name="Radius scale" subtitle="Squared, not soft — 10 button, 12/14 card, 18 image, 100 pill" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body{margin:0;background:var(--paper)}
+  .wrap{padding:28px 34px;display:flex;gap:24px;align-items:flex-end;font-family:var(--font-mono)}
+  .item{display:flex;flex-direction:column;gap:8px;align-items:center}
+  .box{width:84px;height:64px;background:var(--white);border:1px solid var(--line-strong)}
+  .lbl{font-size:10px;color:var(--ink-soft)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="item"><div class="box" style="border-radius:var(--radius-button)"></div><span class="lbl">10 · BUTTON</span></div>
+  <div class="item"><div class="box" style="border-radius:var(--radius-card-crm)"></div><span class="lbl">12 · CARD</span></div>
+  <div class="item"><div class="box" style="border-radius:var(--radius-card)"></div><span class="lbl">14 · NAV/CARD</span></div>
+  <div class="item"><div class="box" style="border-radius:var(--radius-image)"></div><span class="lbl">18 · IMAGE</span></div>
+  <div class="item"><div class="box" style="border-radius:var(--radius-pill);width:110px"></div><span class="lbl">100 · PILL</span></div>
+</div>
+</body>
+</html>

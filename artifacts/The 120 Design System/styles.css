@@ -1,0 +1,7 @@
+/* The 120 — design system entry point. Consumers link this one file.
+   Keep this file a list of @import lines only. */
+@import "tokens/fonts.css";
+@import "tokens/colors.css";
+@import "tokens/typography.css";
+@import "tokens/spacing.css";
+@import "tokens/base.css";

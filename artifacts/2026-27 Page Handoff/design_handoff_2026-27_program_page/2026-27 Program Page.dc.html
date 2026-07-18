@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<title>The 2026-27 Year · The 120</title>
+<meta name="description" content="In one year your child takes real steps toward becoming an entrepreneur: one who reads widely, thinks deeply, builds with AI, and runs a real business.">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/tokens/colors.css">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/tokens/typography.css">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/tokens/base.css">
+<link rel="stylesheet" href="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/styles.css">
+<script src="_ds/the-120-design-system-cdb8b763-5ad1-4de1-b3e4-fa05ba758e75/_ds_bundle.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: var(--paper); }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { color: var(--red); }
+  section[id] { scroll-margin-top: 152px; }
+  @media (max-width: 920px) {
+    [data-r~="pad"] { padding-left: 24px !important; padding-right: 24px !important; }
+    [data-r~="grid3"] { grid-template-columns: repeat(2,1fr) !important; }
+    [data-r~="grid5"] { grid-template-columns: repeat(3,1fr) !important; }
+    [data-r~="grid4"] { grid-template-columns: repeat(2,1fr) !important; }
+    [data-r~="two"] { grid-template-columns: 1fr !important; gap: 32px !important; }
+    [data-r~="stepper"] { flex-direction: column !important; align-items: stretch !important; gap: 14px !important; }
+    [data-r~="steparrow"] { display: none !important; }
+    [data-r~="heroh1"] { font-size: 46px !important; }
+    [data-r~="heropad"] { padding-top: 0 !important; padding-left: 24px !important; padding-right: 24px !important; }
+    [data-r~="herosec"] { min-height: 600px !important; }
+    [data-r~="ctah1"] { font-size: 40px !important; }
+  }
+  @media (max-width: 600px) {
+    [data-r~="sec"] { padding-top: 56px !important; padding-bottom: 56px !important; }
+    [data-r~="grid3"] { grid-template-columns: 1fr !important; }
+    [data-r~="grid5"] { grid-template-columns: repeat(2,1fr) !important; }
+    [data-r~="fig"] { font-size: 32px !important; }
+    [data-r~="navsec"] { display: none !important; }
+    [data-r~="navwrap"] { gap: 10px !important; }
+    [data-r~="heroh1"] { font-size: 36px !important; }
+    [data-r~="heropad"] { padding-top: 0 !important; }
+    [data-r~="herosec"] { min-height: 520px !important; }
+    [data-r~="ctah1"] { font-size: 32px !important; }
+  }
+</style>
+</helmet>
+
+<div style="font-family:var(--font-sans);color:var(--ink);background:var(--paper);overflow-x:hidden">
+
+  <!-- ============ STICKY HEADER: nav + anchor sub-nav ============ -->
+  <header style="position:sticky;top:18px;z-index:50">
+    <div style="max-width:1240px;margin:0 auto;padding:0 20px;display:flex;flex-direction:column;gap:8px">
+      <div style="border-radius:14px;background:var(--white);box-shadow:var(--shadow-nav);display:flex;align-items:center;justify-content:space-between;padding:11px 22px">
+        <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Wordmark" tone="dark" sublabel="TORONTO" hint-size="150px,40px"></x-import>
+        <span style="display:flex;align-items:center;gap:18px" data-r="navwrap">
+          <a href="#" style="font-size:14px;color:var(--red);font-weight:600">2026-27</a>
+          <a href="#" style="font-size:14px;color:var(--ink)" data-r="navsec">The Gauntlet</a>
+          <a href="#" style="font-size:14px;color:var(--ink)" data-r="navsec">Tuition</a>
+          <a href="#" style="font-size:14px;color:var(--ink)" data-r="navsec">FAQ</a>
+          <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Button" variant="ghost" href="#call" hint-size="120px,44px">{{ t.callCta }}</x-import>
+          <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Button" variant="primary" href="#join" hint-size="140px,44px">{{ t.joinCta }}</x-import>
+        </span>
+      </div>
+      <nav style="border-radius:14px;background:var(--white);border:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:9px 16px 9px 22px">
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow-x:auto;white-space:nowrap">
+          <sc-for list="{{ navLinks }}" as="n" hint-placeholder-count="10">
+            <span style="display:inline-flex;align-items:center">
+              <a href="{{ n.href }}" style="{{ n.style }}">{{ n.label }}</a>
+              <sc-if value="{{ n.showSep }}" hint-placeholder-val="{{ true }}"><span style="color:var(--muted);padding:0 10px;font-family:var(--font-mono);font-size:11px">·</span></sc-if>
+            </span>
+          </sc-for>
+        </div>
+        <div style="flex:none;display:flex;gap:2px;border:1px solid var(--line-strong);border-radius:100px;padding:2px">
+          <button onClick="{{ setParents }}" style="{{ audParentStyle }}">PARENTS</button>
+          <button onClick="{{ setKids }}" style="{{ audKidsStyle }}">KIDS</button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ============ HERO ============ -->
+  <section style="position:relative;min-height:780px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;margin-top:-136px;box-sizing:border-box;padding-top:136px" data-r="herosec">
+    <div style="position:absolute;inset:0;background:var(--blue);z-index:0"></div>
+    <div style="position:absolute;inset:0;z-index:1">
+      <image-slot id="hero-photo" shape="rect" placeholder="Drop the hero photo — a kid mid-pitch or mid-build at a workshop table" fit="cover"></image-slot>
+    </div>
+    <div style="position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(rgba(19,20,22,0.18) 0%, rgba(19,20,22,0) 30%, rgba(19,20,22,0.02) 55%, rgba(19,20,22,0.78) 100%)"></div>
+    <div style="position:relative;z-index:3;pointer-events:none;box-sizing:border-box;max-width:1240px;width:100%;margin:0 auto;padding:0 44px" data-r="heropad">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:26px;pointer-events:auto">
+        <sc-for list="{{ cSegs }}" as="s" hint-placeholder-count="6">
+          <button onClick="{{ s.onSelect }}" style="{{ s.style }}">{{ s.label }}</button>
+        </sc-for>
+      </div>
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blush)">THE 2026-27 YEAR · FIVE GROUPS · ONE PROGRAM</span>
+      <h1 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:68px;color:#fff;max-width:880px;margin:16px 0 0" data-r="heroh1">The 2026-27 year. <em style="font-style:italic;color:var(--blush);display:block">Your business.</em></h1>
+      <p style="max-width:760px;font-size:18px;line-height:1.5;color:#fff;margin:20px 0 0;border-left:3px solid var(--blush);padding-left:18px">{{ cSubhead }}</p>
+      <div style="margin-top:22px;font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;color:rgba(255,255,255,0.68)">The program is to learn how to build a business - you adapt the plan to your business.</div>
+    </div>
+  </section>
+
+  <!-- ============ 01 · THE YEAR AT A GLANCE ============ -->
+  <section id="year" style="background:var(--paper);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.yearKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 40px">{{ t.yearHeadLead }} <em style="font-style:italic;color:var(--red)">{{ t.yearHeadAccent }}</em></h2>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px" data-r="grid3">
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:40px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">20 <em style="font-style:italic;color:var(--red)">sessions</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y1label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y1desc }}</div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:40px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">5 <em style="font-style:italic;color:var(--red)">phases</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y2label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y2desc }}</div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:40px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">5 × <em style="font-style:italic;color:var(--red)">5</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y3label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y3desc }}</div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:40px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">20 <em style="font-style:italic;color:var(--red)">books</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y4label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y4desc }}</div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:40px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">40 <em style="font-style:italic;color:var(--red)">paragraphs</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y5label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y5desc }}</div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:24px 22px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-display);font-size:34px;line-height:1;color:var(--ink);white-space:nowrap" data-r="fig">2X, 3X or 4X <em style="font-style:italic;color:var(--red)">speed</em></div>
+          <div style="font-size:15px;font-weight:600;white-space:nowrap">{{ t.y6label }}</div>
+          <div style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.y6desc }}</div>
+        </div>
+      </div>
+      <p style="text-align:right;font-size:15px;color:var(--ink-soft);margin:24px 0 0">{{ t.yearNote }}</p>
+    </div>
+  </section>
+
+  <!-- ============ 02 · WHO THEY BECOME ============ -->
+  <section id="become" style="background:var(--white);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.becomeKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 18px">{{ t.becomeHeadLead }} <em style="font-style:italic;color:var(--red)">{{ t.becomeHeadAccent }}</em></h2>
+      <p style="max-width:620px;font-size:17px;line-height:1.6;color:var(--ink-soft);margin:0 0 44px">{{ t.becomeIntro }}</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:36px" data-r="grid3">
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">{{ t.b1k }}</span>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.b1b }}</div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">{{ t.b2k }}</span>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.b2b }}</div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">{{ t.b3k }}</span>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.b3b }}</div>
+        </div>
+      </div>
+      <div style="background:var(--white);border-radius:14px;border-left:3px solid var(--red);box-shadow:var(--shadow-card);padding:28px 30px;display:flex;flex-direction:column;gap:12px">
+        <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">{{ t.mathCalloutKicker }}</span>
+        <div style="font-size:18px;line-height:1.6;color:var(--ink);max-width:900px">{{ t.mathCalloutBody }}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 · COACHING ============ -->
+  <section id="coaching" style="background:var(--paper);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.coachKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 40px">{{ t.coachHeadLead }} <em style="font-style:italic;color:var(--red)">{{ t.coachHeadAccent }}</em></h2>
+      <div style="display:grid;grid-template-columns:1fr 1.1fr;gap:56px" data-r="two">
+        <div style="display:flex;flex-direction:column;gap:24px">
+          <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.coachIntro }}</p>
+          <div style="position:relative;border-radius:18px;overflow:hidden;min-height:280px">
+            <image-slot id="coaching-photo" shape="rect" placeholder="Optional: a coach working with a kid at a workshop table" fit="cover"></image-slot>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:168px 1fr;gap:0 28px;padding:0 0 22px 0;border-bottom:1px solid var(--line)">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.09em;color:var(--red);white-space:nowrap;padding-top:3px">{{ t.cr1l }}</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.cr1b }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:168px 1fr;gap:0 28px;padding:22px 0;border-bottom:1px solid var(--line)">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.09em;color:var(--red);white-space:nowrap;padding-top:3px">{{ t.cr2l }}</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.cr2b }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:168px 1fr;gap:0 28px;padding:22px 0;border-bottom:1px solid var(--line)">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.09em;color:var(--red);white-space:nowrap;padding-top:3px">{{ t.cr3l }}</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.cr3b }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:168px 1fr;gap:0 28px;padding:22px 0 0">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.09em;color:var(--red);white-space:nowrap;padding-top:3px">{{ t.cr4l }}</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.cr4b }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 · READ WIDELY ============ -->
+  <section id="books" style="background:var(--white);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.booksKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 18px">Twenty books. <em style="font-style:italic;color:var(--red)">Three tracks.</em></h2>
+      <p style="max-width:680px;font-size:17px;line-height:1.6;color:var(--ink-soft);margin:0 0 32px">{{ t.booksIntro }}</p>
+
+      <div style="display:flex;gap:10px;margin-bottom:28px;flex-wrap:wrap">
+        <sc-for list="{{ tracks }}" as="tab" hint-placeholder-count="3">
+          <button onClick="{{ tab.onSelect }}" style="{{ tab.style }}">{{ tab.label }}</button>
+        </sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px" data-r="grid5">
+        <sc-for list="{{ bookGroups }}" as="group" hint-placeholder-count="5">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--red)">{{ group.step }}</span>
+            <sc-for list="{{ group.books }}" as="book" hint-placeholder-count="4">
+              <div style="background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 15px;display:flex;flex-direction:column;gap:4px">
+                <span style="font-size:16px;font-weight:600;line-height:1.3;color:var(--ink)">{{ book.title }}</span>
+                <span style="font-size:14px;color:var(--ink-soft)">{{ book.author }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:28px 30px;margin-top:32px;display:flex;flex-direction:column;gap:12px">
+        <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">{{ t.writingKicker }}</span>
+        <div style="font-size:17px;line-height:1.6;color:var(--ink);max-width:900px">{{ t.writingBody }}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 · THE SCHEDULE ============ -->
+  <section id="schedule" style="background:var(--paper);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.schedKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 40px">Year. Month. Week. <em style="font-style:italic;color:var(--red)">How it all fits.</em></h2>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:30px 32px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:baseline;gap:16px"><span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">THE YEAR</span></div>
+          <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0;max-width:900px">{{ t.yearBlockBody }}</p>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <sc-for list="{{ seasons }}" as="season" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:16px">
+                <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">{{ season.label }}</span>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px" data-r="grid4">
+                  <sc-for list="{{ season.items }}" as="date" hint-placeholder-count="4">
+                    <div style="{{ date.pillStyle }}">
+                      <span>{{ date.label }}</span>
+                      <sc-if value="{{ date.showMark }}" hint-placeholder-val="{{ true }}"><span style="color:var(--red)">{{ date.mark }}</span></sc-if>
+                      <sc-if value="{{ date.showTag }}" hint-placeholder-val="{{ true }}"><span style="font-size:9px;letter-spacing:0.12em">{{ date.tag }}</span></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <sc-for list="{{ dateNotes }}" as="note" hint-placeholder-count="3">
+              <span style="font-size:13px;color:var(--muted)">{{ note }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:30px 32px;display:flex;flex-direction:column;gap:14px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">THE MONTH</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px" data-r="two">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">AT THE WORKSHOP · TWO SATURDAYS</span>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Demo what you built</span></div>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Pass criteria with your coach</span></div>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Sell to the room</span></div>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Plan the next two weeks</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">AT HOME · IN BETWEEN</span>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ink);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">{{ t.monthHome1 }}</span></div>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ink);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">{{ t.monthHome2 }}</span></div>
+              <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ink);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">{{ t.monthHome3 }}</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:30px 32px;display:flex;flex-direction:column;gap:14px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">THE WEEK</span>
+          <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">THE AT-HOME RHYTHM · MOST WEEKS</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 32px" data-r="two">
+            <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Go 2-4X with Math, earn rewards for The Emporium</span></div>
+            <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Write &amp; publish one paragraph or more (optional)</span></div>
+            <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">A book on the go, about one every two weeks</span></div>
+            <div style="display:flex;align-items:flex-start;gap:11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);flex:none;margin-top:7px"></span><span style="font-size:16px;line-height:1.5;color:var(--ink)">Whatever hours the business demands</span></div>
+          </div>
+          <p style="font-family:var(--font-display);font-style:italic;font-size:20px;line-height:1.3;color:var(--ink);margin:6px 0 0">{{ t.weekCloseLead }}<span style="color:var(--red)">{{ t.weekCloseAccent }}</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 · THE CORE LOOP ============ -->
+  <section id="loop" style="background:var(--white);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.loopKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 18px">{{ t.loopHeadLead }} <em style="font-style:italic;color:var(--red)">{{ t.loopHeadAccent }}</em></h2>
+      <p style="max-width:680px;font-size:17px;line-height:1.6;color:var(--ink-soft);margin:0 0 44px">{{ t.loopIntro }}</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:40px" data-r="grid3">
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">01 · EXPERTISE</span>
+          <div style="font-size:21px;font-weight:600;letter-spacing:-0.01em">Get good at something real.</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.l1b }}</div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">02 · AUDIENCE</span>
+          <div style="font-size:21px;font-weight:600;letter-spacing:-0.01em">Share it until people listen.</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.l2b }}</div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">03 · PRODUCT</span>
+          <div style="font-size:21px;font-weight:600;letter-spacing:-0.01em">Build what the audience asks for.</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.l3b }}</div>
+        </div>
+      </div>
+      <p style="max-width:900px;font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.loopClose }}</p>
+    </div>
+  </section>
+
+  <!-- ============ 07 · THE SKILL TRACK ============ -->
+  <section id="skills" style="background:var(--paper);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.skillsKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 18px">Fifteen skills. <em style="font-style:italic;color:var(--red)">Tracked all year.</em></h2>
+      <p style="max-width:640px;font-size:17px;line-height:1.6;color:var(--ink-soft);margin:0 0 44px">{{ t.skillsIntro }}</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:36px;margin-bottom:48px" data-r="grid3">
+        <div style="border-top:2px solid var(--ink);padding-top:18px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red);margin-bottom:16px">LIFE</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">01</span><span style="font-size:16px;color:var(--ink)">Integrity & Humility</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">02</span><span style="font-size:16px;color:var(--ink)">Courage & Discipline</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">03</span><span style="font-size:16px;color:var(--ink)">Agency & Ambition</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">04</span><span style="font-size:16px;color:var(--ink)">Communication</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">05</span><span style="font-size:16px;color:var(--ink)">Leadership & Social Intelligence</span></div>
+          </div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red);margin-bottom:16px">ENTREPRENEURSHIP</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">01</span><span style="font-size:16px;color:var(--ink)">Selling</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">02</span><span style="font-size:16px;color:var(--ink)">Building</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">03</span><span style="font-size:16px;color:var(--ink)">Rapid Iteration</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">04</span><span style="font-size:16px;color:var(--ink)">Financial Thinking</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">05</span><span style="font-size:16px;color:var(--ink)">Knowing Your Domain</span></div>
+          </div>
+        </div>
+        <div style="border-top:2px solid var(--ink);padding-top:18px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red);margin-bottom:16px">AI</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">01</span><span style="font-size:16px;color:var(--ink)">AI as Thinking Partner</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">02</span><span style="font-size:16px;color:var(--ink)">AI-Augmented Building</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">03</span><span style="font-size:16px;color:var(--ink)">AI Tool Literacy</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">04</span><span style="font-size:16px;color:var(--ink)">Agents & Automation</span></div>
+            <div style="display:flex;gap:12px"><span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">05</span><span style="font-size:16px;color:var(--ink)">AI Judgment & Ethics</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px" data-r="grid4">
+        <div style="background:var(--white);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:8px">
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">LEVEL 1</span>
+          <span style="font-size:15px;font-weight:600;font-family:var(--font-mono);letter-spacing:0.06em">STARTING</span>
+          <span style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.lvl1desc }}</span>
+        </div>
+        <div style="background:var(--white);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:8px">
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">LEVEL 2</span>
+          <span style="font-size:15px;font-weight:600;font-family:var(--font-mono);letter-spacing:0.06em">PRACTICING</span>
+          <span style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.lvl2desc }}</span>
+        </div>
+        <div style="background:var(--white);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:8px">
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--muted)">LEVEL 3</span>
+          <span style="font-size:15px;font-weight:600;font-family:var(--font-mono);letter-spacing:0.06em">SOLID</span>
+          <span style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.lvl3desc }}</span>
+        </div>
+        <div style="background:var(--white);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--red)">
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--red)">LEVEL 4</span>
+          <span style="font-size:15px;font-weight:600;font-family:var(--font-mono);letter-spacing:0.06em;color:var(--red)">COULD TEACH IT</span>
+          <span style="font-size:14px;line-height:1.55;color:var(--ink-soft)">{{ t.lvl4desc }}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 08 · THE PATH ============ -->
+  <section id="path" style="background:var(--blue);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blush)">{{ t.pathKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:#fff;margin:14px 0 20px">{{ t.pathHeadLead }} <em style="font-style:italic;color:var(--blush)">{{ t.pathHeadAccent }}</em></h2>
+      <p style="max-width:760px;font-size:17px;line-height:1.6;color:rgba(255,255,255,0.75);margin:0 0 52px">{{ t.pathIntro }}</p>
+
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0;margin-bottom:56px;flex-wrap:wrap" data-r="stepper">
+        <sc-for list="{{ nodes }}" as="node" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:150px">
+            <sc-if value="{{ node.showArrow }}" hint-placeholder-val="{{ true }}">
+              <span style="font-size:20px;color:rgba(255,255,255,0.4);flex:none" data-r="steparrow">→</span>
+            </sc-if>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;flex:1">
+              <div style="width:48px;height:48px;border-radius:50%;background:var(--paper);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:14px;color:var(--ink);flex:none">{{ node.num }}</div>
+              <div style="font-family:var(--font-display);font-size:22px;color:#fff;text-align:center">{{ node.name }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:56px" data-r="grid3">
+        <div style="background:var(--paper);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;color:var(--red);font-weight:500">PASS FIVE, MOVE ON</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.pc1b }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;color:var(--red);font-weight:500">STUCK IS NORMAL</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.pc2b }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;color:var(--red);font-weight:500">FINISH EARLY, GO DEEPER</div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.pc3b }}</div>
+        </div>
+      </div>
+
+      <sc-if value="{{ isKids }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+          <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.7)">PASS CRITERIA</span>
+          <div style="display:flex;gap:2px;border:1px solid rgba(255,255,255,0.24);border-radius:100px;padding:2px">
+            <button onClick="{{ setCritKid }}" style="{{ critKidStyle }}">KID VOICE</button>
+            <button onClick="{{ setCritOrig }}" style="{{ critOrigStyle }}">ORIGINAL</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <div id="path-detail" style="display:flex;flex-direction:column;gap:12px">
+        <sc-for list="{{ steps }}" as="step" hint-placeholder-count="5">
+          <div style="background:var(--white);border-radius:14px;overflow:hidden">
+            <div onClick="{{ step.onToggle }}" style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:24px 26px;cursor:pointer">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;color:var(--red)">PHASE {{ step.num }} · {{ step.key }}</span>
+                <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+                  <span style="font-family:var(--font-display);font-size:28px;color:var(--ink)">{{ step.title }}</span>
+                  <span style="font-size:15px;color:var(--ink-soft)">{{ step.subtitle }}</span>
+                </div>
+              </div>
+              <span style="font-family:var(--font-mono);font-size:24px;color:var(--red);line-height:1;flex:none">{{ step.sign }}</span>
+            </div>
+            <sc-if value="{{ step.open }}" hint-placeholder-val="{{ true }}">
+              <div style="padding:0 26px 26px">
+                <p style="font-size:16px;line-height:1.6;color:var(--ink);margin:0 0 18px;max-width:720px;font-style:italic">{{ step.principle }}</p>
+                <ul style="margin:0;padding:0;border-top:1px solid var(--line)">
+                  <sc-for list="{{ step.criteria }}" as="c" hint-placeholder-count="5">
+                    <li style="display:flex;gap:14px;padding:11px 0;list-style:none;border-bottom:1px solid var(--line)">
+                      <span style="font-family:var(--font-mono);font-size:12px;color:var(--red);flex:none;margin-top:3px">{{ c.n }}</span>
+                      <span style="font-size:15px;line-height:1.55;color:var(--ink-soft)">{{ c.text }}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+                <div style="margin-top:16px;display:flex;flex-direction:column;gap:6px">
+                  <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">{{ t.pathSeeLabel }}</span>
+                  <span style="font-size:15px;line-height:1.6;color:var(--ink);font-style:italic;max-width:720px">{{ step.parentsSee }}</span>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 09 · THE FOUNDATION (MATH) ============ -->
+  <section id="math" style="background:var(--paper);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.mathKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 40px">Math at <em style="font-style:italic;color:var(--red)">2X, 3X, 4X</em> speed.</h2>
+      <div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:56px;align-items:start" data-r="two">
+        <div style="display:flex;flex-direction:column;gap:20px">
+          <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.mathP1 }}</p>
+          <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.mathP2 }}</p>
+          <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.mathP3 }}</p>
+        </div>
+        <div style="background:var(--white);border-radius:14px;box-shadow:var(--shadow-card);padding:8px 28px">
+          <div style="padding:24px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">THE CURRICULUM</span>
+            <span style="font-size:21px;font-weight:600;letter-spacing:-0.01em">Math Academy</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.mathCurDesc }}</span>
+          </div>
+          <div style="padding:24px 0;display:flex;flex-direction:column;gap:8px">
+            <span style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;color:var(--muted)">THE SPEED LAYER</span>
+            <span style="font-size:21px;font-weight:600;letter-spacing:-0.01em">The Gauntlet</span>
+            <span style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.mathSpeedDesc }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 10 · END OF YEAR ============ -->
+  <section id="end" style="background:var(--white);padding:88px 0" data-r="sec">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px" data-r="pad">
+      <span style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:var(--red)">{{ t.endKicker }}</span>
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.08;font-size:44px;color:var(--ink);margin:14px 0 18px">{{ t.endHeadLead }} <em style="font-style:italic;color:var(--red)">{{ t.endHeadAccent }}</em></h2>
+      <p style="max-width:640px;font-size:17px;line-height:1.6;color:var(--ink-soft);margin:0 0 40px">{{ t.endIntro }}</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:40px" data-r="grid3">
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">A real <em style="font-style:italic;color:var(--red)">sale</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e1 }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">A real <em style="font-style:italic;color:var(--red)">product</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e2 }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">Real <em style="font-style:italic;color:var(--red)">numbers</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e3 }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">Up to <em style="font-style:italic;color:var(--red)">20 books</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e4 }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">A <em style="font-style:italic;color:var(--red)">stage moment</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e5 }}</div>
+        </div>
+        <div style="background:var(--paper);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--font-display);font-size:26px;color:var(--ink)">A <em style="font-style:italic;color:var(--red)">tested mind</em></div>
+          <div style="font-size:15px;line-height:1.6;color:var(--ink-soft)">{{ t.e6 }}</div>
+        </div>
+      </div>
+      <p style="max-width:760px;font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0">{{ t.endClose }}</p>
+    </div>
+  </section>
+
+  <!-- ============ CTA BAND ============ -->
+  <section id="join" style="background:var(--red);padding:96px 0;text-align:center" data-r="sec">
+    <div style="max-width:820px;margin:0 auto;padding:0 44px;display:flex;flex-direction:column;gap:24px;align-items:center" data-r="pad">
+      <h2 style="font-family:var(--font-display);font-weight:400;letter-spacing:-0.01em;line-height:1.1;font-size:52px;color:#fff;margin:0" data-r="ctah1"><span style="display:block">One year.</span><span style="display:block">One real business.</span><em style="font-style:italic;color:var(--blush);display:block">One of 120.</em></h2>
+      <p style="font-size:17px;color:rgba(255,255,255,0.85);margin:0"><span style="display:block">{{ t.ctaSub1 }}</span><span style="display:block">{{ t.ctaSub2 }}</span></p>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
+        <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Button" variant="white" href="#join" hint-size="160px,44px">{{ t.joinCta }}</x-import>
+        <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Button" variant="ghostLight" href="#call" hint-size="150px,44px">{{ t.callCta }}</x-import>
+      </div>
+      <div style="margin-top:4px">
+        <x-import component-from-global-scope="The120DesignSystem_cdb8b7.SeatsDot" remaining="{{ 113 }}" total="{{ 120 }}" tone="onDark" hint-size="240px,20px"></x-import>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="background:var(--blue);padding:48px 0 36px">
+    <div style="max-width:1240px;margin:0 auto;padding:0 44px;display:flex;flex-direction:column;gap:28px" data-r="pad">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:24px">
+        <x-import component-from-global-scope="The120DesignSystem_cdb8b7.Wordmark" tone="light" sublabel="TORONTO" hint-size="150px,40px"></x-import>
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <a href="#" style="font-size:13px;color:rgba(255,255,255,0.85)">2026-27</a>
+          <a href="#" style="font-size:13px;color:var(--muted)">The groups</a>
+          <a href="#" style="font-size:13px;color:var(--muted)">Parents</a>
+          <a href="#" style="font-size:13px;color:var(--muted)">Tuition</a>
+          <a href="#" style="font-size:13px;color:var(--muted)">FAQ</a>
+          <a href="#" style="font-size:13px;color:var(--muted)">Sign in</a>
+        </div>
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,0.25);padding-top:20px">
+        <span style="font-size:12px;line-height:1.6;color:rgba(255,255,255,0.7)">© 2026 The 120 · A learning centre. Not an accredited school. TIN CAN is a trademark of Tin Can Untechnologies, Inc.</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const COPY = {
+  parents: {
+    joinCta: "Join the 120", callCta: "Book a call",
+    heroKicker: "THE 2026-27 YEAR · FOUNDING COHORT · TORONTO",
+    heroHead: "The foundation to become", heroHeadAccent: "an entrepreneur.",
+    heroSub: "In one year your child takes real steps toward becoming an entrepreneur: one who reads widely, thinks deeply, builds with AI, and runs a real business. This is the start of the path to founding their own company one day.",
+    yearKicker: "01 · THE YEAR AT A GLANCE", yearHeadLead: "One year.", yearHeadAccent: "At a glance.",
+    y1label: "Weekend workshops", y1desc: "In-person workshops on the 1st and 3rd Saturday of every month, September 2026 to June 2027.",
+    y2label: "The Path", y2desc: "Sell, then Build, then Validate, then Grow, then Scale. Every child moves through the same five phases, at their own pace.",
+    y3label: "Pass to move on", y3desc: "Each phase has five criteria a child must demonstrate before moving to the next. No seat time, no shortcuts. Proof or you stay.",
+    y4label: "Three reading tracks", y4desc: "A curated year of reading at your child's level: one track for Grades 3–5, one for 6–8, one for 9–12.",
+    y5label: "The writing habit", y5desc: "Optional but encouraged: one published paragraph a week on what they're reading and building. The start of a personal brand.",
+    y6label: "Learn math to run the numbers", y6desc: "Knowing math means you know the health of your business. Catch up, reach ahead, or get solid through Math Academy and The Gauntlet.",
+    yearNote: "20 Saturdays, 20 books, one real business. Book a call or join today.",
+    becomeKicker: "02 · WHO THEY BECOME", becomeHeadLead: "Thoughtful,", becomeHeadAccent: "tech-native leaders.",
+    becomeIntro: "The next generation of entrepreneurs will need to think deeply and be native with the latest tools. The 2026-27 year is designed to produce both, without letting either crowd out the other.",
+    b1k: "01 · WELL-GROUNDED ENTREPRENEUR", b1b: "By June your child can sell. They can build with AI. They can read a profit and loss statement. They can run a loop to validate a business idea. And they have enough math and financial literacy under them to set the stage for everything that comes next.",
+    b2k: "02 · DEEP THINKER", b2b: "They've read up to 20 books chosen to make them think about life, business, and entrepreneurship at their level. If they've taken on the writing habit, they've published a paragraph or more every week on what they've read and built. They can hold a real discussion, a real one, for their age, about ethics, technology, and the shape of the world.",
+    b3k: "03 · AI EXPERT", b3b: "Outside their schoolwork, they treat AI as a co-founder. They've shipped products in days, deployed agents and automations, and used AI on every part of building a business: research, writing, selling, operating. They will never work the old way, because they never learned it.",
+    mathCalloutKicker: "NO COMPROMISE ON MATH", mathCalloutBody: "You can't build a sustainable business without a core understanding of math. So the deal is simple: the same math they'd learn in school, at 2X, 3X, 4X the pace. Keeping pace in math is what unlocks the weekend workshops. If math falls behind, the business work stops until it catches up.",
+    coachKicker: "03 · COACHING", coachHeadLead: "An entrepreneur in their corner.", coachHeadAccent: "A room full of them.",
+    coachIntro: "Every Saturday workshop is run by working entrepreneurs, not lecturers. Coaches are available to your child wherever they are on The Path: to listen to a pitch, to make plans to complete the next tasks, and to ask the questions a real investor would ask, gently, and then less gently as your child levels up.",
+    cr1l: "YOUR CHILD'S COACH", cr1b: "A working operator who knows your child's business by name. Feedback is specific and tied to their progress down The Path, for example: 'What did you hear across your 8 sales that you think made them say yes?', never generic praise.",
+    cr2l: "GUEST FOUNDERS", cr2b: "Throughout the year, founders and builders from the Toronto community and beyond join workshops to demo, tell the truth about their failures, and take questions. Kids get comfortable in rooms with real operators.",
+    cr3l: "THE ADVISOR BENCH", cr3b: "Behind the coaches sits The 120's advisor network. When a child's progress down The Path needs something specific, we'll find someone who has done it before to help.",
+    cr4l: "PARENTS IN THE LOOP", cr4b: "You're not guessing. You see The Path map, you know which criteria your child has passed, and twice a year you watch them present at an intensive.",
+    booksKicker: "04 · READ WIDELY", booksIntro: "Reading is half of thinking deeply. Every child reads roughly a book every two weeks, drawn from a track matched to their reading level, not just their grade. Each track follows the path: four books per phase, mixing business, ingenuity, and the kind of stories that make a kid think about how the world works. Parents get the final list in September.",
+    writingKicker: "40 WRITING EFFORTS · OPTIONAL", writingBody: "Write and publish one paragraph or more a week on what they're reading and building. Forty by June. It's optional, and it's the single best predictor of the kids who go furthest: the habit of thinking in public is the habit of building a brand. Coaches read everything and the best paragraphs get read aloud at workshops.",
+    schedKicker: "05 · THE SCHEDULE", yearBlockBody: "The year kicks off Saturday, September 19. Nineteen in-person workshops run through to June 2027, on the 1st and 3rd Saturday of most months, plus one special session added later as the year progresses. Each workshop runs twice, 9 am to 12 pm and 12 pm to 3 pm, same session both times, so families attend whichever fits their weekend. Plus the Toronto intensives, where kids demo their businesses on stage.",
+    monthHome1: "The business runs, day to day", monthHome2: "Parents are first customers, chauffeurs, and board", monthHome3: "Math keeps moving at 2X, 3X, 4X pace",
+    weekCloseLead: "Be warned: it's so engaging that ", weekCloseAccent: "kids will stop calling it homework.",
+    loopKicker: "06 · THE CORE LOOP · EXPERTISE → AUDIENCE → PRODUCT", loopHeadLead: "The loop that", loopHeadAccent: "compounds.",
+    loopIntro: "Every lasting entrepreneur runs the same loop, whether they're 11 or 40. Get genuinely good at something. Share what you're learning until people pay attention. Build what those people ask for. Then go around again, one level up. Most adults never learn this loop. Your child will run it all year.",
+    l1b: "The loop starts with knowing something worth knowing. Your child picks a domain they already care about, sneakers, baking, Minecraft servers, dog training, it truly doesn't matter, and goes deep: the reading track, the math, and the workshops all feed it. Kids don't need credentials to become experts. They need obsession plus structure, and they have more spare obsession than any adult you know.",
+    l2b: "This is what the writing habit is really for. One published paragraph a week on what they're learning isn't a school assignment, it's how a young person earns trust: people believe the kid who teaches what they know. Their first audience is small and safe, the cohort, the neighbours, your own network. It grows from there, at your pace and with your supervision.",
+    l3b: "Here's the secret most first-time founders miss: when you know a subject and people already listen to you about it, you don't have to guess what to build. The audience tells you. Products built this way sell easier, because the trust arrived before the pitch did. This is where The Path shines, teaching you the easier way to build.",
+    loopClose: "Around the loop again, and again. Each pass makes the next one easier: deeper expertise, a warmer audience, a better product. This is why reading, writing, math and business aren't four separate subjects at The 120. They're one loop, and it's the same loop that will protect your child's career in the age of AI: knowledge that's theirs, people who trust them, and real things they've built to prove it.",
+    skillsKicker: "07 · THE SKILL TRACK", skillsIntro: "Underneath The Path, software, parents and coaches track fifteen skills in three pillars. Every child, at every phase, is developing all fifteen; The Path just changes which ones are under the spotlight. Parents celebrate skill map progress on Demo Days.",
+    lvl1desc: "Aware of the skill, first attempts.", lvl2desc: "Applying it with a coach's support.", lvl3desc: "Delivers consistently without help.", lvl4desc: "Coaches other kids. The bar.",
+    pathKicker: "08 · THE PATH · SELL → BUILD → VALIDATE → GROW → SCALE", pathHeadLead: "Five Phases.", pathHeadAccent: "At your child's pace.",
+    pathIntro: "Every member of The 120 grows through the same five phases, each with a clear focus and exit standard. Every member goes at their own pace. They advance by proving the work, not sitting through it. One kid masters Validate by winter, another hits Build by spring. Both are winning.",
+    pc1b: "Each phase has five pass criteria. Your child demonstrates each one to their coach at a Saturday workshop. Five checks, and they step forward.",
+    pc2b: "Some criteria take one Saturday. Some take five. Coaches work with whatever phase each child is on, every session. Nobody is left behind and nobody is held back.",
+    pc3b: "A child who completes all five phases before June doesn't stop. They run their business at Scale, mentor kids earlier on The Path, and preview what next year holds.",
+    pathSeeLabel: "WHAT PARENTS SEE",
+    mathKicker: "09 · THE FOUNDATION", mathP1: "Your child may want to build their business, but academics are foundational and core to their future success. The 120 focuses on math because as your child builds their business, they need to know and run the numbers to make it healthy.",
+    mathP2: "Math at The 120 is mastery-based so nothing is skipped and no holes exist. It's the math you learn in school, but our system allows you to make way faster progress than in school or after school.",
+    mathP3: "The gate is real. Keeping pace in math is what unlocks the Saturday workshops. If math falls behind, the business work pauses until it's back on track. In practice, kids protect their math hours fiercely, because the workshops are what they refuse to miss.",
+    mathCurDesc: "Adaptive, mastery-based math that moves exactly as fast as your child does. The engine behind the 2X to 4X pace.",
+    mathSpeedDesc: "The 120's own fast-math game: Grade 3 to 12 fact fluency as boss battles and leaderboards. Where math facts get automatic, so the hard stuff gets easier.",
+    endKicker: "10 · END OF YEAR", endHeadLead: "By June,", endHeadAccent: "they've actually done it.",
+    endIntro: "Not \u201clearned about.\u201d Done. Wherever your child lands on The Path by June 2027, here is what's true of every single kid who does the year:",
+    e1: "To a real customer, real money. Every child clears this in the Sell phase.",
+    e2: "Built with AI, shipped, demoed live, improved from feedback.",
+    e3: "Weeks of their own P&L data they can read and explain.",
+    e4: "Read and discussed, at their level, chosen to make them think.",
+    e5: "At least one intensive demo in front of the cohort and parents.",
+    e6: "At least one idea they killed themselves, with evidence, and were proud of it.",
+    endClose: "The Path doesn't reset in June. Wherever your child finishes, year two of The 120 picks up exactly there: a child mid-Validate resumes at Validate; a child who reached Scale starts the year running a real business and mentoring the next cohort. Progress is the only currency.",
+    ctaSub1: "The founding cohort kicks off September 19, 2026.", ctaSub2: "Only 120 seats, and they're going.",
+  },
+  kids: {
+    joinCta: "Get my seat", callCta: "Show my parents",
+    heroKicker: "THE 2026-27 YEAR · FIRST-EVER COHORT · TORONTO",
+    heroHead: "This is the year you become", heroHeadAccent: "a founder.",
+    heroSub: "In one year you learn to sell, build real things with AI, run your own business, and read like a legend. This is where you stop doing worksheets and start building stuff that actually exists.",
+    yearKicker: "01 · YOUR YEAR, QUICK VERSION", yearHeadLead: "One year.", yearHeadAccent: "Here's the deal.",
+    y1label: "Saturday workshops", y1desc: "You show up on the 1st and 3rd Saturday of every month, September to June. In person, in Toronto.",
+    y2label: "The Path", y2desc: "Sell, Build, Validate, Grow, Scale. Five phases every founder runs. You go at your own speed.",
+    y3label: "Prove it to level up", y3desc: "Every phase has five things you have to actually pull off before you level up. No sitting still, no shortcuts. Prove it or stay.",
+    y4label: "Three reading tracks", y4desc: "20 books picked for your reading level, not just your grade. Three tracks to choose from.",
+    y5label: "The writing habit", y5desc: "Optional: post one paragraph a week about what you're reading and building. This is how you start your name.",
+    y6label: "Learn math to run the numbers", y6desc: "Knowing math means you know the health of your business. Catch up, reach ahead, or get solid through Math Academy and The Gauntlet.",
+    yearNote: "20 Saturdays. 20 books. One real business that's yours. Ready?",
+    becomeKicker: "02 · WHO YOU BECOME", becomeHeadLead: "A sharp,", becomeHeadAccent: "tech-native builder.",
+    becomeIntro: "The best founders think deeply AND use the newest tools. This year builds both in you, without letting one crush the other.",
+    b1k: "01 · A REAL FOUNDER", b1b: "By June you can sell. You can build with AI. You can read a profit and loss sheet. You can test a business idea like a scientist. And you've got the math to back it all up.",
+    b2k: "02 · DEEP THINKER", b2b: "You've read up to 20 books that make you think about life, business, and how the world really works. If you took the writing habit, you've posted every week. You can hold a real conversation about the big stuff: ethics, tech, the future.",
+    b3k: "03 · AI EXPERT", b3b: "You treat AI like a co-founder. You've shipped products in days, run agents and automations, and used AI for research, writing, selling, everything. You'll never build the slow way, because you never learned it.",
+    mathCalloutKicker: "NO SKIPPING MATH", mathCalloutBody: "You can't run a real business without real math. So here's the deal: the same math as school, but at 2X, 3X, 4X speed. Keeping up in math is what unlocks the Saturday workshops. Fall behind and the business stuff pauses until you catch up.",
+    coachKicker: "03 · YOUR COACHES", coachHeadLead: "A founder in your corner.", coachHeadAccent: "A whole room of them.",
+    coachIntro: "Every Saturday workshop is run by real entrepreneurs, not teachers reading slides. Coaches sit with you wherever you are on The Path: to hear your pitch, help you plan your next moves, and ask the questions a real investor would, nicely at first, then tougher as you level up.",
+    cr1l: "YOUR COACH", cr1b: "A real operator who knows your business by name. Feedback is specific and tied to your progress on The Path, like 'what did you hear across your 8 sales that made them say yes?' Never fake praise.",
+    cr2l: "GUEST FOUNDERS", cr2b: "All year, real founders and builders from Toronto and beyond drop into workshops to demo, tell the truth about their fails, and take your questions. You get comfortable in rooms with real operators.",
+    cr3l: "THE ADVISOR BENCH", cr3b: "Behind your coaches is The 120's advisor network. When your progress on The Path needs something specific, we find someone who's done it before to help.",
+    cr4l: "YOUR PARENTS, IN THE LOOP", cr4b: "Your parents aren't guessing. They see your Path map, they know which criteria you've passed, and twice a year they watch you present on stage.",
+    booksKicker: "04 · READ WIDELY", booksIntro: "Reading is half of thinking sharp. You read about a book every two weeks, from a track matched to your reading level, not just your grade. Each track follows The Path: four books per phase, mixing business, wild ideas, and stories that make you think. You get the final list in September.",
+    writingKicker: "40 WRITING EFFORTS · OPTIONAL", writingBody: "Write and post one paragraph or more a week about what you're reading and building. Forty by June. It's optional, and it's the best predictor of who goes furthest: thinking in public is how you build your name. Coaches read everything, and the best ones get read out loud at workshops.",
+    schedKicker: "05 · THE SCHEDULE", yearBlockBody: "The year kicks off Saturday, September 19. Nineteen Saturday workshops run through June 2027, on the 1st and 3rd Saturday of most months, plus one surprise session added later. Each one runs twice, 9 am to 12 pm and 12 to 3 pm, same session both times, so you pick the slot that fits your weekend. Plus the Toronto intensives, where you demo your business on stage.",
+    monthHome1: "You run the business, day to day", monthHome2: "Your parents are your first customers, drivers, and board", monthHome3: "Math keeps moving at 2X, 3X, 4X speed",
+    weekCloseLead: "Fair warning: it's so much fun that ", weekCloseAccent: "you'll stop calling it homework.",
+    loopKicker: "06 · THE CORE LOOP · EXPERTISE → AUDIENCE → PRODUCT", loopHeadLead: "The loop that", loopHeadAccent: "stacks up.",
+    loopIntro: "Every great founder runs the same loop, whether they're 11 or 40. Get really good at something. Share what you're learning until people pay attention. Build what those people ask for. Then go again, one level up. Most grown-ups never learn this. You'll run it all year.",
+    l1b: "It starts with knowing something worth knowing. Pick something you already love, sneakers, baking, Minecraft servers, dog training, it really doesn't matter, and go deep. The reading, the math, and the workshops all feed it. You don't need a diploma to be an expert. You need obsession plus structure, and you've got way more spare obsession than any adult.",
+    l2b: "This is what the writing habit is really for. One paragraph a week about what you're learning isn't homework, it's how you earn trust: people believe the kid who teaches what they know. Your first audience is small and safe, your cohort, your neighbours, your family. It grows from there, at your pace, with your parents' help.",
+    l3b: "Here's the secret most first-time founders miss: when you know your subject and people already listen to you, you don't have to guess what to build. Your audience tells you. Stuff built this way sells easier, because the trust showed up before the pitch. This is where The Path shines, showing you the easier way to build.",
+    loopClose: "Around the loop again, and again. Each lap makes the next one easier: deeper skills, a warmer audience, a better product. That's why reading, writing, math, and business aren't four separate subjects at The 120. They're one loop. And it's the same loop that will protect you in the age of AI: knowledge that's yours, people who trust you, and real things you've built to prove it.",
+    skillsKicker: "07 · THE SKILL TRACK", skillsIntro: "Underneath The Path, software, your parents, and your coaches track fifteen skills in three areas. At every phase you're building all fifteen; The Path just changes which ones are in the spotlight. Your parents celebrate your skill map on Demo Days.",
+    lvl1desc: "You know it exists, first tries.", lvl2desc: "You do it with a coach's help.", lvl3desc: "You deliver it on your own.", lvl4desc: "You can teach other kids. The bar.",
+    pathKicker: "08 · THE PATH · SELL → BUILD → VALIDATE → GROW → SCALE", pathHeadLead: "Five Phases.", pathHeadAccent: "At your pace.",
+    pathIntro: "Every member of The 120 grows through the same five phases, each with a clear focus and a bar you have to clear. Everyone goes at their own speed. You move up by proving the work, not by sitting through it. One kid nails Validate by winter, another hits Build by spring. Both are winning.",
+    pc1b: "Each phase has five things to prove. You show each one to your coach at a Saturday workshop. Five checks, and you step forward.",
+    pc2b: "Some things take one Saturday. Some take five. Coaches meet you at whatever phase you're on, every time. Nobody gets left behind, nobody gets held back.",
+    pc3b: "Finish all five phases before June? You don't stop. You run your business at Scale, mentor kids earlier on The Path, and get a sneak peek at next year.",
+    pathSeeLabel: "WHAT YOU'LL PULL OFF",
+    mathKicker: "09 · THE FOUNDATION", mathP1: "You might be here to build a business, but school smarts are the foundation of everything next. The 120 zeroes in on math because to keep your business healthy, you have to know and run your numbers.",
+    mathP2: "Math here is mastery-based, so nothing gets skipped and no gaps sneak in. It's the same math as school, but our system lets you move way faster than school or after-school ever could.",
+    mathP3: "The gate is real. Keeping pace in math is what unlocks the Saturday workshops. Fall behind and the business stuff pauses until you're back on track. Truth is, kids guard their math hours hard, because missing a workshop is the last thing they want.",
+    mathCurDesc: "Adaptive, mastery-based math that moves exactly as fast as you do. The engine behind your 2X to 4X pace.",
+    mathSpeedDesc: "The 120's own fast-math game: Grade 3 to 12 fact fluency as boss battles and leaderboards. Where your math facts get automatic, so the hard stuff feels easy.",
+    endKicker: "10 · END OF YEAR", endHeadLead: "By June,", endHeadAccent: "you've actually done it.",
+    endIntro: "Not \u201clearned about.\u201d Done. Wherever you land on The Path by June 2027, here's what's true of every single kid who does the year:",
+    e1: "To a real customer, real money. You clear this in the Sell phase.",
+    e2: "Built with AI, shipped, demoed live, improved from feedback.",
+    e3: "Weeks of your own P&L data you can read and explain.",
+    e4: "Read and discussed, at your level, chosen to make you think.",
+    e5: "At least one demo on stage in front of the cohort and parents.",
+    e6: "At least one idea you killed yourself, with proof, and were proud of it.",
+    endClose: "The Path doesn't reset in June. Wherever you finish, year two of The 120 picks up right there: mid-Validate? You resume at Validate. Reached Scale? You start year two running a real business and mentoring the next cohort. Progress is the only currency.",
+    ctaSub1: "The first cohort kicks off September 19, 2026.", ctaSub2: "There are only 120 seats, and they're going.",
+  },
+};
+
+const GROUPS = [
+  { key: "athletes", label: "Athletes", biz: "Athletes build an NIL business: your name, image, and likeness turned into a personal brand and real sponsorships." },
+  { key: "founders", label: "Founders", biz: "Founders build a real startup: a product built with AI, real paying customers, and real revenue that grows month over month." },
+  { key: "givers", label: "Givers", biz: "Givers build a service venture: raising real money and real awareness for a cause in their community, and rallying people to turn up." },
+  { key: "makers", label: "Makers", biz: "Makers build a showcase business: an art exhibition, a theatre production, or a concert that puts their work in front of an audience." },
+  { key: "scholars", label: "Scholars", biz: "Scholars build a research venture: finding funding for a science project and building a following for their scholarly work." },
+];
+
+const NAV = [
+  { num: "01", label: "THE YEAR", id: "year" },
+  { num: "02", label: "WHO THEY BECOME", id: "become" },
+  { num: "03", label: "COACHING", id: "coaching" },
+  { num: "04", label: "BOOKS", id: "books" },
+  { num: "05", label: "SCHEDULE", id: "schedule" },
+  { num: "06", label: "THE LOOP", id: "loop" },
+  { num: "07", label: "SKILLS", id: "skills" },
+  { num: "08", label: "THE PATH", id: "path" },
+  { num: "09", label: "MATH", id: "math" },
+  { num: "10", label: "END OF YEAR", id: "end" },
+];
+
+class Component extends DCLogic {
+  state = { audience: "parents", pathOpen: 0, bookTrack: 0, kidOriginal: false, groupSel: "all", activeSection: "year", data: null };
+
+  componentDidMount() {
+    import("./program-data.js").then((m) => {
+      this.setState({
+        data: {
+          dates: m.workshopDates,
+          dateNotes: m.dateNotes,
+          dateNotesKid: m.dateNotesKid,
+          steps: m.pathSteps,
+          stepsKid: m.pathStepsKid,
+          tracks: m.bookTracks,
+        },
+      });
+    });
+    this._nav = () => {
+      const ids = NAV.map((n) => n.id);
+      const y = window.scrollY + 170;
+      let cur = ids[0];
+      for (const id of ids) { const el = document.getElementById(id); if (el && el.getBoundingClientRect().top + window.scrollY <= y) cur = id; }
+      if (cur !== this.state.activeSection) this.setState({ activeSection: cur });
+    };
+    window.addEventListener("scroll", this._nav, { passive: true });
+    this._nav();
+  }
+
+  componentWillUnmount() {
+    if (this._nav) window.removeEventListener("scroll", this._nav);
+  }
+
+  audStyle(active) {
+    const base = { fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.08em", padding: "6px 15px", borderRadius: "100px", border: "none", cursor: "pointer", background: "transparent", whiteSpace: "nowrap" };
+    return active ? { ...base, background: "var(--ink)", color: "#fff" } : { ...base, color: "var(--ink-soft)" };
+  }
+
+  critStyle(active) {
+    const base = { fontFamily: "var(--font-mono)", fontSize: "10px", letterSpacing: "0.08em", padding: "6px 12px", borderRadius: "100px", border: "none", cursor: "pointer", background: "transparent", whiteSpace: "nowrap" };
+    return active ? { ...base, background: "#fff", color: "var(--ink)" } : { ...base, color: "rgba(255,255,255,0.7)" };
+  }
+
+  seg(active) {
+    const base = { fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase", padding: "8px 13px", borderRadius: "100px", cursor: "pointer", whiteSpace: "nowrap" };
+    return active
+      ? { ...base, background: "var(--blush)", color: "var(--ink)", border: "1px solid var(--blush)" }
+      : { ...base, background: "transparent", color: "rgba(255,255,255,0.82)", border: "1px solid rgba(255,255,255,0.32)" };
+  }
+
+  tabStyle(active) {
+    const base = { fontFamily: "var(--font-mono)", fontSize: "12px", letterSpacing: "0.08em", padding: "10px 18px", borderRadius: "100px", cursor: "pointer" };
+    return active
+      ? { ...base, background: "var(--ink)", color: "#fff", border: "1px solid var(--ink)" }
+      : { ...base, background: "transparent", color: "var(--ink-soft)", border: "1px solid var(--line-strong)" };
+  }
+
+  pillStyle(x) {
+    const base = { display: "flex", alignItems: "center", justifyContent: "center", gap: "5px", fontFamily: "var(--font-mono)", fontSize: "12px", letterSpacing: "0.04em", borderRadius: "100px", padding: "8px 10px" };
+    if (x.kickoff) return { ...base, background: "var(--red)", color: "#fff", border: "1px solid var(--red)" };
+    if (x.tbd) return { ...base, background: "transparent", color: "var(--muted)", border: "1px dashed var(--line-strong)" };
+    if (x.mark) return { ...base, background: "var(--line-strong)", color: "var(--ink)", border: "1px solid var(--line-strong)" };
+    return { ...base, background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--line)" };
+  }
+
+  renderVals() {
+    const d = this.state.data;
+    const isKids = this.state.audience === "kids";
+    const t = COPY[this.state.audience] || COPY.parents;
+
+    const rawSteps = (d && d.steps) || [];
+    const rawStepsKid = (d && d.stepsKid) || [];
+    const steps = rawSteps.map((s, i) => {
+      const kid = rawStepsKid[i] || {};
+      const critSource = (isKids && !this.state.kidOriginal) ? (kid.criteria || s.criteria) : s.criteria;
+      return {
+        num: s.num,
+        key: s.key,
+        title: s.title,
+        subtitle: isKids ? (kid.subtitle || s.subtitle) : s.subtitle,
+        principle: isKids ? (kid.principle || s.principle) : s.principle,
+        parentsSee: isKids ? (kid.parentsSee || s.parentsSee) : s.parentsSee,
+        criteria: critSource.map((c, j) => ({ n: String(j + 1), text: c })),
+        open: this.state.pathOpen === i,
+        sign: this.state.pathOpen === i ? "\u2212" : "+",
+        onToggle: () => this.setState((st) => ({ pathOpen: st.pathOpen === i ? -1 : i })),
+      };
+    });
+    const nodes = rawSteps.map((s, i) => ({ num: s.num, name: s.title, showArrow: i > 0 }));
+
+    const rawTracks = (d && d.tracks) || [];
+    const tracks = rawTracks.map((tr, i) => ({
+      label: tr.label,
+      style: this.tabStyle(this.state.bookTrack === i),
+      onSelect: () => this.setState({ bookTrack: i }),
+    }));
+    const active = rawTracks[this.state.bookTrack];
+    const bookGroups = (active && active.groups) || [];
+
+    const dates = ((d && d.dates) || []).map((x) => ({
+      label: x.label,
+      mark: x.mark || "",
+      showMark: !!x.mark,
+      tag: x.kickoff ? "KICKOFF" : "",
+      showTag: !!x.kickoff,
+      pillStyle: this.pillStyle(x),
+    }));
+    const seasons = dates.length ? [
+      { label: "FALL 2026", items: dates.slice(0, 4) },
+      { label: "WINTER 2027", items: dates.slice(4, 12) },
+      { label: "SPRING 2027", items: dates.slice(12) },
+    ] : [];
+    const dateNotes = (d && (isKids ? d.dateNotesKid : d.dateNotes)) || [];
+
+    const cAll = { key: "all", label: "The 120" };
+    const cSegs = [cAll, ...GROUPS].map((g) => ({
+      label: g.label,
+      style: this.seg(this.state.groupSel === g.key),
+      onSelect: () => this.setState({ groupSel: g.key }),
+    }));
+    const selG = GROUPS.find((g) => g.key === this.state.groupSel);
+    const cSubhead = selG ? selG.biz : "Athletes, Founders, Givers, Makers and Scholars each build a business: NIL brands, startups, service ventures, shows, research. Same program, your business.";
+
+    const activeSection = this.state.activeSection;
+    const navLinks = NAV.map((n, i) => ({
+      num: n.num,
+      label: n.label,
+      href: "#" + n.id,
+      showSep: i < NAV.length - 1,
+      style: { fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.1em", textDecoration: "none", whiteSpace: "nowrap", color: activeSection === n.id ? "var(--red)" : "var(--ink-soft)", fontWeight: activeSection === n.id ? 600 : 400 },
+    }));
+
+    return {
+      navLinks,
+      cSegs,
+      cSubhead,
+      t,
+      isKids,
+      audParentStyle: this.audStyle(!isKids),
+      audKidsStyle: this.audStyle(isKids),
+      setParents: () => this.setState({ audience: "parents" }),
+      setKids: () => this.setState({ audience: "kids" }),
+      critKidStyle: this.critStyle(!this.state.kidOriginal),
+      critOrigStyle: this.critStyle(this.state.kidOriginal),
+      setCritKid: () => this.setState({ kidOriginal: false }),
+      setCritOrig: () => this.setState({ kidOriginal: true }),
+      steps,
+      nodes,
+      tracks,
+      bookGroups,
+      dates,
+      seasons,
+      dateNotes,
+    };
+  }
+}
+</script>
+</body>
+</html>

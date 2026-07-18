@@ -1,0 +1,48 @@
+<!-- @dsCard group="Components" viewport="700x340" name="CRM primitives" subtitle="Status pills, heat pips, filter chips, co-pilot / pitch card" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body{margin:0;background:var(--crm-bg)}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { StatusPill, HeatPips, FilterChip, PitchCard } = window.The120DesignSystem_cdb8b7;
+function Demo(){
+  return (
+    <div style={{padding:26,display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <StatusPill tone="neutral">INTERESTED</StatusPill>
+        <StatusPill tone="blue">DOSSIER SUBMITTED</StatusPill>
+        <StatusPill tone="blue">CALL HELD</StatusPill>
+        <StatusPill tone="red">DEPOSIT PAID</StatusPill>
+        <StatusPill tone="red">MEMBER OF THE 120</StatusPill>
+        <StatusPill tone="ink">LOST</StatusPill>
+        <StatusPill tone="blush">WAITLIST</StatusPill>
+      </div>
+      <div style={{display:"flex",gap:24,alignItems:"center"}}>
+        <span style={{display:"flex",alignItems:"center",gap:10,fontFamily:"var(--font-mono)",fontSize:11,color:"var(--ink-soft)"}}>HEAT <HeatPips value={4}/></span>
+        <span style={{display:"flex",alignItems:"center",gap:10,fontFamily:"var(--font-mono)",fontSize:11,color:"var(--ink-soft)"}}>OVERRIDE <HeatPips value={2} suggested={4}/></span>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <FilterChip active>ALL</FilterChip>
+        <FilterChip>SUBMITTED</FilterChip>
+        <FilterChip>IN REVIEW</FilterChip>
+        <FilterChip>OFFERED A SEAT</FilterChip>
+      </div>
+      <PitchCard kicker="CONVERSATION CO-PILOT" dot action="Send the T+1 recap + deposit link">
+        Warm and ready — they held the call Tuesday but haven't put down a deposit. Refundable until Sept 30.
+      </PitchCard>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!-- @dsCard group="Brand" viewport="700x180" name="Wordmark lockup" subtitle="Square red 120 chip + stacked wordmark, on light and dark" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body{margin:0;background:var(--paper)}
+  .wrap{display:flex;gap:0;font-family:var(--font-sans)}
+  .cell{flex:1;padding:38px 34px;display:flex;align-items:center;gap:12px}
+  .cell.dark{background:var(--ink)}
+  .chip{background:var(--red);color:#fff;font-weight:700;font-size:17px;letter-spacing:var(--tracking-wordmark);line-height:1;padding:6px 9px}
+  .stk{display:flex;flex-direction:column;gap:1px}
+  .name{font-weight:700;font-size:17px;letter-spacing:-0.02em;line-height:1}
+  .sub{font-weight:500;font-size:9px;letter-spacing:0.2em;line-height:1}
+  .light .name{color:var(--ink)} .light .sub{color:var(--red)}
+  .dark .name{color:var(--paper)} .dark .sub{color:var(--blush)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cell light"><span class="chip">120</span><span class="stk"><span class="name">The 120</span><span class="sub">TORONTO</span></span></div>
+  <div class="cell dark"><span class="chip">120</span><span class="stk"><span class="name">The 120</span><span class="sub">TORONTO</span></span></div>
+</div>
+</body>
+</html>

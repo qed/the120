@@ -1,0 +1,4 @@
+/* Webfonts. Space Grotesk (UI + body) and IBM Plex Mono (labels) load from
+   Google Fonts. Georgia is a system serif used for editorial display headlines
+   — no webfont needed. */
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");

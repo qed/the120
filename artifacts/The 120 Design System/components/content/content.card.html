@@ -1,0 +1,37 @@
+<!-- @dsCard group="Components" viewport="700x520" name="Content cards" subtitle="Group, stat, testimonial, feature, FAQ" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body{margin:0;background:var(--paper)}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { GroupCard, StatCard, TestimonialCard, FeatureCard, FaqItem } = window.The120DesignSystem_cdb8b7;
+function Demo(){
+  const [open,setOpen]=React.useState(0);
+  return (
+    <div style={{padding:24,display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,alignItems:"start"}}>
+        <GroupCard category="ATHLETES" name="The Athletes" blurb="Train seriously, compete seriously, and think like a pro."/>
+        <StatCard value="1400" accent="+" label="SAT BY 8TH GRADE" note="2 Hour Learning network results."/>
+        <TestimonialCard quote="I'm surrounded by kids that like to work as hard as me." name="Rosie" role="2 HOUR LEARNING STUDENT"/>
+      </div>
+      <FeatureCard image="../../assets/project-robotics.webp" index="02" title="The year-long project" body="A mentored project, demoed to the whole network at the quarterly Toronto intensives."/>
+      <div style={{background:"var(--white)",border:"1px solid var(--line)",padding:"6px 28px"}}>
+        <FaqItem question="What is the Tin Can?" open={open===0} onToggle={()=>setOpen(open===0?-1:0)}>A screen-free phone with the 120 Address Book — the network in your kid's pocket, without the internet.</FaqItem>
+        <FaqItem question="How many hours a week?" open={open===1} onToggle={()=>setOpen(open===1?-1:1)}>3–5 hours a week, alongside any school.</FaqItem>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo/>);
+</script>
+</body>
+</html>

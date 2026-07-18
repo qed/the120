@@ -1,0 +1,24 @@
+<!-- @dsCard group="Brand" viewport="700x150" name="Seats indicator & kickers" subtitle="Scarcity dot, mono kickers, · separators — the typographic voice" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body{margin:0;background:var(--paper)}
+  .wrap{padding:30px 34px;display:flex;flex-direction:column;gap:18px;font-family:var(--font-mono)}
+  .seat{display:inline-flex;align-items:center;gap:9px}
+  .dot{width:8px;height:8px;border-radius:100px;background:var(--red)}
+  .seat .lbl{font-size:12px;letter-spacing:0.06em;color:var(--ink)}
+  .kick{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--red)}
+  .kick.mute{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="seat"><span class="dot"></span><span class="lbl">113 OF 120 SEATS REMAIN</span></span>
+  <span class="kick">FIVE GROUPS · ONE NETWORK</span>
+  <span class="kick mute">FOUNDING COHORT · FALL 2026 · TORONTO</span>
+</div>
+</body>
+</html>

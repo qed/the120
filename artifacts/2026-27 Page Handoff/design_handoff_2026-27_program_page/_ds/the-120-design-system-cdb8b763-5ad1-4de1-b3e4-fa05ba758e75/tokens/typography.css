@@ -1,0 +1,52 @@
+/* The 120 — Typography tokens
+   Three typefaces, strict roles:
+   - Georgia (system serif): editorial display headlines. Weight 400, tight
+     tracking, italic accent words in red (light) or blush (dark).
+   - Space Grotesk: everything UI — subheads, body, buttons-as-text, numerals.
+   - IBM Plex Mono: kickers, data labels, CTA button labels, pills. Uppercase,
+     letterspaced, joined with a · separator. */
+:root {
+  /* Families */
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Display scale (Georgia, weight 400, letter-spacing -0.01em, line-height ~1.08) */
+  --display-hero: 68px;    /* hero headline */
+  --display-1: 52px;       /* CTA band */
+  --display-2: 44px;       /* section heading */
+  --display-3: 36px;       /* dashboard title */
+  --display-4: 28px;       /* card / drawer name */
+
+  /* Sans scale (Space Grotesk) */
+  --text-lead: 19px;       /* lead paragraph */
+  --text-body: 17px;       /* body */
+  --text-base: 15px;       /* UI default */
+  --text-sm: 13px;         /* small copy */
+  --text-title: 21px;      /* card / column title, weight 600 */
+
+  /* Mono scale (IBM Plex Mono) */
+  --mono-kicker: 12px;     /* section kicker */
+  --mono-label: 11px;      /* data label */
+  --mono-micro: 10px;      /* pill / chip */
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Line heights */
+  --leading-display: 1.08;
+  --leading-tight: 1.2;
+  --leading-body: 1.6;
+  --leading-relaxed: 1.65;
+
+  /* Tracking */
+  --tracking-display: -0.01em;
+  --tracking-tight: -0.02em;
+  --tracking-wordmark: -0.04em;
+  --tracking-mono: 0.1em;
+  --tracking-mono-wide: 0.12em;
+  --tracking-cta: 0.04em;
+}

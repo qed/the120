@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import type { GroupKey } from "./data";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SUBNAV, type GroupKey } from "./data";
 import type { Audience } from "./cta-source";
+import { useScrollSpy } from "./useScrollSpy";
+import SubNav from "./SubNav";
 import Hero from "./sections/Hero";
 import YearAtAGlance from "./sections/YearAtAGlance";
 import WhoTheyBecome from "./sections/WhoTheyBecome";
@@ -17,70 +19,67 @@ import EndOfYear from "./sections/EndOfYear";
 import MidPageCta from "./MidPageCta";
 import RedCtaBand from "./RedCtaBand";
 
-const AUDIENCES: { key: Audience; label: string }[] = [
-  { key: "parents", label: "PARENTS" },
-  { key: "kids", label: "KIDS" },
-];
+/** The ten scroll-spy section ids, stable for the island's life. */
+const SECTION_IDS = SUBNAV.map((s) => s.id);
+
+/** The sub-nav/toggle anchor whose viewport position is pinned across a voice swap. */
+const ANCHOR_ID = "audience-toggle";
+
+/**
+ * `useLayoutEffect` runs before paint on the client but warns during SSR; select
+ * `useEffect` on the server so the prerender is quiet. (Same hook every render
+ * within a given environment — Rules of Hooks safe.)
+ */
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /**
  * The single client island for /2026-27. Owns the cross-cutting `audience` and
  * hero `group` state and passes them as props to flat child sections (direct
  * children — no context needed). The route + chrome (Nav/Footer) stay server.
  *
- * NOTE: the sticky PARENTS|KIDS bar here is a TEMPORARY stand-in — Unit 5
- * replaces it with the real sticky anchor sub-nav + scroll-spy that carries the
- * audience toggle. It is kept minimal but works (radiogroup, arrow keys).
+ * Unit 5 wires in the real navigation primitive: the sticky anchor sub-nav with
+ * scroll-spy (which carries the PARENTS|KIDS control), the voice-swap scroll
+ * anchor, and a single polite announcer.
  */
 export default function ProgramContent({ seatsRemaining }: { seatsRemaining: number }) {
   const [audience, setAudience] = useState<Audience>("parents");
   const [group, setGroup] = useState<GroupKey>("the120");
+  const activeId = useScrollSpy(SECTION_IDS);
 
-  const onAudienceKeyDown = (e: React.KeyboardEvent, index: number) => {
-    let next = index;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (index + 1) % AUDIENCES.length;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
-      next = (index - 1 + AUDIENCES.length) % AUDIENCES.length;
-    else return;
-    e.preventDefault();
-    setAudience(AUDIENCES[next].key);
-    const btn = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-      '[role="radio"]'
-    )[next];
-    btn?.focus();
+  // Voice-swap scroll anchoring: record the toggle's viewport top the instant a
+  // switch is requested, then after the DOM reflows to the other voice, scroll by
+  // the delta so the toggle (and the reader's place) stay put despite the height
+  // change. The toggle is sticky, so in practice this holds it exactly steady.
+  const anchorTopBeforeSwap = useRef<number | null>(null);
+
+  const changeAudience = (next: Audience) => {
+    if (next === audience) return;
+    const el = document.getElementById(ANCHOR_ID);
+    anchorTopBeforeSwap.current = el ? el.getBoundingClientRect().top : null;
+    setAudience(next);
   };
+
+  useIsomorphicLayoutEffect(() => {
+    const before = anchorTopBeforeSwap.current;
+    anchorTopBeforeSwap.current = null;
+    if (before == null) return; // initial mount / no pending swap
+    const el = document.getElementById(ANCHOR_ID);
+    if (!el) return;
+    const delta = el.getBoundingClientRect().top - before;
+    if (delta !== 0) window.scrollBy(0, delta);
+  }, [audience]);
 
   return (
     <main className="flex-1">
-      {/* TEMPORARY audience toggle — Unit 5 replaces this with the sub-nav */}
-      <div className="sticky top-[92px] z-40 mx-5 mt-2">
-        <div className="flex items-center justify-end rounded-[14px] border border-line bg-white px-[22px] py-2.5 shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-          <div
-            role="radiogroup"
-            aria-label="Choose audience"
-            className="flex gap-0.5 rounded-full border border-line-strong p-0.5"
-          >
-            {AUDIENCES.map((a, i) => {
-              const checked = a.key === audience;
-              return (
-                <button
-                  key={a.key}
-                  type="button"
-                  role="radio"
-                  aria-checked={checked}
-                  tabIndex={checked ? 0 : -1}
-                  onClick={() => setAudience(a.key)}
-                  onKeyDown={(e) => onAudienceKeyDown(e, i)}
-                  className={`rounded-full px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] transition-colors ${
-                    checked ? "bg-ink text-white" : "text-ink-soft hover:text-ink"
-                  }`}
-                >
-                  {a.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {/* One polite announcer for the whole page — the big content containers are
+          NOT marked live. Its text only changes on an audience switch, so it
+          announces the swap exactly once (and stays silent on first render). */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {audience === "kids" ? "Showing content for kids" : "Showing content for parents"}
       </div>
+
+      <SubNav audience={audience} setAudience={changeAudience} activeId={activeId} />
 
       <Hero group={group} setGroup={setGroup} />
       <YearAtAGlance audience={audience} />

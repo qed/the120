@@ -49,7 +49,13 @@ export default function Hero({
   };
 
   return (
-    <section className="relative flex min-h-[780px] flex-col justify-center overflow-hidden bg-blue">
+    // Pull full-bleed up behind the floating chrome so the blue reaches the very
+    // top with the Nav + sub-nav floating over it. -152px matches the chrome's
+    // stuck bottom (see SubNav's geometry note) and the sections' scroll-mt-152;
+    // it slightly overshoots the true offset, which safely covers the top rather
+    // than leaving a paper gap. The hero is single-voice and vertically centred,
+    // so its copy stays well clear of the chrome.
+    <section className="relative -mt-[152px] flex min-h-[780px] flex-col justify-center overflow-hidden bg-blue">
       <div className="absolute inset-0" style={{ background: OVERLAY_GRADIENT }} aria-hidden />
 
       <div className="relative z-10 mx-auto w-full max-w-[1240px] px-6 py-24 sm:px-11">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { entryOf, judgeAnswer, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
+import { entryOf, judgeAnswer, masteryMsFor, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import { AREAS, PATHWAY } from "../game/pathway";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
@@ -62,9 +62,9 @@ export default function PlacementTrial({
   const area = AREAS.find((a) => a.id === skill.area)!;
   const entry = entryOf(probe.problem);
   const auto = isAutoSubmit(entry);
-  // Enter-to-submit formats (fractions, expressions, pairs) cost ~2–3s of
-  // typing on top of the think time — widen their pass window accordingly.
-  const passMs = auto || probe.problem.kind === "choice" ? PASS_MS : PASS_MS + 3000;
+  // The pass window follows the topic's mastery window (+3s of placement
+  // slack): 3s facts probe at 6s, later-grade skills and typed formats wider.
+  const passMs = masteryMsFor(probe.problem.topic) + PASS_MS - 3000;
 
   const finish = useCallback((landingIdx: number) => {
     if (doneRef.current) return;
@@ -97,7 +97,7 @@ export default function PlacementTrial({
     const t = setInterval(() => {
       const elapsed = Date.now() - askedAt.current;
       setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
-      if (elapsed > HARD_CAP_MS + (passMs - PASS_MS)) {
+      if (elapsed > passMs + (HARD_CAP_MS - PASS_MS)) {
         sfxWrong();
         advance(false);
       }

@@ -156,7 +156,7 @@ export default function SkillPanel({
               </div>
               {skill.topic === "mul" ? <MulGrid keys={set} facts={facts} /> : <FactWall keys={set} facts={facts} />}
               <p className="mt-2 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-white/30">
-                <span className="text-emerald-300/80">■</span> mastered (under 3s twice) · <span className="text-amber-300/70">■</span> learning · ■ unseen
+                <span className="text-emerald-300/80">■</span> mastered (fast twice in a row) · <span className="text-amber-300/70">■</span> learning · ■ unseen
               </p>
             </>
           ) : (

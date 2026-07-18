@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
-import { entryOf, judgeAnswer, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import { entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
@@ -36,12 +36,15 @@ export default function Battle({
   topics,
   band,
   facts,
+  enterSubmit = false,
   onFinish,
 }: {
   boss: Boss;
   topics: TopicId[];
   band: Band;
   facts: Record<string, FactStat>;
+  /** player preference: wait for Enter instead of the length auto-judge */
+  enterSubmit?: boolean;
   onFinish: (won: boolean, stats: BattleStats, results: ProblemResult[]) => void;
 }) {
   const [bossHp, setBossHp] = useState(boss.hp);
@@ -157,9 +160,14 @@ export default function Battle({
   const handleCorrect = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
     record(true, elapsed);
-    const speed = Math.max(0, 1 - elapsed / SPEED_WINDOW_MS);
+    // Later-grade skills take longer per answer, so both the speed-bonus
+    // window and the damage scale with the topic's mastery window — a slow
+    // topic's raid is still winnable in the same 2-minute clock.
+    const topicMs = masteryMsFor(problem.topic);
+    const speedWindow = Math.max(SPEED_WINDOW_MS, 2 * topicMs);
+    const speed = Math.max(0, 1 - elapsed / speedWindow);
     const mult = streakMult(streak + 1);
-    const dmg = Math.round((BASE_DAMAGE + SPEED_BONUS_MAX * speed) * mult);
+    const dmg = Math.round((BASE_DAMAGE + SPEED_BONUS_MAX * speed) * mult * (topicMs / 3000));
     const crit = mult >= 2;
     statsRef.current.correct++;
     statsRef.current.damage += dmg;
@@ -175,7 +183,7 @@ export default function Battle({
     setTimeout(() => setShake(""), crit ? 420 : 360);
     setTimeout(() => setFx(null), 700);
     advance();
-  }, [advance, streak]);
+  }, [advance, streak, problem.topic]);
 
   const handleWrong = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
@@ -194,9 +202,10 @@ export default function Battle({
   }, [advance, problem.answer]);
 
   // C6: the entry format drives the character filter and the submit model —
-  // single-number keeps the length auto-judge, everything else is Enter/⏎.
+  // single-number keeps the length auto-judge (unless the player prefers
+  // Enter — tester-requested toggle), everything else is Enter/⏎.
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry);
+  const auto = isAutoSubmit(entry) && !enterSubmit;
 
   const onType = (v: string) => {
     if (reveal) return;

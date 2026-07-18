@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { type Boss } from "./game/bosses";
-import { BANDS, type Band, type TopicId } from "./game/problems";
+import { BANDS, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
 import BossSprite from "./components/BossSprite";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
 import {
@@ -93,6 +93,8 @@ type Save = {
   skillProgress: SkillProgress;
   /** placement done, skipped, or seeded — gates the first-run assessment */
   placed: boolean;
+  /** prefer Enter-to-submit over the auto-judge for typed answers */
+  enterSubmit: boolean;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -111,6 +113,7 @@ const EMPTY_SAVE: Save = {
   topics: ["mul"],
   skillProgress: {},
   placed: false,
+  enterSubmit: false,
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -142,6 +145,7 @@ function mergeSaves(a: Save, b: Save): Save {
     topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
     skillProgress,
     placed: (a.placed ?? false) || (b.placed ?? false),
+    enterSubmit: a.enterSubmit ?? b.enterSubmit ?? false, // local preference wins
   };
 }
 
@@ -290,8 +294,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         n,
         miss: f.miss + (r.correct ? 0 : 1),
         avgMs: f.avgMs + (r.ms - f.avgMs) / n,
-        // mastery = correct under the limit, twice in a row
-        fastStreak: r.correct && r.ms <= MASTERY_MS ? (f.fastStreak ?? 0) + 1 : 0,
+        // mastery = correct under the TOPIC'S limit, twice in a row —
+        // 3s for number facts, wider for later-grade skills + typed formats
+        fastStreak: r.correct && r.ms <= masteryMsFor(topicOfKey(r.key)) ? (f.fastStreak ?? 0) + 1 : 0,
       };
     }
     return facts;
@@ -451,6 +456,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             if (lvl) startSkillBattle(curIdx, lvl);
           }}
           onSkill={(idx) => setOpenSkill(idx)}
+          onToggleEnter={() => setSave((p) => ({ ...p, enterSubmit: !p.enterSubmit }))}
           onPlacement={() => {
             ensureAudio();
             setPhase("placement");
@@ -515,10 +521,17 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         />
       )}
       {phase === "battle" && (
-        <Battle boss={boss} topics={[skill.topic]} band={skill.band} facts={save.facts} onFinish={finishBattle} />
+        <Battle
+          boss={boss}
+          topics={[skill.topic]}
+          band={skill.band}
+          facts={save.facts}
+          enterSubmit={save.enterSubmit}
+          onFinish={finishBattle}
+        />
       )}
       {phase === "trial" && (
-        <Trial topics={trialTopics} band={trialBand} onFinish={finishTrial} />
+        <Trial topics={trialTopics} band={trialBand} enterSubmit={save.enterSubmit} onFinish={finishTrial} />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result
@@ -573,6 +586,7 @@ function Menu({
   setHandle,
   onContinue,
   onSkill,
+  onToggleEnter,
   onPlacement,
   onTrial,
   onHelp,
@@ -585,6 +599,7 @@ function Menu({
   setHandle: (h: string) => void;
   onContinue: () => void;
   onSkill: (idx: number) => void;
+  onToggleEnter: () => void;
   onPlacement: () => void;
   onTrial: () => void;
   onHelp: () => void;
@@ -695,12 +710,25 @@ function Menu({
             >
               🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
             </button>
-            <button
-              onClick={onPlacement}
-              className="self-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
-            >
-              🎯 take the placement test — it can only move you up
-            </button>
+            <div className="flex items-center justify-center gap-4">
+              <button
+                onClick={onPlacement}
+                className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
+              >
+                🎯 take the placement test — it can only move you up
+              </button>
+              <button
+                onClick={onToggleEnter}
+                title="Auto-submit judges the moment you type enough digits; Enter mode waits for you"
+                className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
+                  save.enterSubmit
+                    ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                    : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
+                }`}
+              >
+                ⏎ enter to submit: {save.enterSubmit ? "on" : "off"}
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -798,7 +826,7 @@ function Menu({
           );
         })}
         <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Master a fact: answer it in under 3s, twice in a row · pass a skill: clear boss level {PASS_LEVEL} · tap any skill for its facts
+          Master a fact: answer it fast twice in a row (3s for number facts, longer for harder skills) · pass a skill: clear boss level {PASS_LEVEL} · tap any skill for its facts
         </p>
       </div>
 
@@ -1131,8 +1159,9 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             ⏱ <strong>Bring the boss to zero before the clock runs out</strong> — 2 minutes, one raid.
           </li>
           <li>
-            🎯 <strong>Master every fact.</strong> Answer a fact in under 3 seconds twice in a row and
-            it&apos;s mastered — raids keep serving the ones you haven&apos;t owned yet.
+            🎯 <strong>Master every fact.</strong> Answer a fact fast twice in a row and it&apos;s
+            mastered (3s for number facts, more time for harder skills) — raids keep serving the
+            ones you haven&apos;t owned yet.
           </li>
           <li>
             🥇 <strong>Earn medals</strong> for accuracy, unlock tougher bosses, and chase your Mastery

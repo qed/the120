@@ -189,6 +189,26 @@ export type Problem = {
 export const entryOf = (p: Problem): EntryFormat =>
   p.entry ?? (p.kind === "choice" ? "multiple-choice" : "single-number");
 
+/** Topic id off a fact key ("mul:7×8" → "mul"). */
+export const topicOfKey = (key: string): TopicId => key.split(":")[0] as TopicId;
+
+/** Topics answered on the Enter-to-submit surfaces — typing costs real seconds. */
+const ENTER_ENTRY_TOPICS: ReadonlySet<TopicId> = new Set([
+  "simpfrac", "likterms", "binom", "slope2", "factpair", "dpower", "dpoly",
+  "pct2dec", "pct2frac", "fracadd", "fracmul", "factquad",
+]);
+
+/**
+ * Per-topic mastery window (tester feedback 2026-07-18: a flat 3s bar is
+ * brutal in the later grades). Tier-1 recall keeps the 3s bar; tier-2 skills
+ * get the doc's Medium band (6s); Enter-entry formats add typing time.
+ */
+export function masteryMsFor(topic: TopicId): number {
+  const t = TOPICS.find((x) => x.id === topic);
+  const base = !t || t.tier === 1 ? MASTERY_MS : MASTERY_MS * 2;
+  return base + (ENTER_ENTRY_TOPICS.has(topic) ? 2500 : 0);
+}
+
 /** One judging door for every surface: the entry's rule decides. */
 export const judgeAnswer = (p: Problem, entered: string): boolean =>
   judge(p.rule ?? (p.kind === "choice" ? "mc" : "int-exact"), entered, p.answer);
@@ -1820,8 +1840,9 @@ export function makeTrialDeck(topics: TopicId[], band: Band): string[] {
   return keys;
 }
 
-/** How many problems back a fact must wait before it can be served again. */
-const RECENT_WINDOW = 4;
+/** Longest no-repeat window; shrinks for small fact sets so the candidate
+ *  pool never empties (tester feedback: same questions too often). */
+const RECENT_WINDOW_MAX = 8;
 
 /**
  * Next problem for battles.
@@ -1838,13 +1859,20 @@ export function nextProblem(
   recent: string[] = []
 ): Problem {
   const topic: TopicId = topics.length ? pick(topics) : "mul";
-  const avoid = new Set(recent.slice(-RECENT_WINDOW));
+  const limit = masteryMsFor(topic);
 
   const set = factSetFor(topic, band);
+  // No-repeat window scales down for small sets so candidates never run dry
+  // (cube has 5 facts; a fixed window of 8 would empty the pool instantly).
+  const win = set ? Math.max(1, Math.min(RECENT_WINDOW_MAX, Math.floor(set.length / 2))) : RECENT_WINDOW_MAX;
+  const avoid = new Set(recent.slice(-win));
   if (set) {
     const unmastered = set.filter((k) => !isMastered(facts[k]));
+    // Focus eases off when only a few facts remain unmastered — hammering the
+    // last 2–3 every serve is the "same questions over and over" complaint.
+    const focusP = unmastered.length <= 3 ? 0.5 : 0.85;
     const pool =
-      unmastered.length && (unmastered.length === set.length || Math.random() < 0.85)
+      unmastered.length && (unmastered.length === set.length || Math.random() < focusP)
         ? unmastered
         : set;
     const candidates = pool.filter((k) => !avoid.has(k));
@@ -1852,7 +1880,7 @@ export function nextProblem(
     for (const k of candidates.length ? candidates : pool) {
       weighted.push(k);
       const f = facts[k];
-      if (f && (f.miss > 0 || f.avgMs > MASTERY_MS)) weighted.push(k);
+      if (f && (f.miss > 0 || f.avgMs > limit)) weighted.push(k);
     }
     const p = problemFromKey(pick(weighted));
     if (p) return p;
@@ -1861,7 +1889,7 @@ export function nextProblem(
   const struggling = Object.keys(facts).filter((k) => {
     if (!k.startsWith(`${topic}:`) || avoid.has(k) || isMastered(facts[k])) return false;
     const f = facts[k];
-    return f.miss / f.n > 0.2 || f.avgMs > MASTERY_MS;
+    return f.miss / f.n > 0.2 || f.avgMs > limit;
   });
   if (struggling.length && Math.random() < 0.3) {
     const p = problemFromKey(pick(struggling));

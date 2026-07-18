@@ -7,6 +7,7 @@ import {
   factSetFor,
   judgeAnswer,
   makeTrialDeck,
+  masteryMsFor,
   nextProblem,
   problemFromKey,
   type Band,
@@ -35,10 +36,13 @@ const CAP_S = 45;
 export default function Trial({
   topics,
   band,
+  enterSubmit = false,
   onFinish,
 }: {
   topics: TopicId[];
   band: Band;
+  /** player preference: wait for Enter instead of the length auto-judge */
+  enterSubmit?: boolean;
   onFinish: (score: number, results: ProblemResult[]) => void;
 }) {
   const deckRef = useRef<string[] | null>(null);
@@ -135,7 +139,11 @@ export default function Trial({
     if (correct) {
       scoreRef.current += 1;
       setScore(scoreRef.current);
-      endAtRef.current = Math.min(endAtRef.current + GAIN_S * 1000, Date.now() + CAP_S * 1000);
+      // Time gained scales with the topic's answer cost — a definite integral
+      // earns more clock than a times-table fact, so later-grade trials
+      // don't starve (tester feedback 2026-07-18).
+      const gain = GAIN_S * Math.max(1, masteryMsFor(problem.topic) / 3000);
+      endAtRef.current = Math.min(endAtRef.current + gain * 1000, Date.now() + CAP_S * 1000);
       sfxHit(scoreRef.current % 12);
       setFlash("good");
     } else {
@@ -148,7 +156,7 @@ export default function Trial({
   };
 
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry);
+  const auto = isAutoSubmit(entry) && !enterSubmit;
 
   const onType = (v: string) => {
     ensureAudio();

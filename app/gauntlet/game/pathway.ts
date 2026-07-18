@@ -56,8 +56,10 @@ export const PATHWAY: Skill[] = [
   { id: "exp-rules", label: "Exponent product rule", area: "prealg", topic: "exprule", band: "g78" },
   { id: "gcd", label: "Greatest common divisor", area: "prealg", topic: "gcd", band: "g56" },
   { id: "simp-fractions", label: "Simplify fractions", area: "prealg", topic: "simpfrac", band: "g56" },
-  { id: "lcm", label: "Least common multiple", area: "prealg", topic: "lcm", band: "g56" },
-  { id: "denoms", label: "Common denominators", area: "prealg", topic: "denom", band: "g56" },
+  // g34 parameter spaces (tester feedback 2026-07-18: g56's LCM/LCD pairs —
+  // e.g. LCD of 8 and 10 — read as too complicated this early in the road)
+  { id: "lcm", label: "Least common multiple", area: "prealg", topic: "lcm", band: "g34" },
+  { id: "denoms", label: "Common denominators", area: "prealg", topic: "denom", band: "g34" },
   { id: "mul-fractions", label: "Multiply fractions", area: "prealg", topic: "fracmul", band: "g56" },
   { id: "add-fractions", label: "Add fractions", area: "prealg", topic: "fracadd", band: "g56" },
   { id: "compare-fractions", label: "Compare fractions", area: "prealg", topic: "fraccomp", band: "g56" },

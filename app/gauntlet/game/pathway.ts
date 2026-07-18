@@ -136,9 +136,24 @@ export function bossForLevel(level: number): Boss {
 
 export const skillLevel = (progress: SkillProgress, id: string) => progress[id] ?? 0;
 
+/** Highest pathway index with a passed skill — the player's frontier. */
+export function highestPassedIdx(progress: SkillProgress): number {
+  let hi = -1;
+  for (let i = 0; i < PATHWAY.length; i++) {
+    if (skillLevel(progress, PATHWAY[i].id) >= PASS_LEVEL) hi = i;
+  }
+  return hi;
+}
+
+/**
+ * Frontier unlock: everything up to one past your furthest passed skill is
+ * open — including GAPS behind the frontier (a Grade 12 rusty at 2×1-digit
+ * multiplication still gets calculus; the gap stays marked, not a prison).
+ */
 export function isUnlocked(progress: SkillProgress, idx: number): boolean {
   if (idx <= 0) return true;
-  return skillLevel(progress, PATHWAY[idx - 1].id) >= PASS_LEVEL;
+  if (skillLevel(progress, PATHWAY[idx - 1].id) >= PASS_LEVEL) return true;
+  return idx <= highestPassedIdx(progress) + 1;
 }
 
 /**
@@ -206,11 +221,12 @@ export function seedProgressFromFacts(facts: Record<string, FactStat>): SkillPro
   return progress;
 }
 
-/** Placement credit: everything before the landing skill counts as passed. */
-export function placementProgress(landingIdx: number): SkillProgress {
+/** Placement credit: exactly the skills whose probes were clean pass — gaps
+ *  (double-failed skills) stay at 0 and remain the CONTINUE priority. */
+export function placementProgress(passedIdxs: number[]): SkillProgress {
   const progress: SkillProgress = {};
-  for (let i = 0; i < landingIdx && i < PATHWAY.length; i++) {
-    progress[PATHWAY[i].id] = PASS_LEVEL;
+  for (const i of passedIdxs) {
+    if (i >= 0 && i < PATHWAY.length) progress[PATHWAY[i].id] = PASS_LEVEL;
   }
   return progress;
 }

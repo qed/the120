@@ -12,6 +12,7 @@ import {
   bossForLevel,
   COMING_SOON,
   currentSkillIdx,
+  highestPassedIdx,
   isUnlocked,
   PASS_LEVEL,
   PATHWAY,
@@ -473,11 +474,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       )}
       {phase === "placement" && (
         <PlacementTrial
-          onDone={(landing) => {
+          onDone={(passed) => {
             setSave((p) => {
               // max-merge: placement can raise levels, never lower them
               const merged = { ...p.skillProgress };
-              for (const [k, v] of Object.entries(placementProgress(landing))) {
+              for (const [k, v] of Object.entries(placementProgress(passed))) {
                 merged[k] = Math.max(merged[k] ?? 0, v);
               }
               return { ...p, placed: true, skillProgress: merged, topics: unlockedTopics(merged) };
@@ -616,6 +617,7 @@ function Menu({
   const nextLvl = startableLevels(progress, curSkill.id)[0] ?? SKILL_LEVELS;
   const fresh = !save.placed;
   const passedTotal = PATHWAY.filter((s) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
+  const frontier = highestPassedIdx(progress);
 
   return (
     <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-6 py-8">
@@ -775,6 +777,7 @@ function Menu({
                   const locked = !isUnlocked(progress, i);
                   const mastered = lvl >= SKILL_LEVELS;
                   const passed = lvl >= PASS_LEVEL;
+                  const gap = !passed && !locked && i < frontier; // unpassed behind the frontier
                   const current = i === curIdx && !fresh;
                   const m = skillMastery(s, save.facts);
                   return (
@@ -788,13 +791,15 @@ function Menu({
                             ? "border-amber-400/50 bg-amber-400/10"
                             : passed
                               ? "border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10"
-                              : locked
-                                ? "border-white/10 bg-white/[0.02] opacity-45"
-                                : "border-white/15 bg-white/5 hover:border-white/40"
+                              : gap
+                                ? "border-amber-400/60 bg-amber-400/5 hover:bg-amber-400/15"
+                                : locked
+                                  ? "border-white/10 bg-white/[0.02] opacity-45"
+                                  : "border-white/15 bg-white/5 hover:border-white/40"
                       }`}
                     >
                       <span className="font-mono text-[11px] text-white/85">
-                        {mastered ? "👑 " : locked ? "🔒 " : current ? "▶ " : ""}
+                        {mastered ? "👑 " : gap ? "🔧 " : locked ? "🔒 " : current ? "▶ " : ""}
                         {s.label}
                       </span>
                       <span className="mt-0.5 flex items-center gap-1">

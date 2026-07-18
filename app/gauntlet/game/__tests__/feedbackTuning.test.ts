@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { masteryMsFor, nextProblem, factSetFor } from "../problems";
+import {
+  currentSkillIdx,
+  isUnlocked,
+  PASS_LEVEL,
+  PATHWAY,
+  placementProgress,
+  unlockedTopics,
+  type SkillProgress,
+} from "../pathway";
 
 /**
  * Tester-feedback tuning (2026-07-18): per-topic mastery windows, and repeat
@@ -57,6 +66,36 @@ describe("repeat suppression", () => {
     expect(counts.size).toBe(set.length);
     const max = Math.max(...counts.values());
     expect(max).toBeLessThan(250 * 0.4);
+  });
+
+  it("frontier unlock: a gap behind the frontier stays open, doesn't lock the road", () => {
+    // Grade 12 places past everything up to algebra EXCEPT 2×1-digit (idx of mul-2x1)
+    const gapIdx = PATHWAY.findIndex((s) => s.id === "mul-2x1");
+    const frontierIdx = PATHWAY.findIndex((s) => s.id === "linear-fn");
+    const passed = Array.from({ length: frontierIdx + 1 }, (_, i) => i).filter((i) => i !== gapIdx);
+    const progress: SkillProgress = placementProgress(passed);
+
+    // the gap itself is unlocked (playable), not a prison
+    expect(isUnlocked(progress, gapIdx)).toBe(true);
+    // the skill after the gap is unlocked via its passed predecessor's pass
+    expect(isUnlocked(progress, gapIdx + 1)).toBe(true);
+    // one past the frontier is open; two past is not
+    expect(isUnlocked(progress, frontierIdx + 1)).toBe(true);
+    expect(isUnlocked(progress, frontierIdx + 2)).toBe(false);
+    // CONTINUE points at the gap first — hole-filling
+    expect(currentSkillIdx(progress)).toBe(gapIdx);
+    // the trial still tests everything reached, gap included
+    const topics = unlockedTopics(progress);
+    expect(topics).toContain(PATHWAY[gapIdx].topic);
+    expect(topics).toContain(PATHWAY[frontierIdx].topic);
+  });
+
+  it("placementProgress credits exactly the passed skills", () => {
+    const progress = placementProgress([0, 1, 3]);
+    expect(progress[PATHWAY[0].id]).toBe(PASS_LEVEL);
+    expect(progress[PATHWAY[1].id]).toBe(PASS_LEVEL);
+    expect(progress[PATHWAY[2].id]).toBeUndefined(); // the gap
+    expect(progress[PATHWAY[3].id]).toBe(PASS_LEVEL);
   });
 
   it("eases focus when only a few facts remain unmastered (mixes mastered back in)", () => {

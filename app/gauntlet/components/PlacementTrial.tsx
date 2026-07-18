@@ -10,17 +10,17 @@ import TriangleFigure from "./TriangleFigure";
 
 /**
  * P1 — placement. Skills probe in pathway order; a skill is placed-past on
- * TWO clean probes and only fails on TWO fails — one typo or misread is a
- * mulligan, not a verdict (v1's any-fail-stops rule was parking strong
- * players in arithmetic on pure fluke statistics). A probe passes when it's
- * answered correctly inside the skill's own mastery window plus slack, so
- * 2-digit×1-digit gets Medium time, not fact-recall time. The first skill
- * that genuinely fails is where the pathway starts — still conservative on
- * purpose: hole-filling beats overplacement.
+ * TWO clean probes and only fails on TWO fails (one slip = a tiebreaker).
+ * A double-failed skill becomes a GAP — placement keeps probing so a rusty
+ * early skill doesn't hide everything after it (Grade 12s were getting
+ * parked at 2×1-digit and never seeing calculus). The trial ends at the
+ * third gap or the end of the road; you start at your FIRST gap — the
+ * frontier unlock keeps everything you passed open while you fill it.
  */
 
 const PASS_SLACK_MS = 3000; // on top of the topic's mastery window
 const HARD_CAP_EXTRA_MS = 6000; // beyond passMs, the probe can't stall the trial
+const MAX_GAPS = 3; // the third gap ends placement — level found
 
 function probeFor(skillIdx: number): Problem {
   const s = PATHWAY[skillIdx];
@@ -33,8 +33,8 @@ export default function PlacementTrial({
   onDone,
   onSkip,
 }: {
-  /** landingIdx = the pathway skill the player starts at */
-  onDone: (landingIdx: number) => void;
+  /** passed = pathway indexes cleanly placed past; landing = where CONTINUE starts */
+  onDone: (passed: number[], landing: number) => void;
   onSkip: () => void;
 }) {
   const coarse = useCoarsePointer();
@@ -43,6 +43,8 @@ export default function PlacementTrial({
   const [probeNum, setProbeNum] = useState(1); // 1..3 within the skill
   const passesRef = useRef(0);
   const failsRef = useRef(0);
+  const passedSkillsRef = useRef<number[]>([]);
+  const gapsRef = useRef<number[]>([]);
   const [problem, setProblem] = useState<Problem>(() => probeFor(0));
   const [input, setInput] = useState("");
   const [landing, setLanding] = useState<number | null>(null);
@@ -75,23 +77,36 @@ export default function PlacementTrial({
   const advance = useCallback(
     (passed: boolean) => {
       if (doneRef.current) return;
+      const wrapUp = () => {
+        // start at your first gap; a clean run starts at the last skill
+        finish(gapsRef.current[0] ?? PATHWAY.length - 1);
+      };
+      const nextSkill = () => {
+        if (skillPos + 1 >= PATHWAY.length) {
+          wrapUp();
+          return;
+        }
+        passesRef.current = 0;
+        failsRef.current = 0;
+        serve(skillPos + 1, 1);
+      };
       if (passed) {
         passesRef.current += 1;
         if (passesRef.current >= 2) {
-          // skill placed-past — next skill (or the end of the road)
-          if (skillPos + 1 >= PATHWAY.length) {
-            finish(PATHWAY.length - 1);
-            return;
-          }
-          passesRef.current = 0;
-          failsRef.current = 0;
-          serve(skillPos + 1, 1);
+          passedSkillsRef.current.push(skillPos);
+          nextSkill();
           return;
         }
       } else {
         failsRef.current += 1;
         if (failsRef.current >= 2) {
-          finish(skillPos); // two real fails = your start
+          // a GAP — mark it and keep probing; the third gap ends placement
+          gapsRef.current.push(skillPos);
+          if (gapsRef.current.length >= MAX_GAPS) {
+            wrapUp();
+            return;
+          }
+          nextSkill();
           return;
         }
       }
@@ -142,7 +157,8 @@ export default function PlacementTrial({
   if (landing !== null) {
     const startSkill = PATHWAY[landing];
     const startArea = AREAS.find((a) => a.id === startSkill.area)!;
-    const passedCount = landing;
+    const passedCount = passedSkillsRef.current.length;
+    const gaps = gapsRef.current;
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Placement complete</p>
@@ -153,11 +169,17 @@ export default function PlacementTrial({
           {startArea.icon} {startArea.label}
           {passedCount > 0 && ` · ${passedCount} ${passedCount === 1 ? "skill" : "skills"} placed behind you`}
         </p>
+        {gaps.length > 1 && (
+          <p className="mt-2 max-w-md font-mono text-xs text-amber-300/90">
+            🔧 Gaps to fill: {gaps.map((g) => PATHWAY[g].label).join(" · ")}
+          </p>
+        )}
         <p className="mt-4 max-w-sm text-sm text-white/55">
-          The pathway serves what you haven&apos;t mastered yet — clear each skill&apos;s bosses to move up the road.
+          Everything you passed stays open — fill your gaps to lock in the road behind you, then keep
+          climbing. The pathway serves what you haven&apos;t mastered yet.
         </p>
         <button
-          onClick={() => onDone(landing)}
+          onClick={() => onDone(passedSkillsRef.current, landing)}
           className="mt-8 rounded-xl bg-cyan-400 px-8 py-3.5 font-mono text-sm font-bold text-black hover:bg-cyan-300"
         >
           START THE PATHWAY

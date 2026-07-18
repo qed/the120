@@ -105,9 +105,12 @@ export const TOPICS: Topic[] = [
   { id: "cube", label: "Cubes", tier: 1 },
   { id: "dbl", label: "Double & halve", tier: 1 },
   { id: "pow10", label: "Powers of ten", tier: 1 },
-  { id: "mul2x1", label: "2-digit × 1-digit", tier: 1 },
+  // Medium-rated in the doc (mental multi-step, not recall) — tier 2 so the
+  // mastery/placement window is 6s, not 3s (Grade 12s were failing placement
+  // here because 47×8 in 6s incl. typing is a Medium ask, not a fact recall)
+  { id: "mul2x1", label: "2-digit × 1-digit", tier: 2 },
   { id: "place", label: "Place value", tier: 1 },
-  { id: "fracof", label: "Fraction of a number", tier: 1 },
+  { id: "fracof", label: "Fraction of a number", tier: 2 }, // Medium-rated (divide then multiply)
   { id: "sqrt", label: "Square roots", tier: 2 },
   { id: "pow", label: "Exponents", tier: 2 },
   { id: "exprule", label: "Exponent rules", tier: 2 },
@@ -125,7 +128,7 @@ export const TOPICS: Topic[] = [
   { id: "disc", label: "Discriminant & real roots", tier: 2 },
   { id: "dist", label: "Distance between points", tier: 2 },
   { id: "srt", label: "Special right triangles", tier: 2 },
-  { id: "sqrtbig", label: "Simplify square roots", tier: 1 },
+  { id: "sqrtbig", label: "Simplify square roots", tier: 2 }, // √529 is a compute, not a recall
   { id: "midpoint", label: "Midpoint x-coordinate", tier: 2 },
   // P4 — trig / precalc / calc
   { id: "refangle", label: "Reference angles", tier: 2 },

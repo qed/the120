@@ -9,31 +9,24 @@ import NumberPad, { useCoarsePointer } from "./NumberPad";
 import TriangleFigure from "./TriangleFigure";
 
 /**
- * P1 — placement. Two probes per pathway skill, easiest first. A probe passes
- * when it's answered correctly within PASS_MS; the first skill that isn't
- * clean is where the pathway starts (conservative on purpose — hole-filling
- * beats overplacement). Every earlier skill gets passed-credit. ~1 min for a
- * beginner, ~5 for a kid who runs the whole road.
+ * P1 — placement. Skills probe in pathway order; a skill is placed-past on
+ * TWO clean probes and only fails on TWO fails — one typo or misread is a
+ * mulligan, not a verdict (v1's any-fail-stops rule was parking strong
+ * players in arithmetic on pure fluke statistics). A probe passes when it's
+ * answered correctly inside the skill's own mastery window plus slack, so
+ * 2-digit×1-digit gets Medium time, not fact-recall time. The first skill
+ * that genuinely fails is where the pathway starts — still conservative on
+ * purpose: hole-filling beats overplacement.
  */
 
-const PASS_MS = 6000;
-const HARD_CAP_MS = 12000; // a probe can't stall the trial
+const PASS_SLACK_MS = 3000; // on top of the topic's mastery window
+const HARD_CAP_EXTRA_MS = 6000; // beyond passMs, the probe can't stall the trial
 
-type Probe = { skillIdx: number; problem: Problem };
-
-function buildProbes(): Probe[] {
-  const probes: Probe[] = [];
-  for (let i = 0; i < PATHWAY.length; i++) {
-    const s = PATHWAY[i];
-    const set = factSetFor(s.topic, s.band);
-    for (let k = 0; k < 2; k++) {
-      const p = set
-        ? problemFromKey(set[Math.floor(Math.random() * set.length)])
-        : nextProblem([s.topic], s.band);
-      if (p) probes.push({ skillIdx: i, problem: p });
-    }
-  }
-  return probes;
+function probeFor(skillIdx: number): Problem {
+  const s = PATHWAY[skillIdx];
+  const set = factSetFor(s.topic, s.band);
+  const p = set ? problemFromKey(set[Math.floor(Math.random() * set.length)]) : null;
+  return p ?? nextProblem([s.topic], s.band);
 }
 
 export default function PlacementTrial({
@@ -44,11 +37,13 @@ export default function PlacementTrial({
   onDone: (landingIdx: number) => void;
   onSkip: () => void;
 }) {
-  const probesRef = useRef<Probe[] | null>(null);
-  if (probesRef.current === null) probesRef.current = buildProbes();
   const coarse = useCoarsePointer();
 
-  const [idx, setIdx] = useState(0);
+  const [skillPos, setSkillPos] = useState(0);
+  const [probeNum, setProbeNum] = useState(1); // 1..3 within the skill
+  const passesRef = useRef(0);
+  const failsRef = useRef(0);
+  const [problem, setProblem] = useState<Problem>(() => probeFor(0));
   const [input, setInput] = useState("");
   const [landing, setLanding] = useState<number | null>(null);
   const [speedPct, setSpeedPct] = useState(100);
@@ -56,15 +51,11 @@ export default function PlacementTrial({
   const inputRef = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
 
-  const probes = probesRef.current!;
-  const probe = probes[Math.min(idx, probes.length - 1)];
-  const skill = PATHWAY[probe.skillIdx];
+  const skill = PATHWAY[skillPos];
   const area = AREAS.find((a) => a.id === skill.area)!;
-  const entry = entryOf(probe.problem);
+  const entry = entryOf(problem);
   const auto = isAutoSubmit(entry);
-  // The pass window follows the topic's mastery window (+3s of placement
-  // slack): 3s facts probe at 6s, later-grade skills and typed formats wider.
-  const passMs = masteryMsFor(probe.problem.topic) + PASS_MS - 3000;
+  const passMs = masteryMsFor(problem.topic) + PASS_SLACK_MS;
 
   const finish = useCallback((landingIdx: number) => {
     if (doneRef.current) return;
@@ -72,23 +63,41 @@ export default function PlacementTrial({
     setLanding(landingIdx);
   }, []);
 
+  const serve = useCallback((skillIdx: number, probe: number) => {
+    setSkillPos(skillIdx);
+    setProbeNum(probe);
+    setProblem(probeFor(skillIdx));
+    setInput("");
+    askedAt.current = Date.now();
+    inputRef.current?.focus();
+  }, []);
+
   const advance = useCallback(
     (passed: boolean) => {
       if (doneRef.current) return;
-      if (!passed) {
-        finish(probe.skillIdx); // first unclean skill = your start
-        return;
+      if (passed) {
+        passesRef.current += 1;
+        if (passesRef.current >= 2) {
+          // skill placed-past — next skill (or the end of the road)
+          if (skillPos + 1 >= PATHWAY.length) {
+            finish(PATHWAY.length - 1);
+            return;
+          }
+          passesRef.current = 0;
+          failsRef.current = 0;
+          serve(skillPos + 1, 1);
+          return;
+        }
+      } else {
+        failsRef.current += 1;
+        if (failsRef.current >= 2) {
+          finish(skillPos); // two real fails = your start
+          return;
+        }
       }
-      if (idx + 1 >= probes.length) {
-        finish(PATHWAY.length - 1); // ran the whole road clean
-        return;
-      }
-      setIdx(idx + 1);
-      setInput("");
-      askedAt.current = Date.now();
-      inputRef.current?.focus();
+      serve(skillPos, probeNum + 1); // the extra probe (best-of-3)
     },
-    [finish, idx, probe.skillIdx, probes.length]
+    [finish, serve, skillPos, probeNum]
   );
 
   // speed bar + hard cap
@@ -97,7 +106,7 @@ export default function PlacementTrial({
     const t = setInterval(() => {
       const elapsed = Date.now() - askedAt.current;
       setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
-      if (elapsed > passMs + (HARD_CAP_MS - PASS_MS)) {
+      if (elapsed > passMs + HARD_CAP_EXTRA_MS) {
         sfxWrong();
         advance(false);
       }
@@ -107,7 +116,7 @@ export default function PlacementTrial({
 
   const answer = (v: string) => {
     const ms = Date.now() - askedAt.current;
-    const correct = probe.problem.kind === "choice" ? v === probe.problem.answer : judgeAnswer(probe.problem, v);
+    const correct = problem.kind === "choice" ? v === problem.answer : judgeAnswer(problem, v);
     const passed = correct && ms <= passMs;
     if (passed) sfxHit(1);
     else sfxWrong();
@@ -118,7 +127,7 @@ export default function PlacementTrial({
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (auto && probe.problem.kind === "numeric" && clean.length >= probe.problem.answer.length && clean.length > 0) {
+    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
       answer(clean);
     }
   };
@@ -169,6 +178,7 @@ export default function PlacementTrial({
         </div>
         <p className="mt-2 font-mono text-sm text-white/70">
           {area.icon} {area.label} · <span className="text-white">{skill.label}</span>
+          {probeNum === 3 && <span className="text-amber-300"> · tiebreaker</span>}
         </p>
         {/* answer-speed bar: full = fast pass, empty = too slow */}
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/15">
@@ -181,18 +191,18 @@ export default function PlacementTrial({
 
       <div className="mx-auto mb-8 mt-auto w-full max-w-xl px-4 pt-8">
         <div className="rounded-2xl border border-white/15 bg-black/45 p-4 backdrop-blur-md sm:p-6">
-          {probe.problem.triangle && (
+          {problem.triangle && (
             <div className="mb-3">
-              <TriangleFigure pair={probe.problem.triangle} />
+              <TriangleFigure pair={problem.triangle} />
             </div>
           )}
-          <p className={`text-center font-bold ${probe.problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
-            {probe.problem.prompt}
-            {probe.problem.kind === "numeric" && !probe.problem.prompt.includes("?") && (
+          <p className={`text-center font-bold ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
+            {problem.prompt}
+            {problem.kind === "numeric" && !problem.prompt.includes("?") && (
               <span className="text-cyan-300"> = ?</span>
             )}
           </p>
-          {probe.problem.kind === "numeric" ? (
+          {problem.kind === "numeric" ? (
             coarse ? (
               <>
                 <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-cyan-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
@@ -202,7 +212,7 @@ export default function PlacementTrial({
                   value={input}
                   onInput={onType}
                   accent="#22d3ee"
-                  extras={padExtras(entry, probe.problem.alphabet)}
+                  extras={padExtras(entry, problem.alphabet)}
                   onSubmit={auto ? undefined : submit}
                 />
               </>
@@ -222,7 +232,7 @@ export default function PlacementTrial({
             )
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {probe.problem.choices!.map((c) => (
+              {problem.choices!.map((c) => (
                 <button
                   key={c}
                   onClick={() => {
@@ -238,7 +248,7 @@ export default function PlacementTrial({
           )}
         </div>
         <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Answer fast and clean to place higher — a miss or a slow answer sets your start
+          Two clean answers place you past a skill — one slip gets a second chance, two set your start
         </p>
       </div>
     </div>

@@ -18,6 +18,13 @@ describe("masteryMsFor", () => {
     expect(masteryMsFor("lcm")).toBe(6000);
     expect(masteryMsFor("denom")).toBe(6000);
   });
+  it("doc-Medium mental-compute topics are NOT on the 3s recall bar", () => {
+    // Grade 12s were failing placement at 2-digit×1-digit because 47×8 in 6s
+    // (incl. typing) was being treated as fact recall
+    expect(masteryMsFor("mul2x1")).toBe(6000);
+    expect(masteryMsFor("fracof")).toBe(6000);
+    expect(masteryMsFor("sqrtbig")).toBe(6000);
+  });
   it("Enter-entry formats add typing time", () => {
     expect(masteryMsFor("fracadd")).toBe(8500); // 6000 + 2500
     expect(masteryMsFor("factquad")).toBe(8500);

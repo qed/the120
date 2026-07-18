@@ -68,7 +68,21 @@ export type TopicId =
   | "slope2"
   | "factpair"
   | "dpower"
-  | "dpoly";
+  | "dpoly"
+  // C6 completion — the ±-unblocked single-number picks, the fraction
+  // family, the percent family, and the factored-form entry
+  | "intadd"
+  | "intmul"
+  | "evalexpr"
+  | "solve1"
+  | "solve2"
+  | "pct2dec"
+  | "dec2pct"
+  | "pct2frac"
+  | "fracadd"
+  | "fracmul"
+  | "fraccomp"
+  | "factquad";
 
 export type Band = "g34" | "g56" | "g78" | "g912";
 
@@ -134,6 +148,19 @@ export const TOPICS: Topic[] = [
   { id: "factpair", label: "Sum & product pairs", tier: 2 },
   { id: "dpower", label: "Power rule", tier: 1 },
   { id: "dpoly", label: "Differentiate polynomials", tier: 2 },
+  // C6 completion
+  { id: "intadd", label: "Signed add & subtract", tier: 1 },
+  { id: "intmul", label: "Sign rules ×/÷", tier: 1 },
+  { id: "evalexpr", label: "Evaluate expressions", tier: 2 },
+  { id: "solve1", label: "One-step equations", tier: 2 },
+  { id: "solve2", label: "Two-step equations", tier: 2 },
+  { id: "pct2dec", label: "Percent → decimal", tier: 1 },
+  { id: "dec2pct", label: "Decimal → percent", tier: 1 },
+  { id: "pct2frac", label: "Percent → fraction", tier: 2 },
+  { id: "fracadd", label: "Add fractions", tier: 2 },
+  { id: "fracmul", label: "Multiply fractions", tier: 2 },
+  { id: "fraccomp", label: "Compare fractions", tier: 2 },
+  { id: "factquad", label: "Factor quadratics", tier: 2 },
 ];
 
 export type TrianglePair = {
@@ -1080,6 +1107,270 @@ function makeDpoly(a: number, b: number, c: number, deg: number): Problem {
 }
 const genDpoly = (): Problem => makeDpoly(ri(1, 9), ri(1, 9), ri(1, 9), pick([2, 3]));
 
+/* ---------- C6 completion (gauntletcontent.md; ± pad + engines) ---------- */
+
+const neg = (n: number) => (n < 0 ? `(−${-n})` : String(n));
+
+// fk.integer-add-sub — operands [−20,20], all sign combos; answers [−40,40]
+function makeIntadd(op: "add" | "sub", a: number, b: number): Problem {
+  return {
+    topic: "intadd",
+    key: `intadd:${op},${a},${b}`,
+    prompt: `${a < 0 ? `−${-a}` : a} ${op === "add" ? "+" : "−"} ${neg(b)}`,
+    answer: String(op === "add" ? a + b : a - b),
+    kind: "numeric",
+  };
+}
+function genIntadd(): Problem {
+  const a = ri(-20, 20);
+  const b = ri(-20, 20);
+  return makeIntadd(pick(["add", "sub"]), a, b);
+}
+
+// fk.integer-mul-div — factors [−12,12] excl 0/±1; division always exact
+function makeIntmul(op: "mul" | "div", a: number, b: number): Problem {
+  if (op === "mul") {
+    return {
+      topic: "intmul",
+      key: `intmul:mul,${a},${b}`,
+      prompt: `${neg(a)} × ${neg(b)}`,
+      answer: String(a * b),
+      kind: "numeric",
+    };
+  }
+  return {
+    topic: "intmul",
+    key: `intmul:div,${a},${b}`,
+    prompt: `${a < 0 ? `−${-a}` : a} ÷ ${neg(b)}`,
+    answer: String(a / b),
+    kind: "numeric",
+  };
+}
+function genIntmul(): Problem {
+  const mag = () => ri(2, 12) * pick([1, -1]);
+  if (Math.random() < 0.5) return makeIntmul("mul", mag(), mag());
+  const d = mag();
+  const q = mag();
+  return makeIntmul("div", d * q, d);
+}
+
+// prealg.evaluate-expression — ax+b, a(x+b), x²+a; signed band x ∈ [−9,−2]
+function makeEvalexpr(form: "lin" | "paren" | "sq", a: number, b: number, x: number): Problem {
+  const prompts = {
+    lin: `${a}x + ${b} when x = ${x}`,
+    paren: `${a}(x + ${b}) when x = ${x}`,
+    sq: `x² + ${a} when x = ${x}`,
+  };
+  const answers = {
+    lin: a * x + b,
+    paren: a * (x + b),
+    sq: x * x + a,
+  };
+  return {
+    topic: "evalexpr",
+    key: `evalexpr:${form},${a},${b},${x}`,
+    prompt: prompts[form],
+    answer: String(answers[form]),
+    kind: "numeric",
+  };
+}
+function genEvalexpr(): Problem {
+  const form = pick(["lin", "paren", "sq"] as const);
+  const x = Math.random() < 0.3 ? ri(-9, -2) : ri(2, 9); // signed band ~30%
+  return makeEvalexpr(form, ri(1, 9), ri(1, 9), x);
+}
+
+// prealg.solve-one-step-equation — one inverse-operation read, all four ops
+function makeSolve1(op: "add" | "sub" | "mul" | "div", p: number, q: number): Problem {
+  switch (op) {
+    case "add": // x + p = q
+      return { topic: "solve1", key: `solve1:add,${p},${q}`, prompt: `x + ${p} = ${q}. x = ?`, answer: String(q - p), kind: "numeric" };
+    case "sub": // x − p = q
+      return { topic: "solve1", key: `solve1:sub,${p},${q}`, prompt: `x − ${p} = ${q}. x = ?`, answer: String(q + p), kind: "numeric" };
+    case "mul": // p·x = q
+      return { topic: "solve1", key: `solve1:mul,${p},${q}`, prompt: `${p}x = ${q}. x = ?`, answer: String(q / p), kind: "numeric" };
+    case "div": // x ÷ p = q
+      return { topic: "solve1", key: `solve1:div,${p},${q}`, prompt: `x ÷ ${p} = ${q}. x = ?`, answer: String(p * q), kind: "numeric" };
+  }
+}
+function genSolve1(): Problem {
+  const op = pick(["add", "sub", "mul", "div"] as const);
+  if (op === "add") {
+    const p = ri(2, 25);
+    // signed band: x + 9 = 4 admits negative answers
+    return makeSolve1("add", p, Math.random() < 0.25 ? ri(2, p - 1) : ri(p + 1, 50));
+  }
+  if (op === "sub") return makeSolve1("sub", ri(2, 25), ri(1, 25));
+  if (op === "mul") {
+    const a = ri(2, 12);
+    return makeSolve1("mul", a, a * ri(2, 12));
+  }
+  return makeSolve1("div", ri(2, 12), ri(2, 12));
+}
+
+// prealg.solve-two-step-equation — ax + b = c; undo the constant, then the coefficient
+function makeSolve2(a: number, b: number, x: number): Problem {
+  return {
+    topic: "solve2",
+    key: `solve2:${a},${b},${x}`,
+    prompt: `${a}x ${signed(b)} = ${a * x + b}. x = ?`,
+    answer: String(x),
+    kind: "numeric",
+  };
+}
+function genSolve2(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const a = ri(2, 9);
+    const b = pick([-15, -12, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15]);
+    const x = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    if (Math.abs(a * x + b) <= 99) return makeSolve2(a, b, x);
+  }
+  return makeSolve2(3, 5, 5);
+}
+
+// prealg.percent-to-decimal — shift the point; decimal entry, dec-exact
+function makePct2dec(p: number): Problem {
+  return {
+    topic: "pct2dec",
+    key: `pct2dec:${p}`,
+    prompt: `Write ${p}% as a decimal`,
+    answer: String(p / 100),
+    kind: "numeric",
+    entry: "decimal",
+    rule: "dec-exact",
+  };
+}
+const genPct2dec = (): Problem => makePct2dec(ri(1, 150));
+
+// prealg.decimal-to-percent — the percent NUMBER, so plain single-number
+function makeDec2pct(p: number): Problem {
+  return {
+    topic: "dec2pct",
+    key: `dec2pct:${p}`,
+    prompt: `Write ${p / 100} as a percent (number only)`,
+    answer: String(p),
+    kind: "numeric",
+  };
+}
+const genDec2pct = (): Problem => makeDec2pct(ri(1, 150));
+
+// prealg.percent-to-fraction — over 100 and reduce; gcd(p,100) ≥ 4 always
+function makePct2frac(p: number): Problem {
+  const g = gcd(p, 100);
+  return {
+    topic: "pct2frac",
+    key: `pct2frac:${p}`,
+    prompt: `Write ${p}% as a fraction in lowest terms`,
+    answer: `${p / g}/${100 / g}`,
+    kind: "numeric",
+    entry: "fraction",
+    rule: "frac-lowest-terms",
+  };
+}
+function genPct2frac(): Problem {
+  for (let i = 0; i < 30; i++) {
+    const p = ri(1, 99);
+    if (gcd(p, 100) >= 4) return makePct2frac(p);
+  }
+  return makePct2frac(40);
+}
+
+// prealg.fraction-add-unlike — LCD ≤ 24; lowest-terms answers, improper allowed
+const FRACDENOMS = [2, 3, 4, 5, 6, 8, 10, 12];
+function makeFracadd(n1: number, d1: number, n2: number, d2: number): Problem {
+  const L = lcm(d1, d2);
+  const num = n1 * (L / d1) + n2 * (L / d2);
+  const g = gcd(num, L);
+  return {
+    topic: "fracadd",
+    key: `fracadd:${n1}/${d1}+${n2}/${d2}`,
+    prompt: `${n1}/${d1} + ${n2}/${d2}`,
+    answer: `${num / g}/${L / g}`,
+    kind: "numeric",
+    entry: "fraction",
+    rule: "frac-lowest-terms",
+  };
+}
+function genFracadd(): Problem {
+  for (let i = 0; i < 30; i++) {
+    const d1 = pick(FRACDENOMS);
+    const d2 = pick(FRACDENOMS);
+    if (d1 === d2 || lcm(d1, d2) > 24) continue;
+    const n1 = ri(1, d1 - 1);
+    const n2 = ri(1, d2 - 1);
+    const L = lcm(d1, d2);
+    if ((n1 * (L / d1) + n2 * (L / d2)) % L === 0) continue; // integer sums are a different shape
+    return makeFracadd(n1, d1, n2, d2);
+  }
+  return makeFracadd(1, 2, 1, 3);
+}
+
+// prealg.fraction-multiply — at least one cross-cancellation; denominator ≤ 24
+function makeFracmul(n1: number, d1: number, n2: number, d2: number): Problem {
+  const num = n1 * n2;
+  const den = d1 * d2;
+  const g = gcd(num, den);
+  return {
+    topic: "fracmul",
+    key: `fracmul:${n1}/${d1}×${n2}/${d2}`,
+    prompt: `${n1}/${d1} × ${n2}/${d2}`,
+    answer: `${num / g}/${den / g}`,
+    kind: "numeric",
+    entry: "fraction",
+    rule: "frac-lowest-terms",
+  };
+}
+function genFracmul(): Problem {
+  for (let i = 0; i < 40; i++) {
+    const [n1, d1, n2, d2] = [ri(1, 9), ri(2, 9), ri(1, 9), ri(2, 9)];
+    if (gcd(n1, d2) === 1 && gcd(n2, d1) === 1) continue; // need a cross-cancellation
+    const den = (d1 * d2) / gcd(n1 * n2, d1 * d2);
+    if (den > 24 || den === 1) continue; // lowest-terms denominator ≤ 24, keep fractional
+    return makeFracmul(n1, d1, n2, d2);
+  }
+  return makeFracmul(2, 3, 3, 4);
+}
+
+// prealg.compare-fractions — verify a claimed inequality; cross-multiply
+function makeFraccomp(n1: number, d1: number, n2: number, d2: number): Problem {
+  return {
+    topic: "fraccomp",
+    key: `fraccomp:${n1}/${d1}>${n2}/${d2}`,
+    prompt: `True or false: ${n1}/${d1} > ${n2}/${d2}`,
+    answer: n1 * d2 > n2 * d1 ? "True" : "False",
+    kind: "choice",
+    choices: ["True", "False"],
+    rule: "tf",
+  };
+}
+function genFraccomp(): Problem {
+  for (let i = 0; i < 40; i++) {
+    const [d1, d2] = [ri(2, 12), ri(2, 12)];
+    const n1 = ri(1, d1 - 1);
+    const n2 = ri(1, d2 - 1);
+    const diff = Math.abs(n1 / d1 - n2 / d2);
+    if (diff === 0 || diff > 1 / 6) continue; // close enough to force cross-multiplication
+    return makeFraccomp(n1, d1, n2, d2);
+  }
+  return makeFraccomp(3, 5, 2, 3);
+}
+
+// alg1.factor-simple-quadratic — pinned band: monic, both roots ∈ [1, 9]
+function makeFactquad(r: number, s: number): Problem {
+  const [lo, hi] = [Math.min(r, s), Math.max(r, s)];
+  return {
+    topic: "factquad",
+    key: `factquad:${lo},${hi}`,
+    prompt: `Factor: x² ${signed(lo + hi)}x ${signed(lo * hi)}`,
+    answer: `(x+${lo})(x+${hi})`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "factored-commutative-ws",
+    alphabet: ["x", "+", "(", ")"],
+  };
+}
+const genFactquad = (): Problem => makeFactquad(ri(1, 9), ri(1, 9));
+
 /* ---------- registry + adaptive serving ---------- */
 
 export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
@@ -1131,6 +1422,18 @@ export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   factpair: genFactpair,
   dpower: genDpower,
   dpoly: genDpoly,
+  intadd: genIntadd,
+  intmul: genIntmul,
+  evalexpr: genEvalexpr,
+  solve1: genSolve1,
+  solve2: genSolve2,
+  pct2dec: genPct2dec,
+  dec2pct: genDec2pct,
+  pct2frac: genPct2frac,
+  fracadd: genFracadd,
+  fracmul: genFracmul,
+  fraccomp: genFraccomp,
+  factquad: genFactquad,
 };
 
 /** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
@@ -1268,6 +1571,54 @@ export function problemFromKey(key: string): Problem | null {
       case "dpoly": {
         const [deg, a, b, c] = rest.split(",").map(Number);
         return makeDpoly(a, b, c, deg);
+      }
+      case "intadd": {
+        const [op, a, b] = rest.split(",");
+        return makeIntadd(op as "add" | "sub", Number(a), Number(b));
+      }
+      case "intmul": {
+        const [op, a, b] = rest.split(",");
+        return makeIntmul(op as "mul" | "div", Number(a), Number(b));
+      }
+      case "evalexpr": {
+        const [form, a, b, x] = rest.split(",");
+        return makeEvalexpr(form as "lin" | "paren" | "sq", Number(a), Number(b), Number(x));
+      }
+      case "solve1": {
+        const [op, p, q] = rest.split(",");
+        return makeSolve1(op as "add" | "sub" | "mul" | "div", Number(p), Number(q));
+      }
+      case "solve2": {
+        const [a, b, x] = rest.split(",").map(Number);
+        return makeSolve2(a, b, x);
+      }
+      case "pct2dec":
+        return makePct2dec(Number(rest));
+      case "dec2pct":
+        return makeDec2pct(Number(rest));
+      case "pct2frac":
+        return makePct2frac(Number(rest));
+      case "fracadd": {
+        const [l, r2] = rest.split("+");
+        const [n1, d1] = l.split("/").map(Number);
+        const [n2, d2] = r2.split("/").map(Number);
+        return makeFracadd(n1, d1, n2, d2);
+      }
+      case "fracmul": {
+        const [l, r2] = rest.split("×");
+        const [n1, d1] = l.split("/").map(Number);
+        const [n2, d2] = r2.split("/").map(Number);
+        return makeFracmul(n1, d1, n2, d2);
+      }
+      case "fraccomp": {
+        const [l, r2] = rest.split(">");
+        const [n1, d1] = l.split("/").map(Number);
+        const [n2, d2] = r2.split("/").map(Number);
+        return makeFraccomp(n1, d1, n2, d2);
+      }
+      case "factquad": {
+        const [r, s] = rest.split(",").map(Number);
+        return makeFactquad(r, s);
       }
     }
   } catch {
@@ -1412,6 +1763,21 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
     case "dpower":
       for (let n = 2; n <= 9; n++) keys.push(`dpower:${n}`);
       return keys;
+    case "pct2dec":
+      for (let p = 1; p <= 150; p++) keys.push(`pct2dec:${p}`);
+      return keys; // exactly the cap
+    case "dec2pct":
+      for (let p = 1; p <= 150; p++) keys.push(`dec2pct:${p}`);
+      return keys;
+    case "pct2frac":
+      for (let p = 1; p <= 99; p++) {
+        if (gcd(p, 100) >= 4) keys.push(`pct2frac:${p}`);
+      }
+      return keys;
+    case "factquad":
+      // pinned band: both roots ∈ [1, 9] (signed band is a later tune)
+      for (let r = 1; r <= 9; r++) for (let s = r; s <= 9; s++) keys.push(`factquad:${r},${s}`);
+      return keys; // 45 keys
     default:
       // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, the
       // g912 open generators (slope, linfn, evalquad, expquot, disc, dist,

@@ -30,43 +30,88 @@ export default function NumberPad({
   onInput,
   disabled,
   accent = "#22d3ee",
+  extras = [],
+  onSubmit,
 }: {
   value: string;
   onInput: (v: string) => void;
   disabled?: boolean;
   accent?: string;
+  /** C6 formats: extra token keys above the digit grid (e.g. "/", ",", "x", "^") */
+  extras?: string[];
+  /** C6 variable-length formats are Enter-to-submit; renders the ⏎ key */
+  onSubmit?: () => void;
 }) {
-  const press = (k: (typeof KEYS)[number]) => {
+  const press = (k: string) => {
     if (disabled) return;
     if (k === "⌫") onInput(value.slice(0, -1));
     else if (k === "±") onInput(value.startsWith("-") ? value.slice(1) : `-${value}`);
     else onInput(value + k);
   };
+  const keyCls = (muted: boolean) =>
+    `h-11 touch-manipulation select-none rounded-xl border font-mono text-xl font-bold text-white transition-colors disabled:opacity-40 sm:h-14 ${
+      muted ? "border-white/15 bg-white/5 active:bg-white/20" : "border-white/20 bg-white/10 active:bg-white/30"
+    }`;
 
   return (
-    <div className="mt-2 grid grid-cols-3 gap-1.5">
-      {KEYS.map((k) => (
-        <button
-          key={k}
-          type="button"
-          // pointerdown, not click: answers land the moment the finger does
-          onPointerDown={(e) => {
-            e.preventDefault();
-            press(k);
-          }}
-          disabled={disabled}
-          aria-label={k === "⌫" ? "Delete" : k === "±" ? "Plus or minus" : k}
-          className={`h-11 touch-manipulation select-none rounded-xl border font-mono text-xl font-bold text-white transition-colors disabled:opacity-40 sm:h-14 ${
-            k === "±" || k === "⌫"
-              ? "border-white/15 bg-white/5 active:bg-white/20"
-              : "border-white/20 bg-white/10 active:bg-white/30"
-          }`}
-          style={{ WebkitTapHighlightColor: "transparent" }}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <span style={k === "±" ? { color: accent } : undefined}>{k}</span>
-        </button>
-      ))}
+    <div className="mt-2">
+      {(extras.length > 0 || onSubmit) && (
+        <div className="mb-1.5 grid gap-1.5" style={{ gridTemplateColumns: `repeat(${extras.length + (onSubmit ? 1 : 0)}, 1fr)` }}>
+          {extras.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                press(k);
+              }}
+              disabled={disabled}
+              aria-label={`Token ${k}`}
+              className={keyCls(false)}
+              style={{ WebkitTapHighlightColor: "transparent", color: accent }}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {k}
+            </button>
+          ))}
+          {onSubmit && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                if (!disabled) onSubmit();
+              }}
+              disabled={disabled}
+              aria-label="Submit answer"
+              className="h-11 touch-manipulation select-none rounded-xl bg-emerald-400 font-mono text-xl font-bold text-black transition-colors active:bg-emerald-300 disabled:opacity-40 sm:h-14"
+              style={{ WebkitTapHighlightColor: "transparent" }}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              ⏎
+            </button>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-1.5">
+        {KEYS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            // pointerdown, not click: answers land the moment the finger does
+            onPointerDown={(e) => {
+              e.preventDefault();
+              press(k);
+            }}
+            disabled={disabled}
+            aria-label={k === "⌫" ? "Delete" : k === "±" ? "Plus or minus" : k}
+            className={keyCls(k === "±" || k === "⌫")}
+            style={{ WebkitTapHighlightColor: "transparent" }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <span style={k === "±" ? { color: accent } : undefined}>{k}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

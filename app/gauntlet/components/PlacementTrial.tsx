@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
+import { entryOf, judgeAnswer, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
+import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import { AREAS, PATHWAY } from "../game/pathway";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
@@ -59,6 +60,11 @@ export default function PlacementTrial({
   const probe = probes[Math.min(idx, probes.length - 1)];
   const skill = PATHWAY[probe.skillIdx];
   const area = AREAS.find((a) => a.id === skill.area)!;
+  const entry = entryOf(probe.problem);
+  const auto = isAutoSubmit(entry);
+  // Enter-to-submit formats (fractions, expressions, pairs) cost ~2–3s of
+  // typing on top of the think time — widen their pass window accordingly.
+  const passMs = auto || probe.problem.kind === "choice" ? PASS_MS : PASS_MS + 3000;
 
   const finish = useCallback((landingIdx: number) => {
     if (doneRef.current) return;
@@ -90,19 +96,19 @@ export default function PlacementTrial({
     if (landing !== null) return;
     const t = setInterval(() => {
       const elapsed = Date.now() - askedAt.current;
-      setSpeedPct(Math.max(0, 100 - (elapsed / PASS_MS) * 100));
-      if (elapsed > HARD_CAP_MS) {
+      setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
+      if (elapsed > HARD_CAP_MS + (passMs - PASS_MS)) {
         sfxWrong();
         advance(false);
       }
     }, 120);
     return () => clearInterval(t);
-  }, [advance, landing]);
+  }, [advance, landing, passMs]);
 
   const answer = (v: string) => {
     const ms = Date.now() - askedAt.current;
-    const correct = v === probe.problem.answer;
-    const passed = correct && ms <= PASS_MS;
+    const correct = probe.problem.kind === "choice" ? v === probe.problem.answer : judgeAnswer(probe.problem, v);
+    const passed = correct && ms <= passMs;
     if (passed) sfxHit(1);
     else sfxWrong();
     advance(passed);
@@ -110,11 +116,17 @@ export default function PlacementTrial({
 
   const onType = (v: string) => {
     ensureAudio();
-    const clean = v.replace(/[^0-9-]/g, "");
+    const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (probe.problem.kind === "numeric" && clean.length >= probe.problem.answer.length && clean.length > 0) {
+    if (auto && probe.problem.kind === "numeric" && clean.length >= probe.problem.answer.length && clean.length > 0) {
       answer(clean);
     }
+  };
+
+  const submit = () => {
+    if (!input.trim()) return;
+    ensureAudio();
+    answer(input);
   };
 
   /* ---------- result screen ---------- */
@@ -186,16 +198,25 @@ export default function PlacementTrial({
                 <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-cyan-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
                   {input || <span className="text-base font-normal text-white/30">Tap the answer!</span>}
                 </div>
-                <NumberPad value={input} onInput={onType} accent="#22d3ee" />
+                <NumberPad
+                  value={input}
+                  onInput={onType}
+                  accent="#22d3ee"
+                  extras={padExtras(entry, probe.problem.alphabet)}
+                  onSubmit={auto ? undefined : submit}
+                />
               </>
             ) : (
               <input
                 ref={inputRef}
                 autoFocus
-                inputMode="numeric"
+                inputMode={auto ? "numeric" : "text"}
                 value={input}
                 onChange={(e) => onType(e.target.value)}
-                placeholder="Type the answer!"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !auto) submit();
+                }}
+                placeholder={auto ? "Type the answer!" : "Type, then Enter"}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70"
               />
             )

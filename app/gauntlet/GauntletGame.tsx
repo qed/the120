@@ -451,6 +451,10 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             if (lvl) startSkillBattle(curIdx, lvl);
           }}
           onSkill={(idx) => setOpenSkill(idx)}
+          onPlacement={() => {
+            ensureAudio();
+            setPhase("placement");
+          }}
           onTrial={() => {
             ensureAudio();
             setPhase("trial");
@@ -464,12 +468,14 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       {phase === "placement" && (
         <PlacementTrial
           onDone={(landing) => {
-            setSave((p) => ({
-              ...p,
-              placed: true,
-              skillProgress: { ...placementProgress(landing), ...p.skillProgress },
-              topics: unlockedTopics({ ...placementProgress(landing), ...p.skillProgress }),
-            }));
+            setSave((p) => {
+              // max-merge: placement can raise levels, never lower them
+              const merged = { ...p.skillProgress };
+              for (const [k, v] of Object.entries(placementProgress(landing))) {
+                merged[k] = Math.max(merged[k] ?? 0, v);
+              }
+              return { ...p, placed: true, skillProgress: merged, topics: unlockedTopics(merged) };
+            });
             setPhase("menu");
           }}
           onSkip={() => {
@@ -567,6 +573,7 @@ function Menu({
   setHandle,
   onContinue,
   onSkill,
+  onPlacement,
   onTrial,
   onHelp,
   onBoard,
@@ -578,6 +585,7 @@ function Menu({
   setHandle: (h: string) => void;
   onContinue: () => void;
   onSkill: (idx: number) => void;
+  onPlacement: () => void;
   onTrial: () => void;
   onHelp: () => void;
   onBoard: () => void;
@@ -680,12 +688,20 @@ function Menu({
             A quick placement finds your start on the pathway — answer fast and clean to place higher
           </p>
         ) : (
-          <button
-            onClick={onTrial}
-            className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-2.5 font-mono text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/20"
-          >
-            🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
-          </button>
+          <>
+            <button
+              onClick={onTrial}
+              className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-2.5 font-mono text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/20"
+            >
+              🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
+            </button>
+            <button
+              onClick={onPlacement}
+              className="self-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
+            >
+              🎯 take the placement test — it can only move you up
+            </button>
+          </>
         )}
       </div>
 

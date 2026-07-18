@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BOSSES } from "../game/bosses";
 import {
+  entryOf,
   factSetFor,
+  judgeAnswer,
   makeTrialDeck,
   nextProblem,
   problemFromKey,
@@ -11,6 +13,7 @@ import {
   type Problem,
   type TopicId,
 } from "../game/problems";
+import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import { ensureAudio, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
@@ -144,13 +147,22 @@ export default function Trial({
     advance();
   };
 
+  const entry = entryOf(problem);
+  const auto = isAutoSubmit(entry);
+
   const onType = (v: string) => {
     ensureAudio();
-    const clean = v.replace(/[^0-9-]/g, "");
+    const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
-      answer(clean === problem.answer);
+    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
+      answer(judgeAnswer(problem, clean));
     }
+  };
+
+  const submit = () => {
+    if (!input.trim()) return;
+    ensureAudio();
+    answer(judgeAnswer(problem, input));
   };
 
   const seconds = Math.ceil(msLeft / 1000);
@@ -215,16 +227,25 @@ export default function Trial({
                 <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-amber-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
                   {input || <span className="text-base font-normal text-white/30">Tap the answer!</span>}
                 </div>
-                <NumberPad value={input} onInput={onType} accent="#fbbf24" />
+                <NumberPad
+                  value={input}
+                  onInput={onType}
+                  accent="#fbbf24"
+                  extras={padExtras(entry, problem.alphabet)}
+                  onSubmit={auto ? undefined : submit}
+                />
               </>
             ) : (
               <input
                 ref={inputRef}
                 autoFocus
-                inputMode="numeric"
+                inputMode={auto ? "numeric" : "text"}
                 value={input}
                 onChange={(e) => onType(e.target.value)}
-                placeholder="Type the answer!"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !auto) submit();
+                }}
+                placeholder={auto ? "Type the answer!" : "Type, then Enter"}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
               />
             )

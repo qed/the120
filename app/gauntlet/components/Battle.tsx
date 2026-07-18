@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
-import { nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import { entryOf, judgeAnswer, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
 import BossSprite from "./BossSprite";
@@ -192,15 +193,27 @@ export default function Battle({
     }, REVEAL_MS);
   }, [advance, problem.answer]);
 
+  // C6: the entry format drives the character filter and the submit model —
+  // single-number keeps the length auto-judge, everything else is Enter/⏎.
+  const entry = entryOf(problem);
+  const auto = isAutoSubmit(entry);
+
   const onType = (v: string) => {
     if (reveal) return;
     ensureAudio();
-    const clean = v.replace(/[^0-9-]/g, "");
+    const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
-      if (clean === problem.answer) handleCorrect();
+    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
+      if (judgeAnswer(problem, clean)) handleCorrect();
       else handleWrong();
     }
+  };
+
+  const submit = () => {
+    if (reveal || !input.trim()) return;
+    ensureAudio();
+    if (judgeAnswer(problem, input)) handleCorrect();
+    else handleWrong();
   };
 
   const choose = (c: string) => {
@@ -376,16 +389,26 @@ export default function Battle({
                     <span className="text-base font-normal text-white/30">{reveal ? "" : "Tap the answer!"}</span>
                   )}
                 </div>
-                <NumberPad value={input} onInput={onType} disabled={!!reveal} accent={boss.glow} />
+                <NumberPad
+                  value={input}
+                  onInput={onType}
+                  disabled={!!reveal}
+                  accent={boss.glow}
+                  extras={padExtras(entry, problem.alphabet)}
+                  onSubmit={auto ? undefined : submit}
+                />
               </>
             ) : (
               <input
                 ref={inputRef}
                 autoFocus
-                inputMode="numeric"
+                inputMode={auto ? "numeric" : "text"}
                 value={input}
                 onChange={(e) => onType(e.target.value)}
-                placeholder={reveal ? "" : "Type the answer!"}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !auto) submit();
+                }}
+                placeholder={reveal ? "" : auto ? "Type the answer!" : "Type, then Enter"}
                 disabled={!!reveal}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
               />

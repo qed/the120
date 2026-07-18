@@ -10,6 +10,7 @@
  */
 
 import { isMastered, MASTERY_MS, type FactStat } from "./mastery";
+import { judge, type AnswerRule, type EntryFormat } from "./answerRules";
 
 export type TopicId =
   // core arithmetic (shipped picks #1/2/3/6)
@@ -58,7 +59,16 @@ export type TopicId =
   | "chain"
   | "dpoint"
   | "critpt"
-  | "defint";
+  | "defint"
+  // C6 — new answer engines (fraction / short-expression / two-numbers):
+  // the ranked picks that waited on input formats (#7, #21, #23, #25, #26)
+  | "simpfrac"
+  | "likterms"
+  | "binom"
+  | "slope2"
+  | "factpair"
+  | "dpower"
+  | "dpoly";
 
 export type Band = "g34" | "g56" | "g78" | "g912";
 
@@ -116,6 +126,14 @@ export const TOPICS: Topic[] = [
   { id: "dpoint", label: "Derivative at a point", tier: 2 },
   { id: "critpt", label: "Critical points", tier: 2 },
   { id: "defint", label: "Definite integrals", tier: 2 },
+  // C6 answer-engine topics
+  { id: "simpfrac", label: "Simplify fractions", tier: 2 },
+  { id: "likterms", label: "Combine like terms", tier: 2 },
+  { id: "binom", label: "Multiply binomials", tier: 2 },
+  { id: "slope2", label: "Slope (fractions)", tier: 2 },
+  { id: "factpair", label: "Sum & product pairs", tier: 2 },
+  { id: "dpower", label: "Power rule", tier: 1 },
+  { id: "dpoly", label: "Differentiate polynomials", tier: 2 },
 ];
 
 export type TrianglePair = {
@@ -132,7 +150,21 @@ export type Problem = {
   kind: "numeric" | "choice";
   choices?: string[];
   triangle?: TrianglePair;
+  /** C6 input format; defaults to single-number (numeric) / multiple-choice */
+  entry?: EntryFormat;
+  /** C6 accepted-answer rule; defaults to int-exact (numeric) / mc (choice) */
+  rule?: AnswerRule;
+  /** short-expression only: the token row's alphabet (beyond digits) */
+  alphabet?: string[];
 };
+
+/** Resolved input format for a problem (legacy problems carry no entry field). */
+export const entryOf = (p: Problem): EntryFormat =>
+  p.entry ?? (p.kind === "choice" ? "multiple-choice" : "single-number");
+
+/** One judging door for every surface: the entry's rule decides. */
+export const judgeAnswer = (p: Problem, entered: string): boolean =>
+  judge(p.rule ?? (p.kind === "choice" ? "mc" : "int-exact"), entered, p.answer);
 
 const ri = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
@@ -901,6 +933,153 @@ function genDefint(): Problem {
   return makeDefint(3, 2, 2);
 }
 
+/* ---------- C6 · answer-engine topics (gauntletcontent.md ranked picks) ---------- */
+
+// prealg.simplify-fraction (#7) — (a·g)/(b·g) with gcd(a,b)=1; frac-lowest-terms
+function makeSimpfrac(a: number, b: number, g: number): Problem {
+  return {
+    topic: "simpfrac",
+    key: `simpfrac:${a * g}/${b * g}`,
+    prompt: `Write ${a * g}/${b * g} in lowest terms`,
+    answer: `${a}/${b}`,
+    kind: "numeric",
+    entry: "fraction",
+    rule: "frac-lowest-terms",
+  };
+}
+function genSimpfrac(): Problem {
+  for (let i = 0; i < 30; i++) {
+    const a = ri(1, 9);
+    const b = ri(2, 9);
+    const g = ri(2, 6);
+    if (gcd(a, b) === 1 && a !== b && b * g <= 54) return makeSimpfrac(a, b, g);
+  }
+  return makeSimpfrac(3, 4, 2);
+}
+
+// prealg.combine-like-terms (#23) — 2–3 like terms, coeffs [1,12], sums ≤ 99
+function makeLikterms(coeffs: number[]): Problem {
+  const sum = coeffs.reduce((s, c) => s + c, 0);
+  return {
+    topic: "likterms",
+    key: `likterms:${coeffs.join("+")}`,
+    prompt: `Simplify ${coeffs.map((c) => `${c}x`).join(" + ")}`,
+    answer: `${sum}x`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x"],
+  };
+}
+function genLikterms(): Problem {
+  const n = pick([2, 2, 3]);
+  const coeffs = Array.from({ length: n }, () => ri(1, 12));
+  return makeLikterms(coeffs);
+}
+
+// alg1.multiply-binomials (#21) — monic (x+a)(x+b); expanded trinomial answer
+function makeBinom(a: number, b: number): Problem {
+  const mid = a + b;
+  const midStr = mid === 0 ? "" : mid > 0 ? `+${mid}x` : `${mid}x`;
+  const cStr = a * b > 0 ? `+${a * b}` : `${a * b}`;
+  const term = (v: number) => (v > 0 ? `x + ${v}` : `x − ${-v}`);
+  return {
+    topic: "binom",
+    key: `binom:${Math.min(a, b)},${Math.max(a, b)}`,
+    prompt: `Multiply: (${term(a)})(${term(b)})`,
+    answer: `x^2${midStr}${cStr}`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x", "^", "+", "-"],
+  };
+}
+function genBinom(): Problem {
+  // base band all-positive; signed band mixes ± (vanishing middle excluded)
+  for (let i = 0; i < 20; i++) {
+    const signed = Math.random() < 0.4;
+    const a = signed ? pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]) : ri(1, 9);
+    const b = signed ? pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]) : ri(1, 9);
+    if (a + b !== 0) return makeBinom(a, b);
+  }
+  return makeBinom(3, 4);
+}
+
+// alg1.slope-two-points (#25) — non-integer slopes in lowest terms; fraction
+function makeSlope2(x1: number, y1: number, x2: number, y2: number): Problem {
+  const dy = y2 - y1;
+  const dx = x2 - x1;
+  const g = gcd(Math.abs(dy), Math.abs(dx));
+  const sign = dy * dx < 0 ? -1 : 1;
+  return {
+    topic: "slope2",
+    key: `slope2:${x1},${y1},${x2},${y2}`,
+    prompt: `Slope through (${x1}, ${y1}) and (${x2}, ${y2})`,
+    answer: `${sign * Math.abs(dy / g)}/${Math.abs(dx / g)}`,
+    kind: "numeric",
+    entry: "fraction",
+    rule: "frac-lowest-terms",
+  };
+}
+function genSlope2(): Problem {
+  for (let i = 0; i < 30; i++) {
+    const q = ri(2, 9); // run (denominator), slope non-integer
+    let p = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    if (Math.abs(p) % q === 0) continue; // integer slope — excluded band
+    if (gcd(Math.abs(p), q) !== 1) continue; // keep the stated pair in lowest terms
+    const x1 = ri(-9, 9 - q);
+    const y1 = p > 0 ? ri(-9, 9 - p) : ri(-9 - p, 9);
+    return makeSlope2(x1, y1, x1 + q, y1 + p);
+  }
+  return makeSlope2(1, 2, 4, 4);
+}
+
+// alg1.factor-pairs-sum-product (#26, no-MC-fallback) — pinned all-positive band
+function makeFactpair(m: number, n: number): Problem {
+  return {
+    topic: "factpair",
+    key: `factpair:${Math.min(m, n)},${Math.max(m, n)}`,
+    prompt: `Two numbers with sum ${m + n} and product ${m * n}`,
+    answer: `${Math.min(m, n)},${Math.max(m, n)}`,
+    kind: "numeric",
+    entry: "two-numbers",
+    rule: "pair-unordered",
+  };
+}
+const genFactpair = (): Problem => makeFactpair(ri(2, 12), ri(2, 12));
+
+// calcab.derivative-power-rule — d/dx xⁿ → nx^(n−1); n ∈ [2, 9]
+function makeDpower(n: number): Problem {
+  return {
+    topic: "dpower",
+    key: `dpower:${n}`,
+    prompt: `d/dx x${sup(n)}`,
+    answer: n === 2 ? "2x" : `${n}x^${n - 1}`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x", "^"],
+  };
+}
+const genDpower = (): Problem => makeDpower(ri(2, 9));
+
+// calcab.differentiate-polynomial — 3 terms, degree 2–3, coeffs [1,9]
+function makeDpoly(a: number, b: number, c: number, deg: number): Problem {
+  const lead = deg === 3 ? `${a}x³` : `${a}x²`;
+  const dLead = deg === 3 ? `${3 * a}x^2` : `${2 * a}x`;
+  return {
+    topic: "dpoly",
+    key: `dpoly:${deg},${a},${b},${c}`,
+    prompt: `d/dx (${lead} + ${b}x − ${c})`,
+    answer: `${dLead}+${b}`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x", "^", "+", "-"],
+  };
+}
+const genDpoly = (): Problem => makeDpoly(ri(1, 9), ri(1, 9), ri(1, 9), pick([2, 3]));
+
 /* ---------- registry + adaptive serving ---------- */
 
 export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
@@ -945,6 +1124,13 @@ export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   dpoint: genDpoint,
   critpt: genCritpt,
   defint: genDefint,
+  simpfrac: genSimpfrac,
+  likterms: genLikterms,
+  binom: genBinom,
+  slope2: genSlope2,
+  factpair: genFactpair,
+  dpower: genDpower,
+  dpoly: genDpoly,
 };
 
 /** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
@@ -1057,6 +1243,31 @@ export function problemFromKey(key: string): Problem | null {
       case "defint": {
         const [a, n, bnd] = rest.split(",").map(Number);
         return makeDefint(a, n, bnd);
+      }
+      case "simpfrac": {
+        const [num, den] = rest.split("/").map(Number);
+        const g = gcd(num, den);
+        return makeSimpfrac(num / g, den / g, g);
+      }
+      case "likterms":
+        return makeLikterms(rest.split("+").map(Number));
+      case "binom": {
+        const [a, b] = rest.split(",").map(Number);
+        return Math.random() < 0.5 ? makeBinom(a, b) : makeBinom(b, a);
+      }
+      case "slope2": {
+        const [x1, y1, x2, y2] = rest.split(",").map(Number);
+        return makeSlope2(x1, y1, x2, y2);
+      }
+      case "factpair": {
+        const [m, n] = rest.split(",").map(Number);
+        return makeFactpair(m, n);
+      }
+      case "dpower":
+        return makeDpower(Number(rest));
+      case "dpoly": {
+        const [deg, a, b, c] = rest.split(",").map(Number);
+        return makeDpoly(a, b, c, deg);
       }
     }
   } catch {
@@ -1194,10 +1405,18 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
         }
       }
       return keys;
+    case "factpair":
+      // pinned all-positive calibration band (the signed band is a later tune)
+      for (let m = 2; m <= 12; m++) for (let n = m; n <= 12; n++) keys.push(`factpair:${m},${n}`);
+      return keys; // 66 keys
+    case "dpower":
+      for (let n = 2; n <= 9; n++) keys.push(`dpower:${n}`);
+      return keys;
     default:
       // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, the
       // g912 open generators (slope, linfn, evalquad, expquot, disc, dist,
-      // midpoint), and the P4 open generators (det2, limitsub): parameter
+      // midpoint), the P4 open generators (det2, limitsub), and the C6 open
+      // generators (simpfrac, likterms, binom, slope2, dpoly): parameter
       // space too large or non-recall — open-ended.
       return null;
   }

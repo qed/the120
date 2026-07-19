@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { type Boss } from "./game/bosses";
-import { BANDS, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
+import { BANDS, factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
 import BossSprite from "./components/BossSprite";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
 import {
@@ -96,6 +96,8 @@ type Save = {
   placed: boolean;
   /** prefer Enter-to-submit over the auto-judge for typed answers */
   enterSubmit: boolean;
+  /** per-skill fastest boss clear, in seconds (personal records) */
+  records: Record<string, number>;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -115,6 +117,7 @@ const EMPTY_SAVE: Save = {
   skillProgress: {},
   placed: false,
   enterSubmit: false,
+  records: {},
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -130,6 +133,10 @@ function mergeSaves(a: Save, b: Save): Save {
   const skillProgress: SkillProgress = { ...(a.skillProgress ?? {}) };
   for (const [k, v] of Object.entries(b.skillProgress ?? {})) {
     skillProgress[k] = Math.max(skillProgress[k] ?? 0, v);
+  }
+  const records: Record<string, number> = { ...(a.records ?? {}) };
+  for (const [k, v] of Object.entries(b.records ?? {})) {
+    records[k] = records[k] === undefined ? v : Math.min(records[k], v); // fastest wins
   }
   return {
     xp: Math.max(a.xp, b.xp),
@@ -147,6 +154,7 @@ function mergeSaves(a: Save, b: Save): Save {
     skillProgress,
     placed: (a.placed ?? false) || (b.placed ?? false),
     enterSubmit: a.enterSubmit ?? b.enterSubmit ?? false, // local preference wins
+    records,
   };
 }
 
@@ -187,6 +195,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [lastMastered, setLastMastered] = useState(0);
   const [trialScore, setTrialScore] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  // competition bundle: personal records, challenge links, trial recap
+  const [lastElapsed, setLastElapsed] = useState(0);
+  const [lastNewRecord, setLastNewRecord] = useState(false);
+  const [lastRecap, setLastRecap] = useState<{ tested: number; total: number } | null>(null);
+  const [challenge, setChallenge] = useState<{ skillId: string; level: number; t: number; h?: string } | null>(null);
+  const challengeRunRef = useRef(false); // the current battle is a challenge attempt
 
   const [userId, setUserId] = useState<string | null>(null);
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
@@ -224,6 +238,24 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     setMuted(s.muted);
     setLoaded(true);
     if (!s.seenHelp) setShowHelp(true);
+    // challenge link (?c=base64 payload): validated hard — id must exist on the
+    // pathway, level 1–5, time positive; handle re-sanitized (kid-safe chars)
+    try {
+      const c = new URLSearchParams(window.location.search).get("c");
+      if (c) {
+        const d = JSON.parse(atob(c)) as { s?: unknown; l?: unknown; t?: unknown; h?: unknown };
+        const idx = PATHWAY.findIndex((sk) => sk.id === d.s);
+        const level = Math.floor(Number(d.l));
+        const t = Math.floor(Number(d.t));
+        if (idx >= 0 && level >= 1 && level <= SKILL_LEVELS && t > 0 && t <= RAID_SECONDS) {
+          const h =
+            typeof d.h === "string" ? d.h.replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12) : undefined;
+          setChallenge({ skillId: d.s as string, level, t, h: h || undefined });
+        }
+      }
+    } catch {
+      /* malformed link — ignore */
+    }
   }, []);
   useEffect(() => {
     if (loaded) localStorage.setItem(SAVE_KEY, JSON.stringify(save));
@@ -310,8 +342,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     return { date: t, count: prev.daily.date === yesterdayStr() ? prev.daily.count + 1 : 1 };
   };
 
-  const startSkillBattle = (idx: number, level: number) => {
+  const startSkillBattle = (idx: number, level: number, isChallenge = false) => {
     ensureAudio();
+    challengeRunRef.current = isChallenge;
     setSkillIdx(idx);
     setBattleLevel(level);
     setOpenSkill(null);
@@ -320,6 +353,41 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     setSave((p) => ({ ...p, band: PATHWAY[idx].band, topics: unlockedTopics(p.skillProgress) }));
     setPhase("battle");
   };
+
+  // Challenge a friend: encode this win as a link (skill + level + time to
+  // beat + kid-safe handle only — no PII). navigator.share on phones,
+  // clipboard on desktop.
+  const shareChallenge = useCallback(async (): Promise<boolean> => {
+    const payload = { s: skill.id, l: battleLevel, t: lastElapsed, h: save.handle || undefined };
+    const url = `${window.location.origin}/gauntlet/beta?c=${btoa(JSON.stringify(payload))}`;
+    const text = `⚔️ Beat my time: ${skill.label} boss L${battleLevel} in ${lastElapsed}s — The Gauntlet`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "The Gauntlet", text, url });
+        return true;
+      }
+    } catch {
+      /* user cancelled the sheet — fall through to clipboard */
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [skill.id, skill.label, battleLevel, lastElapsed, save.handle]);
+
+  // Challenge verdict line for the result screen
+  const challengeNote = (() => {
+    if (!challengeRunRef.current || !challenge) return undefined;
+    const who = challenge.h ?? "your rival";
+    if (phase === "victory") {
+      return lastElapsed <= challenge.t
+        ? `🏆 Challenge beaten — ${lastElapsed}s vs ${who}'s ${challenge.t}s!`
+        : `⚔️ Cleared in ${lastElapsed}s — ${who}'s ${challenge.t}s still stands`;
+    }
+    return `⚔️ ${who}'s ${challenge.t}s challenge stands — run it back`;
+  })();
 
   // Mid-raid/trial the page chrome above the game (parent banner) hides via
   // this body class (globals.css) so the arena gets the whole viewport.
@@ -362,10 +430,13 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       const acc = total ? stats.correct / total : 0;
       const medal = won ? (acc >= 0.9 && stats.timeLeft >= 30 ? 3 : acc >= 0.75 ? 2 : 1) : 0;
       const after = applyResults(save, results);
+      const elapsed = RAID_SECONDS - stats.timeLeft;
       setLastStats(stats);
       setLastResults(results);
       setLastMedal(medal);
       setLastMastered(countNewlyMastered(save.facts, after));
+      setLastElapsed(elapsed);
+      setLastNewRecord(won && elapsed < (save.records[skill.id] ?? Infinity));
       if (won) sfxVictory();
       else sfxDefeat();
       setSave((prev) => ({
@@ -381,6 +452,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           won && battleLevel > (prev.skillProgress[skill.id] ?? 0)
             ? { ...prev.skillProgress, [skill.id]: battleLevel }
             : prev.skillProgress,
+        // personal record: fastest winning clear per skill
+        records:
+          won && (RAID_SECONDS - stats.timeLeft) < (prev.records[skill.id] ?? Infinity)
+            ? { ...prev.records, [skill.id]: RAID_SECONDS - stats.timeLeft }
+            : prev.records,
       }));
       setPhase(won ? "victory" : "defeat");
       postTournamentMastery(save.facts, after, skill.band);
@@ -394,6 +470,10 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       setTrialScore(score);
       setLastResults(results);
       setLastMastered(countNewlyMastered(save.facts, after));
+      // C4 recap: how much of the reachable fact universe did this trial touch
+      const universe = new Set(trialTopics.flatMap((t) => factSetFor(t, trialBand) ?? []));
+      const tested = new Set(results.map((r) => r.key).filter((k) => universe.has(k))).size;
+      setLastRecap(universe.size > 0 ? { tested, total: universe.size } : null);
       sfxDefeat();
       setSave((prev) => ({
         ...prev,
@@ -405,7 +485,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       setPhase("trialEnd");
       postTournamentMastery(save.facts, after, trialBand);
     },
-    [applyResults, countNewlyMastered, postTournamentMastery, save, trialBand]
+    [applyResults, countNewlyMastered, postTournamentMastery, save, trialBand, trialTopics]
   );
 
   const toggleMute = () => {
@@ -445,6 +525,22 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         <Menu
           save={save}
           userId={cloudOk ? userId : null}
+          challenge={
+            challenge
+              ? {
+                  label: PATHWAY.find((s) => s.id === challenge.skillId)?.label ?? "?",
+                  level: challenge.level,
+                  t: challenge.t,
+                  h: challenge.h,
+                }
+              : null
+          }
+          onAcceptChallenge={() => {
+            if (!challenge) return;
+            const idx = PATHWAY.findIndex((s) => s.id === challenge.skillId);
+            if (idx >= 0) startSkillBattle(idx, challenge.level, true);
+          }}
+          onDismissChallenge={() => setChallenge(null)}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
           onContinue={() => {
             if (!save.placed) {
@@ -497,6 +593,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           level={skillLevel(save.skillProgress, PATHWAY[openSkill].id)}
           locked={!isUnlocked(save.skillProgress, openSkill)}
           facts={save.facts}
+          record={save.records[PATHWAY[openSkill].id]}
           onStart={(lvl) => startSkillBattle(openSkill, lvl)}
           onClose={() => setOpenSkill(null)}
         />
@@ -542,8 +639,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           medal={lastMedal}
           mastered={lastMastered}
           results={lastResults}
+          elapsed={lastElapsed}
+          newRecord={lastNewRecord}
+          challengeNote={challengeNote}
+          onChallenge={phase === "victory" ? shareChallenge : undefined}
           onMenu={() => setPhase("menu")}
-          onRetry={() => startSkillBattle(skillIdx, battleLevel)}
+          onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRunRef.current)}
           onNext={
             phase === "victory" && battleLevel < SKILL_LEVELS
               ? () => startSkillBattle(skillIdx, battleLevel + 1)
@@ -557,6 +658,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           best={save.trialBest}
           mastered={lastMastered}
           results={lastResults}
+          recap={lastRecap}
           onMenu={() => setPhase("menu")}
           onRetry={() => {
             ensureAudio();
@@ -584,6 +686,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 function Menu({
   save,
   userId,
+  challenge,
+  onAcceptChallenge,
+  onDismissChallenge,
   setHandle,
   onContinue,
   onSkill,
@@ -597,6 +702,9 @@ function Menu({
 }: {
   save: Save;
   userId: string | null;
+  challenge: { label: string; level: number; t: number; h?: string } | null;
+  onAcceptChallenge: () => void;
+  onDismissChallenge: () => void;
   setHandle: (h: string) => void;
   onContinue: () => void;
   onSkill: (idx: number) => void;
@@ -691,6 +799,30 @@ function Menu({
           </div>
         )}
       </div>
+
+      {/* Challenge banner: someone sent you a time to beat */}
+      {challenge && (
+        <div className="mt-6 flex w-full max-w-md items-center gap-3 rounded-2xl border border-amber-400/50 bg-amber-400/10 px-4 py-3">
+          <span className="text-2xl">⚔️</span>
+          <div className="flex-1">
+            <p className="font-mono text-xs font-bold text-amber-200">
+              {challenge.h ?? "A rival"} challenges you!
+            </p>
+            <p className="font-mono text-[11px] text-white/70">
+              Beat {challenge.label} boss L{challenge.level} in under {challenge.t}s
+            </p>
+          </div>
+          <button
+            onClick={onAcceptChallenge}
+            className="rounded-xl bg-amber-400 px-4 py-2 font-mono text-xs font-bold text-black hover:bg-amber-300"
+          >
+            FIGHT
+          </button>
+          <button onClick={onDismissChallenge} aria-label="Dismiss challenge" className="px-1 text-white/40 hover:text-white">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* P1 — one button. New players get placed; everyone else continues the road. */}
       <div className="mt-7 flex w-full max-w-md flex-col items-stretch gap-2">
@@ -873,6 +1005,10 @@ function Result({
   medal,
   mastered,
   results,
+  elapsed,
+  newRecord,
+  challengeNote,
+  onChallenge,
   onMenu,
   onRetry,
   onNext,
@@ -883,6 +1019,10 @@ function Result({
   medal: number;
   mastered: number;
   results: ProblemResult[];
+  elapsed: number;
+  newRecord: boolean;
+  challengeNote?: string;
+  onChallenge?: () => Promise<boolean>;
   onMenu: () => void;
   onRetry: () => void;
   onNext?: () => void;
@@ -891,6 +1031,7 @@ function Result({
   const acc = total ? Math.round((stats.correct / total) * 100) : 0;
   const waste = stats.activeMs ? Math.round((stats.wasteMs / stats.activeMs) * 100) : 0;
   const train = trainList(results);
+  const [challengeState, setChallengeState] = useState<"idle" | "busy" | "sent">("idle");
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center px-6 py-10 text-center">
@@ -914,6 +1055,17 @@ function Result({
         <Stat label="Best streak" value={`×${stats.bestStreak}`} />
         <Stat label="Waste" value={`${waste}%`} />
       </div>
+
+      {won && (
+        <p className={`mt-3 font-mono text-sm ${newRecord ? "font-bold text-amber-300" : "text-white/60"}`}>
+          {newRecord ? `⚡ NEW RECORD — cleared in ${elapsed}s!` : `⏱ Cleared in ${elapsed}s`}
+        </p>
+      )}
+      {challengeNote && (
+        <p className="mt-2 rounded-full border border-amber-400/40 bg-amber-400/10 px-4 py-1.5 font-mono text-sm text-amber-200">
+          {challengeNote}
+        </p>
+      )}
 
       {mastered > 0 && (
         <p className="mt-5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1.5 font-mono text-sm text-emerald-300">
@@ -953,6 +1105,18 @@ function Result({
             }}
           />
         )}
+        {onChallenge && (
+          <button
+            onClick={async () => {
+              setChallengeState("busy");
+              setChallengeState((await onChallenge()) ? "sent" : "idle");
+            }}
+            disabled={challengeState === "busy"}
+            className="rounded-xl border border-amber-400/50 bg-amber-400/15 px-6 py-3 font-mono text-sm font-bold text-amber-200 hover:bg-amber-400/25 disabled:opacity-60"
+          >
+            {challengeState === "sent" ? "LINK COPIED ✓" : "⚔️ CHALLENGE A FRIEND"}
+          </button>
+        )}
         {won && onNext && (
           <button onClick={onNext} className="rounded-xl bg-emerald-500 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-400">
             NEXT BOSS →
@@ -974,6 +1138,7 @@ function TrialResult({
   best,
   mastered,
   results,
+  recap,
   onMenu,
   onRetry,
 }: {
@@ -981,6 +1146,7 @@ function TrialResult({
   best: number;
   mastered: number;
   results: ProblemResult[];
+  recap: { tested: number; total: number } | null;
   onMenu: () => void;
   onRetry: () => void;
 }) {
@@ -993,6 +1159,12 @@ function TrialResult({
       <p className="mt-1 text-white/70">
         {isRecord ? "New personal best!" : `Personal best: ${best}`} · +{score * 2} XP
       </p>
+      {recap && (
+        <p className="mt-2 font-mono text-xs text-white/50">
+          Tested {recap.tested} of {recap.total} facts on your road
+          {recap.total > recap.tested && ` · ${recap.total - recap.tested} still unseen — run it back`}
+        </p>
+      )}
 
       {mastered > 0 && (
         <p className="mt-4 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-1.5 font-mono text-sm text-emerald-300">

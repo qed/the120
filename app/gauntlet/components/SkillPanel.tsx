@@ -86,6 +86,7 @@ export default function SkillPanel({
   level,
   locked,
   facts,
+  record,
   onStart,
   onClose,
 }: {
@@ -94,6 +95,8 @@ export default function SkillPanel({
   level: number;
   locked: boolean;
   facts: Record<string, FactStat>;
+  /** fastest winning clear in seconds (personal record) */
+  record?: number;
   onStart: (level: number) => void;
   onClose: () => void;
 }) {
@@ -115,6 +118,9 @@ export default function SkillPanel({
               {area.icon} {area.label}
             </p>
             <h2 className="mt-0.5 text-2xl font-bold">{skill.label}</h2>
+            {record !== undefined && (
+              <p className="mt-0.5 font-mono text-[11px] text-amber-300">⚡ Fastest clear: {record}s</p>
+            )}
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-md px-2 py-1 text-white/50 hover:bg-white/10 hover:text-white">
             ✕

@@ -67,6 +67,10 @@ export default function Battle({
   const [dying, setDying] = useState(false);
   const [entering, setEntering] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // C1 · boss personality: a taunt at half HP, an enrage roar under 25%
+  const [bark, setBark] = useState<string | null>(null);
+  const barkFiredRef = useRef({ half: false, low: false });
+  const enraged = bossHp > 0 && bossHp / boss.hp <= 0.25;
   const coarse = useCoarsePointer(); // A3: touch devices get the game pad, not the OS keyboard
 
   const statsRef = useRef<BattleStats>({ correct: 0, wrong: 0, damage: 0, bestStreak: 0, wasteMs: 0, activeMs: 0, timeLeft: 0 });
@@ -132,6 +136,24 @@ export default function Battle({
       finish(false);
     }
   }, [bossHp, timeLeft, playerHp, dying, finish]);
+
+  // C1: bark once at half HP, roar once on enrage
+  useEffect(() => {
+    const ratio = bossHp / boss.hp;
+    let line: string | null = null;
+    if (!barkFiredRef.current.half && ratio <= 0.5 && ratio > 0.25) {
+      barkFiredRef.current.half = true;
+      line = boss.taunt;
+    } else if (!barkFiredRef.current.low && ratio <= 0.25 && bossHp > 0) {
+      barkFiredRef.current.low = true;
+      line = `${boss.name.toUpperCase()} IS ENRAGED!`;
+    }
+    if (line) {
+      setBark(line);
+      const t = setTimeout(() => setBark(null), 2200);
+      return () => clearTimeout(t);
+    }
+  }, [bossHp, boss.hp, boss.taunt, boss.name]);
 
   const record = (correct: boolean, ms: number) => {
     resultsRef.current.push({ key: problem.key, prompt: problem.prompt, answer: problem.answer, ms, correct });
@@ -297,6 +319,7 @@ export default function Battle({
             />
           </div>
           <p className="mt-1 text-right font-mono text-[11px] tabular-nums text-white/60">
+            {enraged && <span className="mr-flame mr-2 font-bold text-red-400">🔥 ENRAGED</span>}
             {bossHp} / {boss.hp} HP
           </p>
         </div>
@@ -313,10 +336,21 @@ export default function Battle({
       <div className={`relative flex flex-1 items-center justify-center ${coarse ? "min-h-[112px]" : "min-h-[260px]"}`}>
         <div className="absolute h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: boss.glow }} />
         <div className={dying ? "mr-death" : entering ? "mr-enter" : shake || "mr-float"}>
-          <span key={hitFlash} className={hitFlash ? "mr-hit inline-block" : "inline-block"}>
+          <span
+            key={hitFlash}
+            className={hitFlash ? "mr-hit inline-block" : "inline-block"}
+            style={enraged ? { filter: "drop-shadow(0 0 20px rgba(239,68,68,0.75)) saturate(1.35)" } : undefined}
+          >
             <BossSprite id={boss.id} size={240} useImage />
           </span>
         </div>
+
+        {/* C1 bark bubble */}
+        {bark && (
+          <div className="mr-enter pointer-events-none absolute top-2 z-10 max-w-xs rounded-2xl border border-white/25 bg-black/75 px-4 py-2 text-center font-mono text-sm font-bold text-white backdrop-blur">
+            {bark}
+          </div>
+        )}
 
         {/* Slash FX (the user asked for this one personally) */}
         {fx && (

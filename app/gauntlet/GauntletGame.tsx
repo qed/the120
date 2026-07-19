@@ -168,6 +168,54 @@ const loadSave = (): Save => {
   }
 };
 
+/**
+ * ?demo=1 — a believable Grade-8 player for live walkthroughs (GT Alpha):
+ * arithmetic + most of pre-algebra passed with one deliberate gap (signed
+ * add/subtract — the badge shows "Grade 6 · frontier Grade 8"), a mixed ×
+ * mastery grid (mastered / learning / unseen), speed records, a trial best,
+ * and a daily streak. Everything derives from real game data structures.
+ */
+function buildDemoSave(): Save {
+  const passed = [
+    "add-facts", "sub-facts", "times-1", "div-facts", "dbl-halve", "place-value",
+    "times-2", "mul-2x1", "pow-ten", "frac-of", "sign-rules", // signed-add left as the gap
+    "squares", "sq-roots", "cubes", "exponents", "gcd", "simp-fractions", "lcm",
+    "denoms", "mul-fractions", "add-fractions", "compare-fractions", "exp-rules",
+    "proportions", "pct-to-dec", "dec-to-pct", "pct-to-frac", "arith-patterns",
+    "eval-expressions", "one-step-eq", "two-step-eq",
+  ];
+  const skillProgress: SkillProgress = {};
+  for (const id of passed) skillProgress[id] = PASS_LEVEL;
+  skillProgress["times-1"] = 5; // one crowned skill for the 👑 state
+  const facts: Record<string, FactStat> = {};
+  const mulSet = factSetFor("mul", "g56") ?? [];
+  mulSet.forEach((k, i) => {
+    if (i % 5 === 4) return; // ~20% unseen
+    if (i % 5 === 3) facts[k] = { n: 3, miss: 1, avgMs: 4200, fastStreak: 0 }; // learning
+    else facts[k] = { n: 6, miss: 0, avgMs: 1700, fastStreak: 3 }; // mastered
+  });
+  const sqSet = factSetFor("sq", "g56") ?? [];
+  sqSet.forEach((k, i) => {
+    if (i % 3 !== 2) facts[k] = { n: 4, miss: 0, avgMs: 1900, fastStreak: 2 };
+  });
+  return {
+    ...EMPTY_SAVE,
+    xp: 730,
+    bossesBeaten: ["clank", "gloop", "magmar"],
+    bestStreak: 14,
+    medals: { clank: 3, gloop: 2, magmar: 1 },
+    band: "g78",
+    seenHelp: true,
+    daily: { date: todayStr(), count: 6 },
+    facts,
+    trialBest: 38,
+    handle: "DEMO-RAIDER",
+    skillProgress,
+    placed: true,
+    records: { "times-1": 41, "div-facts": 58, "squares": 49, "one-step-eq": 66 },
+  };
+}
+
 const TITLES: [number, string][] = [
   [12, "Legend"],
   [8, "Champion"],
@@ -229,6 +277,14 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   }, [userId, openAccountModal]);
 
   useEffect(() => {
+    // Demo mode (?demo=1): seed a rich mid-progress player so the whole
+    // product (grade badge, gaps, grids, records) shows in one screen —
+    // built for the GT Alpha walkthrough. Local-only; overwrites this
+    // browser's save deliberately.
+    if (new URLSearchParams(window.location.search).get("demo") === "1") {
+      const demo = buildDemoSave();
+      localStorage.setItem(SAVE_KEY, JSON.stringify(demo));
+    }
     const s = loadSave();
     // Returning players from before the pathway: credit levels their fact
     // stats already prove, so nobody restarts a road they've walked (P1).
@@ -1370,8 +1426,13 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             ones you haven&apos;t owned yet.
           </li>
           <li>
-            🥇 <strong>Earn medals</strong> for accuracy, unlock tougher bosses, and chase your Mastery
-            Trial record.
+            🛤 <strong>Climb the pathway.</strong> One road from arithmetic to calculus — a quick
+            placement finds your start, and your <strong>Fast Math grade</strong> climbs as you pass
+            each skill&apos;s bosses. Gaps get marked, not hidden.
+          </li>
+          <li>
+            🥇 <strong>Earn medals</strong>, set speed records, challenge friends to beat your times,
+            and chase your Mastery Trial best.
           </li>
         </ul>
         <button

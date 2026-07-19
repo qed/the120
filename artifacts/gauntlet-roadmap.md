@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-19 (d)** — **Bosses got personality.** They taunt you at half health, and under 25% they **ENRAGE** — red glow, roar, the works. Finish them before they finish you. Also: the How-to-play now actually explains the pathway and your Fast Math grade. *(Internal, not for Discord: `?demo=1` on the beta URL seeds a rich Grade-6/frontier-8 demo player for walkthroughs — built for the GT Alpha meeting; it overwrites the browser's local save, so don't open it on a device with real progress.)*
+
 - **2026-07-19 (c)** — **📐 Your Fast Math grade.** Every skill on the pathway now carries a grade (3–12), and the menu shows *your* number: your Fast Math grade is where your earliest unfilled skill sits, with your frontier grade alongside if you've climbed higher ("Grade 6 · frontier Grade 11" = you've reached precalc but have a grade-6 gap to fill). Placement announces it ("📐 Grade 9 Fast Math"), the map shows each area's grade span, and clearing everything reads Grade 12 — COMPLETE 👑. Now you know exactly where you stand — and exactly which gap is holding your number down.
 
 - **2026-07-19 (b)** — **⚔️ Challenge your friends.** Win any raid and hit CHALLENGE A FRIEND — it makes a link with your skill, boss level, and time. They open it, hit FIGHT, and the game calls the verdict ("Challenge beaten — 41s vs your 55s!"). Plus: every skill now tracks your **⚡ fastest clear** (on the skill panel, with NEW RECORD callouts on wins), and the Mastery Trial ends with a recap of how many of your road's facts it actually tested. Records sync to your account. Go set some times worth beating.

@@ -3,32 +3,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { entryOf, judgeAnswer, masteryMsFor, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
-import { AREAS, PATHWAY, skillGrade } from "../game/pathway";
+import { AREAS, gradePlacementPassed, PATHWAY, placementGrades, skillGrade, skillsOfGrade } from "../game/pathway";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
 import TriangleFigure from "./TriangleFigure";
 
 /**
- * P1 — placement. Skills probe in pathway order; a skill is placed-past on
- * TWO clean probes and only fails on TWO fails (one slip = a tiebreaker).
- * A double-failed skill becomes a GAP — placement keeps probing so a rusty
- * early skill doesn't hide everything after it (Grade 12s were getting
- * parked at 2×1-digit and never seeing calculus). The trial ends at the
- * third gap or the end of the road; you start at your FIRST gap — the
- * frontier unlock keeps everything you passed open while you fill it.
+ * P1 — placement as a GRADE STAIRCASE (tester feedback: probing all 80
+ * skills ran 8+ minutes). Each grade is one station: two probes sampling
+ * two different skills of that grade; both clean → the whole grade (and
+ * everything below) is credited and you climb. One slip earns a tiebreaker
+ * on a third skill; two fails end placement — you land at that grade's
+ * first skill. Ten stations max ≈ 2–3 minutes, and you watch your grade
+ * climb as you go. Skill-level gaps surface later through raids/trials;
+ * placement's job is your LEVEL, fast.
  */
 
 const PASS_SLACK_MS = 3000; // on top of the topic's mastery window
 // Once the speed bar empties the probe can no longer pass — fail it quickly
 // (tester feedback: a long dead gap after the bar hits zero feels broken).
 const HARD_CAP_EXTRA_MS = 1200;
-const MAX_GAPS = 3; // the third gap ends placement — level found
 
 function probeFor(skillIdx: number): Problem {
   const s = PATHWAY[skillIdx];
   const set = factSetFor(s.topic, s.band);
   const p = set ? problemFromKey(set[Math.floor(Math.random() * set.length)]) : null;
   return p ?? nextProblem([s.topic], s.band);
+}
+
+/** Sample up to n distinct skill indexes from a grade, shuffled. */
+function sampleSkills(grade: number, n: number): number[] {
+  const pool = [...skillsOfGrade(grade)];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, Math.max(1, Math.min(n, pool.length)));
 }
 
 export default function PlacementTrial({
@@ -43,14 +53,15 @@ export default function PlacementTrial({
   onSkip: () => void;
 }) {
   const coarse = useCoarsePointer();
+  const gradesRef = useRef<number[]>(placementGrades());
 
-  const [skillPos, setSkillPos] = useState(0);
-  const [probeNum, setProbeNum] = useState(1); // 1..3 within the skill
+  const [stationIdx, setStationIdx] = useState(0); // index into gradesRef
+  const [probeNum, setProbeNum] = useState(1); // 1..3 within the station
+  const stationSkillsRef = useRef<number[]>(sampleSkills(gradesRef.current[0], 3));
   const passesRef = useRef(0);
   const failsRef = useRef(0);
-  const passedSkillsRef = useRef<number[]>([]);
-  const gapsRef = useRef<number[]>([]);
-  const [problem, setProblem] = useState<Problem>(() => probeFor(0));
+  const [skillPos, setSkillPos] = useState(stationSkillsRef.current[0]);
+  const [problem, setProblem] = useState<Problem>(() => probeFor(stationSkillsRef.current[0]));
   const [input, setInput] = useState("");
   const [landing, setLanding] = useState<number | null>(null);
   const [speedPct, setSpeedPct] = useState(100);
@@ -58,7 +69,11 @@ export default function PlacementTrial({
   const askedAt = useRef(Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
+  const passedSkillsRef = useRef<number[]>([]);
+  const gapsRef = useRef<number[]>([]); // kept for the result copy (first failed grade's skill)
 
+  const grades = gradesRef.current;
+  const grade = grades[Math.min(stationIdx, grades.length - 1)];
   const skill = PATHWAY[skillPos];
   const area = AREAS.find((a) => a.id === skill.area)!;
   const entry = entryOf(problem);
@@ -83,42 +98,44 @@ export default function PlacementTrial({
   const advance = useCallback(
     (passed: boolean) => {
       if (doneRef.current) return;
-      const wrapUp = () => {
-        // start at your first gap; a clean run starts at the last skill
-        finish(gapsRef.current[0] ?? PATHWAY.length - 1);
+      const failGrade = () => {
+        // land at this grade's first skill; everything below is credited
+        passedSkillsRef.current = gradePlacementPassed(grade);
+        const landIdx = skillsOfGrade(grade)[0];
+        gapsRef.current = [landIdx];
+        finish(landIdx);
       };
-      const nextSkill = () => {
-        if (skillPos + 1 >= PATHWAY.length) {
-          wrapUp();
+      const passGrade = () => {
+        if (stationIdx + 1 >= grades.length) {
+          passedSkillsRef.current = gradePlacementPassed(null); // clean full run
+          finish(PATHWAY.length - 1);
           return;
         }
+        const nextGrade = grades[stationIdx + 1];
+        stationSkillsRef.current = sampleSkills(nextGrade, 3);
         passesRef.current = 0;
         failsRef.current = 0;
-        serve(skillPos + 1, 1);
+        setStationIdx(stationIdx + 1);
+        serve(stationSkillsRef.current[0], 1);
       };
       if (passed) {
         passesRef.current += 1;
         if (passesRef.current >= 2) {
-          passedSkillsRef.current.push(skillPos);
-          nextSkill();
+          passGrade();
           return;
         }
       } else {
         failsRef.current += 1;
         if (failsRef.current >= 2) {
-          // a GAP — mark it and keep probing; the third gap ends placement
-          gapsRef.current.push(skillPos);
-          if (gapsRef.current.length >= MAX_GAPS) {
-            wrapUp();
-            return;
-          }
-          nextSkill();
+          failGrade();
           return;
         }
       }
-      serve(skillPos, probeNum + 1); // the extra probe (best-of-3)
+      // next probe in this station: a different sampled skill when available
+      const next = stationSkillsRef.current[Math.min(probeNum, stationSkillsRef.current.length - 1)];
+      serve(next, probeNum + 1);
     },
-    [finish, serve, skillPos, probeNum]
+    [finish, serve, stationIdx, probeNum, grade, grades]
   );
 
   // speed bar + hard cap
@@ -213,8 +230,25 @@ export default function PlacementTrial({
             skip — start from the beginning
           </button>
         </div>
+        {/* the grade staircase — watch your grade climb */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {grades.map((g, i) => (
+            <span
+              key={g}
+              className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-bold ${
+                i < stationIdx
+                  ? "bg-emerald-400/20 text-emerald-300"
+                  : i === stationIdx
+                    ? "bg-cyan-400/25 text-cyan-200 ring-1 ring-cyan-400/60"
+                    : "bg-white/5 text-white/30"
+              }`}
+            >
+              {i < stationIdx ? `G${g} ✓` : `G${g}`}
+            </span>
+          ))}
+        </div>
         <p className="mt-2 font-mono text-sm text-white/70">
-          {area.icon} {area.label} · <span className="text-white">{skill.label}</span>
+          Grade {grade} · {area.icon} {area.label} · <span className="text-white">{skill.label}</span>
           {probeNum === 3 && <span className="text-amber-300"> · tiebreaker</span>}
         </p>
         {/* answer-speed bar: full = fast pass, empty = too slow */}
@@ -285,7 +319,7 @@ export default function PlacementTrial({
           )}
         </div>
         <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Two clean answers place you past a skill — one slip gets a second chance, two set your start
+          Two clean answers pass a grade — one slip gets a tiebreaker, two set your start · ~2 min
         </p>
       </div>
     </div>

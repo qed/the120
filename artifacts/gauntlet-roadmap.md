@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-19 (f)** — **Placement is now ~2 minutes.** It was creeping past 8 as the pathway grew — now it's a **grade staircase**: two quick probes per grade, pass and climb (watch the G3 → G12 ladder tick ✓ as you go), and your start is set the moment a grade stops you. Passing a grade credits everything below it. Retakes still only move you up — go set your real grade.
+
 - **2026-07-19 (e)** — **Placement feel, fixed (your feedback again).** Misses now flash red so you know a probe failed · the dead 6-second wait after the speed bar empties is gone (fails ~1s after zero) · **Enter now works everywhere** — auto-submit still fires for plain numbers, but hitting Enter always submits, and the ⏎ key is always on the phone pad · placement respects your Enter-to-submit setting · and the placement screen got its background back (that one was just a bug).
 
 - **2026-07-19 (d)** — **Bosses got personality.** They taunt you at half health, and under 25% they **ENRAGE** — red glow, roar, the works. Finish them before they finish you. Also: the How-to-play now actually explains the pathway and your Fast Math grade. *(Internal, not for Discord: `?demo=1` on the beta URL seeds a rich Grade-6/frontier-8 demo player for walkthroughs — built for the GT Alpha meeting; it overwrites the browser's local save, so don't open it on a device with real progress.)*

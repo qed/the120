@@ -185,6 +185,30 @@ export function fastMathGrade(progress: SkillProgress): {
   return { grade, frontierGrade, complete };
 }
 
+/** Pathway indexes of every skill at a grade (placement staircase stations). */
+export function skillsOfGrade(grade: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < PATHWAY.length; i++) {
+    if (skillGrade(PATHWAY[i].id) === grade) out.push(i);
+  }
+  return out;
+}
+
+/** All grades that actually have skills, ascending (the staircase). */
+export function placementGrades(): number[] {
+  return [...new Set(PATHWAY.map((s) => skillGrade(s.id)))].sort((a, b) => a - b);
+}
+
+/** Grade-staircase credit: passing up to (not including) firstFailedGrade
+ *  credits every skill below it. Pass null for a clean full run. */
+export function gradePlacementPassed(firstFailedGrade: number | null): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < PATHWAY.length; i++) {
+    if (firstFailedGrade === null || skillGrade(PATHWAY[i].id) < firstFailedGrade) out.push(i);
+  }
+  return out;
+}
+
 /** Grade span of an area's skills, for the map headers ("Grades 6–8"). */
 export function areaGradeSpan(areaId: AreaId): [number, number] | null {
   const grades = PATHWAY.filter((s) => s.area === areaId).map((s) => skillGrade(s.id));

@@ -67,10 +67,12 @@ export const PATHWAY: Skill[] = [
   { id: "pct-to-dec", label: "Percent → decimal", area: "prealg", topic: "pct2dec", band: "g78" },
   { id: "dec-to-pct", label: "Decimal → percent", area: "prealg", topic: "dec2pct", band: "g78" },
   { id: "pct-to-frac", label: "Percent → fraction", area: "prealg", topic: "pct2frac", band: "g78" },
+  { id: "arith-patterns", label: "Arithmetic patterns", area: "prealg", topic: "nextarith", band: "g78" },
   { id: "eval-expressions", label: "Evaluate expressions", area: "prealg", topic: "evalexpr", band: "g78" },
   { id: "one-step-eq", label: "One-step equations", area: "prealg", topic: "solve1", band: "g78" },
   { id: "two-step-eq", label: "Two-step equations", area: "prealg", topic: "solve2", band: "g78" },
   { id: "like-terms", label: "Combine like terms", area: "prealg", topic: "likterms", band: "g78" },
+  { id: "distribute", label: "Distribute", area: "prealg", topic: "distlin", band: "g78" },
   // Algebra
   { id: "linear-fn", label: "Evaluate linear functions", area: "alg", topic: "linfn", band: "g912" },
   { id: "slope", label: "Slope from two points", area: "alg", topic: "slope", band: "g912" },
@@ -79,10 +81,13 @@ export const PATHWAY: Skill[] = [
   { id: "factor-pairs", label: "Sum & product pairs", area: "alg", topic: "factpair", band: "g912" },
   { id: "binomials", label: "Multiply binomials", area: "alg", topic: "binom", band: "g912" },
   { id: "factor-quads", label: "Factor quadratics", area: "alg", topic: "factquad", band: "g912" },
+  { id: "factor-gcf", label: "Factor out the GCF", area: "alg", topic: "factgcf", band: "g912" },
+  { id: "geo-patterns", label: "Geometric patterns", area: "alg", topic: "nextgeo", band: "g912" },
   { id: "exp-quotient", label: "Exponent quotient rule", area: "alg", topic: "expquot", band: "g912" },
   { id: "simplify-roots", label: "Simplify square roots", area: "alg", topic: "sqrtbig", band: "g912" },
   { id: "discriminant", label: "Discriminant & real roots", area: "alg", topic: "disc", band: "g912" },
   // Geometry
+  { id: "supp-comp", label: "Supplements & complements", area: "geo", topic: "suppcomp", band: "g78" },
   { id: "pythagoras", label: "Pythagorean triples", area: "geo", topic: "pyth", band: "g78" },
   { id: "congruence", label: "Triangle congruence", area: "geo", topic: "congruence", band: "g78" },
   { id: "distance", label: "Distance between points", area: "geo", topic: "dist", band: "g912" },
@@ -90,29 +95,43 @@ export const PATHWAY: Skill[] = [
   { id: "special-rt", label: "Special right triangles", area: "geo", topic: "srt", band: "g912" },
   // Trigonometry (P4, from gauntletcontent.md's Trig/Precalc pass)
   { id: "ref-angles", label: "Reference angles", area: "trig", topic: "refangle", band: "g912" },
+  { id: "coterminal", label: "Coterminal angles", area: "trig", topic: "coterm", band: "g912" },
   { id: "trig-values", label: "Exact trig values", area: "trig", topic: "trigval", band: "g912" },
+  { id: "trig-beyond-q1", label: "Trig beyond Q1", area: "trig", topic: "trigq", band: "g912" },
+  { id: "reciprocal-trig", label: "Reciprocal trig", area: "trig", topic: "recip", band: "g912" },
   { id: "cofunctions", label: "Cofunction complements", area: "trig", topic: "cofunc", band: "g912" },
+  { id: "amplitude", label: "Amplitude", area: "trig", topic: "amp", band: "g912" },
+  { id: "midline", label: "Midline", area: "trig", topic: "midline", band: "g912" },
   // Pre-Calculus
+  { id: "exp-solve", label: "Solve bˣ = k", area: "precalc", topic: "expsolve", band: "g912" },
   { id: "logs", label: "Evaluate logarithms", area: "precalc", topic: "evallog", band: "g912" },
+  { id: "log-rules", label: "Log product rule", area: "precalc", topic: "logrule", band: "g912" },
   { id: "determinants", label: "2×2 determinants", area: "precalc", topic: "det2", band: "g912" },
   { id: "limits", label: "Limits by substitution", area: "precalc", topic: "limitsub", band: "g912" },
+  { id: "v-asymptotes", label: "Vertical asymptotes", area: "precalc", topic: "vasymp", band: "g912" },
+  { id: "h-asymptotes", label: "Horizontal asymptotes", area: "precalc", topic: "hasymp", band: "g912" },
   { id: "geo-series", label: "Geometric series", area: "precalc", topic: "geoseries", band: "g912" },
-  // Calculus (AP Calc AB entries; BC series tests are next)
+  // Calculus (AP Calc AB + the first BC entry)
+  { id: "trig-limits", label: "Special trig limits", area: "calc", topic: "triglim", band: "g912" },
   { id: "power-rule", label: "Power rule", area: "calc", topic: "dpower", band: "g912" },
   { id: "deriv-table", label: "Derivative table", area: "calc", topic: "dstd", band: "g912" },
   { id: "diff-polys", label: "Differentiate polynomials", area: "calc", topic: "dpoly", band: "g912" },
   { id: "chain-rule", label: "Chain rule", area: "calc", topic: "chain", band: "g912" },
   { id: "deriv-at-point", label: "Derivative at a point", area: "calc", topic: "dpoint", band: "g912" },
+  { id: "second-derivs", label: "Second derivatives", area: "calc", topic: "dsecond", band: "g912" },
+  { id: "velocity", label: "Velocity", area: "calc", topic: "veloc", band: "g912" },
   { id: "crit-points", label: "Critical points", area: "calc", topic: "critpt", band: "g912" },
+  { id: "anti-power", label: "Antiderivative power rule", area: "calc", topic: "antipow", band: "g912" },
   { id: "def-integrals", label: "Definite integrals", area: "calc", topic: "defint", band: "g912" },
+  { id: "ratio-test", label: "Ratio test", area: "calc", topic: "ratiotest", band: "g912" },
 ];
 
 /** P4 — authored in gauntletcontent.md, not yet in the engine; shown as
  *  dashed "coming" chips after an area's playable skills. */
 export const COMING_SOON: Record<string, string[]> = {
-  trig: ["Exact values beyond Q1", "Amplitude & period reads", "Solve sin θ = k"],
-  precalc: ["Coterminal angles", "Asymptotes of rationals", "Vectors & matrices"],
-  calc: ["Tangent lines", "u-substitution", "Series tests (BC)"],
+  trig: ["Period reads", "Solve sin θ = k", "Double-angle evaluate"],
+  precalc: ["Vectors & matrices", "Function composition", "Counting & probability"],
+  calc: ["Tangent lines", "u-substitution", "More series tests (BC)"],
 };
 
 /* ------------------------------------------------------------------ */

@@ -82,7 +82,27 @@ export type TopicId =
   | "fracadd"
   | "fracmul"
   | "fraccomp"
-  | "factquad";
+  | "factquad"
+  // HS sweep batch 4 (2026-07-19) — algebra depth, trig reads, calc depth
+  | "distlin"
+  | "nextarith"
+  | "nextgeo"
+  | "expsolve"
+  | "logrule"
+  | "factgcf"
+  | "suppcomp"
+  | "coterm"
+  | "trigq"
+  | "recip"
+  | "vasymp"
+  | "hasymp"
+  | "amp"
+  | "midline"
+  | "dsecond"
+  | "veloc"
+  | "antipow"
+  | "triglim"
+  | "ratiotest";
 
 export type Band = "g34" | "g56" | "g78" | "g912";
 
@@ -164,6 +184,26 @@ export const TOPICS: Topic[] = [
   { id: "fracmul", label: "Multiply fractions", tier: 2 },
   { id: "fraccomp", label: "Compare fractions", tier: 2 },
   { id: "factquad", label: "Factor quadratics", tier: 2 },
+  // HS sweep batch 4
+  { id: "distlin", label: "Distribute", tier: 1 },
+  { id: "nextarith", label: "Arithmetic patterns", tier: 2 },
+  { id: "nextgeo", label: "Geometric patterns", tier: 2 },
+  { id: "expsolve", label: "Solve bˣ = k", tier: 1 },
+  { id: "logrule", label: "Log product rule", tier: 2 },
+  { id: "factgcf", label: "Factor out the GCF", tier: 2 },
+  { id: "suppcomp", label: "Supplements & complements", tier: 2 },
+  { id: "coterm", label: "Coterminal angles", tier: 2 },
+  { id: "trigq", label: "Trig beyond Q1", tier: 2 },
+  { id: "recip", label: "Reciprocal trig", tier: 2 },
+  { id: "vasymp", label: "Vertical asymptotes", tier: 1 },
+  { id: "hasymp", label: "Horizontal asymptotes", tier: 2 },
+  { id: "amp", label: "Amplitude", tier: 1 },
+  { id: "midline", label: "Midline", tier: 1 },
+  { id: "dsecond", label: "Second derivatives", tier: 2 },
+  { id: "veloc", label: "Velocity", tier: 2 },
+  { id: "antipow", label: "Antiderivative power rule", tier: 1 },
+  { id: "triglim", label: "Special trig limits", tier: 2 },
+  { id: "ratiotest", label: "Ratio test", tier: 1 },
 ];
 
 export type TrianglePair = {
@@ -198,7 +238,7 @@ export const topicOfKey = (key: string): TopicId => key.split(":")[0] as TopicId
 /** Topics answered on the Enter-to-submit surfaces — typing costs real seconds. */
 const ENTER_ENTRY_TOPICS: ReadonlySet<TopicId> = new Set([
   "simpfrac", "likterms", "binom", "slope2", "factpair", "dpower", "dpoly",
-  "pct2dec", "pct2frac", "fracadd", "fracmul", "factquad",
+  "pct2dec", "pct2frac", "fracadd", "fracmul", "factquad", "distlin", "factgcf",
 ]);
 
 /**
@@ -1394,6 +1434,364 @@ function makeFactquad(r: number, s: number): Problem {
 }
 const genFactquad = (): Problem => makeFactquad(ri(1, 9), ri(1, 9));
 
+/* ---------- HS sweep batch 4 (gauntletcontent.md, 2026-07-19) ---------- */
+
+// alg1.distribute-linear (pinned calibration) — Expand 3(x + 4) → 3x+12
+function makeDistlin(a: number, c: number): Problem {
+  return {
+    topic: "distlin",
+    key: `distlin:${a},${c}`,
+    prompt: `Expand ${a}(x ${signed(c)})`,
+    answer: `${a}x${a * c > 0 ? "+" : ""}${a * c}`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x", "+", "-"],
+  };
+}
+const genDistlin = (): Problem =>
+  makeDistlin(ri(2, 9), pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+
+// prealg.next-term-arithmetic — spot the common difference, apply once
+function makeNextarith(a: number, d: number): Problem {
+  const terms = [a, a + d, a + 2 * d, a + 3 * d];
+  return {
+    topic: "nextarith",
+    key: `nextarith:${a},${d}`,
+    prompt: `Next term: ${terms.join(", ")}, …`,
+    answer: String(a + 4 * d),
+    kind: "numeric",
+  };
+}
+function genNextarith(): Problem {
+  return makeNextarith(ri(1, 20), pick([2, 3, 4, 5, 6, 7, 8, 9]) * pick([1, -1]));
+}
+
+// alg1.next-term-geometric — spot the ratio, one product; answers ≤ 1000
+function makeNextgeo(a: number, r: number, n: number): Problem {
+  const terms = Array.from({ length: n }, (_, i) => a * Math.pow(r, i));
+  return {
+    topic: "nextgeo",
+    key: `nextgeo:${a},${r},${n}`,
+    prompt: `Next term: ${terms.join(", ")}, …`,
+    answer: String(a * Math.pow(r, n)),
+    kind: "numeric",
+  };
+}
+function genNextgeo(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const a = ri(1, 5);
+    const r = pick([2, 3, 4, 5, 10]);
+    const n = pick([3, 4]);
+    if (a * Math.pow(r, n) <= 1000) return makeNextgeo(a, r, n);
+  }
+  return makeNextgeo(2, 3, 3);
+}
+
+// alg2.exponential-solve-common-base — 2ˣ = 32 → 5 (memorized powers)
+function makeExpsolve(b: number, e: number): Problem {
+  return {
+    topic: "expsolve",
+    key: `expsolve:${b}^${e}`,
+    prompt: `${b}ˣ = ${Math.pow(b, e)}. x = ?`,
+    answer: String(e),
+    kind: "numeric",
+  };
+}
+const genExpsolve = (): Problem => makeExpsolve(pick([2, 3, 4, 5, 10]), ri(2, 6));
+
+// alg2.log-product-rule — log₆ 4 + log₆ 9 → 2 (sum of logs = log of the product)
+function makeLogrule(b: number, m: number, n: number): Problem {
+  const k = Math.round(Math.log(m * n) / Math.log(b));
+  return {
+    topic: "logrule",
+    key: `logrule:${b},${Math.min(m, n)},${Math.max(m, n)}`,
+    prompt: `log${subs(b)} ${m} + log${subs(b)} ${n} = ?`,
+    answer: String(k),
+    kind: "numeric",
+  };
+}
+function genLogrule(): Problem {
+  const set = factSetFor("logrule", "g912");
+  const key = set![Math.floor(Math.random() * set!.length)];
+  return problemFromKey(key)!;
+}
+
+// alg1.factor-gcf — Factor: 6x + 12 → 6(x+2); coefficients ≤ 72
+function makeFactgcf(g: number, b: number): Problem {
+  return {
+    topic: "factgcf",
+    key: `factgcf:${g},${b}`,
+    prompt: `Factor: ${g}x ${signed(g * b)}`,
+    answer: `${g}(x${b > 0 ? "+" : ""}${b})`,
+    kind: "numeric",
+    entry: "short-expression",
+    rule: "factored-commutative-ws",
+    alphabet: ["x", "+", "-", "(", ")"],
+  };
+}
+function genFactgcf(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const g = ri(2, 9);
+    const b = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    if (Math.abs(g * b) <= 72) return makeFactgcf(g, b);
+  }
+  return makeFactgcf(6, 2);
+}
+
+// geo.supplement-complement — to 90° or to 180°, then subtract
+function makeSuppcomp(kind: "supp" | "comp", theta: number): Problem {
+  return {
+    topic: "suppcomp",
+    key: `suppcomp:${kind},${theta}`,
+    prompt: `What is the ${kind === "supp" ? "supplement" : "complement"} of ${theta}°?`,
+    answer: String((kind === "supp" ? 180 : 90) - theta),
+    kind: "numeric",
+  };
+}
+function genSuppcomp(): Problem {
+  const kind = pick(["supp", "comp"] as const);
+  return makeSuppcomp(kind, ri(1, kind === "supp" ? 35 : 17) * 5);
+}
+
+// trig.coterminal-angle — one or two ±360 adjustments into [0°, 360°)
+function makeCoterm(theta: number): Problem {
+  return {
+    topic: "coterm",
+    key: `coterm:${theta}`,
+    prompt: `Which angle in [0°, 360°) is coterminal with ${theta}°?`,
+    answer: String(((theta % 360) + 360) % 360),
+    kind: "numeric",
+  };
+}
+function genCoterm(): Problem {
+  let theta = 0;
+  do theta = ri(-144, 216) * 5; // [−720°, 1080°], multiples of 5
+  while (theta >= 0 && theta < 360);
+  return makeCoterm(theta);
+}
+
+// trig.exact-trig-any-quadrant — reference angle + ASTC sign on the Q1 table
+const TRIGQ_ANGLES = [120, 135, 150, 210, 225, 240, 300, 315, 330];
+const TRIGQ_ALT: Record<string, Record<number, string>> = {
+  sin: { 30: "√3/2", 45: "1/2", 60: "1/2" },
+  cos: { 30: "√3/2", 45: "1/2", 60: "1/2" },
+  tan: { 30: "√3", 45: "√3", 60: "√3/3" },
+};
+function makeTrigq(fn: string, theta: number): Problem {
+  const ref = theta < 180 ? 180 - theta : theta < 270 ? theta - 180 : 360 - theta;
+  const mag = TRIGTABLE[fn][ref];
+  const q = theta < 180 ? 2 : theta < 270 ? 3 : 4;
+  const positive = fn === "sin" ? q === 2 : fn === "cos" ? q === 4 : q === 3;
+  const answer = positive ? mag : `−${mag}`;
+  const alt = TRIGQ_ALT[fn][ref];
+  const choices = [mag, `−${mag}`, alt, `−${alt}`].sort(() => Math.random() - 0.5);
+  return {
+    topic: "trigq",
+    key: `trigq:${fn}:${theta}`,
+    prompt: `${fn} ${theta}° = ?`,
+    answer,
+    kind: "choice",
+    choices,
+  };
+}
+const genTrigq = (): Problem => makeTrigq(pick(["sin", "cos", "tan"]), pick(TRIGQ_ANGLES));
+
+// trig.reciprocal-trig-value — one table recall + one flip; rationalized forms
+const RECIP_TABLE: Record<string, Record<number, string>> = {
+  csc: { 30: "2", 45: "√2", 60: "2√3/3", 90: "1" },
+  sec: { 0: "1", 30: "2√3/3", 45: "√2", 60: "2" },
+  cot: { 30: "√3", 45: "1", 60: "√3/3", 90: "0" },
+};
+const RECIP_BASE: Record<string, string> = { csc: "sin", sec: "cos", cot: "tan" };
+const RECIP_POOL = ["0", "1", "2", "√2", "√3", "√3/3", "2√3/3", "1/2", "√2/2", "√3/2"];
+function makeRecip(fn: string, theta: number): Problem {
+  const answer = RECIP_TABLE[fn][theta];
+  const flip = TRIGTABLE[RECIP_BASE[fn]]?.[theta]; // the classic reciprocal-forgotten trap
+  const opts = new Set<string>([answer]);
+  if (flip && flip !== answer) opts.add(flip);
+  for (const p of RECIP_POOL) {
+    if (opts.size >= 4) break;
+    opts.add(p);
+  }
+  return {
+    topic: "recip",
+    key: `recip:${fn}:${theta}`,
+    prompt: `${fn} ${theta}° = ?`,
+    answer,
+    kind: "choice",
+    choices: [...opts].sort(() => Math.random() - 0.5),
+  };
+}
+function genRecip(): Problem {
+  const fn = pick(["csc", "sec", "cot"]);
+  return makeRecip(fn, pick(Object.keys(RECIP_TABLE[fn]).map(Number)));
+}
+
+// trig.vertical-asymptote — the denominator-zero read with a sign flip
+function makeVasymp(a: number, c: number): Problem {
+  return {
+    topic: "vasymp",
+    key: `vasymp:${a},${c}`,
+    prompt: `y = (x ${signed(c)})/(x ${signed(-a)}). Vertical asymptote at x = ?`,
+    answer: String(a),
+    kind: "numeric",
+  };
+}
+function genVasymp(): Problem {
+  const a = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  let c = 0;
+  do c = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  while (c === -a); // no shared factor — that family is identify-hole's
+  return makeVasymp(a, c);
+}
+
+// trig.horizontal-asymptote — degree compare + leading-coefficient division;
+// n1 = 0 marks the lower-degree-numerator band (answer 0)
+function makeHasymp(n1: number, c1: number, d1: number, c2: number): Problem {
+  const num = n1 === 0 ? `${c1}` : `${n1}x ${signed(c1)}`;
+  return {
+    topic: "hasymp",
+    key: `hasymp:${n1},${c1},${d1},${c2}`,
+    prompt: `y = (${num})/(${d1}x ${signed(c2)}). Horizontal asymptote at y = ?`,
+    answer: String(n1 === 0 ? 0 : n1 / d1),
+    kind: "numeric",
+  };
+}
+function genHasymp(): Problem {
+  const c1 = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const c2 = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const d1 = ri(1, 5);
+  if (Math.random() < 0.3) return makeHasymp(0, Math.abs(c1), d1, c2); // answer-0 band
+  const r = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  return makeHasymp(r * d1, c1, d1, c2);
+}
+
+// trig.amplitude-from-equation — the |a| read; b and the shift are decorative
+function makeAmp(a: number, b: number, c: number, fn: string): Problem {
+  return {
+    topic: "amp",
+    key: `amp:${a},${b},${c},${fn}`,
+    prompt: `y = ${a < 0 ? `−${-a}` : a} ${fn}(${b}x) ${signed(c)}. Amplitude?`,
+    answer: String(Math.abs(a)),
+    kind: "numeric",
+  };
+}
+function genAmp(): Problem {
+  const nz = [-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  return makeAmp(pick(nz), ri(2, 4), pick(nz), pick(["sin", "cos"]));
+}
+
+// trig.midline-from-equation — the constant-term read, sign and all
+function makeMidline(a: number, b: number, c: number, fn: string): Problem {
+  return {
+    topic: "midline",
+    key: `midline:${a},${b},${c},${fn}`,
+    prompt: `y = ${a} ${fn}(${b}x) ${signed(c)}. The midline is y = ?`,
+    answer: String(c),
+    kind: "numeric",
+  };
+}
+function genMidline(): Problem {
+  const nz = [-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  return makeMidline(ri(2, 9), ri(2, 4), pick(nz), pick(["sin", "cos"]));
+}
+
+// calcab.second-derivative-power — f = axⁿ → f″(x₀) = a·n·(n−1)·x₀ⁿ⁻²
+function makeDsecond(a: number, n: number, x0: number): Problem {
+  return {
+    topic: "dsecond",
+    key: `dsecond:${a},${n},${x0}`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}. f″(${x0}) = ?`,
+    answer: String(a * n * (n - 1) * Math.pow(x0, n - 2)),
+    kind: "numeric",
+  };
+}
+const genDsecond = (): Problem => makeDsecond(ri(1, 3), ri(3, 5), pick([-2, -1, 1, 2]));
+
+// calcab.velocity-from-position — v = s′, then evaluate
+function makeVeloc(deg: number, a: number, b: number, t: number): Problem {
+  const s = deg === 3 ? `${a === 1 ? "" : a}t³ − ${b}t` : `${a === 1 ? "" : a}t² − ${b}t`;
+  const v = deg === 3 ? 3 * a * t * t - b : 2 * a * t - b;
+  return {
+    topic: "veloc",
+    key: `veloc:${deg},${a},${b},${t}`,
+    prompt: `s(t) = ${s}. The velocity at t = ${t}?`,
+    answer: String(v),
+    kind: "numeric",
+  };
+}
+function genVeloc(): Problem {
+  for (let i = 0; i < 20; i++) {
+    const deg = pick([2, 3]);
+    const a = ri(1, 5);
+    const b = ri(1, 5);
+    const t = ri(1, 4);
+    const v = deg === 3 ? 3 * a * t * t - b : 2 * a * t - b;
+    if (Math.abs(v) <= 60) return makeVeloc(deg, a, b, t);
+  }
+  return makeVeloc(3, 1, 3, 2);
+}
+
+// calcab.antiderivative-power-rule — ∫xⁿ dx = xᵐ/m + C; asking for m keeps it one digit
+function makeAntipow(n: number): Problem {
+  return {
+    topic: "antipow",
+    key: `antipow:${n}`,
+    prompt: `∫x${n === 1 ? "" : sup(n)} dx = xⁿ/n + C. n = ?`,
+    answer: String(n + 1),
+    kind: "numeric",
+  };
+}
+const genAntipow = (): Problem => makeAntipow(ri(1, 8));
+
+// calcab.special-trig-limits — sin(ax)/x = a · sin(ax)/sin(bx) = a/b · (1−cos x)/x = 0
+function makeTriglim(fam: string, a: number, b: number): Problem {
+  if (fam === "c") {
+    return { topic: "triglim", key: "triglim:c", prompt: "lim (x → 0) of (1 − cos x)/x", answer: "0", kind: "numeric" };
+  }
+  if (fam === "x") {
+    return {
+      topic: "triglim",
+      key: `triglim:x,${a}`,
+      prompt: `lim (x → 0) of sin(${a === 1 ? "" : a}x)/x`,
+      answer: String(a),
+      kind: "numeric",
+    };
+  }
+  return {
+    topic: "triglim",
+    key: `triglim:s,${a},${b}`,
+    prompt: `lim (x → 0) of sin(${a === 1 ? "" : a}x)/sin(${b === 1 ? "" : b}x)`,
+    answer: String(a / b),
+    kind: "numeric",
+  };
+}
+function genTriglim(): Problem {
+  const roll = Math.random();
+  if (roll < 0.15) return makeTriglim("c", 0, 0);
+  if (roll < 0.6) return makeTriglim("x", ri(1, 9), 0);
+  const b = ri(1, 4);
+  const k = ri(1, Math.floor(9 / b));
+  return makeTriglim("s", k * b, b);
+}
+
+// calcbc.ratio-test-read — the L-vs-1 threshold; L = 1 is the trap
+const RATIO_LS = ["0", "1/3", "1/2", "2/3", "1", "3/2", "2", "∞"];
+const RATIO_OPTS = ["Converges absolutely", "Diverges", "Test is inconclusive"];
+function makeRatiotest(L: string): Problem {
+  const v = L === "∞" ? Infinity : L.includes("/") ? Number(L.split("/")[0]) / Number(L.split("/")[1]) : Number(L);
+  return {
+    topic: "ratiotest",
+    key: `ratiotest:${L}`,
+    prompt: `The ratio test gives L = ${L} for a series. The conclusion?`,
+    answer: v < 1 ? RATIO_OPTS[0] : v > 1 ? RATIO_OPTS[1] : RATIO_OPTS[2],
+    kind: "choice",
+    choices: [...RATIO_OPTS],
+  };
+}
+const genRatiotest = (): Problem => makeRatiotest(pick(RATIO_LS));
+
 /* ---------- registry + adaptive serving ---------- */
 
 export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
@@ -1457,6 +1855,25 @@ export const GENERATORS: Record<TopicId, (band: Band) => Problem> = {
   fracmul: genFracmul,
   fraccomp: genFraccomp,
   factquad: genFactquad,
+  distlin: genDistlin,
+  nextarith: genNextarith,
+  nextgeo: genNextgeo,
+  expsolve: genExpsolve,
+  logrule: genLogrule,
+  factgcf: genFactgcf,
+  suppcomp: genSuppcomp,
+  coterm: genCoterm,
+  trigq: genTrigq,
+  recip: genRecip,
+  vasymp: genVasymp,
+  hasymp: genHasymp,
+  amp: genAmp,
+  midline: genMidline,
+  dsecond: genDsecond,
+  veloc: genVeloc,
+  antipow: genAntipow,
+  triglim: genTriglim,
+  ratiotest: genRatiotest,
 };
 
 /** Rebuild a specific fact from its key (weak-fact re-serve; all numeric topics). */
@@ -1643,6 +2060,73 @@ export function problemFromKey(key: string): Problem | null {
         const [r, s] = rest.split(",").map(Number);
         return makeFactquad(r, s);
       }
+      case "distlin": {
+        const [a, c] = rest.split(",").map(Number);
+        return makeDistlin(a, c);
+      }
+      case "nextarith": {
+        const [a, d] = rest.split(",").map(Number);
+        return makeNextarith(a, d);
+      }
+      case "nextgeo": {
+        const [a, r, n] = rest.split(",").map(Number);
+        return makeNextgeo(a, r, n);
+      }
+      case "expsolve": {
+        const [b, e] = rest.split("^").map(Number);
+        return makeExpsolve(b, e);
+      }
+      case "logrule": {
+        const [b, m, n] = rest.split(",").map(Number);
+        return Math.random() < 0.5 ? makeLogrule(b, m, n) : makeLogrule(b, n, m);
+      }
+      case "factgcf": {
+        const [g, b] = rest.split(",").map(Number);
+        return makeFactgcf(g, b);
+      }
+      case "suppcomp": {
+        const [kind, theta] = rest.split(",");
+        return makeSuppcomp(kind as "supp" | "comp", Number(theta));
+      }
+      case "coterm":
+        return makeCoterm(Number(rest));
+      case "trigq":
+        return makeTrigq(restParts[0], Number(restParts[1]));
+      case "recip":
+        return makeRecip(restParts[0], Number(restParts[1]));
+      case "vasymp": {
+        const [a, c] = rest.split(",").map(Number);
+        return makeVasymp(a, c);
+      }
+      case "hasymp": {
+        const [n1, c1, d1, c2] = rest.split(",").map(Number);
+        return makeHasymp(n1, c1, d1, c2);
+      }
+      case "amp": {
+        const [a, b, c, fn] = rest.split(",");
+        return makeAmp(Number(a), Number(b), Number(c), fn);
+      }
+      case "midline": {
+        const [a, b, c, fn] = rest.split(",");
+        return makeMidline(Number(a), Number(b), Number(c), fn);
+      }
+      case "dsecond": {
+        const [a, n, x0] = rest.split(",").map(Number);
+        return makeDsecond(a, n, x0);
+      }
+      case "veloc": {
+        const [deg, a, b, t] = rest.split(",").map(Number);
+        return makeVeloc(deg, a, b, t);
+      }
+      case "antipow":
+        return makeAntipow(Number(rest));
+      case "triglim": {
+        if (rest === "c") return makeTriglim("c", 0, 0);
+        const [fam, a, b] = rest.split(",");
+        return makeTriglim(fam, Number(a), Number(b ?? 0));
+      }
+      case "ratiotest":
+        return makeRatiotest(rest);
     }
   } catch {
     return null;
@@ -1801,6 +2285,75 @@ function enumerateFacts(topic: TopicId, band: Band): string[] | null {
       // pinned band: both roots ∈ [1, 9] (signed band is a later tune)
       for (let r = 1; r <= 9; r++) for (let s = r; s <= 9; s++) keys.push(`factquad:${r},${s}`);
       return keys; // 45 keys
+    case "distlin":
+      for (let a = 2; a <= 9; a++) {
+        for (let c = -9; c <= 9; c++) {
+          if (c !== 0) keys.push(`distlin:${a},${c}`);
+        }
+      }
+      return keys; // 144 keys
+    case "nextgeo":
+      for (let a = 1; a <= 5; a++) {
+        for (const r of [2, 3, 4, 5, 10]) {
+          for (const n of [3, 4]) {
+            if (a * Math.pow(r, n) <= 1000) keys.push(`nextgeo:${a},${r},${n}`);
+          }
+        }
+      }
+      return keys;
+    case "expsolve":
+      for (const b of [2, 3, 4, 5, 10]) for (let e = 2; e <= 6; e++) keys.push(`expsolve:${b}^${e}`);
+      return keys; // 25 keys
+    case "logrule": {
+      for (const b of [2, 3, 5, 6, 10]) {
+        for (let k = 1; k <= 4; k++) {
+          const P = Math.pow(b, k);
+          for (let m = 2; m * m <= P; m++) {
+            if (P % m === 0 && P / m >= 2 && P / m <= 50 && m <= 50) keys.push(`logrule:${b},${m},${P / m}`);
+          }
+        }
+      }
+      return keys;
+    }
+    case "suppcomp":
+      for (let t = 5; t <= 85; t += 5) keys.push(`suppcomp:comp,${t}`);
+      for (let t = 5; t <= 175; t += 5) keys.push(`suppcomp:supp,${t}`);
+      return keys; // 52 keys
+    case "trigq":
+      for (const fn of ["sin", "cos", "tan"]) for (const t of TRIGQ_ANGLES) keys.push(`trigq:${fn}:${t}`);
+      return keys; // 27 keys
+    case "recip":
+      for (const fn of ["csc", "sec", "cot"]) {
+        for (const t of Object.keys(RECIP_TABLE[fn])) keys.push(`recip:${fn}:${t}`);
+      }
+      return keys; // 12 keys
+    case "factgcf":
+      for (let g = 2; g <= 9; g++) {
+        for (let b = -9; b <= 9; b++) {
+          if (b !== 0 && Math.abs(g * b) <= 72) keys.push(`factgcf:${g},${b}`);
+        }
+      }
+      return keys;
+    case "dsecond":
+      for (let a = 1; a <= 3; a++) {
+        for (let n = 3; n <= 5; n++) {
+          for (const x0 of [-2, -1, 1, 2]) keys.push(`dsecond:${a},${n},${x0}`);
+        }
+      }
+      return keys; // 36 keys
+    case "antipow":
+      for (let n = 1; n <= 8; n++) keys.push(`antipow:${n}`);
+      return keys;
+    case "triglim": {
+      keys.push("triglim:c");
+      for (let a = 1; a <= 9; a++) keys.push(`triglim:x,${a}`);
+      for (let b = 1; b <= 4; b++) {
+        for (let k = 1; k * b <= 9; k++) keys.push(`triglim:s,${k * b},${b}`);
+      }
+      return [...new Set(keys)];
+    }
+    case "ratiotest":
+      return RATIO_LS.map((L) => `ratiotest:${L}`);
     default:
       // dbl, pow10, fracof, place, mul2x1, prop, exprule, congruence, the
       // g912 open generators (slope, linfn, evalquad, expquot, disc, dist,

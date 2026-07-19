@@ -147,14 +147,17 @@ export function judge(rule: AnswerRule, entered: string, answer: string): boolea
       return !!e && !!a && e.length === a.length && e.every((t, i) => t === a[i]);
     }
     case "factored-commutative-ws": {
-      // top-level parenthesized factors: order-insensitive; inside each, expr rules
+      // top-level parenthesized factors, order-insensitive, expr rules inside
+      // each; an optional bare integer coefficient factor is allowed (6(x+2)).
       const split = (s: string): string[] | null => {
         const t = ascii(s);
-        const m = t.match(/\([^()]*\)/g);
-        if (!m || m.join("") !== t) return null;
-        return m
-          .map((f) => (normExprTerms(f.slice(1, -1)) ?? []).join("|"))
-          .sort();
+        const groups = t.match(/\([^()]*\)/g) ?? [];
+        if (groups.length === 0) return null;
+        const remainder = groups.reduce((acc, g) => acc.replace(g, ""), t);
+        if (!/^\d*$/.test(remainder)) return null; // only a coefficient may sit outside parens
+        const factors = groups.map((f) => (normExprTerms(f.slice(1, -1)) ?? []).join("|")).sort();
+        const coef = remainder === "" ? "1" : String(parseInt(remainder, 10));
+        return [coef, ...factors];
       };
       const e = split(entered);
       const a = split(answer);

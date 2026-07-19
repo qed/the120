@@ -36,15 +36,15 @@ export default function Battle({
   topics,
   band,
   facts,
-  enterSubmit = false,
+  instantSubmit = false,
   onFinish,
 }: {
   boss: Boss;
   topics: TopicId[];
   band: Band;
   facts: Record<string, FactStat>;
-  /** player preference: wait for Enter instead of the length auto-judge */
-  enterSubmit?: boolean;
+  /** opt-in speedrun mode: number answers auto-fire at full length */
+  instantSubmit?: boolean;
   onFinish: (won: boolean, stats: BattleStats, results: ProblemResult[]) => void;
 }) {
   const [bossHp, setBossHp] = useState(boss.hp);
@@ -223,11 +223,10 @@ export default function Battle({
     }, REVEAL_MS);
   }, [advance, problem.answer]);
 
-  // C6: the entry format drives the character filter and the submit model —
-  // single-number keeps the length auto-judge (unless the player prefers
-  // Enter — tester-requested toggle), everything else is Enter/⏎.
+  // One consistent rule (tester consensus): Enter/⏎ submits everything.
+  // Auto-fire on plain numbers is the opt-in ⚡ instant mode.
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry) && !enterSubmit;
+  const auto = isAutoSubmit(entry) && instantSubmit;
 
   const onType = (v: string) => {
     if (reveal) return;

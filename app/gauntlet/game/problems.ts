@@ -478,7 +478,8 @@ function makeProp(a: number, b: number, k: number, pos: 0 | 1 | 2 | 3): Problem 
   return {
     topic: "prop",
     key: `prop:${a}:${b}:${k}:${pos}`,
-    prompt: `${show[0]}/${show[1]} = ${show[2]}/${show[3]} · x = ?`,
+    // ". x = ?" not "· x = ?" — the dot separator read as a multiplication sign
+    prompt: `${show[0]}/${show[1]} = ${show[2]}/${show[3]}. x = ?`,
     answer: String(vals[pos]),
     kind: "numeric",
   };
@@ -498,7 +499,7 @@ function makeExpRule(base: string, e1: number, e2: number): Problem {
   return {
     topic: "exprule",
     key: `exprule:${base}:${e1}:${e2}`,
-    prompt: `${base}${sup(e1)} × ${base}${sup(e2)} = ${base}ⁿ · n = ?`,
+    prompt: `${base}${sup(e1)} × ${base}${sup(e2)} = ${base}ⁿ. n = ?`,
     answer: String(e1 + e2),
     kind: "numeric",
   };
@@ -643,7 +644,7 @@ function makeExpQuot(base: string, e1: number, e2: number): Problem {
   return {
     topic: "expquot",
     key: `expquot:${base}:${e1}:${e2}`,
-    prompt: `${base}${sup(e1)} ÷ ${base}${sup(e2)} = ${base}ⁿ · n = ?`,
+    prompt: `${base}${sup(e1)} ÷ ${base}${sup(e2)} = ${base}ⁿ. n = ?`,
     answer: String(e1 - e2),
     kind: "numeric",
   };
@@ -916,7 +917,7 @@ const DSTD: Record<string, { prompt: string; answer: string; pool: string[] }> =
   sin: { prompt: "d/dx sin x = ?", answer: "cos x", pool: ["cos x", "−cos x", "sin x", "−sin x"] },
   cos: { prompt: "d/dx cos x = ?", answer: "−sin x", pool: ["−sin x", "sin x", "cos x", "−cos x"] },
   tan: { prompt: "d/dx tan x = ?", answer: "sec²x", pool: ["sec²x", "sec x tan x", "cot x", "−sec²x"] },
-  exp: { prompt: "d/dx eˣ = ?", answer: "eˣ", pool: ["eˣ", "x·eˣ", "eˣ⁻¹", "ln x"] },
+  exp: { prompt: "d/dx eˣ = ?", answer: "eˣ", pool: ["eˣ", "x eˣ", "eˣ⁻¹", "ln x"] },
   ln: { prompt: "d/dx ln x = ?", answer: "1/x", pool: ["1/x", "x", "ln x", "1/x²"] },
   recip: { prompt: "d/dx 1/x = ?", answer: "−1/x²", pool: ["−1/x²", "1/x²", "−1/x", "ln x"] },
   sqrt: { prompt: "d/dx √x = ?", answer: "1/(2√x)", pool: ["1/(2√x)", "2√x", "√x/2", "1/√x"] },
@@ -944,7 +945,7 @@ function makeChain(outer: "sin" | "cos" | "exp", a: number): Problem {
       prompt: `d/dx e^(${a}x) = ?`,
       answer: `${a}e^(${a}x)`,
       kind: "choice",
-      choices: [`${a}e^(${a}x)`, `e^(${a}x)`, `${a}eˣ`, `${a}x·e^(${a}x)`].sort(() => Math.random() - 0.5),
+      choices: [`${a}e^(${a}x)`, `e^(${a}x)`, `${a}eˣ`, `${a}x e^(${a}x)`].sort(() => Math.random() - 0.5),
     };
   }
   const other = outer === "sin" ? "cos" : "sin";

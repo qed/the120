@@ -96,8 +96,10 @@ type Save = {
   skillProgress: SkillProgress;
   /** placement done, skipped, or seeded — gates the first-run assessment */
   placed: boolean;
-  /** prefer Enter-to-submit over the auto-judge for typed answers */
-  enterSubmit: boolean;
+  /** opt-in speedrun mode: number answers fire the moment enough digits are
+   *  typed. DEFAULT OFF — Enter/⏎ submits everything, one consistent rule
+   *  (testers found the mixed submit models confusing). */
+  instantSubmit: boolean;
   /** per-skill fastest boss clear, in seconds (personal records) */
   records: Record<string, number>;
 };
@@ -118,7 +120,7 @@ const EMPTY_SAVE: Save = {
   topics: ["mul"],
   skillProgress: {},
   placed: false,
-  enterSubmit: false,
+  instantSubmit: false,
   records: {},
 };
 
@@ -155,7 +157,7 @@ function mergeSaves(a: Save, b: Save): Save {
     topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
     skillProgress,
     placed: (a.placed ?? false) || (b.placed ?? false),
-    enterSubmit: a.enterSubmit ?? b.enterSubmit ?? false, // local preference wins
+    instantSubmit: a.instantSubmit ?? b.instantSubmit ?? false, // local preference wins
     records,
   };
 }
@@ -611,7 +613,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             if (lvl) startSkillBattle(curIdx, lvl);
           }}
           onSkill={(idx) => setOpenSkill(idx)}
-          onToggleEnter={() => setSave((p) => ({ ...p, enterSubmit: !p.enterSubmit }))}
+          onToggleEnter={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
           onPlacement={() => {
             ensureAudio();
             setPhase("placement");
@@ -628,7 +630,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       )}
       {phase === "placement" && (
         <PlacementTrial
-          enterSubmit={save.enterSubmit}
+          instantSubmit={save.instantSubmit}
           onDone={(passed) => {
             setSave((p) => {
               // max-merge: placement can raise levels, never lower them
@@ -683,12 +685,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           topics={[skill.topic]}
           band={skill.band}
           facts={save.facts}
-          enterSubmit={save.enterSubmit}
+          instantSubmit={save.instantSubmit}
           onFinish={finishBattle}
         />
       )}
       {phase === "trial" && (
-        <Trial topics={trialTopics} band={trialBand} enterSubmit={save.enterSubmit} onFinish={finishTrial} />
+        <Trial topics={trialTopics} band={trialBand} instantSubmit={save.instantSubmit} onFinish={finishTrial} />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result
@@ -933,14 +935,14 @@ function Menu({
               </button>
               <button
                 onClick={onToggleEnter}
-                title="Auto-submit judges the moment you type enough digits; Enter mode waits for you"
+                title="Instant: number answers fire the moment you type enough digits. Off (default): Enter/⏎ submits everything — one consistent rule."
                 className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
-                  save.enterSubmit
-                    ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                  save.instantSubmit
+                    ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
                     : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
                 }`}
               >
-                ⏎ enter to submit: {save.enterSubmit ? "on" : "off"}
+                ⚡ instant submit: {save.instantSubmit ? "on" : "off"}
               </button>
             </div>
           </>
@@ -1411,8 +1413,9 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
         <h3 className="text-2xl font-bold">How to play</h3>
         <ul className="mt-4 space-y-3 text-sm leading-relaxed text-white/80">
           <li>
-            ⚔️ <strong>Answer math problems to strike the boss.</strong> Type the number — it submits
-            itself. No Enter needed.
+            ⚔️ <strong>Answer math problems to strike the boss.</strong> Type your answer and press
+            Enter (or ⏎ on the pad). Speedrunners: flip on ⚡ instant submit and number answers fire
+            the moment you type them.
           </li>
           <li>
             ⚡ <strong>Speed and streaks hit harder.</strong> Fast answers do bonus damage; 3+ in a row

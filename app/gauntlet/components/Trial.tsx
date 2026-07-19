@@ -36,13 +36,13 @@ const CAP_S = 45;
 export default function Trial({
   topics,
   band,
-  enterSubmit = false,
+  instantSubmit = false,
   onFinish,
 }: {
   topics: TopicId[];
   band: Band;
-  /** player preference: wait for Enter instead of the length auto-judge */
-  enterSubmit?: boolean;
+  /** opt-in speedrun mode: number answers auto-fire at full length */
+  instantSubmit?: boolean;
   onFinish: (score: number, results: ProblemResult[]) => void;
 }) {
   const deckRef = useRef<string[] | null>(null);
@@ -156,7 +156,7 @@ export default function Trial({
   };
 
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry) && !enterSubmit;
+  const auto = isAutoSubmit(entry) && instantSubmit;
 
   const onType = (v: string) => {
     ensureAudio();

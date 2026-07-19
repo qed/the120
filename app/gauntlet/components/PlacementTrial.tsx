@@ -42,12 +42,12 @@ function sampleSkills(grade: number, n: number): number[] {
 }
 
 export default function PlacementTrial({
-  enterSubmit = false,
+  instantSubmit = false,
   onDone,
   onSkip,
 }: {
-  /** player preference: wait for Enter instead of the length auto-judge */
-  enterSubmit?: boolean;
+  /** opt-in speedrun mode: number answers auto-fire at full length */
+  instantSubmit?: boolean;
   /** passed = pathway indexes cleanly placed past; landing = where CONTINUE starts */
   onDone: (passed: number[], landing: number) => void;
   onSkip: () => void;
@@ -77,7 +77,7 @@ export default function PlacementTrial({
   const skill = PATHWAY[skillPos];
   const area = AREAS.find((a) => a.id === skill.area)!;
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry) && !enterSubmit;
+  const auto = isAutoSubmit(entry) && instantSubmit;
   const passMs = masteryMsFor(problem.topic) + PASS_SLACK_MS;
 
   const finish = useCallback((landingIdx: number) => {

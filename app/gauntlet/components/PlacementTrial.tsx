@@ -171,8 +171,11 @@ export default function PlacementTrial({
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
-      answer(clean);
+    if (!instantSubmit || problem.kind !== "numeric" || clean.length === 0) return;
+    if (isAutoSubmit(entry)) {
+      if (clean.length >= problem.answer.length) answer(clean);
+    } else if (judgeAnswer(problem, clean)) {
+      answer(clean); // fire-on-correct for fractions/expressions/pairs
     }
   };
 
@@ -297,7 +300,7 @@ export default function PlacementTrial({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submit(); // Enter always works, every format
                 }}
-                placeholder={auto ? "Type the answer!" : "Type, then Enter"}
+                placeholder={instantSubmit ? "Type the answer!" : "Type, then Enter"}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70"
               />
             )

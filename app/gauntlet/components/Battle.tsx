@@ -223,8 +223,10 @@ export default function Battle({
     }, REVEAL_MS);
   }, [advance, problem.answer]);
 
-  // One consistent rule (tester consensus): Enter/⏎ submits everything.
-  // Auto-fire on plain numbers is the opt-in ⚡ instant mode.
+  // ⚡ instant (default): numbers fire at full length (right OR wrong — the
+  // classic feel); variable-length formats fire the moment the typed input
+  // judges CORRECT, so instant is instant for every format. Enter always
+  // submits (the only way a wrong variable-length answer lands).
   const entry = entryOf(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
 
@@ -233,9 +235,14 @@ export default function Battle({
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
-      if (judgeAnswer(problem, clean)) handleCorrect();
-      else handleWrong();
+    if (!instantSubmit || problem.kind !== "numeric" || clean.length === 0) return;
+    if (isAutoSubmit(entry)) {
+      if (clean.length >= problem.answer.length) {
+        if (judgeAnswer(problem, clean)) handleCorrect();
+        else handleWrong();
+      }
+    } else if (judgeAnswer(problem, clean)) {
+      handleCorrect(); // fire-on-correct for fractions/expressions/pairs
     }
   };
 
@@ -450,7 +457,7 @@ export default function Battle({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submit(); // Enter always works, every format
                 }}
-                placeholder={reveal ? "" : auto ? "Type the answer!" : "Type, then Enter"}
+                placeholder={reveal ? "" : instantSubmit ? "Type the answer!" : "Type, then Enter"}
                 disabled={!!reveal}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
               />

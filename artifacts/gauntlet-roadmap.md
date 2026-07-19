@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-19 (h)** — **Instant mode is truly instant now — and it's the default again.** The real problem wasn't auto-fire, it was that fractions and expressions still demanded Enter even in instant mode. Fixed properly: **correct answers fire the moment you finish typing them, every format** — type `3/4` or `x^2+7x+12` and it lands the instant it's right. Wrong answers wait for Enter (a free chance to catch your own typo — but the clock's still running). Numbers keep the classic fire-at-full-length. Prefer deliberate submits? ⚡ instant submit toggles off.
+
 - **2026-07-19 (g)** — **One rule: Enter submits. Everything.** You were right that the mixed submit models were confusing — so now every answer, number or expression, submits on Enter/⏎ by default. Speedrunners: flip on **⚡ instant submit** in the menu and number answers fire the moment you type them, like before. Also fixed: the "·" that looked like a multiplication sign in equation prompts (4/6 = 8/x **·** x = ?) was actually a separator — it's a period now, and the multiply-dots in a few calculus options are gone too.
 
 - **2026-07-19 (f)** — **Placement is now ~2 minutes.** It was creeping past 8 as the pathway grew — now it's a **grade staircase**: two quick probes per grade, pass and climb (watch the G3 → G12 ladder tick ✓ as you go), and your start is set the moment a grade stops you. Passing a grade credits everything below it. Retakes still only move you up — go set your real grade.

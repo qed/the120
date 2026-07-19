@@ -9,9 +9,11 @@ import BossSprite from "./components/BossSprite";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
 import {
   AREAS,
+  areaGradeSpan,
   bossForLevel,
   COMING_SOON,
   currentSkillIdx,
+  fastMathGrade,
   highestPassedIdx,
   isUnlocked,
   PASS_LEVEL,
@@ -726,6 +728,7 @@ function Menu({
   const fresh = !save.placed;
   const passedTotal = PATHWAY.filter((s) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
   const frontier = highestPassedIdx(progress);
+  const fm = fastMathGrade(progress);
 
   return (
     <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-6 py-8">
@@ -824,6 +827,26 @@ function Menu({
         </div>
       )}
 
+      {/* Fast Math grade — the number a student carries (GT Alpha ask) */}
+      {!fresh && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-3">
+          <span className="text-3xl">📐</span>
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/80">
+              Your Fast Math grade
+            </p>
+            <p className="font-mono text-2xl font-bold text-white">
+              {fm.complete ? "Grade 12 — COMPLETE 👑" : `Grade ${fm.grade}`}
+              {!fm.complete && fm.frontierGrade > fm.grade && (
+                <span className="ml-2 text-sm font-normal text-white/50">
+                  · frontier Grade {fm.frontierGrade}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* P1 — one button. New players get placed; everyone else continues the road. */}
       <div className="mt-7 flex w-full max-w-md flex-col items-stretch gap-2">
         <button
@@ -895,10 +918,16 @@ function Menu({
             );
           }
           const areaPassed = nodes.filter(({ s }) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
+          const span = areaGradeSpan(area.id);
           return (
             <div key={area.id} className="mt-4">
               <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/45">
                 {area.icon} {area.label}{" "}
+                {span && (
+                  <span className="text-cyan-300/60">
+                    · {span[0] === span[1] ? `Grade ${span[0]}` : `Grades ${span[0]}–${span[1]}`}
+                  </span>
+                )}{" "}
                 <span className={areaPassed === nodes.length ? "text-emerald-300" : "text-white/30"}>
                   · {areaPassed}/{nodes.length}
                 </span>

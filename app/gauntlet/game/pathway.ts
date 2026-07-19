@@ -53,7 +53,6 @@ export const PATHWAY: Skill[] = [
   { id: "sq-roots", label: "Square roots", area: "prealg", topic: "sqrt", band: "g56" },
   { id: "cubes", label: "Perfect cubes", area: "prealg", topic: "cube", band: "g78" },
   { id: "exponents", label: "Exponents", area: "prealg", topic: "pow", band: "g78" },
-  { id: "exp-rules", label: "Exponent product rule", area: "prealg", topic: "exprule", band: "g78" },
   { id: "gcd", label: "Greatest common divisor", area: "prealg", topic: "gcd", band: "g56" },
   { id: "simp-fractions", label: "Simplify fractions", area: "prealg", topic: "simpfrac", band: "g56" },
   // g34 parameter spaces (tester feedback 2026-07-18: g56's LCM/LCD pairs —
@@ -63,6 +62,7 @@ export const PATHWAY: Skill[] = [
   { id: "mul-fractions", label: "Multiply fractions", area: "prealg", topic: "fracmul", band: "g56" },
   { id: "add-fractions", label: "Add fractions", area: "prealg", topic: "fracadd", band: "g56" },
   { id: "compare-fractions", label: "Compare fractions", area: "prealg", topic: "fraccomp", band: "g56" },
+  { id: "exp-rules", label: "Exponent product rule", area: "prealg", topic: "exprule", band: "g78" },
   { id: "proportions", label: "Proportions", area: "prealg", topic: "prop", band: "g78" },
   { id: "pct-to-dec", label: "Percent → decimal", area: "prealg", topic: "pct2dec", band: "g78" },
   { id: "dec-to-pct", label: "Decimal → percent", area: "prealg", topic: "dec2pct", band: "g78" },
@@ -125,6 +125,72 @@ export const PATHWAY: Skill[] = [
   { id: "def-integrals", label: "Definite integrals", area: "calc", topic: "defint", band: "g912" },
   { id: "ratio-test", label: "Ratio test", area: "calc", topic: "ratiotest", band: "g912" },
 ];
+
+/**
+ * Fast Math grade per skill (Peter 2026-07-19, for the GT Alpha pitch):
+ * students should know which GRADE they are in Fast Math. Grades are
+ * non-decreasing along the pathway so "your grade" is coherent with the
+ * hole-filling CONTINUE: your Fast Math grade is where your earliest
+ * unpassed skill sits; your frontier grade is the highest you've passed.
+ */
+export const SKILL_GRADE: Record<string, number> = {
+  // Arithmetic — grades 3–6
+  "add-facts": 3, "sub-facts": 3, "times-1": 3, "div-facts": 3, "dbl-halve": 3,
+  "place-value": 4, "times-2": 4, "mul-2x1": 4, "pow-ten": 5, "frac-of": 5,
+  "signed-add": 6, "sign-rules": 6,
+  // Pre-Algebra — grades 6–8
+  "squares": 6, "sq-roots": 6, "cubes": 6, "exponents": 6, "exp-rules": 7,
+  "gcd": 6, "simp-fractions": 6, "lcm": 6, "denoms": 6, "mul-fractions": 6,
+  "add-fractions": 6, "compare-fractions": 6, "proportions": 7, "pct-to-dec": 7,
+  "dec-to-pct": 7, "pct-to-frac": 7, "arith-patterns": 7, "eval-expressions": 7,
+  "one-step-eq": 7, "two-step-eq": 8, "like-terms": 8, "distribute": 8,
+  // Algebra — grades 8–9
+  "linear-fn": 8, "slope": 8, "slope-fractions": 8, "quadratics": 9,
+  "factor-pairs": 9, "binomials": 9, "factor-quads": 9, "factor-gcf": 9,
+  "geo-patterns": 9, "exp-quotient": 9, "simplify-roots": 9, "discriminant": 9,
+  // Geometry — grades 9–10
+  "supp-comp": 9, "pythagoras": 9, "congruence": 10, "distance": 10,
+  "midpoints": 10, "special-rt": 10,
+  // Trigonometry — grades 10–11
+  "ref-angles": 10, "coterminal": 10, "trig-values": 10, "trig-beyond-q1": 11,
+  "reciprocal-trig": 11, "cofunctions": 11, "amplitude": 11, "midline": 11,
+  // Pre-Calculus — grade 11
+  "exp-solve": 11, "logs": 11, "log-rules": 11, "determinants": 11,
+  "limits": 11, "v-asymptotes": 11, "h-asymptotes": 11, "geo-series": 11,
+  // Calculus — grade 12
+  "trig-limits": 12, "power-rule": 12, "deriv-table": 12, "diff-polys": 12,
+  "chain-rule": 12, "deriv-at-point": 12, "second-derivs": 12, "velocity": 12,
+  "crit-points": 12, "anti-power": 12, "def-integrals": 12, "ratio-test": 12,
+};
+
+export const skillGrade = (id: string): number => SKILL_GRADE[id] ?? 12;
+
+/** The player's Fast Math grade: where the earliest unpassed skill sits
+ *  (hole-filling — a gap holds your grade down until you fill it), plus the
+ *  frontier grade = the highest grade with a passed skill. */
+export function fastMathGrade(progress: SkillProgress): {
+  grade: number;
+  frontierGrade: number;
+  complete: boolean;
+} {
+  const complete = PATHWAY.every((s) => skillLevel(progress, s.id) >= PASS_LEVEL);
+  if (complete) return { grade: 12, frontierGrade: 12, complete };
+  const grade = skillGrade(PATHWAY[currentSkillIdx(progress)].id);
+  let frontierGrade = grade;
+  for (const s of PATHWAY) {
+    if (skillLevel(progress, s.id) >= PASS_LEVEL) {
+      frontierGrade = Math.max(frontierGrade, skillGrade(s.id));
+    }
+  }
+  return { grade, frontierGrade, complete };
+}
+
+/** Grade span of an area's skills, for the map headers ("Grades 6–8"). */
+export function areaGradeSpan(areaId: AreaId): [number, number] | null {
+  const grades = PATHWAY.filter((s) => s.area === areaId).map((s) => skillGrade(s.id));
+  if (grades.length === 0) return null;
+  return [Math.min(...grades), Math.max(...grades)];
+}
 
 /** P4 — authored in gauntletcontent.md, not yet in the engine; shown as
  *  dashed "coming" chips after an area's playable skills. */

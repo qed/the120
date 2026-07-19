@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { entryOf, judgeAnswer, masteryMsFor, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
-import { AREAS, PATHWAY } from "../game/pathway";
+import { AREAS, PATHWAY, skillGrade } from "../game/pathway";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
 import TriangleFigure from "./TriangleFigure";
@@ -162,6 +162,9 @@ export default function PlacementTrial({
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Placement complete</p>
+        <p className="mt-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-6 py-3 font-mono text-xl font-bold text-white">
+          📐 Grade {skillGrade(startSkill.id)} Fast Math
+        </p>
         <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
           You start at <span className="text-amber-300">{startSkill.label}</span>
         </h2>

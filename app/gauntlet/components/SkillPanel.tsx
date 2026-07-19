@@ -7,6 +7,7 @@ import {
   bossForLevel,
   PASS_LEVEL,
   SKILL_LEVELS,
+  skillGrade,
   skillMastery,
   startableLevels,
   type Skill,
@@ -115,7 +116,7 @@ export default function SkillPanel({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/45">
-              {area.icon} {area.label}
+              {area.icon} {area.label} · <span className="text-cyan-300/70">Grade {skillGrade(skill.id)}</span>
             </p>
             <h2 className="mt-0.5 text-2xl font-bold">{skill.label}</h2>
             {record !== undefined && (

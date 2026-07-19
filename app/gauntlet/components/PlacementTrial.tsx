@@ -19,7 +19,9 @@ import TriangleFigure from "./TriangleFigure";
  */
 
 const PASS_SLACK_MS = 3000; // on top of the topic's mastery window
-const HARD_CAP_EXTRA_MS = 6000; // beyond passMs, the probe can't stall the trial
+// Once the speed bar empties the probe can no longer pass — fail it quickly
+// (tester feedback: a long dead gap after the bar hits zero feels broken).
+const HARD_CAP_EXTRA_MS = 1200;
 const MAX_GAPS = 3; // the third gap ends placement — level found
 
 function probeFor(skillIdx: number): Problem {
@@ -30,9 +32,12 @@ function probeFor(skillIdx: number): Problem {
 }
 
 export default function PlacementTrial({
+  enterSubmit = false,
   onDone,
   onSkip,
 }: {
+  /** player preference: wait for Enter instead of the length auto-judge */
+  enterSubmit?: boolean;
   /** passed = pathway indexes cleanly placed past; landing = where CONTINUE starts */
   onDone: (passed: number[], landing: number) => void;
   onSkip: () => void;
@@ -49,6 +54,7 @@ export default function PlacementTrial({
   const [input, setInput] = useState("");
   const [landing, setLanding] = useState<number | null>(null);
   const [speedPct, setSpeedPct] = useState(100);
+  const [missFlash, setMissFlash] = useState(false); // red pulse on a failed probe
   const askedAt = useRef(Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
@@ -56,7 +62,7 @@ export default function PlacementTrial({
   const skill = PATHWAY[skillPos];
   const area = AREAS.find((a) => a.id === skill.area)!;
   const entry = entryOf(problem);
-  const auto = isAutoSubmit(entry);
+  const auto = isAutoSubmit(entry) && !enterSubmit;
   const passMs = masteryMsFor(problem.topic) + PASS_SLACK_MS;
 
   const finish = useCallback((landingIdx: number) => {
@@ -123,6 +129,8 @@ export default function PlacementTrial({
       setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
       if (elapsed > passMs + HARD_CAP_EXTRA_MS) {
         sfxWrong();
+        setMissFlash(true);
+        setTimeout(() => setMissFlash(false), 450);
         advance(false);
       }
     }, 120);
@@ -134,7 +142,11 @@ export default function PlacementTrial({
     const correct = problem.kind === "choice" ? v === problem.answer : judgeAnswer(problem, v);
     const passed = correct && ms <= passMs;
     if (passed) sfxHit(1);
-    else sfxWrong();
+    else {
+      sfxWrong();
+      setMissFlash(true);
+      setTimeout(() => setMissFlash(false), 450);
+    }
     advance(passed);
   };
 
@@ -193,7 +205,7 @@ export default function PlacementTrial({
 
   /* ---------- probe screen ---------- */
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className={`flex min-h-dvh flex-col ${missFlash ? "mr-wrong" : ""}`}>
       <div className="mx-auto w-full max-w-xl px-4 pt-6">
         <div className="flex items-baseline justify-between">
           <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Finding your start</p>
@@ -215,7 +227,7 @@ export default function PlacementTrial({
       </div>
 
       <div className="mx-auto mb-8 mt-auto w-full max-w-xl px-4 pt-8">
-        <div className="rounded-2xl border border-white/15 bg-black/45 p-4 backdrop-blur-md sm:p-6">
+        <div className={`rounded-2xl border p-4 backdrop-blur-md sm:p-6 ${missFlash ? "border-red-400/70 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
           {problem.triangle && (
             <div className="mb-3">
               <TriangleFigure pair={problem.triangle} />
@@ -238,7 +250,7 @@ export default function PlacementTrial({
                   onInput={onType}
                   accent="#22d3ee"
                   extras={padExtras(entry, problem.alphabet)}
-                  onSubmit={auto ? undefined : submit}
+                  onSubmit={submit}
                 />
               </>
             ) : (
@@ -249,7 +261,7 @@ export default function PlacementTrial({
                 value={input}
                 onChange={(e) => onType(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !auto) submit();
+                  if (e.key === "Enter") submit(); // Enter always works, every format
                 }}
                 placeholder={auto ? "Type the answer!" : "Type, then Enter"}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70"

@@ -438,7 +438,7 @@ export default function Battle({
                   disabled={!!reveal}
                   accent={boss.glow}
                   extras={padExtras(entry, problem.alphabet)}
-                  onSubmit={auto ? undefined : submit}
+                  onSubmit={submit}
                 />
               </>
             ) : (
@@ -449,7 +449,7 @@ export default function Battle({
                 value={input}
                 onChange={(e) => onType(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !auto) submit();
+                  if (e.key === "Enter") submit(); // Enter always works, every format
                 }}
                 placeholder={reveal ? "" : auto ? "Type the answer!" : "Type, then Enter"}
                 disabled={!!reveal}

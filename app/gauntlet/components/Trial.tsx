@@ -240,7 +240,7 @@ export default function Trial({
                   onInput={onType}
                   accent="#fbbf24"
                   extras={padExtras(entry, problem.alphabet)}
-                  onSubmit={auto ? undefined : submit}
+                  onSubmit={submit}
                 />
               </>
             ) : (
@@ -251,7 +251,7 @@ export default function Trial({
                 value={input}
                 onChange={(e) => onType(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !auto) submit();
+                  if (e.key === "Enter") submit(); // Enter always works, every format
                 }}
                 placeholder={auto ? "Type the answer!" : "Type, then Enter"}
                 className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"

@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-19 (e)** — **Placement feel, fixed (your feedback again).** Misses now flash red so you know a probe failed · the dead 6-second wait after the speed bar empties is gone (fails ~1s after zero) · **Enter now works everywhere** — auto-submit still fires for plain numbers, but hitting Enter always submits, and the ⏎ key is always on the phone pad · placement respects your Enter-to-submit setting · and the placement screen got its background back (that one was just a bug).
+
 - **2026-07-19 (d)** — **Bosses got personality.** They taunt you at half health, and under 25% they **ENRAGE** — red glow, roar, the works. Finish them before they finish you. Also: the How-to-play now actually explains the pathway and your Fast Math grade. *(Internal, not for Discord: `?demo=1` on the beta URL seeds a rich Grade-6/frontier-8 demo player for walkthroughs — built for the GT Alpha meeting; it overwrites the browser's local save, so don't open it on a device with real progress.)*
 
 - **2026-07-19 (c)** — **📐 Your Fast Math grade.** Every skill on the pathway now carries a grade (3–12), and the menu shows *your* number: your Fast Math grade is where your earliest unfilled skill sits, with your frontier grade alongside if you've climbed higher ("Grade 6 · frontier Grade 11" = you've reached precalc but have a grade-6 gap to fill). Placement announces it ("📐 Grade 9 Fast Math"), the map shows each area's grade span, and clearing everything reads Grade 12 — COMPLETE 👑. Now you know exactly where you stand — and exactly which gap is holding your number down.

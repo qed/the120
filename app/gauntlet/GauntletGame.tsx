@@ -556,7 +556,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     <div
       className="flex min-h-screen flex-col bg-[#0a0f1a] font-display text-white"
       style={
-        phase === "menu" || phase === "victory" || phase === "defeat" || phase === "trialEnd"
+        phase === "menu" || phase === "placement" || phase === "victory" || phase === "defeat" || phase === "trialEnd"
           ? {
               background:
                 "linear-gradient(rgba(6,9,16,0.84), rgba(6,9,16,0.95)), url(/raiders/keyart.jpg) center / cover no-repeat, #0a0f1a",
@@ -628,6 +628,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       )}
       {phase === "placement" && (
         <PlacementTrial
+          enterSubmit={save.enterSubmit}
           onDone={(passed) => {
             setSave((p) => {
               // max-merge: placement can raise levels, never lower them

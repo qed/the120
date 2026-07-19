@@ -162,11 +162,8 @@ export default function Trial({
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (!instantSubmit || problem.kind !== "numeric" || clean.length === 0) return;
-    if (isAutoSubmit(entry)) {
-      if (clean.length >= problem.answer.length) answer(judgeAnswer(problem, clean));
-    } else if (judgeAnswer(problem, clean)) {
-      answer(true); // fire-on-correct for fractions/expressions/pairs
+    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
+      answer(judgeAnswer(problem, clean));
     }
   };
 
@@ -237,6 +234,9 @@ export default function Trial({
               <>
                 <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-amber-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
                   {input || <span className="text-base font-normal text-white/30">Tap the answer!</span>}
+                  {!auto && (
+                    <span className="ml-2 rounded-md border border-white/25 px-1.5 font-mono text-sm font-normal text-white/40">⏎</span>
+                  )}
                 </div>
                 <NumberPad
                   value={input}
@@ -247,18 +247,25 @@ export default function Trial({
                 />
               </>
             ) : (
-              <input
-                ref={inputRef}
-                autoFocus
-                inputMode={auto ? "numeric" : "text"}
-                value={input}
-                onChange={(e) => onType(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit(); // Enter always works, every format
-                }}
-                placeholder={instantSubmit ? "Type the answer!" : "Type, then Enter"}
-                className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
-              />
+              <div className="relative mt-4">
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  inputMode={auto ? "numeric" : "text"}
+                  value={input}
+                  onChange={(e) => onType(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submit(); // Enter always works, every format
+                  }}
+                  placeholder={auto ? "Type the answer!" : "Type, then ⏎"}
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
+                />
+                {!auto && (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-white/25 px-1.5 py-0.5 font-mono text-xs text-white/45">
+                    ⏎
+                  </span>
+                )}
+              </div>
             )
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">

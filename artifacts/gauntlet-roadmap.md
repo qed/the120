@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-19 (i)** — **The input model, settled.** Number facts fire the moment you type the last digit — right or wrong, that's the commitment. Built answers (fractions, expressions, pairs) now show a **⏎ badge** and commit with Enter — because an answer you could keep retyping until it "fires correct" wouldn't be a test (and would be cheatable for tournament points). Recall fires; construction commits. ⚡ instant submit stays the default; toggle off for Enter-on-everything.
+
 - **2026-07-19 (h)** — **Instant mode is truly instant now — and it's the default again.** The real problem wasn't auto-fire, it was that fractions and expressions still demanded Enter even in instant mode. Fixed properly: **correct answers fire the moment you finish typing them, every format** — type `3/4` or `x^2+7x+12` and it lands the instant it's right. Wrong answers wait for Enter (a free chance to catch your own typo — but the clock's still running). Numbers keep the classic fire-at-full-length. Prefer deliberate submits? ⚡ instant submit toggles off.
 
 - **2026-07-19 (g)** — **One rule: Enter submits. Everything.** You were right that the mixed submit models were confusing — so now every answer, number or expression, submits on Enter/⏎ by default. Speedrunners: flip on **⚡ instant submit** in the menu and number answers fire the moment you type them, like before. Also fixed: the "·" that looked like a multiplication sign in equation prompts (4/6 = 8/x **·** x = ?) was actually a separator — it's a period now, and the multiply-dots in a few calculus options are gone too.

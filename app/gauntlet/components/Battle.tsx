@@ -223,10 +223,11 @@ export default function Battle({
     }, REVEAL_MS);
   }, [advance, problem.answer]);
 
-  // ⚡ instant (default): numbers fire at full length (right OR wrong — the
-  // classic feel); variable-length formats fire the moment the typed input
-  // judges CORRECT, so instant is instant for every format. Enter always
-  // submits (the only way a wrong variable-length answer lands).
+  // ⚡ instant (default): number facts fire at full length, right OR wrong —
+  // instant AND committal. Built answers (fractions/expressions/pairs) always
+  // need ⏎: Enter IS the commitment for variable-length input — firing only
+  // on correct would make them guess-and-check-able for free (mastery and
+  // tournament integrity). Recall fires; construction commits.
   const entry = entryOf(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
 
@@ -235,14 +236,9 @@ export default function Battle({
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
-    if (!instantSubmit || problem.kind !== "numeric" || clean.length === 0) return;
-    if (isAutoSubmit(entry)) {
-      if (clean.length >= problem.answer.length) {
-        if (judgeAnswer(problem, clean)) handleCorrect();
-        else handleWrong();
-      }
-    } else if (judgeAnswer(problem, clean)) {
-      handleCorrect(); // fire-on-correct for fractions/expressions/pairs
+    if (auto && problem.kind === "numeric" && clean.length >= problem.answer.length && clean.length > 0) {
+      if (judgeAnswer(problem, clean)) handleCorrect();
+      else handleWrong();
     }
   };
 
@@ -437,6 +433,9 @@ export default function Battle({
                   {input || (
                     <span className="text-base font-normal text-white/30">{reveal ? "" : "Tap the answer!"}</span>
                   )}
+                  {!auto && !reveal && (
+                    <span className="ml-2 rounded-md border border-white/25 px-1.5 font-mono text-sm font-normal text-white/40">⏎</span>
+                  )}
                 </div>
                 <NumberPad
                   value={input}
@@ -448,19 +447,26 @@ export default function Battle({
                 />
               </>
             ) : (
-              <input
-                ref={inputRef}
-                autoFocus
-                inputMode={auto ? "numeric" : "text"}
-                value={input}
-                onChange={(e) => onType(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit(); // Enter always works, every format
-                }}
-                placeholder={reveal ? "" : instantSubmit ? "Type the answer!" : "Type, then Enter"}
-                disabled={!!reveal}
-                className="mt-4 w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
-              />
+              <div className="relative mt-4">
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  inputMode={auto ? "numeric" : "text"}
+                  value={input}
+                  onChange={(e) => onType(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submit(); // Enter always works, every format
+                  }}
+                  placeholder={reveal ? "" : auto ? "Type the answer!" : "Type, then ⏎"}
+                  disabled={!!reveal}
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
+                />
+                {!auto && !reveal && (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-white/25 px-1.5 py-0.5 font-mono text-xs text-white/45">
+                    ⏎
+                  </span>
+                )}
+              </div>
             )
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">

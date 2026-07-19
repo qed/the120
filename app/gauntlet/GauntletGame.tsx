@@ -96,10 +96,11 @@ type Save = {
   skillProgress: SkillProgress;
   /** placement done, skipped, or seeded — gates the first-run assessment */
   placed: boolean;
-  /** DEFAULT ON (immersion): numbers fire at full length, and variable-length
-   *  answers (fractions/expressions/pairs) fire the moment the typed input
-   *  judges CORRECT — so instant mode is instant for every format. Enter/⏎
-   *  always submits too. Toggle off for deliberate Enter-only submits. */
+  /** DEFAULT ON (immersion): number facts fire at full length, right or
+   *  wrong. Built answers (fractions/expressions/pairs) always commit via
+   *  Enter/⏎ — fire-on-correct was rejected as guess-and-check-able (mastery
+   *  + tournament integrity). The ⏎ badge marks commit-style questions.
+   *  Toggle off for deliberate Enter-only submits on everything. */
   instantSubmit: boolean;
   /** per-skill fastest boss clear, in seconds (personal records) */
   records: Record<string, number>;
@@ -936,7 +937,7 @@ function Menu({
               </button>
               <button
                 onClick={onToggleEnter}
-                title="On (default): correct answers fire the moment you finish typing them, every format. Off: Enter/⏎ submits everything."
+                title="On (default): number facts fire at full length; built answers (marked ⏎) commit with Enter. Off: Enter/⏎ submits everything."
                 className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
                   save.instantSubmit
                     ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
@@ -1414,9 +1415,9 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
         <h3 className="text-2xl font-bold">How to play</h3>
         <ul className="mt-4 space-y-3 text-sm leading-relaxed text-white/80">
           <li>
-            ⚔️ <strong>Answer math problems to strike the boss.</strong> Correct answers fire the
-            moment you finish typing them — no Enter needed. (Enter/⏎ always works too; prefer
-            deliberate submits? Turn off ⚡ instant submit on the menu.)
+            ⚔️ <strong>Answer math problems to strike the boss.</strong> Number facts fire the moment
+            you type the last digit. Built answers — fractions, expressions, pairs — show a ⏎ badge:
+            press Enter to lock them in.
           </li>
           <li>
             ⚡ <strong>Speed and streaks hit harder.</strong> Fast answers do bonus damage; 3+ in a row

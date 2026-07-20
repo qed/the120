@@ -13,11 +13,14 @@ export type ShareData =
       damage: number;
       accuracy: number;
       bestStreak: number;
+      /** the player's Fast Math grade — the number parents share */
+      grade?: number;
     }
   | {
       kind: "trial";
       score: number;
       best: number;
+      grade?: number;
     };
 
 const SITE = "the120.school/gauntlet";
@@ -82,12 +85,19 @@ async function drawCard(data: ShareData): Promise<HTMLCanvasElement> {
   cx.fillStyle = "rgba(255,255,255,0.55)";
   cx.fillText("FASTMATH BOSS BATTLES · THE 120", W / 2, 208);
 
+  // Fast Math grade — the line parents repeat
+  if (data.grade) {
+    cx.font = "700 42px 'IBM Plex Mono', monospace";
+    cx.fillStyle = "#22d3ee";
+    cx.fillText(`📐 GRADE ${data.grade} FAST MATH`, W / 2, 268);
+  }
+
   if (data.kind === "raid") {
     // Boss sprite
     const boss = await loadImage(`/raiders/boss-${data.bossId}.png`);
     if (boss) {
-      const size = 380;
-      cx.drawImage(boss, (W - size) / 2, 250, size, size);
+      const size = data.grade ? 340 : 380;
+      cx.drawImage(boss, (W - size) / 2, data.grade ? 290 : 250, size, size);
     }
     // Headline
     cx.font = "700 78px 'Space Grotesk', sans-serif";

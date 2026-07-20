@@ -379,6 +379,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const curIdx = currentSkillIdx(save.skillProgress);
   const trialTopics = unlockedTopics(save.skillProgress);
   const trialBand = PATHWAY[curIdx].band;
+  const fmGrade = fastMathGrade(save.skillProgress).grade;
 
   const applyResults = useCallback((prev: Save, results: ProblemResult[]): Record<string, FactStat> => {
     const facts = { ...prev.facts };
@@ -704,6 +705,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           results={lastResults}
           elapsed={lastElapsed}
           newRecord={lastNewRecord}
+          grade={fmGrade}
           challengeNote={challengeNote}
           onChallenge={phase === "victory" ? shareChallenge : undefined}
           onMenu={() => setPhase("menu")}
@@ -722,6 +724,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           mastered={lastMastered}
           results={lastResults}
           recap={lastRecap}
+          grade={fmGrade}
           onMenu={() => setPhase("menu")}
           onRetry={() => {
             ensureAudio();
@@ -1097,6 +1100,7 @@ function Result({
   results,
   elapsed,
   newRecord,
+  grade,
   challengeNote,
   onChallenge,
   onMenu,
@@ -1111,6 +1115,7 @@ function Result({
   results: ProblemResult[];
   elapsed: number;
   newRecord: boolean;
+  grade: number;
   challengeNote?: string;
   onChallenge?: () => Promise<boolean>;
   onMenu: () => void;
@@ -1192,6 +1197,7 @@ function Result({
               damage: stats.damage,
               accuracy: acc,
               bestStreak: stats.bestStreak,
+              grade,
             }}
           />
         )}
@@ -1229,6 +1235,7 @@ function TrialResult({
   mastered,
   results,
   recap,
+  grade,
   onMenu,
   onRetry,
 }: {
@@ -1237,6 +1244,7 @@ function TrialResult({
   mastered: number;
   results: ProblemResult[];
   recap: { tested: number; total: number } | null;
+  grade: number;
   onMenu: () => void;
   onRetry: () => void;
 }) {
@@ -1280,7 +1288,7 @@ function TrialResult({
       )}
 
       <div className="mt-8 flex flex-wrap justify-center gap-3">
-        {score > 0 && <ShareButton data={{ kind: "trial", score, best }} />}
+        {score > 0 && <ShareButton data={{ kind: "trial", score, best, grade }} />}
         <button onClick={onRetry} className="rounded-xl bg-amber-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-amber-300">
           RUN IT BACK
         </button>

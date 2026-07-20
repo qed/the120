@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   title: "The Gauntlet — The 120",
   description:
     "Fast math, disguised as a boss battle. One pathway from arithmetic to calculus — coming soon from The 120.",
+  openGraph: { images: ["/raiders/keyart.jpg"] },
 };
 
 // Render per-request so the tournament phase (date-derived + env-overridable)

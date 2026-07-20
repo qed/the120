@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-20** — **Share loop polish.** Your score card now carries your **📐 Fast Math grade** — the number worth showing off. And challenge links unfurl properly when you paste them: "⚔️ RIVAL-X challenges you — beat Factor quadratics L3 in 48s" right in the chat preview, instead of a generic page title.
+
 - **2026-07-19 (i)** — **The input model, settled.** Number facts fire the moment you type the last digit — right or wrong, that's the commitment. Built answers (fractions, expressions, pairs) now show a **⏎ badge** and commit with Enter — because an answer you could keep retyping until it "fires correct" wouldn't be a test (and would be cheatable for tournament points). Recall fires; construction commits. ⚡ instant submit stays the default; toggle off for Enter-on-everything.
 
 - **2026-07-19 (h)** — **Instant mode is truly instant now — and it's the default again.** The real problem wasn't auto-fire, it was that fractions and expressions still demanded Enter even in instant mode. Fixed properly: **correct answers fire the moment you finish typing them, every format** — type `3/4` or `x^2+7x+12` and it lands the instant it's right. Wrong answers wait for Enter (a free chance to catch your own typo — but the clock's still running). Numbers keep the classic fire-at-full-length. Prefer deliberate submits? ⚡ instant submit toggles off.

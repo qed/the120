@@ -104,6 +104,9 @@ type Save = {
   instantSubmit: boolean;
   /** per-skill fastest boss clear, in seconds (personal records) */
   records: Record<string, number>;
+  /** last date a placement was completed — one per day (the staircase samples
+   *  2 skills per grade, so retake-spamming could luck past grades) */
+  lastPlacement: string;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -124,6 +127,7 @@ const EMPTY_SAVE: Save = {
   placed: false,
   instantSubmit: true,
   records: {},
+  lastPlacement: "",
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -161,6 +165,7 @@ function mergeSaves(a: Save, b: Save): Save {
     placed: (a.placed ?? false) || (b.placed ?? false),
     instantSubmit: a.instantSubmit ?? b.instantSubmit ?? true, // local preference wins
     records,
+    lastPlacement: (a.lastPlacement ?? "") >= (b.lastPlacement ?? "") ? (a.lastPlacement ?? "") : (b.lastPlacement ?? ""),
   };
 }
 
@@ -641,7 +646,13 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
               for (const [k, v] of Object.entries(placementProgress(passed))) {
                 merged[k] = Math.max(merged[k] ?? 0, v);
               }
-              return { ...p, placed: true, skillProgress: merged, topics: unlockedTopics(merged) };
+              return {
+                ...p,
+                placed: true,
+                lastPlacement: todayStr(), // one placement per day
+                skillProgress: merged,
+                topics: unlockedTopics(merged),
+              };
             });
             setPhase("menu");
           }}
@@ -932,12 +943,18 @@ function Menu({
               🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
             </button>
             <div className="flex items-center justify-center gap-4">
-              <button
-                onClick={onPlacement}
-                className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
-              >
-                🎯 take the placement test — it can only move you up
-              </button>
+              {save.lastPlacement === todayStr() ? (
+                <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/30">
+                  🎯 placement taken today — again tomorrow
+                </span>
+              ) : (
+                <button
+                  onClick={onPlacement}
+                  className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
+                >
+                  🎯 take the placement test — it can only move you up
+                </button>
+              )}
               <button
                 onClick={onToggleEnter}
                 title="On (default): number facts fire at full length; built answers (marked ⏎) commit with Enter. Off: Enter/⏎ submits everything."

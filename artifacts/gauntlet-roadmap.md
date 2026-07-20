@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-20 (b)** — **Clarity round (your feedback).** ① Questions like "2³ × 2² = 2ⁿ. n = ?" now put **n = ? on its own line** — no more dot that looks like multiplication, anywhere. ② Questions that need submitting now have a real green **⏎ button** next to the answer box (Enter still works). ③ True/False questions render as two big centered buttons. ④ Placement is now **once per day** — with two probes per grade, unlimited retakes could luck you past grades you haven't earned (nice catch).
+
 - **2026-07-20** — **Share loop polish.** Your score card now carries your **📐 Fast Math grade** — the number worth showing off. And challenge links unfurl properly when you paste them: "⚔️ RIVAL-X challenges you — beat Factor quadratics L3 in 48s" right in the chat preview, instead of a generic page title.
 
 - **2026-07-19 (i)** — **The input model, settled.** Number facts fire the moment you type the last digit — right or wrong, that's the commitment. Built answers (fractions, expressions, pairs) now show a **⏎ badge** and commit with Enter — because an answer you could keep retyping until it "fires correct" wouldn't be a test (and would be cheatable for tournament points). Recall fires; construction commits. ⚡ instant submit stays the default; toggle off for Enter-on-everything.

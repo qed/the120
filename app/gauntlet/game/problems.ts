@@ -479,7 +479,8 @@ function makeProp(a: number, b: number, k: number, pos: 0 | 1 | 2 | 3): Problem 
     topic: "prop",
     key: `prop:${a}:${b}:${k}:${pos}`,
     // ". x = ?" not "· x = ?" — the dot separator read as a multiplication sign
-    prompt: `${show[0]}/${show[1]} = ${show[2]}/${show[3]}. x = ?`,
+    prompt: `${show[0]}/${show[1]} = ${show[2]}/${show[3]}
+x = ?`,
     answer: String(vals[pos]),
     kind: "numeric",
   };
@@ -499,7 +500,8 @@ function makeExpRule(base: string, e1: number, e2: number): Problem {
   return {
     topic: "exprule",
     key: `exprule:${base}:${e1}:${e2}`,
-    prompt: `${base}${sup(e1)} × ${base}${sup(e2)} = ${base}ⁿ. n = ?`,
+    prompt: `${base}${sup(e1)} × ${base}${sup(e2)} = ${base}ⁿ
+n = ?`,
     answer: String(e1 + e2),
     kind: "numeric",
   };
@@ -644,7 +646,8 @@ function makeExpQuot(base: string, e1: number, e2: number): Problem {
   return {
     topic: "expquot",
     key: `expquot:${base}:${e1}:${e2}`,
-    prompt: `${base}${sup(e1)} ÷ ${base}${sup(e2)} = ${base}ⁿ. n = ?`,
+    prompt: `${base}${sup(e1)} ÷ ${base}${sup(e2)} = ${base}ⁿ
+n = ?`,
     answer: String(e1 - e2),
     kind: "numeric",
   };
@@ -972,7 +975,8 @@ function makeDpoint(a: number, n: number, x0: number): Problem {
   return {
     topic: "dpoint",
     key: `dpoint:${a},${n},${x0}`,
-    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}. f′(${x0}) = ?`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}
+f′(${x0}) = ?`,
     answer: String(a * n * Math.pow(x0, n - 1)),
     kind: "numeric",
   };
@@ -992,7 +996,8 @@ function makeCritpt(a: number, xstar: number): Problem {
   return {
     topic: "critpt",
     key: `critpt:${a},${xstar}`,
-    prompt: `f(x) = ${a === 1 ? "" : a}x² ${signed(b)}x ${signed(c)}. Critical point at x = ?`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x² ${signed(b)}x ${signed(c)}
+Critical point: x = ?`,
     answer: String(xstar),
     kind: "numeric",
   };
@@ -1248,13 +1253,17 @@ function genEvalexpr(): Problem {
 function makeSolve1(op: "add" | "sub" | "mul" | "div", p: number, q: number): Problem {
   switch (op) {
     case "add": // x + p = q
-      return { topic: "solve1", key: `solve1:add,${p},${q}`, prompt: `x + ${p} = ${q}. x = ?`, answer: String(q - p), kind: "numeric" };
+      return { topic: "solve1", key: `solve1:add,${p},${q}`, prompt: `x + ${p} = ${q}
+x = ?`, answer: String(q - p), kind: "numeric" };
     case "sub": // x − p = q
-      return { topic: "solve1", key: `solve1:sub,${p},${q}`, prompt: `x − ${p} = ${q}. x = ?`, answer: String(q + p), kind: "numeric" };
+      return { topic: "solve1", key: `solve1:sub,${p},${q}`, prompt: `x − ${p} = ${q}
+x = ?`, answer: String(q + p), kind: "numeric" };
     case "mul": // p·x = q
-      return { topic: "solve1", key: `solve1:mul,${p},${q}`, prompt: `${p}x = ${q}. x = ?`, answer: String(q / p), kind: "numeric" };
+      return { topic: "solve1", key: `solve1:mul,${p},${q}`, prompt: `${p}x = ${q}
+x = ?`, answer: String(q / p), kind: "numeric" };
     case "div": // x ÷ p = q
-      return { topic: "solve1", key: `solve1:div,${p},${q}`, prompt: `x ÷ ${p} = ${q}. x = ?`, answer: String(p * q), kind: "numeric" };
+      return { topic: "solve1", key: `solve1:div,${p},${q}`, prompt: `x ÷ ${p} = ${q}
+x = ?`, answer: String(p * q), kind: "numeric" };
   }
 }
 function genSolve1(): Problem {
@@ -1277,7 +1286,8 @@ function makeSolve2(a: number, b: number, x: number): Problem {
   return {
     topic: "solve2",
     key: `solve2:${a},${b},${x}`,
-    prompt: `${a}x ${signed(b)} = ${a * x + b}. x = ?`,
+    prompt: `${a}x ${signed(b)} = ${a * x + b}
+x = ?`,
     answer: String(x),
     kind: "numeric",
   };
@@ -1494,7 +1504,8 @@ function makeExpsolve(b: number, e: number): Problem {
   return {
     topic: "expsolve",
     key: `expsolve:${b}^${e}`,
-    prompt: `${b}ˣ = ${Math.pow(b, e)}. x = ?`,
+    prompt: `${b}ˣ = ${Math.pow(b, e)}
+x = ?`,
     answer: String(e),
     kind: "numeric",
   };
@@ -1634,7 +1645,8 @@ function makeVasymp(a: number, c: number): Problem {
   return {
     topic: "vasymp",
     key: `vasymp:${a},${c}`,
-    prompt: `y = (x ${signed(c)})/(x ${signed(-a)}). Vertical asymptote at x = ?`,
+    prompt: `y = (x ${signed(c)})/(x ${signed(-a)})
+Vertical asymptote: x = ?`,
     answer: String(a),
     kind: "numeric",
   };
@@ -1654,7 +1666,8 @@ function makeHasymp(n1: number, c1: number, d1: number, c2: number): Problem {
   return {
     topic: "hasymp",
     key: `hasymp:${n1},${c1},${d1},${c2}`,
-    prompt: `y = (${num})/(${d1}x ${signed(c2)}). Horizontal asymptote at y = ?`,
+    prompt: `y = (${num})/(${d1}x ${signed(c2)})
+Horizontal asymptote: y = ?`,
     answer: String(n1 === 0 ? 0 : n1 / d1),
     kind: "numeric",
   };
@@ -1673,7 +1686,8 @@ function makeAmp(a: number, b: number, c: number, fn: string): Problem {
   return {
     topic: "amp",
     key: `amp:${a},${b},${c},${fn}`,
-    prompt: `y = ${a < 0 ? `−${-a}` : a} ${fn}(${b}x) ${signed(c)}. Amplitude?`,
+    prompt: `y = ${a < 0 ? `−${-a}` : a} ${fn}(${b}x) ${signed(c)}
+Amplitude = ?`,
     answer: String(Math.abs(a)),
     kind: "numeric",
   };
@@ -1688,7 +1702,8 @@ function makeMidline(a: number, b: number, c: number, fn: string): Problem {
   return {
     topic: "midline",
     key: `midline:${a},${b},${c},${fn}`,
-    prompt: `y = ${a} ${fn}(${b}x) ${signed(c)}. The midline is y = ?`,
+    prompt: `y = ${a} ${fn}(${b}x) ${signed(c)}
+Midline: y = ?`,
     answer: String(c),
     kind: "numeric",
   };
@@ -1703,7 +1718,8 @@ function makeDsecond(a: number, n: number, x0: number): Problem {
   return {
     topic: "dsecond",
     key: `dsecond:${a},${n},${x0}`,
-    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}. f″(${x0}) = ?`,
+    prompt: `f(x) = ${a === 1 ? "" : a}x${sup(n)}
+f″(${x0}) = ?`,
     answer: String(a * n * (n - 1) * Math.pow(x0, n - 2)),
     kind: "numeric",
   };
@@ -1717,7 +1733,8 @@ function makeVeloc(deg: number, a: number, b: number, t: number): Problem {
   return {
     topic: "veloc",
     key: `veloc:${deg},${a},${b},${t}`,
-    prompt: `s(t) = ${s}. The velocity at t = ${t}?`,
+    prompt: `s(t) = ${s}
+Velocity at t = ${t}: ?`,
     answer: String(v),
     kind: "numeric",
   };
@@ -1739,7 +1756,8 @@ function makeAntipow(n: number): Problem {
   return {
     topic: "antipow",
     key: `antipow:${n}`,
-    prompt: `∫x${n === 1 ? "" : sup(n)} dx = xⁿ/n + C. n = ?`,
+    prompt: `∫x${n === 1 ? "" : sup(n)} dx = xⁿ/n + C
+n = ?`,
     answer: String(n + 1),
     kind: "numeric",
   };

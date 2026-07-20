@@ -407,7 +407,7 @@ export default function Battle({
               <TriangleFigure pair={problem.triangle} />
             </div>
           )}
-          <p className={`text-center font-bold ${problem.prompt.length > 24 ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"}`}>
+          <p className={`whitespace-pre-line text-center font-bold ${problem.prompt.length > 24 ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"}`}>
             {problem.prompt}
             {/* only append "= ?" when the prompt doesn't already ask its own question */}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && (
@@ -447,7 +447,7 @@ export default function Battle({
                 />
               </>
             ) : (
-              <div className="relative mt-4">
+              <div className="mt-4 flex items-stretch gap-2">
                 <input
                   ref={inputRef}
                   autoFocus
@@ -459,23 +459,36 @@ export default function Battle({
                   }}
                   placeholder={reveal ? "" : auto ? "Type the answer!" : "Type, then ⏎"}
                   disabled={!!reveal}
-                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
+                  className="min-w-0 flex-1 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-cyan-400/70 disabled:opacity-50 sm:py-4 sm:text-3xl"
                 />
-                {!auto && !reveal && (
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-white/25 px-1.5 py-0.5 font-mono text-xs text-white/45">
+                {!auto && (
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!!reveal || !input.trim()}
+                    className="rounded-xl bg-emerald-400 px-5 font-mono text-lg font-bold text-black transition-colors hover:bg-emerald-300 disabled:opacity-30"
+                  >
                     ⏎
-                  </span>
+                  </button>
                 )}
               </div>
             )
           ) : (
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div
+              className={
+                problem.choices!.length <= 2
+                  ? "mt-4 flex justify-center gap-3" // True/False: two large centered buttons
+                  : "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"
+              }
+            >
               {problem.choices!.map((c) => (
                 <button
                   key={c}
                   onClick={() => choose(c)}
                   disabled={!!reveal}
-                  className={`rounded-xl border px-2 py-3 font-mono text-sm font-medium text-white transition-colors disabled:opacity-60 ${
+                  className={`rounded-xl border font-mono font-medium text-white transition-colors disabled:opacity-60 ${
+                    problem.choices!.length <= 2 ? "px-10 py-4 text-lg" : "px-2 py-3 text-sm"
+                  } ${
                     reveal && c === problem.answer
                       ? "border-emerald-400 bg-emerald-400/25"
                       : "border-white/20 bg-white/5 hover:border-cyan-400 hover:bg-cyan-400/15"

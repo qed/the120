@@ -223,7 +223,7 @@ export default function Trial({
               <TriangleFigure pair={problem.triangle} />
             </div>
           )}
-          <p className={`text-center font-bold ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
+          <p className={`whitespace-pre-line text-center font-bold ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
             {problem.prompt}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && (
               <span className="text-amber-300"> = ?</span>
@@ -247,7 +247,7 @@ export default function Trial({
                 />
               </>
             ) : (
-              <div className="relative mt-4">
+              <div className="mt-4 flex items-stretch gap-2">
                 <input
                   ref={inputRef}
                   autoFocus
@@ -258,17 +258,28 @@ export default function Trial({
                     if (e.key === "Enter") submit(); // Enter always works, every format
                   }}
                   placeholder={auto ? "Type the answer!" : "Type, then ⏎"}
-                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
+                  className="min-w-0 flex-1 rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-2xl font-bold tracking-wider text-white outline-none placeholder:text-base placeholder:font-normal placeholder:text-white/30 focus:border-amber-400/70"
                 />
                 {!auto && (
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-white/25 px-1.5 py-0.5 font-mono text-xs text-white/45">
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!input.trim()}
+                    className="rounded-xl bg-emerald-400 px-5 font-mono text-lg font-bold text-black transition-colors hover:bg-emerald-300 disabled:opacity-30"
+                  >
                     ⏎
-                  </span>
+                  </button>
                 )}
               </div>
             )
           ) : (
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div
+              className={
+                problem.choices!.length <= 2
+                  ? "mt-4 flex justify-center gap-3"
+                  : "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"
+              }
+            >
               {problem.choices!.map((c) => (
                 <button
                   key={c}
@@ -276,7 +287,9 @@ export default function Trial({
                     ensureAudio();
                     answer(c === problem.answer);
                   }}
-                  className="rounded-xl border border-white/20 bg-white/5 px-2 py-3 font-mono text-sm font-medium text-white transition-colors hover:border-amber-400 hover:bg-amber-400/15"
+                  className={`rounded-xl border border-white/20 bg-white/5 font-mono font-medium text-white transition-colors hover:border-amber-400 hover:bg-amber-400/15 ${
+                    problem.choices!.length <= 2 ? "px-10 py-4 text-lg" : "px-2 py-3 text-sm"
+                  }`}
                 >
                   {c}
                 </button>

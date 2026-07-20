@@ -244,6 +244,7 @@ export const AUDIT_ACTIONS = [
   "drill-down",
   "offer-email",
   "referral-asked",
+  "welcome-email",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

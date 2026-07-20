@@ -242,13 +242,35 @@ const ENTER_ENTRY_TOPICS: ReadonlySet<TopicId> = new Set([
 ]);
 
 /**
- * Per-topic mastery window (tester feedback 2026-07-18: a flat 3s bar is
- * brutal in the later grades). Tier-1 recall keeps the 3s bar; tier-2 skills
- * get the doc's Medium band (6s); Enter-entry formats add typing time.
+ * Topics the content doc rates at Medium's UPPER HALF/CEILING ("4–7s",
+ * "5–8s") or whose figure/option-scan time counts as thinking time
+ * (congruence is the doc's own worked example of that). Audited 2026-07-20
+ * against each entry's rating language after tester reports.
+ */
+const HARD_TOPICS: ReadonlySet<TopicId> = new Set([
+  "dist", // "Medium's ceiling, 5–8s even with triple-friendly params"
+  "congruence", // figure-reading + 5-option scan count as thinking time
+  "defint", // "Medium's upper half, 4–7s"
+  "dsecond", // "Medium's upper half, 4–7s"
+  "veloc", // "Medium's upper half, 4–7s"
+  "logrule", // "4–7s"
+]);
+
+/**
+ * Per-topic mastery window (tester feedback 2026-07-18/20: a flat bar is
+ * brutal in the later grades). Three classes, audited against the doc's
+ * per-entry ratings: tier-1 recall = 3s · tier-2 skills = 6s · doc-rated
+ * upper-Medium/figure-scan = 9s; Enter-entry formats add typing time.
+ * The raid economy scales with this (damage + speed window), so slower
+ * topics stay fair on the same clock.
  */
 export function masteryMsFor(topic: TopicId): number {
   const t = TOPICS.find((x) => x.id === topic);
-  const base = !t || t.tier === 1 ? MASTERY_MS : MASTERY_MS * 2;
+  const base = HARD_TOPICS.has(topic)
+    ? MASTERY_MS * 3
+    : !t || t.tier === 1
+      ? MASTERY_MS
+      : MASTERY_MS * 2;
   return base + (ENTER_ENTRY_TOPICS.has(topic) ? 2500 : 0);
 }
 

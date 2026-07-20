@@ -22,10 +22,20 @@ describe("masteryMsFor", () => {
     expect(masteryMsFor("trigval")).toBe(3000); // tap recall
   });
   it("later-grade skills get the Medium band (6s)", () => {
-    expect(masteryMsFor("defint")).toBe(6000);
     expect(masteryMsFor("dpoint")).toBe(6000);
     expect(masteryMsFor("lcm")).toBe(6000);
     expect(masteryMsFor("denom")).toBe(6000);
+    expect(masteryMsFor("critpt")).toBe(6000);
+  });
+  it("doc-rated upper-Medium / figure-scan topics get 9s", () => {
+    // distance: "Medium's ceiling, 5–8s"; congruence: figure-reading counts
+    // as thinking time (the doc's own calibration anchor)
+    expect(masteryMsFor("dist")).toBe(9000);
+    expect(masteryMsFor("congruence")).toBe(9000);
+    expect(masteryMsFor("defint")).toBe(9000);
+    expect(masteryMsFor("dsecond")).toBe(9000);
+    expect(masteryMsFor("veloc")).toBe(9000);
+    expect(masteryMsFor("logrule")).toBe(9000);
   });
   it("doc-Medium mental-compute topics are NOT on the 3s recall bar", () => {
     // Grade 12s were failing placement at 2-digit×1-digit because 47×8 in 6s

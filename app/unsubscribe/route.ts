@@ -61,11 +61,15 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const url = new URL(req.url);
+  // RFC 8058 one-click: mail providers POST here with f/t in the QUERY string
+  // (the body is "List-Unsubscribe=One-Click"), and expect the POST itself to
+  // revoke — no human confirm step. The in-body confirm page instead POSTs f/t
+  // in the FORM body. Accept either source (query first) so both flows revoke.
   const form = await req.formData().catch(() => null);
-  const params = validParams(
-    (form?.get("f") as string | null) ?? null,
-    (form?.get("t") as string | null) ?? null
-  );
+  const f = url.searchParams.get("f") ?? (form?.get("f") as string | null) ?? null;
+  const t = url.searchParams.get("t") ?? (form?.get("t") as string | null) ?? null;
+  const params = validParams(f, t);
   if (!params) {
     return page(
       "This link isn't valid",

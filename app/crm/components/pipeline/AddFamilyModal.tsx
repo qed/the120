@@ -121,23 +121,30 @@ export default function AddFamilyModal({
       };
     }
 
-    const result = await addFamily(payload);
-    setSubmitting(false);
-
-    if (result.success) {
-      toast("success", "Family added");
-      if (result.warning) toast("info", result.warning);
-      reset();
-      onClose();
-      if (result.familyId) {
-        router.push(`/crm/pipeline?family=${result.familyId}`, {
-          scroll: false,
-        });
+    // A rejected server action (transient Supabase/network stall, an expired
+    // session in requireStaff) must never leave the modal frozen on "Saving…":
+    // finally always clears `submitting`, catch surfaces a retryable error.
+    try {
+      const result = await addFamily(payload);
+      if (result.success) {
+        toast("success", "Family added");
+        if (result.warning) toast("info", result.warning);
+        reset();
+        onClose();
+        if (result.familyId) {
+          router.push(`/crm/pipeline?family=${result.familyId}`, {
+            scroll: false,
+          });
+        } else {
+          router.refresh();
+        }
       } else {
-        router.refresh();
+        setError(result.error ?? "Failed to add the family.");
       }
-    } else {
-      setError(result.error ?? "Failed to add the family.");
+    } catch {
+      setError("Something went wrong saving the family. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   }
 

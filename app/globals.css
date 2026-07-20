@@ -79,6 +79,14 @@ body {
    crucial on phones, where the touch pad needs every vertical pixel. */
 body.gauntlet-playing .gauntlet-page-chrome { display: none; }
 
+/* The site is paper-white, the Gauntlet is dark — without this, overscroll
+   rubber-banding at the page ends flashes the white root background. When a
+   Gauntlet surface is mounted, the document root goes dark too. */
+html:has(.gauntlet-root),
+html:has(.gauntlet-root) body {
+  background: #0a0f1a;
+}
+
 @keyframes mr-shake {
   0%, 100% { transform: translate(0, 0); }
   20% { transform: translate(-7px, 2px) rotate(-2deg); }

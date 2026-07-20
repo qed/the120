@@ -12,7 +12,7 @@ import JoinButton from "@/app/components/JoinButton";
 export default function ComingSoon() {
   return (
     <div
-      className="flex min-h-dvh flex-col bg-[#0a0f1a] font-display text-white"
+      className="gauntlet-root flex min-h-dvh flex-col bg-[#0a0f1a] font-display text-white"
       style={{
         background:
           "linear-gradient(rgba(6,9,16,0.88), rgba(6,9,16,0.96)), url(/raiders/keyart.jpg) center / cover no-repeat, #0a0f1a",

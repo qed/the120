@@ -87,6 +87,8 @@ Strangers were meeting a v1 game as their first impression of The 120. Until lau
 
 ## 📓 Changelog (newest first — each entry gets posted to Discord)
 
+- **2026-07-20 (e)** — **No more white flash at the page edges.** Scrolling past the top or bottom of the game used to rubber-band into the site's white background — the page root now goes dark whenever a Gauntlet screen is up.
+
 - **2026-07-20 (d)** — **Fair time for the genuinely hard ones.** You were right that distance and triangle congruence couldn't be done in the time given — the content doc itself rates them at Medium's ceiling (figure-reading counts as thinking time). Six topics move to a **9-second window**: distance, congruence, definite integrals, second derivatives, velocity, and the log product rule — with triple damage per hit, so their raids stay winnable on the same clock. If any other skill feels time-impossible, name it — the doc has a rating for every entry and we re-class same-day.
 
 - **2026-07-20 (c)** — **Share cards, fixed on desktop.** No more weird Windows share popup — SHARE SCORE now shows your card right in the game with **📋 COPY IMAGE** (paste it straight into Discord) and download. Phones still get the native share sheet, where it actually belongs.

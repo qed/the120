@@ -611,7 +611,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 
   return (
     <div
-      className="flex min-h-screen flex-col bg-[#0a0f1a] font-display text-white"
+      className="gauntlet-root flex min-h-screen flex-col bg-[#0a0f1a] font-display text-white"
       style={
         phase === "menu" || phase === "placement" || phase === "victory" || phase === "defeat" || phase === "trialEnd"
           ? {

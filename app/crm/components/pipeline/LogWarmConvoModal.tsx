@@ -108,19 +108,25 @@ export default function LogWarmConvoModal({
       if (note.trim()) payload.note = note;
       if (force) payload.force = true;
 
-      const result = await logWarmConvo(payload);
-      setSubmitting(false);
-
-      if (!result.success) {
-        setError(result.error ?? "Failed to log the conversation.");
-        return;
+      // A rejected server action must never freeze the modal on "Logging…":
+      // finally always clears `submitting`, catch surfaces a retryable error.
+      try {
+        const result = await logWarmConvo(payload);
+        if (!result.success) {
+          setError(result.error ?? "Failed to log the conversation.");
+          return;
+        }
+        // No-email soft match → offer attach-or-create instead of finishing.
+        if (result.candidate && !result.familyId) {
+          setCandidate(result.candidate);
+          return;
+        }
+        finish(result.familyId, result.matched);
+      } catch {
+        setError("Something went wrong logging the conversation. Please try again.");
+      } finally {
+        setSubmitting(false);
       }
-      // No-email soft match → offer attach-or-create instead of finishing.
-      if (result.candidate && !result.familyId) {
-        setCandidate(result.candidate);
-        return;
-      }
-      finish(result.familyId, result.matched);
     },
     [email, finish, name, note]
   );
@@ -130,13 +136,18 @@ export default function LogWarmConvoModal({
     setSubmitting(true);
     const payload: Record<string, unknown> = { familyId: candidate.id };
     if (note.trim()) payload.note = note;
-    const result = await logWarmConvo(payload);
-    setSubmitting(false);
-    if (!result.success) {
-      setError(result.error ?? "Failed to attach the conversation.");
-      return;
+    try {
+      const result = await logWarmConvo(payload);
+      if (!result.success) {
+        setError(result.error ?? "Failed to attach the conversation.");
+        return;
+      }
+      finish(result.familyId, true);
+    } catch {
+      setError("Something went wrong attaching the conversation. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-    finish(result.familyId, true);
   }, [candidate, finish, note]);
 
   async function handleSubmit(e: React.FormEvent) {

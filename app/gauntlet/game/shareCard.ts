@@ -156,31 +156,51 @@ export async function shareCardDataUrl(data: ShareData): Promise<string> {
   return cv.toDataURL("image/png");
 }
 
-/**
- * Share the card: native share sheet with the image where supported
- * (iOS/Android), otherwise downloads the PNG. Returns how it was delivered.
- */
-export async function shareScore(data: ShareData): Promise<"shared" | "downloaded"> {
+/** Render the card once; the UI decides how to deliver it. */
+export async function buildShareCard(data: ShareData): Promise<{ blob: Blob; dataUrl: string }> {
   const cv = await drawCard(data);
   const blob: Blob = await new Promise((res) => cv.toBlob((b) => res(b!), "image/png"));
-  const file = new File([blob], "the-gauntlet-score.png", { type: "image/png" });
+  return { blob, dataUrl: cv.toDataURL("image/png") };
+}
 
-  if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: "The Gauntlet",
-        text: `Can you beat me? Play The Gauntlet: https://${SITE}`,
-      });
-      return "shared";
-    } catch {
-      /* user cancelled or share failed — fall through to download */
-    }
+/** True where the native share sheet is actually pleasant (phones/tablets) —
+ *  on desktop Windows it pops a jarring OS panel, so we preview in-app there. */
+export function nativeShareAvailable(blob: Blob): boolean {
+  const file = new File([blob], "the-gauntlet-score.png", { type: "image/png" });
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  return coarse && typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+}
+
+/** Native share (mobile). Returns false if cancelled/unsupported. */
+export async function nativeShare(blob: Blob): Promise<boolean> {
+  const file = new File([blob], "the-gauntlet-score.png", { type: "image/png" });
+  try {
+    await navigator.share({
+      files: [file],
+      title: "The Gauntlet",
+      text: `Can you beat me? Play The Gauntlet: https://${SITE}`,
+    });
+    return true;
+  } catch {
+    return false;
   }
+}
+
+/** Copy the card image to the clipboard (desktop's best path — paste anywhere). */
+export async function copyCard(blob: Blob): Promise<boolean> {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Download fallback. */
+export function downloadCard(blob: Blob): void {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "the-gauntlet-score.png";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  return "downloaded";
 }

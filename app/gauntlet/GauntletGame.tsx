@@ -34,7 +34,14 @@ import Trial from "./components/Trial";
 import PlacementTrial from "./components/PlacementTrial";
 import SkillPanel from "./components/SkillPanel";
 import { useCoarsePointer } from "./components/NumberPad";
-import { shareScore, type ShareData } from "./game/shareCard";
+import {
+  buildShareCard,
+  copyCard,
+  downloadCard,
+  nativeShare,
+  nativeShareAvailable,
+  type ShareData,
+} from "./game/shareCard";
 import TournamentEntryModal from "./components/TournamentEntryModal";
 import type { TournamentState } from "@/app/lib/tournament";
 import JoinButton from "@/app/components/JoinButton";
@@ -46,30 +53,70 @@ import {
   type LeaderRow,
 } from "./game/cloudSave";
 
-/** Share button with delivered-state feedback (GTM share card). */
+/** Share button: phones get the native sheet; desktop gets an in-app preview
+ *  with copy-to-clipboard (paste into Discord/iMessage) — no OS popup. */
 function ShareButton({ data }: { data: ShareData }) {
-  const [state, setState] = useState<"idle" | "busy" | "shared" | "downloaded">("idle");
+  const [state, setState] = useState<"idle" | "busy" | "shared">("idle");
+  const [card, setCard] = useState<{ blob: Blob; dataUrl: string } | null>(null);
+  const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   return (
-    <button
-      onClick={async () => {
-        setState("busy");
-        try {
-          setState(await shareScore(data));
-        } catch {
-          setState("idle");
-        }
-      }}
-      className="rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300 disabled:opacity-60"
-      disabled={state === "busy"}
-    >
-      {state === "busy"
-        ? "MAKING CARD…"
-        : state === "shared"
-          ? "SHARED ✓"
-          : state === "downloaded"
-            ? "SAVED — SEND IT ✓"
-            : "📸 SHARE SCORE"}
-    </button>
+    <>
+      <button
+        onClick={async () => {
+          setState("busy");
+          try {
+            const built = await buildShareCard(data);
+            if (nativeShareAvailable(built.blob)) {
+              setState((await nativeShare(built.blob)) ? "shared" : "idle");
+              return;
+            }
+            setCopied("idle");
+            setCard(built); // desktop: in-app preview
+            setState("idle");
+          } catch {
+            setState("idle");
+          }
+        }}
+        className="rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300 disabled:opacity-60"
+        disabled={state === "busy"}
+      >
+        {state === "busy" ? "MAKING CARD…" : state === "shared" ? "SHARED ✓" : "📸 SHARE SCORE"}
+      </button>
+      {card && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
+          onClick={() => setCard(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/15 bg-[#0d1322] p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- canvas data URL */}
+            <img src={card.dataUrl} alt="Your Gauntlet score card" className="w-full rounded-xl" />
+            <div className="mt-3 flex justify-center gap-2">
+              <button
+                onClick={async () => setCopied((await copyCard(card.blob)) ? "done" : "failed")}
+                className="rounded-xl bg-cyan-400 px-5 py-2.5 font-mono text-xs font-bold text-black hover:bg-cyan-300"
+              >
+                {copied === "done" ? "COPIED — PASTE IT ✓" : copied === "failed" ? "COPY FAILED — DOWNLOAD?" : "📋 COPY IMAGE"}
+              </button>
+              <button
+                onClick={() => downloadCard(card.blob)}
+                className="rounded-xl bg-white/15 px-5 py-2.5 font-mono text-xs font-bold text-white hover:bg-white/25"
+              >
+                ⬇ DOWNLOAD
+              </button>
+              <button
+                onClick={() => setCard(null)}
+                className="rounded-xl border border-white/25 px-5 py-2.5 font-mono text-xs text-white/80 hover:border-white/60"
+              >
+                CLOSE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

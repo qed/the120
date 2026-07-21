@@ -10,6 +10,12 @@ export async function supabaseServer() {
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
+        // The second `headers` argument (@supabase/ssr 0.10+) carries the
+        // no-store cache headers for responses that set auth cookies. It is
+        // deliberately unused here: `cookies()` writes into the request's
+        // cookie store and there is no response object in scope, so arbitrary
+        // response headers cannot be set from a Server Component or Route
+        // Handler. Those headers are `proxy.ts`'s responsibility.
         setAll: (cookiesToSet) => {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>

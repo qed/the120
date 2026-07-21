@@ -269,7 +269,7 @@ browser                    Server Action            Supabase Storage
 | Surfaces | 14 → 15 | Student, then parent |
 | Close the loop | 11 → 12 → 16 | Offline sync onto a working surface; notification; celebration |
 
-- [ ] **Unit 1: Fix Supabase session handling and bump `@supabase/ssr`**
+- [x] **Unit 1: Fix Supabase session handling and bump `@supabase/ssr`**
 
 **Goal:** Correct two pre-existing session-desync bugs before a second gated area depends on the same code.
 

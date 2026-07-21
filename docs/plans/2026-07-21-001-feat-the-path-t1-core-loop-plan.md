@@ -112,7 +112,8 @@ Decisions carried in: **D15–D27** (origin document; D27 — per-student progra
 - **RLS performance:** wrap function calls as `(select fn())` so Postgres builds an initPlan and evaluates once per statement, not per row (a security-definer function measured 178,000 ms → 12 ms). Specify `TO authenticated`. Index policy columns.
 - **`app_metadata` changes are not reflected in `auth.jwt()` until token refresh.** Never optimize the DB lookup away into a pure claim check.
 - **Never module-scope a Supabase client** — Vercel Fluid Compute reuses warm instances and would leak sessions between users.
-- `supabase/config.toml` has `enable_confirmations = false`, which is why R2's system addresses are expected to work — **verified by the Unit 2 spike** (promoted from Unit 6 in the deepening pass).
+- ⚠️ **`supabase/config.toml` is misleading and its `enable_confirmations = false` does NOT describe the hosted project.** The Unit 2 spike (run 2026-07-21 against production) settled this: an account created **without** `email_confirm: true` gets `email_confirmed_at: NULL` and its sign-in fails with **"Email not confirmed"**. `artifacts/roadmap.md` was right — confirmations were turned ON in production on 2026-07-13. Treat `config.toml` as local declarative config only; it is not a source of truth for the hosted project's auth settings.
+- **Spike result (Unit 2, 2026-07-21):** `admin.createUser({ email, password, email_confirm: true })` on a system-generated **non-deliverable** address works, and the account signs in with `signInWithPassword` returning a session. No MX or deliverability validation occurs — even a non-routable `.invalid` domain is accepted. **R1/R2/R31/R32 are viable as designed**, provided `email_confirm: true` is always passed.
 - **`ca-central-1` is available**; region is chosen at project creation and migration later is painful. Relevant to the launch gate below.
 
 ### Offline and media research
@@ -296,7 +297,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 2: Test harness and `/path` module skeleton**
+- [x] **Unit 2: Test harness and `/path` module skeleton**
 
 **Goal:** Make Path tests capable of running at all, and fix the module layout before any logic exists.
 
@@ -443,7 +444,8 @@ browser                    Server Action            Supabase Storage
 **Files:** Modify `proxy.ts`. Create `app/path/(auth)/sign-in/page.tsx`, `app/path/lib/actions/provision.ts` (`"use server"`), `app/path/lib/provision-rules.ts` (pure), `app/path/lib/rate-limit-rules.ts` (pure). Test: `__tests__/provision-rules.test.ts`, `__tests__/rate-limit-rules.test.ts`.
 
 **Approach:**
-- The non-deliverable-address assumption was **already verified by Unit 2's `admin.createUser` spike** *(promoted there in the deepening pass)* — this unit builds on a falsified-or-confirmed fact, not a hope.
+- The non-deliverable-address assumption was **verified by Unit 2's spike on 2026-07-21** — confirmed viable, with one mandatory correction below.
+- ⚠️ **`email_confirm: true` is REQUIRED on every student `createUser` call.** The hosted project has email confirmations ON (despite `config.toml` saying otherwise). Omit the flag and the account is created but **cannot sign in** — `signInWithPassword` fails with "Email not confirmed", and since the address is non-deliverable by design there is no confirmation email to rescue it. Every child provisioned without this flag is permanently locked out of an account that looks fine in the dashboard. Cover it with a test that asserts the provisioning call includes the flag, and mirror `scripts/seed-staff.ts`, which already does this for staff.
 - Provision via the service-role admin API with a parent-set password — **not** `signUp()`, which returns no session and strands the profile write. **Provisioning pins the student to the currently-designated program version** (Unit 4's `is_current`) — the pin is set here and never touched by content deploys.
 - Sign-in shows **name + password**; the system address is derived server-side and never displayed.
 - Rate limiting and a strength floor (R29) are entirely greenfield — no throttle exists anywhere in this repo, and a first name is far more guessable than an email address within a cohort.

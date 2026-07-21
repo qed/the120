@@ -115,6 +115,13 @@ is governed by `docs/solutions/database-issues/blind-upsert-on-conflict-public-e
 (never blind-upsert; select-first) and `docs/solutions/best-practices/bulk-import-crm-leads-families-derived-stage-parent-id-consent-2026-07-15.md`
 (never a 2nd family for an account-holder; coalesce consent).
 
+**Caveat — `server-only` is not reusable by standalone scripts:** this doc
+prescribes a plain `import "server-only"` module as the safe home for a shared
+core, but that home **breaks the moment a `tsx`/Node script must reuse it**
+(`server-only` throws outside Next's bundler). When that happens, split a
+plain-core module and make the `server-only` file a re-export wrapper — see
+`docs/solutions/best-practices/server-only-import-breaks-tsx-scripts-plain-core-re-export-2026-07-21.md`.
+
 **Secondary catch from the same phase:** for an "ensure this signal is present"
 operation, use an **add-only** helper (`ensureSignals`), not a toggle
 (`applySignalToggle`) — a toggle would *remove* an already-present signal, so

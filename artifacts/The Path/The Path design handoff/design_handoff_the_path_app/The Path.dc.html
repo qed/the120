@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/tokens/colors.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/tokens/typography.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/tokens/layout.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/tokens/motion.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/base.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/components.css">
+<link rel="stylesheet" href="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/styles.css">
+<script src="_ds/the-path-design-system-05a7ecff-cb52-428c-a104-274101333e3a/_ds_bundle.js"></script>
+<style>
+  html,body{margin:0}
+  a{color:var(--tp-ink)}a:hover{color:var(--tp-phase-sell)}
+  .scr{scrollbar-width:none;-ms-overflow-style:none}
+  .scr::-webkit-scrollbar{width:0;height:0;display:none}
+  .navbtn{transition:background var(--tp-dur-fast) var(--tp-ease-out),color var(--tp-dur-fast) var(--tp-ease-out)}
+  .navbtn:hover{background:hsl(0 0% 100% / 0.06)}
+  @keyframes rt-ping{0%{transform:scale(.9);opacity:.7}70%{transform:scale(1.8);opacity:0}100%{opacity:0}}
+  @keyframes conn-flow{0%{background-position:0 0}100%{background-position:0 -16px}}
+  /* ---- responsive app shell: Student & Parent desktop views ---- */
+  .tp-appframe.is-phone{display:flex;justify-content:center}
+  .tp-appframe.is-phone .tp-side,.tp-appframe.is-phone .tp-topbar{display:none}
+  .tp-appframe.is-phone .tp-bezel{flex:0 0 auto;width:392px;background:linear-gradient(160deg,#2c2723,#131110);border-radius:52px;padding:12px;box-shadow:0 44px 80px -26px rgba(40,26,12,.55),inset 0 0 0 2px rgba(255,255,255,.05)}
+  .tp-appframe.is-phone .tp-screen{position:relative;border-radius:42px;overflow:hidden;background:#fff;height:812px;display:flex;flex-direction:column}
+  .tp-appframe.is-phone .tp-scr{flex:1;overflow:auto}
+  .tp-appframe.is-phone .tp-appbody{width:100%}
+  .tp-appframe.is-desktop{container-type:inline-size;display:flex;max-width:1000px;margin:0 auto;min-height:764px;border:1px solid var(--tp-border);border-radius:18px;overflow:hidden;box-shadow:var(--tp-shadow-hq-lg)}
+  .tp-appframe.is-desktop.sk-trail{background:var(--tp-trail-canvas)}
+  .tp-appframe.is-desktop.sk-hq{background:var(--tp-surface)}
+  .tp-appframe.is-desktop .tp-notch,.tp-appframe.is-desktop .tp-statusbar{display:none}
+  .tp-appframe.is-desktop .tp-side{flex:0 0 236px;display:flex;flex-direction:column;gap:2px;background:var(--tp-surface-sunken);border-right:1px solid var(--tp-border);padding:20px 14px}
+  .tp-appframe.is-desktop.no-side .tp-side{display:none}
+  .tp-appframe.is-desktop .tp-bezel{flex:1;min-width:0;display:flex}
+  .tp-appframe.is-desktop .tp-screen{flex:1;min-width:0;display:flex;flex-direction:column;background:transparent;border-radius:0;height:auto;overflow:hidden}
+  .tp-appframe.is-desktop .tp-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:0 0 auto;padding:12px 24px;border-bottom:1px solid var(--tp-border);background:color-mix(in srgb, var(--tp-canvas) 72%, transparent);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+  .tp-appframe.is-desktop .tp-scr{flex:1;overflow:auto}
+  .tp-appframe.is-desktop .tp-appbody{max-width:840px;margin:0 auto}
+  .tp-appframe.is-desktop.no-side .tp-appbody{max-width:540px}
+  .tp-side-link:hover{background:var(--tp-canvas)}
+  @container (max-width:720px){
+    .tp-appframe.is-desktop{flex-direction:column;min-height:0}
+    .tp-appframe.is-desktop .tp-side{flex:0 0 auto;flex-direction:row;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--tp-border);padding:10px 12px}
+    .tp-appframe.is-desktop .tp-side-brand,.tp-appframe.is-desktop .tp-side-foot{display:none}
+    .tp-appframe.is-desktop .tp-side-link{white-space:nowrap;width:auto}
+    .tp-appframe.is-desktop .tp-topbar{padding:11px 16px}
+    .tp-appframe.is-desktop .tp-appbody{max-width:none}
+  }
+</style>
+</helmet>
+<div style="display:flex;min-height:100vh;background:radial-gradient(120% 90% at 50% 0%, hsl(40 30% 99%), hsl(40 24% 95%));font-family:var(--tp-font-sans);color:var(--tp-text)">
+
+  <!-- ======================= NAVIGATOR RAIL ======================= -->
+  <aside class="scr" style="position:sticky;top:0;flex:0 0 264px;height:100vh;overflow:auto;background:linear-gradient(180deg, hsl(30 14% 13%), hsl(28 16% 10%));color:hsl(40 20% 82%);padding:22px 16px 28px;display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;align-items:center;gap:11px;padding:4px 8px 14px">
+      <span style="display:flex;height:40px;width:40px;align-items:center;justify-content:center;border-radius:11px;background:hsl(0 0% 100% / 0.08)"><img src="assets/logo.svg" alt="" style="height:22px"></span>
+      <div>
+        <div class="tp-display" style="font-size:18px;font-weight:600;color:#fff;line-height:1">The Path</div>
+        <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:hsl(40 16% 60%);margin-top:3px">Interactive prototype</div>
+      </div>
+    </div>
+    <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="9">
+      <div style="padding:12px 8px 4px;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:{{ g.color }}">{{ g.title }}</div>
+      <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+        <button class="navbtn" onClick="{{ it.go }}" style="{{ it.style }}">
+          <span style="{{ it.dot }}"></span>{{ it.label }}
+        </button>
+      </sc-for>
+    </sc-for>
+    <div style="margin-top:auto;padding:16px 8px 0;border-top:1px solid hsl(0 0% 100% / 0.08)">
+      <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:hsl(40 16% 55%)">Live state</div>
+      <div class="tp-mono" style="font-size:12px;color:hsl(40 18% 74%);margin-top:6px;line-height:1.7">Maya · {{ mayaVerified }}/125 verified<br>Loop · {{ loopLabel }}</div>
+    </div>
+  </aside>
+
+  <!-- ======================= STAGE ======================= -->
+  <main class="scr" style="flex:1;min-width:0;height:100vh;overflow:auto">
+    <div style="max-width:1120px;margin:0 auto;padding:34px 40px 90px">
+      <header style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:26px">
+        <div>
+          <div class="tp-eyebrow" style="color:{{ sceneEyebrowColor }}">{{ sceneEyebrow }}</div>
+          <h1 class="tp-display" style="font-size:32px;font-weight:600;letter-spacing:-0.02em;color:var(--tp-ink);margin-top:6px">{{ sceneTitle }}</h1>
+          <p style="font-size:14.5px;color:var(--tp-text-soft);margin-top:6px;max-width:620px;line-height:1.55">{{ sceneSub }}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;flex-wrap:wrap">
+          <sc-if value="{{ isAppScene }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="display:inline-flex;background:var(--tp-surface-sunken);border:1px solid var(--tp-border);border-radius:9px;padding:3px">
+                <button onClick="{{ setDevicePhone }}" style="{{ devPhoneStyle }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>Phone</button>
+                <button onClick="{{ setDeviceDesktop }}" style="{{ devDeskStyle }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Desktop</button>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ showSkinToggle }}" hint-placeholder-val="{{ false }}">
+            <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.SkinToggle" value="{{ skinValue }}" onChange="{{ onSkin }}" hint-size="150px,38px"></x-import>
+          </sc-if>
+        </div>
+      </header>
+
+      <!-- ============ THE LOOP (hero) ============ -->
+      <sc-if value="{{ isLoop }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
+
+          <!-- ---------- MAYA · TRAIL PHONE ---------- -->
+          <div style="flex:0 0 auto;width:344px;background:linear-gradient(160deg,#2c2723,#131110);border-radius:46px;padding:11px;box-shadow:0 44px 80px -26px rgba(40,26,12,.55),inset 0 0 0 2px rgba(255,255,255,.05)">
+            <div style="position:relative;border-radius:37px;overflow:hidden;background:var(--tp-trail-canvas);height:718px;display:flex;flex-direction:column">
+              <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:98px;height:26px;background:#0d0c0b;border-radius:16px;z-index:6"></div>
+              <div style="flex:0 0 46px;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 26px;color:var(--tp-trail-text)"><span class="tp-mono" style="font-size:14px;font-weight:600">9:41</span><span style="display:flex;gap:6px;align-items:center"><span style="display:flex;gap:2px;align-items:flex-end;height:11px">‌<i style="width:3px;height:5px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:8px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:11px;background:currentColor;border-radius:1px;display:block"></i></span><span style="width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;padding:1.5px;display:block"><i style="display:block;width:72%;height:100%;background:currentColor;border-radius:1px"></i></span></span></div>
+              <div class="scr" style="flex:1;overflow:auto;padding:6px 18px 26px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <span style="display:flex;height:32px;width:32px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-trail-text)"><img src="assets/logo.svg" alt="" style="height:17px"></span>
+                    <div><div class="tp-display" style="font-size:15px;font-weight:600;color:var(--tp-trail-text);line-height:1">Maya's Trail</div><div style="font-size:10.5px;color:var(--tp-trail-text-soft)">Grade 4 · The Market Town</div></div>
+                  </div>
+                  <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#fff;background:var(--tp-phase-sell);border-radius:999px;padding:4px 9px">Trail</span>
+                </div>
+                <div style="background:var(--tp-trail-surface);border:2px solid hsl(var(--trail-ink) / 0.1);border-radius:16px;padding:11px 13px;box-shadow:var(--tp-shadow-trail);margin-bottom:16px">
+                  <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.ProgressMeter" value="{{ mayaVerified }}" label="stamped" hint-size="100%,40px"></x-import>
+                </div>
+                <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:2px">Landmark 1.2</div>
+                <div class="tp-display" style="font-size:19px;font-weight:600;color:var(--tp-trail-text);margin-bottom:14px">Make a real sale</div>
+                <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:18px">
+                  <sc-for list="{{ loopSteps }}" as="s" hint-placeholder-count="5">
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.TrailStep" index="{{ s.index }}" state="{{ s.state }}" phase="sell" label="{{ s.label }}" hint-size="58px,82px"></x-import>
+                  </sc-for>
+                </div>
+
+                <!-- current step card -->
+                <div style="background:var(--tp-trail-surface);border:2px solid hsl(var(--trail-ink) / 0.12);border-radius:20px;padding:17px 16px;box-shadow:var(--tp-shadow-trail)">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+                    <span class="tp-mono" style="font-size:12px;font-weight:600;color:#fff;background:var(--tp-phase-sell);border-radius:6px;padding:2px 7px">1.2.4</span>
+                    <span style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-phase-sell)">Your step</span>
+                  </div>
+                  <div class="tp-display" style="font-size:20px;font-weight:600;color:var(--tp-trail-text);line-height:1.15;margin-bottom:8px">Ask until one yes</div>
+                  <p style="font-size:13.5px;color:var(--tp-trail-text-soft);line-height:1.5;margin-bottom:12px">Ask real people from your list until one says yes and pays you real money. Dad is right beside you.</p>
+                  <div style="border-left:3px solid var(--tp-phase-sell);background:hsl(var(--phase-sell) / 0.07);border-radius:0 10px 10px 0;padding:9px 12px;margin-bottom:14px">
+                    <div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:3px">Done when</div>
+                    <p style="font-size:12.5px;color:var(--tp-trail-text);line-height:1.45">Money from a customer who isn't family is in your hand, and the sale — who, what, how much, when — is written in your satchel.</p>
+                  </div>
+
+                  <sc-if value="{{ loopAvailable }}" hint-placeholder-val="{{ true }}">
+                    <p style="font-size:12px;color:var(--tp-trail-text-soft);margin-bottom:11px">Go do it in the world. Then bring back your proof.</p>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="trail" variant="accent" phase="sell" onClick="{{ loopAddEvidence }}" style="{{ fullBtn }}" hint-size="100%,44px">Add evidence to my satchel</x-import>
+                  </sc-if>
+
+                  <sc-if value="{{ loopInprogress }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:13px">
+                      <div style="display:flex;align-items:center;gap:9px;background:var(--tp-trail-canvas);border:1.5px solid hsl(var(--trail-ink) / 0.12);border-radius:11px;padding:9px 11px"><span style="flex:0 0 34px;height:34px;border-radius:8px;overflow:hidden"><img src="assets/evidence/doorstep.jpg" alt="" style="width:100%;height:100%;object-fit:cover"></span><span style="font-size:12px;color:var(--tp-trail-text);line-height:1.35">Photo — the $2 coin, at the Nguyens' door</span></div>
+                      <div style="display:flex;align-items:center;gap:9px;background:var(--tp-trail-canvas);border:1.5px solid hsl(var(--trail-ink) / 0.12);border-radius:11px;padding:9px 11px"><span style="flex:0 0 34px;height:34px;border-radius:8px;background:hsl(var(--phase-sell) / 0.14);display:flex;align-items:center;justify-content:center;font-size:15px" class="tp-mono">≣</span><span style="font-size:12px;color:var(--tp-trail-text);line-height:1.35">Sale log — Mrs. Nguyen · blue bracelet · $2 · Jul 18</span></div>
+                    </div>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="trail" variant="accent" phase="sell" onClick="{{ loopSubmit }}" style="{{ fullBtn }}" hint-size="100%,44px">Send my satchel to Dad</x-import>
+                  </sc-if>
+
+                  <sc-if value="{{ loopWaiting }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:12px;background:hsl(var(--awaiting) / 0.08);border:1.5px solid hsl(var(--awaiting) / 0.22);border-radius:14px;padding:14px">
+                      <span class="tp-anim-shimmer" style="flex:0 0 auto;color:var(--tp-awaiting)"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10"/><path d="M9 6V4a3 3 0 0 1 6 0v2"/><path d="M4 13h16"/></svg></span>
+                      <div><div style="font-size:13.5px;font-weight:600;color:var(--tp-trail-text)">Your satchel's in!</div><div style="font-size:12px;color:var(--tp-trail-text-soft);line-height:1.4">Dad is taking a look. You'll feel the stamp the moment he's done.</div></div>
+                    </div>
+                    <button onClick="{{ loopWithdraw }}" style="margin-top:10px;background:none;border:none;font:inherit;font-size:11.5px;color:var(--tp-trail-text-soft);text-decoration:underline;cursor:pointer;padding:2px">Withdraw to add more</button>
+                  </sc-if>
+
+                  <sc-if value="{{ loopVerified }}" hint-placeholder-val="{{ false }}">
+                    <div style="text-align:center;padding:6px 0 4px">
+                      <span class="tp-anim-stamp" style="display:inline-flex;color:var(--tp-wax)"><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+                      <div class="tp-display" style="font-size:22px;font-weight:600;color:var(--tp-trail-text);margin-top:4px">Stamped!</div>
+                    </div>
+                    <div style="background:hsl(var(--verified) / 0.09);border:1.5px solid hsl(var(--verified) / 0.25);border-radius:13px;padding:11px 13px;margin:10px 0 12px"><div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tp-verified);margin-bottom:4px">Dad wrote</div><p style="font-size:13px;font-style:italic;color:var(--tp-trail-text);line-height:1.45">"You knocked, you smiled, you asked. Mrs. Nguyen said yes to the blue one. That's a real sale, Maya."</p></div>
+                    <div style="margin-bottom:12px">
+                      <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.WisdomCard" entry="{{ loopWisdom }}" favorited="{{ wisdomFav }}" onFavorite="{{ toggleWisdomFav }}" hint-size="100%,190px"></x-import>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:9px;background:var(--tp-trail-canvas);border:1.5px dashed hsl(var(--trail-ink) / 0.2);border-radius:12px;padding:11px"><span style="color:var(--tp-phase-sell)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span><div style="font-size:12.5px;color:var(--tp-trail-text);line-height:1.4"><b>Next step unlocked:</b> Deliver, thank &amp; log.</div></div>
+                    <button onClick="{{ loopReset }}" style="margin-top:12px;background:none;border:none;font:inherit;font-size:11.5px;color:var(--tp-trail-text-soft);text-decoration:underline;cursor:pointer;padding:2px">Replay the loop</button>
+                  </sc-if>
+
+                  <sc-if value="{{ loopNotyet }}" hint-placeholder-val="{{ false }}">
+                    <div style="background:hsl(var(--not-yet) / 0.1);border:1.5px solid hsl(var(--not-yet) / 0.3);border-radius:14px;padding:13px 14px;margin-bottom:12px">
+                      <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px"><span style="color:var(--tp-not-yet)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></span><span style="font-size:14px;font-weight:600;color:var(--tp-trail-text)">Not yet — and that's okay.</span></div>
+                      <p style="font-size:12.5px;color:var(--tp-trail-text-soft);line-height:1.45">Dad's note: "So close! The log needs the <b>date</b>. Add today's date next to the sale and send it back."</p>
+                    </div>
+                    <p style="font-size:11.5px;color:var(--tp-trail-text-soft);margin-bottom:11px">Your evidence is safe. Fix the one thing and try again — not done, <i>yet</i>.</p>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="trail" variant="accent" phase="sell" onClick="{{ loopFix }}" style="{{ fullBtn }}" hint-size="100%,44px">Fix it &amp; resubmit</x-import>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+            <div style="text-align:center;margin-top:9px;font-size:11px;font-weight:600;color:var(--tp-text-muted)">Maya · student (Trail)</div>
+          </div>
+
+          <!-- ---------- CONNECTOR ---------- -->
+          <div style="align-self:center;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:40px;min-width:96px">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--tp-text-muted);text-align:center">Real-time</div>
+            <div style="position:relative;width:2px;height:64px;background:{{ connColor }};border-radius:2px;{{ connAnim }}"></div>
+            <span style="position:relative;display:flex;height:14px;width:14px;align-items:center;justify-content:center">
+              <span style="height:10px;width:10px;border-radius:50%;background:{{ connColor }}"></span>
+              <sc-if value="{{ connLive }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;height:10px;width:10px;border-radius:50%;background:var(--tp-awaiting);animation:rt-ping 1.4s ease-out infinite"></span></sc-if>
+            </span>
+            <div style="font-size:10.5px;color:var(--tp-text-muted);text-align:center;line-height:1.4;max-width:96px">{{ connLabel }}</div>
+          </div>
+
+          <!-- ---------- DAD · PARENT PHONE ---------- -->
+          <div style="flex:0 0 auto;width:344px;background:linear-gradient(160deg,#2c2723,#131110);border-radius:46px;padding:11px;box-shadow:0 44px 80px -26px rgba(40,26,12,.55),inset 0 0 0 2px rgba(255,255,255,.05)">
+            <div style="position:relative;border-radius:37px;overflow:hidden;background:var(--tp-surface);height:718px;display:flex;flex-direction:column">
+              <div style="position:absolute;top:11px;left:50%;transform:translateX(-50%);width:98px;height:26px;background:#0d0c0b;border-radius:16px;z-index:6"></div>
+              <div style="flex:0 0 46px;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 26px;color:var(--tp-ink)"><span class="tp-mono" style="font-size:14px;font-weight:600">9:41</span><span style="display:flex;gap:6px;align-items:center"><span style="display:flex;gap:2px;align-items:flex-end;height:11px"><i style="width:3px;height:5px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:8px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:11px;background:currentColor;border-radius:1px;display:block"></i></span><span style="width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;padding:1.5px;display:block"><i style="display:block;width:72%;height:100%;background:currentColor;border-radius:1px"></i></span></span></div>
+              <div class="scr" style="flex:1;overflow:auto;padding:6px 18px 26px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <span style="display:flex;height:32px;width:32px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-ink)"><img src="assets/logo.svg" alt="" style="height:17px"></span>
+                    <div><div class="tp-display" style="font-size:15px;font-weight:600;color:var(--tp-ink);line-height:1.05">Review</div><div style="font-size:10.5px;color:var(--tp-text-muted)">Okafor family · verifier: Dad</div></div>
+                  </div>
+                  <span style="display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;color:var(--tp-verified);background:hsl(var(--verified) / 0.12);border-radius:999px;padding:4px 9px"><span style="height:6px;width:6px;border-radius:50%;background:var(--tp-verified)"></span>real-time</span>
+                </div>
+
+                <sc-if value="{{ dadQuiet }}" hint-placeholder-val="{{ true }}">
+                  <div style="text-align:center;padding:70px 14px">
+                    <span style="display:inline-flex;color:var(--tp-border-strong)"><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+                    <div style="font-size:15px;font-weight:600;color:var(--tp-ink);margin-top:14px">Nothing waiting</div>
+                    <p style="font-size:12.5px;color:var(--tp-text-soft);margin-top:6px;line-height:1.5">Maya is out working on <span class="tp-mono">1.2.4</span>. The moment she submits, this buzzes — no waiting until Saturday.</p>
+                  </div>
+                  <div style="opacity:.5;margin-top:12px">
+                    <div class="tp-eyebrow" style="margin-bottom:8px">Earlier today</div>
+                    <div style="display:flex;align-items:center;gap:10px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:12px;padding:11px 13px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="verified" hint-size="94px,26px"></x-import><span style="font-size:12px;color:var(--tp-text-soft)"><span class="tp-mono">1.2.3</span> Set up the point of sale</span></div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ dadQueue }}" hint-placeholder-val="{{ false }}">
+                  <div class="tp-anim-rise" style="display:flex;align-items:center;gap:8px;background:hsl(var(--awaiting) / 0.1);border:1px solid hsl(var(--awaiting) / 0.25);border-radius:11px;padding:9px 12px;margin-bottom:14px"><span style="color:var(--tp-awaiting)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><span style="font-size:12px;font-weight:600;color:var(--tp-ink)">Just now · Maya submitted a task</span></div>
+                  <div class="tp-eyebrow" style="margin-bottom:8px">Review queue · 1</div>
+                  <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:14px;padding:15px;box-shadow:var(--tp-shadow-hq)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><div style="display:flex;align-items:center;gap:8px"><span class="tp-mono" style="font-size:12px;font-weight:600;color:#fff;background:var(--tp-phase-sell);border-radius:6px;padding:2px 7px">1.2.4</span><span style="font-size:11px;color:var(--tp-text-muted)">Maya · 2m ago</span></div><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="submitted" hint-size="120px,26px"></x-import></div>
+                    <div style="font-size:15px;font-weight:600;color:var(--tp-ink);margin-bottom:4px">Ask until one yes</div>
+                    <p style="font-size:12px;color:var(--tp-text-soft);line-height:1.45;margin-bottom:13px">2 pieces of evidence · a photo and the sale log.</p>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ loopOpenReview }}" style="{{ fullBtn }}" hint-size="100%,40px">Open review</x-import>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ dadReviewing }}" hint-placeholder-val="{{ false }}">
+                  <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.ReviewPanel" task-id="1.2.4" title="Ask until one yes" phase="sell" reviewer="Dad" done-when="Money from a non-family customer is in hand and the sale (who, what, amount, date) is logged." band-variant="Grades 3–5: a parent is physically present at every ask; the child speaks the ask." evidence="{{ loopEvidence }}" onVerify="{{ loopVerify }}" onNotYet="{{ loopNotYet }}" hint-size="100%,440px"></x-import>
+                  <p style="display:flex;gap:6px;font-size:11px;color:var(--tp-text-muted);margin:13px 2px 0;line-height:1.5">Hold the bar, warmly — if you're debating whether it's done, the answer is Not Yet, with a note pointing at the Done-when line.</p>
+                </sc-if>
+
+                <sc-if value="{{ dadVerified }}" hint-placeholder-val="{{ false }}">
+                  <div style="text-align:center;padding:40px 10px 20px">
+                    <span class="tp-anim-stamp" style="display:inline-flex;color:var(--tp-verified)"><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>
+                    <div style="font-size:17px;font-weight:600;color:var(--tp-ink);margin-top:12px">Verified — stamp sent to Maya</div>
+                    <p style="font-size:12.5px;color:var(--tp-text-soft);margin-top:6px;line-height:1.5"><span class="tp-mono">1.2.4</span> is done. One task left in criterion 1.2, then the landmark review.</p>
+                  </div>
+                  <button onClick="{{ loopReset }}" style="display:block;margin:0 auto;background:none;border:none;font:inherit;font-size:12px;color:var(--tp-text-soft);text-decoration:underline;cursor:pointer">Back to queue</button>
+                </sc-if>
+
+                <sc-if value="{{ dadNotyet }}" hint-placeholder-val="{{ false }}">
+                  <div style="text-align:center;padding:34px 10px 16px">
+                    <span style="display:inline-flex;color:var(--tp-not-yet)"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.5 0 10-4.5 10-10S17.5 2 12 2 2 6.5 2 12s4.5 10 10 10Z"/><path d="M9 12h6"/></svg></span>
+                    <div style="font-size:16px;font-weight:600;color:var(--tp-ink);margin-top:12px">Sent back with a note</div>
+                  </div>
+                  <div style="background:hsl(var(--not-yet) / 0.08);border:1px solid hsl(var(--not-yet) / 0.25);border-radius:12px;padding:12px 14px"><div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tp-not-yet);margin-bottom:4px">Your note to Maya</div><p style="font-size:12.5px;color:var(--tp-ink);line-height:1.45">"So close! The log needs the date. Add today's date next to the sale and send it back."</p></div>
+                  <p style="font-size:11.5px;color:var(--tp-text-muted);margin-top:10px;line-height:1.5">Nothing is broken — 1.2.4 is back in progress with her evidence intact.</p>
+                  <button onClick="{{ loopReset }}" style="display:block;margin:14px auto 0;background:none;border:none;font:inherit;font-size:12px;color:var(--tp-text-soft);text-decoration:underline;cursor:pointer">Back to queue</button>
+                </sc-if>
+              </div>
+            </div>
+            <div style="text-align:center;margin-top:9px;font-size:11px;font-weight:600;color:var(--tp-text-muted)">Dad · parent (always grounded)</div>
+          </div>
+        </div>
+
+        <!-- loop caption -->
+        <div style="max-width:760px;margin:32px auto 0;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:18px 22px;box-shadow:var(--tp-shadow-hq)">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <sc-for list="{{ loopChips }}" as="c" hint-placeholder-count="3">
+              <span style="{{ c.style }}">{{ c.label }}</span>
+              <span style="color:var(--tp-border-strong)">{{ c.sep }}</span>
+            </sc-for>
+          </div>
+          <p style="font-size:13px;color:var(--tp-text-soft);line-height:1.55;margin-top:12px">The whole app is this one loop at three scales. The student captures proof in the field and submits; a real adult verifies against the <i>Done-when</i> line — one tap, or Not Yet with a note; verification lands as a stamp, the meter ticks, and wisdom arrives. The skin changes the words and the art — never the bar. <b>Try it: add evidence on Maya's phone, then verify (or decline) on Dad's.</b></p>
+        </div>
+      </sc-if>
+
+      <!-- ============ PHONE-FRAMED SCENES ============ -->
+      <sc-if value="{{ isPhoneScene }}" hint-placeholder-val="{{ false }}">
+        <div class="tp-appframe {{ appClass }}">
+          <aside class="tp-side">
+            <div class="tp-side-brand" style="display:flex;align-items:center;gap:10px;padding:2px 8px 16px">
+              <span style="display:flex;height:34px;width:34px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-ink)"><img src="assets/logo.svg" alt="" style="height:18px"></span>
+              <div><div class="tp-display" style="font-size:15px;font-weight:600;color:var(--tp-ink);line-height:1">The Path</div><div style="font-size:10.5px;color:var(--tp-text-muted)">{{ appRoleLabel }}</div></div>
+            </div>
+            <nav style="display:flex;flex-direction:column;gap:2px"><sc-for list="{{ appNav }}" as="n" hint-placeholder-count="4"><button class="tp-side-link" onClick="{{ n.go }}" style="{{ n.style }}"><span style="{{ n.dot }}"></span>{{ n.label }}</button></sc-for></nav>
+          </aside>
+          <div class="tp-bezel">
+            <div class="tp-screen">
+              <div class="tp-notch" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);width:110px;height:28px;background:#0d0c0b;border-radius:16px;z-index:8"></div>
+              <div class="tp-statusbar" style="flex:0 0 50px;display:flex;align-items:center;justify-content:space-between;padding:0 24px 0 28px;color:{{ phoneStatusColor }};z-index:5"><span class="tp-mono" style="font-size:15px;font-weight:600">9:41</span><span style="display:flex;gap:6px;align-items:center"><span style="display:flex;gap:2px;align-items:flex-end;height:11px"><i style="width:3px;height:5px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:8px;background:currentColor;border-radius:1px;display:block"></i><i style="width:3px;height:11px;background:currentColor;border-radius:1px;display:block"></i></span><span style="width:23px;height:11px;border:1.5px solid currentColor;border-radius:3px;padding:1.5px;display:block"><i style="display:block;width:74%;height:100%;background:currentColor;border-radius:1px"></i></span></span></div>
+              <div class="tp-topbar">
+                <div style="display:flex;align-items:center;gap:10px"><span style="display:flex;height:30px;width:30px;align-items:center;justify-content:center;border-radius:8px;background:{{ appTopMark }}"><img src="assets/logo.svg" alt="" style="height:16px"></span><div><div style="font-size:14px;font-weight:600;color:var(--tp-ink);line-height:1.1">{{ appName }}</div><div style="font-size:10.5px;color:var(--tp-text-muted)">{{ appRoleLabel }}</div></div></div>
+                <sc-if value="{{ appShowSkin }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;font-weight:600;color:var(--tp-ink);background:var(--tp-surface-sunken);border:1px solid var(--tp-border);border-radius:999px;padding:5px 12px">{{ skinLabelCap }} view</span></sc-if>
+                <sc-if value="{{ appIsParent }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--tp-verified);background:hsl(var(--verified) / 0.12);border-radius:999px;padding:5px 11px"><span style="height:6px;width:6px;border-radius:50%;background:var(--tp-verified)"></span>real-time</span></sc-if>
+              </div>
+              <div class="scr tp-scr"><div class="tp-appbody">
+<!-- ===== TRAIL · TERRITORY MAP ===== -->
+                <sc-if value="{{ scTrailMap }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-trail-canvas);padding:6px 18px 30px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 16px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="display:flex;height:32px;width:32px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-trail-text)"><img src="assets/logo.svg" alt="" style="height:17px"></span><div><div class="tp-display" style="font-size:16px;font-weight:600;color:var(--tp-trail-text);line-height:1">Maya's Trail</div><div style="font-size:10.5px;color:var(--tp-trail-text-soft)">Grade 4 · 8 stamps so far</div></div></div>
+                    <span style="color:var(--tp-trail-text-soft)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+                  </div>
+                  <div class="tp-eyebrow" style="color:var(--tp-phase-sell)">Your journey</div>
+                  <h2 class="tp-display" style="font-size:23px;font-weight:600;color:var(--tp-trail-text);margin:3px 0 16px">Five territories</h2>
+
+                  <!-- SELL — current -->
+                  <section style="border:2px solid hsl(var(--trail-ink) / 0.14);border-radius:20px;overflow:hidden;box-shadow:var(--tp-shadow-trail);margin-bottom:16px">
+                    <div style="position:relative;height:76px;background:linear-gradient(180deg, hsl(20 78% 62%), hsl(14 78% 54%));overflow:hidden">
+                      <svg viewBox="0 0 320 76" preserveAspectRatio="xMidYMax slice" style="position:absolute;inset:0;width:100%;height:100%"><circle cx="266" cy="26" r="15" fill="hsl(41 90% 70%)"/><g fill="hsl(30 60% 96%)" opacity="0.92"><path d="M24 76V52h30v24z"/><path d="M20 52h38l-6-10H26z"/><path d="M78 76V56h26v20z"/><path d="M74 56h34l-5-9H79z"/><path d="M128 76V50h30v26z"/><path d="M124 50h38l-6-10h-26z"/></g><path d="M0 66h320" stroke="hsl(14 60% 44%)" stroke-width="2" opacity="0.4"/></svg>
+                    </div>
+                    <div style="background:var(--tp-trail-surface);padding:16px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+                        <div style="display:flex;align-items:baseline;gap:9px"><span class="tp-mono" style="font-size:15px;font-weight:600;color:var(--tp-phase-sell)">01</span><span class="tp-display" style="font-size:20px;font-weight:600;letter-spacing:.02em;color:var(--tp-trail-text)">SELL</span></div>
+                        <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#fff;background:var(--tp-phase-sell);border-radius:999px;padding:4px 10px"><span style="height:6px;width:6px;border-radius:50%;background:#fff"></span>You are here</span>
+                      </div>
+                      <p style="font-size:12.5px;color:var(--tp-trail-text-soft);margin-bottom:14px">The Market Town — stalls, doorsteps, handshakes. Learn to sell anything.</p>
+                      <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:15px"><sc-for list="{{ sellPips }}" as="p" hint-placeholder-count="5"><span style="{{ p.style }}">{{ p.n }}</span></sc-for></div>
+                      <div style="display:flex;align-items:center;gap:11px;background:var(--tp-trail-canvas);border:1.5px solid hsl(var(--phase-sell) / 0.3);border-radius:13px;padding:11px 13px">
+                        <span style="flex:1;min-width:0"><span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tp-phase-sell)">Landmark 1.2 · now</span><span style="display:block;font-size:13.5px;font-weight:600;color:var(--tp-trail-text)">Make a real sale · 3 of 5 steps</span></span>
+                        <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="trail" variant="accent" phase="sell" size="sm" onClick="{{ enterLandmark }}" hint-size="76px,38px">Enter</x-import>
+                      </div>
+                    </div>
+                  </section>
+
+                  <!-- locked territories -->
+                  <sc-for list="{{ lockedTerr }}" as="t" hint-placeholder-count="4">
+                    <section style="display:flex;align-items:center;gap:13px;background:var(--tp-trail-surface);border:2px solid hsl(var(--trail-ink) / 0.08);border-radius:18px;padding:14px 16px;margin-bottom:11px;opacity:.62">
+                      <span style="flex:0 0 auto;display:flex;height:44px;width:44px;align-items:center;justify-content:center;border-radius:50%;background:var(--tp-trail-canvas);border:2px dashed var(--tp-trail-mist);color:var(--tp-trail-text-soft)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                      <div style="flex:1;min-width:0"><div style="display:flex;align-items:baseline;gap:8px"><span class="tp-mono" style="font-size:12px;font-weight:600;color:var(--tp-trail-text-soft)">{{ t.idx }}</span><span class="tp-display" style="font-size:16px;font-weight:600;letter-spacing:.02em;color:var(--tp-trail-text)">{{ t.name }}</span></div><div style="font-size:11.5px;color:var(--tp-trail-text-soft)">{{ t.place }}</div></div>
+                      <span style="font-size:10px;color:var(--tp-trail-text-soft);text-align:right;max-width:80px;line-height:1.3">opens when SELL is sealed</span>
+                    </section>
+                  </sc-for>
+                </div>
+                </sc-if>
+
+                <!-- ===== TRAIL · LANDMARK ===== -->
+                <sc-if value="{{ scTrailLandmark }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-trail-canvas);padding:6px 18px 30px">
+                  <button onClick="{{ backToMap }}" style="display:flex;align-items:center;gap:5px;background:none;border:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--tp-trail-text-soft);cursor:pointer;padding:8px 2px;margin-bottom:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>Territory map</button>
+                  <div class="tp-eyebrow" style="color:var(--tp-phase-sell)">The Market Town</div>
+                  <h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-trail-text);margin:4px 0 3px">Landmark 1.2 · Make a real sale</h2>
+                  <p style="font-size:13px;color:var(--tp-trail-text-soft);margin-bottom:18px;line-height:1.5">A real customer who isn't family. Real money changing hands.</p>
+                  <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:16px"><sc-for list="{{ lmSteps }}" as="s" hint-placeholder-count="5"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.TrailStep" index="{{ s.index }}" state="{{ s.state }}" phase="sell" label="{{ s.label }}" hint-size="58px,82px"></x-import></sc-for></div>
+                  <div style="background:var(--tp-trail-surface);border:2px solid hsl(var(--trail-ink) / 0.12);border-radius:20px;padding:17px 16px;box-shadow:var(--tp-shadow-trail);margin-bottom:16px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px"><span class="tp-mono" style="font-size:12px;font-weight:600;color:#fff;background:var(--tp-phase-sell);border-radius:6px;padding:2px 7px">1.2.4</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--tp-phase-sell)">The glowing step</span></div>
+                    <div class="tp-display" style="font-size:20px;font-weight:600;color:var(--tp-trail-text);margin-bottom:8px">Ask until one yes</div>
+                    <div style="border-left:3px solid var(--tp-phase-sell);background:hsl(var(--phase-sell) / 0.07);border-radius:0 10px 10px 0;padding:9px 12px;margin-bottom:14px"><div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:3px">Done when</div><p style="font-size:12.5px;color:var(--tp-trail-text);line-height:1.45">Money from a customer who isn't family is in your hand, and the sale is written in your satchel.</p></div>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="trail" variant="accent" phase="sell" onClick="{{ openStepInLoop }}" style="{{ fullBtn }}" hint-size="100%,44px">Open this step</x-import>
+                  </div>
+                  <div style="margin-bottom:16px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.WisdomCard" entry="{{ lmWisdom }}" favorited="{{ true }}" hint-size="100%,180px"></x-import></div>
+                  <div style="display:flex;align-items:center;gap:14px;background:var(--tp-trail-surface);border:2px dashed hsl(var(--trail-ink) / 0.18);border-radius:18px;padding:15px">
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Crest" phase="sell" criterion="1.2" skin="trail" size="60" locked="{{ true }}" hint-size="60px,60px"></x-import>
+                    <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--tp-trail-text)">The 1.2 crest</div><p style="font-size:11.5px;color:var(--tp-trail-text-soft);line-height:1.4">Clear all five steps and a parent reviews the landmark — then this crest is yours.</p></div>
+                  </div>
+                </div>
+                </sc-if>
+
+                <!-- ===== TRAIL · SATCHEL (Founder File) ===== -->
+                <sc-if value="{{ scTrailSatchel }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-trail-canvas);padding:6px 18px 30px">
+                  <div style="margin:8px 0 14px"><div class="tp-eyebrow" style="color:var(--tp-phase-sell)">Founder File</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-trail-text);margin-top:3px">Maya's Satchel</h2><p style="font-size:12px;color:var(--tp-trail-text-soft);margin-top:3px">Everything she has filed — 7 items, organised by landmark.</p></div>
+                  <div style="display:flex;gap:7px;margin-bottom:16px">
+                    <span style="font-size:12px;font-weight:600;color:#fff;background:var(--tp-trail-text);border-radius:999px;padding:6px 14px">Evidence</span>
+                    <button onClick="{{ goCardbook }}" style="font:inherit;font-size:12px;font-weight:600;color:var(--tp-trail-text-soft);background:var(--tp-trail-surface);border:1.5px solid hsl(var(--trail-ink) / 0.14);border-radius:999px;padding:6px 14px;cursor:pointer">Cards</span>
+                    <span style="font-size:12px;font-weight:600;color:var(--tp-trail-text-soft);background:var(--tp-trail-surface);border:1.5px solid hsl(var(--trail-ink) / 0.14);border-radius:999px;padding:6px 14px">Crests</span>
+                  </div>
+                  <sc-for list="{{ satchelGroups }}" as="g" hint-placeholder-count="2">
+                    <div style="margin-bottom:20px">
+                      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:9px">Landmark {{ g.lm }} · {{ g.title }}</div>
+                      <div style="display:flex;flex-direction:column;gap:8px;padding-bottom:10px;border-bottom:5px solid hsl(28 40% 78%);border-radius:2px;box-shadow:0 6px 10px -6px rgba(120,80,40,.4)">
+                        <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="3">
+                          <div style="display:flex;align-items:center;gap:11px;background:var(--tp-trail-surface);border:1.5px solid hsl(var(--trail-ink) / 0.12);border-radius:12px;padding:9px 11px">
+                            <span style="position:relative;flex:0 0 40px;height:40px;border-radius:9px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:hsl(var(--phase-sell) / 0.12);color:var(--tp-phase-sell)"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Icon" name="{{ it.icon }}" size="18" hint-size="18px,18px"></x-import><span style="{{ it.thumbBg }}"></span></span>
+                            <div style="flex:1;min-width:0"><div style="font-size:12.5px;color:var(--tp-trail-text);line-height:1.35">{{ it.label }}</div><div class="tp-mono" style="font-size:10.5px;color:var(--tp-trail-text-soft);margin-top:2px">{{ it.id }} · stamped</div></div>
+                            <span style="flex:0 0 auto;color:var(--tp-verified)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+                </sc-if>
+
+                <!-- ===== TRAIL · CARD BOOK (Almanac) ===== -->
+                <sc-if value="{{ scTrailCardbook }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-trail-canvas);padding:6px 18px 30px">
+                  <div style="margin:8px 0 14px"><div class="tp-eyebrow" style="color:var(--tp-phase-sell)">The Almanac</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-trail-text);margin-top:3px">Maya's Card Book</h2><p style="font-size:12px;color:var(--tp-trail-text-soft);margin-top:3px">Wisdom she has collected. Tap the star to keep a favourite close.</p></div>
+                  <div style="display:flex;gap:7px;margin-bottom:16px">
+                    <button onClick="{{ goSatchel }}" style="font:inherit;font-size:12px;font-weight:600;color:var(--tp-trail-text-soft);background:var(--tp-trail-surface);border:1.5px solid hsl(var(--trail-ink) / 0.14);border-radius:999px;padding:6px 14px;cursor:pointer">Evidence</button>
+                    <span style="font-size:12px;font-weight:600;color:#fff;background:var(--tp-trail-text);border-radius:999px;padding:6px 14px">Cards</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:14px"><sc-for list="{{ cardbook }}" as="c" hint-placeholder-count="4"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.WisdomCard" entry="{{ c }}" favorited="{{ c.fav }}" onFavorite="{{ c.onFav }}" hint-size="100%,180px"></x-import></sc-for></div>
+                </div>
+                </sc-if>
+
+                <!-- ===== HQ · DASHBOARD ===== -->
+                <sc-if value="{{ scHqHome }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 16px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="display:flex;height:32px;width:32px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-ink)"><img src="assets/logo.svg" alt="" style="height:17px"></span><div><div class="tp-display" style="font-size:16px;font-weight:600;color:var(--tp-ink);line-height:1">Dev Sharma</div><div style="font-size:10.5px;color:var(--tp-text-muted)">Grade 10 · StudyHall</div></div></div>
+                    <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--tp-ink);background:var(--tp-surface-sunken);border:1px solid var(--tp-border);border-radius:999px;padding:4px 9px">HQ</span>
+                  </div>
+                  <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:12px;padding:13px 15px;box-shadow:var(--tp-shadow-hq);margin-bottom:18px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.ProgressMeter" value="{{ devVerified }}" hint-size="100%,42px"></x-import></div>
+                  <sc-if value="{{ mathGate }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;gap:11px;background:hsl(var(--not-yet) / 0.09);border:1px solid hsl(var(--not-yet) / 0.3);border-radius:12px;padding:12px 14px;margin-bottom:18px"><span style="flex:0 0 auto;color:var(--tp-not-yet)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span><div><div style="font-size:13px;font-weight:600;color:var(--tp-ink)">Business is paused while math catches up</div><p style="font-size:11.5px;color:var(--tp-text-soft);line-height:1.45;margin-top:2px">In-flight tasks and reviews finish; new submissions resume when a parent attests math is back on track. That's the deal.</p></div></div>
+                  </sc-if>
+                  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--tp-phase-grow);margin:2px 0 10px">Now</div>
+                  <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.HQTaskCard" task="{{ devNow }}" now="{{ true }}" onOpen="{{ goHqTask }}" hint-size="100%,300px"></x-import>
+                  <div style="font-size:12.5px;font-weight:600;color:var(--tp-ink);margin:24px 0 11px">Your Path</div>
+                  <div style="display:flex;flex-direction:column;gap:9px"><sc-for list="{{ devPhases }}" as="p" hint-placeholder-count="5"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.PhaseRow" phase="{{ p.key }}" criteria-cleared="{{ p.criteriaCleared }}" tasks-verified="{{ p.tasksVerified }}" tasks-total="{{ p.tasksTotal }}" status="{{ p.status }}" sealed-date="{{ p.sealedDate }}" hint-size="100%,84px"></x-import></sc-for></div>
+                </div>
+                </sc-if>
+
+                <!-- ===== HQ · CURRENT TASK (Stage Moment) ===== -->
+                <sc-if value="{{ scHqTask }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <button onClick="{{ backHqHome }}" style="display:flex;align-items:center;gap:5px;background:none;border:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--tp-text-soft);cursor:pointer;padding:8px 2px;margin-bottom:6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>Dashboard</button>
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span class="tp-mono" style="font-size:13px;font-weight:600;color:#fff;background:var(--tp-phase-grow);border-radius:6px;padding:2px 8px">4.5.4</span><span style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--tp-wax);background:hsl(var(--wax) / 0.1);border:1px solid hsl(var(--wax) / 0.28);border-radius:999px;padding:3px 9px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>Live moment</span></div>
+                  <h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);letter-spacing:-0.01em;margin-bottom:7px">Present and take the hard questions</h2>
+                  <p style="font-size:13.5px;color:var(--tp-text-soft);line-height:1.55;margin-bottom:15px">Deliver the board pack to the Family Board and take at least three questions — at least one uncomfortable. No parent rescues.</p>
+                  <div style="border-left:3px solid var(--tp-phase-grow);background:hsl(var(--phase-grow) / 0.06);border-radius:0 10px 10px 0;padding:11px 14px;margin-bottom:14px"><div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tp-phase-grow);margin-bottom:3px">Done when</div><p style="font-size:13px;color:var(--tp-ink);line-height:1.5">The board meeting has run, recorded on video, with all questions answered by the student alone.</p></div>
+                  <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:11px 13px;margin-bottom:12px"><div style="font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tp-text-muted);margin-bottom:4px">Your band · Grades 9–12</div><p style="font-size:12.5px;color:var(--tp-text-soft);line-height:1.45">Two non-family adults on the board, at least one who reads financial statements in real life.</p></div>
+                  <div style="display:flex;gap:9px;background:hsl(var(--phase-grow) / 0.06);border:1px solid hsl(var(--phase-grow) / 0.2);border-radius:11px;padding:10px 13px;margin-bottom:16px"><span style="flex:0 0 auto;color:var(--tp-phase-grow)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg></span><p style="font-size:11.5px;color:var(--tp-text-soft);line-height:1.45"><b style="color:var(--tp-ink)">Safety:</b> a parent is present; the recording and any names follow your family's publishing rules.</p></div>
+                  <div class="tp-eyebrow" style="margin-bottom:9px">Evidence to capture</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                    <div style="display:flex;align-items:center;gap:10px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:10px 12px"><span style="flex:0 0 auto;height:20px;width:20px;border-radius:50%;border:2px solid var(--tp-border-strong)"></span><span style="flex:1;font-size:12.5px;color:var(--tp-ink)">Video of the board meeting</span><span style="font-size:10px;font-weight:600;color:var(--tp-not-yet);background:hsl(var(--not-yet) / 0.12);border-radius:999px;padding:2px 8px">required</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:10px 12px"><span style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:20px;width:20px;border-radius:50%;background:var(--tp-verified);color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span style="flex:1;font-size:12.5px;color:var(--tp-ink)">Board pack — attached from 4.5.1</span></div>
+                  </div>
+                  <button onClick="{{ toggleReadiness }}" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;font:inherit;font-size:13px;font-weight:600;color:var(--tp-phase-validate);background:hsl(var(--phase-validate) / 0.08);border:1px solid hsl(var(--phase-validate) / 0.28);border-radius:10px;padding:11px;cursor:pointer;margin-bottom:12px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>Run Readiness Check</button>
+                  <sc-if value="{{ readiness }}" hint-placeholder-val="{{ false }}">
+                    <div class="tp-anim-rise" style="background:hsl(var(--phase-validate) / 0.06);border:1px solid hsl(var(--phase-validate) / 0.25);border-radius:13px;padding:14px;margin-bottom:14px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:7px"><span style="color:var(--tp-phase-validate)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg></span><span style="font-size:12px;font-weight:700;color:var(--tp-phase-validate)">Readiness Check</span></div><p style="font-size:12.5px;color:var(--tp-ink);line-height:1.5">Almost there. The <i>Done-when</i> line asks for at least three questions answered by you alone — your recording shows two. Capture the third answer, then submit.</p><p style="font-size:10.5px;color:var(--tp-text-muted);margin-top:8px">Advisory only. It never verifies or blocks — you can always submit anyway.</p></div>
+                  </sc-if>
+                  <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" style="{{ fullBtn }}" hint-size="100%,44px">Submit for review — notify Mum</x-import>
+                </div>
+                </sc-if>
+
+                <!-- ===== HQ · TROPHY WALL ===== -->
+                <sc-if value="{{ scHqTrophy }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="margin:8px 0 16px"><div class="tp-eyebrow" style="color:var(--tp-phase-grow)">Awards</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);margin-top:3px">Trophy Wall</h2><p style="font-size:12px;color:var(--tp-text-soft);margin-top:3px">Three seals, nineteen crests — the same artwork the Trail renders in full colour.</p></div>
+                  <div class="tp-eyebrow" style="margin-bottom:11px">Phase seals · 3 of 5</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;margin-bottom:24px"><sc-for list="{{ devSeals }}" as="s" hint-placeholder-count="5"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Seal" phase="{{ s.phase }}" skin="hq" size="60" sealed="{{ s.sealed }}" date="{{ s.date }}" hint-size="64px,84px"></x-import></sc-for></div>
+                  <div class="tp-eyebrow" style="margin-bottom:11px">Criterion crests · 19 of 25</div>
+                  <div style="display:flex;flex-direction:column;gap:16px"><sc-for list="{{ trophyPhases }}" as="ph" hint-placeholder-count="5">
+                    <div><div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--tp-text-muted);margin-bottom:8px">{{ ph.name }}</div><div style="display:flex;justify-content:space-between;gap:4px"><sc-for list="{{ ph.crests }}" as="c" hint-placeholder-count="5"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Crest" phase="{{ ph.key }}" criterion="{{ c.criterion }}" skin="hq" size="52" locked="{{ c.locked }}" hint-size="52px,52px"></x-import></sc-for></div></div>
+                  </sc-for></div>
+                </div>
+                </sc-if>
+
+                <!-- ===== HQ · FOUNDER FILE (vault) ===== -->
+                <sc-if value="{{ scHqFile }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:8px 0 14px"><div><div class="tp-eyebrow" style="color:var(--tp-phase-grow)">Founder File</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);margin-top:3px">The vault</h2><p style="font-size:12px;color:var(--tp-text-soft);margin-top:3px">Every item, verified and dated. Yours to keep.</p></div><button style="flex:0 0 auto;display:flex;align-items:center;gap:5px;font:inherit;font-size:11.5px;font-weight:600;color:var(--tp-ink);background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:9px;padding:7px 10px;cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>Export</button></div>
+                  <div class="scr" style="display:flex;gap:7px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px"><sc-for list="{{ vaultFilters }}" as="f" hint-placeholder-count="5"><button onClick="{{ f.go }}" style="{{ f.style }}">{{ f.label }}</button></sc-for></div>
+                  <div style="display:flex;flex-direction:column;gap:8px"><sc-for list="{{ vaultItems }}" as="it" hint-placeholder-count="6">
+                    <div style="display:flex;align-items:center;gap:11px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:10px 12px">
+                      <span style="position:relative;flex:0 0 38px;height:38px;border-radius:9px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, {{ it.accent }} 14%, white);color:{{ it.accent }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Icon" name="{{ it.icon }}" size="17" hint-size="17px,17px"></x-import><span style="{{ it.thumbBg }}"></span></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:12.5px;color:var(--tp-ink);line-height:1.35">{{ it.label }}</div><div class="tp-mono" style="font-size:10.5px;color:var(--tp-text-muted);margin-top:2px">{{ it.id }} · {{ it.date }}</div></div>
+                      <span style="flex:0 0 auto;color:var(--tp-verified)" title="Verified"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>
+                    </div>
+                  </sc-for></div>
+                </div>
+                </sc-if>
+
+                <!-- ===== HQ · ALMANAC ===== -->
+                <sc-if value="{{ scHqAlmanac }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="margin:8px 0 18px"><div class="tp-eyebrow" style="color:var(--tp-phase-grow)">The Almanac</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);margin-top:3px">Margin notes</h2><p style="font-size:12px;color:var(--tp-text-soft);margin-top:3px">The same wisdom the Trail files as cards — set here as quiet pull-quotes.</p></div>
+                  <div style="display:flex;flex-direction:column;gap:14px"><sc-for list="{{ marginNotes }}" as="n" hint-placeholder-count="5"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.MarginNote" entry="{{ n }}" hint-size="100%,110px"></x-import></sc-for></div>
+                </div>
+                </sc-if>
+
+                <!-- ===== PARENT · REVIEW QUEUE ===== -->
+                <sc-if value="{{ scParentQueue }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 14px">
+                    <div style="display:flex;align-items:center;gap:9px"><span style="display:flex;height:32px;width:32px;align-items:center;justify-content:center;border-radius:9px;background:var(--tp-ink)"><img src="assets/logo.svg" alt="" style="height:17px"></span><div><div class="tp-display" style="font-size:16px;font-weight:600;color:var(--tp-ink);line-height:1.05">Review</div><div style="font-size:10.5px;color:var(--tp-text-muted)">Okafor family · Dad</div></div></div>
+                    <span style="display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;color:var(--tp-verified);background:hsl(var(--verified) / 0.12);border-radius:999px;padding:4px 9px"><span style="height:6px;width:6px;border-radius:50%;background:var(--tp-verified)"></span>real-time</span>
+                  </div>
+                  <sc-if value="{{ pqHasToast }}" hint-placeholder-val="{{ false }}">
+                    <div class="tp-anim-rise" style="display:flex;align-items:center;gap:8px;border-radius:11px;padding:10px 13px;margin-bottom:14px;background:color-mix(in srgb, {{ pqToast.color }} 10%, white);border:1px solid color-mix(in srgb, {{ pqToast.color }} 30%, white)"><span style="height:8px;width:8px;border-radius:50%;background:{{ pqToast.color }}"></span><span style="font-size:12.5px;font-weight:600;color:var(--tp-ink)">{{ pqToast.text }}</span></div>
+                  </sc-if>
+
+                  <sc-if value="{{ pqNone }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;align-items:center;gap:10px;background:var(--tp-surface-sunken);border:1px solid var(--tp-border);border-radius:12px;padding:11px 13px;margin-bottom:18px"><span style="color:var(--tp-text-muted)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span><div style="font-size:11.5px;color:var(--tp-text-soft);line-height:1.4"><b style="color:var(--tp-ink)">This week</b> · 6 tasks verified across Maya & Theo · next Family Demo Session Sat, Jul 26</div></div>
+                    <div class="tp-eyebrow" style="margin-bottom:10px">Waiting for you · 2</div>
+                    <div style="display:flex;flex-direction:column;gap:10px">
+                      <sc-for list="{{ queueItems }}" as="q" hint-placeholder-count="2">
+                        <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:14px;padding:14px;box-shadow:var(--tp-shadow-hq)">
+                          <div style="display:flex;align-items:center;gap:10px;margin-bottom:11px"><span style="{{ q.initStyle }}">{{ q.initial }}</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px"><span class="tp-mono" style="font-size:11.5px;font-weight:600;color:var(--tp-ink)">{{ q.taskId }}</span><span style="font-size:11px;color:var(--tp-text-muted)">{{ q.child }} · {{ q.time }}</span></div><div style="font-size:14px;font-weight:600;color:var(--tp-ink);margin-top:1px">{{ q.title }}</div></div><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="submitted" hint-size="120px,26px"></x-import></div>
+                          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:11.5px;color:var(--tp-text-soft)">{{ q.ev }} pieces of evidence</span><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" size="sm" onClick="{{ q.open }}" hint-size="90px,36px">Review</x-import></div>
+                        </div>
+                      </sc-for>
+                    </div>
+                    <div style="opacity:.5;margin-top:16px"><div class="tp-eyebrow" style="margin-bottom:8px">Verified earlier today</div><div style="display:flex;align-items:center;gap:10px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:12px;padding:10px 13px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="verified" hint-size="92px,26px"></x-import><span style="font-size:12px;color:var(--tp-text-soft)"><span class="tp-mono">1.2.3</span> · Maya · Set up the point of sale</span></div></div>
+                  </sc-if>
+
+                  <sc-if value="{{ pqActive }}" hint-placeholder-val="{{ false }}">
+                    <button onClick="{{ closePq }}" style="display:flex;align-items:center;gap:5px;background:none;border:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--tp-text-soft);cursor:pointer;padding:4px 2px 12px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>Back to queue</button>
+                    <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px"><span style="{{ pqActive.initStyle }}">{{ pqActive.initial }}</span><div><div style="font-size:13px;font-weight:600;color:var(--tp-ink)">{{ pqActive.child }}</div><div style="font-size:11px;color:var(--tp-text-muted)">submitted {{ pqActive.time }} · real-time</div></div></div>
+                    <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.ReviewPanel" task-id="{{ pqActive.taskId }}" title="{{ pqActive.title }}" phase="{{ pqActive.review.phase }}" reviewer="Dad" done-when="{{ pqActive.review.doneWhen }}" band-variant="{{ pqActive.review.band }}" evidence="{{ pqActive.review.evidence }}" onVerify="{{ activeVerify }}" onNotYet="{{ activeNotYet }}" hint-size="100%,440px"></x-import>
+                    <p style="display:flex;gap:6px;font-size:11px;color:var(--tp-text-muted);margin:13px 2px 0;line-height:1.5">Hold the bar, warmly — if you're debating whether it's done, the answer is Not Yet, with a note pointing at the Done-when line.</p>
+                  </sc-if>
+                </div>
+                </sc-if>
+
+                <!-- ===== PARENT · FAMILY DASHBOARD ===== -->
+                <sc-if value="{{ scParentFamily }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;background:var(--tp-surface);padding:6px 18px 30px">
+                  <div style="margin:8px 0 16px"><div class="tp-eyebrow" style="color:var(--tp-phase-grow)">One subscription · every founder</div><h2 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);margin-top:3px">Okafor family</h2></div>
+                  <div style="background:var(--tp-ink);border-radius:15px;padding:15px 17px;margin-bottom:18px;color:hsl(40 20% 90%)"><div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:hsl(40 16% 62%);margin-bottom:8px">This week's digest</div><div style="display:flex;gap:18px"><div><div class="tp-mono" style="font-size:22px;font-weight:600;color:#fff">6</div><div style="font-size:10.5px;color:hsl(40 16% 62%)">verified</div></div><div><div class="tp-mono" style="font-size:22px;font-weight:600;color:#fff">2</div><div style="font-size:10.5px;color:hsl(40 16% 62%)">awaiting you</div></div><div><div class="tp-mono" style="font-size:22px;font-weight:600;color:#fff">Jul 26</div><div style="font-size:10.5px;color:hsl(40 16% 62%)">Demo Session</div></div></div></div>
+                  <div class="tp-eyebrow" style="margin-bottom:11px">Your founders · 2</div>
+                  <div style="display:flex;flex-direction:column;gap:12px">
+                    <sc-for list="{{ kids }}" as="k" hint-placeholder-count="2">
+                      <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:15px;padding:15px;box-shadow:var(--tp-shadow-hq)">
+                        <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px">
+                          <span style="flex:0 0 auto;display:flex;height:42px;width:42px;align-items:center;justify-content:center;border-radius:50%;font-weight:700;font-size:17px;color:#fff;background:{{ k.color }}">{{ k.initial }}</span>
+                          <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;color:var(--tp-ink)">{{ k.name }}</div><div style="font-size:11px;color:var(--tp-text-muted)">{{ k.band }}</div></div>
+                          <div style="text-align:right"><div class="tp-mono" style="font-size:15px;font-weight:600;color:var(--tp-ink)">{{ k.verified }}<span style="font-size:11px;color:var(--tp-text-muted)">/125</span></div><div style="font-size:10px;color:var(--tp-text-muted)">verified</div></div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="tp-mono" style="font-size:11px;font-weight:600;color:{{ k.color }}">{{ k.idx }}</span><span style="font-size:12.5px;font-weight:600;color:var(--tp-ink)">{{ k.phase }}</span><span style="font-size:12px;color:var(--tp-text-soft)">· {{ k.criterion }}</span></div>
+                        <div style="display:flex;gap:4px;margin-bottom:12px"><sc-for list="{{ k.pips }}" as="p" hint-placeholder-count="5"><span style="{{ p.style }}"></span></sc-for></div>
+                        <div style="display:flex;align-items:center;justify-content:space-between"><span style="display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--tp-awaiting)"><span style="height:7px;width:7px;border-radius:50%;background:var(--tp-awaiting)"></span>{{ k.pending }} awaiting your review</span><button onClick="{{ k.review }}" style="font:inherit;font-size:11.5px;font-weight:600;color:var(--tp-ink);background:var(--tp-surface-sunken);border:1px solid var(--tp-border);border-radius:8px;padding:6px 11px;cursor:pointer">Open</button></div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:16px">
+                    <div style="flex:1;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:11px"><div style="font-size:10px;color:var(--tp-text-muted)">Notifications</div><div style="font-size:12px;font-weight:600;color:var(--tp-ink);margin-top:2px">Real-time</div></div>
+                    <div style="flex:1;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:11px"><div style="font-size:10px;color:var(--tp-text-muted)">Math gate</div><div style="font-size:12px;font-weight:600;color:var(--tp-ink);margin-top:2px">Off</div></div>
+                    <div style="flex:1;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:11px"><div style="font-size:10px;color:var(--tp-text-muted)">Evidence</div><div style="font-size:12px;font-weight:600;color:var(--tp-ink);margin-top:2px">Private</div></div>
+                  </div>
+                </div>
+                </sc-if>
+
+                <!-- ===== ONBOARDING ===== -->
+                <sc-if value="{{ scOnboarding }}" hint-placeholder-val="{{ false }}">
+                <div style="min-height:100%;display:flex;flex-direction:column;background:var(--tp-surface);padding:14px 22px 24px">
+                  <div style="display:flex;gap:5px;justify-content:center;margin:6px 0 8px"><sc-for list="{{ onbDots }}" as="d" hint-placeholder-count="4"><span style="{{ d.style }}"></span></sc-for></div>
+                  <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 0">
+
+                    <sc-if value="{{ onb0 }}" hint-placeholder-val="{{ true }}">
+                      <div style="text-align:center"><span style="display:inline-flex;height:66px;width:66px;align-items:center;justify-content:center;border-radius:18px;background:var(--tp-ink);margin-bottom:20px"><img src="assets/logo.svg" alt="" style="height:34px"></span>
+                        <h2 class="tp-display" style="font-size:27px;font-weight:600;letter-spacing:-0.02em;color:var(--tp-ink);margin-bottom:10px">Welcome to The Path</h2>
+                        <p style="font-size:14px;color:var(--tp-text-soft);line-height:1.55;max-width:280px;margin:0 auto 22px">One app, two skins. 125 real things done in the real world — each verified by a real adult, celebrated like it matters.</p>
+                        <div style="display:flex;gap:7px;justify-content:center;margin-bottom:6px"><span style="height:9px;width:9px;border-radius:50%;background:var(--tp-phase-sell)"></span><span style="height:9px;width:9px;border-radius:50%;background:var(--tp-phase-build)"></span><span style="height:9px;width:9px;border-radius:50%;background:var(--tp-phase-validate)"></span><span style="height:9px;width:9px;border-radius:50%;background:var(--tp-phase-grow)"></span><span style="height:9px;width:9px;border-radius:50%;background:var(--tp-phase-scale)"></span></div>
+                        <p class="tp-eyebrow" style="text-align:center">Sell · Build · Validate · Grow · Scale</p>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ onb1 }}" hint-placeholder-val="{{ false }}">
+                      <div><div class="tp-eyebrow" style="margin-bottom:4px">Step 2 · add a founder</div><h2 class="tp-display" style="font-size:23px;font-weight:600;color:var(--tp-ink);margin-bottom:16px">Who's starting The Path?</h2>
+                        <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:11px;padding:12px 14px;margin-bottom:18px"><div style="font-size:10px;color:var(--tp-text-muted);margin-bottom:2px">Name</div><div style="font-size:15px;font-weight:600;color:var(--tp-ink)">Maya Okafor</div></div>
+                        <div class="tp-eyebrow" style="margin-bottom:10px">Pick a grade band</div>
+                        <div style="display:flex;flex-direction:column;gap:10px"><sc-for list="{{ onbBands }}" as="b" hint-placeholder-count="3"><button onClick="{{ b.sel }}" style="{{ b.style }}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><span style="font-size:14px;font-weight:600;color:var(--tp-ink)">{{ b.label }}</span><span style="font-size:10px;font-weight:600;color:var(--tp-text-muted);background:var(--tp-surface-sunken);border-radius:999px;padding:2px 8px">default: {{ b.defSkin }}</span></div><div style="font-size:11.5px;color:var(--tp-text-soft);line-height:1.4">{{ b.desc }}</div></button></sc-for></div>
+                        <p style="font-size:11px;color:var(--tp-text-muted);margin-top:12px;line-height:1.45">The band sets the default skin and the depth of each task — never the pass bar. A Grade 3 completion means the same as a Grade 12 one.</p>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ onb2 }}" hint-placeholder-val="{{ false }}">
+                      <div><div class="tp-eyebrow" style="margin-bottom:4px">Step 3 · starting view</div><h2 class="tp-display" style="font-size:23px;font-weight:600;color:var(--tp-ink);margin-bottom:6px">Maya's starting skin</h2>
+                        <p style="font-size:12.5px;color:var(--tp-text-soft);line-height:1.5;margin-bottom:16px">{{ onbBandLabel }} start on the Trail. Maya can flip to HQ any time — everything earned carries across, nothing is lost.</p>
+                        <div style="display:flex;gap:10px">
+                          <button onClick="{{ onbSetTrail }}" style="flex:1;cursor:pointer;font:inherit;text-align:left;border-radius:16px;padding:14px;border:2px solid var(--tp-border);background:var(--tp-canvas)">
+                            <div style="height:56px;border-radius:10px;background:var(--tp-trail-canvas);border:1.5px solid hsl(var(--trail-ink) / 0.12);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><span style="color:var(--tp-phase-sell)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6 4 8v12l5-2 6 2 5-2V6l-5 2-6-2Z"/><path d="M9 6v14"/><path d="M15 8v14"/></svg></span></div>
+                            <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:var(--tp-ink)">Trail</span><sc-if value="{{ onbIsTrail }}" hint-placeholder-val="{{ true }}"><span style="color:var(--tp-verified)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></sc-if></div><div style="font-size:10.5px;color:var(--tp-text-muted);margin-top:1px">Illustrated journey</div>
+                          </button>
+                          <button onClick="{{ onbSetHq }}" style="flex:1;cursor:pointer;font:inherit;text-align:left;border-radius:16px;padding:14px;border:2px solid var(--tp-border);background:var(--tp-canvas)">
+                            <div style="height:56px;border-radius:10px;background:var(--tp-surface-sunken);border:1.5px solid var(--tp-border);display:flex;flex-direction:column;justify-content:center;gap:5px;padding:0 12px;margin-bottom:10px"><span style="height:6px;width:70%;border-radius:3px;background:var(--tp-phase-build)"></span><span style="height:6px;width:45%;border-radius:3px;background:var(--tp-border-strong)"></span></div>
+                            <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:var(--tp-ink)">HQ</span><sc-if value="{{ onbIsHq }}" hint-placeholder-val="{{ false }}"><span style="color:var(--tp-verified)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></sc-if></div><div style="font-size:10.5px;color:var(--tp-text-muted);margin-top:1px">Founder dashboard</div>
+                          </button>
+                        </div>
+                        <p style="font-size:11px;color:var(--tp-text-muted);margin-top:14px;text-align:center">The skin toggle affects only Maya's view. You always see the grounded review interface.</p>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ onb3 }}" hint-placeholder-val="{{ false }}">
+                      <div style="text-align:center"><span class="tp-anim-stamp" style="display:inline-flex;color:var(--tp-verified);margin-bottom:18px"><svg width="58" height="58" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>
+                        <h2 class="tp-display" style="font-size:25px;font-weight:600;color:var(--tp-ink);margin-bottom:10px">Maya is ready</h2>
+                        <p style="font-size:13.5px;color:var(--tp-text-soft);line-height:1.55;max-width:288px;margin:0 auto 18px">Her Founder File is open and empty, waiting for real proof. One rule is on for every band: <b style="color:var(--tp-ink)">Maya can never mark her own work done</b> — a real adult always verifies.</p>
+                      </div>
+                    </sc-if>
+                  </div>
+
+                  <div style="display:flex;gap:10px;padding-top:8px">
+                    <sc-if value="{{ onbShowBack }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="secondary" onClick="{{ onbBack }}" hint-size="90px,44px">Back</x-import></sc-if>
+                    <sc-if value="{{ onb3 }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ finishOnb }}" style="flex:1;justify-content:center" hint-size="100%,44px">Enter Maya's Path</x-import></sc-if>
+                    <sc-if value="{{ onb0 }}" hint-placeholder-val="{{ true }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ onbNext }}" style="flex:1;justify-content:center" hint-size="100%,44px">Set up your family</x-import></sc-if>
+                    <sc-if value="{{ onb1 }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ onbNext }}" style="flex:1;justify-content:center" hint-size="100%,44px">Continue</x-import></sc-if>
+                    <sc-if value="{{ onb2 }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ onbNext }}" style="flex:1;justify-content:center" hint-size="100%,44px">Continue</x-import></sc-if>
+                  </div>
+                </div>
+                </sc-if>
+
+                <!--PHONE-SCENES-->
+              </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ============ DESKTOP / DOC SCENES ============ -->
+      <sc-if value="{{ isDeskScene }}" hint-placeholder-val="{{ false }}">
+        <div>
+<!-- ===== GUIDE · COHORT BOARD ===== -->
+          <sc-if value="{{ scGuideCohort }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:1000px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:18px 22px;box-shadow:var(--tp-shadow-hq);margin-bottom:18px">
+              <div style="display:flex;align-items:center;gap:13px"><span style="display:flex;height:44px;width:44px;align-items:center;justify-content:center;border-radius:12px;background:var(--tp-phase-validate);color:#fff;font-weight:700;font-size:18px">A</span><div><div class="tp-display" style="font-size:19px;font-weight:600;color:var(--tp-ink)">Ms. Adeyemi · Saturday Cohort</div><div style="font-size:12px;color:var(--tp-text-muted)">2026–27 · 24 students</div></div></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--tp-wax);background:hsl(var(--wax) / 0.1);border:1px solid hsl(var(--wax) / 0.28);border-radius:999px;padding:6px 12px"><span style="height:7px;width:7px;border-radius:50%;background:var(--tp-wax)"></span>2 awaiting your countersign</span></div>
+            </div>
+            <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;overflow:hidden;box-shadow:var(--tp-shadow-hq)">
+              <div style="display:grid;grid-template-columns:1.6fr 0.5fr 1.4fr 1fr 1fr;gap:14px;align-items:center;padding:12px 16px;background:var(--tp-surface-sunken)"><span class="tp-eyebrow">Student</span><span class="tp-eyebrow">Band</span><span class="tp-eyebrow">Journey</span><span class="tp-eyebrow">Now</span><span class="tp-eyebrow">Status</span></div>
+              <sc-for list="{{ cohort }}" as="q" hint-placeholder-count="12">
+                <div style="{{ q.rowStyle }}">
+                  <span style="display:flex;align-items:center;gap:10px;min-width:0"><span style="{{ q.initStyle }}">{{ q.initial }}</span><span style="font-size:13px;font-weight:600;color:var(--tp-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.name }}</span></span>
+                  <span class="tp-mono" style="font-size:12px;color:var(--tp-text-soft)">{{ q.band }}</span>
+                  <span style="display:flex;gap:3px"><sc-for list="{{ q.segs }}" as="g" hint-placeholder-count="5"><span style="{{ g.style }}"></span></sc-for></span>
+                  <span class="tp-mono" style="font-size:11.5px;color:var(--tp-text-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.crit }}</span>
+                  <span>
+                    <sc-if value="{{ q.needsSign }}" hint-placeholder-val="{{ false }}"><button onClick="{{ q.sign }}" style="font:inherit;font-size:11.5px;font-weight:600;color:#fff;background:var(--tp-wax);border:none;border-radius:8px;padding:6px 12px;cursor:pointer">Countersign</button></sc-if>
+                    <sc-if value="{{ q.showPill }}" hint-placeholder-val="{{ true }}"><span style="{{ q.pillStyle }}">{{ q.pill }}</span></sc-if>
+                  </span>
+                </div>
+              </sc-for>
+            </div>
+            <p style="display:flex;gap:7px;font-size:12px;color:var(--tp-text-muted);margin:14px 2px 0;line-height:1.5">You see every student's position and review status — never their evidence unless a phase review needs your countersign. Weekday task verification stays with parents; your formal power is the second signature.</p>
+          </div>
+          </sc-if>
+
+          <!-- ===== GUIDE · COUNTERSIGN ===== -->
+          <sc-if value="{{ scGuideCountersign }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:720px;margin:0 auto">
+            <button onClick="{{ goCohort }}" style="display:flex;align-items:center;gap:5px;background:none;border:none;font:inherit;font-size:13px;font-weight:600;color:var(--tp-text-soft);cursor:pointer;padding:4px 2px 14px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>Cohort board</button>
+            <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:18px;overflow:hidden;box-shadow:var(--tp-shadow-hq-lg)">
+              <div style="background:var(--tp-phase-grow);padding:22px 24px;color:#fff"><div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;opacity:.85">Phase review · countersign</div><div class="tp-display" style="font-size:26px;font-weight:600;margin-top:5px">Phase 04 · GROW</div><div style="font-size:13px;opacity:.9;margin-top:3px">Dev Sharma · the report card's second signature</div></div>
+              <div style="padding:22px 24px">
+                <div style="display:flex;align-items:center;gap:11px;background:hsl(var(--verified) / 0.08);border:1px solid hsl(var(--verified) / 0.25);border-radius:12px;padding:13px 15px;margin-bottom:20px"><span style="display:flex;height:34px;width:34px;flex:0 0 auto;align-items:center;justify-content:center;border-radius:50%;background:var(--tp-verified);color:#fff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><div style="font-size:13.5px;font-weight:600;color:var(--tp-ink)">Signature 1 · Parent</div><div style="font-size:12px;color:var(--tp-text-soft)">Mum attested the phase — Jul 19, 2026</div></div></div>
+                <div class="tp-eyebrow" style="margin-bottom:11px">The five criteria you're attesting</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:22px"><sc-for list="{{ phaseCriteria }}" as="c" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:12px;background:var(--tp-surface);border:1px solid var(--tp-border);border-radius:11px;padding:11px 14px"><span class="tp-mono" style="flex:0 0 auto;font-size:12px;font-weight:600;color:var(--tp-phase-grow)">{{ c.c }}</span><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--tp-ink)">{{ c.title }}</div><div style="font-size:11.5px;color:var(--tp-text-muted)">{{ c.stat }}</div></div><span style="flex:0 0 auto;color:var(--tp-verified)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></div>
+                </sc-for></div>
+                <sc-if value="{{ notCountersigned }}" hint-placeholder-val="{{ true }}">
+                  <div style="border:2px dashed var(--tp-border-strong);border-radius:13px;padding:18px;text-align:center"><div style="font-size:13.5px;font-weight:600;color:var(--tp-ink);margin-bottom:3px">Signature 2 · Guide — pending</div><p style="font-size:12px;color:var(--tp-text-soft);margin-bottom:14px">The phase does not seal until both signatures land. You watched the board-meeting video from the cohort board.</p><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Button" skin="hq" variant="primary" onClick="{{ doCountersign }}" hint-size="220px,44px">Countersign &amp; seal Phase 04</x-import></div>
+                </sc-if>
+                <sc-if value="{{ countersigned }}" hint-placeholder-val="{{ false }}">
+                  <div class="tp-anim-rise" style="background:hsl(var(--verified) / 0.08);border:1px solid hsl(var(--verified) / 0.28);border-radius:13px;padding:18px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:7px;font-size:14px;font-weight:600;color:var(--tp-ink);margin-bottom:4px"><span style="color:var(--tp-verified)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>Sealed — both signatures in</div><p style="font-size:12.5px;color:var(--tp-text-soft)">Phase 04 · GROW is sealed. Dev's Tier 3 celebration is firing on his phone now.</p><button onClick="{{ resetCountersign }}" style="margin-top:12px;background:none;border:none;font:inherit;font-size:11.5px;color:var(--tp-text-soft);text-decoration:underline;cursor:pointer">Reset demo</button></div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- ===== CELEBRATIONS ===== -->
+          <sc-if value="{{ scCelebrations }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:860px;margin:0 auto">
+            <div style="display:flex;gap:9px;flex-wrap:wrap;justify-content:center;margin-bottom:24px"><sc-for list="{{ tierTabs }}" as="t" hint-placeholder-count="4"><button onClick="{{ t.sel }}" style="{{ t.style }}">{{ t.label }}</button></sc-for></div>
+
+            <sc-if value="{{ isTier1 }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:420px;margin:0 auto;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:18px;padding:26px;box-shadow:var(--tp-shadow-hq-lg);text-align:center">
+                <span class="tp-anim-stamp" style="display:inline-flex;color:var(--tp-wax);margin-bottom:8px"><svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+                <div style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-verified)">Task verified · <span class="tp-mono">1.2.4</span></div>
+                <h3 class="tp-display" style="font-size:22px;font-weight:600;color:var(--tp-ink);margin:6px 0 12px">Ask until one yes</h3>
+                <div style="background:hsl(var(--verified) / 0.08);border-radius:12px;padding:12px 14px;font-size:13px;font-style:italic;color:var(--tp-ink);line-height:1.45;margin-bottom:14px">"You knocked, you smiled, you asked. That's a real sale, Maya."</div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px;font-size:12.5px;color:var(--tp-text-soft)"><span class="tp-mono" style="font-weight:600;color:var(--tp-ink)">8 → 9</span> verified · the meter ticks</div>
+                <p style="font-size:11px;color:var(--tp-text-muted);margin-top:16px">Two to four seconds. Never a modal, never interrupts flow. Trail thumps the stamp; HQ flips the chip.</p>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isTier2 }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:520px;margin:0 auto;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:20px;padding:34px 30px;box-shadow:var(--tp-shadow-hq-lg);text-align:center">
+                <div class="tp-eyebrow" style="text-align:center;color:var(--tp-phase-sell);margin-bottom:14px">Criterion cleared</div>
+                <div style="display:flex;justify-content:center;margin-bottom:16px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Crest" phase="sell" criterion="1.5" skin="trail" size="118" hint-size="118px,118px"></x-import></div>
+                <h3 class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink);margin-bottom:4px">Criterion 1.5 · 25 supervised outreach attempts</h3>
+                <p style="font-size:13px;color:var(--tp-text-soft);margin-bottom:20px">The real numbers this criterion produced</p>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"><sc-for list="{{ t2Stats }}" as="s" hint-placeholder-count="3"><div style="background:var(--tp-surface-sunken);border-radius:13px;padding:14px"><div class="tp-display" style="font-size:30px;font-weight:600;color:var(--tp-phase-sell)">{{ s.value }}</div><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--tp-text-muted)">{{ s.label }}</div></div></sc-for></div>
+                <div style="display:flex;align-items:center;gap:9px;background:hsl(var(--phase-validate) / 0.06);border:1px solid hsl(var(--phase-validate) / 0.22);border-radius:11px;padding:11px 14px;text-align:left"><span style="color:var(--tp-phase-validate)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span><span style="font-size:12.5px;color:var(--tp-ink)">The <b>Criterion Recap</b> was written to Maya's Founder File · a family share card was generated</span></div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isTier3 }}" hint-placeholder-val="{{ false }}">
+              <div style="text-align:center">
+                <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:18px"><span style="font-size:12px;color:var(--tp-text-muted)">The benchmark — shown in</span><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.SkinToggle" value="{{ tierSkin }}" onChange="{{ setTierSkin }}" hint-size="150px,38px"></x-import></div>
+                <div style="display:flex;justify-content:center"><div style="width:100%;max-width:600px;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:22px;padding:14px;box-shadow:var(--tp-shadow-hq-lg)"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.PhaseSealCelebration" phase="sell" skin="{{ tierSkin }}" montage="{{ celebMontage }}" stats="{{ t3Stats }}" hint-size="100%,640px"></x-import></div></div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isTier4 }}" hint-placeholder-val="{{ false }}">
+              <div style="max-width:640px;margin:0 auto;background:linear-gradient(180deg, hsl(41 60% 97%), var(--tp-canvas));border:1px solid hsl(var(--gold-leaf) / 0.35);border-radius:22px;padding:36px 32px;box-shadow:var(--tp-shadow-hq-lg);text-align:center">
+                <div class="tp-eyebrow" style="text-align:center;color:var(--tp-gold-leaf);letter-spacing:.14em;margin-bottom:14px">The Path complete</div>
+                <div style="display:flex;justify-content:center;margin-bottom:16px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.Seal" phase="scale" skin="trail" size="96" sealed="{{ true }}" hint-size="96px,96px"></x-import></div>
+                <h3 class="tp-display" style="font-size:28px;font-weight:600;letter-spacing:-0.01em;color:var(--tp-ink);margin-bottom:8px">A year, sealed five times over</h3>
+                <p style="font-size:13.5px;color:var(--tp-text-soft);line-height:1.55;max-width:440px;margin:0 auto 22px">The full journey replays from a year of real evidence. The <b>Founder Portfolio</b> is assembled, a printable certificate is generated — and the last act is Maya's own: <i>“What I can do now that I couldn't a year ago.”</i></p>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px"><sc-for list="{{ t4Totals }}" as="s" hint-placeholder-count="4"><div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:13px;padding:13px 8px"><div class="tp-display" style="font-size:24px;font-weight:600;color:var(--tp-ink)">{{ s.value }}</div><div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--tp-text-muted)">{{ s.label }}</div></div></sc-for></div>
+                <div style="display:inline-flex;align-items:center;gap:8px;background:var(--tp-ink);color:#fff;border-radius:11px;padding:11px 18px;font-size:13px;font-weight:600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>A physical seal &amp; letter from The 120 ships home</div>
+              </div>
+            </sc-if>
+          </div>
+          </sc-if>
+
+          <!-- ===== AI DOCUMENTS ===== -->
+          <sc-if value="{{ scDocs }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:820px;margin:0 auto">
+            <div style="display:flex;gap:9px;flex-wrap:wrap;justify-content:center;margin-bottom:14px"><sc-for list="{{ docTabs }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.sel }}" style="{{ t.style }}">{{ t.label }}</button></sc-for></div>
+            <p style="display:flex;align-items:center;justify-content:center;gap:7px;font-size:12px;color:var(--tp-text-muted);margin-bottom:22px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>Generated from verified evidence only. Assistive and celebratory — never a grade, never the student's own writing passed off.</p>
+            <div style="max-width:640px;margin:0 auto;background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:6px;box-shadow:var(--tp-shadow-hq-lg);padding:44px 46px">
+              <sc-if value="{{ isRecap }}" hint-placeholder-val="{{ true }}">
+                <div class="tp-eyebrow" style="color:var(--tp-phase-sell)">{{ recapDoc.kicker }} · <span class="tp-mono">{{ recapDoc.crit }}</span></div>
+                <h2 class="tp-display" style="font-size:30px;font-weight:600;letter-spacing:-0.02em;color:var(--tp-ink);margin:8px 0 6px">{{ recapDoc.title }}</h2>
+                <div style="font-size:12px;color:var(--tp-text-muted);padding-bottom:20px;border-bottom:1px solid var(--tp-border);margin-bottom:22px">{{ recapDoc.student }} · {{ recapDoc.date }}</div>
+                <div style="display:flex;flex-direction:column;gap:18px"><sc-for list="{{ recapDoc.sections }}" as="s" hint-placeholder-count="5"><div><div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:5px">{{ s.h }}</div><p style="font-size:14px;color:var(--tp-text);line-height:1.62">{{ s.body }}</p></div></sc-for></div>
+              </sc-if>
+              <sc-if value="{{ isChronicle }}" hint-placeholder-val="{{ false }}">
+                <div class="tp-eyebrow" style="color:var(--tp-phase-sell)">{{ chronicleDoc.kicker }} · Phase <span class="tp-mono">{{ chronicleDoc.crit }}</span></div>
+                <h2 class="tp-display" style="font-size:30px;font-weight:600;letter-spacing:-0.02em;color:var(--tp-ink);margin:8px 0 6px">{{ chronicleDoc.title }}</h2>
+                <div style="font-size:12px;color:var(--tp-text-muted);padding-bottom:20px;border-bottom:1px solid var(--tp-border);margin-bottom:22px">{{ chronicleDoc.student }} · {{ chronicleDoc.date }}</div>
+                <div style="display:flex;flex-direction:column;gap:18px"><sc-for list="{{ chronicleDoc.sections }}" as="s" hint-placeholder-count="5"><div><div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:5px">{{ s.h }}</div><p style="font-size:14px;color:var(--tp-text);line-height:1.62">{{ s.body }}</p></div></sc-for></div>
+              </sc-if>
+              <sc-if value="{{ isPortfolio }}" hint-placeholder-val="{{ false }}">
+                <div class="tp-eyebrow" style="color:var(--tp-gold-leaf)">{{ portfolioDoc.kicker }} · {{ portfolioDoc.crit }}</div>
+                <h2 class="tp-display" style="font-size:30px;font-weight:600;letter-spacing:-0.02em;color:var(--tp-ink);margin:8px 0 6px">{{ portfolioDoc.title }}</h2>
+                <div style="font-size:12px;color:var(--tp-text-muted);padding-bottom:20px;border-bottom:1px solid var(--tp-border);margin-bottom:22px">{{ portfolioDoc.student }} · {{ portfolioDoc.date }}</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:22px"><sc-for list="{{ montageTiles }}" as="m" hint-placeholder-count="4"><span style="aspect-ratio:1;border-radius:6px;overflow:hidden;background:var(--tp-surface-sunken)"><span style="display:block;width:100%;height:100%;{{ m.bg }}"></span></span></sc-for></div>
+                <div style="display:flex;flex-direction:column;gap:18px"><sc-for list="{{ portfolioDoc.sections }}" as="s" hint-placeholder-count="4"><div><div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-gold-leaf);margin-bottom:5px">{{ s.h }}</div><p style="font-size:14px;color:var(--tp-text);line-height:1.62">{{ s.body }}</p></div></sc-for></div>
+              </sc-if>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- ===== STATES & SYSTEMS ===== -->
+          <sc-if value="{{ scStates }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:20px">
+            <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:22px 24px;box-shadow:var(--tp-shadow-hq)">
+              <div class="tp-eyebrow" style="margin-bottom:14px">The task state machine</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="locked" hint-size="86px,28px"></x-import><span style="color:var(--tp-border-strong)">→</span>
+                <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="available" hint-size="100px,28px"></x-import><span style="color:var(--tp-border-strong)">→</span>
+                <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="in_progress" hint-size="104px,28px"></x-import><span style="color:var(--tp-border-strong)">→</span>
+                <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="submitted" hint-size="132px,28px"></x-import><span style="color:var(--tp-border-strong)">→</span>
+                <x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="verified" hint-size="96px,28px"></x-import>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="not_yet" hint-size="86px,28px"></x-import><span style="font-size:12.5px;color:var(--tp-text-soft)">— a decline loops back to <b>in progress</b> with a note, never to locked. Verified evidence is append-only: later additions allowed, deletions not.</span></div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div style="background:var(--tp-trail-surface);border:2px solid hsl(var(--trail-ink) / 0.12);border-radius:16px;padding:20px;box-shadow:var(--tp-shadow-trail)">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-phase-sell);margin-bottom:10px">Not Yet · Trail</div>
+                <div style="display:flex;align-items:center;gap:11px;margin-bottom:10px"><span style="color:var(--tp-not-yet)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg></span><div style="font-size:14px;font-weight:600;color:var(--tp-trail-text)">The gatekeeper hands the satchel back — kindly.</div></div>
+                <p style="font-size:12.5px;color:var(--tp-trail-text-soft);line-height:1.5">"Not yet — and that's okay. The video needs three clean runs in a row. Go get 'em."</p>
+              </div>
+              <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:20px;box-shadow:var(--tp-shadow-hq)">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-text-muted);margin-bottom:10px">Not Yet · HQ</div>
+                <div style="margin-bottom:10px"><x-import component-from-global-scope="ThePathDesignSystem_05a7ec.StatusChip" state="not_yet" hint-size="86px,28px"></x-import></div>
+                <p style="font-size:12.5px;color:var(--tp-text-soft);line-height:1.5">Reviewer note: needs three consecutive clean runs. Resubmit when ready. No red, no broken streak — a task is never failed, only not done <i>yet</i>.</p>
+              </div>
+            </div>
+
+            <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:22px 24px;box-shadow:var(--tp-shadow-hq)">
+              <div class="tp-eyebrow" style="margin-bottom:14px">Reviews underway — report-card gravity</div>
+              <div style="display:flex;align-items:center;gap:12px;background:hsl(var(--phase-sell) / 0.06);border-left:3px solid var(--tp-phase-sell);border-radius:0 11px 11px 0;padding:13px 15px;margin-bottom:11px"><span style="color:var(--tp-phase-sell)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span><div><div style="font-size:13px;font-weight:600;color:var(--tp-ink)">Criterion 1.2 review underway</div><div style="font-size:12px;color:var(--tp-text-soft)">All five tasks and their evidence under review. "Big moment — Mum is looking at everything."</div></div></div>
+              <div style="display:flex;align-items:center;gap:12px;background:hsl(var(--phase-grow) / 0.06);border-left:3px solid var(--tp-phase-grow);border-radius:0 11px 11px 0;padding:13px 15px"><span style="color:var(--tp-phase-grow)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg></span><div><div style="font-size:13px;font-weight:600;color:var(--tp-ink)">Phase 04 · GROW — review in progress</div><div style="font-size:12px;color:var(--tp-text-soft)">Reviewer: Mum · <sc-if value="{{ guideLinked }}" hint-placeholder-val="{{ true }}"><span>Countersign: Guide (pending)</span></sc-if><sc-if value="{{ notGuideLinked }}" hint-placeholder-val="{{ false }}"><span>Home-study — seals on the parent's signature alone</span></sc-if></div></div></div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div style="background:hsl(var(--not-yet) / 0.06);border:1px solid hsl(var(--not-yet) / 0.28);border-radius:16px;padding:22px 24px">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tp-not-yet);margin-bottom:10px">Math gate · paused</div>
+                <div style="font-size:15px;font-weight:600;color:var(--tp-ink);margin-bottom:6px">Business is paused while math catches up</div>
+                <p style="font-size:12.5px;color:var(--tp-text-soft);line-height:1.5">Family-level, off by default. When a parent attests math is behind, new submissions pause — in-flight tasks and reviews finish. Matter-of-fact, never punitive: "that's the deal."</p>
+              </div>
+              <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;padding:22px 24px;box-shadow:var(--tp-shadow-hq)">
+                <div class="tp-eyebrow" style="margin-bottom:8px">Field Guides · optional shelf</div>
+                <div style="font-size:15px;font-weight:600;color:var(--tp-ink);margin-bottom:6px">One book per phase, per band</div>
+                <p style="font-size:12.5px;color:var(--tp-text-soft);line-height:1.5">Mark a book read plus a one-line takeaway — it files to the Founder File. Never gates a task, criterion, or phase.</p>
+              </div>
+            </div>
+
+            <div style="background:var(--tp-canvas);border:1px solid var(--tp-border);border-radius:16px;overflow:hidden;box-shadow:var(--tp-shadow-hq)">
+              <div style="padding:18px 16px 10px"><div class="tp-eyebrow">Notifications — real-time is the default</div></div>
+              <div style="display:grid;grid-template-columns:1.3fr 1.2fr 1.2fr 1.2fr;gap:12px;padding:8px 16px;background:var(--tp-surface-sunken)"><span class="tp-eyebrow">Event</span><span class="tp-eyebrow">Student</span><span class="tp-eyebrow">Parent</span><span class="tp-eyebrow">Guide</span></div>
+              <sc-for list="{{ notifRows }}" as="r" hint-placeholder-count="6"><div style="{{ r.rowStyle }}"><span style="font-weight:600;color:var(--tp-ink)">{{ r.e }}</span><span style="color:var(--tp-text-soft)">{{ r.s }}</span><span style="color:var(--tp-text-soft)">{{ r.p }}</span><span style="color:var(--tp-text-soft)">{{ r.g }}</span></div></sc-for>
+            </div>
+          </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:900},&quot;startScene&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;loop&quot;,&quot;options&quot;:[&quot;loop&quot;,&quot;onboarding&quot;,&quot;trail-map&quot;,&quot;trail-landmark&quot;,&quot;trail-satchel&quot;,&quot;trail-cardbook&quot;,&quot;hq-home&quot;,&quot;hq-task&quot;,&quot;hq-trophy&quot;,&quot;hq-file&quot;,&quot;hq-almanac&quot;,&quot;parent-queue&quot;,&quot;parent-family&quot;,&quot;guide-cohort&quot;,&quot;guide-countersign&quot;,&quot;celebrations&quot;,&quot;docs&quot;,&quot;states&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;guideLinked&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;mathGateOn&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+class Component extends DCLogic {
+  state = { scene: null, loop: 'available', mayaBase: 8, wisdomFav: false,
+            hqTab: 'home', trailTab: 'map', parentTab: 'queue', guideTab: 'cohort',
+            tier: 3, tierSkin: 'trail', doc: 'recap', statesGroup: 'task', onbStep: 0, readiness: false };
+
+  go(scene){ this.setState({ scene }); const m = document.querySelector('main.scr'); if(m) m.scrollTop = 0; }
+
+  renderVals(){
+    const scene = this.state.scene || this.props.startScene || 'loop';
+    const lp = this.state.loop;
+
+    // ---- scene groups / nav ----
+    const groups = [
+      { title:'Core loop', color:'hsl(40 16% 60%)', items:[['loop','The Loop']] },
+      { title:'Get started', color:'hsl(40 16% 60%)', items:[['onboarding','Onboarding']] },
+      { title:'Student · Trail', color:'hsl(14 60% 62%)', items:[['trail-map','Territory Map'],['trail-landmark','Landmark'],['trail-satchel','The Satchel'],['trail-cardbook','Card Book']] },
+      { title:'Student · HQ', color:'hsl(217 55% 66%)', items:[['hq-home','Dashboard'],['hq-task','Current Task'],['hq-trophy','Trophy Wall'],['hq-file','Founder File'],['hq-almanac','Almanac']] },
+      { title:'Parent', color:'hsl(150 40% 58%)', items:[['parent-queue','Review Queue'],['parent-family','Family Dashboard']] },
+      { title:'Guide · cohort', color:'hsl(265 45% 70%)', items:[['guide-cohort','Cohort Board'],['guide-countersign','Countersign']] },
+      { title:'Celebration', color:'hsl(41 74% 58%)', items:[['celebrations','The Four Tiers']] },
+      { title:'AI documents', color:'hsl(40 16% 60%)', items:[['docs','Recap · Chronicle · Portfolio']] },
+      { title:'States & systems', color:'hsl(40 16% 60%)', items:[['states','Every State']] },
+    ];
+    const navGroups = groups.map(g => ({ title:g.title, color:g.color, items: g.items.map(([key,label]) => {
+      const active = scene === key;
+      return { label, go: () => this.go(key),
+        style:`display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:none;cursor:pointer;font:inherit;font-size:13px;font-weight:${active?600:500};border-radius:9px;padding:8px 11px;margin:1px 0;background:${active?'hsl(0 0% 100% / 0.10)':'transparent'};color:${active?'#fff':'hsl(40 18% 74%)'}`,
+        dot:`flex:0 0 6px;height:6px;width:6px;border-radius:50%;background:${active?g.color:'hsl(0 0% 100% / 0.18)'}` };
+    }) }));
+
+    // ---- scene meta ----
+    const META = {
+      loop:['The core loop','Submit → verify → celebrate','One loop at three scales, wired live. Add evidence on Maya\u2019s phone, then verify or decline on Dad\u2019s — the stamp, meter and wisdom all respond.','hsl(30 8% 46%)'],
+      onboarding:['Onboarding','One family, many founders','A parent sets up the family, adds each child, picks a band — and the band quietly chooses a starting skin the student can change any time.','hsl(30 8% 46%)'],
+      'trail-map':['Student · Trail','The illustrated journey','Maya\u2019s five territories. Distance travelled is progress; the glowing landmark is now; mist is what\u2019s still locked.','hsl(14 60% 50%)'],
+      'trail-landmark':['Student · Trail','A landmark up close','Criterion 1.2 as a short trail of steps on parchment, with the current step glowing and a wisdom card in the margin.','hsl(14 60% 50%)'],
+      'trail-satchel':['Student · Trail','The Satchel — Founder File','Every piece of filed evidence as a labelled item on shelves, organised by territory and landmark.','hsl(14 60% 50%)'],
+      'trail-cardbook':['Student · Trail','The Card Book — Almanac','The wisdom Maya has collected, filed as illustrated cards she can favourite and annotate.','hsl(14 60% 50%)'],
+      'hq-home':['Student · HQ','The founder dashboard','Dev\u2019s HQ: the n/125 credential meter, the one prominent Now card, and the five-phase progress ledger.','hsl(217 55% 52%)'],
+      'hq-task':['Student · HQ','The task spec sheet','A single unit task as a founder\u2019s spec: body, the Done-when line, band variant, evidence checklist, and the optional Readiness Check.','hsl(217 55% 52%)'],
+      'hq-trophy':['Student · HQ','The Trophy Wall','Crests and seals as clean monochrome marks — the same artwork lineage the Trail renders in full colour.','hsl(217 55% 52%)'],
+      'hq-file':['Student · HQ','The Founder File — vault','A document vault: every item filterable by phase, criterion and type, each with its task id, date and verification stamp.','hsl(217 55% 52%)'],
+      'hq-almanac':['Student · HQ','The Almanac','Collected wisdom as typographic margin notes — the quiet HQ finish of the same entries.','hsl(217 55% 52%)'],
+      'parent-queue':['Parent','The Review Queue','Submissions land in real time. Each opens to evidence against the Done-when line with the band bar — one tap to verify, Not Yet needs a note.','hsl(150 40% 40%)'],
+      'parent-family':['Parent','The family dashboard','Every child\u2019s position at a glance — different bands, different skins, one subscription. Progress is shared; evidence never is.','hsl(150 40% 40%)'],
+      'guide-cohort':['Guide · cohort','The cohort board','A Guide sees every student\u2019s position and review status across a 24-student cohort — visibility to coach, never to verify weekday tasks.','hsl(265 45% 58%)'],
+      'guide-countersign':['Guide · cohort','The phase countersign','The Guide\u2019s one formal power: the report card\u2019s second signature on a phase review. It does not seal until both signatures land.','hsl(265 45% 58%)'],
+      celebrations:['Celebration','Proportional to the real thing','Four tiers, engineered as carefully as verification. Small for a task, meaningful for a criterion, big for a phase, enormous for The Path.','hsl(41 74% 46%)'],
+      docs:['AI documents','Look what you did','On each clearing review the app writes the story from verified evidence only — assistive and celebratory, never a grade.','hsl(30 8% 46%)'],
+      states:['States & systems','Every state, warmly held','The full task state machine, the Not Yet moment in both skins, the review ceremonies, the math gate, and how notifications route.','hsl(30 8% 46%)'],
+    };
+    const meta = META[scene] || META.loop;
+
+    const PHONE = ['onboarding','trail-map','trail-landmark','trail-satchel','trail-cardbook','hq-home','hq-task','hq-trophy','hq-file','hq-almanac','parent-queue','parent-family'];
+    const DESK = ['guide-cohort','guide-countersign','celebrations','docs','states'];
+    const TRAILV = scene.startsWith('trail');
+    const parentScene = scene.startsWith('parent');
+
+    // skin toggle pairing (D4: flipping loses nothing)
+    const PAIR = { 'trail-map':'hq-home','hq-home':'trail-map','trail-landmark':'hq-task','hq-task':'trail-landmark','trail-satchel':'hq-file','hq-file':'trail-satchel','trail-cardbook':'hq-almanac','hq-almanac':'trail-cardbook' };
+    const showSkinToggle = scene in PAIR;
+
+    // ---- loop wiring ----
+    const stepState = lp==='verified' ? 'verified' : (lp==='submitted'||lp==='reviewing') ? 'submitted' : lp==='notyet' ? 'not_yet' : 'available';
+    const loopSteps = [
+      { index:1, label:'Set your price', state:'verified' },
+      { index:2, label:'List ten people', state:'verified' },
+      { index:3, label:'Set up money', state:'verified' },
+      { index:4, label:'Ask until yes', state: stepState },
+      { index:5, label:'Deliver & thank', state: lp==='verified' ? 'available' : 'locked' },
+    ];
+    const mayaVerified = this.state.mayaBase + (lp==='verified' ? 1 : 0);
+    const stage = (lp==='available'||lp==='inprogress'||lp==='notyet') ? 'submit' : (lp==='submitted'||lp==='reviewing') ? 'verify' : 'celebrate';
+    const chip = (label, on) => ({ label, style:`font-size:12px;font-weight:600;border-radius:999px;padding:5px 13px;background:${on?'var(--tp-ink)':'var(--tp-surface-sunken)'};color:${on?'#fff':'var(--tp-text-muted)'}` });
+    const loopChips = [ {...chip('1 · Submit', stage==='submit'), sep:'›'}, {...chip('2 · Verify', stage==='verify'), sep:'›'}, {...chip('3 · Celebrate', stage==='celebrate'), sep:''} ];
+    const connLive = lp==='submitted'||lp==='reviewing';
+    const connColor = connLive ? 'var(--tp-awaiting)' : lp==='verified' ? 'var(--tp-verified)' : 'var(--tp-border-strong)';
+    const connLabel = lp==='available' ? 'nothing in flight' : lp==='inprogress' ? 'evidence in the satchel' : connLive ? 'satchel crossing to Dad' : lp==='verified' ? 'stamp on its way back' : 'note on its way back';
+
+    // ---- responsive app shell (desktop/phone) for Student & Parent ----
+    const device = this.state.device || 'phone';
+    const NAV = { trail:[['trail-map','Territory Map'],['trail-landmark','Landmark'],['trail-satchel','Satchel'],['trail-cardbook','Card Book']], hq:[['hq-home','Dashboard'],['hq-task','Current Task'],['hq-trophy','Trophy Wall'],['hq-file','Founder File'],['hq-almanac','Almanac']], parent:[['parent-queue','Review Queue'],['parent-family','Family']] };
+    const role = scene.startsWith('trail') ? 'trail' : scene.startsWith('hq') ? 'hq' : scene.startsWith('parent') ? 'parent' : 'onb';
+    const accent = role==='trail' ? 'var(--tp-phase-sell)' : role==='parent' ? 'var(--tp-phase-grow)' : 'var(--tp-phase-build)';
+    const appNav = (NAV[role]||[]).map(([k,label]) => { const active = scene===k; return { label, go:()=>this.go(k),
+      style:`display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:none;cursor:pointer;font:inherit;font-size:13.5px;font-weight:${active?600:500};border-radius:9px;padding:9px 12px;background:${active?'var(--tp-canvas)':'transparent'};color:${active?'var(--tp-ink)':'var(--tp-text-soft)'};box-shadow:${active?'var(--tp-shadow-hq)':'none'}`,
+      dot:`flex:0 0 7px;height:7px;width:7px;border-radius:50%;background:${active?accent:'var(--tp-border-strong)'}` }; });
+    const dbtn = (on) => `font:inherit;font-size:12px;font-weight:600;cursor:pointer;border:none;border-radius:7px;padding:6px 11px;display:flex;align-items:center;gap:5px;background:${on?'var(--tp-ink)':'transparent'};color:${on?'#fff':'var(--tp-text-soft)'}`;
+    return {
+      ...this.sceneData(scene),
+      navGroups, mayaVerified,
+      loopLabel: { available:'ready', inprogress:'capturing', submitted:'submitted', reviewing:'in review', verified:'verified ✓', notyet:'not yet' }[lp],
+      sceneEyebrow: meta[0], sceneTitle: meta[1], sceneSub: meta[2], sceneEyebrowColor: meta[3],
+      isLoop: scene==='loop', isPhoneScene: PHONE.includes(scene), isDeskScene: DESK.includes(scene),
+      phoneStatusColor: (TRAILV) ? 'var(--tp-trail-text)' : 'var(--tp-ink)',
+      showSkinToggle, skinValue: TRAILV ? 'trail' : 'hq', onSkin: (sk) => { const cur = TRAILV ? 'trail' : 'hq'; if(sk===cur) return; const t = PAIR[scene]; if(t) this.go(t); },
+      fullBtn: 'width:100%;justify-content:center',
+      isAppScene: PHONE.includes(scene),
+      device, appClass: (device==='desktop'?'is-desktop':'is-phone')+' sk-'+(TRAILV?'trail':'hq')+(role==='onb'?' no-side':''),
+      appNav, appName: role==='trail'?'Maya Okafor':role==='hq'?'Dev Sharma':role==='parent'?'Okafor family':'New founder',
+      appRoleLabel: role==='trail'?'Student · Trail':role==='hq'?'Student · HQ':role==='parent'?'Parent · verifier':'Getting set up',
+      appShowSkin: role==='trail'||role==='hq', appIsParent: role==='parent',
+      appTopMark: TRAILV?'var(--tp-trail-text)':'var(--tp-ink)', skinLabelCap: TRAILV?'Trail':'HQ',
+      setDevicePhone: () => this.setState({device:'phone'}), setDeviceDesktop: () => this.setState({device:'desktop'}),
+      devPhoneStyle: dbtn(device==='phone'), devDeskStyle: dbtn(device==='desktop'),
+
+      // loop
+      loopSteps,
+      loopAvailable: lp==='available', loopInprogress: lp==='inprogress', loopWaiting: lp==='submitted'||lp==='reviewing',
+      loopVerified: lp==='verified', loopNotyet: lp==='notyet',
+      dadQuiet: lp==='available'||lp==='inprogress', dadQueue: lp==='submitted', dadReviewing: lp==='reviewing',
+      dadVerified: lp==='verified', dadNotyet: lp==='notyet',
+      loopChips, connLive, connColor,
+      connAnim: connLive ? 'background-image:repeating-linear-gradient(0deg,var(--tp-awaiting) 0 6px,transparent 6px 12px);background-size:2px 12px;animation:conn-flow .6s linear infinite' : '',
+      connLabel,
+      loopWisdom: { text:'Your first yes is worth more than the money — it proves a stranger will pay for something you made.', attribution:'The 120', original:true },
+      wisdomFav: this.state.wisdomFav, toggleWisdomFav: () => this.setState(s=>({wisdomFav:!s.wisdomFav})),
+      loopEvidence: [ {kind:'photo', label:'Photo — the $2 coin at the Nguyens\u2019 door'}, {kind:'log', label:'Sale log — Mrs. Nguyen · blue bracelet · $2 · Jul 18'}, {kind:'text', label:'Say-back witnessed: \u201Cbracelets, two dollars\u201D'} ],
+      loopAddEvidence: () => this.setState({loop:'inprogress'}),
+      loopSubmit: () => this.setState({loop:'submitted'}),
+      loopWithdraw: () => this.setState({loop:'inprogress'}),
+      loopOpenReview: () => this.setState({loop:'reviewing'}),
+      loopVerify: () => this.setState({loop:'verified'}),
+      loopNotYet: () => this.setState({loop:'notyet'}),
+      loopFix: () => this.setState({loop:'inprogress'}),
+      loopReset: () => this.setState({loop:'available', wisdomFav:false}),
+    };
+  }
+
+  sceneData(scene){ return Object.assign({}, this.trailScenes(scene), this.hqScenes(scene), this.parentScenes(scene), this.onbScene(scene), this.deskScenes(scene)); }
+
+  trailScenes(scene){
+    const A = 'assets/evidence/';
+    const cf = this.state.cardFav || { 0:true };
+    const ICON = { photo:'image', log:'file', text:'text', video:'video', link:'link', audio:'radio' };
+    const cardsBase = [
+      { text:'Your first yes is worth more than the money — it proves a stranger will pay for something you made.', attribution:'The 120', original:true },
+      { text:'A no is not a door closing. It is a map telling you where the wall is.', attribution:'The 120', original:true },
+      { text:'Sara Blakely\u2019s dad asked her every week: \u201CWhat did you fail at?\u201D Your no\u2019s are your answer.', attribution:'On rejection' },
+      { text:'Price is what you pay. Value is what you get.', attribution:'Warren Buffett' },
+    ];
+    return {
+      scTrailMap: scene==='trail-map', scTrailLandmark: scene==='trail-landmark',
+      scTrailSatchel: scene==='trail-satchel', scTrailCardbook: scene==='trail-cardbook',
+      enterLandmark: () => this.go('trail-landmark'), backToMap: () => this.go('trail-map'),
+      openStepInLoop: () => this.go('loop'), goSatchel: () => this.go('trail-satchel'), goCardbook: () => this.go('trail-cardbook'),
+      lmSteps: [
+        { index:1, label:'Set your price', state:'verified' }, { index:2, label:'List ten people', state:'verified' },
+        { index:3, label:'Set up money', state:'verified' }, { index:4, label:'Ask until yes', state:'available' },
+        { index:5, label:'Deliver & thank', state:'locked' },
+      ],
+      lmWisdom: { text:'A no is not a door closing. It is a map telling you where the wall is.', attribution:'The 120', original:true },
+      sellPips: [ {n:'1',st:'done'}, {n:'2',st:'current'}, {n:'3',st:'ahead'}, {n:'4',st:'ahead'}, {n:'5',st:'ahead'} ].map(p => ({ n:p.n,
+        style:'flex:0 0 auto;height:40px;width:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--tp-font-mono);font-size:14px;font-weight:600;'+
+          (p.st==='done' ? 'background:var(--tp-phase-sell);color:#fff' : p.st==='current' ? 'background:#fff;color:var(--tp-phase-sell);box-shadow:0 0 0 3px var(--tp-phase-sell);animation:tp-pulse 2.2s var(--tp-ease-in-out) infinite' : 'background:hsl(var(--phase-sell) / 0.12);color:hsl(var(--phase-sell) / 0.45)') })),
+      lockedTerr: [ {idx:'02',name:'BUILD',place:'The Workshop Quarter'}, {idx:'03',name:'VALIDATE',place:'The Observatory'}, {idx:'04',name:'GROW',place:'The Growing High Street'}, {idx:'05',name:'SCALE',place:'The Summit City'} ],
+      satchelGroups: [
+        { lm:'1.1', title:'Pitch a product in 60 seconds', items:[
+          { id:'1.1.3', icon:ICON.video, label:'Three clean pitch runs, no notes', thumb:null },
+          { id:'1.1.5', icon:ICON.log, label:'Delivered to Mr. Alvarez · say-back matched', thumb:null },
+        ]},
+        { lm:'1.2', title:'Make a real sale', items:[
+          { id:'1.2.1', icon:ICON.text, label:'Offer & price — bracelets, $2 each', thumb:null },
+          { id:'1.2.4', icon:ICON.photo, label:'The $2 coin at the door', thumb:A+'doorstep.jpg' },
+          { id:'1.2.4', icon:ICON.log, label:'Sale log — Mrs. Nguyen · blue · $2', thumb:null },
+          { id:'1.2.5', icon:ICON.photo, label:'Handing over the blue bracelet', thumb:A+'handoff.jpg' },
+          { id:'1.2.5', icon:ICON.photo, label:'Saturday booth', thumb:A+'booth.jpg' },
+        ]},
+      ].map(g => ({ ...g, items: g.items.map(it => ({ ...it, thumbBg: it.thumb ? `position:absolute;inset:0;background-image:url(${it.thumb});background-size:cover;background-position:center` : '' })) })),
+      cardbook: cardsBase.map((e,i) => ({ ...e, fav: !!cf[i], onFav: () => this.setState(s => { const c = { ...(s.cardFav||{0:true}) }; c[i] = !c[i]; return { cardFav:c }; }) })),
+    };
+  }
+
+  hqScenes(scene){
+    const ICON = { photo:'image', log:'file', text:'text', video:'video', link:'link', document:'file' };
+    const PC = { sell:'var(--tp-phase-sell)', build:'var(--tp-phase-build)', validate:'var(--tp-phase-validate)', grow:'var(--tp-phase-grow)', scale:'var(--tp-phase-scale)' };
+    const vf = this.state.vaultFilter || 'all';
+    const earned = { sell:5, build:5, validate:5, grow:4, scale:0 };
+    const items = [
+      { id:'4.5.1', type:'document', label:'Board pack — 5 slides, every number traced', date:'Jul 16', phase:'grow' },
+      { id:'4.4.4', type:'document', label:'Supplier terms — signed by both sides', date:'Jul 9', phase:'grow' },
+      { id:'4.2.4', type:'log', label:'P&L — four consecutive weeks', date:'Jul 2', phase:'grow' },
+      { id:'4.1.5', type:'log', label:'Sales ledger — 11 sales, 3 repeat customers', date:'Jun 28', phase:'grow' },
+      { id:'3.4.4', type:'video', label:'Solo validation talk — Family Demo Session', date:'Jun 18', phase:'validate' },
+      { id:'3.2.5', type:'document', label:'Pricing verdict — two groups, one surprise', date:'Jun 6', phase:'validate' },
+      { id:'2.5.5', type:'video', label:'Live product demo — 4m 12s', date:'Apr 30', phase:'build' },
+      { id:'2.1.5', type:'link', label:'StudyHall v1 — live URL', date:'Apr 2', phase:'build' },
+      { id:'1.2.5', type:'photo', label:'First sale — the handoff', date:'Feb 22', phase:'sell', thumb:'assets/evidence/handoff.jpg' },
+    ].map(it => ({ ...it, icon:ICON[it.type], accent:PC[it.phase], thumbBg: it.thumb ? `position:absolute;inset:0;background-image:url(${it.thumb});background-size:cover;background-position:center` : '' }));
+    const filtered = vf==='all' ? items : items.filter(i => i.phase===vf);
+    const mkFilter = (k,l) => ({ label:l, go:()=>this.setState({vaultFilter:k}),
+      style:`font:inherit;font-size:12px;font-weight:600;border-radius:999px;padding:6px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${vf===k?'var(--tp-ink)':'var(--tp-border)'};background:${vf===k?'var(--tp-ink)':'var(--tp-canvas)'};color:${vf===k?'#fff':'var(--tp-text-soft)'}` });
+    return {
+      scHqHome: scene==='hq-home', scHqTask: scene==='hq-task', scHqTrophy: scene==='hq-trophy',
+      scHqFile: scene==='hq-file', scHqAlmanac: scene==='hq-almanac',
+      mathGate: !!this.props.mathGateOn,
+      devVerified: 98, goHqTask: () => this.go('hq-task'), backHqHome: () => this.go('hq-home'),
+      devNow: { id:'4.5.4', title:'Present and take the hard questions', phase:'grow', state:'available', liveMoment:true,
+        body:'Deliver the board pack to the Family Board and take at least three questions — at least one uncomfortable. No parent rescues.',
+        doneWhen:'The board meeting has run, recorded on video, with all questions answered by the student alone.',
+        bandVariant:'Grades 9–12: two non-family adults on the board, at least one who reads financial statements in real life.' },
+      devPhases: [
+        { key:'sell', criteriaCleared:5, tasksVerified:25, tasksTotal:25, status:'sealed', sealedDate:'Mar 12, 2026' },
+        { key:'build', criteriaCleared:5, tasksVerified:26, tasksTotal:26, status:'sealed', sealedDate:'May 3, 2026' },
+        { key:'validate', criteriaCleared:5, tasksVerified:24, tasksTotal:24, status:'sealed', sealedDate:'Jun 21, 2026' },
+        { key:'grow', criteriaCleared:4, tasksVerified:23, tasksTotal:25, status:'active' },
+        { key:'scale', criteriaCleared:0, tasksVerified:0, tasksTotal:25, status:'locked' },
+      ],
+      readiness: this.state.readiness, toggleReadiness: () => this.setState(s => ({ readiness:!s.readiness })),
+      trophyPhases: ['sell','build','validate','grow','scale'].map((k,pi) => ({ key:k, name:['SELL','BUILD','VALIDATE','GROW','SCALE'][pi], crests:[1,2,3,4,5].map(ci => ({ criterion:`${pi+1}.${ci}`, locked: ci>earned[k] })) })),
+      devSeals: [ {phase:'sell',date:'Mar 12 2026',sealed:true}, {phase:'build',date:'May 3 2026',sealed:true}, {phase:'validate',date:'Jun 21 2026',sealed:true}, {phase:'grow',date:'in review',sealed:false}, {phase:'scale',date:'locked',sealed:false} ],
+      vaultItems: filtered, vaultFilters: [['all','All'],['sell','Sell'],['build','Build'],['validate','Validate'],['grow','Grow']].map(a => mkFilter(a[0],a[1])),
+      marginNotes: [
+        { text:'Price is what you pay. Value is what you get.', attribution:'Warren Buffett' },
+        { text:'The pass bar is set before the test — so hope can\u2019t move the goalposts after.', attribution:'The 120', original:true },
+        { text:'Revenue is vanity, profit is sanity, but cash is king.', attribution:'Business proverb' },
+        { text:'Your real job as a founder is to make yourself unnecessary to the day-to-day.', attribution:'The 120', original:true },
+        { text:'What gets measured gets managed.', attribution:'Peter Drucker' },
+      ],
+    };
+  }
+
+  parentScenes(scene){
+    const pqId = this.state.pqItem || null;
+    const res = this.state.pqResult || null;
+    const base = [
+      { id:'maya', child:'Maya', initial:'M', color:'var(--tp-phase-sell)', taskId:'1.2.4', title:'Ask until one yes', ev:2, time:'2m ago', fresh:true,
+        review:{ phase:'sell', doneWhen:'Money from a non-family customer is in hand and the sale (who, what, amount, date) is logged.', band:'Grades 3–5: a parent is physically present at every ask; the child speaks the ask.',
+          evidence:[ {kind:'photo',label:'The $2 coin at the Nguyens\u2019 door'}, {kind:'log',label:'Sale log — Mrs. Nguyen · blue bracelet · $2 · Jul 18'} ] } },
+      { id:'theo', child:'Theo', initial:'T', color:'var(--tp-phase-build)', taskId:'2.1.5', title:'Go live and test from outside', ev:3, time:'1h ago', fresh:false,
+        review:{ phase:'build', doneWhen:'The live URL loads on someone else\u2019s device, the link is logged, and a parent confirms pricing + instructions are visible.', band:'Grades 6–8: child publishes with parent review.',
+          evidence:[ {kind:'link',label:'studyhall.app — live URL'}, {kind:'photo',label:'Loaded on Nan\u2019s phone, different network'}, {kind:'text',label:'Price ($4/mo) + how-to visible on the page'} ] } },
+    ];
+    const queueItems = base.map(q => ({ ...q,
+      open: () => this.setState({ pqItem:q.id }),
+      verify: () => this.setState({ pqItem:null, pqResult:{ name:q.child, ok:true } }),
+      notyet: () => this.setState({ pqItem:null, pqResult:{ name:q.child, ok:false } }),
+      initStyle:`flex:0 0 auto;display:flex;height:38px;width:38px;align-items:center;justify-content:center;border-radius:50%;font-weight:700;font-size:15px;color:#fff;background:${q.color}` }));
+    const active = base.find(q => q.id===pqId) || null;
+    const activeVerify = active ? () => this.setState({ pqItem:null, pqResult:{ name:active.child, ok:true } }) : null;
+    const activeNotYet = active ? () => this.setState({ pqItem:null, pqResult:{ name:active.child, ok:false } }) : null;
+    const kids = [
+      { name:'Maya', initial:'M', band:'Grade 4 · Trail', color:'var(--tp-phase-sell)', idx:'01', phase:'SELL', criterion:'Criterion 1.2 · Make a real sale', verified:8, pending:1, demo:'Sat, Jul 26',
+        segs:[ 'done','current','ahead','ahead','ahead' ] },
+      { name:'Theo', initial:'T', band:'Grade 7 · HQ', color:'var(--tp-phase-build)', idx:'02', phase:'BUILD', criterion:'Criterion 2.1 · Ship a working product', verified:31, pending:1, demo:'Sat, Jul 26',
+        segs:[ 'current','ahead','ahead','ahead','ahead' ] },
+    ].map(k => ({ ...k, review:()=>this.go('parent-queue'), pips: k.segs.map(s => ({ style:`flex:1;height:7px;border-radius:3px;background:${s==='done'?k.color:s==='current'?`color-mix(in srgb, ${k.color} 45%, white)`:'var(--tp-border)'}` })) }));
+    return {
+      scParentQueue: scene==='parent-queue', scParentFamily: scene==='parent-family',
+      pqNone: !pqId, pqActive: active, queueItems, closePq: () => this.setState({ pqItem:null }),
+      activeVerify, activeNotYet,
+      pqToast: res ? { text: res.ok ? `Verified — stamp sent to ${res.name}` : `Sent back to ${res.name} with a note`, color: res.ok ? 'var(--tp-verified)' : 'var(--tp-not-yet)', ok:res.ok } : null,
+      pqHasToast: !!res,
+      goQueue: () => this.go('parent-queue'), kids,
+    };
+  }
+
+  onbScene(scene){
+    const step = this.state.onbStep || 0;
+    const band = this.state.onbBand || 'g3_5';
+    const skin = this.state.onbSkin || (band==='g3_5' ? 'trail' : 'hq');
+    const bands = [
+      ['g3_5','Grades 3–5','Co-pilot — a parent may scribe and drive the tools; the child directs every decision aloud.','Trail'],
+      ['g6_8','Grades 6–8','Support — the child does the work; the parent reviews before anything ships or sells.','HQ'],
+      ['g9_12','Grades 9–12','Verify only — the child works solo; the parent supervises safety and verifies.','HQ'],
+    ];
+    return {
+      scOnboarding: scene==='onboarding', onbStep: step,
+      onbDots: [0,1,2,3].map(i => ({ style:`height:6px;border-radius:3px;${i===step?'width:24px;background:var(--tp-ink)':'width:6px;background:var(--tp-border-strong)'}` })),
+      onb0: step===0, onb1: step===1, onb2: step===2, onb3: step===3, onbShowBack: step>0,
+      onbNext: () => this.setState(s => ({ onbStep: Math.min(3, (s.onbStep||0)+1) })),
+      onbBack: () => this.setState(s => ({ onbStep: Math.max(0, (s.onbStep||0)-1) })),
+      onbBands: bands.map(([k,label,desc,defSkin]) => ({ label, desc, defSkin, active: band===k, sel: () => this.setState({ onbBand:k, onbSkin:null }),
+        style:`text-align:left;width:100%;cursor:pointer;font:inherit;border-radius:14px;padding:14px;border:2px solid ${band===k?'var(--tp-ink)':'var(--tp-border)'};background:${band===k?'var(--tp-surface-sunken)':'var(--tp-canvas)'}` })),
+      onbBandLabel: (bands.find(b => b[0]===band) || bands[0])[1],
+      onbSkin: skin, onbIsTrail: skin==='trail', onbIsHq: skin==='hq',
+      onbSetTrail: () => this.setState({ onbSkin:'trail' }), onbSetHq: () => this.setState({ onbSkin:'hq' }),
+      finishOnb: () => { this.setState({ onbStep:0 }); this.go(skin==='trail' ? 'trail-map' : 'hq-home'); },
+    };
+  }
+
+  deskScenes(scene){
+    const PCV = ['var(--tp-phase-sell)','var(--tp-phase-build)','var(--tp-phase-validate)','var(--tp-phase-grow)','var(--tp-phase-scale)'];
+    const MONT = ['assets/evidence/booth.jpg','assets/evidence/doorstep.jpg','assets/evidence/handoff.jpg','assets/evidence/product.jpg'];
+    const SMETA = {
+      active:{ label:'On track', color:'var(--tp-text-muted)' },
+      submitted:{ label:'Parent review', color:'var(--tp-awaiting)' },
+      review:{ label:'Criterion review', color:'var(--tp-phase-validate)' },
+      countersign:{ label:'Countersign', color:'var(--tp-wax)' },
+      stalled:{ label:'Stalled', color:'var(--tp-not-yet)' },
+    };
+    const students = [
+      { name:'Dev Sharma', band:'9–12', idx:4, crit:'4.5 · board meeting', status:'countersign' },
+      { name:'Grace Tan', band:'6–8', idx:5, crit:'5.5 · capstone', status:'countersign' },
+      { name:'Aria Lopez', band:'6–8', idx:3, crit:'3.2 · pricing', status:'active' },
+      { name:'Ben Osei', band:'9–12', idx:5, crit:'5.1 · automation', status:'active' },
+      { name:'Chloe Kim', band:'3–5', idx:2, crit:'2.3 · 40 contacts', status:'submitted' },
+      { name:'Diego Ruiz', band:'6–8', idx:4, crit:'4.2 · P&L', status:'review' },
+      { name:'Emma Novak', band:'9–12', idx:3, crit:'3.4 · solo test', status:'active' },
+      { name:'Farah Aziz', band:'3–5', idx:1, crit:'1.5 · outreach', status:'active' },
+      { name:'Hugo Marsh', band:'9–12', idx:2, crit:'2.5 · live demo', status:'stalled' },
+      { name:'Ivy Chen', band:'3–5', idx:2, crit:'2.1 · ship it', status:'submitted' },
+      { name:'Jonas Weber', band:'6–8', idx:4, crit:'4.4 · negotiate', status:'active' },
+      { name:'Kaya Bright', band:'9–12', idx:3, crit:'3.5 · publish', status:'active' },
+    ];
+    const cohort = students.map(s => ({ name:s.name, band:s.band, crit:s.crit,
+      initial:s.name[0], initStyle:`display:flex;height:30px;width:30px;flex:0 0 auto;align-items:center;justify-content:center;border-radius:50%;font-weight:700;font-size:12px;color:#fff;background:${PCV[s.idx-1]}`,
+      segs:[0,1,2,3,4].map(i => ({ style:`flex:1;height:6px;border-radius:2px;background:${i<s.idx-1?PCV[i]:i===s.idx-1?`color-mix(in srgb, ${PCV[i]} 42%, white)`:'var(--tp-border)'}` })),
+      pillStyle:`font-size:11px;font-weight:600;white-space:nowrap;border-radius:999px;padding:3px 10px;color:${SMETA[s.status].color};background:color-mix(in srgb, ${SMETA[s.status].color} 12%, white)`,
+      pill:SMETA[s.status].label, needsSign:s.status==='countersign', showPill:s.status!=='countersign',
+      rowStyle:`display:grid;grid-template-columns:1.6fr 0.5fr 1.4fr 1fr 1fr;gap:14px;align-items:center;padding:12px 16px;border-top:1px solid var(--tp-border);${s.name==='Dev Sharma'?'background:hsl(var(--wax) / 0.04)':''}`,
+      sign:()=>this.go('guide-countersign') }));
+
+    const tier = this.state.tier || 3;
+    const tskin = this.state.tierSkin || 'trail';
+    const tierTabs = [ [1,'Tier 1 · Task'], [2,'Tier 2 · Criterion'], [3,'Tier 3 · Phase'], [4,'Tier 4 · The Path'] ].map(([n,label]) => ({ label, active:tier===n, sel:()=>this.setState({tier:n}),
+      style:`font:inherit;font-size:13px;font-weight:600;cursor:pointer;border-radius:10px;padding:9px 15px;border:1px solid ${tier===n?'var(--tp-ink)':'var(--tp-border)'};background:${tier===n?'var(--tp-ink)':'var(--tp-canvas)'};color:${tier===n?'#fff':'var(--tp-text-soft)'}` }));
+
+    const doc = this.state.doc || 'recap';
+    const docTabs = [ ['recap','Criterion Recap'], ['chronicle','Phase Chronicle'], ['portfolio','Founder Portfolio'] ].map(([k,label]) => ({ label, active:doc===k, sel:()=>this.setState({doc:k}),
+      style:`font:inherit;font-size:13px;font-weight:600;cursor:pointer;border-radius:10px;padding:9px 15px;border:1px solid ${doc===k?'var(--tp-ink)':'var(--tp-border)'};background:${doc===k?'var(--tp-ink)':'var(--tp-canvas)'};color:${doc===k?'#fff':'var(--tp-text-soft)'}` }));
+
+    const cs = this.state.countersigned || false;
+    return {
+      scGuideCohort: scene==='guide-cohort', scGuideCountersign: scene==='guide-countersign',
+      scCelebrations: scene==='celebrations', scDocs: scene==='docs', scStates: scene==='states',
+      guideLinked: this.props.guideLinked !== false, notGuideLinked: this.props.guideLinked === false,
+      cohort,
+      tier, isTier1:tier===1, isTier2:tier===2, isTier3:tier===3, isTier4:tier===4, tierTabs,
+      tierSkin: tskin, setTierSkin: (sk)=>this.setState({tierSkin:sk}),
+      celebMontage: MONT,
+      montageTiles: MONT.map(u => ({ bg:`background-image:url(${u});background-size:cover;background-position:center` })),
+      t2Stats: [ {value:'25',label:'outreach'}, {value:'9',label:'conversations'}, {value:'2',label:'yeses'} ],
+      t3Stats: [ {value:'25',label:'outreach'}, {value:'9',label:'conversations'}, {value:'2',label:'yeses'} ],
+      t4Totals: [ {value:'$412',label:'revenue'}, {value:'63',label:'customers'}, {value:'47',label:'no\u2019s logged'}, {value:'25',label:'crests'} ],
+      countersigned: cs, notCountersigned: !cs, doCountersign: ()=>this.setState({countersigned:true}), resetCountersign: ()=>this.setState({countersigned:false}),
+      phaseCriteria: [
+        { c:'4.1', title:'10 sales or 3 repeat customers', stat:'11 sales · 3 repeat' },
+        { c:'4.2', title:'Simple P&L, four consecutive weeks', stat:'4 weeks · best week circled' },
+        { c:'4.3', title:'One repeating AI process', stat:'thank-you automation · 3 runs' },
+        { c:'4.4', title:'Close one real negotiation', stat:'supplier −18% · both signed' },
+        { c:'4.5', title:'Present financials like a founder', stat:'board · 2 non-family adults' },
+      ],
+      doc, isRecap:doc==='recap', isChronicle:doc==='chronicle', isPortfolio:doc==='portfolio', docTabs,
+      recapDoc: {
+        kicker:'Criterion Recap', student:'Maya Okafor · Grade 4', crit:'1.2', title:'Make a real sale', date:'Filed Jul 18, 2026',
+        sections:[
+          { h:'What this criterion asked', body:'A real customer who isn\u2019t family. Real money changing hands — and the sale logged with who, what, how much, and when.' },
+          { h:'What Maya actually did', body:'Maya set her price at $2 a bracelet, built a list of ten neighbours with Dad, and rehearsed the point of sale start to finish. Across five real asks she heard four no\u2019s and, on Jul 18, one yes — Mrs. Nguyen bought the blue bracelet at the door. Maya delivered it the same afternoon and logged the sale.' },
+          { h:'The headline', body:'First real sale: $2 from a non-family customer, greeting to thank-you, all on her own.' },
+          { h:'A moment from the evidence', body:'From Dad\u2019s verification note — \u201CYou knocked, you smiled, you asked. Mrs. Nguyen said yes to the blue one. That\u2019s a real sale, Maya.\u201D' },
+          { h:'From your Almanac', body:'In week one you kept the card \u201CYour first yes is worth more than the money.\u201D This week it came true: a stranger paid for something you made.' },
+        ] },
+      chronicleDoc: {
+        kicker:'Phase Chronicle', student:'Maya Okafor · Grade 4', crit:'01', title:'SELL — the story of a first business', date:'Sealed after review',
+        sections:[
+          { h:'The arc', body:'Over eight weeks in the Market Town, Maya went from a shy one-liner to a logged sale. She wrote a 60-second pitch, rehearsed it to camera until it was note-free, and delivered it live to a neighbour who repeated it back correctly.' },
+          { h:'The hard parts, told with pride', body:'Criterion 1.3 asked for three no\u2019s. Maya got them — and logged what each taught. \u201CPeople say no when they\u2019re busy, not when it\u2019s bad,\u201D she wrote after no #2, and moved her asks to Saturday mornings.' },
+          { h:'The numbers', body:'25 supervised outreach attempts · 9 real conversations · 2 yeses · first revenue in hand · a one-page cost/price/profit sheet she can teach back to an adult.' },
+          { h:'The wisdom that proved true', body:'\u201CA no is not a door closing — it is a map telling you where the wall is.\u201D By attempt 16, Maya was reading the map.' },
+          { h:'In Maya\u2019s words', body:'\u201CI used to think selling was tricking people. Now I think it\u2019s finding the person who already wanted it.\u201D' },
+        ] },
+      portfolioDoc: {
+        kicker:'Founder Portfolio', student:'Dev Sharma · Grade 10', crit:'★', title:'StudyHall — a year on The Path', date:'The completion credential',
+        sections:[
+          { h:'The year', body:'Dev built StudyHall, an AI study-planner, from a one-line idea to a running business with repeat customers, a four-week P&L, a signed supplier deal, and an automation that answers customers while he sleeps.' },
+          { h:'The real totals', body:'$412 revenue · 63 customers · 47 no\u2019s logged and learned from · 5 phases sealed · 25 crests earned · one week the business ran without him touching it.' },
+          { h:'The evidence gallery', body:'Assembled from the Founder File: the first booth, the doorstep handoff, the live demo, the board meeting — every frame is something that actually happened.' },
+          { h:'What I can do now that I couldn\u2019t a year ago', body:'\u201CI can walk up to a stranger and make an honest ask. I can read a P&L and defend a price. And I can build a thing with AI, ship it, and fix it when a real person tells me it\u2019s broken.\u201D — Dev\u2019s closing page, written in the app.' },
+        ] },
+      notifRows: [
+        { e:'Evidence submitted', s:'—', p:'Push · real-time', g:'—' },
+        { e:'Verified / Not Yet', s:'Push · real-time', p:'—', g:'—' },
+        { e:'Review opened', s:'Push', p:'Push', g:'Countersign request' },
+        { e:'Cleared / sealed', s:'Push', p:'Push', g:'Digest' },
+        { e:'Weekly digest', s:'Optional', p:'On by default', g:'Daily / weekly' },
+        { e:'Stalled nudge', s:'Gentle, in-register', p:'In digest', g:'In digest' },
+      ].map((r,i) => ({ ...r, rowStyle:`display:grid;grid-template-columns:1.3fr 1.2fr 1.2fr 1.2fr;gap:12px;padding:11px 16px;font-size:12.5px;${i%2?'background:var(--tp-surface-sunken)':''}` })),
+    };
+  }
+}
+</script>
+</body>
+</html>

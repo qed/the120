@@ -179,11 +179,11 @@ Decisions carried in: **D15–D26** (origin document).
 
 **The children's-data compliance research failed and produced nothing.** It is unresolved and must not be guessed at.
 
-**This gate must start before Unit 1, not after Unit 12.** It has a long external lead time (counsel), and one of its answers — data residency — is not a scheduling constraint but a project-level architectural fork. It needs a named owner and a start date now.
+**Deferred 2026-07-21 (Peter) → roadmap `TP-1`, gated on/after 2026-10-21.** The decision: test users only until a public launch roughly three months out, so the exposure during this build is a handful of consenting families rather than the public. That is a reasonable risk posture and it unblocks building and testing everything below. **This gate no longer blocks T1.**
 
-**Consequence for T1's exit check.** T1 cannot be verified by "a real family" while the gate is open, because the gate forbids exactly that. The lawful T1 verification is a **staff-family dry run**: adult participants, synthetic evidence, real devices, the full loop. That is sufficient to falsify every platform bet in this plan. Verification with a real child's real evidence happens only after the gate clears.
+**Consequence for T1's exit check.** T1 is verified with **test families** — real devices, the full loop, a small number of families who know they are testing. Verification at public scale waits on TP-1.
 
-**Residency is a fork, not a delay.** The Supabase project already exists and holds `auth.users` and `public.children`, which R31's linkage depends on. Region is fixed at project creation. If the answer requires `ca-central-1`, the remedy is a project migration or a two-project identity split — the second of which breaks R31's linkage premise and Decision 1's single service-role boundary. **Price both branches before Unit 1**; do not treat this as "blocks Unit 5".
+**✅ Data residency — cleared 2026-07-21.** Counsel confirmed the current Supabase region is acceptable, so R31's linkage to `public.children` and Decision 1's single service-role boundary both stand as planned. This was the last pre-build blocker. **T1 has no remaining gate.** Re-check only if the project is recreated or a second project is introduced.
 
 Before any real family uses this, a dedicated task must answer — and a Canadian privacy lawyer must review the consent flow and privacy policy:
 
@@ -796,7 +796,7 @@ browser                    Server Action            Supabase Storage
 | A leaked signed URL for a child's media cannot be revoked | Low | High | Short expiries, private bucket, `allow_any_operation`. Note the tension with the CDN-cost mitigation — resolve toward shorter expiry. |
 | `@theme` cannot be scoped, discovered after components exist | Low | High | Settled up front (Decision 9). Must hold before any component work. |
 | **125 kid-register strings do not exist and no unit authors them** | Certain | High | Not a discovery risk — a confirmed gap. The curriculum has no kid-voice task copy. **Trail is the default skin for Grades 3–5**, the exact persona T1's success story is built around. Needs its own track with a named owner and a milestone, plus Unit 3's fallback-to-standard-register rule so the build can go green before it finishes. |
-| **T1 verification requires a real family, which the launch gate forbids** | Certain | High | Resolved above: T1's exit check is a staff-family dry run with adult participants and synthetic evidence. Real children's evidence only after the gate clears. |
+| T1 verification needs real families before the compliance review is done | Low | Medium | Resolved 2026-07-21: test users only until public launch, and residency is cleared by counsel. T1's exit check is a small number of families who know they are testing, on real devices, running the full loop. |
 | Parent knows the child's password, so a parent can submit as the child and verify as themselves | Medium | Medium | An accepted trust boundary of home study, recorded rather than discovered. R6's guarantee is against forged clients and mis-attributed actors, **not** against a parent choosing to act as their child. Record the session/device distinction in the audit payload as a cheap signal; do not pretend the invariant is stronger than it is. |
 | Vercel and Supabase plan tiers unknown, and both change unit content | Certain | Medium | Establish both before Units 9 and 12. Hobby's daily cron cap defeats Decision 8; Free's 50 MB file ceiling invalidates D21 and the cost model. |
 
@@ -813,7 +813,9 @@ browser                    Server Action            Supabase Storage
 
 Implement this plan with `/ce:work docs/plans/2026-07-21-001-feat-the-path-t1-core-loop-plan.md`.
 
-**Start these three before Unit 1**, because each has a long lead time or forecloses an architecture: the compliance gate (owner + start date), the data-residency fork (price both branches), and the kid-register authoring track (owner + milestone). Also settle the Vercel and Supabase plan tiers — two cheap lookups that change unit content.
+**Nothing blocks this plan. Start at Unit 1.**
+
+The items previously listed here were resolved or deferred on 2026-07-21. Data residency is **cleared by counsel**. The remaining compliance review (`TP-1`, on/after 2026-10-21), kid-register authoring (`TP-2`, before Trail meets Grades 3–5), and the Vercel/Supabase tier checks (`TP-3`, at 30 users) all live in `artifacts/roadmap.md` and none of them gates this build.
 
 **When every unit here is checked off and the verification steps pass, the next step is:**
 `/ce:work docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md` — T2, *The Year*: phase reviews and countersign, install and web push, the skin toggle, Tier 2–3 celebrations, the AI Readiness Check and Criterion Recap, wisdom, and export.

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Design/marketing assets and standalone prototypes — not app source, and
+    // they carry their own dependencies that this project does not install.
+    "artifacts/**",
   ]),
 ]);
 

@@ -218,6 +218,25 @@ All 12 ✦ starter kernels from gauntletcontent.md's ranked picks are live topic
 **G2 · Pathway system (basics → complex)** *(dev)* — 🔴 Not started; content blocker cleared.
 Skill-tree progression: start at foundations, unlock topics by demonstrated mastery (the adaptive fact-tracking from M3 already measures this). Blocker (a) ✅ **complete 2026-07-10**: `artifacts/gauntletcontent.md` shipped — full Pre-Algebra → AP Calc BC taxonomy (346 rated entries, 100 cross-references, kernel registry with in-degree ranking, 28 prioritized top picks incl. the "Starter Twelve" zero-engine-work subset). Blocker (b) resolved: the ninja_maths reference image arrived and adds nothing beyond the written description — design proceeds from the taxonomy alone. Architecture note: current unlock chain (boss gating) generalizes to topic nodes; the fact-tracking store already measures per-kernel mastery.
 
+## 🛤 The Path (app at `/path`) — deferred gates
+
+Requirements: `docs/brainstorms/2026-07-21-the-path-app-requirements.md`. Build: three chained plans, `docs/plans/2026-07-21-00{1,2,3}-feat-the-path-*.md` (T1 core loop → T2 the year → T3 completeness).
+
+**Deferred 2026-07-21 (Peter):** test users only until a public launch ~3 months out, so the items below do not gate building or testing. They are parked here deliberately so they surface when the roadmap is next scanned for work, rather than being carried in anyone's head.
+
+**TP-1 · Children's-data compliance review** *(L; research + outside counsel)* — 🔴 **Gate: on/after 2026-10-21, and before any public launch.** The app stores photos and video of children, and — because the curriculum has kids log real customers and door-to-door prospects by name — information about adults who never consented to being in it. Needs a dedicated research task, then a Canadian privacy lawyer reviewing the consent flow and privacy policy. Covers: PIPEDA status and the consent standard for minors; third parties incidentally captured; retention versus the product's permanence promise; what happens when the child turns 18; breach obligations. **Also gates the AI features** (T2 Units 7–8, T3 Units 3–4) — sending children's photographs to a model vendor requires their retention and training terms confirmed first. Full statement in the T1 plan under *Launch Gate*.
+✅ **Data residency — CLEARED 2026-07-21.** Counsel confirmed the current Supabase region is acceptable. This was the one piece of TP-1 that could not be deferred (region is fixed at project creation and the project already holds `auth.users` and `public.children`), so clearing it removes the only pre-build blocker on T1. **Re-check if the project is ever recreated or a second project is introduced** — the clearance is for the region we are in, not for regions in general.
+
+✅ **AI vendor retention/training terms — CLEARED 2026-07-21.** Peter read the terms for the vendor in use; sending children's photo and video evidence for the Readiness Check and recap generation is permitted. Unblocks T2 Units 7–8 and T3 Units 3–4. ⚠️ **This clearance is vendor-specific and does not transfer.** Switching model providers — or adding a second one for a different capability — re-triggers the check before any child's image is sent.
+
+**Still open in TP-1:** the broader compliance review — PIPEDA status and the consent standard for minors, third parties incidentally captured in evidence, retention versus the permanence promise, what happens at 18, breach obligations. Gated to on/after 2026-10-21 as above.
+
+**TP-2 · Kid-register task copy — 125 strings** *(L; writing, not engineering)* — 🔴 **Gate: before the Trail skin is put in front of Grades 3–5.** Each of the 125 unit tasks needs a kid-voice version alongside the founder-voice one. The 25 *criteria* already have one (`pathStepsKid` in `app/2026-27/data.ts` — the program page's Kids toggle); the 125 *tasks* underneath them do not, and the curriculum brief carries founder voice only. Trail is the default skin for Grades 3–5, so until these exist the youngest users read adult wording. Not parallelizable by adding developers. **The build does not block on it:** T1 Unit 3 falls back to the founder register whenever a kid string is missing and never renders blank. Needs a writer and a milestone.
+
+**TP-3 · Platform tier check — Vercel + Supabase** *(S; two lookups)* — 🔴 **Gate: at 30 real users.** Two plan-tier facts change what The Path can do, and neither bites at test-user volume. **Vercel:** Hobby caps cron jobs at once daily, which would leave a failed verification notification silent for up to 24h and undermine the durable-delivery design (T1 Unit 12). **Supabase:** Free caps files at 50 MB, which moves the native-video-versus-link boundary by an order of magnitude and invalidates both D21's 500 MB per-item cap and the ~$33/mo storage projection (T1 Unit 9). Confirm both, then revisit those two units.
+
+---
+
 ## 🧊 Phase 3 / Later
 
 - ~~CASL-consented nurture email flow~~ → promoted to **E3** (provider decided 2026-07-12: Resend).

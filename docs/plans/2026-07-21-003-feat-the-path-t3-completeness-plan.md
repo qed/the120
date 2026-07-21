@@ -14,7 +14,7 @@ previous: docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md
 
 ## Prerequisite
 
-**T2 must be complete before starting this plan** — with the exception of T2 Units 7 and 8 (the AI layer), which are blocked on the children's-data compliance gate. T3 Unit 3 (Phase Chronicle) and Unit 4 (Founder Portfolio) inherit that same block, since they are the same capability at larger scope.
+**T2 must be complete before starting this plan.** As of 2026-07-21 nothing in T2 is blocked — the AI vendor's retention and training terms were read and cleared, so T2 Units 7–8 and T3 Units 3–4 all proceed. The clearance is vendor-specific; a provider change re-triggers it.
 
 Carried forward: the full state machine including phase reviews and countersign, both skins with a working toggle, celebrations through Tier 3, push and install, export, and wisdom at the Phase 01 floor.
 
@@ -72,7 +72,7 @@ T1 and T2 context applies unchanged. Additional considerations specific to this 
 
 ### Blocked
 
-- ⚠️ **Units 3 and 4 inherit T2's AI-vendor block.** Do not send children's images to any model API until the compliance gate in T1 is answered.
+- ✅ **Units 3 and 4 are unblocked (2026-07-21)** — the vendor's retention and training terms were read and cleared (roadmap `TP-1`). The clearance is vendor-specific; a provider change re-triggers it.
 
 ### Still Open Beyond This Plan
 
@@ -139,7 +139,7 @@ Seven units. Units 1–2 are independent of 3–7.
 
 ---
 
-- [ ] **Unit 3: Phase Chronicle** ⚠️ *blocked on the T1 AI-vendor gate*
+- [ ] **Unit 3: Phase Chronicle**
 
 **Goal:** A document worthy of the report-card gravity the phase review carries.
 
@@ -163,7 +163,7 @@ Seven units. Units 1–2 are independent of 3–7.
 
 ---
 
-- [ ] **Unit 4: Founder Portfolio and Tier 4** ⚠️ *blocked on the T1 AI-vendor gate*
+- [ ] **Unit 4: Founder Portfolio and Tier 4**
 
 **Goal:** The completion credential, and the largest moment in the product. Once per student, ever.
 
@@ -284,7 +284,7 @@ Seven units. Units 1–2 are independent of 3–7.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| **AI-vendor compliance gate still open** | Certain until answered | Critical | Units 3 and 4 hard-blocked. Units 1, 2, 5, 6, 7 proceed independently. |
+| AI-vendor terms — cleared 2026-07-21, but vendor-specific | Low | High | A provider change re-triggers the check before any child's image is sent. Record vendor + date alongside `prompt_version`. |
 | The cohort board drifts into a leaderboard | Medium | High | Decision 1, enforced by test and by an in-code comment citing the brief's rule. |
 | Math gate strands a student one task from a crest | Medium | Medium | Named as an explicit test scenario; decide the behaviour deliberately rather than discovering it. |
 | Portfolio design is guessed at before any real completed file exists | High | Medium | Deferred to implementation against a real Founder File; do not over-specify now. |

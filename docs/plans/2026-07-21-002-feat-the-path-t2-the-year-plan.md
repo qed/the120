@@ -17,7 +17,7 @@ next: docs/plans/2026-07-21-003-feat-the-path-t3-completeness-plan.md
 
 **T1 must be complete and verified end to end before starting this plan.** Every unit here assumes the state machine, the evidence pipeline, and the notification transport are trustworthy.
 
-**How that verification happens depends on the compliance gate.** While the gate is open, T1's exit check is a **staff-family dry run** — adult participants, synthetic evidence, real devices, the full loop. Real children's evidence only after the gate clears. Do not read "verified with a real family" as a licence to walk past the gate.
+**Verification is with test families** — a small number of families who know they are testing, on real devices, running the full loop. Data residency was cleared by counsel on 2026-07-21 and the broader compliance review (roadmap `TP-1`) is gated to on/after 2026-10-21, before public launch. Neither blocks T1 or T2.
 
 Carried forward from T1 and assumed present: `path-rules.ts` and the transition table, the transition RPC, `resolvePathAccess`, the content package, the evidence pipeline with offline queue, `path_notification_sends`, the design foundation and both skins (T1 Unit 13), the student app shell and task surface (T1 Unit 14), the parent surfaces (T1 Unit 15), and the Tier 1 celebration and in-app notification surface (T1 Unit 16).
 
@@ -129,7 +129,7 @@ Everything in T1's Context section still applies. Additional findings that shape
 
 ### Blocked
 
-- ⚠️ **Units 7 and 8 (the AI layer) are blocked on the T1 launch gate's AI-vendor question:** whether any provider trains on or retains API-submitted images of children under PIPEDA. This is a compliance question wearing an engineering hat. **Do not send a single child's photograph to any model API until it is answered.** Everything else in T2 can proceed.
+- ✅ **Units 7 and 8 are unblocked (2026-07-21).** The vendor's retention and training terms were read and cleared, so sending children's photo and video evidence to the model API is permitted. ⚠️ **The clearance is vendor-specific.** If the Readiness Check or the recap generator later moves to a different provider — or a second provider is added for a capability the first lacks — the terms must be re-read before any child's image is sent. Record the vendor and the date alongside `prompt_version` in the AI evaluations table so a future reader knows which terms applied.
 
 ## Implementation Units
 
@@ -319,13 +319,13 @@ Ten units. Units 1–4 are independent of each other; 5–6 depend on 1; 7–8 a
 
 ---
 
-- [ ] **Unit 7: AI Readiness Check** ⚠️ *blocked on the T1 launch gate's AI-vendor question*
+- [ ] **Unit 7: AI Readiness Check**
 
 **Goal:** A student can ask, before submitting, whether anything looks missing — advisory only, never a verdict.
 
 **Requirements:** Brief §12 capability 1, and its hard rule that AI never verifies, grades, or gates.
 
-**Dependencies:** T1 Unit 10. **Blocked:** do not send any child's photograph to a model API until the vendor retention and training question is answered.
+**Dependencies:** T1 Unit 10. Vendor terms cleared 2026-07-21 — see Open Questions for the vendor-change caveat.
 
 **Files:** Create `supabase/migrations/<ts>_path_ai_evaluations.sql`, `app/path/lib/ai/readiness.ts` (plain), `app/path/lib/ai/readiness-rules.ts` (pure), `app/path/lib/ai/frame-sample.ts` (client), `app/path/components/ReadinessPanel.tsx`. Test: `app/path/lib/ai/__tests__/readiness-rules.test.ts`.
 
@@ -353,7 +353,7 @@ Ten units. Units 1–4 are independent of each other; 5–6 depend on 1; 7–8 a
 
 ---
 
-- [ ] **Unit 8: AI Criterion Recap** ⚠️ *blocked on the same gate*
+- [ ] **Unit 8: AI Criterion Recap**
 
 **Goal:** When a criterion clears, the student gets a document that says *look what you did*.
 
@@ -453,7 +453,7 @@ Ten units. Units 1–4 are independent of each other; 5–6 depend on 1; 7–8 a
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| **AI vendor retention of children's images unresolved** | Certain | Critical | Units 7 and 8 are hard-blocked. Everything else proceeds. |
+| AI vendor terms cleared, but the clearance is vendor-specific | Low | High | A provider change — or adding a second provider — re-triggers the terms check before any child's image is sent. Record vendor + date alongside `prompt_version`. |
 | iOS push reach is low — install, open, tap, grant is a four-step funnel on a child's device | High | Medium | Push is an enhancement; email to the parent remains the reliable channel per R12. Do not degrade email once push exists. |
 | VAPID key rotation is one-way with no re-key path | Low | High | Store `vapid_key_id` per subscription; back keys up outside Vercel; set via `--value`/REST, never a PS 5.1 pipe. |
 | The Apple `sub` angle-bracket trap silently 403s every iOS send | Medium | Medium | Config-time validation test (Unit 3) that rejects angle brackets before any send. |

@@ -21,6 +21,7 @@ import {
   stampCall,
   type ActionResult,
 } from "@/app/crm/lib/actions/families";
+import { resendWelcome } from "@/app/crm/lib/actions/welcome";
 import { useToast } from "@/app/crm/components/Toast";
 import { fmtDay } from "@/app/crm/lib/dates";
 import {
@@ -38,6 +39,24 @@ function todayStr(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** R13 gate-closed reason (null = "ok", i.e. emailable). */
+function welcomeReasonLabel(reason: string): string | null {
+  switch (reason) {
+    case "no-consent":
+      return "no consent";
+    case "revoked":
+      return "consent revoked";
+    case "expired":
+      return "consent expired";
+    case "no-email":
+      return "no email";
+    case "merged":
+      return "merged record";
+    default:
+      return null;
+  }
 }
 
 export default function DrawerHeader({
@@ -123,6 +142,20 @@ export default function DrawerHeader({
     );
     if (!sure) return;
     await run(() => revokeConsent({ familyId: detail.id }), "Consent revoked");
+  };
+
+  // R13: send / resend the welcome email. Deliberate (bypasses the NULL claim
+  // via CAS on the stamp shown here). The server re-checks the CASL gate.
+  const handleWelcomeSend = async () => {
+    const verb = detail.welcomeEmailAt ? "Resend" : "Send";
+    const sure = window.confirm(
+      `${verb} the Welcome email to ${detail.name} (${detail.email ?? "no email"})?`
+    );
+    if (!sure) return;
+    await run(
+      () => resendWelcome({ familyId: detail.id, resendOf: detail.welcomeEmailAt }),
+      `Welcome email ${detail.welcomeEmailAt ? "resent" : "sent"}`
+    );
   };
 
   const stampButton = (kind: StampKind, existing: string | null) => (
@@ -236,6 +269,19 @@ export default function DrawerHeader({
           consented={detail.consented}
           revoked={Boolean(detail.consentRevokedAt)}
         />
+        {/* R12: welcome-email sent status. */}
+        <span
+          className="rounded-full border border-crm-line2 px-2 py-[3px] font-mono text-[9px] uppercase tracking-[0.08em] text-crm-muted"
+          title={
+            detail.welcomeEmailAt
+              ? `Welcome email sent ${fmtDay(detail.welcomeEmailAt)}`
+              : "Welcome email not sent yet"
+          }
+        >
+          {detail.welcomeEmailAt
+            ? `Welcome sent · ${fmtDay(detail.welcomeEmailAt)}`
+            : "Welcome not sent"}
+        </span>
       </div>
 
       {/* Action row */}
@@ -253,6 +299,38 @@ export default function DrawerHeader({
         >
           Send from library
         </button>
+
+        {/* R13: send / resend the welcome email. Disabled with a visible reason
+            when the family isn't emailable (gate-closed state). */}
+        {(() => {
+          const reasonLabel = welcomeReasonLabel(detail.welcomeEmailReason);
+          const label = detail.welcomeEmailAt ? "Resend welcome" : "Send welcome";
+          return (
+            <div className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                disabled={busy || reasonLabel !== null}
+                aria-describedby={reasonLabel ? `welcome-reason-${detail.id}` : undefined}
+                title={reasonLabel ? `Can't send — ${reasonLabel}` : undefined}
+                onClick={handleWelcomeSend}
+              >
+                {label}
+                {detail.welcomeEmailAt && !reasonLabel && (
+                  <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-crm-green" />
+                )}
+              </button>
+              {reasonLabel && (
+                <span
+                  id={`welcome-reason-${detail.id}`}
+                  className="font-mono text-[9px] uppercase tracking-[0.08em] text-crm-faint"
+                >
+                  {reasonLabel}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* R5: log a warm conversation on this family — a small note popover
             (mirrors the call-stamp backdate popover above). */}

@@ -6,6 +6,7 @@
  */
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { emailableReason, type EmailableReason } from "@/app/lib/welcome/welcome-rules";
 import {
   buildCopilotSummary,
   deriveNextMove,
@@ -54,6 +55,7 @@ export interface FamilyRow {
   consent_at: string | null;
   consent_source: string | null;
   consent_revoked_at: string | null;
+  consent_expires_at: string | null;
   heat_score: number;
   concerns: string[];
   engagement_signals: string[];
@@ -147,7 +149,7 @@ export interface LibraryItemRow {
 const FAMILY_COLUMNS =
   "id, parent_id, parent_name, email, phone, spouse_name, kids, kid_count, source, " +
   "referral_code, area, consent_given, consent_at, consent_source, " +
-  "consent_revoked_at, heat_score, concerns, engagement_signals, " +
+  "consent_revoked_at, consent_expires_at, heat_score, concerns, engagement_signals, " +
   "last_touch_at, call_booked_at, call_held_at, stage_override, " +
   "deposit_asked_referral, signup_at, dossier_submitted_at, " +
   "welcome_email_at, merged_into_id, created_at, updated_at";
@@ -186,6 +188,12 @@ export interface PipelineFamily {
   consentAt: string | null;
   consentSource: string | null;
   consentRevokedAt: string | null;
+  /** R12: the welcome-email sent stamp (null = not sent yet). */
+  welcomeEmailAt: string | null;
+  /** R12/R13: why the family is/isn't welcome-emailable, for the chip + resend
+   *  disabled state ("ok" | "no-consent" | "revoked" | "expired" | "merged" |
+   *  "no-email"). */
+  welcomeEmailReason: EmailableReason;
   lastTouchAt: string | null;
   callBookedAt: string | null;
   callHeldAt: string | null;
@@ -394,6 +402,14 @@ function composeFamily(
     consentAt: family.consent_at,
     consentSource: family.consent_source,
     consentRevokedAt: family.consent_revoked_at,
+    welcomeEmailAt: family.welcome_email_at,
+    welcomeEmailReason: emailableReason({
+      consent_given: family.consent_given,
+      consent_revoked_at: family.consent_revoked_at,
+      consent_expires_at: family.consent_expires_at,
+      merged_into_id: family.merged_into_id,
+      email: family.email,
+    }),
     lastTouchAt: family.last_touch_at,
     callBookedAt: family.call_booked_at,
     callHeldAt: family.call_held_at,

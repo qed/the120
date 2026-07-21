@@ -3,6 +3,7 @@ title: "feat: The Path T1 — the core loop at /path"
 type: feat
 status: active
 date: 2026-07-21
+deepened: 2026-07-21
 origin: docs/brainstorms/2026-07-21-the-path-app-requirements.md
 tier: T1
 next: docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md
@@ -38,7 +39,7 @@ Per **D22** this build deliberately does not target the 19 Sept 2026 cohort star
 
 Inherited behaviour in T1: task state machine and concurrency (brief §9.1, §9.2, §9.5), Criterion Review (§9.3), data model (§10), Tier 1 celebration and the Not Yet moment (§5), roles (§14), privacy non-negotiables (§11).
 
-Decisions carried in: **D15–D26** (origin document).
+Decisions carried in: **D15–D27** (origin document; D27 — per-student program-version pinning — was added during the deepening pass).
 
 ## Scope Boundaries
 
@@ -111,7 +112,7 @@ Decisions carried in: **D15–D26** (origin document).
 - **RLS performance:** wrap function calls as `(select fn())` so Postgres builds an initPlan and evaluates once per statement, not per row (a security-definer function measured 178,000 ms → 12 ms). Specify `TO authenticated`. Index policy columns.
 - **`app_metadata` changes are not reflected in `auth.jwt()` until token refresh.** Never optimize the DB lookup away into a pure claim check.
 - **Never module-scope a Supabase client** — Vercel Fluid Compute reuses warm instances and would leak sessions between users.
-- `supabase/config.toml` has `enable_confirmations = false`, which is why R2's system addresses are expected to work — **verify it** (Unit 6).
+- `supabase/config.toml` has `enable_confirmations = false`, which is why R2's system addresses are expected to work — **verified by the Unit 2 spike** (promoted from Unit 6 in the deepening pass).
 - **`ca-central-1` is available**; region is chosen at project creation and migration later is painful. Relevant to the launch gate below.
 
 ### Offline and media research
@@ -239,25 +240,34 @@ browser                    Server Action            Supabase Storage
 
 ## Implementation Units
 
-**Sixteen units. Unit numbers are stable IDs, not the execution sequence** — Units 13–16 were added after review and must run in the positions below, not last.
+**Sixteen units. Unit numbers are stable IDs, not the execution sequence.** *(Sequencing corrected in the 2026-07-21 deepening pass: the old strictly-serial order hid two parallel tracks and misstated Unit 13's constraint.)*
 
-**Execution order:**
+**Execution structure — two parallel tracks after the prerequisites, converging at Unit 7:**
 
-`1 → 2 → 13 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 14 → 15 → 11 → 12 → 16`
+```
+1 → 2 ─┬─ 13 (design foundation) ─────┐
+       ├─ 4-DDL → 5 → 6 ──────────────┤
+       └─ 3 → 4-seed ─────────────────┴→ 7 → 8 → 9 → 10 → 14 → 15 → 11 → 12 → 16
+```
 
-| Order | Unit | Why here |
+*The diagram is a sketch of the three parallel branches; the edges list below is authoritative.*
+
+**Hard edges, stated precisely so a re-sequencer cannot break them:**
+- `2 → 13`, and `13 → {6, 9, 10, 11, 14, 15, 16}` — Unit 13 must precede **Unit 6's sign-in page**, the first rendered surface, not merely "any component". Unit 13 has **no** edge into 3, 4, 5, 7, or 8 — it runs as its own parallel branch, not ahead of the identity track. Its early start is chosen for marketing-file soak time (it is the only other unit touching `app/globals.css` / `app/layout.tsx`, and landing it early maximizes time for a regression to surface — the same logic that puts Unit 1 first).
+- **Unit 4 splits.** Its **DDL half** (four tables) depends only on Unit 2. Its **seed half** (`scripts/seed-path-content.ts`) depends on Unit 3 **and on the 4-DDL migration having been applied** — a committed migration is not an applied migration, and the seed inserts into tables that only exist once the DDL has actually run. This split is what unlocks the parallel tracks: the identity work — the plan's highest-risk greenfield — no longer waits on the content parser.
+- `4-DDL → 5` is a **real** edge (Unit 5's `program_version_id` FK references `path_program_versions`).
+- Unit 7 converges the tracks (Dependencies: Units 3, 5 — unchanged).
+
+| Track | Units | Why |
 |---|---|---|
-| 1–2 | Session fixes, test harness | Prerequisites for everything |
-| **13** | **Design foundation — tokens, fonts, skins** | Decision 9: must be settled **before any component is written** |
-| 3–4 | Content package, content schema | Nothing renders without tasks |
-| 5–6 | Identity, sign-in and gate | Nothing is reachable without accounts |
-| 7–8 | State machine, transition RPC | The engine |
-| 9–10 | Storage, evidence model | The pipeline |
-| **14** | **Student app shell, journey, task view, submit** | The surface the loop actually runs on |
-| **15** | **Parent surfaces — onboarding, family dashboard, provisioning** | How a family gets in at all |
-| 11 | Offline queue and sync | Layers onto a working capture surface |
-| 12 | Review queue and durable notification | Closes the loop |
-| **16** | **Tier 1 celebration, Not Yet, in-app notification surface** | The moment the loop pays off |
+| Prerequisites | 1 → 2 | Session fixes; test harness — including the `admin.createUser` spike that falsifies the identity layer's load-bearing assumption on day one |
+| Design foundation | 13 | Before Unit 6's sign-in surface; soak time on shared marketing files |
+| Identity track | 4-DDL → 5 → 6 | The highest-risk greenfield, now unblocked from content |
+| Content track | 3 → 4-seed | Nothing renders without tasks |
+| Convergence | 7 → 8 | The engine needs both content and identity |
+| Pipeline | 9 → 10 | Storage, evidence |
+| Surfaces | 14 → 15 | Student, then parent |
+| Close the loop | 11 → 12 → 16 | Offline sync onto a working surface; notification; celebration |
 
 - [ ] **Unit 1: Fix Supabase session handling and bump `@supabase/ssr`**
 
@@ -299,11 +309,12 @@ browser                    Server Action            Supabase Storage
 **Approach:**
 - Add `app/path/**/__tests__/**/*.test.ts` to the `include` allowlist **in this unit**. A directory outside the allowlist silently never runs and the suite stays green.
 - Establish the convention: pure `*-rules.ts` modules with no Next, Supabase, or React imports, colocated `__tests__/`. Nothing here can test a React component, so anything that must be defended has to be pure.
+- **Run the `admin.createUser` spike here, not in Unit 6.** *(Promoted in the deepening pass.)* The identity layer's single load-bearing assumption — that Supabase Auth accepts a parent-provisioned account on a system-generated non-deliverable address with confirmations disabled — needs nothing but the project and one call, and the origin marks it "not yet tested, and load-bearing for the entire identity layer". Falsify it on day one, not at execution position seven. Create one throwaway account, confirm sign-in works, delete it. If it fails, escalate before any schema work begins. Copy the env-loading pattern from `scripts/seed-staff.ts` (`.env.local` on this machine carries the service-role key); note the spike is machine-bound — env-less machines and worktree agents cannot run it, the same portability class as the untracked-artifacts prerequisite. The spike should also settle whether `admin.createUser` needs `email_confirm: true` despite `enable_confirmations = false` — mailer autoconfirm governs `signUp`, not the admin API.
 
 **Test scenarios:**
 - Happy path: a deliberately failing assertion **fails** under `npm run test`, proving the glob took effect — then invert it. Do not verify with `npx vitest run <path>`; that bypasses the config and gives false confidence.
 
-**Verification:** `npm run test` discovers and runs the new file.
+**Verification:** `npm run test` discovers and runs the new file; the `admin.createUser` spike has succeeded (throwaway account created, signed in, deleted) or its failure has been escalated.
 
 ---
 
@@ -315,7 +326,7 @@ browser                    Server Action            Supabase Storage
 
 **Dependencies:** Unit 2.
 
-**Files:** Create `app/path/content/parse-curriculum.ts` (plain core — **no `server-only`, no `"use server"`**), `app/path/content/manifest.ts`, `app/path/content/types.ts`, `scripts/build-path-content.ts`, `app/path/content/generated/program-2026-27.ts` (generated, committed). Test: `app/path/content/__tests__/parse-curriculum.test.ts`, `.../manifest.test.ts`.
+**Files:** Create `app/path/content/parse-curriculum.ts` (plain core — **no `server-only`, no `"use server"`**), `app/path/content/manifest.ts`, `app/path/content/types.ts`, `scripts/build-path-content.ts`, `app/path/content/generated/program-2026-27.ts` (generated, committed). **Hand-authored sidecars** *(added in the deepening pass — every one manifest-validated, none parser work)*: `app/path/content/log-templates.ts`, `app/path/content/safety-flags.ts`, `app/path/content/evidence-spec.ts`. Test: `app/path/content/__tests__/parse-curriculum.test.ts`, `.../manifest.test.ts`, `.../sidecars.test.ts`.
 
 **Approach:**
 - **The `server-only` decision is this unit's most consequential.** The parser must be reusable by a `tsx` script, and `import "server-only"` throws under `tsx`, transitively. Author it plain from the start; retrofitting means touching every importer.
@@ -324,6 +335,13 @@ browser                    Server Action            Supabase Storage
 - **Reconciliation against `app/2026-27/data.ts` is structural, not textual.** The two sources deliberately differ: the curriculum's own "Home-Study Adaptations of Cohort Moments" table strips cohort references (3.4 drops "on a Saturday", 4.5 drops "to the cohort", 5.5 drops "at an intensive"), and nine further criteria are independently reworded. **Zero of the 25 match exactly today** — eight differ only by a trailing period, seventeen substantively, and the encoding drift runs both ways (1.3 has straight quotes in the markdown and curly in `data.ts`; 2.5 has an en dash in one and a hyphen in the other). A string-equality assertion would fail the build on first run for every criterion. Assert instead that the 25 `N.N` IDs exist, that phase and criterion counts and ordering align with `pathSteps`, and that each curriculum criterion links to its `data.ts` index. **State explicitly that curriculum wording and marketing wording are permitted to differ.** If drift detection is still wanted, commit a snapshot of the 25 `data.ts` strings and assert against the snapshot, so a marketing edit fails the build while the intentional home-study rewording does not.
 - **Handle the `As written.` sentinel.** 15 of the 57 `6–8` band lines read literally `- **6–8:** As written.`, meaning "inherit the base text" — not a variant. A parser handling only the *absent* case stores `"As written."` as the variant, and a Grade 7 child opening task 1.1.3 sees those words where their instruction should be. Resolve the sentinel (case-insensitive, with or without the period) exactly as an absent line.
 - **The kid register does not exist.** The curriculum has no kid-voice task copy — its own open items still ask whether one should be produced. R23 requires it for all 125 tasks and no parser can produce strings nobody wrote. See the content track note below; the parser must **fall back to the standard register, never render blank**, and the manifest must treat a missing kid string as tolerated inheritance rather than a hard failure, or the build cannot go green until an authoring project finishes.
+- **Four §10 fields the parser must NOT try to parse** *(deepening pass, verified against the markdown)*. The brief's `UnitTask` carries fields whose information is either absent from the curriculum or present only as irregular prose — every one closes as a **hand-authored sidecar or constant**, never a parser extension:
+  - **Log-table templates** — Unit 10 promises them ("the 25-attempt tracker, No Log, sales ledger, and P&L ship as per-task templates") and, before this pass, nothing produced them. The column definitions exist explicitly in prose ("a tracker numbered 1–25 with columns: date, channel, who, response, note", with band overrides like the 9–12 follow-up column) but under varying grammar — hand-author ~8–12 templates in `log-templates.ts`, keyed by task ID, band overrides included. **Column names must be stable**: T2's `headlineStatSpec` will reference them, and free-form grids now mean a migration later.
+  - **`safetyFlags`** — a tiny enum (`parent_present`, `approval_gate`, `publishing_rules`) hand-mapped in `safety-flags.ts`. Safety content exists in three inconsistent prose forms and cannot be keyed on. **Highest real-world weight of the four**: Phase 01 *is* the door-to-door phase, and the handoff's task card has a Safety slot that would otherwise render nothing on exactly the tasks (1.2.4, 1.5.x) where test families knock on strangers' doors. Phase 01 coverage is the floor.
+  - **`evidenceSpec`** — absent as structure; some tasks (1.2.3's witnessed rehearsal) legitimately have *no* filed artifact. Optional field in `types.ts` plus a Phase-01 sidecar in `evidence-spec.ts`. Where absent, **Unit 14 renders the Done-when line as the evidence standard** — a coherent fallback, since §9.1 never gates submit on spec fulfillment and the parent verifies against Done-when prose anyway.
+  - **`isStageMoment`** — derivable: a fixed list of four criterion IDs (`2.5, 3.4, 4.5, 5.5`) as one constant in `manifest.ts`. Unit 14's port of the handoff's 4.5.4 card needs it for the "Live moment" badge.
+  - `wisdomContextTags` and `headlineStatSpec` stay out of T1 entirely — reserve optional type fields so T2 doesn't touch every consumer, and author nothing now.
+- **The generated module is keyed by version, and consumers never import it directly** *(deepening pass)*. `manifest.ts` exports a `getProgram(versionId)` registry; nothing does `import { program } from "./generated/program-2026-27"`. When a revision ships, the new module lands **beside** the old one — a pinned student still reads theirs, so old modules are permanent fixtures, never deleted or regenerated in place. This is near-zero cost now and a touch-every-consumer refactor after Units 12–16 exist — the same class of decision as the `server-only` split. Honest correction to R22's phrasing: a revision ships a new module *plus* a new manifest, not "a manifest, not a code change".
 - UTF-8 safety throughout — the source is full of em-dashes and curly quotes.
 
 **Prerequisite:** `artifacts/The Path/` is **untracked in git today** (`?? "artifacts/The Path/"`), and the previously tracked copy at `artifacts/the-path-home-study-curriculum-brief.md` is staged for deletion. The single source of 125 tasks, 125 Done-when lines and 179 band variants exists on one machine. **Commit it before this unit starts** — the parser's input must be a tracked file or no other developer, agent, or verification pass can run these tests.
@@ -342,8 +360,12 @@ browser                    Server Action            Supabase Storage
 - Error path: a manifest declaring 124 against a 125 parse fails loudly, naming the mismatch.
 - Error path: a malformed task ID fails rather than being skipped silently.
 - Integration: all 25 `N.N` IDs resolve to a `data.ts` index and the phase/criterion ordering aligns; a reordering of `pathSteps` fails the assertion, a rewording does not.
+- Edge case: every sidecar entry's task ID exists in the parsed package — an entry for a nonexistent task fails manifest validation loudly.
+- Edge case: the 1.5.2 log template carries the 9–12 follow-up column as a band override; the 3–5 P&L template is three whole-dollar lines.
+- Edge case: a task with no evidence-spec entry resolves to the Done-when-as-standard fallback, not to an empty checklist.
+- Happy path: `getProgram('2026-27')` returns the module; an unknown version ID fails loudly, never falls back to "latest".
 
-**Verification:** env-less `npm run build` succeeds; the generated module is committed and diffable.
+**Verification:** env-less `npm run build` succeeds; the generated module is committed and diffable; every Phase 01 task has its safety flags authored (the door-to-door floor).
 
 ---
 
@@ -353,18 +375,22 @@ browser                    Server Action            Supabase Storage
 
 **Requirements:** R22.
 
-**Dependencies:** Unit 3.
+**Dependencies:** **Split** *(deepening pass)*: the **DDL half** depends on Unit 2 only — the four tables' shapes are fully decided by this plan and need no parsed content. The **seed half** (`scripts/seed-path-content.ts`) depends on Unit 3. This split is what lets the identity track (4-DDL → 5 → 6) run parallel to the content track (3 → 4-seed).
 
 **Files:** Create `supabase/migrations/<ts>_path_program_content.sql`, `scripts/seed-path-content.ts`. Test: `app/path/content/__tests__/seed-rows.test.ts`.
 
 **Approach:**
 - Tables hold **IDs, slugs, sequence, version only** — `path_program_versions`, `path_phases`, `path_criteria`, `path_unit_tasks`. Prose lives in the generated TS module (Decision 7), structurally avoiding the recorded em-dash flattening incident.
+- **`path_program_versions` designates the active version** (an `is_current` flag or equivalent) — provisioning (Units 6/15) needs to know which version to pin a new student to, and before this pass nothing supplied that.
+- **Content rows are immutable per version** *(deepening pass)*: a revision inserts new rows under a new version ID; it never updates or deletes rows a pinned student references. This is the DB-side companion to Unit 3's keep-old-modules rule, and the seed's "re-run is a no-op" property only covers the same-version case — the revision case is a new-version insert.
+- **The seed script prechecks its own tables**: `select to_regclass('public.path_unit_tasks')` first, aborting with a named error if null — the dormant-migration learning applied to this unit's own split halves.
 - Idempotent DDL (`create table if not exists`); header states the rollout phase imperatively.
 - Apply via the Management API playbook. `to_regclass` **before** applying dependents; record the version only after the DDL succeeds. Check for a timestamp collision before naming the file.
 
 **Test scenarios:**
 - Happy path: the row builder emits 125 task rows with stable slugs and correct FK targets.
 - Edge case: re-running against existing rows is a no-op, not a duplicate insert.
+- Edge case: seeding a second version inserts new rows and leaves every first-version row byte-identical.
 - Error path: a task whose criterion slug is absent raises rather than inserting an orphan.
 
 **Verification:** `select count(*) from path_unit_tasks` = 125; a **negative-space** query (`count(*) where criterion_id is null`) = 0. Verify by counting the bad condition, not by absence of error.
@@ -377,12 +403,14 @@ browser                    Server Action            Supabase Storage
 
 **Requirements:** R1, R2, R4, R31, D24.
 
-**Dependencies:** Unit 4. **Blocked on the launch gate's residency question if `ca-central-1` is required** — region is fixed at project creation.
+**Dependencies:** Unit 4's **DDL half** only (the `program_version_id` FK below references `path_program_versions`). *(Deepening pass: the old whole-Unit-4 edge was spurious — nothing here needs the seed or the parser — and the old residency-blocked clause was stale; counsel cleared residency 2026-07-21.)*
 
 **Files:** Create `supabase/migrations/<ts>_path_identity.sql`, `app/path/lib/access-rules.ts` (pure), `app/path/lib/auth.ts` (thin `server-only` wrapper). Test: `app/path/lib/__tests__/access-rules.test.ts`.
 
 **Approach:**
 - `path_student_profiles` links to `public.children` (R31), which stays authoritative for name and grade; band is **derived**, not stored twice.
+- **`path_student_profiles.program_version_id` — NOT NULL FK to `path_program_versions`, set at provisioning, immutable thereafter** *(deepening pass; origin flow-analysis conclusion I9, now recorded as D27)*. Same class as the band snapshot: without it, a content revision silently rewrites an active student's remaining tasks. A sibling provisioned after a revision pins the newer version.
+- **FK posture: ON DELETE RESTRICT, stated explicitly** *(deepening pass)*. The repo's house idiom is CASCADE end-to-end (`auth.users → parents → children`), so an implementer following house style would let a CRM account deletion cascade into Path and destroy a decade of evidence. `path_student_profiles → public.children` is RESTRICT — a CRM delete must fail loudly, never silently take a Founder File with it. RESTRICT holds throughout the Path graph (Units 8, 10, 12).
 - `path_role_grants (user_id, role, scope_type, scope_id)` per Decision 2 — a human can hold `parent` scoped to a family and `guide` scoped to a cohort simultaneously.
 - Path tables: **RLS enabled, zero policies** (Decision 1). Where a policy is ever added, use `TO authenticated` and `(select fn())`-wrapped calls.
 - Student provisioning must not trip the `on_parent_created` trigger.
@@ -415,8 +443,8 @@ browser                    Server Action            Supabase Storage
 **Files:** Modify `proxy.ts`. Create `app/path/(auth)/sign-in/page.tsx`, `app/path/lib/actions/provision.ts` (`"use server"`), `app/path/lib/provision-rules.ts` (pure), `app/path/lib/rate-limit-rules.ts` (pure). Test: `__tests__/provision-rules.test.ts`, `__tests__/rate-limit-rules.test.ts`.
 
 **Approach:**
-- **Verify first** that Supabase Auth accepts a system-generated non-deliverable address with confirmations disabled. `config.toml` sets `enable_confirmations = false`, so this is expected to hold — a single `admin.createUser` call settles it. If it fails, escalate rather than working around it.
-- Provision via the service-role admin API with a parent-set password — **not** `signUp()`, which returns no session and strands the profile write.
+- The non-deliverable-address assumption was **already verified by Unit 2's `admin.createUser` spike** *(promoted there in the deepening pass)* — this unit builds on a falsified-or-confirmed fact, not a hope.
+- Provision via the service-role admin API with a parent-set password — **not** `signUp()`, which returns no session and strands the profile write. **Provisioning pins the student to the currently-designated program version** (Unit 4's `is_current`) — the pin is set here and never touched by content deploys.
 - Sign-in shows **name + password**; the system address is derived server-side and never displayed.
 - Rate limiting and a strength floor (R29) are entirely greenfield — no throttle exists anywhere in this repo, and a first name is far more guessable than an email address within a cohort.
 - `config.matcher` becomes a literal array `["/crm/:path*", "/path/:path*"]` with a pathname branch. `/path/sign-in` gets its own unguarded allowlist — the guard must not lock the door to the door.
@@ -455,6 +483,7 @@ browser                    Server Action            Supabase Storage
 - Criterion return: returned tasks → `not_yet`; later-sequence verified tasks **stay verified** but become display-blocked and un-submittable; the criterion sits in `returned` until every task is verified again.
 - Awards immutable (D23) — a returned criterion renders its crest provisional, never withdrawn.
 - Band snapshotted at first `available`.
+- **Every task, criterion, and manifest lookup resolves through the student's pinned `program_version_id`** *(deepening pass, D27)* — never a "current" or "latest" global. The engine takes the version from the student context and calls `getProgram(versionId)`; publishing a newer version is invisible to an active student, exactly as a staff grade correction is invisible to an in-review task.
 - Expose a `gateStatus` hook now, gating at **submit**, so T3's math gate is additive rather than structural.
 
 **Execution note:** Strictly test-first. The transition table is the specification.
@@ -465,6 +494,7 @@ browser                    Server Action            Supabase Storage
 - Happy path: verifying a criterion's last task moves the criterion to `review_underway`.
 - Edge case: criterion 2.3's **sixth** task, not its fifth, triggers the review.
 - Edge case: a student holds `in_progress` tasks in three criteria of one phase simultaneously.
+- Edge case: publishing a newer program version does not alter a pinned student's task set; a sibling provisioned afterwards resolves tasks from the newer version. *(Mirrors the band-snapshot scenario; D27.)*
 - Edge case: withdraw with `reviewOpenedAt` null succeeds; with it set, refused.
 - Edge case: revoke by the original verifier succeeds; by the other parent, refused (§9.5 is actor-scoped).
 - Edge case: a criterion return leaves later verified tasks verified but un-submittable.
@@ -492,7 +522,8 @@ browser                    Server Action            Supabase Storage
 - **Optimistic concurrency in the WHERE clause** — first write wins; the loser is told "Mum verified this at 7:42pm", not shown an error.
 - **Never a full-row upsert.** Content via status-free write, state flip via targeted UPDATE with the transition value **hardcoded** so a stale caller cannot smuggle local state in. This exact shape broke "Submit for review" in production before: a `BEFORE INSERT` trigger's coercion propagates into `EXCLUDED` and poisons the DO UPDATE arm.
 - Guards **coerce, never raise** — so `{error: null}` does not mean the row is what you asked for. Echo-verify critical transitions with `.select()` and interpret **three ways**: matches → success; behind intent → retryable; **ahead of intent → adopt the DB value**. Treating the third as failure reverts authoritative state to a stale belief and loops forever.
-- `path_task_progress` carries `submitted_at`, `review_opened_at`, `decided_at` (R30) and the snapshotted band.
+- `path_task_progress` carries `submitted_at`, `review_opened_at`, `decided_at` (R30) and the snapshotted band. **And `unique (student_id, unit_task_id)`** *(deepening pass — the most corrupting single omission found)*: without it, nothing prevents two progress rows for one student-task pair, and the CAS transition, band snapshot, evidence FKs, and review attempts all fork across duplicates into a split permanent record no later constraint can merge. The transition RPC keys on this uniqueness.
+- **All FKs in the progress graph are ON DELETE RESTRICT** (see Unit 5's posture note) — no cascade anywhere in Path.
 - An errored response is **not** proof the write failed — the write can commit while the response is lost. Re-read once before reporting failure.
 - `path_reviews` gets an `attempt` int; uniqueness `(scope, scope_id, student_id, attempt)`. A second review must not overwrite the first, or the audit trail R6 exists to keep is destroyed.
 - Test policy and trigger behaviour by replaying the app's **real statement shape under the real role** inside a `DO $$ ... RAISE EXCEPTION 'RESULT %' $$` rollback block with `set_config('request.jwt.claims', ...)`. A prior suite of targeted UPDATEs passed while the bug shipped.
@@ -528,6 +559,8 @@ browser                    Server Action            Supabase Storage
 - Upload per Decision 4: the action returns a slot; the client uploads direct. Plain `upload()` under 6 MB; **TUS above, `chunkSize` exactly `6 * 1024 * 1024`**, against `https://{ref}.storage.supabase.co/storage/v1/upload/resumable`. Authorize with a server-minted **`x-signature`** token so the child's client never needs a long-lived session for the upload leg.
 - **Persist the TUS URL and its creation time**; it expires after **24 hours** and an older unfinished upload must restart from zero. One client per URL — a second gets 409.
 - Enforce D21's caps (3 min / 500 MB) **client-side at capture**; quota server-side at slot issue. A six-minute video rejected at sync time is rejected long after the moment is gone.
+- **Verified objects must be physically unoverwritable** *(deepening pass)*. Both upload legs are mint-time-authorized and RLS-exempt, TUS was specified with `x-upsert: true` ("last completer wins"), the path's sha256 is **client-declared and never verified**, and a TUS URL stays live 24 hours — so a replayed URL or re-minted slot could replace a *verified* object's bytes while the DB row still swears append-only. Close it structurally: (a) **all upload legs run with upsert disabled** — an existing object is never replaceable, first completed upload wins; (b) **slot minting refuses any path whose evidence row's append-only latch is set.** Note in the module header that the content hash is client-declared, so nobody later assumes it is integrity-verified. **One retry mapping falls out of (a) and must be stated:** an already-exists response on either upload leg means the object completed on a prior attempt — treat it as upload success and proceed directly to confirm; without this rule, the upload-then-die retry wedges against its own earlier success until the orphan reaper deletes it. Resume of an *incomplete* transfer (same TUS URL) is unaffected by upsert — upsert only matters at completion. Confirm the exact already-exists status code during this unit's prerequisite curl checks.
+- **Orphan reaping** *(deepening pass)*: an object written whose `confirm` never arrives (upload-then-die) is invisible, unbilled-against-quota, and permanent. Objects whose path has no confirmed evidence row after 48h (comfortably past the 24h TUS window) are deleted via the Storage API by the existing cron; quota accounting reconciles against confirmed rows.
 - **Object deletion goes through the Storage API, never SQL** — deleting `storage.objects` rows orphans the file permanently, which matters enormously once a retention obligation exists.
 - Every client-side awaited action needs `try/catch/finally`; the guard can `redirect()` (throws) before the action's own try, and a frozen upload modal is the worst instance of that class here.
 - Never construct a Supabase client in a render path, including `useState`/`useRef` initializers.
@@ -561,9 +594,12 @@ browser                    Server Action            Supabase Storage
 - **Record video in-app via `MediaRecorder`** (Decision 11). iOS writes H.264/AAC MP4 that plays everywhere; the camera-roll path yields HEVC `.mov` that desktop Firefox and GPU-less Chrome cannot play at all. Cap recording at 60–90s, which also caps the storage bill. File-picker fallback routes through client-side normalization (Mediabunny, WebCodecs-backed).
 - **Generate a poster frame on-device at capture** and use it as the review thumbnail, so the list renders even when a video is unplayable.
 - Preserve EXIF server-side in a private column; **do not canvas-re-encode to strip it**, which also destroys orientation and rotates photos. Stripping on export is a launch-gate policy question.
-- **Log table is a first-class structured type** — the 25-attempt tracker, No Log, sales ledger, and P&L ship as per-task templates.
+- **Log table is a first-class structured type** — the 25-attempt tracker, No Log, sales ledger, and P&L ship as per-task templates, **loaded from Unit 3's `app/path/content/log-templates.ts` sidecar** (hand-authored, band overrides included, stable column names for T2's `headlineStatSpec`). `LogTable.tsx` renders a template; it never defines one.
 - **Append-only latches at first verification and never lifts** — through revocation, Not Yet, criterion return, and phase return. State this in the module header: it is currently derivable but unstated, and a reasonable implementer would conclude the latch lifts when a task returns to `in_progress`, which would let a student delete the evidence that made a reviewer uncomfortable. Carve-out: duplicate reconciliation *before* verification is not a deletion.
 - Ship `redacted_at`, `redacted_by`, `redaction_reason` from day one. The policy is deferred; the columns must not be.
+- **Redaction's blast radius is defined now, or redaction doesn't redact** *(deepening pass)*: on redaction, delete or quarantine the storage object **and its poster frame** via the Storage API, null the Postgres-cached signed URL row (signed URLs are irrevocable by design, so a surviving cached URL keeps the "redacted" media readable), and clear the private EXIF column — which can hold the GPS coordinates of a child's home. The DB row itself remains, append-only, as the tombstone.
+- **Any content-hash uniqueness is a partial index scoped `where redacted_at is null`** *(deepening pass)* — otherwise a redacted row holds the hash forever and a later legitimate re-submission of similar content is refused with no recourse. Alternatively make hash dedupe advisory (a prompt) rather than a constraint; either way, decide and test it.
+- **FKs: ON DELETE RESTRICT** per Unit 5's posture note.
 
 **Test scenarios:**
 - Happy path: five evidence items of different types attach to one task and read back in capture order.
@@ -611,6 +647,7 @@ browser                    Server Action            Supabase Storage
 - Edge case: an item queued against a since-verified task attaches with `addedAfterVerification` set.
 - Edge case: an item queued against a since-locked phase attaches but its submit is refused with a student-readable reason.
 - Edge case: the same queued item replayed twice yields one row.
+- Edge case: a retry after a completed-but-unconfirmed upload maps already-exists to success and clears the queue via confirm — no re-upload, no drop, no 48h wedge.
 - Edge case: a submit whose response was lost but which committed is detected on re-read, not double-applied.
 - Edge case: a `capturedAt` in the future is clamped, and the clamping is recorded.
 - Edge case: a TUS URL past 24h restarts rather than resuming into a 404.
@@ -638,6 +675,7 @@ browser                    Server Action            Supabase Storage
 - **Escape every user-supplied value in email HTML** — student names, captions, reviewer notes. Escape the `html` part only, never the `text` part.
 - Any verification link must render a button that **POSTs**; scanners prefetch GETs and would false-confirm.
 - **In-app surface (R27)** is the guaranteed channel for under-13 students. Store the event and its parameters, **never rendered copy** — a Not Yet queued in Trail voice and read after a skin toggle would otherwise render Trail copy in an HQ shell. Render the register at read time.
+- **In-app event rows are insert-plus-supersede-flag only, never UPDATE-in-place** *(deepening pass)* — the repo's split-policy append-only idiom. Unit 16 renders reversals as "superseded, past tense, history intact"; if events shared the mutable claim-stamp table's posture, a reversal implemented as an UPDATE would destroy the original event a child's history depends on. Also note `path_notification_sends` carries PII (addresses, names in params) and sits inside any future deletion scope; its FKs are RESTRICT or SET NULL, never CASCADE.
 - Reviewer-side stall nudge at a family-set threshold (default 72h). Nothing currently acts on a parent sitting on a queue; R30 measures that failure and nothing responds to it, and an under-13 would see "awaiting review" indefinitely with no recourse.
 - Not Yet requires a note, uses amber never red, returns the task to `in_progress` with evidence intact.
 - Use `refresh()` or `revalidatePath` after a verification — **not** `revalidateTag`, whose single-arg form is now a TypeScript error and which does not re-render in the action response.
@@ -665,7 +703,7 @@ browser                    Server Action            Supabase Storage
 
 **Requirements:** R18, R19, R20, and the enabling half of R8.
 
-**Dependencies:** Unit 2. **Runs third, before Unit 3** — Decision 9's constraint is that this must precede any component work, and Units 9–12 all create components.
+**Dependencies:** Unit 2. **Hard edges** *(corrected in the deepening pass)*: `2 → 13`, and `13 → {6, 9, 10, 11, 14, 15, 16}` — the first rendered surface is **Unit 6's sign-in page**, not Unit 9, so 13-before-6 is the binding constraint. Unit 13 has **no** edge into 3, 4, 5, 7, or 8. Its early placement is soft and chosen deliberately: this is the only other unit modifying shared marketing files (`app/globals.css`, `app/layout.tsx`), and landing it early maximizes soak time for its "marketing pages visually inert" verification — the same logic that runs Unit 1 first. A re-sequencer may float it anywhere after 2 and before 6.
 
 **Files:** Modify `app/globals.css` (add `--color-hq-*` and `--color-trail-*` to the existing single `@theme inline` block), `app/layout.tsx` (add Fraunces, Inter, Spline Sans Mono with `preload: false`), `package.json` (add `lucide-react`). Create `app/path/components/system/{Button,StatusChip,ProgressMeter,Crest,Seal,Icon}.tsx`, `app/path/components/hq/{HQTaskCard,PhaseRow}.tsx`, `app/path/components/trail/TrailStep.tsx`, `app/path/lib/skin-tokens.ts` (pure). Test: `app/path/lib/__tests__/skin-tokens.test.ts`.
 
@@ -698,6 +736,7 @@ browser                    Server Action            Supabase Storage
 **Approach:**
 - Both layouts per R8 — separately authored phone and desktop shells, desktop verified and polished (R9), phone honest.
 - The task view mounts `EvidenceUploader`, `VideoCapture`, `LogTable`, `EvidenceList`, and `SyncStatus` from Units 9–11. Those components have no route until this unit exists.
+- **The task card consumes Unit 3's sidecars** *(deepening pass)*: the evidence checklist renders from `evidence-spec.ts` where an entry exists and falls back to the Done-when line as the standard where it doesn't; the Safety note renders from `safety-flags.ts` (Phase 01 fully authored — the door-to-door tasks are the reason it exists); the "Live moment" badge renders from the `stageMoments` constant in `manifest.ts`.
 - **The "Now" card selection rule is pure and testable:** criteria run in parallel within a phase, so several tasks can be open at once and both skins render one current step. Most-recently-touched, with a student pin override.
 - **Design first-run explicitly.** Every one of the handoff's 18 surfaces is seeded with a mid-program persona. Day one for a Grade 4 on Trail is `0 / 125`, twenty-five locked silhouettes, an empty satchel — a screen of grey, the opposite of what the brief promises. An implementer handed only mid-program components will render them with empty props. Territory revealed rather than fully locked; the student's skin and avatar choice as their first act.
 - **Withdraw needs a visible affordance and copy** — it is legal until `reviewOpenedAt` is set and currently has no UI anywhere. Likewise the evidence-locked-while-submitted state ("Evidence is locked while Dad reviews · Withdraw to add more"), which is one of three mutability regimes and the only one with no rendering.
@@ -735,7 +774,7 @@ browser                    Server Action            Supabase Storage
 - Happy path: an enrolled family's existing `children` rows appear as linkable founders with derived bands.
 - Edge case: a family with no `children` rows falls through to the create path.
 - Edge case: **a linked child whose `grade` is null** — `public.children.grade` is nullable and CRM rows start as drafts. Provisioning refuses with a specific message, or applies a documented default band recorded as defaulted. Decide and test; without this a real child gets no band and no variant text for all 125 tasks.
-- Edge case: adding a second child mid-year does not disturb the first's progress.
+- Edge case: adding a second child mid-year does not disturb the first's progress — and if a program revision shipped in between, the second child pins the newer version while the first keeps theirs (D27).
 - Error path: a parent linking a child outside their family is refused.
 
 **Verification:** an enrolled 2026-27 family reaches a working student account without re-entering any data.

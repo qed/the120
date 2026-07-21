@@ -157,6 +157,7 @@ Resolved during planning on 2026-07-21, after flow analysis surfaced them as uns
 - **D24 — The same person may not both sign as parent and countersign as Guide on one phase review.** Where a Guide's own child is in their own cohort, the countersign routes to a co-Guide, or the phase seals as home-study with the reason recorded. Requires the data model to carry **role grants** (role + scope) rather than one role per user — a one-line change now, a multi-table migration later.
 - **D25 — A Guide sees evidence for their cohort students at any time,** not only during a countersign. Widens R5.
 - **D26 — Staff-mediated recovery.** Single-parent families are supported without a mandatory second adult; The 120 staff can reset a student's password and, where a parent is unreachable, intervene. Uses the existing `/crm` service-role boundary. Note this grants staff a power the brief never contemplated, so it needs an audit trail and a stated policy for when it may be used.
+- **D27 — Every student is pinned to a program version at provisioning** *(added 2026-07-21 during the T1 deepening pass; this conclusion came out of the flow analysis but was never carried into a committed document)*. A content revision must never silently rewrite an active student's remaining tasks — the same invariant the band snapshot provides for grade changes. New students (including a sibling added mid-year) pin whatever version is current at their provisioning; a pinned version's content is immutable and its generated module is a permanent fixture.
 
 ## Dependencies / Assumptions
 

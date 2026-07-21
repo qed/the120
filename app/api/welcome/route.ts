@@ -2,14 +2,37 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { sendEmail } from "@/app/lib/email";
+import { sendWelcome, type WelcomeSendInput } from "@/app/lib/welcome/send";
 
 /**
- * E3: welcome email #1, sent once right after signup (GTM: "your child's
- * dossier is the application — start it"). Auth mirrors /api/checkout.
- * Idempotent via welcome_sent_at in auth user metadata, so double-fires
- * from the client are harmless.
+ * Welcome Email #1 — fires once on web signup (plan 2026-07-20-001, Unit 4).
+ *
+ * R2/R3: the single-send guard is now the atomic claim on
+ * families.welcome_email_at (inside sendWelcome), gated on the family's CASL
+ * consent state — this REPLACES the old user_metadata.welcome_sent_at guard as
+ * the primary, cross-path dedupe (so a CRM-add-then-web-signup can't double-send:
+ * the trigger links the same family, whose stamp the claim already sees).
+ *
+ * A legacy skip on user_metadata.welcome_sent_at stays during the transition:
+ * users welcomed by the OLD route (whose best-effort welcome_email_at stamp may
+ * be null) must not be re-welcomed before the U7 backfill reconciles them from
+ * metadata. Auth mirrors /api/checkout.
  */
+
+interface FamilyRow {
+  id: string;
+  email: string | null;
+  parent_name: string | null;
+  consent_given: boolean | null;
+  consent_revoked_at: string | null;
+  consent_expires_at: string | null;
+  merged_into_id: string | null;
+  welcome_email_at: string | null;
+}
+
+const COLS =
+  "id, email, parent_name, consent_given, consent_revoked_at, consent_expires_at, merged_into_id, welcome_email_at";
+
 export async function POST(req: Request) {
   try {
     const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -27,75 +50,72 @@ export async function POST(req: Request) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user?.email) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-    if (user.user_metadata?.welcome_sent_at)
-      return NextResponse.json({ ok: true, already: true });
 
-    const firstName = (user.user_metadata?.first_name as string | undefined)?.trim() || "";
-    const greeting = firstName ? `Hi ${firstName},` : "Hi,";
+    // Legacy transition skip — the old route welcomed this user already; the U7
+    // backfill re-welcomes existing families with the new copy, not this path.
+    if (user.user_metadata?.welcome_sent_at) return NextResponse.json({ ok: true, already: true });
 
-    const result = await sendEmail({
-      to: user.email,
-      subject: "Welcome to The 120 — your child's dossier is the application",
-      text: [
-        greeting,
-        "",
-        "Welcome — your family's account at The 120 is live.",
-        "",
-        "Here's the one thing to know: your child's dossier is the application. It takes about 15 minutes — their interests, a project pitch, the workshops they'd pick. When it's complete, you can reserve one of the 120 seats with a $250 deposit, fully refundable until September 30, 2026.",
-        "",
-        "Continue the dossier: https://the120.school/dashboard",
-        "",
-        "Questions first? Book 20 minutes with me: https://cal.com/peter.k/the120",
-        "",
-        "— Peter Kuperman, founder, The 120",
-        "admissions@the120.school · https://the120.school",
-        "",
-        "You're receiving this because an account was created with this address at the120.school.",
-      ].join("\n"),
-      html: `
-<div style="font-family: Georgia, 'Times New Roman', serif; color: #16233b; max-width: 560px; margin: 0 auto; padding: 32px 24px; line-height: 1.6;">
-  <p style="font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: #5a6b8a; margin: 0 0 24px;">The 120</p>
-  <p style="margin: 0 0 16px;">${greeting}</p>
-  <p style="margin: 0 0 16px;">Welcome — your family's account at The 120 is live.</p>
-  <p style="margin: 0 0 16px;">Here's the one thing to know: <strong>your child's dossier is the application.</strong> It takes about 15 minutes — their interests, a project pitch, the workshops they'd pick. When it's complete, you can reserve one of the 120 seats with a $250 deposit, fully refundable until September&nbsp;30,&nbsp;2026.</p>
-  <p style="margin: 24px 0;">
-    <a href="https://the120.school/dashboard" style="background: #16233b; color: #ffffff; text-decoration: none; padding: 12px 22px; font-size: 15px;">Continue the dossier</a>
-  </p>
-  <p style="margin: 0 0 16px;">Questions first? <a href="https://cal.com/peter.k/the120" style="color: #16233b;">Book 20 minutes with me</a> — I take every intro call myself.</p>
-  <p style="margin: 24px 0 0;">— Peter Kuperman<br/>Founder, The 120</p>
-  <hr style="border: none; border-top: 1px solid #d9dee8; margin: 28px 0 16px;"/>
-  <p style="font-size: 12px; color: #5a6b8a; margin: 0;">
-    <a href="mailto:admissions@the120.school" style="color: #5a6b8a;">admissions@the120.school</a> · <a href="https://the120.school" style="color: #5a6b8a;">the120.school</a><br/>
-    You're receiving this because an account was created with this address at the120.school.
-  </p>
-</div>`,
-    });
+    const admin = supabaseAdmin();
 
-    if (!result.ok) {
-      console.error("[welcome]", result.error);
-      // Don't mark sent — a later retry can succeed.
-      return NextResponse.json({ error: "Send failed" }, { status: 502 });
-    }
-
-    await supabaseAdmin().auth.admin.updateUserById(user.id, {
-      user_metadata: { ...user.user_metadata, welcome_sent_at: new Date().toISOString() },
-    });
-
-    // CRM (plan Unit 2): stamp the family's welcome_email_at snapshot.
-    // Best-effort — no family row (pre-backfill) or a write failure must
-    // never affect the response; the backfill script repairs from metadata.
-    try {
-      const { error: crmErr } = await supabaseAdmin()
+    // Resolve the family by parent_id (the parents_families_sync trigger links it
+    // on parent insert). By parent_id, NOT email, to avoid colliding with the
+    // families_email_live_unique_idx on lower(email).
+    let family: FamilyRow | null = null;
+    {
+      const { data } = await admin
         .from("families")
-        .update({ welcome_email_at: new Date().toISOString() })
+        .select(COLS)
         .eq("parent_id", user.id)
-        .is("welcome_email_at", null);
-      if (crmErr) console.error("[welcome] families stamp failed:", crmErr);
-    } catch (crmErr) {
-      console.error("[welcome] families stamp failed:", crmErr);
+        .is("merged_into_id", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      family = (data?.[0] as FamilyRow | undefined) ?? null;
     }
+    // Fallback: a manual lead matching this email the trigger hasn't linked yet.
+    if (!family) {
+      const { data } = await admin
+        .from("families")
+        .select(COLS)
+        .ilike("email", user.email)
+        .is("merged_into_id", null)
+        .limit(1);
+      family = (data?.[0] as FamilyRow | undefined) ?? null;
+    }
+    // Row not created yet (trigger raced/failed) — defer, never create a
+    // duplicate here. A later sign-in or the backfill welcomes them.
+    if (!family) return NextResponse.json({ ok: false, pending: true });
 
-    return NextResponse.json({ ok: true });
+    const firstName = (user.user_metadata?.first_name as string | undefined)?.trim() || null;
+    const input: WelcomeSendInput = {
+      id: family.id,
+      email: family.email || user.email,
+      parentFirst: firstName,
+      consent_given: family.consent_given,
+      consent_revoked_at: family.consent_revoked_at,
+      consent_expires_at: family.consent_expires_at,
+      merged_into_id: family.merged_into_id,
+    };
+
+    const result = await sendWelcome(admin, input, { idempotencyKey: `welcome/${family.id}` });
+
+    switch (result.status) {
+      case "sent": {
+        // Legacy marker for the transition skip above (belt-and-suspenders).
+        await admin.auth.admin.updateUserById(user.id, {
+          user_metadata: { ...user.user_metadata, welcome_sent_at: new Date().toISOString() },
+        });
+        return NextResponse.json({ ok: true });
+      }
+      case "already_sent":
+        return NextResponse.json({ ok: true, already: true });
+      case "not_emailable":
+        return NextResponse.json({ ok: true, skipped: "not-emailable" });
+      case "not_found":
+        return NextResponse.json({ ok: false, pending: true });
+      default:
+        console.error("[welcome]", result.error, result.warning);
+        return NextResponse.json({ error: "Send failed" }, { status: 502 });
+    }
   } catch (err) {
     console.error("[welcome]", err);
     return NextResponse.json({ error: "Could not send welcome email" }, { status: 500 });

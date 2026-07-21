@@ -9,7 +9,9 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireStaff, type StaffSession } from "@/app/crm/lib/auth";
+import { sendWelcome, type WelcomeSendInput } from "@/app/lib/welcome/send";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
   deriveStage,
@@ -325,6 +327,32 @@ export async function addFamily(
     kid_count: d.kids.length,
     consent_given: consentGiven,
   });
+
+  // Go-forward welcome (plan 2026-07-20-001, Unit 5): fire once, consent-gated,
+  // in the BACKGROUND via after() so the "Add family" modal never hangs on
+  // Resend (up to the 8s timeout). sendWelcome claims welcome_email_at + sends;
+  // R13 resend is the recovery net if a backgrounded send fails. An unconsented
+  // add creates the contact and sends nothing (surfaced by R12's chip).
+  if (consentGiven && (d.email ?? "").trim()) {
+    const familyId = created.id;
+    const welcomeInput: WelcomeSendInput = {
+      id: familyId,
+      email: d.email ?? null,
+      parentFirst: d.firstName,
+      consent_given: true,
+      consent_revoked_at: null,
+      consent_expires_at: null,
+      merged_into_id: null,
+    };
+    after(async () => {
+      const res = await sendWelcome(db, welcomeInput, { idempotencyKey: `welcome/${familyId}` });
+      if (res.status === "sent") {
+        await audit(db, staff.staffId, "welcome-email", familyId, { via: "crm-add" });
+      } else if (res.status === "send_failed") {
+        console.error("[welcome][crm-add]", res.error, res.warning);
+      }
+    });
+  }
 
   revalidatePath(PIPELINE_PATH);
   return {

@@ -319,7 +319,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 3: Curriculum content package — parser and manifest**
+- [x] **Unit 3: Curriculum content package — parser and manifest**
 
 **Goal:** Turn the curriculum markdown into a typed, versioned, validated module the app and scripts both consume.
 
@@ -343,7 +343,12 @@ browser                    Server Action            Supabase Storage
   - **`isStageMoment`** — derivable: a fixed list of four criterion IDs (`2.5, 3.4, 4.5, 5.5`) as one constant in `manifest.ts`. Unit 14's port of the handoff's 4.5.4 card needs it for the "Live moment" badge.
   - `wisdomContextTags` and `headlineStatSpec` stay out of T1 entirely — reserve optional type fields so T2 doesn't touch every consumer, and author nothing now.
 - **The generated module is keyed by version, and consumers never import it directly** *(deepening pass)*. `manifest.ts` exports a `getProgram(versionId)` registry; nothing does `import { program } from "./generated/program-2026-27"`. When a revision ships, the new module lands **beside** the old one — a pinned student still reads theirs, so old modules are permanent fixtures, never deleted or regenerated in place. This is near-zero cost now and a touch-every-consumer refactor after Units 12–16 exist — the same class of decision as the `server-only` split. Honest correction to R22's phrasing: a revision ships a new module *plus* a new manifest, not "a manifest, not a code change".
-- UTF-8 safety throughout — the source is full of em-dashes and curly quotes.
+- UTF-8 safety throughout — the source uses em dashes (—), en dashes (–) and STRAIGHT apostrophes; it contains no curly quotes at all. (`data.ts` does, which is one more reason reconciliation is structural.)
+
+**Carried out of Unit 3's review, for later units:**
+- **[T2/T3] Wire generated-module imports before any `getProgram` caller ships.** `registerProgram` runs as an import side effect, so a server component calling `getProgram(versionId)` for a pinned student throws "not registered" unless that version's generated module is in the same module graph. A central barrel that imports every generated module, imported by the engine, closes it. The throw is correct (no silent fallback); the risk is only that the import actually happens on every path.
+- **[T2] Criterion-level home-study notes are not yet captured.** Criteria 3.4, 4.5, 5.1, 5.5 open with an italic framing paragraph (3.4's is the "hands-off by design" statement). The parser drops these — they sit between a criterion header and its first task, where `draft` is undefined. `Criterion` has no field for them. Add an optional `note?` and capture it, or a small sidecar, when these surfaces are built.
+- **[build] `scripts/build-path-content.ts` is not wired into `package.json`.** A stale or hand-edited generated module can currently drift from the parser without a gate. Add a `pretest`/`prebuild` hook, or a test that diffs a fresh `parseCurriculum()` against the committed module, before real families are on it.
 
 **Prerequisite:** `artifacts/The Path/` is **untracked in git today** (`?? "artifacts/The Path/"`), and the previously tracked copy at `artifacts/the-path-home-study-curriculum-brief.md` is staged for deletion. The single source of 125 tasks, 125 Done-when lines and 179 band variants exists on one machine. **Commit it before this unit starts** — the parser's input must be a tracked file or no other developer, agent, or verification pass can run these tests.
 - `app/2026-27/__tests__/data.test.ts` hard-asserts `toHaveLength(5)` on criteria arrays. Still correct for the 25 criteria; do not let that invariant leak into task-level code.

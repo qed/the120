@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { config } from "@/proxy";
 import {
+  carryOverAuthState,
   isUnguarded,
   outcomeDestination,
   resolveProxyOutcome,
@@ -166,6 +167,72 @@ describe("shouldCarryHeader", () => {
   it("does not over-match headers that merely contain the prefix", () => {
     expect(shouldCarryHeader("x-my-x-middleware-thing")).toBe(true);
     expect(shouldCarryHeader("x-middleware")).toBe(true);
+  });
+});
+
+describe("carryOverAuthState — the session-desync fix, now testable", () => {
+  // Minimal stubs mirroring the Next cookie/header shapes the proxy uses.
+  const makeResponse = (
+    cookies: { name: string; value: string }[],
+    headers: Record<string, string>
+  ) => {
+    const setCookies: { name: string; value: string }[] = [];
+    const setHeaders: Record<string, string> = {};
+    return {
+      cookies: {
+        getAll: () => cookies,
+        set: (c: { name: string; value: string }) => setCookies.push(c),
+      },
+      headers: {
+        forEach: (cb: (v: string, k: string) => void) =>
+          Object.entries(headers).forEach(([k, v]) => cb(v, k)),
+        set: (k: string, v: string) => {
+          setHeaders[k] = v;
+        },
+      },
+      setCookies,
+      setHeaders,
+    };
+  };
+
+  it("carries every refreshed auth cookie onto the gated response", () => {
+    // Chunked tokens (.0/.1) are the case that desynced sessions before.
+    const from = makeResponse(
+      [
+        { name: "sb-deolv-auth-token.0", value: "a" },
+        { name: "sb-deolv-auth-token.1", value: "b" },
+      ],
+      {}
+    );
+    const to = makeResponse([], {});
+    carryOverAuthState(from, to);
+    expect(to.setCookies).toEqual([
+      { name: "sb-deolv-auth-token.0", value: "a" },
+      { name: "sb-deolv-auth-token.1", value: "b" },
+    ]);
+  });
+
+  it("carries the no-store headers but drops set-cookie and x-middleware-*", () => {
+    const from = makeResponse([], {
+      "cache-control": "private, no-cache, no-store",
+      pragma: "no-cache",
+      "set-cookie": "sb-x=1",
+      "x-middleware-next": "1",
+      "x-middleware-rewrite": "/crm/staff-only",
+    });
+    const to = makeResponse([], {});
+    carryOverAuthState(from, to);
+    expect(to.setHeaders).toEqual({
+      "cache-control": "private, no-cache, no-store",
+      pragma: "no-cache",
+    });
+  });
+
+  it("is a no-op when nothing was refreshed", () => {
+    const to = makeResponse([], {});
+    carryOverAuthState(makeResponse([], {}), to);
+    expect(to.setCookies).toEqual([]);
+    expect(to.setHeaders).toEqual({});
   });
 });
 

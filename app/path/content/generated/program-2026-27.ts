@@ -1663,7 +1663,7 @@ export const PROGRAM_2026_27: ProgramContent = {
       ]
     }
   ]
-} as const;
+};
 
 registerProgram(PROGRAM_2026_27);
 

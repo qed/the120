@@ -102,3 +102,18 @@ export type ResolvedTask = UnitTask & {
   /** The band-specific line, if this task has one. */
   variant?: string;
 };
+
+/**
+ * Recursively-readonly view of a value. `getProgram()` returns the content this
+ * way: the registry hands back the SAME object reference on every call in a
+ * long-running process, so a consumer mutating it in place — sorting `tasks`,
+ * writing a resolved variant onto a task — would corrupt the curriculum for
+ * every student on that version. Readonly at the boundary makes that a compile
+ * error rather than a silent cross-request bug. The parser still builds mutable
+ * drafts internally; only what escapes to callers is frozen at the type level.
+ */
+export type DeepReadonly<T> = T extends (infer U)[]
+  ? ReadonlyArray<DeepReadonly<U>>
+  : T extends object
+    ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+    : T;

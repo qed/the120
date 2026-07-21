@@ -103,6 +103,21 @@ describe("log templates", () => {
   it("returns undefined for a task that creates no log", () => {
     expect(logTemplateFor("1.1.1")).toBeUndefined();
   });
+
+  it("throws when a band column collides with a base column key", () => {
+    // The guard the current data never triggers — proven here so deleting it
+    // would fail a test, not pass silently.
+    const colliding = {
+      taskId: "x.y.z",
+      name: "collision",
+      columns: [{ key: "date", label: "Date", type: "date" as const }],
+      bandColumns: {
+        g9_12: [{ key: "date", label: "Also date", type: "date" as const }],
+      },
+      source: "synthetic fixture for the collision guard",
+    };
+    expect(() => columnsForBand(colliding, "g9_12")).toThrow(/collides/);
+  });
 });
 
 describe("safety flags", () => {

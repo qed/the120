@@ -64,6 +64,34 @@ describe("manifest validation", () => {
       "the one-liner is written. **This completes the criterion.**";
     expect(() => assertMatchesManifest(clone)).toThrow(/markdown bold markers/);
   });
+
+  it("catches an empty title, body, or Done-when line", () => {
+    const clone: ProgramContent = JSON.parse(JSON.stringify(PROGRAM));
+    clone.phases[0].criteria[0].tasks[0].title = "";
+    expect(() => assertMatchesManifest(clone)).toThrow(
+      /empty title, body, or Done-when/
+    );
+  });
+});
+
+describe("getProgram returns an immutable view", () => {
+  // Compile-time only — declared, never called, so it can't corrupt the shared
+  // singleton that every other test reads. The `@ts-expect-error`s ARE the
+  // assertion: if getProgram's return type stopped being DeepReadonly, these
+  // lines would compile and `tsc` (part of the verification gate) would fail on
+  // the now-unused directives.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function _typeGuard() {
+    const p = getProgram("2026-27");
+    // @ts-expect-error — phases is readonly; no pushing into the shared object.
+    p.phases.push(p.phases[0]);
+    // @ts-expect-error — a task's fields are readonly too.
+    p.phases[0].criteria[0].tasks[0].doneWhen = "corrupted";
+  }
+
+  it("still serves intact content (the type guard above never runs)", () => {
+    expect(getProgram("2026-27").phases).toHaveLength(5);
+  });
 });
 
 describe("version registry (D27)", () => {

@@ -114,3 +114,44 @@ export function shouldCarryHeader(key: string): boolean {
   const k = key.toLowerCase();
   return k !== "set-cookie" && !k.startsWith("x-middleware-");
 }
+
+/* ── carry-over ────────────────────────────────────────────────────────────
+ * The redirect/rewrite branches in proxy.ts build a fresh response, which does
+ * NOT inherit the cookies or no-store headers @supabase/ssr set on the
+ * pass-through one. Dropping them ends a live session mid-navigation — the bug
+ * this whole unit exists to fix.
+ *
+ * The copy is pulled out here, duck-typed, so it can be tested with plain
+ * objects. The wrapper in proxy.ts is otherwise untestable in this repo (no way
+ * to construct the real Next cookie/header objects), which is exactly how a
+ * regression to this loop would ship green.
+ */
+
+export type CookieCarrier = {
+  getAll(): readonly { name: string; value: string }[];
+};
+export type CookieSink = {
+  set(cookie: { name: string; value: string }): void;
+};
+export type HeaderCarrier = {
+  forEach(cb: (value: string, key: string) => void): void;
+};
+export type HeaderSink = {
+  set(key: string, value: string): void;
+};
+
+/**
+ * Copy every cookie, and every carry-eligible header, from a pass-through
+ * response onto a gated (redirect/rewrite) response.
+ */
+export function carryOverAuthState(
+  from: { cookies: CookieCarrier; headers: HeaderCarrier },
+  to: { cookies: CookieSink; headers: HeaderSink }
+): void {
+  for (const cookie of from.cookies.getAll()) {
+    to.cookies.set(cookie);
+  }
+  from.headers.forEach((value, key) => {
+    if (shouldCarryHeader(key)) to.headers.set(key, value);
+  });
+}

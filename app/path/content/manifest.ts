@@ -16,7 +16,7 @@
  *     place — because a pinned student still reads theirs.
  */
 
-import type { ProgramContent, ProgramManifest } from "./types";
+import type { DeepReadonly, ProgramContent, ProgramManifest } from "./types";
 
 /**
  * Criteria that end on a live audience. A fixed list of four, per the app
@@ -159,8 +159,12 @@ export function registerProgram(content: ProgramContent): void {
  *
  * Callers pass the STUDENT'S PINNED version (D27), never a "current" global.
  * An unknown id throws rather than falling back.
+ *
+ * Returns `DeepReadonly` — the registry hands back a shared reference, so the
+ * type stops a consumer mutating the one curriculum object every student on
+ * this version reads from.
  */
-export function getProgram(versionId: string): ProgramContent {
+export function getProgram(versionId: string): DeepReadonly<ProgramContent> {
   const loader = REGISTRY.get(versionId);
   if (!loader) {
     throw new Error(

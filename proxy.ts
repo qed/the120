@@ -2,10 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
+  carryOverAuthState,
   isUnguarded,
   outcomeDestination,
   resolveProxyOutcome,
-  shouldCarryHeader,
 } from "@/app/lib/supabase/proxy-rules";
 
 /**
@@ -85,10 +85,7 @@ export async function proxy(request: NextRequest) {
       ? NextResponse.rewrite(destination)
       : NextResponse.redirect(destination);
 
-  response.cookies.getAll().forEach((cookie) => gated.cookies.set(cookie));
-  response.headers.forEach((value, key) => {
-    if (shouldCarryHeader(key)) gated.headers.set(key, value);
-  });
+  carryOverAuthState(response, gated);
 
   return gated;
 }

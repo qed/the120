@@ -177,13 +177,10 @@ export function parseCurriculum(
           `Phase ${num}: expected key ${expectedKey} at position ${seq}, got ${key}.`
         );
       }
-      phase = {
-        num,
-        key: key as PhaseKey,
-        subtitle: subtitle.trim(),
-        seq,
-        criteria: [],
-      };
+      // `key` is already narrowed to PhaseKey by the equality guard above — no
+      // cast. If that guard is ever weakened, this line should stop compiling
+      // rather than silently assert the type.
+      phase = { num, key, subtitle: subtitle.trim(), seq, criteria: [] };
       continue;
     }
 

@@ -71,20 +71,23 @@ function main() {
  * it never regenerates this file, because a pinned student still reads it.
  */`;
 
+  // Sanitize once — all three usages below must stay byte-identical or the
+  // generated module won't compile.
+  const exportName = `PROGRAM_${VERSION_ID.replace(/-/g, "_")}`;
+
+  // No `as const`: with a `: ProgramContent` annotation whose fields are plain
+  // arrays, `as const` is a no-op the compiler widens straight back. Immutability
+  // is enforced where it matters instead — getProgram() returns DeepReadonly.
   const body = `${banner}
 
 import { registerProgram } from "../manifest";
 import type { ProgramContent } from "../types";
 
-export const PROGRAM_${VERSION_ID.replace(/-/g, "_")}: ProgramContent = ${JSON.stringify(
-    content,
-    null,
-    2
-  )} as const;
+export const ${exportName}: ProgramContent = ${JSON.stringify(content, null, 2)};
 
-registerProgram(PROGRAM_${VERSION_ID.replace(/-/g, "_")});
+registerProgram(${exportName});
 
-export default PROGRAM_${VERSION_ID.replace(/-/g, "_")};
+export default ${exportName};
 `;
 
   mkdirSync(OUT_DIR, { recursive: true });

@@ -331,6 +331,44 @@ describe("parse failures are loud", () => {
     expect(() => parseCurriculum(broken, "2026-27")).toThrow(/phase header/i);
   });
 
+  // These edge-case throws use minimal synthetic documents rather than
+  // mutating the real 785-line curriculum: a targeted replace is fragile (a
+  // hyphen makes a line not-a-band-line rather than a bad label; a body
+  // sentence has continuation text a naive cut leaves behind). The parser's
+  // contract is under test, so a hand-built document exercises it precisely.
+  const doc = (rest: string) =>
+    "# Phase 01 · SELL — *Learn to confidently sell anything.*\n" +
+    "## Criterion 1.1 — Some criterion\n" +
+    rest;
+
+  it("throws on a band label that matches the shape but isn't a real band", () => {
+    // "1–2" (en dash, digits) matches the band-bullet regex but is no known
+    // band — it must fail loudly, not store a variant under a bogus band.
+    const broken = doc(
+      "**1.1.1 — Title.** A body.\n*Done when:* x.\n- **1–2:** oops.\n"
+    );
+    expect(() => parseCurriculum(broken, "2026-27")).toThrow(
+      /unrecognised band label/i
+    );
+  });
+
+  it("throws when a criterion parses with zero tasks", () => {
+    const broken = doc("(no task lines at all)\n");
+    expect(() => parseCurriculum(broken, "2026-27")).toThrow(/zero tasks/i);
+  });
+
+  it("throws when a task body is empty", () => {
+    // Title marker with nothing after it, no continuation before Done-when.
+    const broken = doc("**1.1.1 — Title only.**\n*Done when:* something.\n");
+    expect(() => parseCurriculum(broken, "2026-27")).toThrow(/empty body/i);
+  });
+
+  it("throws when no phases parse at all", () => {
+    expect(() => parseCurriculum("just some prose\n", "2026-27")).toThrow(
+      /No phases parsed/i
+    );
+  });
+
   it("handles CRLF input identically to LF", () => {
     // The file is CRLF on disk here; a parser keyed on "\n" alone would leave
     // a trailing \r on every field.

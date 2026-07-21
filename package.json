@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "seed:staff": "tsx scripts/seed-staff.ts",
-    "backfill:families": "tsx scripts/backfill-families.ts"
+    "backfill:families": "tsx scripts/backfill-families.ts",
+    "backfill:welcome": "tsx scripts/backfill-welcome-email.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

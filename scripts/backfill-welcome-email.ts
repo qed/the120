@@ -163,13 +163,23 @@ async function main() {
       consent_expires_at: r.consent_expires_at,
       merged_into_id: r.merged_into_id,
     };
-    const res = await sendWelcome(admin, input, {
-      // Deliberate re-welcome bypasses the NULL claim via CAS on the current
-      // stamp; a concurrent go-forward send (stamp moved past cutover) makes the
-      // CAS miss -> already_sent -> we skip it. Null stamp -> plain NULL claim.
-      resendOf: r.welcome_email_at ?? undefined,
-      idempotencyKey: `welcome-backfill-${r.id}`,
-    });
+    const sendOnce = () =>
+      sendWelcome(admin, input, {
+        // Deliberate re-welcome bypasses the NULL claim via CAS on the current
+        // stamp; a concurrent go-forward send (stamp moved past cutover) makes the
+        // CAS miss -> already_sent -> we skip it. Null stamp -> plain NULL claim.
+        resendOf: r.welcome_email_at ?? undefined,
+        idempotencyKey: `welcome-backfill-${r.id}`,
+      });
+    let res = await sendOnce();
+    // Retry a transient "fetch failed" (network blip) — the Idempotency-Key makes
+    // a resend a no-op at Resend if the first attempt actually landed, so retries
+    // can't duplicate. Only a persistent failure after 3 tries counts.
+    for (let attempt = 2; res.status === "send_failed" && attempt <= 3; attempt++) {
+      console.warn(`  · retry ${r.email} (attempt ${attempt}) after: ${res.error ?? ""}`);
+      await sleep(2000);
+      res = await sendOnce();
+    }
     if (res.status === "sent") stats.sent += 1;
     else if (res.status === "send_failed") {
       stats.failures += 1;

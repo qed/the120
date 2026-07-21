@@ -98,7 +98,13 @@ async function main() {
   });
 
   const all = await fetchAll(admin);
-  const recipients = selectBackfillRecipients(all, { cutoffIso });
+  const eligible = selectBackfillRecipients(all, { cutoffIso });
+  // --only=<email> restricts the run to a single address — the test-to-self gate
+  // (plan R11): send to yourself first, confirm it renders, then run the full set.
+  const only = arg("only");
+  const recipients = only
+    ? eligible.filter((r) => (r.email ?? "").toLowerCase() === only.toLowerCase())
+    : eligible;
 
   // Ordering breakdown by consent source (non-PII).
   const bySource = new Map<string, number>();
@@ -109,7 +115,8 @@ async function main() {
 
   console.log(`\nWelcome backfill — cutover: ${cutoffIso}`);
   console.log(`  families scanned:  ${all.length}`);
-  console.log(`  eligible recipients: ${recipients.length}`);
+  console.log(`  eligible recipients: ${eligible.length}`);
+  if (only) console.log(`  --only ${only}: ${recipients.length} match (test-to-self)`);
   console.log(`  by consent source (send order rank asc):`);
   [...bySource.entries()]
     .sort((a, b) => consentStrengthRank(a[0]) - consentStrengthRank(b[0]))

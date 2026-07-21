@@ -112,7 +112,8 @@ Decisions carried in: **D15–D27** (origin document; D27 — per-student progra
 - **RLS performance:** wrap function calls as `(select fn())` so Postgres builds an initPlan and evaluates once per statement, not per row (a security-definer function measured 178,000 ms → 12 ms). Specify `TO authenticated`. Index policy columns.
 - **`app_metadata` changes are not reflected in `auth.jwt()` until token refresh.** Never optimize the DB lookup away into a pure claim check.
 - **Never module-scope a Supabase client** — Vercel Fluid Compute reuses warm instances and would leak sessions between users.
-- `supabase/config.toml` has `enable_confirmations = false`, which is why R2's system addresses are expected to work — **verified by the Unit 2 spike** (promoted from Unit 6 in the deepening pass).
+- ⚠️ **`supabase/config.toml` is misleading and its `enable_confirmations = false` does NOT describe the hosted project.** The Unit 2 spike (run 2026-07-21 against production) settled this: an account created **without** `email_confirm: true` gets `email_confirmed_at: NULL` and its sign-in fails with **"Email not confirmed"**. `artifacts/roadmap.md` was right — confirmations were turned ON in production on 2026-07-13. Treat `config.toml` as local declarative config only; it is not a source of truth for the hosted project's auth settings.
+- **Spike result (Unit 2, 2026-07-21):** `admin.createUser({ email, password, email_confirm: true })` on a system-generated **non-deliverable** address works, and the account signs in with `signInWithPassword` returning a session. No MX or deliverability validation occurs — even a non-routable `.invalid` domain is accepted. **R1/R2/R31/R32 are viable as designed**, provided `email_confirm: true` is always passed.
 - **`ca-central-1` is available**; region is chosen at project creation and migration later is painful. Relevant to the launch gate below.
 
 ### Offline and media research
@@ -269,7 +270,7 @@ browser                    Server Action            Supabase Storage
 | Surfaces | 14 → 15 | Student, then parent |
 | Close the loop | 11 → 12 → 16 | Offline sync onto a working surface; notification; celebration |
 
-- [ ] **Unit 1: Fix Supabase session handling and bump `@supabase/ssr`**
+- [x] **Unit 1: Fix Supabase session handling and bump `@supabase/ssr`**
 
 **Goal:** Correct two pre-existing session-desync bugs before a second gated area depends on the same code.
 
@@ -296,7 +297,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 2: Test harness and `/path` module skeleton**
+- [x] **Unit 2: Test harness and `/path` module skeleton**
 
 **Goal:** Make Path tests capable of running at all, and fix the module layout before any logic exists.
 
@@ -318,7 +319,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 3: Curriculum content package — parser and manifest**
+- [x] **Unit 3: Curriculum content package — parser and manifest**
 
 **Goal:** Turn the curriculum markdown into a typed, versioned, validated module the app and scripts both consume.
 
@@ -342,7 +343,12 @@ browser                    Server Action            Supabase Storage
   - **`isStageMoment`** — derivable: a fixed list of four criterion IDs (`2.5, 3.4, 4.5, 5.5`) as one constant in `manifest.ts`. Unit 14's port of the handoff's 4.5.4 card needs it for the "Live moment" badge.
   - `wisdomContextTags` and `headlineStatSpec` stay out of T1 entirely — reserve optional type fields so T2 doesn't touch every consumer, and author nothing now.
 - **The generated module is keyed by version, and consumers never import it directly** *(deepening pass)*. `manifest.ts` exports a `getProgram(versionId)` registry; nothing does `import { program } from "./generated/program-2026-27"`. When a revision ships, the new module lands **beside** the old one — a pinned student still reads theirs, so old modules are permanent fixtures, never deleted or regenerated in place. This is near-zero cost now and a touch-every-consumer refactor after Units 12–16 exist — the same class of decision as the `server-only` split. Honest correction to R22's phrasing: a revision ships a new module *plus* a new manifest, not "a manifest, not a code change".
-- UTF-8 safety throughout — the source is full of em-dashes and curly quotes.
+- UTF-8 safety throughout — the source uses em dashes (—), en dashes (–) and STRAIGHT apostrophes; it contains no curly quotes at all. (`data.ts` does, which is one more reason reconciliation is structural.)
+
+**Carried out of Unit 3's review, for later units:**
+- **[T2/T3] Wire generated-module imports before any `getProgram` caller ships.** `registerProgram` runs as an import side effect, so a server component calling `getProgram(versionId)` for a pinned student throws "not registered" unless that version's generated module is in the same module graph. A central barrel that imports every generated module, imported by the engine, closes it. The throw is correct (no silent fallback); the risk is only that the import actually happens on every path.
+- **[T2] Criterion-level home-study notes are not yet captured.** Criteria 3.4, 4.5, 5.1, 5.5 open with an italic framing paragraph (3.4's is the "hands-off by design" statement). The parser drops these — they sit between a criterion header and its first task, where `draft` is undefined. `Criterion` has no field for them. Add an optional `note?` and capture it, or a small sidecar, when these surfaces are built.
+- **[build] `scripts/build-path-content.ts` is not wired into `package.json`.** A stale or hand-edited generated module can currently drift from the parser without a gate. Add a `pretest`/`prebuild` hook, or a test that diffs a fresh `parseCurriculum()` against the committed module, before real families are on it.
 
 **Prerequisite:** `artifacts/The Path/` is **untracked in git today** (`?? "artifacts/The Path/"`), and the previously tracked copy at `artifacts/the-path-home-study-curriculum-brief.md` is staged for deletion. The single source of 125 tasks, 125 Done-when lines and 179 band variants exists on one machine. **Commit it before this unit starts** — the parser's input must be a tracked file or no other developer, agent, or verification pass can run these tests.
 - `app/2026-27/__tests__/data.test.ts` hard-asserts `toHaveLength(5)` on criteria arrays. Still correct for the 25 criteria; do not let that invariant leak into task-level code.
@@ -443,7 +449,8 @@ browser                    Server Action            Supabase Storage
 **Files:** Modify `proxy.ts`. Create `app/path/(auth)/sign-in/page.tsx`, `app/path/lib/actions/provision.ts` (`"use server"`), `app/path/lib/provision-rules.ts` (pure), `app/path/lib/rate-limit-rules.ts` (pure). Test: `__tests__/provision-rules.test.ts`, `__tests__/rate-limit-rules.test.ts`.
 
 **Approach:**
-- The non-deliverable-address assumption was **already verified by Unit 2's `admin.createUser` spike** *(promoted there in the deepening pass)* — this unit builds on a falsified-or-confirmed fact, not a hope.
+- The non-deliverable-address assumption was **verified by Unit 2's spike on 2026-07-21** — confirmed viable, with one mandatory correction below.
+- ⚠️ **`email_confirm: true` is REQUIRED on every student `createUser` call.** The hosted project has email confirmations ON (despite `config.toml` saying otherwise). Omit the flag and the account is created but **cannot sign in** — `signInWithPassword` fails with "Email not confirmed", and since the address is non-deliverable by design there is no confirmation email to rescue it. Every child provisioned without this flag is permanently locked out of an account that looks fine in the dashboard. Cover it with a test that asserts the provisioning call includes the flag, and mirror `scripts/seed-staff.ts`, which already does this for staff.
 - Provision via the service-role admin API with a parent-set password — **not** `signUp()`, which returns no session and strands the profile write. **Provisioning pins the student to the currently-designated program version** (Unit 4's `is_current`) — the pin is set here and never touched by content deploys.
 - Sign-in shows **name + password**; the system address is derived server-side and never displayed.
 - Rate limiting and a strength floor (R29) are entirely greenfield — no throttle exists anywhere in this repo, and a first name is far more guessable than an email address within a cohort.

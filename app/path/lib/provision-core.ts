@@ -51,7 +51,16 @@ export type ProvisionStudentInput = {
 
 export type ProvisionStudentResult =
   | { ok: true; profileId: string; userId: string; repaired: boolean }
-  | { ok: false; reason: "child_not_found" | "family_not_found" | "already_provisioned" | "no_current_program_version" | "unavailable" }
+  | {
+      ok: false;
+      reason:
+        | "child_not_found"
+        | "child_name_missing"
+        | "family_not_found"
+        | "already_provisioned"
+        | "no_current_program_version"
+        | "unavailable";
+    }
   | { ok: false; reason: "weak_password"; message: string };
 
 export async function provisionStudent(
@@ -70,6 +79,12 @@ export async function provisionStudent(
   if (!childRes.data) return { ok: false, reason: "child_not_found" };
   const firstName =
     typeof childRes.data.first_name === "string" ? childRes.data.first_name : "";
+
+  // Refuse a nameless roster row (public.children.first_name defaults to '' for
+  // CRM drafts). Without a name, studentNameMatches fails closed forever, so the
+  // account we would mint here could NEVER sign in — a silent, permanent lockout
+  // reported as success. Fail loudly at provisioning instead (Unit 6 review).
+  if (firstName.trim().length === 0) return { ok: false, reason: "child_name_missing" };
 
   // 2. One profile per child, ever (unique child_id backs this check under race).
   const existing = await db
@@ -125,11 +140,34 @@ export async function provisionStudent(
       return { ok: false, reason: "unavailable" };
     }
     // Repair: a prior run created the account (the address is derived from the
-    // child id) but died before the profile landed. Re-adopt it and re-set the
-    // password to the parent's CURRENT intent.
-    const found = await findUserByEmail(db, deriveStudentEmail(childId));
+    // child id) but died before the profile landed. Re-adopt it — but ONLY if
+    // this is genuinely a stranded run, not a live concurrent co-parent
+    // provisioning the same child (R32 allows either parent). Re-probe for a
+    // profile first: if one now exists, a concurrent caller already won, so we
+    // must NOT clobber their password — report already_provisioned and stop
+    // (Unit 6 review, adversarial). Only when there is still no profile do we
+    // reset the password to complete the stranded provisioning.
+    const reprobe = await db
+      .from("path_student_profiles")
+      .select("id")
+      .eq("child_id", childId)
+      .maybeSingle();
+    if (reprobe.error) {
+      console.error(`[path/provision] repair re-probe failed for ${childId}: ${reprobe.error.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    if (reprobe.data) return { ok: false, reason: "already_provisioned" };
+
+    const found = await findAuthUserByEmail(db, deriveStudentEmail(childId));
     if (!found) {
       console.error(`[path/provision] email exists but user not found for child ${childId}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    // Defense in depth: only adopt an account this system minted as a student.
+    // The address is derived from an internal child UUID (so external collision
+    // is implausible), but never reset a non-student account's password.
+    if (found.app_metadata?.role !== "student") {
+      console.error(`[path/provision] refusing to adopt non-student account for child ${childId}`);
       return { ok: false, reason: "unavailable" };
     }
     const updated = await db.auth.admin.updateUserById(found.id, { password });
@@ -174,8 +212,14 @@ export async function provisionStudent(
       console.error(`[path/provision] profile insert failed for ${childId}: ${inserted.error.message}`);
       return { ok: false, reason: "unavailable" };
     }
+  } else if (typeof inserted.data?.id === "string") {
+    profileId = inserted.data.id;
   } else {
-    profileId = inserted.data.id as string;
+    // The insert reported success but the projected id is not a string — fail
+    // loudly rather than let a bad profileId flow into the grants upsert (the
+    // adopt branch above already guards its read the same way).
+    console.error(`[path/provision] profile insert returned no id for ${childId}`);
+    return { ok: false, reason: "unavailable" };
   }
 
   // 8. The two-grant pair. Upsert-on-unique so a repair run is a no-op.
@@ -225,6 +269,18 @@ export type ResetStudentPasswordResult =
   | { ok: false; reason: "weak_password"; message: string };
 
 /**
+ * Map a failed reset result to user-facing copy — shared so the parent action
+ * (provision.ts) and the D26 staff action (path-recovery.ts) can't drift on the
+ * two strings. weak_password surfaces the specific floor message; everything
+ * else is a generic retry.
+ */
+export function resetFailureMessage(
+  result: Exclude<ResetStudentPasswordResult, { ok: true }>
+): string {
+  return result.reason === "weak_password" ? result.message : "The reset failed — please try again.";
+}
+
+/**
  * Set a student's password to the adult's new choice — no email round-trip
  * exists or is possible (the address is non-deliverable by design). AUTH IS
  * THE CALLER'S JOB: the parent action checks isParentOfFamily against the
@@ -256,9 +312,17 @@ export async function resetStudentPassword(
 
 /* ---------------------------------------------------------------- helpers */
 
-/** Page-walk lookup by email (the seed-staff.ts precedent — no direct
- *  get-by-email exists in the admin API). Only runs on the repair path. */
-async function findUserByEmail(db: SupabaseClient, email: string): Promise<User | null> {
+/**
+ * Page-walk lookup by email (the seed-staff.ts precedent — no direct
+ * get-by-email exists in the admin API). Exported so the machine-bound seed
+ * script reuses this one copy instead of a third hand-rolled duplicate; returns
+ * null on a query error (logged) so callers fail closed. Only the provisioning
+ * repair path and the seed script call it.
+ */
+export async function findAuthUserByEmail(
+  db: SupabaseClient,
+  email: string
+): Promise<User | null> {
   const perPage = 1000;
   for (let page = 1; ; page += 1) {
     const { data, error } = await db.auth.admin.listUsers({ page, perPage });

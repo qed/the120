@@ -10,13 +10,18 @@
  * here, same posture as Unit 9/10's actions). The machine-bound seed script
  * reaches the same core directly with the service-role key.
  *
- * T1 trust boundary, on the record: the CRM child ↔ Path parent linkage
- * (R31's backfill) is Unit 15's. Until it lands, nothing DB-side proves the
- * roster child being linked "belongs to" the calling parent — bounded because
- * parent accounts + grants exist ONLY via the seed script (no self-serve
- * parent signup before Unit 15), so every caller is a staff-provisioned,
- * consenting test family. Unit 15 must add the CRM-side ownership check when
- * it opens parent entry. Carried forward in the plan.
+ * ⚠️ T1 TRUST BOUNDARY — a Unit 15 BLOCKER, not just a note. Authority is
+ * checked against the client-supplied familyId (isParentOfFamily); nothing
+ * DB-side proves the supplied childId "belongs to" that family. A signed-in
+ * parent could therefore pair their own familyId with ANY child row in the
+ * shared public.children roster and provision it into their family — permanently
+ * squatting that child (the unique child_id makes it un-reprovisionable by the
+ * real family). This is bounded TODAY only because parent accounts + grants
+ * exist solely via the machine-bound seed script (no self-serve parent signup),
+ * so every caller is a staff-provisioned, consenting test family. **Unit 15 MUST
+ * add the CRM-side childId↔family ownership check before it opens any parent
+ * self-serve entry — this is a hard gate, recorded in the plan's Unit 15
+ * carry-forwards and flagged by the Unit 6 security review.**
  */
 
 import { z } from "zod";
@@ -26,6 +31,7 @@ import { isParentOfFamily } from "@/app/path/lib/provision-rules";
 import {
   loadStudentProfileForAuth,
   provisionStudent,
+  resetFailureMessage,
   resetStudentPassword,
 } from "@/app/path/lib/provision-core";
 
@@ -68,6 +74,11 @@ export async function provisionStudentAction(
       return { success: false, error: result.message };
     case "child_not_found":
       return { success: false, error: "That child couldn't be found on the roster." };
+    case "child_name_missing":
+      return {
+        success: false,
+        error: "This child has no name on the roster yet — add it before creating their account.",
+      };
     case "already_provisioned":
       return { success: false, error: "This child already has a Path account." };
     case "family_not_found":
@@ -120,12 +131,6 @@ export async function resetStudentPasswordAction(
     newPassword: parsed.data.newPassword,
     studentName: profile.firstName,
   });
-  if (!result.ok) {
-    return {
-      success: false,
-      error:
-        result.reason === "weak_password" ? result.message : "The reset failed — please try again.",
-    };
-  }
+  if (!result.ok) return { success: false, error: resetFailureMessage(result) };
   return { success: true };
 }

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  checkAndRecordRateLimit,
   checkRateLimit,
   clearRateLimitBucket,
   MAX_RATE_LIMIT_BUCKETS,
   recordRateLimitEvent,
+  releaseRateLimitEvent,
   resetRateLimitStoreForTests,
 } from "../rate-limit-store";
 import { SIGN_IN_RATE_LIMIT, type RateLimitConfig } from "../rate-limit-rules";
@@ -45,14 +47,65 @@ describe("rate-limit store (in-memory, per warm instance)", () => {
     expect(out.allowed).toBe(false);
   });
 
-  it("evicts the oldest-inserted bucket beyond the cap — bounded memory, fails OPEN for the evicted key", () => {
-    // Deny k-first, then flood with distinct keys until the cap forces eviction.
-    for (let i = 0; i < cfg.limit; i++) recordRateLimitEvent("k-first", cfg, NOW);
-    expect(checkRateLimit("k-first", cfg, NOW).allowed).toBe(false);
+  it("an ACTIVE lockout survives a distinct-key flood — eviction takes the fewest-event bucket, not the oldest (F2 fix)", () => {
+    // Lock a victim, then flood with single-event throwaway keys past the cap.
+    for (let i = 0; i < cfg.limit; i++) recordRateLimitEvent("victim", cfg, NOW);
+    expect(checkRateLimit("victim", cfg, NOW).allowed).toBe(false);
     for (let i = 0; i < MAX_RATE_LIMIT_BUCKETS; i++) {
       recordRateLimitEvent(`flood-${i}`, cfg, NOW);
     }
-    // k-first was the oldest bucket, so it was evicted → its history is gone.
-    expect(checkRateLimit("k-first", cfg, NOW)).toEqual({ allowed: true });
+    // The victim's 3-event bucket is NOT the fewest-event bucket, so it is never
+    // the eviction target while 1-event throwaways exist — the lockout holds.
+    expect(checkRateLimit("victim", cfg, NOW).allowed).toBe(false);
+  });
+});
+
+describe("checkAndRecordRateLimit — the atomic gate (F1 fix)", () => {
+  it("records the event when it allows, so a follow-up check reflects it", () => {
+    for (let i = 0; i < cfg.limit; i++) {
+      expect(checkAndRecordRateLimit("k", cfg, NOW).allowed).toBe(true);
+    }
+    // limit events now recorded → the next gate refuses.
+    const out = checkAndRecordRateLimit("k", cfg, NOW);
+    expect(out.allowed).toBe(false);
+  });
+
+  it("does NOT record when it refuses (no runaway growth on a locked key)", () => {
+    for (let i = 0; i < cfg.limit; i++) recordRateLimitEvent("k", cfg, NOW);
+    checkAndRecordRateLimit("k", cfg, NOW); // refused
+    checkAndRecordRateLimit("k", cfg, NOW); // refused
+    // Still exactly `limit` events: clearing frees it in exactly one window step.
+    expect(checkRateLimit("k", cfg, NOW + cfg.windowMs + 1)).toEqual({ allowed: true });
+  });
+
+  it("N atomic gates for one key admit exactly `limit`, refuse the rest — the race is closed", () => {
+    let allowed = 0;
+    for (let i = 0; i < cfg.limit * 3; i++) {
+      if (checkAndRecordRateLimit("k", cfg, NOW).allowed) allowed++;
+    }
+    expect(allowed).toBe(cfg.limit);
+  });
+});
+
+describe("releaseRateLimitEvent — undo a provisional strike on an outage", () => {
+  it("removes exactly one (most-recent) event, re-opening a just-closed gate", () => {
+    for (let i = 0; i < cfg.limit; i++) checkAndRecordRateLimit("k", cfg, NOW);
+    expect(checkRateLimit("k", cfg, NOW).allowed).toBe(false);
+    releaseRateLimitEvent("k");
+    expect(checkRateLimit("k", cfg, NOW).allowed).toBe(true);
+  });
+
+  it("is a no-op on an unknown / empty key", () => {
+    expect(() => releaseRateLimitEvent("nope")).not.toThrow();
+    expect(checkRateLimit("nope", cfg, NOW)).toEqual({ allowed: true });
+  });
+
+  it("deletes the bucket when the last event is released", () => {
+    checkAndRecordRateLimit("k", cfg, NOW);
+    releaseRateLimitEvent("k");
+    // A subsequent full window's worth is available again from scratch.
+    for (let i = 0; i < cfg.limit; i++) {
+      expect(checkAndRecordRateLimit("k", cfg, NOW).allowed).toBe(true);
+    }
   });
 });

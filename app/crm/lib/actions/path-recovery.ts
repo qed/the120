@@ -18,9 +18,11 @@
 
 import { z } from "zod";
 import { requireStaff } from "@/app/crm/lib/auth";
+import { type AuditAction } from "@/app/crm/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
   loadStudentProfileForAuth,
+  resetFailureMessage,
   resetStudentPassword,
 } from "@/app/path/lib/provision-core";
 
@@ -51,30 +53,34 @@ export async function recoverPathStudentAccess(
     newPassword: parsed.data.newPassword,
     studentName: profile.firstName,
   });
-  if (!result.ok) {
-    return {
-      success: false,
-      error:
-        result.reason === "weak_password"
-          ? result.message
-          : "The reset failed — please try again.",
-    };
-  }
+  if (!result.ok) return { success: false, error: resetFailureMessage(result) };
 
-  // The D26 audit trail. If this insert fails the reset has still happened —
-  // returning failure would just trigger a retry loop against a completed
-  // reset — so log LOUDLY and report the gap instead of hiding it.
-  const audit = await db.from("crm_audit_log").insert({
+  // The D26 audit trail. `action` is typed `AuditAction` (via satisfies), so a
+  // typo becomes a compile error rather than a runtime CHECK violation the
+  // untyped supabaseAdmin() client would let through — the sibling CRM actions
+  // gate their inserts behind an AuditAction-typed helper for the same reason.
+  const auditRow = {
     actor: staff.staffId,
-    action: "path-recovery",
-    family_id: null, // CRM family linkage is Unit 15's backfill; Path ids ride in metadata
+    action: "path-recovery" satisfies AuditAction,
+    family_id: null as string | null, // CRM family linkage is Unit 15's backfill; Path ids ride in metadata
     metadata: {
       kind: "student-password-reset",
       path_profile_id: profile.profileId,
       path_family_id: profile.familyId,
       child_id: profile.childId,
     },
-  });
+  };
+
+  // The reset has ALREADY committed, so we never fail the request on an audit
+  // hiccup (that would loop a retry against a completed reset). But D26's whole
+  // point is the trail, so one bounded retry meaningfully shrinks the silent-gap
+  // window on a transient blip; on final failure, log LOUDLY (the only backstop).
+  // The append-only table has no uniqueness on these fields, so a rare duplicate
+  // row from a lost-ack retry is acceptable — over-logging beats a missing record.
+  let audit = await db.from("crm_audit_log").insert(auditRow);
+  if (audit.error) {
+    audit = await db.from("crm_audit_log").insert(auditRow);
+  }
   if (audit.error) {
     console.error(
       `[crm/path-recovery] AUDIT WRITE FAILED for profile ${profile.profileId}: ${audit.error.message}`

@@ -31,9 +31,9 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
-import { provisionStudent } from "@/app/path/lib/provision-core";
+import { findAuthUserByEmail, provisionStudent } from "@/app/path/lib/provision-core";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";
 const PARENT_NAME = { first_name: "Path", last_name: "Testparent" };
@@ -72,17 +72,6 @@ function loadEnv(): { url: string; serviceRoleKey: string } {
   return { url, serviceRoleKey };
 }
 
-async function findUserByEmail(admin: SupabaseClient, email: string): Promise<User | null> {
-  const perPage = 1000;
-  for (let page = 1; ; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-    if (error) throw error;
-    const hit = data.users.find((u) => (u.email ?? "").toLowerCase() === email.toLowerCase());
-    if (hit) return hit;
-    if (data.users.length < perPage) return null;
-  }
-}
-
 function generatedPassword(): string {
   return randomBytes(12).toString("base64url"); // 16 chars, clears the R29 floor
 }
@@ -100,7 +89,7 @@ async function main() {
   });
 
   // 1. Parent auth user.
-  let parent = await findUserByEmail(db, PARENT_EMAIL);
+  let parent = await findAuthUserByEmail(db, PARENT_EMAIL);
   if (!parent) {
     const password = generatedPassword();
     const { data, error } = await db.auth.admin.createUser({

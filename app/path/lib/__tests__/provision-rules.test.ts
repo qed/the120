@@ -123,6 +123,24 @@ describe("validateStudentPassword — the R29 strength floor", () => {
     expect(out.ok).toBe(false);
   });
 
+  it("measures BYTES, not code units — a multi-byte passphrase over 72 bytes is refused", () => {
+    // Varied katakana (10 distinct chars, so it clears the repetition check and is
+    // rejected specifically on byte length): 30 chars = JS length 30 (< 72) but
+    // ~90 UTF-8 bytes — past bcrypt's 72-BYTE truncation point. A `.length` check
+    // would wave it through and let bcrypt silently truncate it.
+    const cjk = "アイウエオカキクケコ".repeat(3);
+    expect(cjk.length).toBeLessThanOrEqual(72);
+    expect(new Set(cjk).size).toBeGreaterThanOrEqual(4); // not rejected as repetitive
+    expect(new TextEncoder().encode(cjk).length).toBeGreaterThan(72);
+    expect(validateStudentPassword(cjk, {}).ok).toBe(false);
+  });
+
+  it("still accepts a multi-byte passphrase that fits within 72 bytes", () => {
+    const accented = "café rocket 42"; // one 2-byte char, ~16 bytes total
+    expect(new TextEncoder().encode(accented).length).toBeLessThanOrEqual(72);
+    expect(validateStudentPassword(accented, {}).ok).toBe(true);
+  });
+
   it("rejects highly repetitive passwords", () => {
     expect(validateStudentPassword("aaaaaaaaaa", {}).ok).toBe(false);
     expect(validateStudentPassword("ababababab", {}).ok).toBe(false);
@@ -151,6 +169,15 @@ describe("validateStudentPassword — the R29 strength floor", () => {
     expect(validateStudentPassword("green rocket 42", { studentName: "Maya" })).toEqual({
       ok: true,
     });
+  });
+
+  it("catches the student's name embedded in DECOMPOSED unicode (password normalized symmetrically)", () => {
+    // Name normalizes (NFKC) to a composed "josé"; the password spells the same
+    // name in decomposed form (e + combining acute). Without normalizing the
+    // password too, `includes` would miss it — the asymmetry F14 closed.
+    const composedName = "Jos\u00e9"; // Jose + precomposed acute
+    const decomposedInPw = "jose\u0301bicycle"; // jose + COMBINING acute + filler (>=10 chars)
+    expect(validateStudentPassword(decomposedInPw, { studentName: composedName }).ok).toBe(false);
   });
 });
 

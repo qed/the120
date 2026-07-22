@@ -39,7 +39,7 @@ import { mintSignedUploadToken, sumStudentStorageBytes } from "@/app/path/lib/st
 import { isEvidencePathLatched } from "@/app/path/lib/evidence-loader";
 import { classifyUploadKind } from "@/app/path/lib/evidence-rules";
 import { UPLOAD_SLOT_RATE_LIMIT } from "@/app/path/lib/rate-limit-rules";
-import { checkRateLimit, recordRateLimitEvent } from "@/app/path/lib/rate-limit-store";
+import { checkAndRecordRateLimit } from "@/app/path/lib/rate-limit-store";
 
 const uploadSlotSchema = z.object({
   studentId: z.uuid(),
@@ -103,10 +103,13 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
   const { studentId, evidenceId, sha256, ext, sizeBytes, durationSeconds, contentType } = parsed.data;
 
   // Rate-limit BEFORE any DB work, keyed by the authenticated caller (never a
-  // client field). Only successful MINTS are recorded (below), so refused or
-  // failed requests never consume the caller's budget.
+  // client field), and record ATOMICALLY at the gate — checking then recording
+  // after the awaited mint left a window for concurrent bursts to all pass a
+  // stale count (Unit 6 review). Counting attempts (not just successful mints)
+  // is marginally stricter and closes the race; an honest capture session stays
+  // far under UPLOAD_SLOT_RATE_LIMIT.
   const rateKey = `path-upload-slot:${userId}`;
-  const gate = checkRateLimit(rateKey, UPLOAD_SLOT_RATE_LIMIT);
+  const gate = checkAndRecordRateLimit(rateKey, UPLOAD_SLOT_RATE_LIMIT);
   if (!gate.allowed) {
     return { ok: false, reason: "rate_limited", retryAfterMs: gate.retryAfterMs };
   }
@@ -182,10 +185,6 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
     console.error(`[path/upload-slot] mint failed for ${objectPath}:`, e);
     return { ok: false, reason: "unavailable" };
   }
-
-  // The mint is the counted event — the moment an unconfirmed, quota-invisible
-  // object becomes possible.
-  recordRateLimitEvent(rateKey, UPLOAD_SLOT_RATE_LIMIT);
 
   if (decision.strategy === "plain") {
     return {

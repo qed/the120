@@ -142,14 +142,20 @@ export function validateStudentPassword(
       error: `Use at least ${STUDENT_PASSWORD_MIN_LENGTH} characters — a few unrelated words work well.`,
     };
   }
-  if (password.length > 72) {
-    // bcrypt truncates beyond 72 bytes; refuse rather than silently truncate.
+  // bcrypt truncates beyond 72 BYTES; measure UTF-8 bytes, not `.length` (UTF-16
+  // code units), or a multi-byte passphrase (accents, CJK) could pass this guard
+  // and still be silently truncated at hash time — the exact outcome it exists to
+  // prevent. TextEncoder keeps the module pure/portable (no Node Buffer).
+  if (new TextEncoder().encode(password).length > 72) {
     return { ok: false, error: "That password is too long — keep it under 72 characters." };
   }
   if (new Set(password).size < 4) {
     return { ok: false, error: "That password repeats itself too much — mix it up a little." };
   }
-  const lowered = password.toLowerCase();
+  // Normalize the password the SAME way (NFKC) the name tokens are normalized
+  // below, so `includes` compares like-for-like — a decomposed-unicode name
+  // pasted into the password would otherwise slip past a composed-form token.
+  const lowered = password.normalize("NFKC").toLowerCase();
   if (PASSWORD_DENYLIST.some((w) => lowered.includes(w))) {
     return { ok: false, error: "That password is too easy to guess — try a few unrelated words." };
   }

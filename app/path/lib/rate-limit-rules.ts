@@ -43,6 +43,17 @@ export type RateLimitDecision =
 export const SIGN_IN_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 5 };
 
 /**
+ * Per-IP sign-in backstop (Unit 6 review): the per-name limit alone can be
+ * side-stepped by varying the typed name every request (a fresh bucket each
+ * time), which both defeats throttling and forces an unfiltered candidate scan
+ * per request. A coarse per-IP cap bounds that flood regardless of name — set
+ * generously so a family (or several kids) behind one NAT never trips it, while
+ * still capping a single source far below the thousands of distinct-name
+ * requests the bucket-eviction attack needs.
+ */
+export const SIGN_IN_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 40 };
+
+/**
  * Upload-slot minting (Unit 9 carry-forward): each successful mint is the
  * counted event, keyed by the calling user. 30 mints / 10 min never touches an
  * honest capture session (a handful of evidence items plus retries) while

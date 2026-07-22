@@ -127,3 +127,12 @@ operation, use an **add-only** helper (`ensureSignals`), not a toggle
 (`applySignalToggle`) — a toggle would *remove* an already-present signal, so
 "family already has the signal → idempotent" silently breaks. Match the helper's
 semantics (add vs toggle) to the caller's intent.
+
+**Caveat — the boundary covers TYPE re-exports too (2026-07-22):** every value
+export of a `"use server"` file becomes a public Server Action, and a
+type-only re-export (`export type { X }`) is not safe either — Next's
+use-server transform still emits a `registerServerReference` for the export
+name and the module throws `X is not defined` at load, taking every action in
+the graph down with it. Export actions only; import shared types from the
+plain core module. See
+`docs/solutions/runtime-errors/use-server-type-reexport-registers-server-reference-referenceerror-2026-07-22.md`.

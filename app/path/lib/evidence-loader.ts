@@ -23,8 +23,10 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { EVIDENCE_BUCKET } from "./upload-rules";
 import {
   computeLatched,
+  isEvidenceKind,
   planRedaction,
   selectOrphans,
+  shouldRemintSignedUrl,
   SIGNED_URL_TTL_SECONDS,
   type EvidenceKind,
   type LatchEvent,
@@ -181,6 +183,8 @@ export type EvidenceInsert = {
   exif: unknown | null;
   signedUrl: string | null;
   signedUrlExpiresAt: string | null;
+  posterSignedUrl: string | null;
+  posterSignedUrlExpiresAt: string | null;
   /** R6: evidence landing on an already-verified task, flagged not invisible. */
   addedAfterVerification: boolean;
 };
@@ -222,6 +226,8 @@ export async function insertEvidenceItem(
         exif: row.exif,
         signed_url: row.signedUrl,
         signed_url_expires_at: row.signedUrlExpiresAt,
+        poster_signed_url: row.posterSignedUrl,
+        poster_signed_url_expires_at: row.posterSignedUrlExpiresAt,
         added_after_verification: row.addedAfterVerification,
       },
       { onConflict: "id", ignoreDuplicates: true }
@@ -246,23 +252,26 @@ export async function insertEvidenceItem(
 }
 
 /** Upsert a log-table evidence row (kind='log'). ON CONFLICT (id) updates the rows
- *  — a log is edited in place until the task latches (the action gates that). */
+ *  — a log is edited in place until the task latches (the action gates that).
+ *
+ *  `caption` is written ONLY when the caller supplied one (`undefined` = leave
+ *  it alone). LogTable's save never sends a caption, and a full-row overwrite
+ *  here would deterministically wipe whatever `editEvidenceCaption` set — the
+ *  Unit 14 adversarial review's guaranteed lost-update. */
 export async function upsertLogEvidence(
   db: Db,
-  p: { id: string; taskProgressId: string; studentId: string; rows: unknown[]; caption: string | null }
+  p: { id: string; taskProgressId: string; studentId: string; rows: unknown[]; caption?: string | null }
 ): Promise<void> {
-  const { error } = await db.from("path_evidence_items").upsert(
-    {
-      id: p.id,
-      task_progress_id: p.taskProgressId,
-      student_id: p.studentId,
-      kind: "log",
-      log_data: p.rows,
-      caption: p.caption,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
+  const payload: Record<string, unknown> = {
+    id: p.id,
+    task_progress_id: p.taskProgressId,
+    student_id: p.studentId,
+    kind: "log",
+    log_data: p.rows,
+    updated_at: new Date().toISOString(),
+  };
+  if (p.caption !== undefined) payload.caption = p.caption;
+  const { error } = await db.from("path_evidence_items").upsert(payload, { onConflict: "id" });
   if (error) throw new Error(`upsertLogEvidence(${p.id}) failed: ${error.message}`);
 }
 
@@ -325,6 +334,166 @@ export async function mintSignedDownloadUrl(db: Db, objectPath: string): Promise
   return { signedUrl: data.signedUrl, expiresAtMs: Date.now() + SIGNED_URL_TTL_SECONDS * 1000 };
 }
 
+/** Update a non-redacted item's caption. Returns false when no row matched —
+ *  the item is missing OR redacted (a tombstone's caption is frozen); the
+ *  action maps that to a typed refusal. */
+export async function updateEvidenceCaption(
+  db: Db,
+  evidenceId: string,
+  caption: string | null
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("path_evidence_items")
+    .update({ caption, updated_at: new Date().toISOString() })
+    .eq("id", evidenceId)
+    .is("redacted_at", null)
+    .select("id");
+  if (error) throw new Error(`updateEvidenceCaption(${evidenceId}) failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
+/* ------------------------------------------------------------- read views */
+
+/** One evidence item as the task surface renders it (EvidenceList's shape,
+ *  minus the client-only fields the caller adds). */
+export type EvidenceReadRow = {
+  id: string;
+  kind: EvidenceKind;
+  url: string | null;
+  posterUrl: string | null;
+  contentType: string | null;
+  caption: string | null;
+  linkUrl: string | null;
+  logRows: Record<string, unknown>[];
+  redactedAt: string | null;
+  addedAfterVerification: boolean;
+  createdAt: string;
+};
+
+/**
+ * Load a task's evidence items for READ, in capture order, with fresh-enough
+ * signed URLs. The Unit 10/14 rule made real here: the STORED URL is reused
+ * until near expiry (`shouldRemintSignedUrl`); a remint happens at most once
+ * per item per TTL window and is PERSISTED back onto the row — never minted per
+ * render (each unique token is a fresh CDN cache key at 3x the egress rate).
+ * The poster frame gets the identical treatment via its own columns.
+ *
+ * A redacted row comes back as a tombstone (nulled URLs; the columns are
+ * already nulled, but the mapping guards it anyway). A row whose kind fails the
+ * fail-closed narrowing is dropped LOUDLY (logged), never coerced.
+ */
+export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise<EvidenceReadRow[]> {
+  const { data, error } = await db
+    .from("path_evidence_items")
+    .select(
+      "id, kind, object_path, poster_object_path, content_type, caption, link_url, log_data, signed_url, signed_url_expires_at, poster_signed_url, poster_signed_url_expires_at, redacted_at, added_after_verification, created_at"
+    )
+    .eq("task_progress_id", taskProgressId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`loadEvidenceViews(${taskProgressId}) failed: ${error.message}`);
+
+  const nowMs = Date.now();
+  // Items resolve CONCURRENTLY — a same-session batch of uploads shares one
+  // expiry window, so the remint case is the common one, and a serial loop
+  // would pay 2N sequential Storage round trips on exactly that page load
+  // (Unit 14 performance/reliability reviews). freshSignedUrl isolates its own
+  // failures, so parallelizing changes latency, never failure semantics.
+  const out = await Promise.all(
+    (data ?? []).map(async (r): Promise<EvidenceReadRow | null> => {
+      const kind = r.kind;
+      if (!isEvidenceKind(kind)) {
+        console.error(`[path/evidence] dropped row ${String(r.id)} with unrecognized kind ${String(kind)}`);
+        return null;
+      }
+      const redactedAt = (r.redacted_at as string | null) ?? null;
+
+      let url: string | null = null;
+      let posterUrl: string | null = null;
+      if (!redactedAt) {
+        [url, posterUrl] = await Promise.all([
+          freshSignedUrl(db, {
+            evidenceId: r.id as string,
+            objectPath: (r.object_path as string | null) ?? null,
+            storedUrl: (r.signed_url as string | null) ?? null,
+            storedExpiresAt: (r.signed_url_expires_at as string | null) ?? null,
+            urlColumn: "signed_url",
+            expiryColumn: "signed_url_expires_at",
+            nowMs,
+          }),
+          freshSignedUrl(db, {
+            evidenceId: r.id as string,
+            objectPath: (r.poster_object_path as string | null) ?? null,
+            storedUrl: (r.poster_signed_url as string | null) ?? null,
+            storedExpiresAt: (r.poster_signed_url_expires_at as string | null) ?? null,
+            urlColumn: "poster_signed_url",
+            expiryColumn: "poster_signed_url_expires_at",
+            nowMs,
+          }),
+        ]);
+      }
+
+      return {
+        id: r.id as string,
+        kind,
+        url,
+        posterUrl,
+        contentType: (r.content_type as string | null) ?? null,
+        caption: (r.caption as string | null) ?? null,
+        linkUrl: (r.link_url as string | null) ?? null,
+        logRows: Array.isArray(r.log_data) ? (r.log_data as Record<string, unknown>[]) : [],
+        redactedAt,
+        addedAfterVerification: r.added_after_verification === true,
+        createdAt: r.created_at as string,
+      };
+    })
+  );
+  return out.filter((r): r is EvidenceReadRow => r !== null);
+}
+
+/** Reuse the stored signed URL, or remint near expiry and PERSIST the new one.
+ *  A mint/persist failure degrades to the stale-but-maybe-working stored URL
+ *  (or null) rather than failing the whole read — one broken thumbnail beats a
+ *  blank task page. */
+async function freshSignedUrl(
+  db: Db,
+  p: {
+    evidenceId: string;
+    objectPath: string | null;
+    storedUrl: string | null;
+    storedExpiresAt: string | null;
+    urlColumn: "signed_url" | "poster_signed_url";
+    expiryColumn: "signed_url_expires_at" | "poster_signed_url_expires_at";
+    nowMs: number;
+  }
+): Promise<string | null> {
+  if (!p.objectPath) return null;
+
+  const expiresAtMs = p.storedExpiresAt ? Date.parse(p.storedExpiresAt) : NaN;
+  const remint = shouldRemintSignedUrl({
+    expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : null,
+    nowMs: p.nowMs,
+  });
+  if (!remint && p.storedUrl) return p.storedUrl;
+
+  try {
+    const minted = await mintSignedDownloadUrl(db, p.objectPath);
+    const { error } = await db
+      .from("path_evidence_items")
+      .update({
+        [p.urlColumn]: minted.signedUrl,
+        [p.expiryColumn]: new Date(minted.expiresAtMs).toISOString(),
+      })
+      .eq("id", p.evidenceId);
+    if (error) {
+      console.error(`[path/evidence] persisting reminted ${p.urlColumn} for ${p.evidenceId} failed: ${error.message}`);
+    }
+    return minted.signedUrl;
+  } catch (e) {
+    console.error(`[path/evidence] remint failed for ${p.evidenceId} (${p.objectPath}):`, e);
+    return p.storedUrl; // possibly stale; better than a guaranteed-blank item
+  }
+}
+
 /**
  * Redact an evidence row: perform the full blast radius (`planRedaction`) — delete
  * the object AND its poster via the Storage API, null the cached signed URL, clear
@@ -364,6 +533,8 @@ export async function redactEvidence(
         redaction_reason: input.reason,
         signed_url: null, // irrevocable URLs keep redacted media readable while cached
         signed_url_expires_at: null,
+        poster_signed_url: null, // the poster's cached URL is the same leak (Unit 14)
+        poster_signed_url_expires_at: null,
         exif: null, // can hold a child's home GPS coords
         updated_at: now,
       })

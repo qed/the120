@@ -33,7 +33,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
-import { findAuthUserByEmail, provisionStudent } from "@/app/path/lib/provision-core";
+import { ensureStudentProgress, findAuthUserByEmail, provisionStudent } from "@/app/path/lib/provision-core";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";
 const PARENT_NAME = { first_name: "Path", last_name: "Testparent" };
@@ -189,6 +189,24 @@ async function main() {
         }`
       );
     }
+  }
+
+  // 6. Backfill progress rows for EVERY student in the family (Unit 14) — the
+  // provisioning core now materializes them for fresh students, but students
+  // provisioned before Unit 14 (this very test family) have none, and without
+  // them no transition can ever apply. Idempotent: inserts only missing rows.
+  const profiles = await db.from("path_student_profiles").select("id").eq("family_id", familyId);
+  if (profiles.error) throw profiles.error;
+  for (const profile of profiles.data ?? []) {
+    const ensured = await ensureStudentProgress(db, { profileId: profile.id as string });
+    if (!ensured.ok) {
+      throw new Error(`progress materialization failed for profile ${profile.id}: ${ensured.reason}`);
+    }
+    console.log(
+      `profile ${profile.id}: progress rows ensured (${ensured.created} created${
+        ensured.created === 0 ? " — already materialized" : ""
+      }).`
+    );
   }
 
   console.log(

@@ -21,6 +21,7 @@ import {
   extensionFor,
   interpretUploadResponse,
   isTusUrlExpired,
+  parseTusFailure,
 } from "../upload-rules";
 
 const MB = 1024 * 1024;
@@ -428,5 +429,37 @@ describe("migration parity: path_storage.sql", () => {
     expect(ops).toEqual([...EVIDENCE_READ_OPERATIONS]);
     // and it must NOT authorize listing
     expect(ops).not.toContain("object.list");
+  });
+});
+
+describe("parseTusFailure — the TUS error-body parser (Unit 14 extraction)", () => {
+  it("extracts the inner 409/Duplicate signal from a JSON body", () => {
+    const parsed = parseTusFailure({
+      status: 400,
+      body: '{"statusCode":"409","error":"Duplicate","message":"The resource already exists"}',
+      message: "tus: unexpected response",
+    });
+    expect(parsed).toEqual({
+      status: 400,
+      statusCode: "409",
+      errorName: "Duplicate",
+      message: "tus: unexpected response",
+    });
+    expect(interpretUploadResponse(parsed)).toBe("success");
+  });
+
+  it("a non-JSON body falls back to the outer status + message heuristics", () => {
+    const parsed = parseTusFailure({ status: 500, body: "<html>oops</html>", message: "boom" });
+    expect(parsed).toEqual({ status: 500, statusCode: null, errorName: null, message: "boom" });
+    expect(interpretUploadResponse(parsed)).toBe("retry");
+  });
+
+  it("a missing body yields all-null inner fields with the message preserved", () => {
+    expect(parseTusFailure({ status: null, body: null, message: "network down" })).toEqual({
+      status: null,
+      statusCode: null,
+      errorName: null,
+      message: "network down",
+    });
   });
 });

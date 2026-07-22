@@ -109,6 +109,15 @@ export function gradeFromChildJoin(childJoin: unknown): number | null {
   return typeof grade === "number" ? grade : null;
 }
 
+/** Same normalisation for the child's first name (Unit 14's shell header).
+ *  Null — never "" — when the join is malformed or the name isn't a string, so
+ *  callers decide their own fallback explicitly. */
+export function firstNameFromChildJoin(childJoin: unknown): string | null {
+  const child = Array.isArray(childJoin) ? childJoin[0] : childJoin;
+  const name = (child as { first_name?: unknown } | null | undefined)?.first_name;
+  return typeof name === "string" && name.length > 0 ? name : null;
+}
+
 /* ------------------------------------------- snapshot building (fail-closed) */
 
 /** The minimal task shape the snapshot builder reads from a DB progress row. */
@@ -284,4 +293,78 @@ export function resultForEcho(
       }
       return { ok: false, reason: "retry" };
   }
+}
+
+/* --------------------------------------- initial progress materialization */
+
+/** The DB row shapes the builder consumes — `path_criteria` / `path_unit_tasks`
+ *  (the same source the RPC's cascade reads, so the two can't disagree). */
+export type SeedCriterionRow = { criterion_id: string; phase_num: string; seq: number };
+export type SeedTaskRow = { task_id: string; criterion_id: string; seq: number };
+
+export type InitialProgressRow = {
+  student_id: string;
+  program_version_id: string;
+  criterion_id: string;
+  task_id: string;
+  state: "locked" | "available";
+  snapshot_band: Band | null;
+};
+
+/**
+ * Build the initial `path_task_progress` rows for a freshly provisioned (or
+ * backfilled) student: one row per task in the pinned version, the FIRST task
+ * of each FIRST-PHASE criterion `available` with the band snapshotted (the
+ * first-`available` rule — criteria run in parallel within a phase), everything
+ * else `locked` with no band.
+ *
+ * The RPC only UPDATEs — "empty echo = the progress row does not exist (a
+ * provisioning gap)" — so these rows are the precondition for every transition
+ * a student will ever make. Pure; the I/O executor lives in provision-core.
+ *
+ * Throws (fail loud, never a partial record):
+ *   - null band — an unlock must never snapshot nothing (Unit 8 carry-forward:
+ *     the caller refuses provisioning for a grade-less child, or documents a
+ *     default; this builder never invents one);
+ *   - empty tasks — zero rows is a data bug reported as success otherwise;
+ *   - a task whose criterion is missing — a silent lock would strand the task.
+ */
+export function buildInitialProgressRows(input: {
+  studentId: string;
+  programVersionId: string;
+  band: Band | null;
+  /** `path_phases.num` of the version's first phase (seq 1) — e.g. "01". */
+  firstPhaseNum: string;
+  criteria: readonly SeedCriterionRow[];
+  tasks: readonly SeedTaskRow[];
+}): InitialProgressRow[] {
+  if (!input.band) {
+    throw new Error(
+      `buildInitialProgressRows: student ${input.studentId} has no band — refuse the unlock rather than snapshot nothing`
+    );
+  }
+  if (input.tasks.length === 0) {
+    throw new Error(
+      `buildInitialProgressRows: zero tasks for version ${input.programVersionId} — the content seed has not run`
+    );
+  }
+
+  const byId = new Map(input.criteria.map((c) => [c.criterion_id, c]));
+  return input.tasks.map((t) => {
+    const criterion = byId.get(t.criterion_id);
+    if (!criterion) {
+      throw new Error(
+        `buildInitialProgressRows: task ${t.task_id} references criterion ${t.criterion_id}, absent from path_criteria`
+      );
+    }
+    const available = criterion.phase_num === input.firstPhaseNum && t.seq === 1;
+    return {
+      student_id: input.studentId,
+      program_version_id: input.programVersionId,
+      criterion_id: t.criterion_id,
+      task_id: t.task_id,
+      state: available ? "available" : "locked",
+      snapshot_band: available ? input.band : null,
+    };
+  });
 }

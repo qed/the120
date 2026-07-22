@@ -326,3 +326,30 @@ export function decideUploadSlot(req: SlotRequest): SlotDecision {
 
   return { ok: true, strategy: chooseUploadStrategy(req.sizeBytes, limits.plainMaxBytes), sizeBytes: req.sizeBytes };
 }
+
+/**
+ * Parse a raw TUS error-response BODY into `interpretUploadResponse`'s input
+ * (Unit 14 review extraction). tus-js-client's DetailedError exposes the outer
+ * HTTP status but never parses the body — and Supabase's already-exists signal
+ * ({"statusCode":"409","error":"Duplicate"}) lives IN the body. Pure so the
+ * parsing is unit-tested; upload-client's normalizeTusError is a thin adapter
+ * that feeds it the DetailedError's status/body/message.
+ */
+export function parseTusFailure(input: {
+  status: number | null;
+  body: string | null;
+  message: string;
+}): { status: number | null; statusCode: number | string | null; errorName: string | null; message: string } {
+  let statusCode: number | string | null = null;
+  let errorName: string | null = null;
+  if (input.body) {
+    try {
+      const parsed = JSON.parse(input.body) as { statusCode?: number | string; error?: string };
+      if (parsed.statusCode != null) statusCode = parsed.statusCode;
+      if (typeof parsed.error === "string") errorName = parsed.error;
+    } catch {
+      // body wasn't JSON — fall back to the outer status + message heuristics
+    }
+  }
+  return { status: input.status, statusCode, errorName, message: input.message };
+}

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   bandForGrade,
+  buildInitialProgressRows,
   buildTaskSnapshots,
   criterionIdOf,
+  firstNameFromChildJoin,
   gradeFromChildJoin,
   interpretEcho,
   isTaskTransition,
@@ -277,5 +279,102 @@ describe("resultForEcho — EchoOutcome → client TransitionResult (the action'
       { transition: "revoke", actorId: "mum" }
     );
     expect(r).toEqual({ ok: false, reason: "retry" });
+  });
+});
+
+/* -------------------------------------------- initial progress materialization */
+
+describe("buildInitialProgressRows — the Unit 14 provisioning-gap fix", () => {
+  const version = "2026-27";
+  const criteria = [
+    { criterion_id: "1.1", phase_num: "01", seq: 1 },
+    { criterion_id: "1.2", phase_num: "01", seq: 2 },
+    { criterion_id: "2.1", phase_num: "02", seq: 1 },
+  ];
+  const tasks = [
+    { task_id: "1.1.1", criterion_id: "1.1", seq: 1 },
+    { task_id: "1.1.2", criterion_id: "1.1", seq: 2 },
+    { task_id: "1.2.1", criterion_id: "1.2", seq: 1 },
+    { task_id: "1.2.2", criterion_id: "1.2", seq: 2 },
+    { task_id: "2.1.1", criterion_id: "2.1", seq: 1 },
+  ];
+  const firstPhaseNum = "01";
+
+  it("marks the first task of each first-phase criterion available with the band snapshotted; everything else locked, band null", () => {
+    const rows = buildInitialProgressRows({
+      studentId: "s1",
+      programVersionId: version,
+      band: "g3_5",
+      firstPhaseNum,
+      criteria,
+      tasks,
+    });
+    expect(rows).toHaveLength(5);
+    const byTask = Object.fromEntries(rows.map((r) => [r.task_id, r]));
+    expect(byTask["1.1.1"]).toMatchObject({ state: "available", snapshot_band: "g3_5" });
+    expect(byTask["1.2.1"]).toMatchObject({ state: "available", snapshot_band: "g3_5" });
+    expect(byTask["1.1.2"]).toMatchObject({ state: "locked", snapshot_band: null });
+    expect(byTask["1.2.2"]).toMatchObject({ state: "locked", snapshot_band: null });
+    expect(byTask["2.1.1"]).toMatchObject({ state: "locked", snapshot_band: null });
+    for (const r of rows) {
+      expect(r.student_id).toBe("s1");
+      expect(r.program_version_id).toBe(version);
+      expect(r.criterion_id).toBe(tasks.find((t) => t.task_id === r.task_id)!.criterion_id);
+    }
+  });
+
+  it("refuses a null band — an unlock must never snapshot nothing (Unit 8 carry-forward)", () => {
+    expect(() =>
+      buildInitialProgressRows({
+        studentId: "s1",
+        programVersionId: version,
+        band: null,
+        firstPhaseNum,
+        criteria,
+        tasks,
+      })
+    ).toThrow(/band/i);
+  });
+
+  it("refuses an empty task list — materializing zero rows is a data bug, not a no-op", () => {
+    expect(() =>
+      buildInitialProgressRows({
+        studentId: "s1",
+        programVersionId: version,
+        band: "g6_8",
+        firstPhaseNum,
+        criteria,
+        tasks: [],
+      })
+    ).toThrow(/tasks/i);
+  });
+
+  it("a task whose criterion is missing from the criteria list throws, never silently locks", () => {
+    expect(() =>
+      buildInitialProgressRows({
+        studentId: "s1",
+        programVersionId: version,
+        band: "g6_8",
+        firstPhaseNum,
+        criteria: criteria.filter((c) => c.criterion_id !== "1.2"),
+        tasks,
+      })
+    ).toThrow(/1\.2/);
+  });
+});
+
+describe("firstNameFromChildJoin — join-shape narrowing for the shell header", () => {
+  it("normalises object and array join shapes", () => {
+    expect(firstNameFromChildJoin({ first_name: "Maya" })).toBe("Maya");
+    expect(firstNameFromChildJoin([{ first_name: "Dev" }])).toBe("Dev");
+  });
+
+  it("fails closed to null on malformed shapes — never an empty-string sentinel", () => {
+    expect(firstNameFromChildJoin(null)).toBeNull();
+    expect(firstNameFromChildJoin(undefined)).toBeNull();
+    expect(firstNameFromChildJoin({})).toBeNull();
+    expect(firstNameFromChildJoin({ first_name: 42 })).toBeNull();
+    expect(firstNameFromChildJoin({ first_name: "" })).toBeNull();
+    expect(firstNameFromChildJoin([])).toBeNull();
   });
 });

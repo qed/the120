@@ -38,14 +38,14 @@
  *
  * ## Who consumes this
  *
- * The Unit 14 app shells choose the skin once at a subtree root and use this
- * resolver for their neutral background/text/border classes. The design-system
- * PRIMITIVES (Button, Seal, …) deliberately hardcode their own fuller per-skin
- * class lists — which include shadows, focus rings, and brightness beyond the
- * neutral tokens resolved here — so they are not routed through `skinClass`.
- * Until those shells land this resolver has no production caller; that is
- * expected, and the reason it is settled (and tested) now is Decision 9's rule
- * that the skin architecture must exist before any surface is written.
+ * The Unit 14 app shell (PathShell) chooses the skin once at the subtree root
+ * and resolves its neutral background/text/border classes here — each branch
+ * narrowed to a literal skin, which is what lets it reach skin-specific tokens
+ * like trail's `mist`. The design-system PRIMITIVES (Button, Seal, …) and the
+ * SCENE components (task surface, journey views) deliberately pair their own
+ * complete per-skin class-string literals instead — their styling goes beyond
+ * the neutral roles this table publishes (shadows, phase colors, focus rings),
+ * and Tailwind's scanner needs the complete literals spelled out either way.
  */
 
 export type Skin = "hq" | "trail";

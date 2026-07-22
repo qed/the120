@@ -33,6 +33,14 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import {
+  bandForGrade,
+  buildInitialProgressRows,
+  gradeFromChildJoin,
+  type InitialProgressRow,
+  type SeedCriterionRow,
+  type SeedTaskRow,
+} from "./progress-core";
+import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
   deriveStudentEmail,
@@ -234,6 +242,20 @@ export async function provisionStudent(
     return { ok: false, reason: "unavailable" };
   }
 
+  // 9. Materialize the student's progress rows (Unit 14): every task locked,
+  // the first task of each first-phase criterion available with the band
+  // snapshotted. Without these the transition RPC has nothing to update and no
+  // task can ever open. Idempotent, so a repair run completes a stranded one.
+  // A failure here is logged but does NOT fail provisioning: the account and
+  // grants are real, and a later ensureStudentProgress re-run (or the seed
+  // script) completes the materialization.
+  const progress = await ensureStudentProgress(db, { profileId });
+  if (!progress.ok) {
+    console.error(
+      `[path/provision] progress materialization for ${profileId} deferred: ${progress.reason} — re-run ensureStudentProgress to complete`
+    );
+  }
+
   return { ok: true, profileId, userId: user.id, repaired };
 }
 
@@ -334,4 +356,105 @@ export async function findAuthUserByEmail(
     if (hit) return hit;
     if (data.users.length < perPage) return null;
   }
+}
+
+/* -------------------------------------- initial progress materialization */
+
+/**
+ * Materialize the student's `path_task_progress` rows (Unit 14). The transition
+ * RPC only UPDATEs — a missing row echoes empty ("a provisioning gap") — so
+ * until these rows exist no transition can ever apply. One row per task in the
+ * pinned version; the first task of each first-phase criterion `available`
+ * with the band snapshotted; `unlock` events recorded for exactly the rows this
+ * run created (actor_role 'system', mirroring the RPC's own cascade shape).
+ *
+ * Idempotent: `upsert … ignoreDuplicates` on `unique (student_id, task_id)`
+ * inserts only the missing rows and returns only those, so a re-run (or a
+ * concurrent double-call) never duplicates rows or events, and a student
+ * mid-journey is never reset. Plain module rule as above: callers own the gate.
+ */
+export async function ensureStudentProgress(
+  db: SupabaseClient,
+  input: { profileId: string }
+): Promise<
+  | { ok: true; created: number }
+  | { ok: false; reason: "profile_not_found" | "no_band" | "no_content" | "unavailable" }
+> {
+  const profile = await db
+    .from("path_student_profiles")
+    .select("id, program_version_id, children(grade)")
+    .eq("id", input.profileId)
+    .maybeSingle();
+  if (profile.error) {
+    console.error(`[path/progress-seed] profile load failed for ${input.profileId}: ${profile.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!profile.data) return { ok: false, reason: "profile_not_found" };
+  const versionId = profile.data.program_version_id as string;
+
+  const band = bandForGrade(gradeFromChildJoin(profile.data.children));
+  if (!band) return { ok: false, reason: "no_band" };
+
+  const [phases, criteria, tasks] = await Promise.all([
+    db.from("path_phases").select("num, seq").eq("program_version_id", versionId),
+    db.from("path_criteria").select("criterion_id, phase_num, seq").eq("program_version_id", versionId),
+    db.from("path_unit_tasks").select("task_id, criterion_id, seq").eq("program_version_id", versionId),
+  ]);
+  const queryError = phases.error ?? criteria.error ?? tasks.error;
+  if (queryError) {
+    console.error(`[path/progress-seed] content load failed for ${versionId}: ${queryError.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  const firstPhase = (phases.data ?? []).find((p) => p.seq === 1);
+  if (!firstPhase || (tasks.data ?? []).length === 0) return { ok: false, reason: "no_content" };
+
+  let rows: InitialProgressRow[];
+  try {
+    rows = buildInitialProgressRows({
+      studentId: input.profileId,
+      programVersionId: versionId,
+      band,
+      firstPhaseNum: firstPhase.num as string,
+      criteria: (criteria.data ?? []) as SeedCriterionRow[],
+      tasks: (tasks.data ?? []) as SeedTaskRow[],
+    });
+  } catch (e) {
+    console.error(`[path/progress-seed] row build failed for ${input.profileId}:`, e);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  // Insert only the missing rows; the projection returns exactly what this run
+  // created, which scopes the unlock events below.
+  const inserted = await db
+    .from("path_task_progress")
+    .upsert(rows, { onConflict: "student_id,task_id", ignoreDuplicates: true })
+    .select("task_id, state");
+  if (inserted.error) {
+    console.error(`[path/progress-seed] progress upsert failed for ${input.profileId}: ${inserted.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  const unlocked = (inserted.data ?? []).filter((r) => r.state === "available");
+  if (unlocked.length > 0) {
+    const events = await db.from("path_task_events").insert(
+      unlocked.map((r) => ({
+        student_id: input.profileId,
+        task_id: r.task_id as string,
+        transition: "unlock",
+        from_state: "locked",
+        to_state: "available",
+        actor: null,
+        actor_role: "system",
+        note: null,
+      }))
+    );
+    if (events.error) {
+      // The rows exist and are correct; a missing unlock event is an audit gap,
+      // not a broken student — log loudly, do not roll back the materialization.
+      console.error(`[path/progress-seed] unlock events insert failed for ${input.profileId}: ${events.error.message}`);
+    }
+  }
+
+  return { ok: true, created: (inserted.data ?? []).length };
 }

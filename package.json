@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "seed:staff": "tsx scripts/seed-staff.ts",
+    "seed:path-content": "tsx scripts/seed-path-content.ts",
     "backfill:families": "tsx scripts/backfill-families.ts",
     "backfill:welcome": "tsx scripts/backfill-welcome-email.ts",
     "path:build": "tsx scripts/build-path-content.ts"

@@ -26,7 +26,7 @@ export default async function PathOnboardingPage() {
   const { userId, grants } = await requirePathUser();
 
   const db = supabaseAdmin();
-  const family = await resolveParentFamily(db, { userId, grants });
+  const family = await resolveParentFamily({ userId, grants });
   if (!family) {
     const isStudent = grants.some((g) => g.role === "student");
     if (isStudent) redirect("/path");

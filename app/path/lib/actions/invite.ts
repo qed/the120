@@ -11,13 +11,32 @@
  *   - The accept action is unauthenticated by design (the invited adult has no
  *     account yet) and rate-limited per IP. Acceptance from a signed-in
  *     session requires the session email to MATCH the invited address — an
- *     invite is not transferable to whoever holds the link.
+ *     invite is not transferable to whoever holds the link while signed into
+ *     something else. An acceptor already parenting a DIFFERENT family is
+ *     refused (T1 is one-family-per-parent; a silent second grant would make
+ *     the dashboard's family resolution ambiguous — adversarial review).
  *   - Creating the account with email_confirm: true is sound here: possession
  *     of the token proves control of the invited inbox.
  *   - Never mutate on GET: the landing page only reads; acceptance is this
  *     POSTed action (scanner-prefetch learning).
  *   - Invite emails escape every user-supplied value in the html part only
  *     (the admissions injection learning).
+ *
+ * Consistency posture (Unit 15 review — there is no cross-call transaction
+ * here, so acceptance is compensation-based):
+ *   - R4's two-parent cap has no DB constraint yet (carry-forward), so the
+ *     accept path VERIFIES the cap AFTER its grant write and deletes its own
+ *     grant when a concurrent acceptance of a different invite over-filled
+ *     the family — both racers fail closed and can retry sequentially.
+ *   - The claim CAS includes the TOKEN HASH, so a resend's rotation kills an
+ *     accept still in flight on the old token (the rotation's whole promise).
+ *   - The grant only survives a WON claim; a lost claim compensates by
+ *     removing the grant it just wrote (never a pre-existing one).
+ *   - An account this call created is best-effort deleted on any later
+ *     failure — otherwise the retry hits email_exists and the "sign in first"
+ *     advice strands a grant-less account permanently (reliability P1).
+ *   - Rate-limit strikes are RELEASED on infra failures (a DB outage is not a
+ *     real attempt — the sign-in action's documented store contract).
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -29,11 +48,12 @@ import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { requirePathUser } from "@/app/path/lib/auth";
+import { clientIp } from "@/app/path/lib/client-ip";
 import {
   canInviteCoParent,
   inviteVerdict,
   MAX_PARENTS_PER_FAMILY,
-  normalizeInviteEmail,
+  normalizeEmail,
   PARENT_INVITE_TTL_MS,
 } from "@/app/path/lib/onboarding-rules";
 import { isParentOfFamily, validateStudentPassword } from "@/app/path/lib/provision-rules";
@@ -41,7 +61,10 @@ import {
   INVITE_ACCEPT_RATE_LIMIT,
   INVITE_CREATE_RATE_LIMIT,
 } from "@/app/path/lib/rate-limit-rules";
-import { checkAndRecordRateLimit } from "@/app/path/lib/rate-limit-store";
+import {
+  checkAndRecordRateLimit,
+  releaseRateLimitEvent,
+} from "@/app/path/lib/rate-limit-store";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
 
@@ -64,20 +87,21 @@ export async function inviteCoParentAction(input: unknown): Promise<InviteCoPare
   const parsed = inviteSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Enter a valid email address." };
   const familyId = parsed.data.familyId;
-  const email = normalizeInviteEmail(parsed.data.email);
+  const email = normalizeEmail(parsed.data.email);
 
   if (!isParentOfFamily(grants, familyId)) {
     return { success: false, error: "Only a parent of this family can invite a co-parent." };
   }
 
-  if (!checkAndRecordRateLimit(`path-invite:${userId}`, INVITE_CREATE_RATE_LIMIT).allowed) {
+  const rateKey = `path-invite:${userId}`;
+  if (!checkAndRecordRateLimit(rateKey, INVITE_CREATE_RATE_LIMIT).allowed) {
     return { success: false, error: "Too many invites for now — wait a few minutes." };
   }
 
   const admin = supabaseAdmin();
 
-  // R4's cap, checked against the live grant count (and re-checked at accept —
-  // this one is UX, that one is the enforcement).
+  // R4's cap, checked against the live grant count (and re-verified at accept
+  // — this one is UX, that one is the enforcement).
   const members = await admin
     .from("path_role_grants")
     .select("user_id")
@@ -86,6 +110,7 @@ export async function inviteCoParentAction(input: unknown): Promise<InviteCoPare
     .eq("scope_id", familyId);
   if (members.error) {
     console.error(`[path/invite] member count failed for ${familyId}: ${members.error.message}`);
+    releaseRateLimitEvent(rateKey); // an outage is not a real attempt
     return { success: false, error: GENERIC_ERROR };
   }
   const cap = canInviteCoParent({ parentCount: (members.data ?? []).length });
@@ -93,6 +118,29 @@ export async function inviteCoParentAction(input: unknown): Promise<InviteCoPare
     return {
       success: false,
       error: `This family already has ${MAX_PARENTS_PER_FAMILY} parents on The Path.`,
+    };
+  }
+
+  // Same-address dedupe: a live pending invite for this email means the right
+  // move is Resend (fresh token), not a second parallel token for one inbox.
+  const pending = await admin
+    .from("path_parent_invites")
+    .select("id")
+    .eq("family_id", familyId)
+    .eq("email", email)
+    .is("accepted_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .limit(1)
+    .maybeSingle();
+  if (pending.error) {
+    console.error(`[path/invite] pending probe failed for ${familyId}: ${pending.error.message}`);
+    releaseRateLimitEvent(rateKey);
+    return { success: false, error: GENERIC_ERROR };
+  }
+  if (pending.data) {
+    return {
+      success: false,
+      error: "This address already has a pending invite — use Resend to send a fresh link.",
     };
   }
 
@@ -107,12 +155,15 @@ export async function inviteCoParentAction(input: unknown): Promise<InviteCoPare
   });
   if (inserted.error) {
     console.error(`[path/invite] insert failed for ${familyId}: ${inserted.error.message}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
 
   const sent = await sendInviteEmail({ to: email, token });
   if (!sent.ok) {
     console.error(`[path/invite] send failed for ${familyId}: ${sent.error ?? "unknown"}`);
+    // The row exists and is resendable; the send outage is not a real attempt.
+    releaseRateLimitEvent(rateKey);
     return {
       success: false,
       error: "The invite was created but the email didn't send — use Resend in a minute.",
@@ -124,14 +175,16 @@ export async function inviteCoParentAction(input: unknown): Promise<InviteCoPare
 const resendSchema = z.object({ inviteId: z.uuid() });
 
 /** Re-send a pending invite with a FRESH token (the old hash is replaced, so a
- *  stale email link dies) and a fresh expiry. */
+ *  stale email link dies — the accept claim's token-hash CAS enforces that
+ *  even against an accept already in flight) and a fresh expiry. */
 export async function resendInviteAction(input: unknown): Promise<InviteCoParentResult> {
   const { userId, grants } = await requirePathUser();
 
   const parsed = resendSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
-  if (!checkAndRecordRateLimit(`path-invite:${userId}`, INVITE_CREATE_RATE_LIMIT).allowed) {
+  const rateKey = `path-invite:${userId}`;
+  if (!checkAndRecordRateLimit(rateKey, INVITE_CREATE_RATE_LIMIT).allowed) {
     return { success: false, error: "Too many invites for now — wait a few minutes." };
   }
 
@@ -145,6 +198,7 @@ export async function resendInviteAction(input: unknown): Promise<InviteCoParent
     .maybeSingle();
   if (invite.error) {
     console.error(`[path/invite] resend load failed: ${invite.error.message}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
   if (!invite.data) return { success: false, error: "That invite no longer exists." };
@@ -166,12 +220,14 @@ export async function resendInviteAction(input: unknown): Promise<InviteCoParent
     .is("accepted_at", null);
   if (updated.error) {
     console.error(`[path/invite] resend update failed: ${updated.error.message}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
 
   const sent = await sendInviteEmail({ to: invite.data.email as string, token });
   if (!sent.ok) {
     console.error(`[path/invite] resend send failed: ${sent.error ?? "unknown"}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: "The email didn't send — try again in a minute." };
   }
   return { success: true };
@@ -211,6 +267,7 @@ export type AcceptInviteResult =
 
 const INVITE_DEAD =
   "This invite link isn't valid any more — ask your co-parent to send a fresh one.";
+const FAMILY_FULL = `This family already has ${MAX_PARENTS_PER_FAMILY} parents on The Path.`;
 
 export async function acceptInviteAction(input: unknown): Promise<AcceptInviteResult> {
   const parsed = acceptSchema.safeParse(input);
@@ -218,18 +275,21 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
 
   const h = await headers();
   const ip = clientIp(h);
-  if (!checkAndRecordRateLimit(`path-invite-accept:${ip}`, INVITE_ACCEPT_RATE_LIMIT).allowed) {
+  const rateKey = `path-invite-accept:${ip}`;
+  if (!checkAndRecordRateLimit(rateKey, INVITE_ACCEPT_RATE_LIMIT).allowed) {
     return { success: false, error: "Too many tries for now. Wait a few minutes, then try again." };
   }
 
+  const tokenHash = hashToken(parsed.data.token);
   const admin = supabaseAdmin();
   const inviteRes = await admin
     .from("path_parent_invites")
     .select("id, family_id, email, expires_at, accepted_at")
-    .eq("token_hash", hashToken(parsed.data.token))
+    .eq("token_hash", tokenHash)
     .maybeSingle();
   if (inviteRes.error) {
     console.error(`[path/invite] accept load failed: ${inviteRes.error.message}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
   const row = inviteRes.data;
@@ -262,13 +322,14 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
     }
     return { success: false, error: INVITE_DEAD };
   }
-  // row is non-null past a passing verdict.
+  // row is non-null past a passing verdict (inviteVerdict returns not_found
+  // on a null invite).
   const invite = row as NonNullable<typeof row>;
   const familyId = invite.family_id as string;
   const invitedEmail = invite.email as string;
 
-  // R4's cap is ENFORCED here (creation's check is UX): count current parents,
-  // not counting this acceptor if they somehow already hold the grant.
+  // Current members, read once: the pre-write snapshot the compensation logic
+  // below compares against (never trusted as the cap on its own).
   const members = await admin
     .from("path_role_grants")
     .select("user_id")
@@ -277,15 +338,44 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
     .eq("scope_id", familyId);
   if (members.error) {
     console.error(`[path/invite] accept member count failed: ${members.error.message}`);
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
   const memberIds = (members.data ?? [])
     .map((r) => r.user_id)
     .filter((id): id is string => typeof id === "string");
 
+  // UX pre-check (the enforcement is the post-write verify below).
+  if (memberIds.length >= MAX_PARENTS_PER_FAMILY) {
+    return { success: false, error: FAMILY_FULL };
+  }
+
   let acceptorId: string;
+  let createdAccountHere = false;
   if (verdict.mode === "accept_signed_in") {
     acceptorId = (sessionUser as NonNullable<typeof sessionUser>).id;
+
+    // One family per parent in T1: a signed-in acceptor already parenting a
+    // DIFFERENT family is refused — a silent second grant would make the
+    // dashboard's family resolution ambiguous (adversarial review).
+    const existing = await admin
+      .from("path_role_grants")
+      .select("scope_id")
+      .eq("user_id", acceptorId)
+      .eq("role", "parent")
+      .eq("scope_type", "family");
+    if (existing.error) {
+      console.error(`[path/invite] acceptor grants load failed: ${existing.error.message}`);
+      releaseRateLimitEvent(rateKey);
+      return { success: false, error: GENERIC_ERROR };
+    }
+    const otherFamily = (existing.data ?? []).some((g) => g.scope_id !== familyId);
+    if (otherFamily) {
+      return {
+        success: false,
+        error: "This account already belongs to another Path family — contact The 120.",
+      };
+    }
   } else {
     const password = parsed.data.password ?? "";
     // The same floor students get; the copy reads fine for adults too.
@@ -312,43 +402,105 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
         };
       }
       console.error(`[path/invite] accept createUser failed: ${created.error.message}`);
+      releaseRateLimitEvent(rateKey);
       return { success: false, error: GENERIC_ERROR };
     }
     acceptorId = created.data.user.id;
+    createdAccountHere = true;
   }
 
-  if (!memberIds.includes(acceptorId) && !canInviteCoParent({ parentCount: memberIds.length }).ok) {
-    return {
-      success: false,
-      error: `This family already has ${MAX_PARENTS_PER_FAMILY} parents on The Path.`,
-    };
-  }
+  // Compensation for any failure past this point: an account THIS call minted
+  // must not outlive a failed acceptance — a stranded grant-less account turns
+  // every retry into an email_exists dead end (reliability P1). Best-effort;
+  // a failed delete is logged and the retry advice still works via sign-in.
+  const cleanupCreatedAccount = async () => {
+    if (!createdAccountHere) return;
+    const del = await admin.auth.admin.deleteUser(acceptorId);
+    if (del.error) {
+      console.error(
+        `[path/invite] cleanup deleteUser failed for ${acceptorId}: ${del.error.message} — account is grant-less; staff can remove it`
+      );
+    }
+  };
 
-  // Grant first (idempotent), then claim the invite. A concurrent double-accept
-  // both land the same grant (dup ignored); the claim's cardinality decides who
-  // reports success — the loser reads the honest already-accepted refusal.
+  const wasAlreadyMember = memberIds.includes(acceptorId);
+
+  // Grant, then VERIFY the cap against fresh state, then claim. The grant only
+  // survives a won claim; every failure path below compensates.
   const grant = await admin.from("path_role_grants").upsert(
     [{ user_id: acceptorId, role: "parent", scope_type: "family", scope_id: familyId }],
     { onConflict: "user_id,role,scope_type,scope_id", ignoreDuplicates: true }
   );
   if (grant.error) {
     console.error(`[path/invite] accept grant failed: ${grant.error.message}`);
+    await cleanupCreatedAccount();
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
 
+  const removeOwnGrant = async () => {
+    if (wasAlreadyMember) return; // never remove a pre-existing membership
+    const del = await admin
+      .from("path_role_grants")
+      .delete()
+      .eq("user_id", acceptorId)
+      .eq("role", "parent")
+      .eq("scope_type", "family")
+      .eq("scope_id", familyId);
+    if (del.error) {
+      console.error(`[path/invite] compensating grant delete failed: ${del.error.message}`);
+    }
+  };
+
+  // R4 cap ENFORCEMENT (post-write verify): a concurrent acceptance of a
+  // DIFFERENT invite can land between our read and our write. Re-count; if
+  // the family is over cap and we were not already a member, undo our grant.
+  // Both racers undoing and retrying sequentially converges — fail closed,
+  // never a silent third parent (four-reviewer consensus finding).
+  const verify = await admin
+    .from("path_role_grants")
+    .select("user_id")
+    .eq("role", "parent")
+    .eq("scope_type", "family")
+    .eq("scope_id", familyId);
+  if (verify.error) {
+    console.error(`[path/invite] accept cap verify failed: ${verify.error.message}`);
+    await removeOwnGrant();
+    await cleanupCreatedAccount();
+    releaseRateLimitEvent(rateKey);
+    return { success: false, error: GENERIC_ERROR };
+  }
+  const distinctParents = new Set(
+    (verify.data ?? []).map((r) => r.user_id).filter((id): id is string => typeof id === "string")
+  );
+  if (distinctParents.size > MAX_PARENTS_PER_FAMILY && !wasAlreadyMember) {
+    await removeOwnGrant();
+    await cleanupCreatedAccount();
+    return { success: false, error: FAMILY_FULL };
+  }
+
+  // Claim LAST, CAS on (id, unaccepted, THE TOKEN WE VERIFIED): cardinality
+  // decides the winner, and a resend's token rotation mid-flight makes this
+  // affect zero rows — the old link genuinely dies (adversarial review).
   const claimed = await admin
     .from("path_parent_invites")
     .update({ accepted_at: new Date().toISOString(), accepted_by: acceptorId })
     .eq("id", invite.id as string)
+    .eq("token_hash", tokenHash)
     .is("accepted_at", null)
     .select("id");
   if (claimed.error) {
     console.error(`[path/invite] accept claim failed: ${claimed.error.message}`);
+    await removeOwnGrant();
+    await cleanupCreatedAccount();
+    releaseRateLimitEvent(rateKey);
     return { success: false, error: GENERIC_ERROR };
   }
   if ((claimed.data ?? []).length === 0) {
-    // A concurrent acceptance won the claim; the grant above is theirs or ours
-    // identically, so the family is intact — report the honest state.
+    // Lost the claim: someone else accepted, or a resend rotated the token
+    // while we were in flight. The grant must not outlive a lost claim.
+    await removeOwnGrant();
+    await cleanupCreatedAccount();
     return { success: false, error: INVITE_DEAD };
   }
 
@@ -360,7 +512,7 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
       password: parsed.data.password ?? "",
     });
     if (signedIn.error) {
-      // The grant exists; the sign-in hiccuped. The parent tab works — say so.
+      // The grant exists and the invite is claimed; the sign-in hiccuped.
       return {
         success: false,
         error: "Your account is ready but sign-in hiccuped — sign in on the parent tab.",
@@ -369,13 +521,4 @@ export async function acceptInviteAction(input: unknown): Promise<AcceptInviteRe
   }
 
   return { success: true };
-}
-
-function clientIp(h: Headers): string {
-  const fwd = h.get("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return h.get("x-real-ip")?.trim() || "unknown";
 }

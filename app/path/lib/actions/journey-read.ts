@@ -3,9 +3,15 @@
 /**
  * Typed read-model wrappers over the journey read layer (T1 Unit 15; the
  * Unit 14 agent-native carry-forward). Any position a user can SEE, an agent
- * (or the parent dashboard, or a future client surface) can fetch through
- * these — gated exactly like the pages: requirePathUser + resolvePathAccess
- * against the AUTHORITATIVE profile row, never a client-trusted id.
+ * (or a future client surface) can fetch through these — gated exactly like
+ * the pages: requirePathUser + resolvePathAccess against the AUTHORITATIVE
+ * profile row, never a client-trusted id.
+ *
+ * NO UI CONSUMER BY DESIGN: the RSC pages call the server-only loaders
+ * directly (the repo idiom — an RSC gains nothing from routing its own reads
+ * through an action). These exist for PROGRAMMATIC callers; being callable is
+ * the feature. family-read.ts is the sibling surface for family/roster/invite
+ * discovery.
  *
  * ⚠️ `"use server"` boundary rules (docs/solutions/runtime-errors/use-server-
  * type-reexport-registers-server-reference-referenceerror-2026-07-22.md):

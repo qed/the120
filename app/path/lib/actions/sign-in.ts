@@ -28,6 +28,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { clientIp } from "@/app/path/lib/client-ip";
 import {
   deriveStudentEmail,
   MAX_SIGN_IN_CANDIDATES,
@@ -140,19 +141,4 @@ export async function signInStudent(input: unknown): Promise<SignInStudentResult
   // the strike was already recorded atomically at the gate, one message,
   // indistinguishable outside.
   return { success: false, error: SIGN_IN_FAILED_MESSAGE };
-}
-
-/**
- * Best-effort client IP from the proxy headers Vercel sets. The first hop of
- * `x-forwarded-for` is the closest to the real client; `x-real-ip` is the
- * fallback. A missing value collapses to a shared "unknown" bucket, which is
- * strictly SAFER (stricter throttling), never a bypass.
- */
-function clientIp(h: Headers): string {
-  const fwd = h.get("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return h.get("x-real-ip")?.trim() || "unknown";
 }

@@ -98,20 +98,32 @@ export function AddFounder({
   const handleProvision = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
+    // Local guards at the point of use — the same invariant the Continue
+    // button enforces, re-checked HERE so a future step-flow edit can't turn
+    // a stale pick/grade into a runtime throw (Unit 15 review; replaces the
+    // previous NonNullable casts).
+    if (mode === "link" && !picked) {
+      setStep("pick");
+      return;
+    }
+    if (mode === "create" && grade === null) {
+      setStep("pick");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const result = unwrapActionResult(
-        mode === "link"
+        mode === "link" && picked
           ? await provisionStudentAction({
-              childId: (picked as NonNullable<typeof picked>).childId,
+              childId: picked.childId,
               familyId,
               password,
             })
           : await createFounderAction({
               familyId,
               firstName: pendingName,
-              grade: grade as number,
+              grade: grade ?? 0, // unreachable: guarded above; zod refuses 0 anyway
               password,
             })
       );

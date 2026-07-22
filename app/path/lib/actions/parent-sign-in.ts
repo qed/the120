@@ -24,7 +24,8 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { normalizeInviteEmail } from "@/app/path/lib/onboarding-rules";
+import { clientIp } from "@/app/path/lib/client-ip";
+import { normalizeEmail } from "@/app/path/lib/onboarding-rules";
 import {
   SIGN_IN_IP_RATE_LIMIT,
   SIGN_IN_RATE_LIMIT,
@@ -50,7 +51,7 @@ export async function signInParent(input: unknown): Promise<SignInParentResult> 
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { success: false, error: PARENT_SIGN_IN_FAILED };
 
-  const email = normalizeInviteEmail(parsed.data.email);
+  const email = normalizeEmail(parsed.data.email);
   if (!email) return { success: false, error: PARENT_SIGN_IN_FAILED };
 
   const h = await headers();
@@ -78,16 +79,4 @@ export async function signInParent(input: unknown): Promise<SignInParentResult> 
   // (the IP aggregate stands — it ages out on its own).
   clearRateLimitBucket(emailKey);
   return { success: true };
-}
-
-/** Best-effort client IP (the signInStudent shape): first x-forwarded-for hop,
- *  x-real-ip fallback, and a shared "unknown" bucket that is stricter, never
- *  a bypass. */
-function clientIp(h: Headers): string {
-  const fwd = h.get("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return h.get("x-real-ip")?.trim() || "unknown";
 }

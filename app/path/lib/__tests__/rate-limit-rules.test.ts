@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateRateLimit,
+  INVITE_ACCEPT_RATE_LIMIT,
+  INVITE_CREATE_RATE_LIMIT,
   pruneEvents,
   SIGN_IN_RATE_LIMIT,
   UPLOAD_SLOT_RATE_LIMIT,
@@ -162,6 +164,30 @@ describe("upload-slot configuration (Unit 9 carry-forward → bounds never-final
     const honestSession = Array.from({ length: 12 }, (_, i) => NOW - i * 20_000);
     expect(
       evaluateRateLimit({ events: honestSession, now: NOW, ...UPLOAD_SLOT_RATE_LIMIT }).allowed
+    ).toBe(true);
+  });
+});
+
+describe("invite configurations (Unit 15 — pinned like every prior config)", () => {
+  it("invite creation: 5 per 15 minutes, the 6th refused", () => {
+    expect(INVITE_CREATE_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 5 });
+    const five = Array.from({ length: 5 }, (_, i) => NOW - (i + 1) * 1_000);
+    expect(
+      evaluateRateLimit({ events: five, now: NOW, ...INVITE_CREATE_RATE_LIMIT }).allowed
+    ).toBe(false);
+    expect(
+      evaluateRateLimit({ events: five.slice(1), now: NOW, ...INVITE_CREATE_RATE_LIMIT }).allowed
+    ).toBe(true);
+  });
+
+  it("invite acceptance: 10 per 15 minutes per IP, the 11th refused", () => {
+    expect(INVITE_ACCEPT_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 10 });
+    const ten = Array.from({ length: 10 }, (_, i) => NOW - (i + 1) * 1_000);
+    expect(
+      evaluateRateLimit({ events: ten, now: NOW, ...INVITE_ACCEPT_RATE_LIMIT }).allowed
+    ).toBe(false);
+    expect(
+      evaluateRateLimit({ events: ten.slice(1), now: NOW, ...INVITE_ACCEPT_RATE_LIMIT }).allowed
     ).toBe(true);
   });
 });

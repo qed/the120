@@ -24,29 +24,22 @@ import { phaseColor, phaseColorAlpha } from "@/app/path/components/system/phases
 import { Button } from "@/app/path/components/system/Button";
 import { cn } from "@/app/path/components/system/cn";
 import { unwrapActionResult, type UnwrappedResult } from "@/app/path/lib/now-card-rules";
-import type { SegmentStatus } from "@/app/path/lib/onboarding-rules";
+import type { FounderCard as FounderCardData } from "@/app/path/lib/onboarding-rules";
 import { resetStudentPasswordAction } from "@/app/path/lib/actions/provision";
 import { inviteCoParentAction, resendInviteAction } from "@/app/path/lib/actions/invite";
 
-/* Serializable card props (family-loader's FounderCardWithIds, flattened). */
-export type FounderCardProps = {
+/* Serializable card props (family-loader's FounderCardWithIds — the pure
+ * FounderCard plus the ids; typed via the shared onboarding-rules type so the
+ * loader, the page, and this component cannot drift). */
+export type FounderCardProps = FounderCardData & {
   profileId: string;
-  firstName: string;
-  gradeLabel: string | null;
-  skinLabel: "Trail" | "HQ";
-  verifiedTotal: number;
-  totalTasks: number;
-  phase: { num: string; key: string; label: string } | null;
-  criterionLine: string | null;
-  segments: readonly SegmentStatus[];
-  awaitingCount: number;
-  stranded: boolean;
-  firstRun: boolean;
+  childId: string;
 };
 
 export type PendingInviteProps = {
   id: string;
   email: string;
+  createdAt: string;
   expiresAt: string;
   expired: boolean;
 };
@@ -64,7 +57,9 @@ function FounderCard({ card }: { card: FounderCardProps }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
-  const phaseKey = (card.phase?.key ?? "SELL") as PhaseKey;
+  // card.phase.key is the literal PhaseKey union end to end (Unit 15 review:
+  // no widening, no unchecked cast back).
+  const phaseKey: PhaseKey = card.phase?.key ?? "SELL";
   const accent = phaseColor(phaseKey);
 
   const handleReset = async (e: React.FormEvent) => {
@@ -169,8 +164,12 @@ function FounderCard({ card }: { card: FounderCardProps }) {
             </span>
             <button
               type="button"
-              className="rounded-lg border border-hq-border bg-hq-sunken px-3 py-1.5 font-path-body text-[12px] font-semibold text-hq-ink hover:bg-hq-canvas"
+              disabled={busy}
+              className="rounded-lg border border-hq-border bg-hq-sunken px-3 py-1.5 font-path-body text-[12px] font-semibold text-hq-ink hover:bg-hq-canvas disabled:opacity-50"
               onClick={() => {
+                // Never collapse the form under an in-flight reset — a failure
+                // note with the form hidden strands the retry (races review).
+                if (busy) return;
                 setResetOpen((v) => !v);
                 setNote(null);
               }}
@@ -243,10 +242,13 @@ function InviteSection({
       if (result.ok) {
         setNote({ kind: "ok", text: okText });
         setEmail("");
-        router.refresh();
       } else {
         setNote({ kind: "error", text: failureMessage(result) });
       }
+      // Refresh on BOTH branches: a partial failure ("created but the email
+      // didn't send") leaves a real pending row whose Resend button only
+      // exists after a refresh (reliability review).
+      router.refresh();
     } catch {
       setNote({ kind: "error", text: "Something went wrong — please try again." });
     } finally {

@@ -26,22 +26,27 @@ export const metadata: Metadata = {
 
 /** The page-render verdict — a plain helper so the component body stays pure
  *  (the clock read lives here; the action re-runs the same pure verdict
- *  authoritatively at submit time). */
+ *  authoritatively at submit time). Returns the narrowed email ALONGSIDE the
+ *  verdict so the render never re-narrows the raw row (Unit 15 review — one
+ *  narrowing point, not two that can drift). */
 function verdictForRow(
   row: { email: unknown; expires_at: unknown; accepted_at: unknown } | null,
   sessionEmail: string | null
 ) {
-  return inviteVerdict({
-    invite: row
-      ? {
-          email: row.email as string,
-          expiresAt: row.expires_at as string,
-          acceptedAt: (row.accepted_at as string | null) ?? null,
-        }
-      : null,
+  const email = row && typeof row.email === "string" ? row.email : null;
+  const verdict = inviteVerdict({
+    invite:
+      row && email !== null
+        ? {
+            email,
+            expiresAt: row.expires_at as string,
+            acceptedAt: (row.accepted_at as string | null) ?? null,
+          }
+        : null,
     now: Date.now(),
     sessionEmail,
   });
+  return { verdict, email };
 }
 
 export default async function PathInvitePage({
@@ -66,7 +71,7 @@ export default async function PathInvitePage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const verdict = verdictForRow(row, user?.email ?? null);
+  const { verdict, email } = verdictForRow(row, user?.email ?? null);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-hq-canvas px-6 py-12">
@@ -92,11 +97,7 @@ export default async function PathInvitePage({
               You&apos;ve been invited to join your family on The Path as a parent — you review and
               verify your child&apos;s real-world work.
             </p>
-            <AcceptInviteForm
-              token={token}
-              mode={verdict.mode}
-              email={(row as { email: string }).email}
-            />
+            <AcceptInviteForm token={token} mode={verdict.mode} email={email ?? ""} />
           </>
         )}
       </div>

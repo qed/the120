@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   BAND_CARDS,
   bandCardFor,
@@ -10,10 +10,11 @@ import {
   familyDisplayName,
   inviteVerdict,
   MAX_PARENTS_PER_FAMILY,
-  normalizeInviteEmail,
+  normalizeEmail,
   PARENT_INVITE_TTL_MS,
   resolveLinkableFounders,
   resolveOnboardingMode,
+  resolveSiblingAdoption,
   type FounderCardInput,
   type LinkableFounder,
   type RosterChild,
@@ -183,9 +184,44 @@ describe("canInviteCoParent", () => {
   });
 });
 
-describe("normalizeInviteEmail", () => {
+describe("normalizeEmail", () => {
   it("trims and lowercases", () => {
-    expect(normalizeInviteEmail("  Casey@Example.COM ")).toBe("casey@example.com");
+    expect(normalizeEmail("  Casey@Example.COM ")).toBe("casey@example.com");
+  });
+});
+
+describe("resolveSiblingAdoption (the create path's retry-safety decision)", () => {
+  it("no same-name sibling → insert a fresh roster row", () => {
+    expect(resolveSiblingAdoption({ match: null, typedGrade: 5 })).toEqual({ action: "insert" });
+  });
+
+  it("a PROVISIONED same-name sibling is never adopted — insert (same-named siblings are legitimate, and adopting could mutate an enrolled child's grade)", () => {
+    expect(
+      resolveSiblingAdoption({ match: { grade: 5, provisioned: true }, typedGrade: 5 })
+    ).toEqual({ action: "insert" });
+    // The correctness review's named bug: provisioned + null grade must NOT
+    // have its roster grade filled as a side effect of a doomed create.
+    expect(
+      resolveSiblingAdoption({ match: { grade: null, provisioned: true }, typedGrade: 5 })
+    ).toEqual({ action: "insert" });
+  });
+
+  it("an unprovisioned match with a blank grade → adopt and fill the blank", () => {
+    expect(
+      resolveSiblingAdoption({ match: { grade: null, provisioned: false }, typedGrade: 7 })
+    ).toEqual({ action: "fill_grade" });
+  });
+
+  it("an unprovisioned match whose grade agrees → adopt as-is", () => {
+    expect(
+      resolveSiblingAdoption({ match: { grade: 7, provisioned: false }, typedGrade: 7 })
+    ).toEqual({ action: "adopt" });
+  });
+
+  it("a conflicting non-null grade → refuse with the roster's grade, never overwrite", () => {
+    expect(
+      resolveSiblingAdoption({ match: { grade: 4, provisioned: false }, typedGrade: 7 })
+    ).toEqual({ action: "conflict", existingGrade: 4 });
   });
 });
 
@@ -294,7 +330,7 @@ function cardInput(overrides: Partial<FounderCardInput> = {}): FounderCardInput 
     phases: [
       {
         num: "01",
-        key: "sell",
+        key: "SELL",
         criteria: [
           { id: "1.1", title: "Spot ten problems", verifiedCount: 5, taskTotal: 5, states: states("verified", "verified", "verified", "verified", "verified") },
           { id: "1.2", title: "Make a real sale", verifiedCount: 2, taskTotal: 5, states: states("verified", "verified", "submitted", "in_progress", "locked") },
@@ -305,7 +341,7 @@ function cardInput(overrides: Partial<FounderCardInput> = {}): FounderCardInput 
       },
       {
         num: "02",
-        key: "build",
+        key: "BUILD",
         criteria: [
           { id: "2.1", title: "Ship a working product", verifiedCount: 0, taskTotal: 5, states: states("locked", "locked", "locked", "locked", "locked") },
           { id: "2.2", title: "B", verifiedCount: 0, taskTotal: 5, states: states("locked", "locked", "locked", "locked", "locked") },
@@ -328,7 +364,7 @@ describe("deriveFounderCard", () => {
     expect(card.skinLabel).toBe("Trail");
     expect(card.verifiedTotal).toBe(8);
     expect(card.totalTasks).toBe(125);
-    expect(card.phase).toEqual({ num: "01", key: "sell", label: "SELL" });
+    expect(card.phase).toEqual({ num: "01", key: "SELL", label: "SELL" });
     expect(card.criterionLine).toBe("Criterion 1.2 · Make a real sale");
     expect(card.segments).toHaveLength(5);
     expect(card.segments[0]).toBe("done"); // 1.1 fully verified
@@ -359,7 +395,7 @@ describe("deriveFounderCard", () => {
       phases: [
         {
           num: "01",
-          key: "sell",
+          key: "SELL",
           criteria: [
             { id: "1.1", title: "Spot ten problems", verifiedCount: 0, taskTotal: 5, states: states("available", "locked", "locked", "locked", "locked") },
             { id: "1.2", title: "Make a real sale", verifiedCount: 0, taskTotal: 5, states: states("available", "locked", "locked", "locked", "locked") },

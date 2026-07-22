@@ -32,7 +32,7 @@ export default async function PathFamilyPage() {
   const { userId, grants } = await requirePathUser();
 
   const db = supabaseAdmin();
-  const family = await resolveParentFamily(db, { userId, grants });
+  const family = await resolveParentFamily({ userId, grants });
   if (!family) {
     const isStudent = grants.some((g) => g.role === "student");
     if (isStudent) redirect("/path");
@@ -42,34 +42,18 @@ export default async function PathFamilyPage() {
   const [cards, founders, invites] = await Promise.all([
     loadFounderCards(db, family.familyId),
     loadLinkableFounders(db, family),
-    loadPendingInvites(db, family.familyId, Date.now()),
+    loadPendingInvites(db, family.familyId),
   ]);
 
+  // Loader output types ARE the component prop types (shared via
+  // onboarding-rules) — pass through, no field-by-field re-mapping to drift.
   return (
     <FamilyDashboard
       familyLabel={family.familyLabel}
       familyId={family.familyId}
-      cards={cards.map((c) => ({
-        profileId: c.profileId,
-        firstName: c.firstName,
-        gradeLabel: c.gradeLabel,
-        skinLabel: c.skinLabel,
-        verifiedTotal: c.verifiedTotal,
-        totalTasks: c.totalTasks,
-        phase: c.phase,
-        criterionLine: c.criterionLine,
-        segments: c.segments,
-        awaitingCount: c.awaitingCount,
-        stranded: c.stranded,
-        firstRun: c.firstRun,
-      }))}
+      cards={cards}
       parentCount={family.parentCount}
-      invites={invites.map((i) => ({
-        id: i.id,
-        email: i.email,
-        expiresAt: i.expiresAt,
-        expired: i.expired,
-      }))}
+      invites={invites}
       hasLinkable={founders.some((f) => f.kind === "linkable" || f.kind === "needs_grade")}
     />
   );

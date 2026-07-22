@@ -32,7 +32,7 @@
  * never moves the bar under work in flight.
  */
 
-import type { Band } from "@/app/path/content/types";
+import type { Band, PhaseKey } from "@/app/path/content/types";
 import { bandForGrade } from "./progress-core";
 import { skinForBand, type JourneyPresentation, type PhaseView } from "./now-card-rules";
 import type { TaskState } from "./transition-table";
@@ -212,8 +212,9 @@ export function canInviteCoParent({
   return { ok: true };
 }
 
-/** One normalization for BOTH sides of every invite-email comparison. */
-export function normalizeInviteEmail(raw: string): string {
+/** One normalization for BOTH sides of every email comparison — invites AND
+ *  parent sign-in share it (a generic trim+lowercase, not invite-specific). */
+export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
@@ -249,11 +250,50 @@ export function inviteVerdict({
   const expiresMs = Date.parse(invite.expiresAt);
   if (!(expiresMs > now)) return { ok: false, reason: "expired" };
   if (sessionEmail) {
-    return normalizeInviteEmail(sessionEmail) === normalizeInviteEmail(invite.email)
+    return normalizeEmail(sessionEmail) === normalizeEmail(invite.email)
       ? { ok: true, mode: "accept_signed_in" }
       : { ok: false, reason: "wrong_account" };
   }
   return { ok: true, mode: "create_account" };
+}
+
+/* ─────────────────────────── create-path sibling adoption (retry safety) ─── */
+
+export type SiblingAdoptionVerdict =
+  /** No same-name unprovisioned sibling — insert a fresh roster row. */
+  | { action: "insert" }
+  /** Adopt the existing unprovisioned row as-is (grades agree). */
+  | { action: "adopt" }
+  /** Adopt AND fill the roster's blank grade with the typed one — the typed
+   *  grade IS a roster edit by the roster's owner, but only ever fills a blank. */
+  | { action: "fill_grade" }
+  /** The roster knows a DIFFERENT grade — refuse rather than silently
+   *  overwrite; the link path is the right door for this child. */
+  | { action: "conflict"; existingGrade: number };
+
+/**
+ * The create-path's adopt-vs-insert decision for a same-name roster match
+ * (Unit 15 review: this three-way branch is pure decision logic and must not
+ * live untestably inside the server action). A PROVISIONED same-name sibling
+ * is never adopted — adopting one could mutate an enrolled child's
+ * authoritative grade as a side effect of a doomed create attempt (the
+ * correctness review's named bug), and a family can genuinely hold two
+ * same-named children (one enrolled, one not) — so a provisioned match falls
+ * through to `insert`.
+ */
+export function resolveSiblingAdoption({
+  match,
+  typedGrade,
+}: {
+  /** The same-name roster row, if any: its grade and whether a Path profile
+   *  already links it. Null = no same-name sibling. */
+  match: { grade: number | null; provisioned: boolean } | null;
+  typedGrade: number;
+}): SiblingAdoptionVerdict {
+  if (!match || match.provisioned) return { action: "insert" };
+  if (match.grade === null) return { action: "fill_grade" };
+  if (match.grade !== typedGrade) return { action: "conflict", existingGrade: match.grade };
+  return { action: "adopt" };
 }
 
 /* ─────────────────────────────── the family dashboard card derivation ────── */
@@ -283,7 +323,7 @@ export type FounderCardInput = {
   /** Phases in program order, criteria in seq order (5 per phase by content). */
   phases: readonly {
     num: string;
-    key: string;
+    key: PhaseKey;
     criteria: readonly FounderCardCriterion[];
   }[];
   /** The child's Now selection — the criterion the segment bar lights first. */
@@ -299,7 +339,7 @@ export type FounderCard = {
   verifiedTotal: number;
   totalTasks: number;
   /** The phase the card headlines — the active one, else the last complete. */
-  phase: { num: string; key: string; label: string } | null;
+  phase: { num: string; key: PhaseKey; label: string } | null;
   /** "Criterion 1.2 · Make a real sale" — the handoff's position line. */
   criterionLine: string | null;
   /** The five-segment criteria bar for the headlined phase. */

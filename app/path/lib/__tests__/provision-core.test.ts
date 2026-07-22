@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ensurePathFamilyForParent,
   provisionStudent,
   resetFailureMessage,
   resetStudentPassword,
@@ -426,6 +427,46 @@ describe("provisionStudent — repair path (F16 / F10)", () => {
     const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
     expect(result).toEqual({ ok: false, reason: "unavailable" });
     expect(calls.updateUserById).toBe(0);
+  });
+});
+
+describe("ensurePathFamilyForParent (the R31 linkage helper)", () => {
+  it("ADOPTS the family an existing parent grant points at — never mints a second", async () => {
+    const { db, tables } = makeFakeDb(baseSeed());
+    const before = tables.path_families.length;
+    const result = await ensurePathFamilyForParent(db, { userId: PARENT_USER });
+    expect(result).toEqual({ ok: true, familyId: "fam-1", created: false });
+    expect(tables.path_families).toHaveLength(before); // no new family row
+  });
+
+  it("creates a family + grant for a parent with no grant yet", async () => {
+    const { db, tables } = makeFakeDb(baseSeed({ path_role_grants: [] }));
+    const result = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.created).toBe(true);
+    expect(
+      tables.path_role_grants.some(
+        (g) =>
+          g.user_id === "new-parent" &&
+          g.role === "parent" &&
+          g.scope_type === "family" &&
+          g.scope_id === result.familyId
+      )
+    ).toBe(true);
+  });
+
+  it("is idempotent: a re-run adopts the family the first run created", async () => {
+    const { db, tables } = makeFakeDb(baseSeed({ path_role_grants: [] }));
+    const first = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(first.ok).toBe(true);
+    const familiesAfterFirst = tables.path_families.length;
+    const second = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.familyId).toBe(first.familyId);
+    expect(second.created).toBe(false);
+    expect(tables.path_families).toHaveLength(familiesAfterFirst); // still one
   });
 });
 

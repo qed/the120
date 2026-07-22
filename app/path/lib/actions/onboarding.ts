@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { bandVerdictForGrade } from "@/app/path/lib/onboarding-rules";
+import { bandVerdictForGrade, resolveSiblingAdoption } from "@/app/path/lib/onboarding-rules";
 import { normalizeStudentName, validateStudentPassword } from "@/app/path/lib/provision-rules";
 import { isParentOfFamily } from "@/app/path/lib/provision-rules";
 import { provisionStudent } from "@/app/path/lib/provision-core";
@@ -80,9 +80,12 @@ export async function createFounderAction(input: unknown): Promise<CreateFounder
     };
   }
 
-  // Adopt an unprovisioned same-name child of this parent (retry safety); a
-  // provisioned one falls through to provisionStudent's already_provisioned.
-  let childId: string | null = null;
+  // Adopt an UNPROVISIONED same-name child of this parent (retry safety). The
+  // decision is the pure, tested resolveSiblingAdoption — critically, a
+  // PROVISIONED same-name sibling is never adopted (adopting one could mutate
+  // an enrolled child's authoritative grade as a side effect of a doomed
+  // create attempt, and same-named siblings are legitimate), so that case
+  // inserts a genuinely new roster row.
   const siblings = await admin
     .from("children")
     .select("id, first_name, grade")
@@ -96,25 +99,38 @@ export async function createFounderAction(input: unknown): Promise<CreateFounder
       typeof c.first_name === "string" &&
       normalizeStudentName(c.first_name) === normalizeStudentName(firstName)
   );
+
+  let matchProvisioned = false;
   if (match) {
-    childId = match.id as string;
-    // The typed grade IS a roster edit by the roster's owner — but only fill a
-    // BLANK; a conflicting non-null grade means the roster knows something this
-    // form doesn't, so refuse rather than silently overwrite.
-    const existingGrade = typeof match.grade === "number" ? match.grade : null;
-    if (existingGrade === null) {
-      const setGrade = await admin.from("children").update({ grade }).eq("id", childId);
-      if (setGrade.error) {
-        console.error(`[path/onboarding] grade fill failed for ${childId}: ${setGrade.error.message}`);
-        return { success: false, error: "Something went wrong — please try again." };
-      }
-    } else if (existingGrade !== grade) {
-      return {
-        success: false,
-        error: `${firstName} is already on your roster with grade ${existingGrade} — link them from the founder list instead.`,
-      };
+    const profile = await admin
+      .from("path_student_profiles")
+      .select("id")
+      .eq("child_id", match.id as string)
+      .maybeSingle();
+    if (profile.error) {
+      console.error(`[path/onboarding] profile probe failed for ${match.id}: ${profile.error.message}`);
+      return { success: false, error: "Something went wrong — please try again." };
     }
-  } else {
+    matchProvisioned = profile.data !== null;
+  }
+
+  const adoption = resolveSiblingAdoption({
+    match: match
+      ? {
+          grade: typeof match.grade === "number" ? match.grade : null,
+          provisioned: matchProvisioned,
+        }
+      : null,
+    typedGrade: grade,
+  });
+
+  let childId: string;
+  if (adoption.action === "conflict") {
+    return {
+      success: false,
+      error: `${firstName} is already on your roster with grade ${adoption.existingGrade} — link them from the founder list instead.`,
+    };
+  } else if (adoption.action === "insert") {
     const inserted = await admin
       .from("children")
       .insert({ parent_id: userId, first_name: firstName, last_name: lastName, grade })
@@ -127,6 +143,16 @@ export async function createFounderAction(input: unknown): Promise<CreateFounder
       return { success: false, error: "Something went wrong — please try again." };
     }
     childId = inserted.data.id;
+  } else {
+    // adopt / fill_grade — the match exists by construction of the verdict.
+    childId = (match as NonNullable<typeof match>).id as string;
+    if (adoption.action === "fill_grade") {
+      const setGrade = await admin.from("children").update({ grade }).eq("id", childId);
+      if (setGrade.error) {
+        console.error(`[path/onboarding] grade fill failed for ${childId}: ${setGrade.error.message}`);
+        return { success: false, error: "Something went wrong — please try again." };
+      }
+    }
   }
 
   const result = await provisionStudent(admin, { childId, familyId, cohortId: null, password });

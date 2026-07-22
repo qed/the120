@@ -29,7 +29,7 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
   const self = await resolveStudentSelf(db, grants);
 
   if (!self) {
-    const family = await resolveParentFamily(db, { userId, grants });
+    const family = await resolveParentFamily({ userId, grants });
     if (family) {
       return (
         <ParentShell familyLabel={family.familyLabel} signOut={signOutPath}>

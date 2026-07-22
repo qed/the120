@@ -29,7 +29,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
@@ -39,6 +39,7 @@ import {
   findAuthUserByEmail,
   provisionStudent,
 } from "@/app/path/lib/provision-core";
+import { loadSupabaseEnv } from "./load-env";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";
 const PARENT_NAME = { first_name: "Path", last_name: "Testparent" };
@@ -54,34 +55,6 @@ const TEST_CHILDREN = [
 
 const PASSWORD_FILE = path.resolve(process.cwd(), "scripts/.path-passwords.local.txt");
 
-/** Minimal .env.local parser (values may be quoted); env vars win. */
-function loadEnv(): { url: string; serviceRoleKey: string } {
-  const envPath = path.resolve(process.cwd(), ".env.local");
-  if (existsSync(envPath)) {
-    for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
-      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-      if (!match) continue;
-      let value = match[2];
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      if (!process.env[match[1]]) process.env[match[1]] = value;
-    }
-  }
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) {
-    console.error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY (environment or .env.local)."
-    );
-    process.exit(1);
-  }
-  return { url, serviceRoleKey };
-}
-
 function generatedPassword(): string {
   return randomBytes(12).toString("base64url"); // 16 chars, clears the R29 floor
 }
@@ -93,7 +66,7 @@ function recordPassword(label: string, password: string): void {
 }
 
 async function main() {
-  const { url, serviceRoleKey } = loadEnv();
+  const { url, serviceRoleKey } = loadSupabaseEnv();
   const db = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });

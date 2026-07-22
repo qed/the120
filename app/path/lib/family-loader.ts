@@ -10,6 +10,7 @@ import "server-only";
  * null only for a legitimate "not found".
  */
 
+import { cache } from "react";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import type { RoleGrant } from "./access-rules";
 import {
@@ -42,26 +43,17 @@ export type ParentFamilyContext = {
 };
 
 /**
- * Resolve the signed-in user's family from their parent/family grant. Null when
- * the caller holds no parent grant (a student or guide — their surfaces are
- * elsewhere). T1 assumes one family per parent; the first grant wins and a
- * second is logged loudly rather than silently ignored.
+ * The cached inner load, keyed on PRIMITIVES only — React's `cache` uses
+ * reference equality per argument, so passing the per-call `db` client or a
+ * fresh viewer object would never hit. The (app) layout resolves the family
+ * for the shell and each page resolves it again for its data; this cache
+ * makes that one set of queries per request instead of two (Unit 15 review).
  */
-export async function resolveParentFamily(
-  db: Db,
-  viewer: { userId: string; grants: readonly RoleGrant[] }
-): Promise<ParentFamilyContext | null> {
-  const parentGrants = viewer.grants.filter(
-    (g) => g.role === "parent" && g.scopeType === "family"
-  );
-  if (parentGrants.length === 0) return null;
-  if (parentGrants.length > 1) {
-    console.error(
-      `[path/family] user ${viewer.userId} holds ${parentGrants.length} parent/family grants — rendering the first`
-    );
-  }
-  const familyId = parentGrants[0].scopeId;
-
+const loadFamilyContextCached = cache(async function loadFamilyContext(
+  userId: string,
+  familyId: string
+): Promise<Omit<ParentFamilyContext, "familyId">> {
+  const db = supabaseAdmin();
   const [members, callerParentRow] = await Promise.all([
     db
       .from("path_role_grants")
@@ -69,14 +61,14 @@ export async function resolveParentFamily(
       .eq("role", "parent")
       .eq("scope_type", "family")
       .eq("scope_id", familyId),
-    db.from("parents").select("id, last_name").eq("id", viewer.userId).maybeSingle(),
+    db.from("parents").select("id, last_name").eq("id", userId).maybeSingle(),
   ]);
   if (members.error) {
     throw new Error(`resolveParentFamily(${familyId}) grants failed: ${members.error.message}`);
   }
   if (callerParentRow.error) {
     throw new Error(
-      `resolveParentFamily(${viewer.userId}) parents failed: ${callerParentRow.error.message}`
+      `resolveParentFamily(${userId}) parents failed: ${callerParentRow.error.message}`
     );
   }
 
@@ -89,7 +81,7 @@ export async function resolveParentFamily(
   let lastName =
     typeof callerParentRow.data?.last_name === "string" ? callerParentRow.data.last_name : null;
   if (!lastName) {
-    const others = parentUserIds.filter((id) => id !== viewer.userId);
+    const others = parentUserIds.filter((id) => id !== userId);
     if (others.length > 0) {
       const other = await db
         .from("parents")
@@ -105,12 +97,36 @@ export async function resolveParentFamily(
   }
 
   return {
-    familyId,
     familyLabel: familyDisplayName(lastName),
     parentUserIds,
     parentCount: parentUserIds.length,
     callerHasCrmParentRow: callerParentRow.data !== null,
   };
+});
+
+/**
+ * Resolve the signed-in user's family from their parent/family grant. Null when
+ * the caller holds no parent grant (a student or guide — their surfaces are
+ * elsewhere). T1 assumes one family per parent; the first grant wins
+ * (requirePathUser orders grants by created_at, so "first" is deterministic)
+ * and a second is logged loudly rather than silently ignored.
+ */
+export async function resolveParentFamily(viewer: {
+  userId: string;
+  grants: readonly RoleGrant[];
+}): Promise<ParentFamilyContext | null> {
+  const parentGrants = viewer.grants.filter(
+    (g) => g.role === "parent" && g.scopeType === "family"
+  );
+  if (parentGrants.length === 0) return null;
+  if (parentGrants.length > 1) {
+    console.error(
+      `[path/family] user ${viewer.userId} holds ${parentGrants.length} parent/family grants — rendering the first`
+    );
+  }
+  const familyId = parentGrants[0].scopeId;
+  const ctx = await loadFamilyContextCached(viewer.userId, familyId);
+  return { familyId, ...ctx };
 }
 
 /* -------------------------------------------------------- linkable roster */
@@ -178,63 +194,71 @@ export async function loadFounderCards(db: Db, familyId: string): Promise<Founde
     throw new Error(`loadFounderCards(${familyId}) profiles failed: ${profiles.error.message}`);
   }
 
-  const cards: FounderCardWithIds[] = [];
-  for (const row of profiles.data ?? []) {
-    const profileId = row.id as string;
-    const ctx = await loadStudentContext(db, profileId);
-    if (!ctx) continue; // deleted mid-read — skip rather than throw
-    const journey = await loadJourney(db, ctx, { pinnedTaskId: null });
+  // Each child's card is independent — load them concurrently (the review's
+  // wall-clock note: a serial per-child loop grows linearly with family size).
+  const cards = await Promise.all(
+    (profiles.data ?? []).map(async (row): Promise<FounderCardWithIds | null> => {
+      const profileId = row.id as string;
+      const ctx = await loadStudentContext(db, profileId);
+      if (!ctx) {
+        // Deleted mid-read — skip rather than throw, but never silently
+        // (the reliability review's observability note).
+        console.error(`[path/family] profile ${profileId} vanished mid-read — card skipped`);
+        return null;
+      }
+      const journey = await loadJourney(db, ctx, { pinnedTaskId: null });
 
-    // Fold the loaded journey into the pure card input.
-    const phases = journey.program.phases.map((phase) => ({
-      num: phase.num,
-      key: phase.key,
-      criteria: phase.criteria.map((criterion): FounderCardCriterion => {
-        const jc = journey.criteria[criterion.id];
-        return {
-          id: criterion.id,
-          title: splitCriterionLabel(criterion.passCriterion).title,
-          verifiedCount: jc.view.verifiedCount,
-          taskTotal: jc.view.taskTotal,
-          states: criterion.tasks.map((t) => jc.taskStates[t.id]),
-        };
-      }),
-    }));
-
-    let now: { criterionId: string; criterionTitle: string } | null = null;
-    if (journey.now.kind === "task") {
-      const nowTaskId = journey.now.taskId;
-      const hit = journey.candidates.find((c) => c.taskId === nowTaskId);
-      if (hit) {
-        const criterion = journey.program.phases
-          .flatMap((p) => p.criteria)
-          .find((c) => c.id === hit.criterionId);
-        if (criterion) {
-          now = {
-            criterionId: criterion.id,
-            criterionTitle: splitCriterionLabel(criterion.passCriterion).title,
+      // Fold the loaded journey into the pure card input.
+      const phases = journey.program.phases.map((phase) => ({
+        num: phase.num,
+        key: phase.key,
+        criteria: phase.criteria.map((criterion): FounderCardCriterion => {
+          const jc = journey.criteria[criterion.id];
+          return {
+            id: criterion.id,
+            title: splitCriterionLabel(criterion.passCriterion).title,
+            verifiedCount: jc.view.verifiedCount,
+            taskTotal: jc.view.taskTotal,
+            states: criterion.tasks.map((t) => jc.taskStates[t.id]),
           };
+        }),
+      }));
+
+      let now: { criterionId: string; criterionTitle: string } | null = null;
+      if (journey.now.kind === "task") {
+        const nowTaskId = journey.now.taskId;
+        const hit = journey.candidates.find((c) => c.taskId === nowTaskId);
+        if (hit) {
+          const criterion = journey.program.phases
+            .flatMap((p) => p.criteria)
+            .find((c) => c.id === hit.criterionId);
+          if (criterion) {
+            now = {
+              criterionId: criterion.id,
+              criterionTitle: splitCriterionLabel(criterion.passCriterion).title,
+            };
+          }
         }
       }
-    }
 
-    cards.push({
-      ...deriveFounderCard({
-        firstName: firstNameFromChildJoin(row.children) ?? "",
-        grade: gradeFromChildJoin(row.children),
-        band: ctx.band,
-        presentation: journey.presentation,
-        verifiedTotal: journey.verifiedTotal,
-        totalTasks: journey.totalTasks,
-        phaseViews: journey.phaseViews,
-        phases,
-        now,
-      }),
-      profileId,
-      childId: row.child_id as string,
-    });
-  }
-  return cards;
+      return {
+        ...deriveFounderCard({
+          firstName: firstNameFromChildJoin(row.children) ?? "",
+          grade: gradeFromChildJoin(row.children),
+          band: ctx.band,
+          presentation: journey.presentation,
+          verifiedTotal: journey.verifiedTotal,
+          totalTasks: journey.totalTasks,
+          phaseViews: journey.phaseViews,
+          phases,
+          now,
+        }),
+        profileId,
+        childId: row.child_id as string,
+      };
+    })
+  );
+  return cards.filter((c): c is FounderCardWithIds => c !== null);
 }
 
 /* ------------------------------------------------------- pending invites */
@@ -247,12 +271,11 @@ export type PendingInvite = {
   expired: boolean;
 };
 
-/** Unaccepted invites for the dashboard list (expired ones render as such). */
-export async function loadPendingInvites(
-  db: Db,
-  familyId: string,
-  now: number
-): Promise<PendingInvite[]> {
+/** Unaccepted invites for the dashboard list (expired ones render as such).
+ *  Reads the clock itself — a page passing Date.now() would trip the
+ *  component-purity rule; a lib function owns its own clock. */
+export async function loadPendingInvites(db: Db, familyId: string): Promise<PendingInvite[]> {
+  const now = Date.now();
   const res = await db
     .from("path_parent_invites")
     .select("id, email, created_at, expires_at")

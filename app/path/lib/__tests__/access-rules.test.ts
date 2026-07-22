@@ -6,6 +6,7 @@ import {
   parseRoleGrant,
   PATH_ROLES,
   PATH_SCOPES,
+  resolveActorRole,
   resolvePathAccess,
   type AccessTarget,
   type RoleGrant,
@@ -283,5 +284,39 @@ describe("parseRoleGrant + guards — fail-closed narrowing of untyped rows", ()
     expect(parseRoleGrant({ role: "parent", scope_type: "family", scope_id: null })).toBeNull();
     expect(parseRoleGrant({ role: "parent", scope_type: "family", scope_id: 123 })).toBeNull();
     expect(parseRoleGrant({ role: "parent", scope_type: "family" })).toBeNull();
+  });
+});
+
+describe("resolveActorRole — who is driving the transition (Unit 8)", () => {
+  const tgt = target("profile");
+
+  it("a student acting on their OWN profile is the 'student' actor", () => {
+    const grants = studentGrants("sA", "fam1");
+    expect(resolveActorRole({ grants, target: tgt })).toBe("student");
+  });
+
+  it("either parent of the family is the 'adult' actor (the verifier)", () => {
+    const grants: RoleGrant[] = [{ role: "parent", scopeType: "family", scopeId: "fam1" }];
+    expect(resolveActorRole({ grants, target: tgt })).toBe("adult");
+  });
+
+  it("a Guide of the student's cohort is the 'adult' actor", () => {
+    const grants: RoleGrant[] = [{ role: "guide", scopeType: "cohort", scopeId: "coh1" }];
+    expect(resolveActorRole({ grants, target: tgt })).toBe("adult");
+    // …but not for a student in a different cohort.
+    expect(resolveActorRole({ grants, target: target("profile", { cohortId: "other" }) })).toBeNull();
+    // …and never for an unassigned (null-cohort) student.
+    expect(resolveActorRole({ grants, target: target("profile", { cohortId: null }) })).toBeNull();
+  });
+
+  it("a SIBLING (student/family grant, not this student) resolves to null — reading position is not authority to act", () => {
+    const grants: RoleGrant[] = [{ role: "student", scopeType: "family", scopeId: "fam1" }];
+    // No student/student grant for sA → cannot drive a transition on sA.
+    expect(resolveActorRole({ grants, target: tgt })).toBeNull();
+  });
+
+  it("a stranger with no matching grant resolves to null", () => {
+    const grants: RoleGrant[] = [{ role: "parent", scopeType: "family", scopeId: "other-family" }];
+    expect(resolveActorRole({ grants, target: tgt })).toBeNull();
   });
 });

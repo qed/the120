@@ -173,3 +173,36 @@ export function resolvePathAccess({
 
   return "forbidden";
 }
+
+/**
+ * The ACTOR CLASS a caller acts as WHEN DRIVING A TRANSITION on this student —
+ * the piece the Unit 8 transition action needs that `resolvePathAccess` (a READ
+ * verdict) does not give: is this write coming from the student or from a
+ * verifying adult? R6's teeth in the pure engine (path-rules.ts) turn on this
+ * value, so it MUST be resolved server-side from the caller's grants against the
+ * AUTHORITATIVE target, never from a client field.
+ *
+ *   - a `student`/`student` grant for THIS student → "student" (their own work)
+ *   - a `parent`/`family` grant for the family     → "adult"  (a verifying parent)
+ *   - a `guide`/`cohort` grant for the cohort       → "adult" (a verifying guide)
+ *   - anything else (incl. a SIBLING's `student`/`family` grant) → null
+ *
+ * A sibling resolves to `null`, not "student": their family grant lets them SEE
+ * position (resolvePathAccess), but it is not authority to act on another
+ * student's tasks. `null` means "no authority to drive a transition here" — the
+ * action refuses before it ever reaches the engine.
+ */
+export function resolveActorRole({
+  grants,
+  target,
+}: {
+  grants: readonly RoleGrant[];
+  target: AccessTarget;
+}): "student" | "adult" | null {
+  if (has(grants, "student", "student", target.studentId)) return "student";
+  if (has(grants, "parent", "family", target.familyId)) return "adult";
+  if (target.cohortId !== null && has(grants, "guide", "cohort", target.cohortId)) {
+    return "adult";
+  }
+  return null;
+}

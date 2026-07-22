@@ -86,6 +86,41 @@ export function chooseUploadStrategy(
   return sizeBytes < plainMaxBytes ? "plain" : "tus";
 }
 
+// ── Object-path helpers (pure so they are testable and reusable by non-UI
+//    callers — the client component must NOT be the only place they live) ──
+
+/**
+ * A path-safe file extension matching the slot action's `/^[a-z0-9]{1,8}$/`:
+ * the real extension when the name HAS one, else derived from the MIME type,
+ * else "bin". Kept pure and here (not trapped in EvidenceUploader) so a non-UI
+ * caller reproduces the exact heuristic the server validates against, and so the
+ * dotless-name case is unit-tested.
+ *
+ * The dot check is deliberate: `"photo".split(".").pop()` is `"photo"`, not "",
+ * so a dotless filename would otherwise be mistaken for its own extension
+ * (`hash.photo`) and sail through the server regex. Only treat a segment as an
+ * extension when the name actually contains a separator.
+ */
+export function extensionFor(fileName: string, mimeType: string): string {
+  const dot = fileName.lastIndexOf(".");
+  const fromName = dot > 0 ? fileName.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "") : "";
+  if (fromName.length >= 1 && fromName.length <= 8) return fromName;
+  const fromMime = (mimeType.split("/").pop() ?? "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  return fromMime || "bin";
+}
+
+/**
+ * The direct-storage resumable (TUS) endpoint for a project, derived from its
+ * public URL. Pure (takes the URL as a param, no env read) so the host-shape
+ * parsing — the string that decides where TUS bytes go — is testable rather than
+ * hidden in the untested action body. Throws on an unparseable URL; the action
+ * catches it and maps to `unavailable`.
+ */
+export function buildResumableEndpoint(supabaseUrl: string): string {
+  const ref = new URL(supabaseUrl).host.split(".")[0];
+  return `https://${ref}.storage.supabase.co${RESUMABLE_ENDPOINT_PATH}`;
+}
+
 // ── D21 caps: storable vs link-overflow ──────────────────────────────────────
 
 export type ItemClassification =
@@ -217,8 +252,21 @@ export type SlotRequest = {
    * refusal is modeled and tested here so the wiring is a one-line change.
    */
   appendOnlyLatched: boolean;
-  /** Bytes already stored for this student (summed from storage.objects). */
+  /**
+   * Bytes already stored for this student (summed from storage.objects),
+   * EXCLUDING the target object path — so retrying an upload whose bytes already
+   * landed (lost ack, offline replay) does not double-charge its own size against
+   * quota and wrongly refuse a retry that writes nothing new. The action passes
+   * the exclusion to the byte-sum RPC.
+   */
   currentUsageBytes: number;
+  /**
+   * Test-injection override for the caps/quota constants. The sole production
+   * caller (upload-slot.ts) never sets it — the anticipated 50 MB→500 MB Pro-tier
+   * change is a single-constant flip (MAX_STORABLE_BYTES + the bucket limit), not
+   * a per-request limit. Exists so tests can exercise refusals without huge
+   * fixtures; not a per-cohort/tier configuration surface.
+   */
   limits?: UploadLimits;
 };
 
@@ -232,17 +280,22 @@ export type SlotDecision =
 
 /**
  * The whole slot-issue decision, in order:
- *   1. Access — delegate to resolvePathAccess (login drives redirect, forbidden a
- *      404; an unauthorized caller learns NOTHING about the item — checked first).
- *   2. Append-only latch — a verified evidence path cannot be overwritten.
- *   3. D21 caps — too big / too long → link overflow (regardless of quota).
- *   4. Quota — the annual soft cap; on exceed, a link is offered.
- *   5. Strategy — plain vs TUS.
- *
- * Note: resolvePathAccess(kind:'evidence') admits the student, either parent
- * (the accepted parent-acts-as-child boundary), and a cohort guide; it excludes
- * siblings (position-only). The student app (Unit 14) is the only surface that
- * exposes capture, so the parent/guide read-grant over-permission here is inert.
+ *   1. Access — resolvePathAccess(kind:'evidence') for the login-vs-forbidden
+ *      split and the family relationship (an unauthorized caller learns NOTHING
+ *      about the item — checked first).
+ *   2. WRITE authority — narrow to the STUDENT or a PARENT. Uploading authors new
+ *      evidence in a student's private folder, a stronger authority than reading
+ *      it: a cohort GUIDE has read access (D25) but is NOT authorized to capture.
+ *      This is enforced in code, not by the absence of a UI — requestUploadSlot is
+ *      a network-reachable Server Action a guide session could call directly.
+ *   3. Append-only latch — a verified evidence path cannot be overwritten.
+ *   4. D21 caps — too big / too long → link overflow (regardless of quota).
+ *   5. Quota — the annual SOFT cap; on exceed, a link is offered. `sizeBytes` is
+ *      client-declared and bounded above only by the bucket's 50 MB ceiling, so a
+ *      caller under-declaring size can smuggle at most one ~50 MB file over the
+ *      cap at the boundary; the next request self-corrects (usage is summed from
+ *      real stored bytes). Acceptable for a soft product quota.
+ *   6. Strategy — plain vs TUS.
  */
 export function decideUploadSlot(req: SlotRequest): SlotDecision {
   const limits = req.limits ?? DEFAULT_UPLOAD_LIMITS;
@@ -250,6 +303,15 @@ export function decideUploadSlot(req: SlotRequest): SlotDecision {
   const access = resolvePathAccess({ session: req.session, grants: req.grants, target: req.target });
   if (access === "login") return { ok: false, reason: "login" };
   if (access === "forbidden") return { ok: false, reason: "forbidden" };
+
+  // WRITE authority: the student themselves, or a parent of the family. A guide
+  // (read-only per D25) and a sibling both resolve here to forbidden.
+  const canCapture = req.grants.some(
+    (g) =>
+      (g.role === "student" && g.scopeType === "student" && g.scopeId === req.target.studentId) ||
+      (g.role === "parent" && g.scopeType === "family" && g.scopeId === req.target.familyId)
+  );
+  if (!canCapture) return { ok: false, reason: "forbidden" };
 
   if (req.appendOnlyLatched) return { ok: false, reason: "append_only_latched" };
 

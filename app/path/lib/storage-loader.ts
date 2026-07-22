@@ -24,14 +24,34 @@ type Db = ReturnType<typeof supabaseAdmin>;
  * storage.objects directly (that schema is not exposed through PostgREST). A soft
  * cap — see the RPC's migration comment. Well within JS-safe-int range (10 GB ≪
  * 2^53), so Number() is exact.
+ *
+ * `excludeObjectPath` omits one object from the sum — the path being (re)uploaded
+ * — so a retry of an already-landed upload does not double-charge its own bytes
+ * against quota (its bytes are already in the stored total) and wrongly refuse a
+ * retry that writes nothing new.
+ *
+ * FAIL LOUD: an RPC error throws (above), AND a success that returns a
+ * non-numeric value throws too — silently defaulting to 0 here would be a fail-
+ * OPEN that under-reports usage and defeats the quota, the exact thing this
+ * module's header forbids.
  */
-export async function sumStudentStorageBytes(db: Db, studentId: string): Promise<number> {
-  const { data, error } = await db.rpc("path_student_storage_bytes", { p_student_id: studentId });
+export async function sumStudentStorageBytes(
+  db: Db,
+  studentId: string,
+  excludeObjectPath: string | null = null
+): Promise<number> {
+  const { data, error } = await db.rpc("path_student_storage_bytes", {
+    p_student_id: studentId,
+    p_exclude_path: excludeObjectPath,
+  });
   if (error) {
     throw new Error(`sumStudentStorageBytes(${studentId}) failed: ${error.message}`);
   }
   const n = typeof data === "string" ? Number(data) : (data as number | null);
-  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    throw new Error(`sumStudentStorageBytes(${studentId}) returned a non-numeric value: ${JSON.stringify(data)}`);
+  }
+  return n;
 }
 
 /** What the client needs to upload directly (plain or TUS both use this token). */

@@ -29,9 +29,9 @@ import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { loadStudentContext } from "@/app/path/lib/progress-loader";
 import {
+  buildResumableEndpoint,
   decideUploadSlot,
   EVIDENCE_BUCKET,
-  RESUMABLE_ENDPOINT_PATH,
   TUS_CHUNK_SIZE_BYTES,
   type SlotDecision,
 } from "@/app/path/lib/upload-rules";
@@ -39,20 +39,35 @@ import { mintSignedUploadToken, sumStudentStorageBytes } from "@/app/path/lib/st
 
 const uploadSlotSchema = z.object({
   studentId: z.uuid(),
+  /**
+   * Validated for shape but NOT yet used by the decision or the object path. The
+   * object path is task-independent ({student_id}/{evidence_id}/{sha256}); Unit 10
+   * keys the EvidenceItem row to a task_progress row at confirm time and is where
+   * task-existence gating (mirroring applyTransition's not_found) belongs. Kept in
+   * the contract now so the client↔server shape is stable for that unit — the same
+   * validated-but-reserved posture as `appendOnlyLatched` / `tusMintedAt`.
+   */
   taskId: z.string().regex(/^\d+\.\d+\.\d+$/),
   /** Client-generated evidence identity (Unit 10's `unique(task_progress_id, client_id)`). */
   evidenceId: z.uuid(),
   /** Client-DECLARED content hash — part of the path, never integrity-verified server-side. */
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   ext: z.string().regex(/^[a-z0-9]{1,8}$/),
+  /**
+   * Validated for shape but reserved: the client sets the object's content-type at
+   * upload time from its own File; the server cannot bind it at mint. Content-type
+   * / evidence-kind validation is DEFERRED to Unit 10's evidence-rules (see the
+   * migration header) — kept here so that unit can enforce it without a schema bump.
+   */
   contentType: z.string().min(1).max(255),
   sizeBytes: z.number().int().nonnegative(),
   /** Video only; absent for photo/document/audio. */
   durationSeconds: z.number().nonnegative().optional(),
 });
 
-/** Metadata-only slot (never the bytes). The failure arm mirrors SlotDecision's
- *  refusals plus the action's own I/O outcomes. */
+/** Metadata-only slot (never the bytes). The failure arm is the pure decision's
+ *  refusals (derived, so a new SlotDecision reason is a compile error here until
+ *  handled) plus the action's own I/O outcomes. */
 export type UploadSlotResult =
   | { ok: true; strategy: "plain"; bucket: string; objectPath: string; token: string; signedUrl: string }
   | {
@@ -66,9 +81,8 @@ export type UploadSlotResult =
       /** ISO mint time — Unit 11 persists it to enforce the 24h TUS window. */
       tusMintedAt: string;
     }
-  | { ok: false; reason: "login" | "forbidden" | "append_only_latched" | "not_found" | "invalid_input" | "unavailable" }
-  | { ok: false; reason: "quota_exceeded"; overflowBytes: number }
-  | { ok: false; reason: "link_overflow"; cause: "too_large" | "too_long" };
+  | Extract<SlotDecision, { ok: false }>
+  | { ok: false; reason: "not_found" | "invalid_input" | "unavailable" };
 
 export async function requestUploadSlot(input: unknown): Promise<UploadSlotResult> {
   // Gate: every Server Function verifies auth itself — the proxy matcher does not
@@ -90,9 +104,15 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
   }
   if (!student) return { ok: false, reason: "not_found" };
 
+  // {student_id}/{evidence_id}/{sha256}.{ext} — the folder-1 segment is the
+  // student profile id the read policy keys on. Computed BEFORE the usage sum so
+  // it can be excluded from it (a retry of an already-landed upload must not be
+  // double-charged its own bytes against quota).
+  const objectPath = `${student.studentId}/${evidenceId}/${sha256}.${ext}`;
+
   let currentUsageBytes: number;
   try {
-    currentUsageBytes = await sumStudentStorageBytes(db, studentId);
+    currentUsageBytes = await sumStudentStorageBytes(db, studentId, objectPath);
   } catch (e) {
     console.error(`[path/upload-slot] usage read failed for ${studentId}:`, e);
     return { ok: false, reason: "unavailable" };
@@ -101,7 +121,7 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
   // Authorize + classify + size/duration + quota + strategy, all from the
   // AUTHORITATIVE profile ids (never a client field). session is non-null here
   // (requirePathUser would have redirected otherwise) so `login` cannot surface;
-  // `forbidden` can — a parent of another family requesting this student's slot.
+  // `forbidden` can — a guide, a sibling, or a parent of another family.
   const decision: SlotDecision = decideUploadSlot({
     session: { user: { id: userId } },
     grants,
@@ -120,10 +140,6 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
     currentUsageBytes,
   });
   if (!decision.ok) return decision;
-
-  // {student_id}/{evidence_id}/{sha256}.{ext} — the folder-1 segment is the
-  // student profile id the read policy keys on.
-  const objectPath = `${student.studentId}/${evidenceId}/${sha256}.${ext}`;
 
   let minted;
   try {
@@ -145,16 +161,23 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
   }
 
   // TUS: the SAME token, presented via x-signature against the DIRECT storage host
-  // (not the project URL). Deriving the ref from the public URL host keeps it in
-  // one place; this runs only on invocation, never at build/render.
-  const ref = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL as string).host.split(".")[0];
+  // (not the project URL). The host derivation is pure/tested (buildResumableEndpoint);
+  // guard the env read so a missing var maps to `unavailable` rather than throwing
+  // out of the action's own body (which its throw-posture contract forbids).
+  let endpoint: string;
+  try {
+    endpoint = buildResumableEndpoint(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+  } catch (e) {
+    console.error(`[path/upload-slot] endpoint build failed:`, e);
+    return { ok: false, reason: "unavailable" };
+  }
   return {
     ok: true,
     strategy: "tus",
     bucket: EVIDENCE_BUCKET,
     objectPath,
     token: minted.token,
-    endpoint: `https://${ref}.storage.supabase.co${RESUMABLE_ENDPOINT_PATH}`,
+    endpoint,
     chunkSize: TUS_CHUNK_SIZE_BYTES,
     tusMintedAt: new Date().toISOString(),
   };

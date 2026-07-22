@@ -13,10 +13,12 @@ import {
   STUDENT_ANNUAL_QUOTA_BYTES,
   TUS_CHUNK_SIZE_BYTES,
   TUS_URL_TTL_MS,
+  buildResumableEndpoint,
   chooseUploadStrategy,
   classifyItem,
   decideQuota,
   decideUploadSlot,
+  extensionFor,
   interpretUploadResponse,
   isTusUrlExpired,
 } from "../upload-rules";
@@ -36,6 +38,7 @@ const studentGrants: RoleGrant[] = [
   { role: "student", scopeType: "family", scopeId: FAMILY_ID },
 ];
 const parentGrants: RoleGrant[] = [{ role: "parent", scopeType: "family", scopeId: FAMILY_ID }];
+const guideGrants: RoleGrant[] = [{ role: "guide", scopeType: "cohort", scopeId: COHORT_ID }];
 const siblingGrants: RoleGrant[] = [
   { role: "student", scopeType: "student", scopeId: SIBLING_ID },
   { role: "student", scopeType: "family", scopeId: FAMILY_ID },
@@ -104,6 +107,49 @@ describe("chooseUploadStrategy", () => {
   });
 });
 
+// ── Object-path helpers ───────────────────────────────────────────────────────
+describe("extensionFor", () => {
+  it("uses the real extension, lowercased and sanitized", () => {
+    expect(extensionFor("photo.JPG", "image/jpeg")).toBe("jpg");
+    expect(extensionFor("clip.mp4", "video/mp4")).toBe("mp4");
+  });
+
+  it("takes the LAST segment of a multi-dot name", () => {
+    expect(extensionFor("archive.tar.gz", "application/gzip")).toBe("gz");
+  });
+
+  it("falls back to the MIME subtype for a DOTLESS filename (not the whole name)", () => {
+    // The bug this guards: "IMG12345".split(".").pop() === "IMG12345", so a dotless
+    // name would otherwise be used as its own extension.
+    expect(extensionFor("IMG12345", "image/jpeg")).toBe("jpeg");
+    expect(extensionFor("capture", "video/webm")).toBe("webm");
+  });
+
+  it("treats a leading-dot-only name as having no extension, falling back to MIME", () => {
+    expect(extensionFor(".hidden", "application/pdf")).toBe("pdf");
+  });
+
+  it("falls back to MIME when the name extension is too long (>8 chars)", () => {
+    expect(extensionFor("weird.superlongextension", "image/png")).toBe("png");
+  });
+
+  it("defaults to 'bin' when neither the name nor the MIME yields an extension", () => {
+    expect(extensionFor("noext", "")).toBe("bin");
+  });
+});
+
+describe("buildResumableEndpoint", () => {
+  it("derives the direct storage host + resumable path from the project URL", () => {
+    expect(buildResumableEndpoint("https://deolvqnyvhhnavsifgxz.supabase.co")).toBe(
+      "https://deolvqnyvhhnavsifgxz.storage.supabase.co/storage/v1/upload/resumable"
+    );
+  });
+
+  it("throws on an unparseable URL (the action maps this to `unavailable`)", () => {
+    expect(() => buildResumableEndpoint("")).toThrow();
+  });
+});
+
 // ── Item classification (D21 caps) ────────────────────────────────────────────
 describe("classifyItem", () => {
   it("a normal photo/video within limits is storable", () => {
@@ -153,9 +199,11 @@ describe("decideQuota", () => {
     if (d.ok) expect(d.remainingBytes).toBe(8 * GB);
   });
 
-  it("allows an upload landing exactly on the quota", () => {
-    const d = decideQuota({ currentUsageBytes: 9 * GB, incomingBytes: 1 * GB });
-    expect(d.ok).toBe(true);
+  it("allows an upload landing exactly on the quota, with zero remaining", () => {
+    expect(decideQuota({ currentUsageBytes: 9 * GB, incomingBytes: 1 * GB })).toEqual({
+      ok: true,
+      remainingBytes: 0,
+    });
   });
 
   it("refuses when the projected total exceeds the quota, with the overflow", () => {
@@ -218,6 +266,12 @@ describe("interpretUploadResponse", () => {
     expect(interpretUploadResponse({ status: 503 })).toBe("retry");
   });
 
+  it("a duplicate body signal wins over a 5xx/429 outer status (duplicate is semantic, not by outer number)", () => {
+    expect(interpretUploadResponse({ status: 503, statusCode: 409 })).toBe("success");
+    expect(interpretUploadResponse({ status: 500, errorName: "Duplicate" })).toBe("success");
+    expect(interpretUploadResponse({ status: 429, message: "The resource already exists" })).toBe("success");
+  });
+
   it("other 4xx (413 payload too large, 403 auth) are non-retryable failures", () => {
     expect(interpretUploadResponse({ status: 413, message: "Payload too large" })).toBe("failed");
     expect(interpretUploadResponse({ status: 403 })).toBe("failed");
@@ -237,8 +291,16 @@ describe("decideUploadSlot", () => {
   });
 
   it("either parent may capture evidence for their child (accepted trust boundary)", () => {
-    const d = decideUploadSlot(slotReq({ grants: parentGrants }));
-    expect(d.ok).toBe(true);
+    expect(decideUploadSlot(slotReq({ grants: parentGrants }))).toEqual({
+      ok: true,
+      strategy: "plain",
+      sizeBytes: 2 * MB,
+    });
+  });
+
+  it("a cohort GUIDE may READ evidence but NOT capture it — upload is student/parent only", () => {
+    // resolvePathAccess admits the guide (D25 read), but the write-authority narrowing refuses.
+    expect(decideUploadSlot(slotReq({ grants: guideGrants }))).toEqual({ ok: false, reason: "forbidden" });
   });
 
   it("no session resolves login (drives a redirect), never forbidden", () => {
@@ -263,9 +325,30 @@ describe("decideUploadSlot", () => {
     });
   });
 
-  it("routes an over-ceiling item to link overflow (too_large), before quota", () => {
+  it("the append-only latch wins over caps AND quota (a verified path is unambiguously protected)", () => {
+    // A genuine three-way conflict: latched, oversized, over-quota. The latch is
+    // checked first, so the reason is append_only_latched — not link_overflow/quota.
+    expect(
+      decideUploadSlot(
+        slotReq({
+          appendOnlyLatched: true,
+          sizeBytes: MAX_STORABLE_BYTES + 1,
+          currentUsageBytes: STUDENT_ANNUAL_QUOTA_BYTES,
+        })
+      )
+    ).toEqual({ ok: false, reason: "append_only_latched" });
+  });
+
+  it("routes an over-ceiling item to link overflow (too_large)", () => {
     const d = decideUploadSlot(slotReq({ sizeBytes: MAX_STORABLE_BYTES + 1, currentUsageBytes: 0 }));
     expect(d).toEqual({ ok: false, reason: "link_overflow", cause: "too_large" });
+  });
+
+  it("caps win over quota: an oversized item already over quota is link_overflow, not quota_exceeded", () => {
+    // A genuine caps-vs-quota conflict (the docstring says caps apply 'regardless of quota').
+    expect(
+      decideUploadSlot(slotReq({ sizeBytes: MAX_STORABLE_BYTES + 1, currentUsageBytes: STUDENT_ANNUAL_QUOTA_BYTES }))
+    ).toEqual({ ok: false, reason: "link_overflow", cause: "too_large" });
   });
 
   it("routes an over-3-min video to link overflow (too_long)", () => {
@@ -278,6 +361,22 @@ describe("decideUploadSlot", () => {
       slotReq({ sizeBytes: 5 * MB, currentUsageBytes: STUDENT_ANNUAL_QUOTA_BYTES })
     );
     expect(d).toEqual({ ok: false, reason: "quota_exceeded", overflowBytes: 5 * MB });
+  });
+
+  it("honors a limits override end-to-end (a smaller quota refuses what the default would allow)", () => {
+    const d = decideUploadSlot(
+      slotReq({
+        sizeBytes: 3,
+        currentUsageBytes: 0,
+        limits: {
+          plainMaxBytes: PLAIN_UPLOAD_MAX_BYTES,
+          maxStorableBytes: MAX_STORABLE_BYTES,
+          maxVideoDurationSeconds: MAX_VIDEO_DURATION_SECONDS,
+          quotaBytes: 2,
+        },
+      })
+    );
+    expect(d).toEqual({ ok: false, reason: "quota_exceeded", overflowBytes: 1 });
   });
 
   it("checks access before the append-only latch (an unauthorized caller learns nothing about the item)", () => {
@@ -306,15 +405,17 @@ describe("migration parity: path_storage.sql", () => {
     "utf8"
   );
 
-  it("creates the bucket named by EVIDENCE_BUCKET", () => {
-    expect(sql).toContain(`'${EVIDENCE_BUCKET}'`);
-  });
-
-  it("sets the bucket file_size_limit to MAX_STORABLE_BYTES", () => {
-    // insert into storage.buckets (...) values ('path-evidence', 'path-evidence', false, 52428800)
-    const m = sql.match(/values\s*\(\s*'path-evidence'\s*,\s*'path-evidence'\s*,\s*false\s*,\s*(\d+)\s*\)/i);
-    expect(m, "bucket insert with a numeric file_size_limit").not.toBeNull();
-    expect(Number(m![1])).toBe(MAX_STORABLE_BYTES);
+  it("the storage.buckets INSERT names EVIDENCE_BUCKET and sets file_size_limit to MAX_STORABLE_BYTES", () => {
+    // Parse the actual INSERT statement (id + name captured), not a stray comment
+    // mention of the bucket name — so a drift in the real values fails, and a
+    // comment referencing the old name cannot mask it.
+    const m = sql.match(
+      /insert\s+into\s+storage\.buckets[^;]*?values\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*false\s*,\s*(\d+)\s*\)/i
+    );
+    expect(m, "storage.buckets INSERT with id, name, public=false, numeric file_size_limit").not.toBeNull();
+    expect(m![1]).toBe(EVIDENCE_BUCKET); // id
+    expect(m![2]).toBe(EVIDENCE_BUCKET); // name
+    expect(Number(m![3])).toBe(MAX_STORABLE_BYTES);
   });
 
   it("gates the read policy to exactly the EVIDENCE_READ_OPERATIONS (blocks object.list enumeration)", () => {

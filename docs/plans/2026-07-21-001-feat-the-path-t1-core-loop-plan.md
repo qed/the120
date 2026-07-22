@@ -438,7 +438,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 6: Student sign-in, provisioning, reset, and the `/path` gate**
+- [x] **Unit 6: Student sign-in, provisioning, reset, and the `/path` gate**
 
 **Goal:** An eight-year-old signs in with a name and a password; a parent provisions and resets it; the route is gated.
 
@@ -469,6 +469,15 @@ browser                    Server Action            Supabase Storage
 - Integration: a student and a parent hold simultaneous independent sessions in separate browsers, neither invalidating the other (R3 — the requirement a profile-picker design would have failed).
 
 **Verification:** manual two-browser test of R3; env-less `npm run build` passes.
+
+**Prerequisite findings / applied state (2026-07-22):** the D26 audit-action migration is applied + verified + recorded in production (version `20260722180000`): `crm_audit_log_action_check` now accepts `'path-recovery'` (verified via `pg_get_constraintdef`), matched in `constants.ts` + pinned by `app/crm/__tests__/audit-actions-parity.test.ts` (parses migration files, catches drift both ways). A test family was provisioned in prod via `npm run seed:path-family` (parent + Maya g4 + Dev g7). Sign-in is a Server Action (system email derived server-side, never displayed); two students may share a first name → candidate set resolved by normalized name, password disambiguates. Rate limiting is **greenfield + in-memory** (Unit 6 forbade new tables): pure `rate-limit-rules.ts` + a per-instance `rate-limit-store.ts` (`server-only`), reused by Unit 9's upload-slot mint. Provisioning/reset run through the plain `provision-core.ts` (tsx-script-reusable); D26 recovery reuses `requireStaff()`. Verified live: bad password rejected, good sign-in reaches a profile, R3 two-browser simultaneous sessions, the 5→6 lockout, parent reset (old dies / new works). Env-less build passes, `/path/sign-in` static, `/path` dynamic; 1287 tests green, tsc clean, eslint clean on changed files.
+
+**Carried out of Unit 6's review, for later units** *(14-agent `/ce:review`, security-heavy; findings applied — the compound learning is docs/solutions/best-practices/in-memory-rate-limiter-toctou-race-and-fifo-eviction-clears-lockout-2026-07-22.md; run artifact `.context/compound-engineering/ce-review/2026-07-22-unit6/`):*
+- **[Unit 15 — HARD GATE, security P1]** `provisionStudentAction` authorizes on the client-supplied `familyId` (`isParentOfFamily`) but nothing DB-side proves the supplied `childId` belongs to that family — a signed-in parent could pair their `familyId` with **any** roster child and squat it (the unique `child_id` makes it un-reprovisionable by the real family). Bounded today only because parent accounts exist solely via the seed script (no self-serve signup). **Unit 15 MUST add the CRM-side childId↔family ownership check before opening parent self-serve entry** (this is the R31 backfill's job; the comment in `provision.ts` is marked accordingly).
+- **[Unit 14/15]** Unit 6 actions use the CRM `{success, error}` result shape; the rest of `/path` (evidence/upload/transition) uses `{ok, reason}`. When Unit 15 builds the first consumer, reconcile with a shared unwrap helper (or migrate the two actions to `{ok, reason}`) so a family surface calling both families of action has one branch.
+- **[Unit 14 — scale, before TP-1]** `signInStudent` does a full `path_student_profiles⋈children` scan per attempt (deliberate at T1 ≤ few-hundred profiles) with `.order("created_at")` for deterministic same-name truncation. Beyond PostgREST's ~1000-row cap this silently truncates, and >`MAX_SIGN_IN_CANDIDATES` (5) same-name collisions can't sign in. A **normalized-name column + index** removes both the scan and the cap — needed before TP-1 provisions real cohorts.
+- **[before TP-1]** The rate-limit store is **per-instance, best-effort** (a durable table/KV is the carry-forward before public launch lifts the test-families-only posture). Also: the sign-in timing side-channel (unknown-name = 0 probes vs known-name = 1–5 bcrypt probes) is mitigated by the generic message + per-IP cap but not eliminated — a constant-time path is a later hardening.
+- **[later]** `notFound()` propagation from a Server Action (the zero-grants-mid-session path in `requirePathUser`) is used by the provision/reset actions but its behavior in a `"use server"` body is documented-as-unverified in `auth.ts` — verify explicitly in a later unit. Reset actions carry no rate limit (authenticated; session-churn only) — advisory.
 
 ---
 

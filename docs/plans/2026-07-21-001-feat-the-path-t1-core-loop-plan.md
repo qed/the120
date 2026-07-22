@@ -562,7 +562,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 9: Storage, signed uploads, and quota**
+- [x] **Unit 9: Storage, signed uploads, and quota**
 
 **Goal:** Private media storage with direct-to-storage uploads. Entirely greenfield.
 
@@ -598,6 +598,19 @@ browser                    Server Action            Supabase Storage
 - Error path: a slot request for an inaccessible task is refused (delegates to `resolvePathAccess`).
 
 **Verification:** a real 40 MB upload resumes after a mid-transfer network interruption; the object is not readable by URL without a signature.
+
+**Prerequisite findings (run 2026-07-22 against prod, two changed the design):**
+- **Per-file ceiling is 50 MB** (`fileSizeLimit = 52428800`; Free tier, org "Helix"). D21's 500 MB per-item cap is **not storable today** — `MAX_STORABLE_BYTES` is 50 MB and larger items are link-overflow; the bucket `file_size_limit` enforces it server-side. A Pro upgrade (roadmap TP-3) restores 500 MB by flipping that one constant + the bucket limit together (the migration-parity test pins them equal).
+- **`storage.allow_any_operation` exists but its signature is `(expected_operations text[])`**, not the plan's zero-arg reference — the read policy gates to `array['object.get_authenticated','object.get_authenticated_info']` so `object.list` (enumeration) is never authorized.
+- **Range requests over signed URLs return 206** (`Content-Range` honored) — `<video>` seeking works, no player workaround (Units 10/14).
+- Applied + verified + recorded in prod (version `20260722140000`): private `path-evidence` bucket, the family-read `path_can_read_evidence(text)` (proved against a rolled-back fixture: parent→child true, sibling→evidence false), the `path_student_storage_bytes(uuid,text)` quota RPC, and the `storage.objects` SELECT policy (`TO authenticated`, RLS-on, no write policies, anon revoked).
+
+**Carried out of Unit 9's review, for later units** *(15-agent /ce:review; 0 P0, security clean; findings applied where in-scope, the rest carried here):*
+- **[Unit 6]** Rate-limit `requestUploadSlot`. In-flight (never-finalized) resumable objects have no size metadata, so the quota byte-sum is blind to them and Unit 9 ships no reaper — an authenticated caller can start-but-never-finish uploads for unbounded, unattributed storage. The rate limit bounds this until Unit 10's reaper lands.
+- **[Unit 10]** Own the **orphan reaper** (48h, via the Storage API — never SQL). **Wire `appendOnlyLatched`** to the real evidence-row latch (Unit 9 passes `false`; physical unoverwritability is currently upsert-disabled only). Implement **content-type / evidence-kind validation** (the migration's `allowed_mime_types` is NULL and the pure rules do size/duration/quota only — comment corrected to say kind-validation is deferred here). **On an already-exists outcome the client-reported size/sha are UNVERIFIED** (sha256 is client-declared): confirm must reconcile the reported metadata against the real `storage.objects` size/etag, not trust `onUploaded`. Optionally add **task-existence gating** (mirror `applyTransition`'s `not_found`) if slot mint should refuse a well-formed but nonexistent `taskId` (currently validated-but-reserved).
+- **[Unit 11]** Persist `tusMintedAt` + endpoint across sessions and wire **`isTusUrlExpired`** (built + tested, unused in Unit 9's in-session upload) to re-mint before resuming — the signed-upload **token is valid 2h**, the resumable **upload URL 24h**, and a static `x-signature` header goes stale on a >2h pause. `submit`/offline-queue replay reuses the same `evidenceId`, which is what the quota-exclusion-by-path fix relies on to avoid double-charging a retry.
+- **[Unit 14]** When capture is wired into a route: the **guide-exclusion is already enforced** in `decideUploadSlot` (student/parent only — a guide's D25 read grant does not mint a write slot), so re-confirm no surface re-introduces guide capture. **Differentiate retryable (`unavailable`) vs terminal (`forbidden`/`quota_exceeded`/`link_overflow`) refusals** in the UI (the typed reason reaches `onRefused`). **Smoke-test `path_student_storage_bytes` against a real object** before the first real upload: it fails **OPEN** (returns 0) if its SECURITY DEFINER privilege assumption ever breaks, silently disabling the quota — unlike `path_can_read_evidence`, which fails closed.
+- **[Unit 10 / duration]** D21's **3-minute cap has no server-side backstop** (unlike the 50 MB size cap, which the bucket enforces): `durationSeconds` is client-declared and best-effort (`probeVideoDuration` resolves `undefined` on undecodable metadata). A client omitting/lying about it bypasses the duration cap. Accepted for T1; revisit only if server-side length measurement is wanted.
 
 ---
 

@@ -472,7 +472,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 7: The progress engine — pure state machine**
+- [x] **Unit 7: The progress engine — pure state machine**
 
 **Goal:** Every transition, precondition, and cascade as a pure module with exhaustive tests. The heart of the product, and the only part this repo's testing setup can genuinely defend.
 
@@ -511,6 +511,14 @@ browser                    Server Action            Supabase Storage
 - Integration: a full criterion 1.1 walkthrough ends in `review_underway` with exactly five verification records.
 
 **Verification:** every table row has a passing and a refused test; no transition is reachable that the table does not name.
+
+**Carried out of Unit 7's review, for Unit 8** *(the transition RPC + applier; these are caller obligations the pure engine documents but cannot enforce)*:
+- **Re-derive `criterionTo` from ALL siblings inside the CAS/transaction — never blind-write `cascade.criterionTo`.** It is computed from a point-in-time snapshot; two concurrent verifies of *different* tasks in one criterion each compute a stale aggregate, so a blind write can wedge the criterion at `active` even after every task is verified. The `move_candidate()` CAS shape must cover the aggregate, not just the task row.
+- **Stamp `verifiedBy` with the real authenticated `actorId`.** §9.5's revoke identity check trusts it; the cascade never sets it.
+- **The snapshot loader must fail-closed-narrow every DB state string** into the engine's unions before it reaches `evaluateTransition` (the `parseRoleGrant` pattern), and **emit `null` — never `""` — for an unset `reviewOpenedAt`** (withdraw's D6 guard treats both as unset, but the type contract wants `null`).
+- **Re-authorize on an `already_in_target_state` verdict.** That verdict is returned *without* running the row's precondition (identity/note/membership), so per-target authorization is the caller's job on that path.
+- **Confirm the action imports `evaluateTransition`/`clampStudentTaskState`** rather than re-deriving the logic inline (extract-the-branch-the-production-path-calls).
+- **[T2] `phase_return` validates `returnedCriterionIds` against `PhaseSnapshot.criterionIds`** — T2's phase-review unit must populate that list from the phase's real criteria (as the criterion loader populates `criterion.tasks`), and the §9.5 post-clear revoke guard lands when `CriterionState` gains `cleared`.
 
 ---
 

@@ -15,6 +15,7 @@ import {
   reconcileMetadata,
   selectOrphans,
   shouldRemintSignedUrl,
+  isSafeHttpUrl,
 } from "../evidence-rules";
 import { logTemplateFor } from "@/app/path/content/log-templates";
 
@@ -125,6 +126,17 @@ describe("decideConfirm — client_id idempotency (offline-safe) + advisory hash
       clientId: B,
       sha256: HASH2,
       existing: [{ clientId: A, sha256: HASH1, redactedAt: null }],
+    });
+    expect(out).toEqual({ action: "insert", hashDuplicateOf: null });
+  });
+
+  it("a null-hash item (kind='link') never matches another null-hash sibling as a dupe", () => {
+    // addLinkEvidence always passes sha256:null — the `!= null` guard must stop
+    // `null === null` from flagging every second link as a duplicate of the first.
+    const out = decideConfirm({
+      clientId: B,
+      sha256: null,
+      existing: [{ clientId: A, sha256: null, redactedAt: null }],
     });
     expect(out).toEqual({ action: "insert", hashDuplicateOf: null });
   });
@@ -258,6 +270,33 @@ describe("reconcileMetadata — already-exists client metadata is UNVERIFIED; tr
   it("fails loud on an unreadable real size rather than storing a guess", () => {
     const out = reconcileMetadata({ reportedSizeBytes: 1000, actual: { exists: true, sizeBytes: null } });
     expect(out).toEqual({ ok: false, reason: "unreadable_size" });
+  });
+
+  it("fails loud on a negative or non-finite real size (each guard sub-condition)", () => {
+    expect(reconcileMetadata({ reportedSizeBytes: 100, actual: { exists: true, sizeBytes: -1 } })).toEqual({
+      ok: false,
+      reason: "unreadable_size",
+    });
+    expect(reconcileMetadata({ reportedSizeBytes: 100, actual: { exists: true, sizeBytes: NaN } })).toEqual({
+      ok: false,
+      reason: "unreadable_size",
+    });
+  });
+});
+
+describe("isSafeHttpUrl — the link-overflow XSS guard", () => {
+  it("accepts http and https", () => {
+    expect(isSafeHttpUrl("https://example.com/big.mp4")).toBe(true);
+    expect(isSafeHttpUrl("http://example.com/x")).toBe(true);
+  });
+
+  it("REFUSES javascript:, data:, vbscript:, and other schemes", () => {
+    expect(isSafeHttpUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeHttpUrl("data:text/html,<script>alert(1)</script>")).toBe(false);
+    expect(isSafeHttpUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isSafeHttpUrl("ftp://example.com/x")).toBe(false);
+    expect(isSafeHttpUrl("not a url at all")).toBe(false);
+    expect(isSafeHttpUrl("")).toBe(false);
   });
 });
 

@@ -20,8 +20,9 @@
  *     reviewer uncomfortable. Carve-out: reconciling/deleting a duplicate BEFORE
  *     any verification is not a deletion.
  *   * CONTENT-HASH DEDUPE IS ADVISORY (keep-both), not a DB constraint. The hard
- *     idempotency key is the client-generated evidence UUID (the row PK +
- *     `unique(task_progress_id, id)`), which makes the offline queue safe. The
+ *     idempotency key is the client-generated evidence UUID (the row's PRIMARY KEY
+ *     on `id` — a global UUID PK subsumes the plan's weaker composite), which makes
+ *     the offline queue safe. The
  *     content hash only surfaces a "you already added this" hint — so there is no
  *     silent drop, and no redacted tombstone holding a hash forever and blocking a
  *     later legitimate resubmission (the reason a partial unique index is NOT used).
@@ -97,6 +98,23 @@ export function classifyUploadKind(contentType: string): UploadEvidenceKind | nu
   return null;
 }
 
+/**
+ * Whether a URL is safe to store and render as an `<a href>`. Only `http`/`https`
+ * pass — `javascript:`, `data:`, `vbscript:` and friends are refused. Zod's
+ * `z.url()` accepts those dangerous schemes as valid URLs, so a link-overflow item
+ * would otherwise be a stored-XSS vector when a reviewer (incl. a cross-family
+ * Guide) clicks it. Applied at BOTH write (the addLink schema refine) and render
+ * (EvidenceList) so a row that somehow already holds an unsafe URL is never linked.
+ */
+export function isSafeHttpUrl(url: string): boolean {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** The explicit document allowlist (plus any `text/*`). Deliberately narrow for
  *  T1 — a real family hitting a rejection is a one-line addition here. */
 const DOCUMENT_MIME_TYPES: ReadonlySet<string> = new Set([
@@ -140,6 +158,8 @@ export function decideConfirm(input: {
   sha256: string | null;
   existing: readonly ExistingEvidence[];
 }): ConfirmOutcome {
+  // Mirrors the DB's PRIMARY KEY on `id`: a same-clientId row (redacted or not) is
+  // idempotent; otherwise insert, with an advisory pointer to a live same-hash sibling.
   const sameId = input.existing.find((e) => e.clientId === input.clientId);
   if (sameId) return { action: "idempotent", existingClientId: sameId.clientId };
 
@@ -289,6 +309,9 @@ export function selectOrphans(input: {
  * stored, or when within `SIGNED_URL_REMINT_SKEW_MS` of expiry. Reusing the stored
  * URL until near expiry is what keeps the CDN warm — minting per render triples the
  * egress bill.
+ *
+ * No caller yet — Unit 14's evidence-read surface consumes this to decide whether to
+ * re-mint before rendering, rather than reinventing an ad-hoc freshness check.
  */
 export function shouldRemintSignedUrl(input: {
   expiresAtMs: number | null;

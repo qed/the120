@@ -20,7 +20,7 @@
  */
 
 import type { Band } from "@/app/path/content/types";
-import type { EvidenceKind } from "@/app/path/lib/evidence-rules";
+import { isSafeHttpUrl, type EvidenceKind } from "@/app/path/lib/evidence-rules";
 import { LogTable } from "./LogTable";
 
 export type EvidenceItemView = {
@@ -118,7 +118,9 @@ function EvidenceBody({
       ) : null;
 
     case "link":
-      return item.linkUrl ? (
+      // Defense in depth: only render an http(s) link as an anchor (the write path
+      // already refuses other schemes) so a stored javascript:/data: URL is inert.
+      return item.linkUrl && isSafeHttpUrl(item.linkUrl) ? (
         <a href={item.linkUrl} target="_blank" rel="noopener noreferrer">
           {item.caption ?? item.linkUrl}
         </a>

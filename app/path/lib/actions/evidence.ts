@@ -11,7 +11,9 @@
  * to a typed `unavailable`.
  *
  * No caller exists yet (the surfaces land in Unit 14; student sessions in Unit 6);
- * this establishes the contract they consume, verified via the migration DO-block.
+ * this establishes the contract they consume. The table's shape and constraints
+ * were verified against production with a manual rolled-back DO-block (the Unit 8/9
+ * pattern); the pure decisions these actions delegate to are unit-tested.
  */
 
 import { z } from "zod";
@@ -20,7 +22,15 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { loadStudentContext } from "@/app/path/lib/progress-loader";
 import { canCaptureEvidence, resolveActorRole } from "@/app/path/lib/access-rules";
 import { EVIDENCE_BUCKET } from "@/app/path/lib/upload-rules";
-import { classifyUploadKind, computeLatched, decideConfirm, decideEvidenceMutation, reconcileMetadata } from "@/app/path/lib/evidence-rules";
+import {
+  classifyUploadKind,
+  computeLatched,
+  decideConfirm,
+  decideEvidenceMutation,
+  isSafeHttpUrl,
+  reconcileMetadata,
+  type UploadEvidenceKind,
+} from "@/app/path/lib/evidence-rules";
 import {
   deleteEvidenceRow,
   insertEvidenceItem,
@@ -30,7 +40,7 @@ import {
   readObjectMeta,
   redactEvidence,
   resolveEvidenceOwner,
-  resolveTaskProgressId,
+  resolveTaskProgress,
   upsertLogEvidence,
 } from "@/app/path/lib/evidence-loader";
 
@@ -74,7 +84,7 @@ export type ConfirmEvidenceResult =
   | {
       ok: true;
       evidenceId: string;
-      kind: string;
+      kind: UploadEvidenceKind;
       sizeBytes: number;
       sizeMismatch: boolean;
       /** Advisory: a non-redacted same-hash sibling ("you already added this"). */
@@ -121,14 +131,18 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
     return { ok: false, reason: "forbidden" };
   }
 
-  let taskProgressId: string | null;
+  let task;
   try {
-    taskProgressId = await resolveTaskProgressId(db, student.studentId, p.taskId);
+    task = await resolveTaskProgress(db, student.studentId, p.taskId);
   } catch (e) {
     console.error(`[path/confirm] task lookup failed for ${student.studentId}/${p.taskId}:`, e);
     return { ok: false, reason: "unavailable" };
   }
-  if (!taskProgressId) return { ok: false, reason: "not_found" };
+  if (!task) return { ok: false, reason: "not_found" };
+  const taskProgressId = task.id;
+  // R6: evidence landing on a currently-verified task must be flagged, never
+  // invisible — the online path, not only Unit 11's offline sync.
+  const addedAfterVerification = task.state === "verified";
 
   // Idempotency (offline retry) + advisory hash dedupe, from the task's rows.
   let existing;
@@ -169,8 +183,9 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
     return { ok: false, reason: "unavailable" };
   }
 
+  let inserted;
   try {
-    await insertEvidenceItem(db, {
+    inserted = await insertEvidenceItem(db, {
       id: p.evidenceId,
       taskProgressId,
       studentId: student.studentId,
@@ -190,10 +205,18 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
       exif: p.exif ?? null,
       signedUrl: minted.signedUrl,
       signedUrlExpiresAt: new Date(minted.expiresAtMs).toISOString(),
+      addedAfterVerification,
     });
   } catch (e) {
     console.error(`[path/confirm] insert failed for ${p.evidenceId}:`, e);
     return { ok: false, reason: "unavailable" };
+  }
+  if (!inserted.ok) {
+    // The evidenceId already belongs to a different task/student's row — a reused
+    // client id. Refuse loudly rather than report a false success (the just-uploaded
+    // object becomes a reaper-reclaimed orphan).
+    console.error(`[path/confirm] evidenceId ${p.evidenceId} conflicts with an existing row's owner`);
+    return { ok: false, reason: "invalid_input" };
   }
 
   return { ok: true, evidenceId: p.evidenceId, kind, sizeBytes: rec.storedSizeBytes, sizeMismatch: rec.sizeMismatch, hashDuplicateOf: decision.hashDuplicateOf, idempotent: false };
@@ -234,14 +257,30 @@ export async function saveLogEvidence(input: unknown): Promise<SaveLogResult> {
     return { ok: false, reason: "forbidden" };
   }
 
-  let taskProgressId: string | null;
+  let task;
   try {
-    taskProgressId = await resolveTaskProgressId(db, student.studentId, p.taskId);
+    task = await resolveTaskProgress(db, student.studentId, p.taskId);
   } catch (e) {
     console.error(`[path/log] task lookup failed:`, e);
     return { ok: false, reason: "unavailable" };
   }
-  if (!taskProgressId) return { ok: false, reason: "not_found" };
+  if (!task) return { ok: false, reason: "not_found" };
+  const taskProgressId = task.id;
+
+  // Ownership guard: upsertLogEvidence is ON CONFLICT (id) DO UPDATE, so a reused
+  // evidenceId that already belongs to a DIFFERENT student/task could reparent that
+  // row. Refuse unless any existing row for this id is already this student's log on
+  // this task (deleteEvidence/redact guard the same way via resolveEvidenceOwner).
+  let existingOwner;
+  try {
+    existingOwner = await resolveEvidenceOwner(db, p.evidenceId);
+  } catch (e) {
+    console.error(`[path/log] owner read failed:`, e);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (existingOwner && (existingOwner.studentId !== student.studentId || existingOwner.taskId !== p.taskId)) {
+    return { ok: false, reason: "forbidden" };
+  }
 
   // A log is editable until the task is append-only-latched (first verification).
   let latched: boolean;
@@ -275,7 +314,10 @@ const addLinkSchema = z.object({
   studentId,
   taskId,
   evidenceId,
-  url: z.url().max(2048),
+  // z.url() accepts javascript:/data: as valid URLs — the refine restricts to
+  // http(s) so a stored link can never become an XSS payload when rendered as an
+  // <a href> to a reviewer (incl. a cross-family Guide).
+  url: z.url().max(2048).refine(isSafeHttpUrl, "unsupported URL scheme"),
   caption: z.string().max(2000).optional(),
 });
 
@@ -302,14 +344,15 @@ export async function addLinkEvidence(input: unknown): Promise<AddLinkResult> {
     return { ok: false, reason: "forbidden" };
   }
 
-  let taskProgressId: string | null;
+  let task;
   try {
-    taskProgressId = await resolveTaskProgressId(db, student.studentId, p.taskId);
+    task = await resolveTaskProgress(db, student.studentId, p.taskId);
   } catch (e) {
     console.error(`[path/link] task lookup failed:`, e);
     return { ok: false, reason: "unavailable" };
   }
-  if (!taskProgressId) return { ok: false, reason: "not_found" };
+  if (!task) return { ok: false, reason: "not_found" };
+  const taskProgressId = task.id;
 
   let existing;
   try {
@@ -321,8 +364,9 @@ export async function addLinkEvidence(input: unknown): Promise<AddLinkResult> {
   const decision = decideConfirm({ clientId: p.evidenceId, sha256: null, existing });
   if (decision.action === "idempotent") return { ok: true, evidenceId: decision.existingClientId, idempotent: true };
 
+  let inserted;
   try {
-    await insertEvidenceItem(db, {
+    inserted = await insertEvidenceItem(db, {
       id: p.evidenceId,
       taskProgressId,
       studentId: student.studentId,
@@ -342,10 +386,15 @@ export async function addLinkEvidence(input: unknown): Promise<AddLinkResult> {
       exif: null,
       signedUrl: null,
       signedUrlExpiresAt: null,
+      addedAfterVerification: task.state === "verified",
     });
   } catch (e) {
     console.error(`[path/link] insert failed for ${p.evidenceId}:`, e);
     return { ok: false, reason: "unavailable" };
+  }
+  if (!inserted.ok) {
+    console.error(`[path/link] evidenceId ${p.evidenceId} conflicts with an existing row's owner`);
+    return { ok: false, reason: "invalid_input" };
   }
   return { ok: true, evidenceId: p.evidenceId, idempotent: false };
 }

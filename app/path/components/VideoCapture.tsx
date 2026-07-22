@@ -94,7 +94,11 @@ function generatePoster(file: Blob): Promise<Blob | null> {
  *  API mismatch — fall back to the original file. The poster still renders. The
  *  exact conversion path is verified on a real device in Unit 14. */
 async function normalizeToMp4(file: File): Promise<File> {
-  if (file.type === "video/mp4") return file;
+  // Strip any `;codecs=…` params before comparing — a native MediaRecorder MP4 is
+  // tagged e.g. `video/mp4;codecs=avc1…`, and a strict `=== "video/mp4"` would miss
+  // it and needlessly re-transcode the very case in-app recording exists to avoid.
+  const base = file.type.split(";")[0].trim().toLowerCase();
+  if (base === "video/mp4") return file;
   try {
     const mb = (await import("mediabunny")) as unknown as {
       Input: new (o: unknown) => unknown;

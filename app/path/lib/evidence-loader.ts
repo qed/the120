@@ -26,6 +26,7 @@ import {
   planRedaction,
   selectOrphans,
   SIGNED_URL_TTL_SECONDS,
+  type EvidenceKind,
   type LatchEvent,
 } from "./evidence-rules";
 
@@ -39,24 +40,25 @@ function splitObjectPath(objectPath: string): { folder: string; name: string } {
     : { folder: objectPath.slice(0, slash), name: objectPath.slice(slash + 1) };
 }
 
-/** Resolve the task_progress row id for a (student, task) pair — the FK the
- *  evidence row anchors to. Returns null when the task is not provisioned for the
- *  student (a legitimate "not found"); a query error THROWS. */
-export async function resolveTaskProgressId(
+/** Resolve the task_progress row (id + current state) for a (student, task) pair —
+ *  the FK the evidence row anchors to, plus the state that decides R6's
+ *  `added_after_verification` flag. Returns null when the task is not provisioned
+ *  for the student (a legitimate "not found"); a query error THROWS. */
+export async function resolveTaskProgress(
   db: Db,
   studentId: string,
   taskId: string
-): Promise<string | null> {
+): Promise<{ id: string; state: string } | null> {
   const { data, error } = await db
     .from("path_task_progress")
-    .select("id")
+    .select("id, state")
     .eq("student_id", studentId)
     .eq("task_id", taskId)
     .maybeSingle();
   if (error) {
-    throw new Error(`resolveTaskProgressId(${studentId}, ${taskId}) failed: ${error.message}`);
+    throw new Error(`resolveTaskProgress(${studentId}, ${taskId}) failed: ${error.message}`);
   }
-  return data ? (data.id as string) : null;
+  return data ? { id: data.id as string, state: data.state as string } : null;
 }
 
 /** The real, server-observed metadata of a stored object (what confirm trusts
@@ -163,7 +165,7 @@ export type EvidenceInsert = {
   id: string;
   taskProgressId: string;
   studentId: string;
-  kind: string;
+  kind: EvidenceKind;
   bucket: string | null;
   objectPath: string | null;
   posterObjectPath: string | null;
@@ -179,15 +181,24 @@ export type EvidenceInsert = {
   exif: unknown | null;
   signedUrl: string | null;
   signedUrlExpiresAt: string | null;
+  /** R6: evidence landing on an already-verified task, flagged not invisible. */
+  addedAfterVerification: boolean;
 };
 
 /**
- * Insert the evidence row idempotently — ON CONFLICT (id) DO NOTHING, then re-read
- * by id so a race (two confirms of the same evidenceId) converges on one row. The
- * client-generated id is the offline-safety key: an upload that committed then
- * retried can never fork the keepsake into two permanent rows.
+ * Insert the evidence row idempotently — ON CONFLICT (id) DO NOTHING, then RE-READ
+ * by id and verify it actually landed under THIS task/student. `ignoreDuplicates`
+ * silently SKIPS a colliding id, so a reused evidenceId that already belongs to a
+ * different row must surface as a loud `id_conflict`, never a false success that
+ * leaves the just-uploaded object an unattributed orphan. The client-generated id
+ * is the offline-safety key: a committed-then-retried upload can never fork the
+ * keepsake into two rows, and a genuine same-task retry re-reads its own row and
+ * reports ok.
  */
-export async function insertEvidenceItem(db: Db, row: EvidenceInsert): Promise<{ id: string }> {
+export async function insertEvidenceItem(
+  db: Db,
+  row: EvidenceInsert
+): Promise<{ ok: true } | { ok: false; reason: "id_conflict" }> {
   const { error } = await db
     .from("path_evidence_items")
     .upsert(
@@ -211,13 +222,27 @@ export async function insertEvidenceItem(db: Db, row: EvidenceInsert): Promise<{
         exif: row.exif,
         signed_url: row.signedUrl,
         signed_url_expires_at: row.signedUrlExpiresAt,
+        added_after_verification: row.addedAfterVerification,
       },
       { onConflict: "id", ignoreDuplicates: true }
     );
   if (error) {
     throw new Error(`insertEvidenceItem(${row.id}) failed: ${error.message}`);
   }
-  return { id: row.id };
+
+  // Verify the row that now holds this id is OURS (DO NOTHING silently skips a
+  // colliding id belonging to another task/student).
+  const { data, error: readError } = await db
+    .from("path_evidence_items")
+    .select("task_progress_id, student_id")
+    .eq("id", row.id)
+    .maybeSingle();
+  if (readError) throw new Error(`insertEvidenceItem(${row.id}) verify read failed: ${readError.message}`);
+  if (!data) throw new Error(`insertEvidenceItem(${row.id}): row missing immediately after upsert`);
+  if (data.task_progress_id !== row.taskProgressId || data.student_id !== row.studentId) {
+    return { ok: false, reason: "id_conflict" };
+  }
+  return { ok: true };
 }
 
 /** Upsert a log-table evidence row (kind='log'). ON CONFLICT (id) updates the rows
@@ -273,15 +298,18 @@ export async function resolveEvidenceOwner(db: Db, evidenceId: string): Promise<
 }
 
 /** Hard-delete an UNVERIFIED evidence row (the pre-verification carve-out). Deletes
- *  its storage objects via the Storage API FIRST (never SQL), then the row. A
- *  verified item is redacted (tombstoned), never deleted — the action enforces that. */
+ *  the ROW first, THEN its storage objects via the Storage API (never SQL): if the
+ *  object delete then fails, the object is a row-less orphan the 48h reaper reclaims
+ *  — self-healing. The reverse order would leave a live row pointing at deleted
+ *  media, which nothing reconciles. A verified item is redacted (tombstoned), never
+ *  deleted — the action enforces that. */
 export async function deleteEvidenceRow(db: Db, evidenceId: string, objectPaths: string[]): Promise<void> {
-  if (objectPaths.length > 0) {
-    const { error } = await db.storage.from(EVIDENCE_BUCKET).remove(objectPaths);
-    if (error) throw new Error(`deleteEvidenceRow(${evidenceId}) storage remove failed: ${error.message}`);
-  }
   const { error } = await db.from("path_evidence_items").delete().eq("id", evidenceId);
   if (error) throw new Error(`deleteEvidenceRow(${evidenceId}) row delete failed: ${error.message}`);
+  if (objectPaths.length > 0) {
+    const { error: rmError } = await db.storage.from(EVIDENCE_BUCKET).remove(objectPaths);
+    if (rmError) throw new Error(`deleteEvidenceRow(${evidenceId}) storage remove failed: ${rmError.message}`);
+  }
 }
 
 /** A minted signed-download URL and the epoch-ms it expires — stored on the row and
@@ -310,7 +338,7 @@ export async function redactEvidence(
 ): Promise<void> {
   const { data, error } = await db
     .from("path_evidence_items")
-    .select("object_path, poster_object_path")
+    .select("object_path, poster_object_path, redacted_at")
     .eq("id", input.evidenceId)
     .maybeSingle();
   if (error) throw new Error(`redactEvidence(${input.evidenceId}) read failed: ${error.message}`);
@@ -321,27 +349,40 @@ export async function redactEvidence(
     posterObjectPath: (data.poster_object_path as string | null) ?? null,
   });
 
+  // TOMBSTONE FIRST (once): mark redacted + null the cached URL/EXIF BEFORE the
+  // physical delete, so a failure between the two leaves an inert row (UI shows the
+  // tombstone, no URL to serve) rather than a live-looking row whose media is gone.
+  // Only set it when not already redacted, to preserve the ORIGINAL redactor/time on
+  // a retry.
+  if (data.redacted_at == null) {
+    const now = new Date().toISOString();
+    const { error: updError } = await db
+      .from("path_evidence_items")
+      .update({
+        redacted_at: now,
+        redacted_by: input.redactedBy,
+        redaction_reason: input.reason,
+        signed_url: null, // irrevocable URLs keep redacted media readable while cached
+        signed_url_expires_at: null,
+        exif: null, // can hold a child's home GPS coords
+        updated_at: now,
+      })
+      .eq("id", input.evidenceId);
+    if (updError) {
+      throw new Error(`redactEvidence(${input.evidenceId}) tombstone update failed: ${updError.message}`);
+    }
+  }
+
+  // ALWAYS (re)attempt the physical delete — NOT gated on redacted_at. A prior call
+  // may have committed the tombstone and then failed the delete; gating on the
+  // tombstone would leave the media permanently in the bucket (and un-reaped, since
+  // a tombstoned path still counts as "confirmed"). storage.remove is idempotent for
+  // already-gone paths, so a retry converges on media-actually-deleted.
   if (plan.deleteObjectPaths.length > 0) {
     const { error: rmError } = await db.storage.from(EVIDENCE_BUCKET).remove(plan.deleteObjectPaths);
     if (rmError) {
       throw new Error(`redactEvidence(${input.evidenceId}) storage remove failed: ${rmError.message}`);
     }
-  }
-
-  const { error: updError } = await db
-    .from("path_evidence_items")
-    .update({
-      redacted_at: new Date().toISOString(),
-      redacted_by: input.redactedBy,
-      redaction_reason: input.reason,
-      signed_url: null, // irrevocable URLs keep redacted media readable while cached
-      signed_url_expires_at: null,
-      exif: null, // can hold a child's home GPS coords
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.evidenceId);
-  if (updError) {
-    throw new Error(`redactEvidence(${input.evidenceId}) tombstone update failed: ${updError.message}`);
   }
 }
 

@@ -614,7 +614,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 10: Evidence model, capture, video, and log tables**
+- [x] **Unit 10: Evidence model, capture, video, and log tables**
 
 **Goal:** All evidence types captured and playable everywhere, immutable after verification, schema ready for redaction.
 
@@ -647,6 +647,14 @@ browser                    Server Action            Supabase Storage
 - Integration: redaction leaves the task verified and the verification record intact.
 
 **Verification:** append-only holds across all four return paths, each covered; a video recorded on iOS plays in desktop Firefox.
+
+**Prerequisite findings / applied state (2026-07-22):** the `path_evidence_items` migration is applied + verified + recorded in production (version `20260722160000`): client-UUID PK identity, the `(task_progress_id, student_id)` composite FK pinning the denormalized owner, the `kind` + `kind_shape` CHECKs, redaction tombstone columns, `ON DELETE RESTRICT` throughout, RLS enabled / zero policies. Verified behaviourally via a rolled-back `DO`-block (valid insert, log-zero-row, link, dup-PK-rejected, valid-but-wrong-student-rejected, shape-CHECK-rejected, RESTRICT-delete-blocked) plus an `authenticated`-role RLS probe (0 rows). Range requests / bucket already settled in Unit 9. **Decisions taken here:** content-hash dedupe is **advisory keep-both** (no unique constraint → no redaction-tombstone-holds-the-hash trap); the append-only latch is **derived from a `verified` event in `path_task_events`** (never lifts, no RPC change); the orphan reaper ships as pure logic + a Storage-API executor + a CRON_SECRET-gated route but is **NOT scheduled in `vercel.json`** (Hobby's 2-cron cap; scheduling lands with Unit 12's tier decision).
+
+**Carried out of Unit 10's review, for later units** *(14-agent `/ce:review` + a bounded adversarial re-review; a P0 log-hijack, three P1s, and a self-introduced redaction regression were all caught and fixed — see docs/solutions/best-practices/id-keyed-upsert-trusts-client-id-as-ownership-verify-existing-row-owner-2026-07-22.md):*
+- **[Unit 11]** `added_after_verification` is now set on the ONLINE confirm/link path (task currently `verified`), but the flag is snapshotted before the confirm's later I/O — a verify landing in that window yields a stale `false`. The offline-sync rebase is the authoritative path and must set/repair it against real server state. The confirm/log/link/delete/redact actions are built-to-contract (no client caller yet); wire them behind the offline queue with the `try/catch/finally` + mounted-ref posture Unit 9's uploader documents.
+- **[Unit 12]** Own the reaper's **cron schedule** (the route + logic ship now, unscheduled). Before scheduling: (a) the reaper's `listAllObjects` is serial per-folder and `loadConfirmedObjectPaths` reads the whole table — parallelize / paginate before it runs unattended against real volume; (b) confirm the 48h orphan window can never reap a fully-uploaded object whose confirm is legitimately deferred (the online flow couples upload+confirm, so this is latent, but re-confirm when scheduling).
+- **[Unit 14]** When the surfaces mount: wire `shouldRemintSignedUrl` into the read loader (built + tested, no caller yet — reuse the stored URL, never mint per render); the **video poster** needs its own signed URL (only the main object's is stored today) and its own null-out on redaction; re-run `resolvePathAccess(kind:'evidence')` per item on the READ path (this unit gates writes); differentiate retryable (`unavailable`) vs terminal refusals in the UI; and add a caption-edit action (the `edit` mutation is modeled + tested but only `saveLogEvidence` exercises it — photo/video/etc. can currently only be deleted, not caption-fixed). Wire the real **mediabunny** types (`typeof import(...)`) once the file-picker conversion is device-tested.
+- **[T2 / later]** `confirmUploadedEvidence` trusts the client-declared content-type; `readObjectMeta` already fetches the real object metadata, so a mimetype reconciliation (mirroring the size reconciliation) could close the last client-declared-kind gap. The five actions share a gate/authorize/resolve prologue — extract a `loadAuthorizedStudent` helper if a sixth evidence action lands. A concurrent verify-vs-delete TOCTOU exists (the latch read isn't serialized against `move_path_task`); a shared advisory lock is heavier than T1 warrants but revisit if it bites.
 
 ---
 

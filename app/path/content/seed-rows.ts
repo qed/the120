@@ -206,6 +206,20 @@ export function buildProgramRows(
 }
 
 /**
+ * The four content tables, in FK order (parents before children). The single
+ * source of truth for both the seed's readiness-probe list and buildUpsertSteps;
+ * a test pins buildUpsertSteps' table set to this array so the two hand-written
+ * lists cannot silently diverge (a table added to one but not the other would
+ * otherwise reopen the defeated-precheck failure mode for the new table).
+ */
+export const CONTENT_TABLES = [
+  "path_program_versions",
+  "path_phases",
+  "path_criteria",
+  "path_unit_tasks",
+] as const;
+
+/**
  * One idempotent upsert against one content table.
  *
  * The `onConflict` columns are a discriminated-union LITERAL tied to each
@@ -214,9 +228,10 @@ export function buildProgramRows(
  * `object[]` at the call site. `onConflict` MUST name exactly the PRIMARY KEY
  * columns declared in the migration
  * (supabase/migrations/20260721120000_path_program_content.sql); the drift test
- * in __tests__/seed-rows.test.ts pins these so a change to either side is
- * deliberate, not a silent mismatch that turns the no-op re-run into a
- * constraint error or a wrong dedup key.
+ * in __tests__/seed-rows.test.ts READS that migration file and asserts its PK
+ * clauses against these strings, so a change on EITHER side — TS or SQL — fails
+ * the suite instead of silently turning the no-op re-run into a constraint error
+ * or a wrong dedup key.
  */
 export type UpsertStep =
   | { table: "path_program_versions"; rows: VersionRow[]; onConflict: "id" }
@@ -334,4 +349,42 @@ export function checkSeed(
   }
 
   return errors;
+}
+
+/**
+ * The outcome of a PostgREST existence probe, classified so the seed's
+ * waitForTables can decide whether to retry or fail fast. Pure and exported so
+ * the classification — the exact logic whose predecessor shipped a silent
+ * false-positive (a `head:true` probe reporting every missing table as "ready")
+ * — is unit-tested here rather than resting only on a one-time manual production
+ * check.
+ */
+export type TableProbe = { present: boolean; retryable: boolean; error: string | null };
+
+/**
+ * Classify a supabase-js error from a `.select('*').limit(0)` existence probe:
+ *
+ * - no error           → the relation exists and is readable (present).
+ * - code 'PGRST205'    → "not found in the schema cache": the migration is
+ *                        unapplied, or PostgREST's cache is still catching up
+ *                        after a fresh DDL apply. RETRYABLE.
+ * - empty/missing code → a fetch-level or gateway error (a network blip, or a
+ *                        502/504 whose HTML body postgrest-js could not parse
+ *                        into a coded error — postgrest-js only auto-retries 520
+ *                        and 503, so 502/504 reach us). Transient — RETRYABLE, so
+ *                        a momentary edge hiccup in the post-DDL window does not
+ *                        abort the whole run.
+ * - any other code     → an auth/permission failure (e.g. PGRST301 expired JWT,
+ *                        42501 permission denied). FATAL — retrying cannot help
+ *                        and it must not be misreported as "apply the migration".
+ */
+export function classifyProbe(
+  error: { code?: string | null; message?: string } | null
+): TableProbe {
+  if (!error) return { present: true, retryable: false, error: null };
+  const code = error.code ?? "";
+  if (code === "PGRST205" || code === "") {
+    return { present: false, retryable: true, error: error.message ?? code };
+  }
+  return { present: false, retryable: false, error: `${code}: ${error.message ?? ""}` };
 }

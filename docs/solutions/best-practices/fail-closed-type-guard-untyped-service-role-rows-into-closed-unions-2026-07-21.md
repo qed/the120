@@ -74,4 +74,5 @@ Without the guard, a schema/TS drift is a **silent coercion** on a security deci
 ## Related
 
 - `docs/solutions/best-practices/crm-audit-action-allowlist-db-check-constraint-drifts-from-ts-enum-2026-07-15.md` — the **write-path** sibling: a DB CHECK drifting from a TS enum surfaces as a runtime insert failure. This doc is its read-path complement; together they cover both directions of the same closed-set-in-two-places drift.
+- `docs/solutions/test-failures/security-definer-sql-case-third-untested-copy-parse-migration-file-2026-07-22.md` — the **compute-path** sibling of the same family: a value map inside an RPC's SQL `CASE` drifts silently from its TS copy, closed by a migration-file-parsing parity test.
 - `docs/solutions/best-practices/shared-db-taking-core-must-not-live-in-a-use-server-file-server-action-boundary-2026-07-17.md` and `.../server-only-import-breaks-tsx-scripts-plain-core-re-export-2026-07-21.md` — why the guard must live in the plain module, not the `server-only` wrapper.

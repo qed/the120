@@ -522,7 +522,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 8: Transition RPC and progress schema**
+- [x] **Unit 8: Transition RPC and progress schema**
 
 **Goal:** Make the state machine atomic, audited, and safe under concurrency.
 
@@ -552,6 +552,13 @@ browser                    Server Action            Supabase Storage
 - Integration: echo verification detects the ahead-of-intent case and adopts the DB value.
 
 **Verification:** the concurrency test run 50× yields exactly one winner every time; migration verified via `to_regprocedure`.
+
+**Carried out of Unit 8's review, for later units** *(all applied server-side by the RPC/action; these are consumer obligations):*
+- **[Unit 11]** The two submit timestamps are reserved and split: `submit_received_at` (server `now()`, what R30 instruments off) and `submitted_at` (client, skew-clamped — the RPC already accepts `p_submitted_at`). The offline queue supplies the client value; no column rename is needed later.
+- **[Unit 12]** A `revoke` already reconciles an open `path_reviews` row to `returned` and clears `verified_by` on the reopened task, so re-completion opens a fresh attempt. Unit 12 owns the review *ceremony* (`criterion_return`/`phase_return`, which apply the engine's cascade) and must confirm `path_reviews`' `maybeSingle()` open-review read can never see two `review_underway` rows once its return/reopen path exists. `interpretEcho` is task-scope-only; the review RPC is attempt-based, not a simple CAS.
+- **[Units 14–16]** Consume `applyTransition`'s `TransitionResult` (`byCaller`/`winner`/closed-union `reason`): render distinct copy for `superseded` (target reached by someone else — never say "you did it") vs `diverged` (task went elsewhere); wrap every call in `try/catch/finally` (the auth guard can `redirect()`); apply a retry ceiling to `reason: "retry"`; and **escape `note`** (free text) in any history view.
+- **[audit]** Record a session/device signal in `path_task_events` for the accepted parent-acts-as-child boundary (a cheap column a later unit adds).
+- **[Unit 15]** Provisioning must refuse an unlock with an unknown grade (`band` = null), or record a documented default — `effectiveBand`'s live fallback would otherwise silently mask a null band.
 
 ---
 

@@ -134,3 +134,7 @@ alter table public.ambassador_codes enable row level security;
 - `docs/solutions/security-issues/admissions-notification-email-html-injection-via-unescaped-child-parent-names-2026-07-14.md`
   — notes the same "a DB CHECK is a separate layer that could drift" principle
   in the escaping context.
+- `docs/solutions/test-failures/security-definer-sql-case-third-untested-copy-parse-migration-file-2026-07-22.md`
+  — the **compute-path** sibling of this enum-drift family: a value map baked into
+  an RPC's SQL `CASE` drifts SILENTLY from its TS copy (no insert to fail), closed
+  by a test that parses the migration file as text.

@@ -50,6 +50,7 @@ supabase/.temp
 
 # CRM staff seeding — generated passwords, never committed
 scripts/.staff-passwords.local.txt
+scripts/.path-passwords.local.txt
 
 # ce:review / ce:work run artifacts (local, per-run)
 .context/

@@ -403,7 +403,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 5: Identity schema — role grants, families, students, cohorts**
+- [x] **Unit 5: Identity schema — role grants, families, students, cohorts**
 
 **Goal:** The account model, linked to the existing CRM roster.
 

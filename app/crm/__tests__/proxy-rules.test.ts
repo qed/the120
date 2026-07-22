@@ -55,6 +55,15 @@ describe("isUnguarded", () => {
     expect(isUnguarded("/crm")).toBe(false);
     expect(isUnguarded("/path")).toBe(false);
   });
+
+  it("the invite landing is prefix-unguarded — the emailed token arrives session-less (Unit 15)", () => {
+    expect(isUnguarded("/path/invite/some-256-bit-token")).toBe(true);
+    // The bare segment carries no token and stays behind the gate.
+    expect(isUnguarded("/path/invite")).toBe(false);
+    // Near-miss prefixes never leak.
+    expect(isUnguarded("/path/invites/x")).toBe(false);
+    expect(isUnguarded("/path/invite-x")).toBe(false);
+  });
 });
 
 describe("resolveProxyOutcome — /crm (unchanged behaviour)", () => {

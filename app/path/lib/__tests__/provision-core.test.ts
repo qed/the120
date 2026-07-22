@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ensurePathFamilyForParent,
   provisionStudent,
   resetFailureMessage,
   resetStudentPassword,
@@ -23,6 +24,7 @@ type Seed = {
   path_families?: Row[];
   path_program_versions?: Row[];
   path_student_profiles?: Row[];
+  path_role_grants?: Row[];
   authUsers?: Row[];
   createUserError?: { code?: string; message: string } | null;
   /** When createUser returns its seeded error, ALSO insert this profile row —
@@ -36,7 +38,7 @@ function makeFakeDb(seed: Seed) {
     path_families: [...(seed.path_families ?? [])],
     path_program_versions: [...(seed.path_program_versions ?? [])],
     path_student_profiles: [...(seed.path_student_profiles ?? [])],
-    path_role_grants: [],
+    path_role_grants: [...(seed.path_role_grants ?? [])],
   };
   const authUsers: Row[] = [...(seed.authUsers ?? [])];
   let idSeq = 1;
@@ -70,6 +72,17 @@ function makeFakeDb(seed: Seed) {
       async maybeSingle() {
         const row = builder._match();
         return { data: row ? builder._project(row) : null, error: null };
+      },
+      // The PostgREST builder is thenable — a multi-row select is awaited
+      // directly (the ownership gate's grants query does exactly that).
+      then(
+        resolve: (v: { data: Row[]; error: null }) => unknown,
+        reject?: (e: unknown) => unknown
+      ) {
+        const rows = tables[table]
+          .filter((r) => filters.every(([c, v]) => r[c] === v))
+          .map((r) => builder._project(r));
+        return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
       },
       insert(payload: Row) {
         return {
@@ -143,15 +156,24 @@ function makeFakeDb(seed: Seed) {
   return { db: db as never, tables, authUsers, calls };
 }
 
-const CHILD = { id: "child-1", first_name: "Maya" };
+const PARENT_USER = "parent-user-1";
+const CHILD = { id: "child-1", first_name: "Maya", grade: 4, parent_id: PARENT_USER };
 const FAMILY = { id: "fam-1" };
 const VERSION = { id: "2026-27", is_current: true };
+/** The family's parent grant — what the ownership hard gate checks against. */
+const PARENT_GRANT = {
+  user_id: PARENT_USER,
+  role: "parent",
+  scope_type: "family",
+  scope_id: "fam-1",
+};
 
 function baseSeed(over: Partial<Seed> = {}): Seed {
   return {
     children: [{ ...CHILD }],
     path_families: [{ ...FAMILY }],
     path_program_versions: [{ ...VERSION }],
+    path_role_grants: [{ ...PARENT_GRANT }],
     ...over,
   };
 }
@@ -174,7 +196,8 @@ describe("provisionStudent — happy path", () => {
     expect(profile.program_version_id).toBe("2026-27"); // D27 pin from is_current
     expect(profile.user_id).toBe(result.userId);
 
-    expect(tables.path_role_grants).toEqual([
+    // The seeded parent grant stays; provisioning ADDS exactly the two student grants.
+    expect(tables.path_role_grants.filter((g) => g.role === "student")).toEqual([
       { user_id: result.userId, role: "student", scope_type: "student", scope_id: result.profileId },
       { user_id: result.userId, role: "student", scope_type: "family", scope_id: "fam-1" },
     ]);
@@ -226,6 +249,127 @@ describe("provisionStudent — refusals", () => {
     );
     const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
     expect(result).toEqual({ ok: false, reason: "already_provisioned" });
+  });
+});
+
+describe("provisionStudent — the ownership hard gate (Unit 15, security P1)", () => {
+  it("refuses a child whose CRM parent is OUTSIDE the family — the roster-squat the gate exists to stop", async () => {
+    const { db, calls, tables } = makeFakeDb(
+      baseSeed({
+        children: [{ id: "child-1", first_name: "Maya", grade: 4, parent_id: "someone-else" }],
+      })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_not_in_family" });
+    expect(calls.createUser).toBe(0); // refused BEFORE minting anything
+    expect(tables.path_student_profiles).toHaveLength(0);
+  });
+
+  it("refuses when the family has no parent grants at all (fail closed)", async () => {
+    const { db, calls } = makeFakeDb(baseSeed({ path_role_grants: [] }));
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_not_in_family" });
+    expect(calls.createUser).toBe(0);
+  });
+
+  it("refuses a child with a NULL parent_id (fail closed on a corrupt roster row)", async () => {
+    const { db } = makeFakeDb(
+      baseSeed({ children: [{ id: "child-1", first_name: "Maya", grade: 4, parent_id: null }] })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_not_in_family" });
+  });
+
+  it("a SECOND parent of the same family provisions fine — the check keys on the CHILD's parent, not the caller", async () => {
+    // The invited co-parent holds a grant too, but the child's parent_id still
+    // points at the primary CRM parent; ownership passes via the primary's grant.
+    const { db } = makeFakeDb(
+      baseSeed({
+        path_role_grants: [
+          { ...PARENT_GRANT },
+          { user_id: "co-parent", role: "parent", scope_type: "family", scope_id: "fam-1" },
+        ],
+      })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result.ok).toBe(true);
+  });
+
+  it("a STUDENT family grant does not satisfy the gate (role must be parent)", async () => {
+    const { db } = makeFakeDb(
+      baseSeed({
+        path_role_grants: [
+          { user_id: PARENT_USER, role: "student", scope_type: "family", scope_id: "fam-1" },
+        ],
+      })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_not_in_family" });
+  });
+});
+
+describe("provisionStudent — grade refusals (Unit 15: refuse, never default)", () => {
+  it("refuses a null-grade child with a SPECIFIC reason before any write", async () => {
+    const { db, calls } = makeFakeDb(
+      baseSeed({ children: [{ id: "child-1", first_name: "Maya", grade: null, parent_id: PARENT_USER }] })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_grade_missing" });
+    expect(calls.createUser).toBe(0);
+  });
+
+  it("refuses an out-of-range grade distinctly (no band exists for grade 1)", async () => {
+    const { db, calls } = makeFakeDb(
+      baseSeed({ children: [{ id: "child-1", first_name: "Tot", grade: 1, parent_id: PARENT_USER }] })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "child_grade_out_of_range" });
+    expect(calls.createUser).toBe(0);
+  });
+
+  it("an already-provisioned child reads already_provisioned even if their grade was later nulled", async () => {
+    const { db } = makeFakeDb(
+      baseSeed({
+        children: [{ id: "child-1", first_name: "Maya", grade: null, parent_id: PARENT_USER }],
+        path_student_profiles: [
+          { id: "p-0", user_id: "u-0", child_id: "child-1", family_id: "fam-1", program_version_id: "2026-27" },
+        ],
+      })
+    );
+    const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(result).toEqual({ ok: false, reason: "already_provisioned" });
+  });
+});
+
+describe("provisionStudent — D27 version-pin divergence (second child mid-year)", () => {
+  it("a sibling provisioned after a revision pins the NEWER version; the first child's pin and rows are untouched", async () => {
+    const { db, tables } = makeFakeDb(
+      baseSeed({
+        children: [
+          { ...CHILD },
+          { id: "child-2", first_name: "Dev", grade: 7, parent_id: PARENT_USER },
+        ],
+      })
+    );
+    const first = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
+    expect(first.ok).toBe(true);
+
+    // A content revision ships between the two provisionings.
+    tables.path_program_versions[0].is_current = false;
+    tables.path_program_versions.push({ id: "2027-28", is_current: true });
+
+    const firstProfileSnapshot = JSON.stringify(
+      tables.path_student_profiles.find((p) => p.child_id === "child-1")
+    );
+
+    const second = await provisionStudent(db, { childId: "child-2", familyId: "fam-1", password: STRONG_PW });
+    expect(second.ok).toBe(true);
+
+    const p1 = tables.path_student_profiles.find((p) => p.child_id === "child-1");
+    const p2 = tables.path_student_profiles.find((p) => p.child_id === "child-2");
+    expect(p1?.program_version_id).toBe("2026-27"); // the first child keeps their pin
+    expect(p2?.program_version_id).toBe("2027-28"); // the sibling pins the newer version
+    expect(JSON.stringify(p1)).toBe(firstProfileSnapshot); // byte-identical — undisturbed
   });
 });
 
@@ -283,6 +427,46 @@ describe("provisionStudent — repair path (F16 / F10)", () => {
     const result = await provisionStudent(db, { childId: "child-1", familyId: "fam-1", password: STRONG_PW });
     expect(result).toEqual({ ok: false, reason: "unavailable" });
     expect(calls.updateUserById).toBe(0);
+  });
+});
+
+describe("ensurePathFamilyForParent (the R31 linkage helper)", () => {
+  it("ADOPTS the family an existing parent grant points at — never mints a second", async () => {
+    const { db, tables } = makeFakeDb(baseSeed());
+    const before = tables.path_families.length;
+    const result = await ensurePathFamilyForParent(db, { userId: PARENT_USER });
+    expect(result).toEqual({ ok: true, familyId: "fam-1", created: false });
+    expect(tables.path_families).toHaveLength(before); // no new family row
+  });
+
+  it("creates a family + grant for a parent with no grant yet", async () => {
+    const { db, tables } = makeFakeDb(baseSeed({ path_role_grants: [] }));
+    const result = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.created).toBe(true);
+    expect(
+      tables.path_role_grants.some(
+        (g) =>
+          g.user_id === "new-parent" &&
+          g.role === "parent" &&
+          g.scope_type === "family" &&
+          g.scope_id === result.familyId
+      )
+    ).toBe(true);
+  });
+
+  it("is idempotent: a re-run adopts the family the first run created", async () => {
+    const { db, tables } = makeFakeDb(baseSeed({ path_role_grants: [] }));
+    const first = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(first.ok).toBe(true);
+    const familiesAfterFirst = tables.path_families.length;
+    const second = await ensurePathFamilyForParent(db, { userId: "new-parent" });
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.familyId).toBe(first.familyId);
+    expect(second.created).toBe(false);
+    expect(tables.path_families).toHaveLength(familiesAfterFirst); // still one
   });
 });
 

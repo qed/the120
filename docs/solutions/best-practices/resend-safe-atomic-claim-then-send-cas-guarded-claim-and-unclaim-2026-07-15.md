@@ -138,6 +138,7 @@ resendOf: isResend ? (sentAt ?? undefined) : undefined,
 ## Related
 
 - [atomic-claim-then-send-db-guarded-stamp-column-dedupes-best-effort-email-2026-07-14.md](atomic-claim-then-send-db-guarded-stamp-column-dedupes-best-effort-email-2026-07-14.md) — the single-send original this extends; its unconditional unclaim now carries a caveat pointing here.
+- [no-transaction-multi-step-write-compensation-post-write-verify-cas-scoped-claim-2026-07-22.md](no-transaction-multi-step-write-compensation-post-write-verify-cas-scoped-claim-2026-07-22.md) — generalizes this CAS-claim discipline to a MULTI-RESOURCE acceptance chain (auth account + role grant + token claim) with compensating deletes and a post-write aggregate-invariant verify (The Path Unit 15's invite acceptance).
 - `docs/solutions/database-issues/upsert-insert-arm-poisons-excluded-status-guard-coercion-submit-fails-2026-07-14.md` — the "targeted UPDATE, never upsert, for state transitions" discipline the CAS claim builds on.
 - Plan: `docs/plans/2026-07-15-001-feat-dossier-mover-offer-email-plan.md` (PR #8); review artifact: `.context/compound-engineering/ce-review/2026-07-15-dossier-mover-offer-email/summary.md`.
 - Tests pinning the invariants: `app/crm/__tests__/offer-rules.test.ts` (CAS round-trip incl. `+00:00` form, claim-miss mapping, unclaim outcomes).

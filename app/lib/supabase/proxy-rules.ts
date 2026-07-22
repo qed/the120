@@ -43,8 +43,16 @@ const UNGUARDED = new Set([
   "/path/sign-in",
 ]);
 
+/**
+ * Prefix-unguarded: the co-parent invite landing (Unit 15) arrives session-less
+ * by design — the emailed token in the path is the credential, and the page
+ * only READS (acceptance is a POSTed action). The trailing slash is required:
+ * a bare /path/invite has no token and may stay behind the gate.
+ */
+const UNGUARDED_PREFIXES = ["/path/invite/"];
+
 export function isUnguarded(pathname: string): boolean {
-  return UNGUARDED.has(pathname);
+  return UNGUARDED.has(pathname) || UNGUARDED_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 /**

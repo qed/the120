@@ -39,10 +39,15 @@ export async function requirePathUser(): Promise<PathPrincipal> {
 
   if (!user) redirect("/path/sign-in");
 
+  // Ordered so grant-array consumers are deterministic across requests — a
+  // multi-grant anomaly (e.g. a parent granted into two families) must render
+  // the SAME family every time, not whichever row Postgres returned first
+  // (Unit 15 adversarial review).
   const { data: grantRows, error } = await supabaseAdmin()
     .from("path_role_grants")
     .select("role, scope_type, scope_id")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true });
 
   // Fail closed either way, but never let a failure masquerade SILENTLY as "not a
   // member": log a query outage AND every row parseRoleGrant drops, so a real

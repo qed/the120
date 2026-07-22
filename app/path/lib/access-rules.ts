@@ -175,6 +175,25 @@ export function resolvePathAccess({
 }
 
 /**
+ * WRITE authority for capturing evidence into a student's private folder — the
+ * student themselves, or EITHER parent of the family. Deliberately STRICTER than
+ * `resolveActorRole`: a cohort Guide's D25 read grant is authority to REVIEW, never
+ * to author evidence, so a guide (and a sibling) resolve `false`. Enforced in code,
+ * not by the absence of a UI — both the slot mint (Unit 9) and the confirm insert
+ * (Unit 10) are network-reachable Server Actions a guide session could call
+ * directly. Shared by both so the rule lives in exactly one tested place.
+ */
+export function canCaptureEvidence(
+  grants: readonly RoleGrant[],
+  target: { studentId: string; familyId: string }
+): boolean {
+  return (
+    has(grants, "student", "student", target.studentId) ||
+    has(grants, "parent", "family", target.familyId)
+  );
+}
+
+/**
  * The ACTOR CLASS a caller acts as WHEN DRIVING A TRANSITION on this student —
  * the piece the Unit 8 transition action needs that `resolvePathAccess` (a READ
  * verdict) does not give: is this write coming from the student or from a

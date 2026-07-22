@@ -36,6 +36,8 @@ import {
   type SlotDecision,
 } from "@/app/path/lib/upload-rules";
 import { mintSignedUploadToken, sumStudentStorageBytes } from "@/app/path/lib/storage-loader";
+import { isEvidencePathLatched } from "@/app/path/lib/evidence-loader";
+import { classifyUploadKind } from "@/app/path/lib/evidence-rules";
 
 const uploadSlotSchema = z.object({
   studentId: z.uuid(),
@@ -82,7 +84,7 @@ export type UploadSlotResult =
       tusMintedAt: string;
     }
   | Extract<SlotDecision, { ok: false }>
-  | { ok: false; reason: "not_found" | "invalid_input" | "unavailable" };
+  | { ok: false; reason: "not_found" | "invalid_input" | "unsupported_type" | "unavailable" };
 
 export async function requestUploadSlot(input: unknown): Promise<UploadSlotResult> {
   // Gate: every Server Function verifies auth itself — the proxy matcher does not
@@ -91,7 +93,11 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
 
   const parsed = uploadSlotSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
-  const { studentId, evidenceId, sha256, ext, sizeBytes, durationSeconds } = parsed.data;
+  const { studentId, evidenceId, sha256, ext, sizeBytes, durationSeconds, contentType } = parsed.data;
+
+  // Evidence-kind validation (deferred from Unit 9): refuse an unrenderable type
+  // BEFORE the child uploads any bytes, not after. Same pure rule the confirm uses.
+  if (!classifyUploadKind(contentType)) return { ok: false, reason: "unsupported_type" };
 
   const db = supabaseAdmin();
 
@@ -118,6 +124,18 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
     return { ok: false, reason: "unavailable" };
   }
 
+  // The REAL append-only latch (Unit 9 passed a hardcoded false): re-minting a slot
+  // for an evidence id whose task has already been verified must be refused — a
+  // verified object is physically unoverwritable. A brand-new evidenceId has no row
+  // and resolves false, so a first upload is never blocked.
+  let appendOnlyLatched: boolean;
+  try {
+    appendOnlyLatched = await isEvidencePathLatched(db, student.studentId, evidenceId);
+  } catch (e) {
+    console.error(`[path/upload-slot] latch read failed for ${evidenceId}:`, e);
+    return { ok: false, reason: "unavailable" };
+  }
+
   // Authorize + classify + size/duration + quota + strategy, all from the
   // AUTHORITATIVE profile ids (never a client field). session is non-null here
   // (requirePathUser would have redirected otherwise) so `login` cannot surface;
@@ -133,10 +151,10 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
     },
     sizeBytes,
     durationSeconds: durationSeconds ?? null,
-    // Unit 9: the EvidenceItem table (and its append-only latch) is Unit 10.
-    // Physical unoverwritability is guaranteed NOW by upsert-disabled on both
-    // upload legs; Unit 10 wires this input to the evidence row's real latch.
-    appendOnlyLatched: false,
+    // Wired to the real evidence-row latch (Unit 10). Upsert-disabled on both upload
+    // legs is still the PHYSICAL guarantee; this refuses the slot up front so a
+    // replayed slot never even attempts to overwrite verified evidence.
+    appendOnlyLatched,
     currentUsageBytes,
   });
   if (!decision.ok) return decision;

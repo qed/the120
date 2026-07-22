@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canCaptureEvidence,
   isPathRole,
   isPathScope,
   parseRoleGrant,
@@ -64,6 +65,32 @@ describe("resolvePathAccess — parent (R4)", () => {
   it("a parent of another family is forbidden", () => {
     const other = target("evidence", { familyId: "fam2" });
     expect(resolvePathAccess({ session: SESSION, grants: parent, target: other })).toBe("forbidden");
+  });
+});
+
+describe("canCaptureEvidence — WRITE authority (Unit 9 slot + Unit 10 confirm)", () => {
+  const cap = (grants: RoleGrant[]) => canCaptureEvidence(grants, { studentId: "sA", familyId: "fam1" });
+
+  it("the student themselves can capture", () => {
+    expect(cap(studentGrants("sA", "fam1"))).toBe(true);
+  });
+
+  it("either parent of the family can capture", () => {
+    expect(cap([{ role: "parent", scopeType: "family", scopeId: "fam1" }])).toBe(true);
+  });
+
+  it("a GUIDE cannot capture — a D25 read grant is authority to review, never to author", () => {
+    // The security-critical case: a guide session can call requestUploadSlot /
+    // confirmUploadedEvidence directly, so this must be enforced in code.
+    expect(cap([{ role: "guide", scopeType: "cohort", scopeId: "coh1" }])).toBe(false);
+  });
+
+  it("a SIBLING (family-scoped student grant only) cannot capture", () => {
+    expect(cap([{ role: "student", scopeType: "family", scopeId: "fam1" }])).toBe(false);
+  });
+
+  it("a parent of ANOTHER family cannot capture", () => {
+    expect(cap([{ role: "parent", scopeType: "family", scopeId: "fam2" }])).toBe(false);
   });
 });
 

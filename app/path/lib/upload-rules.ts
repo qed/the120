@@ -21,6 +21,7 @@
  */
 
 import {
+  canCaptureEvidence,
   resolvePathAccess,
   type AccessTarget,
   type RoleGrant,
@@ -305,13 +306,11 @@ export function decideUploadSlot(req: SlotRequest): SlotDecision {
   if (access === "forbidden") return { ok: false, reason: "forbidden" };
 
   // WRITE authority: the student themselves, or a parent of the family. A guide
-  // (read-only per D25) and a sibling both resolve here to forbidden.
-  const canCapture = req.grants.some(
-    (g) =>
-      (g.role === "student" && g.scopeType === "student" && g.scopeId === req.target.studentId) ||
-      (g.role === "parent" && g.scopeType === "family" && g.scopeId === req.target.familyId)
-  );
-  if (!canCapture) return { ok: false, reason: "forbidden" };
+  // (read-only per D25) and a sibling both resolve here to forbidden. Shared with
+  // the Unit 10 confirm insert so the rule can never drift between the two legs.
+  if (!canCaptureEvidence(req.grants, { studentId: req.target.studentId, familyId: req.target.familyId })) {
+    return { ok: false, reason: "forbidden" };
+  }
 
   if (req.appendOnlyLatched) return { ok: false, reason: "append_only_latched" };
 

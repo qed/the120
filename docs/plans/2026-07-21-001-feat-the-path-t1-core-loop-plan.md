@@ -375,7 +375,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 4: Program version schema and content seed**
+- [x] **Unit 4: Program version schema and content seed**
 
 **Goal:** Referential integrity for tasks and criteria, without curriculum prose in SQL.
 

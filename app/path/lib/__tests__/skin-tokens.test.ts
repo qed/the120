@@ -90,6 +90,24 @@ describe("skin-tokens", () => {
     expect(typeChecks).toHaveLength(3);
   });
 
+  // A widened (non-literal) skin — e.g. a `skin: Skin` prop that hasn't been
+  // narrowed — may only reach the tokens BOTH namespaces publish. A skin-specific
+  // token is a compile error, because the resolver can't prove the skin at hand
+  // owns it. tsc enforces the @ts-expect-error directives below.
+  it("restricts a widened skin to shared tokens at the type level", () => {
+    function widenedChecks(skin: Skin) {
+      return [
+        () => skinClass(skin, "bg", "canvas"), // shared token — allowed
+        () => skinClass(skin, "text", "ink-soft"), // shared token — allowed
+        // @ts-expect-error 'mist' is Trail-only; a widened Skin cannot guarantee it.
+        () => skinClass(skin, "bg", "mist"),
+        // @ts-expect-error 'ink-muted' is HQ-only; a widened Skin cannot guarantee it.
+        () => skinClass(skin, "text", "ink-muted"),
+      ];
+    }
+    expect(widenedChecks("hq")).toHaveLength(4);
+  });
+
   // Defense-in-depth: if a caller bypasses the types (untyped service-role data,
   // a wrong `as` cast), the resolver throws rather than returning a broken class
   // string that would silently render as no color at all.

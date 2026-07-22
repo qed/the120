@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "./cn";
 import { phaseByKey, phaseColor } from "./phases";
 import type { PhaseKey } from "@/app/path/content/types";
@@ -36,6 +36,10 @@ export function Seal({
   const meta = phaseByKey(phase);
   const color = phaseColor(phase);
   const isTrail = skin === "trail";
+  // Skip the wax-press entrance when the OS asks for reduced motion — the seal
+  // still renders in its final pressed state, just without the spring.
+  const reduce = useReducedMotion();
+  const playEntrance = animate && !reduce;
 
   const ring = !sealed ? "hsl(var(--hq-border-strong))" : isTrail ? "hsl(var(--wax))" : color;
   const face = !sealed
@@ -55,8 +59,8 @@ export function Seal({
         viewBox="0 0 100 100"
         role="img"
         aria-label={`${meta.name} phase ${sealed ? "sealed" : "not sealed"}`}
-        initial={animate ? { scale: 2.2, rotate: -18, opacity: 0 } : false}
-        animate={animate ? { scale: 1, rotate: -6, opacity: 1 } : {}}
+        initial={playEntrance ? { scale: 2.2, rotate: -18, opacity: 0 } : false}
+        animate={playEntrance ? { scale: 1, rotate: -6, opacity: 1 } : {}}
         transition={{ type: "spring", stiffness: 260, damping: 16 }}
         className={sealed && isTrail ? "drop-shadow-lg" : undefined}
       >

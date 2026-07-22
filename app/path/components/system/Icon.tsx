@@ -27,10 +27,14 @@ import {
 
 /**
  * Icon — the Lucide glyph set, 2px stroke, inlined SVG (no CDN), per the design
- * handoff contract. Icons are addressed by a stable kebab-case `name` from this
- * registry rather than by importing the lucide component directly, so surfaces
- * carry no lucide import and the icon vocabulary stays a curated, typed set. The
- * registry is tree-shakeable: only the icons named here are bundled.
+ * handoff contract. A general-purpose primitive for surface and nav chrome:
+ * callers pass a stable kebab-case `name` from this curated, typed registry
+ * instead of reaching for a lucide component, keeping the icon vocabulary in one
+ * place. Components that carry a FIXED per-state glyph vocabulary (StatusChip's
+ * six states, TrailStep's step marks) import those specific icons directly and
+ * colocate the state->icon mapping — that is clearer than an indirection, not a
+ * violation of this registry. The registry is tree-shakeable: only the icons
+ * named here are bundled.
  *
  * Add an icon by importing its lucide component and adding one registry line —
  * `IconName` widens automatically.

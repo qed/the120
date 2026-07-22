@@ -29,8 +29,23 @@
  * HQ and Trail publish deliberately different neutral roles (HQ has sunken /
  * border / border-strong / ink-muted; Trail has mist). `SkinToken<S>` binds the
  * legal token names to the skin, so `skinClass("trail", "bg", "ink-muted")` is a
- * COMPILE error, not a silent runtime miss (plan Unit 13 edge case). `skinClass`
- * also throws if an untyped caller smuggles an illegal combination past the types.
+ * COMPILE error, not a silent runtime miss (plan Unit 13 edge case). The guard
+ * is strongest with a LITERAL skin; a caller holding a widened `Skin` (e.g. a
+ * `skin?: Skin` prop) is restricted to the shared tokens both namespaces
+ * publish, and must narrow to a literal to reach a skin-specific token. Either
+ * way `skinClass` also throws if an untyped caller smuggles an illegal
+ * combination past the types.
+ *
+ * ## Who consumes this
+ *
+ * The Unit 14 app shells choose the skin once at a subtree root and use this
+ * resolver for their neutral background/text/border classes. The design-system
+ * PRIMITIVES (Button, Seal, …) deliberately hardcode their own fuller per-skin
+ * class lists — which include shadows, focus rings, and brightness beyond the
+ * neutral tokens resolved here — so they are not routed through `skinClass`.
+ * Until those shells land this resolver has no production caller; that is
+ * expected, and the reason it is settled (and tested) now is Decision 9's rule
+ * that the skin architecture must exist before any surface is written.
  */
 
 export type Skin = "hq" | "trail";
@@ -68,8 +83,21 @@ export const TRAIL_TOKENS = [
 export type HqToken = (typeof HQ_TOKENS)[number];
 export type TrailToken = (typeof TRAIL_TOKENS)[number];
 
-/** The legal token names for a given skin. */
-export type SkinToken<S extends Skin> = S extends "hq" ? HqToken : TrailToken;
+/**
+ * The legal token names for a given skin. Written NON-distributively
+ * (`[S] extends [...]`) on purpose: a caller that passes a widened `Skin` — one
+ * that has not narrowed to a literal — resolves to the INTERSECTION of both
+ * namespaces (the shared canvas/surface/ink/ink-soft tokens), not their union.
+ * A distributive `S extends "hq" ? HqToken : TrailToken` would let
+ * `skinClass(skin, "bg", "mist")` compile when `skin: Skin`, because the union
+ * distributes to `HqToken | TrailToken` and "mist" is a member of that — the
+ * exact silent hole the guard exists to close.
+ */
+export type SkinToken<S extends Skin> = [S] extends ["hq"]
+  ? HqToken
+  : [S] extends ["trail"]
+    ? TrailToken
+    : HqToken & TrailToken;
 
 // Complete class-string literals, one per (skin, prop, token). Written out in
 // full so Tailwind's content scanner emits every one of these utilities.

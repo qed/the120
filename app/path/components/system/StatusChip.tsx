@@ -52,10 +52,15 @@ const config: Record<
 };
 
 /**
- * StatusChip — the quiet verification status pill, used throughout HQ and inside
- * review surfaces in both skins. Keyed by the engine's canonical `TaskState`, so
- * a new state is a compile error here until it gets a chip. "Not yet" is amber,
- * never red — it is information, not failure.
+ * StatusChip — the quiet verification status pill. Keyed by the engine's canonical
+ * `TaskState`, so a new state is a compile error here until it gets a chip.
+ *
+ * Renders in the GROUNDED (HQ) neutral palette by design, not per-skin: it lives
+ * on the HQ dashboard and inside the parent review surface, and "you always see
+ * the grounded review interface" regardless of the student's skin (design brief).
+ * The verification-semantic colors — verified (green), awaiting (blue), not-yet
+ * (amber) — are skin-independent tokens. "Not yet" is amber, never red: it is
+ * information, not failure.
  */
 export function StatusChip({ state, className }: StatusChipProps) {
   const { label, icon: Glyph, classes } = config[state];

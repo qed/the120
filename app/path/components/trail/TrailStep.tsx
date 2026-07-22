@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { LockIcon, StampIcon, BackpackIcon } from "lucide-react";
 import { cn } from "../system/cn";
 import { phaseColor, phaseColorAlpha } from "../system/phases";
@@ -24,6 +24,9 @@ interface TrailStepProps {
  *   verified  → a wax-stamp footprint
  */
 export function TrailStep({ index, state, phase, label, onClick, className }: TrailStepProps) {
+  // motion/react does not suppress scale/opacity animations on its own; honor the
+  // OS setting here the way the CSS `.animate-*` classes already do (design rule).
+  const reduce = useReducedMotion();
   const color = phaseColor(phase);
   const isCurrent = state === "available" || state === "in_progress";
   const isVerified = state === "verified";
@@ -36,8 +39,8 @@ export function TrailStep({ index, state, phase, label, onClick, className }: Tr
         type="button"
         onClick={onClick}
         disabled={isLocked}
-        whileHover={!isLocked ? { scale: 1.08 } : undefined}
-        whileTap={!isLocked ? { scale: 0.95 } : undefined}
+        whileHover={!isLocked && !reduce ? { scale: 1.08 } : undefined}
+        whileTap={!isLocked && !reduce ? { scale: 0.95 } : undefined}
         className={cn(
           "relative flex h-14 w-14 items-center justify-center rounded-full border-[3px] transition-colors",
           isLocked && "cursor-not-allowed border-trail-mist bg-trail-mist/40",
@@ -62,8 +65,8 @@ export function TrailStep({ index, state, phase, label, onClick, className }: Tr
           <motion.span
             className="h-4 w-4 rounded-full"
             style={{ backgroundColor: color }}
-            animate={{ scale: [1, 1.25, 1] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+            animate={reduce ? { scale: 1 } : { scale: [1, 1.25, 1] }}
+            transition={reduce ? undefined : { duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
           />
         )}
         {isSubmitted && (

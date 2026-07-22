@@ -232,10 +232,12 @@ export type ResetStudentPasswordResult =
  * and writes the audit row. The core re-validates the floor as defense in
  * depth so no caller can skip it.
  *
- * Known limitation, on the record: a password change does not revoke existing
- * refresh tokens, so a live session on another device survives a reset. Fine
- * for the forgot-my-password case; if recovery-from-compromise ever matters,
- * add an explicit sign-out sweep then.
+ * Session posture, verified empirically (Unit 6 drill, 2026-07-22): an
+ * admin.updateUserById password change DID revoke the student's pre-reset
+ * session (getUser on the old session failed immediately after). Treat that as
+ * observed behavior, not a documented contract — if recovery-from-compromise
+ * ever becomes a hard requirement, add an explicit sign-out sweep rather than
+ * relying on it.
  */
 export async function resetStudentPassword(
   db: SupabaseClient,

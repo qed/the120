@@ -38,6 +38,8 @@ import {
 import { mintSignedUploadToken, sumStudentStorageBytes } from "@/app/path/lib/storage-loader";
 import { isEvidencePathLatched } from "@/app/path/lib/evidence-loader";
 import { classifyUploadKind } from "@/app/path/lib/evidence-rules";
+import { UPLOAD_SLOT_RATE_LIMIT } from "@/app/path/lib/rate-limit-rules";
+import { checkAndRecordRateLimit } from "@/app/path/lib/rate-limit-store";
 
 const uploadSlotSchema = z.object({
   studentId: z.uuid(),
@@ -84,7 +86,12 @@ export type UploadSlotResult =
       tusMintedAt: string;
     }
   | Extract<SlotDecision, { ok: false }>
-  | { ok: false; reason: "not_found" | "invalid_input" | "unsupported_type" | "unavailable" };
+  | { ok: false; reason: "not_found" | "invalid_input" | "unsupported_type" | "unavailable" }
+  /** Retryable-after-a-wait (Unit 6, R29 carry-forward from Unit 9's review):
+   *  slot MINTS are rate-limited per caller because in-flight resumable objects
+   *  are invisible to the quota sum until confirmed — this bounds the
+   *  start-but-never-finish abuse until the reaper is scheduled (Unit 12). */
+  | { ok: false; reason: "rate_limited"; retryAfterMs: number };
 
 export async function requestUploadSlot(input: unknown): Promise<UploadSlotResult> {
   // Gate: every Server Function verifies auth itself — the proxy matcher does not
@@ -94,6 +101,18 @@ export async function requestUploadSlot(input: unknown): Promise<UploadSlotResul
   const parsed = uploadSlotSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
   const { studentId, evidenceId, sha256, ext, sizeBytes, durationSeconds, contentType } = parsed.data;
+
+  // Rate-limit BEFORE any DB work, keyed by the authenticated caller (never a
+  // client field), and record ATOMICALLY at the gate — checking then recording
+  // after the awaited mint left a window for concurrent bursts to all pass a
+  // stale count (Unit 6 review). Counting attempts (not just successful mints)
+  // is marginally stricter and closes the race; an honest capture session stays
+  // far under UPLOAD_SLOT_RATE_LIMIT.
+  const rateKey = `path-upload-slot:${userId}`;
+  const gate = checkAndRecordRateLimit(rateKey, UPLOAD_SLOT_RATE_LIMIT);
+  if (!gate.allowed) {
+    return { ok: false, reason: "rate_limited", retryAfterMs: gate.retryAfterMs };
+  }
 
   // Evidence-kind validation (deferred from Unit 9): refuse an unrenderable type
   // BEFORE the child uploads any bytes, not after. Same pure rule the confirm uses.

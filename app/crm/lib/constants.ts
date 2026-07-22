@@ -245,6 +245,10 @@ export const AUDIT_ACTIONS = [
   "offer-email",
   "referral-asked",
   "welcome-email",
+  // D26 (The Path T1 Unit 6): staff-mediated student account recovery. Added to
+  // the DB CHECK in the same change (20260722180000_crm_audit_path_recovery.sql);
+  // parity pinned by app/crm/__tests__/audit-actions-parity.test.ts.
+  "path-recovery",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -10,6 +10,7 @@
     "test": "vitest run",
     "seed:staff": "tsx scripts/seed-staff.ts",
     "seed:path-content": "tsx scripts/seed-path-content.ts",
+    "seed:path-family": "tsx scripts/provision-path-family.ts",
     "backfill:families": "tsx scripts/backfill-families.ts",
     "backfill:welcome": "tsx scripts/backfill-welcome-email.ts",
     "path:build": "tsx scripts/build-path-content.ts"

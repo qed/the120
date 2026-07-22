@@ -45,7 +45,11 @@ import {
 } from "@/app/path/lib/progress-loader";
 import type { CriterionSnapshot, TransitionCtx } from "@/app/path/lib/transition-table";
 
-export type { TransitionResult };
+// NOTE: no `export type { TransitionResult }` here. This is a `"use server"`
+// file, and even a TYPE re-export gets a registerServerReference() emitted for
+// it by the use-server transform — the module then throws "TransitionResult is
+// not defined" at load and takes every Path action down with it (found live in
+// Unit 14's first mount). Import the type from progress-core instead.
 
 const transitionSchema = z.object({
   studentId: z.uuid(),

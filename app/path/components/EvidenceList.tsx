@@ -19,8 +19,11 @@
  * Captions are free text — rendered through React's default escaping.
  */
 
+import type { ReactNode } from "react";
 import type { Band } from "@/app/path/content/types";
 import { isSafeHttpUrl, type EvidenceKind } from "@/app/path/lib/evidence-rules";
+import type { Skin } from "@/app/path/lib/skin-tokens";
+import { cn } from "./system/cn";
 import { LogTable } from "./LogTable";
 
 export type EvidenceItemView = {
@@ -45,33 +48,69 @@ export function EvidenceList({
   taskId,
   band,
   items,
+  skin,
+  renderItemActions,
 }: {
   studentId: string;
   taskId: string;
   band: Band;
   items: readonly EvidenceItemView[];
+  /** Optional skin styling (Unit 14's task surface); omitted = unstyled. */
+  skin?: Skin;
+  /** Optional per-item controls (caption edit / delete) the route owns. */
+  renderItemActions?: (item: EvidenceItemView) => ReactNode;
 }) {
+  const trail = skin === "trail";
   if (items.length === 0) {
     return (
       <div data-path-evidence-list data-empty>
-        <p>No evidence yet.</p>
+        <p className={cn(skin && "font-path-body text-xs", trail ? "text-trail-ink-soft" : skin && "text-hq-ink-muted")}>
+          No evidence yet.
+        </p>
       </div>
     );
   }
 
   return (
-    <ul data-path-evidence-list>
+    <ul data-path-evidence-list className={cn(skin && "flex flex-col gap-2.5")}>
       {items.map((item) => (
-        <li key={item.id} data-evidence-kind={item.kind}>
+        <li
+          key={item.id}
+          data-evidence-kind={item.kind}
+          className={cn(
+            skin &&
+              cn(
+                "overflow-hidden rounded-xl border p-3 [&_img]:max-h-56 [&_img]:rounded-lg [&_video]:max-h-64 [&_video]:w-full [&_video]:rounded-lg",
+                trail ? "border-trail-ink/10 bg-trail-surface" : "border-hq-border bg-hq-canvas shadow-hq"
+              )
+          )}
+        >
           {item.redactedAt ? (
-            <p data-redacted>This item was removed.</p>
+            <p
+              data-redacted
+              className={cn(skin && "font-path-body text-xs italic", trail ? "text-trail-ink-soft" : skin && "text-hq-ink-muted")}
+            >
+              This item was removed.
+            </p>
           ) : (
             <EvidenceBody studentId={studentId} taskId={taskId} band={band} item={item} />
           )}
-          {item.caption && !item.redactedAt && <figcaption>{item.caption}</figcaption>}
-          {item.addedAfterVerification && !item.redactedAt && (
-            <p data-added-after-verification>Added after this task was verified.</p>
+          {item.caption && !item.redactedAt && (
+            <figcaption
+              className={cn(skin && "mt-1.5 font-path-body text-xs", trail ? "text-trail-ink-soft" : skin && "text-hq-ink-soft")}
+            >
+              {item.caption}
+            </figcaption>
           )}
+          {item.addedAfterVerification && !item.redactedAt && (
+            <p
+              data-added-after-verification
+              className={cn(skin && "mt-1 font-path-body text-[11px] text-not-yet")}
+            >
+              Added after this task was verified.
+            </p>
+          )}
+          {renderItemActions && !item.redactedAt && renderItemActions(item)}
         </li>
       ))}
     </ul>

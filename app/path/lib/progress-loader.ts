@@ -14,6 +14,9 @@ import "server-only";
  */
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+// Side-effect: registers every generated program module so getProgram resolves
+// a pinned version in THIS module graph (Unit 3 carry-forward, closed here).
+import "@/app/path/content/registry";
 import { getProgram } from "@/app/path/content/manifest";
 import type { Band } from "@/app/path/content/types";
 import {

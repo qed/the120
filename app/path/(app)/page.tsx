@@ -60,6 +60,14 @@ export default async function PathJourneyPage() {
   const pinnedTaskId = sanitizePinnedTaskId(cookieStore.get(pinCookieName(self.ctx.studentId))?.value);
 
   const journey = await loadJourney(db, self.ctx, { pinnedTaskId });
+  // The stranded-student shape (zero available tasks = provisioning gap) must
+  // be loud server-side, not just an honest client card — it is the support
+  // signal that ensureStudentProgress needs a re-run for this profile.
+  if (journey.presentation === "not_ready") {
+    console.error(
+      `[path/journey] student ${self.ctx.studentId} has no available tasks — progress rows missing or all locked; re-run ensureStudentProgress`
+    );
+  }
   const { phases, now } = buildJourneyView(journey, self.ctx.band);
   const gradeLabel = self.grade === null ? null : `Grade ${self.grade}`;
 
@@ -69,7 +77,7 @@ export default async function PathJourneyPage() {
       gradeLabel={gradeLabel}
       verifiedTotal={journey.verifiedTotal}
       totalTasks={journey.totalTasks}
-      firstRun={journey.firstRun}
+      presentation={journey.presentation}
       now={now}
       phases={phases}
     />
@@ -79,7 +87,7 @@ export default async function PathJourneyPage() {
       gradeLabel={gradeLabel}
       verifiedTotal={journey.verifiedTotal}
       totalTasks={journey.totalTasks}
-      firstRun={journey.firstRun}
+      presentation={journey.presentation}
       now={now}
       phases={phases}
     />

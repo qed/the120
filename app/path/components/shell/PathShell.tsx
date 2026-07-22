@@ -32,7 +32,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MotionConfig } from "motion/react";
 import type { ReactNode } from "react";
-import type { Skin } from "@/app/path/lib/skin-tokens";
+import { skinClass, type Skin } from "@/app/path/lib/skin-tokens";
 import { cn } from "@/app/path/components/system/cn";
 
 export type ShellNavItem = { href: string; label: string };
@@ -76,11 +76,15 @@ export function PathShell({
   const nav = navItemsFor(skin);
   const trail = skin === "trail";
 
-  const canvas = trail ? "bg-trail-canvas" : "bg-hq-canvas";
-  const surface = trail ? "bg-trail-surface" : "bg-hq-surface";
-  const ink = trail ? "text-trail-ink" : "text-hq-ink";
-  const inkSoft = trail ? "text-trail-ink-soft" : "text-hq-ink-soft";
-  const border = trail ? "border-trail-mist" : "border-hq-border";
+  // The shell's neutral classes resolve through skinClass — the Unit 13
+  // resolver's named consumer — so a token a skin doesn't publish is a compile
+  // error, not a silently-unstyled class. Each branch narrows to a literal
+  // skin (the guard's requirement for skin-specific tokens like trail's mist).
+  const canvas = trail ? skinClass("trail", "bg", "canvas") : skinClass("hq", "bg", "canvas");
+  const surface = trail ? skinClass("trail", "bg", "surface") : skinClass("hq", "bg", "surface");
+  const ink = trail ? skinClass("trail", "text", "ink") : skinClass("hq", "text", "ink");
+  const inkSoft = trail ? skinClass("trail", "text", "ink-soft") : skinClass("hq", "text", "ink-soft");
+  const border = trail ? skinClass("trail", "border", "mist") : skinClass("hq", "border", "border");
 
   const brand = (
     <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg", trail ? "bg-trail-ink" : "bg-hq-ink")}>

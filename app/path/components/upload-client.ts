@@ -22,7 +22,12 @@
 import { DetailedError, Upload } from "tus-js-client";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { requestUploadSlot, type UploadSlotResult } from "@/app/path/lib/actions/upload-slot";
-import { extensionFor, interpretUploadResponse, MAX_STORABLE_BYTES } from "@/app/path/lib/upload-rules";
+import {
+  extensionFor,
+  interpretUploadResponse,
+  MAX_STORABLE_BYTES,
+  parseTusFailure,
+} from "@/app/path/lib/upload-rules";
 
 export type SlotRefusal = Extract<UploadSlotResult, { ok: false }>;
 
@@ -80,24 +85,17 @@ export function probeVideoDuration(file: Blob): Promise<number | undefined> {
 
 /** Normalize a tus-js-client error for interpretUploadResponse. The already-exists
  *  signal (statusCode 409 / error 'Duplicate') lives in the response BODY, which
- *  tus-js-client embeds only as text in .message and never parses — so parse it
- *  here to give the TUS leg the same structured detection the plain leg gets. */
+ *  tus-js-client embeds only as text in .message and never parses. The parsing
+ *  itself is the pure, unit-tested `parseTusFailure` (upload-rules); this is the
+ *  thin DetailedError adapter around it. */
 function normalizeTusError(err: unknown): Parameters<typeof interpretUploadResponse>[0] {
   const message = err instanceof Error ? err.message : String(err);
   if (err instanceof DetailedError && err.originalResponse) {
-    let statusCode: number | string | null = null;
-    let errorName: string | null = null;
-    try {
-      const body = JSON.parse(err.originalResponse.getBody() || "{}") as {
-        statusCode?: number | string;
-        error?: string;
-      };
-      if (body.statusCode != null) statusCode = body.statusCode;
-      if (typeof body.error === "string") errorName = body.error;
-    } catch {
-      // body wasn't JSON — fall back to the outer status + message heuristics
-    }
-    return { status: err.originalResponse.getStatus(), statusCode, errorName, message };
+    return parseTusFailure({
+      status: err.originalResponse.getStatus(),
+      body: err.originalResponse.getBody() || null,
+      message,
+    });
   }
   return { status: null, statusCode: null, errorName: null, message };
 }

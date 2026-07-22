@@ -21,27 +21,13 @@
 
 import type { ReactNode } from "react";
 import type { Band } from "@/app/path/content/types";
-import { isSafeHttpUrl, type EvidenceKind } from "@/app/path/lib/evidence-rules";
+import { isSafeHttpUrl } from "@/app/path/lib/evidence-rules";
+import type { EvidenceItemView } from "@/app/path/lib/journey-view-types";
 import type { Skin } from "@/app/path/lib/skin-tokens";
 import { cn } from "./system/cn";
 import { LogTable } from "./LogTable";
 
-export type EvidenceItemView = {
-  id: string;
-  kind: EvidenceKind;
-  /** Signed-download URL for the main object (from the stored row). Null for
-   *  log/link/redacted. */
-  url: string | null;
-  /** Signed-download URL for a video's poster frame. */
-  posterUrl: string | null;
-  contentType: string | null;
-  caption: string | null;
-  linkUrl: string | null;
-  /** kind='log' rows, for the read-only render. */
-  logRows: Record<string, unknown>[];
-  redactedAt: string | null;
-  addedAfterVerification: boolean;
-};
+export type { EvidenceItemView };
 
 export function EvidenceList({
   studentId,

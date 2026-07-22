@@ -48,7 +48,12 @@ import { clearNowPin, pinNowTask } from "@/app/path/lib/actions/pin";
 import type { EvidenceSpec } from "@/app/path/content/evidence-spec";
 import { SAFETY_COPY, type SafetyFlag } from "@/app/path/content/safety-flags";
 import type { Band, PhaseKey } from "@/app/path/content/types";
-import { classifyActionFailure, type MutabilityRegime } from "@/app/path/lib/now-card-rules";
+import {
+  classifyActionFailure,
+  transitionsAfterCapture,
+  transitionsBeforeSubmit,
+  type MutabilityRegime,
+} from "@/app/path/lib/now-card-rules";
 import type { Skin } from "@/app/path/lib/skin-tokens";
 import type { TaskState } from "@/app/path/lib/transition-table";
 
@@ -85,6 +90,30 @@ export type TaskSurfaceProps = {
 
 type Notice = { tone: "info" | "amber" | "error"; text: string };
 
+/** The confirm call's client-held params — kept when a confirm fails after the
+ *  bytes landed, so "Finish saving" can retry without re-uploading. */
+type ConfirmParams = {
+  evidenceId: string;
+  objectPath: string;
+  sha256: string;
+  sizeBytes: number;
+  contentType: string;
+  posterObjectPath?: string;
+  durationSeconds?: number;
+  capturedAt: string;
+};
+
+/** Next's redirect() control-flow throw (the auth guard firing before the
+ *  action body) — must route to sign-in, never a generic "try again". */
+function isNextRedirect(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    "digest" in e &&
+    String((e as { digest: unknown }).digest).startsWith("NEXT_REDIRECT")
+  );
+}
+
 export function TaskSurface(props: TaskSurfaceProps) {
   const {
     skin,
@@ -107,7 +136,9 @@ export function TaskSurface(props: TaskSurfaceProps) {
   const [videoProgress, setVideoProgress] = useState<number | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
   const [captionDraft, setCaptionDraft] = useState<{ id: string; text: string } | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<ConfirmParams | null>(null);
   const mountedRef = useRef(true);
+  const videoUploadRef = useRef<import("tus-js-client").Upload | null>(null);
   // A fresh log's evidence identity, stable across edits until it lands.
   const [draftLogId] = useState(() => crypto.randomUUID());
 
@@ -115,6 +146,8 @@ export function TaskSurface(props: TaskSurfaceProps) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      videoUploadRef.current?.abort().catch(() => {});
+      videoUploadRef.current = null;
     };
   }, []);
 
@@ -160,117 +193,140 @@ export function TaskSurface(props: TaskSurfaceProps) {
     [failureNotice, router]
   );
 
-  /** Run one transition; returns true when the task is at the target. */
+  /**
+   * EVERY async flow runs through here (Unit 14 review consolidation): one
+   * busy key held for the flow's WHOLE lifetime (upload → confirm → transition
+   * → refresh — the julik review found the confirm chain and log-save escaping
+   * the gate), the notice cleared at start, the auth guard's NEXT_REDIRECT
+   * throw routed to sign-in instead of a doomed "try again" (reliability
+   * review), and busy always cleared in finally.
+   */
+  const runGuarded = useCallback(
+    async (key: string, fn: () => Promise<void>) => {
+      setBusy(key);
+      setNotice(null);
+      try {
+        await fn();
+      } catch (e) {
+        if (isNextRedirect(e)) {
+          router.push("/path/sign-in");
+          return;
+        }
+        if (mountedRef.current) setNotice({ tone: "error", text: "Something went wrong. Please try again." });
+      } finally {
+        if (mountedRef.current) setBusy(null);
+      }
+    },
+    [router]
+  );
+
+  /** Run one transition; returns true when the task is at the target. Throws
+   *  are handled by the enclosing runGuarded. */
   const runTransition = useCallback(
     async (transition: "open" | "submit" | "withdraw" | "resume"): Promise<boolean> => {
-      try {
-        const result = await applyTransition({ studentId, taskId, transition });
-        if (!mountedRef.current) return false;
-        if (result.ok) {
-          if (!result.byCaller && result.winner?.verifiedBy) {
-            // Superseded — someone else got it there. Never claim "you did it".
-            setNotice({ tone: "info", text: "Already done — this had just been handled elsewhere." });
-          }
-          return true;
+      const result = await applyTransition({ studentId, taskId, transition });
+      if (!mountedRef.current) return false;
+      if (result.ok) {
+        if (!result.byCaller && result.winner?.verifiedBy) {
+          // Superseded — someone else got it there. Never claim "you did it".
+          setNotice({ tone: "info", text: "Already done — this had just been handled elsewhere." });
         }
-        handleFailure(result.reason);
-        return false;
-      } catch {
-        if (mountedRef.current) {
-          setNotice({ tone: "error", text: "Something went wrong. Please try again." });
-        }
-        return false;
+        return true;
       }
+      handleFailure(result.reason);
+      return false;
     },
     [studentId, taskId, handleFailure]
   );
 
-  /** After a successful capture, move available→in_progress / not_yet→in_progress. */
+  /** After a successful capture: the tested choreography rule (the state
+   *  diagram's "opened / evidence added"). */
   const touchStateAfterCapture = useCallback(async () => {
-    if (state === "available") await runTransition("open");
-    else if (state === "not_yet") await runTransition("resume");
+    for (const transition of transitionsAfterCapture(state)) {
+      await runTransition(transition);
+    }
   }, [state, runTransition]);
 
-  const submit = useCallback(async () => {
-    setBusy("submit");
-    setNotice(null);
-    try {
-      // submit runs from in_progress; chain the state there first when needed.
-      if (state === "available" && !(await runTransition("open"))) return;
-      if (state === "not_yet" && !(await runTransition("resume"))) return;
-      if (await runTransition("submit")) {
-        setNotice({ tone: "info", text: trail ? "Your satchel's in!" : "Submitted for review." });
-        router.refresh();
-      }
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }, [state, runTransition, router, trail]);
+  const submit = useCallback(
+    () =>
+      runGuarded("submit", async () => {
+        // submit runs from in_progress; chain the state there first when needed.
+        for (const transition of transitionsBeforeSubmit(state)) {
+          if (!(await runTransition(transition))) return;
+        }
+        if (await runTransition("submit")) {
+          setNotice({ tone: "info", text: trail ? "Your satchel's in!" : "Submitted for review." });
+          if (mountedRef.current) router.refresh();
+        }
+      }),
+    [state, runGuarded, runTransition, router, trail]
+  );
 
-  const withdraw = useCallback(async () => {
-    setBusy("withdraw");
-    setNotice(null);
-    try {
-      if (await runTransition("withdraw")) {
-        setNotice({ tone: "info", text: "Withdrawn — add what you need, then send it back." });
-        router.refresh();
-      }
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }, [runTransition, router]);
+  const withdraw = useCallback(
+    () =>
+      runGuarded("withdraw", async () => {
+        if (await runTransition("withdraw")) {
+          setNotice({ tone: "info", text: "Withdrawn — add what you need, then send it back." });
+          if (mountedRef.current) router.refresh();
+        }
+      }),
+    [runGuarded, runTransition, router]
+  );
 
-  const togglePin = useCallback(async () => {
-    setBusy("pin");
-    try {
-      const result = pinned ? await clearNowPin() : await pinNowTask({ taskId });
-      if (!mountedRef.current) return;
-      if (result.ok) router.refresh();
-      else handleFailure(result.reason);
-    } catch {
-      if (mountedRef.current) setNotice({ tone: "error", text: "Something went wrong. Please try again." });
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }, [pinned, taskId, router, handleFailure]);
-
-  const confirmUpload = useCallback(
-    async (p: {
-      evidenceId: string;
-      objectPath: string;
-      sha256: string;
-      sizeBytes: number;
-      contentType: string;
-      posterObjectPath?: string;
-      durationSeconds?: number;
-    }) => {
-      try {
-        const result = await confirmUploadedEvidence({
-          studentId,
-          taskId,
-          ...p,
-          capturedAt: new Date().toISOString(),
-        });
+  const togglePin = useCallback(
+    () =>
+      runGuarded("pin", async () => {
+        const result = pinned ? await clearNowPin() : await pinNowTask({ taskId });
         if (!mountedRef.current) return;
-        if (result.ok) {
-          if (result.hashDuplicateOf) {
-            setNotice({ tone: "info", text: "Saved — heads up, it looks identical to something already filed." });
+        if (result.ok) router.refresh();
+        else handleFailure(result.reason);
+      }),
+    [pinned, taskId, runGuarded, router, handleFailure]
+  );
+
+  /**
+   * Confirm an uploaded object into an evidence row. The bytes are ALREADY
+   * durably stored when this runs, so a failed confirm keeps the params in
+   * `pendingConfirm` and offers an explicit "Finish saving" retry — never the
+   * false promise that it "will finish next time this page loads" (nothing
+   * reconciles on load; the 48h reaper would delete the orphan — reliability
+   * review). The retry re-confirms the SAME object; no bytes are re-uploaded.
+   */
+  const confirmUpload = useCallback(
+    (p: ConfirmParams) =>
+      runGuarded("confirm", async () => {
+        try {
+          const result = await confirmUploadedEvidence({ studentId, taskId, ...p });
+          if (!mountedRef.current) return;
+          if (result.ok) {
+            setPendingConfirm(null);
+            if (result.hashDuplicateOf) {
+              setNotice({ tone: "info", text: "Saved — heads up, it looks identical to something already filed." });
+            }
+            await touchStateAfterCapture();
+            if (mountedRef.current) router.refresh();
+          } else if (classifyActionFailure(result.reason) === "retryable") {
+            setPendingConfirm(p);
+            setNotice({
+              tone: "amber",
+              text: "The file is uploaded but not saved to this step yet — tap “Finish saving” to try again.",
+            });
+          } else {
+            setPendingConfirm(null);
+            handleFailure(result.reason);
           }
-          await touchStateAfterCapture();
-          router.refresh();
-        } else {
-          handleFailure(result.reason);
+        } catch (e) {
+          if (isNextRedirect(e)) throw e; // runGuarded routes it to sign-in
+          if (mountedRef.current) {
+            setPendingConfirm(p);
+            setNotice({
+              tone: "amber",
+              text: "The file is uploaded but not saved to this step yet — tap “Finish saving” to try again.",
+            });
+          }
         }
-      } catch {
-        if (mountedRef.current) {
-          setNotice({
-            tone: "amber",
-            text: "The file is uploaded but not yet filed — it will finish next time this page loads.",
-          });
-        }
-      }
-    },
-    [studentId, taskId, touchStateAfterCapture, router, handleFailure]
+      }),
+    [studentId, taskId, runGuarded, touchStateAfterCapture, router, handleFailure]
   );
 
   const onSlotRefused = useCallback(
@@ -285,72 +341,71 @@ export function TaskSurface(props: TaskSurfaceProps) {
   );
 
   const onVideoCaptured = useCallback(
-    async (captured: CapturedVideo) => {
-      setBusy("video");
-      setNotice(null);
-      setVideoProgress(0);
-      try {
-        const evidenceId = crypto.randomUUID();
-        const file = captured.file;
-        const uploaded = await uploadEvidenceFile({
-          studentId,
-          taskId,
-          file,
-          fileName: file.name || "capture.mp4",
-          evidenceId,
-          durationSeconds: captured.durationSeconds,
-          isMounted: () => mountedRef.current,
-          onProgress: (pct) => {
-            if (mountedRef.current) setVideoProgress(pct);
-          },
-        });
-        if (!mountedRef.current) return;
-        if (!uploaded.ok) {
-          if (uploaded.kind === "refused") onSlotRefused(uploaded.refusal);
-          else setNotice({ tone: "amber", text: uploaded.message });
-          return;
-        }
-
-        // The poster rides along under the SAME evidence identity. Best-effort:
-        // a failed poster never blocks the clip (the list falls back gracefully).
-        let posterObjectPath: string | undefined;
-        if (captured.poster) {
-          const poster = await uploadEvidenceFile({
+    (captured: CapturedVideo) =>
+      runGuarded("video", async () => {
+        setVideoProgress(0);
+        try {
+          const evidenceId = crypto.randomUUID();
+          const file = captured.file;
+          const uploaded = await uploadEvidenceFile({
             studentId,
             taskId,
-            file: captured.poster,
-            fileName: "poster.jpg",
+            file,
+            fileName: file.name || "capture.mp4",
             evidenceId,
+            durationSeconds: captured.durationSeconds,
             isMounted: () => mountedRef.current,
+            onProgress: (pct) => {
+              if (mountedRef.current) setVideoProgress(pct);
+            },
+            // Abort-on-unmount, same as the picker path (correctness review).
+            registerUpload: (u) => {
+              videoUploadRef.current = u;
+            },
           });
-          if (poster.ok) posterObjectPath = poster.uploaded.objectPath;
-        }
-        if (!mountedRef.current) return;
+          if (!mountedRef.current) return;
+          if (!uploaded.ok) {
+            if (uploaded.kind === "refused") onSlotRefused(uploaded.refusal);
+            else setNotice({ tone: "amber", text: uploaded.message });
+            return;
+          }
 
-        await confirmUpload({
-          evidenceId,
-          objectPath: uploaded.uploaded.objectPath,
-          sha256: uploaded.uploaded.sha256,
-          sizeBytes: uploaded.uploaded.sizeBytes,
-          contentType: uploaded.uploaded.contentType,
-          posterObjectPath,
-          durationSeconds: captured.durationSeconds,
-        });
-      } finally {
-        if (mountedRef.current) {
-          setBusy(null);
-          setVideoProgress(null);
+          // The poster rides along under the SAME evidence identity. Best-effort:
+          // a failed poster never blocks the clip (the list falls back gracefully).
+          let posterObjectPath: string | undefined;
+          if (captured.poster) {
+            const poster = await uploadEvidenceFile({
+              studentId,
+              taskId,
+              file: captured.poster,
+              fileName: "poster.jpg",
+              evidenceId,
+              isMounted: () => mountedRef.current,
+            });
+            if (poster.ok) posterObjectPath = poster.uploaded.objectPath;
+          }
+          if (!mountedRef.current) return;
+
+          await confirmUpload({
+            evidenceId,
+            objectPath: uploaded.uploaded.objectPath,
+            sha256: uploaded.uploaded.sha256,
+            sizeBytes: uploaded.uploaded.sizeBytes,
+            contentType: uploaded.uploaded.contentType,
+            posterObjectPath,
+            durationSeconds: captured.durationSeconds,
+            capturedAt: new Date().toISOString(),
+          });
+        } finally {
+          if (mountedRef.current) setVideoProgress(null);
         }
-      }
-    },
-    [studentId, taskId, confirmUpload, onSlotRefused]
+      }),
+    [studentId, taskId, runGuarded, confirmUpload, onSlotRefused]
   );
 
-  const addLink = useCallback(async () => {
+  const addLink = useCallback(() => {
     if (!linkUrl.trim()) return;
-    setBusy("link");
-    setNotice(null);
-    try {
+    return runGuarded("link", async () => {
       const result = await addLinkEvidence({
         studentId,
         taskId,
@@ -361,23 +416,18 @@ export function TaskSurface(props: TaskSurfaceProps) {
       if (result.ok) {
         setLinkUrl("");
         await touchStateAfterCapture();
-        router.refresh();
+        if (mountedRef.current) router.refresh();
       } else if (result.reason === "invalid_input") {
         setNotice({ tone: "error", text: "That doesn't look like a web link — it needs to start with https://" });
       } else {
         handleFailure(result.reason);
       }
-    } catch {
-      if (mountedRef.current) setNotice({ tone: "error", text: "Something went wrong. Please try again." });
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }, [linkUrl, studentId, taskId, touchStateAfterCapture, router, handleFailure]);
+    });
+  }, [linkUrl, studentId, taskId, runGuarded, touchStateAfterCapture, router, handleFailure]);
 
-  const saveCaption = useCallback(async () => {
+  const saveCaption = useCallback(() => {
     if (!captionDraft) return;
-    setBusy("caption");
-    try {
+    return runGuarded("caption", async () => {
       const result = await editEvidenceCaption({
         studentId,
         evidenceId: captionDraft.id,
@@ -390,28 +440,29 @@ export function TaskSurface(props: TaskSurfaceProps) {
       } else {
         handleFailure(result.reason);
       }
-    } catch {
-      if (mountedRef.current) setNotice({ tone: "error", text: "Something went wrong. Please try again." });
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }, [captionDraft, studentId, router, handleFailure]);
+    });
+  }, [captionDraft, studentId, runGuarded, router, handleFailure]);
 
   const removeItem = useCallback(
-    async (evidenceId: string) => {
-      setBusy(`delete-${evidenceId}`);
-      try {
+    (evidenceId: string) =>
+      runGuarded(`delete-${evidenceId}`, async () => {
         const result = await deleteEvidence({ studentId, evidenceId });
         if (!mountedRef.current) return;
         if (result.ok) router.refresh();
         else handleFailure(result.reason);
-      } catch {
-        if (mountedRef.current) setNotice({ tone: "error", text: "Something went wrong. Please try again." });
-      } finally {
-        if (mountedRef.current) setBusy(null);
-      }
-    },
-    [studentId, router, handleFailure]
+      }),
+    [studentId, runGuarded, router, handleFailure]
+  );
+
+  /** LogTable's save runs its own action; the follow-on transition + refresh
+   *  must still hold the shared busy gate (julik review). */
+  const onLogSaved = useCallback(
+    () =>
+      runGuarded("log", async () => {
+        await touchStateAfterCapture();
+        if (mountedRef.current) router.refresh();
+      }),
+    [runGuarded, touchStateAfterCapture, router]
   );
 
   const ink = trail ? "text-trail-ink" : "text-hq-ink";
@@ -574,6 +625,16 @@ export function TaskSurface(props: TaskSurfaceProps) {
           )}
         >
           {notice.text}
+          {pendingConfirm && (
+            <button
+              type="button"
+              onClick={() => void confirmUpload(pendingConfirm)}
+              disabled={busy !== null}
+              className="ml-2 font-semibold underline underline-offset-2 disabled:opacity-50"
+            >
+              {busy === "confirm" ? "Saving…" : "Finish saving"}
+            </button>
+          )}
         </div>
       )}
 
@@ -715,9 +776,7 @@ export function TaskSurface(props: TaskSurfaceProps) {
             evidenceId={logItem?.id ?? draftLogId}
             initialRows={logItem?.logRows ?? []}
             readOnly={!captureAllowed || mutability === "append_only"}
-            onSaved={() => {
-              void touchStateAfterCapture().then(() => router.refresh());
-            }}
+            onSaved={() => void onLogSaved()}
             onError={(message) => setNotice({ tone: "error", text: message })}
           />
         </div>
@@ -754,6 +813,7 @@ export function TaskSurface(props: TaskSurfaceProps) {
                   sha256: u.sha256,
                   sizeBytes: u.sizeBytes,
                   contentType: u.contentType,
+                  capturedAt: new Date().toISOString(),
                 })
               }
               onRefused={onSlotRefused}

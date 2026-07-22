@@ -26,23 +26,26 @@ import { resolveVariant } from "@/app/path/content/parse-curriculum";
 import type { Band, DeepReadonly, PhaseKey, ProgramContent } from "@/app/path/content/types";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolvePathAccess, type RoleGrant } from "./access-rules";
-import type { EvidenceItemView } from "@/app/path/components/EvidenceList";
+import type { EvidenceItemView } from "./journey-view-types";
 import { loadEvidenceViews } from "./evidence-loader";
 import {
+  decisionFromEvents,
   deriveCriterionView,
   deriveMutability,
   derivePhaseViews,
-  isFirstRun,
+  journeyPresentation,
+  latestReviewStateByCriterion,
+  resolveTaskInProgram,
   selectNowCard,
   skinForBand,
-  type CriterionReviewState,
   type CriterionView,
+  type JourneyPresentation,
   type MutabilityRegime,
   type NowCandidate,
   type NowSelection,
   type PhaseView,
 } from "./now-card-rules";
-import { bandForGrade, gradeFromChildJoin, narrowTaskState, criterionIdOf } from "./progress-core";
+import { bandForGrade, firstNameFromChildJoin, gradeFromChildJoin, narrowTaskState } from "./progress-core";
 import { loadStudentContext, type StudentContext } from "./progress-loader";
 import type { Skin } from "./skin-tokens";
 import type { TaskState } from "./transition-table";
@@ -80,11 +83,9 @@ export async function resolveStudentSelf(db: Db, grants: readonly RoleGrant[]): 
   if (error) throw new Error(`resolveStudentSelf(${ctx.studentId}) failed: ${error.message}`);
   if (!data) return null;
 
-  const child = Array.isArray(data.children) ? data.children[0] : data.children;
-  const firstName =
-    child && typeof (child as { first_name?: unknown }).first_name === "string"
-      ? ((child as { first_name: string }).first_name)
-      : "";
+  // Both narrows share progress-core's tested join-shape helpers — never an
+  // inline cast dance (Unit 14 review).
+  const firstName = firstNameFromChildJoin(data.children) ?? "";
   const grade = gradeFromChildJoin(data.children);
 
   return { ctx, firstName, grade, skin: skinForBand(ctx.band ?? bandForGrade(grade)) };
@@ -102,7 +103,7 @@ export type Journey = {
   program: DeepReadonly<ProgramContent>;
   candidates: NowCandidate[];
   now: NowSelection;
-  firstRun: boolean;
+  presentation: JourneyPresentation;
   verifiedTotal: number;
   totalTasks: number;
   /** Per-phase verified counts in phase order — ProgressMeter's perPhase. */
@@ -154,20 +155,17 @@ export async function loadJourney(
   const rows = (progress.data ?? []) as ProgressRowLite[];
   const rowByTask = new Map(rows.map((r) => [r.task_id, r]));
 
-  // Latest review state per criterion (highest attempt wins).
-  const reviewByCriterion = new Map<string, { attempt: number; state: CriterionReviewState }>();
-  for (const r of reviews.data ?? []) {
-    const scopeId = r.scope_id as string;
-    const attempt = r.attempt as number;
-    const state = r.state as string;
-    const narrowed: CriterionReviewState =
-      state === "review_underway" || state === "cleared" || state === "returned" ? state : "none";
-    if (narrowed === "none") {
-      console.error(`[path/journey] unrecognized review state '${state}' for ${ctx.studentId}/${scopeId}`);
-      continue;
-    }
-    const prev = reviewByCriterion.get(scopeId);
-    if (!prev || attempt > prev.attempt) reviewByCriterion.set(scopeId, { attempt, state: narrowed });
+  // Latest review state per criterion — the pure, tested fold; dropped
+  // (unrecognized) states are logged loudly, never coerced.
+  const reviewFold = latestReviewStateByCriterion(
+    (reviews.data ?? []).map((r) => ({
+      scopeId: r.scope_id as string,
+      attempt: r.attempt as number,
+      state: r.state as string,
+    }))
+  );
+  for (const drop of reviewFold.dropped) {
+    console.error(`[path/journey] unrecognized review state for ${ctx.studentId}: ${drop}`);
   }
 
   // Fold evidence activity into per-task touch times (attaching IS touching,
@@ -231,7 +229,7 @@ export async function loadJourney(
       const view = deriveCriterionView({
         id: criterion.id,
         taskStates: states,
-        review: reviewByCriterion.get(criterion.id)?.state ?? "none",
+        review: reviewFold.states[criterion.id] ?? "none",
       });
       criteria[criterion.id] = { view, taskStates };
       phaseCriteria.push(view);
@@ -247,7 +245,7 @@ export async function loadJourney(
     program,
     candidates,
     now: selectNowCard({ candidates, pinnedTaskId: opts.pinnedTaskId }),
-    firstRun: isFirstRun({ candidates, verifiedTotal, evidenceCount }),
+    presentation: journeyPresentation({ candidates, verifiedTotal, evidenceCount }),
     verifiedTotal,
     totalTasks,
     perPhaseVerified,
@@ -259,7 +257,7 @@ export async function loadJourney(
 
 /* ---------------------------------------------------------- view mapping */
 
-import type { JourneyCriterionCard, JourneyPhaseCard, NowCardData } from "@/app/path/components/journey/journey-view-types";
+import type { JourneyCriterionCard, JourneyPhaseCard, NowCardData } from "./journey-view-types";
 import { splitCriterionLabel } from "./now-card-rules";
 
 /**
@@ -301,29 +299,30 @@ export function buildJourneyView(journey: Journey, band: Band | null): {
   let now: NowCardData | null = null;
   if (journey.now.kind === "task") {
     const taskId = journey.now.taskId;
-    const criterionId = criterionIdOf(taskId);
-    for (const phase of journey.program.phases) {
-      const criterion = phase.criteria.find((c) => c.id === criterionId);
-      const task = criterion?.tasks.find((t) => t.id === taskId);
-      if (!criterion || !task) continue;
-      const candidate = journey.candidates.find((c) => c.taskId === taskId);
-      now = {
-        taskId,
-        criterionId,
-        criterionTitle: splitCriterionLabel(criterion.passCriterion).title,
-        title: task.title,
-        body: task.body,
-        doneWhen: task.doneWhen,
-        variant: band ? (resolveVariant(task, band) ?? null) : null,
-        state: candidate?.state ?? "available",
-        phaseKey: phase.key,
-        liveMoment: isStageMoment(criterionId),
-        pinned: journey.now.pinned,
-        seq: task.seq,
-        taskTotal: criterion.tasks.length,
-      };
-      break;
+    // Both lookups are guaranteed to hit: selectNowCard only ever picks from
+    // journey.candidates, which are built from this same program's tasks. A
+    // miss would mean the invariant broke — fail loud, never render a
+    // fabricated state (Unit 14 review).
+    const hit = resolveTaskInProgram(journey.program, taskId);
+    const candidate = journey.candidates.find((c) => c.taskId === taskId);
+    if (!hit || !candidate) {
+      throw new Error(`buildJourneyView: Now task ${taskId} not found in program/candidates`);
     }
+    now = {
+      taskId,
+      criterionId: hit.criterion.id,
+      criterionTitle: splitCriterionLabel(hit.criterion.passCriterion).title,
+      title: hit.task.title,
+      body: hit.task.body,
+      doneWhen: hit.task.doneWhen,
+      variant: band ? (resolveVariant(hit.task, band) ?? null) : null,
+      state: candidate.state,
+      phaseKey: hit.phase.key,
+      liveMoment: isStageMoment(hit.criterion.id),
+      pinned: journey.now.pinned,
+      seq: hit.task.seq,
+      taskTotal: hit.criterion.tasks.length,
+    };
   }
 
   return { phases, now };
@@ -371,11 +370,12 @@ export async function loadTaskDetail(
   viewer: { userId: string; grants: readonly RoleGrant[] }
 ): Promise<TaskDetail | null> {
   const program = getProgram(ctx.programVersionId);
-  const criterionId = criterionIdOf(taskId);
-  const phase = program.phases.find((p) => p.criteria.some((c) => c.id === criterionId));
-  const criterion = phase?.criteria.find((c) => c.id === criterionId);
-  const task = criterion?.tasks.find((t) => t.id === taskId);
-  if (!phase || !criterion || !task) return null;
+  // The pure, tested not-found contract: null when the task is not in the
+  // student's pinned program — the page maps this to notFound().
+  const hit = resolveTaskInProgram(program, taskId);
+  if (!hit) return null;
+  const { phase, criterion, task } = hit;
+  const criterionId = criterion.id;
 
   const { data: row, error } = await db
     .from("path_task_progress")
@@ -400,7 +400,11 @@ export async function loadTaskDetail(
   const snapshotBand = row?.snapshot_band as Band | null | undefined;
   const band: Band = snapshotBand ?? ctx.band ?? "g6_8";
 
-  // The latest reviewer decision on this task (verifier comment / Not-Yet note).
+  // The latest reviewer decision on this task (verifier comment / Not-Yet
+  // note). REVOKE is included — its note is the reason the adult reverted,
+  // shown as the not-yet explanation (Unit 14 correctness review: excluding
+  // it left a bare not_yet chip with no words). Mapping is the pure, tested
+  // decisionFromEvents.
   let decision: TaskDetail["decision"] = null;
   if (row) {
     const { data: events, error: evError } = await db
@@ -408,14 +412,16 @@ export async function loadTaskDetail(
       .select("transition, note, at")
       .eq("student_id", ctx.studentId)
       .eq("task_id", taskId)
-      .in("transition", ["verify", "not_yet"])
+      .in("transition", ["verify", "not_yet", "revoke"])
       .order("at", { ascending: false })
-      .limit(1);
+      .limit(3);
     if (evError) throw new Error(`loadTaskDetail(${ctx.studentId}, ${taskId}) events failed: ${evError.message}`);
-    const latest = events?.[0];
-    if (latest && typeof latest.note === "string" && latest.note.length > 0) {
-      decision = { kind: latest.transition === "verify" ? "verified" : "not_yet", note: latest.note };
-    }
+    decision = decisionFromEvents(
+      (events ?? []).map((e) => ({
+        transition: e.transition as string,
+        note: typeof e.note === "string" && e.note.length > 0 ? e.note : null,
+      }))
+    );
   }
 
   // Evidence, with per-item access re-run (defense in depth on the READ path).

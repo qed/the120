@@ -18,15 +18,16 @@ import { HQTaskCard } from "@/app/path/components/hq/HQTaskCard";
 import { PhaseRow } from "@/app/path/components/hq/PhaseRow";
 import { ProgressMeter } from "@/app/path/components/system/ProgressMeter";
 import { phaseColor } from "@/app/path/components/system/phases";
-import { FirstRunHero, NoOpenTasks } from "@/app/path/components/EmptyStates";
-import type { JourneyPhaseCard, NowCardData } from "./journey-view-types";
+import { FirstRunHero, JourneyNotReady, NoOpenTasks } from "@/app/path/components/EmptyStates";
+import type { JourneyPhaseCard, NowCardData } from "@/app/path/lib/journey-view-types";
+import type { JourneyPresentation } from "@/app/path/lib/now-card-rules";
 
 export function HQDashboard({
   firstName,
   gradeLabel,
   verifiedTotal,
   totalTasks,
-  firstRun,
+  presentation,
   now,
   phases,
 }: {
@@ -34,7 +35,7 @@ export function HQDashboard({
   gradeLabel: string | null;
   verifiedTotal: number;
   totalTasks: number;
-  firstRun: boolean;
+  presentation: JourneyPresentation;
   now: NowCardData | null;
   phases: JourneyPhaseCard[];
 }) {
@@ -55,7 +56,8 @@ export function HQDashboard({
         <ProgressMeter value={verifiedTotal} total={totalTasks} label="verified" />
       </div>
 
-      {firstRun && firstCriterion && (
+      {presentation === "not_ready" && <JourneyNotReady skin="hq" firstName={firstName} />}
+      {presentation === "first_run" && firstCriterion && (
         <FirstRunHero
           skin="hq"
           firstName={firstName}
@@ -88,7 +90,7 @@ export function HQDashboard({
           />
         </>
       ) : (
-        !firstRun && <NoOpenTasks skin="hq" />
+        presentation === "mid_program" && <NoOpenTasks skin="hq" />
       )}
 
       <div className="mb-2.5 mt-6 font-path-body text-[12.5px] font-semibold text-hq-ink">Your Path</div>

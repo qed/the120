@@ -109,6 +109,15 @@ export function gradeFromChildJoin(childJoin: unknown): number | null {
   return typeof grade === "number" ? grade : null;
 }
 
+/** Same normalisation for the child's first name (Unit 14's shell header).
+ *  Null — never "" — when the join is malformed or the name isn't a string, so
+ *  callers decide their own fallback explicitly. */
+export function firstNameFromChildJoin(childJoin: unknown): string | null {
+  const child = Array.isArray(childJoin) ? childJoin[0] : childJoin;
+  const name = (child as { first_name?: unknown } | null | undefined)?.first_name;
+  return typeof name === "string" && name.length > 0 ? name : null;
+}
+
 /* ------------------------------------------- snapshot building (fail-closed) */
 
 /** The minimal task shape the snapshot builder reads from a DB progress row. */

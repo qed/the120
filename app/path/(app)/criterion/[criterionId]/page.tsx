@@ -4,7 +4,7 @@ import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { CriterionDetail, type CriterionTaskItem } from "@/app/path/components/journey/CriterionDetail";
 import { loadJourney, resolveStudentSelf } from "@/app/path/lib/journey-loader";
-import { selectNowCard, splitCriterionLabel } from "@/app/path/lib/now-card-rules";
+import { resolveCriterionNow, splitCriterionLabel } from "@/app/path/lib/now-card-rules";
 
 /**
  * /path/criterion/[criterionId] — the landmark / criterion sheet (T1 Unit 14).
@@ -45,18 +45,13 @@ export default async function CriterionPage({ params }: { params: Promise<{ crit
     state: jc.taskStates[t.id] ?? "locked",
   }));
 
-  // The current step WITHIN this criterion: the journey's Now task when it
-  // lives here, else the criterion's own most-actionable step (the same pure
-  // rule, scoped to this criterion's candidates).
+  // The current step WITHIN this criterion — the pure, tested three-way rule
+  // (journey Now here → wins; else this criterion's own selection; else null).
   const scoped = journey.candidates.filter((c) => c.criterionId === criterionId);
-  const journeyNow = journey.now.kind === "task" ? journey.now.taskId : null;
-  const localNow = selectNowCard({ candidates: scoped, pinnedTaskId: null });
-  const currentTaskId =
-    journeyNow && scoped.some((c) => c.taskId === journeyNow)
-      ? journeyNow
-      : localNow.kind === "task"
-        ? localNow.taskId
-        : null;
+  const currentTaskId = resolveCriterionNow(
+    journey.now.kind === "task" ? journey.now.taskId : null,
+    scoped
+  );
 
   const label = splitCriterionLabel(criterion.passCriterion);
 

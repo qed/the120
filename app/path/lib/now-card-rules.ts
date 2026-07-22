@@ -30,7 +30,7 @@
  * natural Now ("the trail continues").
  */
 
-import type { Band } from "@/app/path/content/types";
+import type { Band, Criterion, DeepReadonly, Phase, ProgramContent, UnitTask } from "@/app/path/content/types";
 import type { Skin } from "./skin-tokens";
 import type { TaskState } from "./transition-table";
 
@@ -130,23 +130,35 @@ export function selectNowCard(input: {
   return { kind: "task", taskId: winner.taskId, pinned: false };
 }
 
-// ── first run ─────────────────────────────────────────────────────────────────
+// ── journey presentation (first run / mid program / not ready) ────────────────
+
+export type JourneyPresentation = "first_run" | "mid_program" | "not_ready";
 
 /**
- * Day one: nothing verified, nothing captured, and no task beyond the
- * provisioned locked/available shape. The moment a child opens a task or files
- * evidence, the mid-program presentation takes over. An empty candidate list
- * (progress not yet materialized) is also first-run — a screen of grey is the
- * exact failure the plan names, so the fallback is the welcoming presentation,
- * never mid-program components with empty props.
+ * Which of the three journey presentations renders (Unit 14 review carry):
+ *
+ *  - `first_run`   — day one: nothing verified, nothing captured, no task
+ *    beyond the provisioned locked/available shape, and AT LEAST ONE task
+ *    available. The welcoming presentation, never mid-program components with
+ *    empty props (the plan's named failure).
+ *  - `not_ready`   — every task is locked (or there are no tasks at all): the
+ *    provisioning materialization has not run or failed mid-way. Rendering
+ *    this as a healthy day one would hand the student a map with zero
+ *    clickable steps and no explanation — the exact stranded-student shape the
+ *    reliability review named. The page logs it loudly and renders an honest
+ *    "being set up" card.
+ *  - `mid_program` — everything else.
  */
-export function isFirstRun(input: {
+export function journeyPresentation(input: {
   candidates: readonly NowCandidate[];
   verifiedTotal: number;
   evidenceCount: number;
-}): boolean {
-  if (input.verifiedTotal > 0 || input.evidenceCount > 0) return false;
-  return input.candidates.every((t) => t.state === "locked" || t.state === "available");
+}): JourneyPresentation {
+  const anyAvailable = input.candidates.some((t) => t.state === "available");
+  const allDormant = input.candidates.every((t) => t.state === "locked" || t.state === "available");
+  if (!anyAvailable && allDormant && input.verifiedTotal === 0) return "not_ready";
+  if (input.verifiedTotal > 0 || input.evidenceCount > 0) return "mid_program";
+  return allDormant ? "first_run" : "mid_program";
 }
 
 // ── task-page mutability regimes ──────────────────────────────────────────────
@@ -227,9 +239,13 @@ export type PhaseView = {
 };
 
 /**
- * Phases are strictly sequential: the first phase (in order) that is not fully
- * verified is `active`; everything before it is `complete`, everything after
- * `locked`. Input order is the phase order.
+ * Phase order is the input order. A phase whose every task is verified is
+ * `complete` — INDEPENDENTLY of earlier phases, on purpose: a revoke that
+ * reopens an earlier phase's task must never retroactively hide a later
+ * phase's earned progress (mirrors D23's awards-are-never-taken-back posture).
+ * Among the non-complete phases, the first is `active` and the rest `locked` —
+ * so in normal forward flow this reads exactly "first unfinished phase is
+ * active, everything after locked".
  */
 export function derivePhaseViews(
   phases: readonly { id: string; criteria: readonly CriterionView[] }[]
@@ -252,6 +268,118 @@ export function derivePhaseViews(
 
     return { id: phase.id, tasksVerified, tasksTotal, criteriaComplete, status };
   });
+}
+
+// ── program lookups (pure; the not-found contract the pages map to 404) ──────
+
+export type ResolvedProgramTask = {
+  phase: DeepReadonly<Phase>;
+  criterion: DeepReadonly<Criterion>;
+  task: DeepReadonly<UnitTask>;
+};
+
+/**
+ * Resolve a task id inside a pinned program. Null when the phase, criterion,
+ * or task does not exist in THIS program version — the pages map null to
+ * `notFound()` (the plan's "never a partial render" scenario). Extracted pure
+ * (Unit 14 review) so the not-found contract is tested rather than living
+ * inline in three server files.
+ */
+export function resolveTaskInProgram(
+  program: DeepReadonly<ProgramContent>,
+  taskId: string
+): ResolvedProgramTask | null {
+  const criterionId = taskId.split(".").slice(0, 2).join(".");
+  for (const phase of program.phases) {
+    const criterion = phase.criteria.find((c) => c.id === criterionId);
+    if (!criterion) continue;
+    const task = criterion.tasks.find((t) => t.id === taskId);
+    return task ? { phase, criterion, task } : null;
+  }
+  return null;
+}
+
+/**
+ * The current step WITHIN one criterion: the journey-wide Now task when it
+ * lives here, else the criterion's own most-actionable step (the same
+ * selection rule scoped to this criterion's candidates), else null.
+ */
+export function resolveCriterionNow(
+  journeyNowTaskId: string | null,
+  scopedCandidates: readonly NowCandidate[]
+): string | null {
+  if (journeyNowTaskId && scopedCandidates.some((c) => c.taskId === journeyNowTaskId)) {
+    return journeyNowTaskId;
+  }
+  const local = selectNowCard({ candidates: scopedCandidates, pinnedTaskId: null });
+  return local.kind === "task" ? local.taskId : null;
+}
+
+// ── review-state and decision-event narrowing (pure halves of the loader) ─────
+
+/**
+ * Fold raw `path_reviews` rows into the latest review state per criterion
+ * (highest attempt wins, input order irrelevant). Unrecognized states are
+ * dropped fail-closed and RETURNED so the caller can log them — never coerced.
+ */
+export function latestReviewStateByCriterion(
+  rows: readonly { scopeId: string; attempt: number; state: string }[]
+): { states: Record<string, CriterionReviewState>; dropped: string[] } {
+  const byId = new Map<string, { attempt: number; state: CriterionReviewState }>();
+  const dropped: string[] = [];
+  for (const row of rows) {
+    const narrowed =
+      row.state === "review_underway" || row.state === "cleared" || row.state === "returned"
+        ? row.state
+        : null;
+    if (narrowed === null) {
+      dropped.push(`${row.scopeId}:${row.state}`);
+      continue;
+    }
+    const prev = byId.get(row.scopeId);
+    if (!prev || row.attempt > prev.attempt) byId.set(row.scopeId, { attempt: row.attempt, state: narrowed });
+  }
+  return { states: Object.fromEntries([...byId].map(([id, v]) => [id, v.state])), dropped };
+}
+
+/**
+ * The latest reviewer decision to show on a task, from its event history
+ * (newest first). `verify` carries the verifier's comment; `not_yet` AND
+ * `revoke` both surface as the not-yet note — a revoke's note is the reason
+ * the adult reverted, which is exactly what the student needs to see (the
+ * Unit 14 correctness review: excluding revoke left a bare not_yet chip with
+ * no explanation). Events without a note are skipped — an older noted
+ * decision beats a newer silent one only when the newer one said nothing.
+ */
+export function decisionFromEvents(
+  eventsNewestFirst: readonly { transition: string; note: string | null }[]
+): { kind: "verified" | "not_yet"; note: string } | null {
+  for (const event of eventsNewestFirst) {
+    if (event.transition !== "verify" && event.transition !== "not_yet" && event.transition !== "revoke") {
+      continue;
+    }
+    if (!event.note) return null; // the LATEST decision said nothing — show nothing stale
+    return { kind: event.transition === "verify" ? "verified" : "not_yet", note: event.note };
+  }
+  return null;
+}
+
+// ── transition choreography (pure; the state → required-sequence rule) ────────
+
+/**
+ * The transitions that must run, in order, before a SUBMIT from this state
+ * (submit's `from` is `in_progress`), and before a CAPTURE counts as touching
+ * the task (the state diagram's "opened / evidence added"). Extracted pure so
+ * the choreography is tested rather than hard-coded in the client component —
+ * and so a direct action caller can read the same rule (the agent-native
+ * review: an agent calling confirm without these leaves a divergent state).
+ */
+export function transitionsBeforeSubmit(state: TaskState): ("open" | "resume")[] {
+  return state === "available" ? ["open"] : state === "not_yet" ? ["resume"] : [];
+}
+
+export function transitionsAfterCapture(state: TaskState): ("open" | "resume")[] {
+  return transitionsBeforeSubmit(state);
 }
 
 // ── criterion display label ───────────────────────────────────────────────────
@@ -320,6 +448,12 @@ export type UnwrappedResult =
  * `{ok, reason}` and Unit 6's CRM-shaped `{success, error}`. An unrecognized
  * shape fails closed as a failure — a malformed result must never read as
  * success.
+ *
+ * FIRST CONSUMER: Unit 15's parent surfaces, which call both families (the
+ * provision/reset actions speak {success,error}; everything else {ok,reason}).
+ * Unit 14's student surfaces turned out to consume only {ok,reason}, so this
+ * ships tested-but-unwired here — kept (rather than deleted and rebuilt in a
+ * week) per the Unit 6 review carry-forward that ordered the reconciliation.
  */
 export function unwrapActionResult(
   result:

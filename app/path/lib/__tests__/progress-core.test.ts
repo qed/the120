@@ -7,6 +7,7 @@ import {
   buildInitialProgressRows,
   buildTaskSnapshots,
   criterionIdOf,
+  firstNameFromChildJoin,
   gradeFromChildJoin,
   interpretEcho,
   isTaskTransition,
@@ -359,5 +360,21 @@ describe("buildInitialProgressRows — the Unit 14 provisioning-gap fix", () => 
         tasks,
       })
     ).toThrow(/1\.2/);
+  });
+});
+
+describe("firstNameFromChildJoin — join-shape narrowing for the shell header", () => {
+  it("normalises object and array join shapes", () => {
+    expect(firstNameFromChildJoin({ first_name: "Maya" })).toBe("Maya");
+    expect(firstNameFromChildJoin([{ first_name: "Dev" }])).toBe("Dev");
+  });
+
+  it("fails closed to null on malformed shapes — never an empty-string sentinel", () => {
+    expect(firstNameFromChildJoin(null)).toBeNull();
+    expect(firstNameFromChildJoin(undefined)).toBeNull();
+    expect(firstNameFromChildJoin({})).toBeNull();
+    expect(firstNameFromChildJoin({ first_name: 42 })).toBeNull();
+    expect(firstNameFromChildJoin({ first_name: "" })).toBeNull();
+    expect(firstNameFromChildJoin([])).toBeNull();
   });
 });

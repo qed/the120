@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyActionFailure,
+  decisionFromEvents,
   deriveCriterionView,
   deriveMutability,
   derivePhaseViews,
-  isFirstRun,
+  journeyPresentation,
+  latestReviewStateByCriterion,
   pinCookieName,
+  resolveCriterionNow,
+  resolveTaskInProgram,
   sanitizePinnedTaskId,
   selectNowCard,
   skinForBand,
   splitCriterionLabel,
+  transitionsAfterCapture,
+  transitionsBeforeSubmit,
   unwrapActionResult,
   type NowCandidate,
 } from "../now-card-rules";
+import type { DeepReadonly, ProgramContent } from "@/app/path/content/types";
 import type { TaskState } from "../transition-table";
 
 /** Build a candidate with sane defaults; tests override what they exercise. */
@@ -213,41 +220,64 @@ describe("selectNowCard", () => {
         pinned: false,
       });
     });
+
+    it("a MISSING earlier sibling fails closed — the later task never wins (partial-data guard)", () => {
+      // Only seq 2-5 present: task 2's seq-1 sibling is absent from the list
+      // entirely, so it must be treated as blocked, not eligible.
+      const partial = criterion("1.1", ["in_progress", "locked", "locked", "locked", "locked"], [T(9)])
+        .map((c) => ({ ...c, seq: c.seq + 1, taskId: `1.1.${c.seq + 1}` }));
+      const other = criterion("1.2", ["available", "locked", "locked", "locked", "locked"], [T(1)]);
+      expect(selectNowCard({ candidates: [...partial, ...other], pinnedTaskId: null })).toEqual({
+        kind: "task",
+        taskId: "1.2.1",
+        pinned: false,
+      });
+    });
   });
 });
 
-describe("isFirstRun", () => {
-  it("day one — only locked/available rows, nothing verified, no evidence → first run (plan edge case)", () => {
+describe("journeyPresentation", () => {
+  it("day one — locked/available rows with at least one available → first_run (plan edge case)", () => {
     const candidates = [
       ...criterion("1.1", ["available", "locked", "locked", "locked", "locked"], [T(0)]),
       ...criterion("1.2", ["available", "locked", "locked", "locked", "locked"], [T(0)]),
     ];
-    expect(isFirstRun({ candidates, verifiedTotal: 0, evidenceCount: 0 })).toBe(true);
+    expect(journeyPresentation({ candidates, verifiedTotal: 0, evidenceCount: 0 })).toBe("first_run");
   });
 
   it("an opened task ends first-run", () => {
     const candidates = [
       ...criterion("1.1", ["in_progress", "locked", "locked", "locked", "locked"], [T(1)]),
     ];
-    expect(isFirstRun({ candidates, verifiedTotal: 0, evidenceCount: 0 })).toBe(false);
+    expect(journeyPresentation({ candidates, verifiedTotal: 0, evidenceCount: 0 })).toBe("mid_program");
   });
 
   it("any evidence ends first-run even before a transition", () => {
     const candidates = [
       ...criterion("1.1", ["available", "locked", "locked", "locked", "locked"], [T(0)]),
     ];
-    expect(isFirstRun({ candidates, verifiedTotal: 0, evidenceCount: 1 })).toBe(false);
+    expect(journeyPresentation({ candidates, verifiedTotal: 0, evidenceCount: 1 })).toBe("mid_program");
   });
 
   it("any verified task ends first-run", () => {
     const candidates = [
       ...criterion("1.1", ["verified", "available", "locked", "locked", "locked"], [T(0), T(1)]),
     ];
-    expect(isFirstRun({ candidates, verifiedTotal: 1, evidenceCount: 0 })).toBe(false);
+    expect(journeyPresentation({ candidates, verifiedTotal: 1, evidenceCount: 0 })).toBe("mid_program");
   });
 
-  it("an empty candidate list is first-run (provisioning not yet materialized)", () => {
-    expect(isFirstRun({ candidates: [], verifiedTotal: 0, evidenceCount: 0 })).toBe(true);
+  it("EVERY task locked → not_ready, never a healthy-looking day one (stranded-student shape)", () => {
+    // A partially-failed ensureStudentProgress run leaves rows all-locked with
+    // nothing clickable; rendering FirstRunHero would look intentional.
+    const candidates = [
+      ...criterion("1.1", ["locked", "locked", "locked", "locked", "locked"]),
+      ...criterion("1.2", ["locked", "locked", "locked", "locked", "locked"]),
+    ];
+    expect(journeyPresentation({ candidates, verifiedTotal: 0, evidenceCount: 0 })).toBe("not_ready");
+  });
+
+  it("an empty candidate list is not_ready (progress never materialized)", () => {
+    expect(journeyPresentation({ candidates: [], verifiedTotal: 0, evidenceCount: 0 })).toBe("not_ready");
   });
 });
 
@@ -493,10 +523,178 @@ describe("unwrapActionResult", () => {
       reason: "action_failed",
       message: "That password doesn't match.",
     });
+    // A failure with no error text still fails — no message field, no success.
+    expect(unwrapActionResult({ success: false })).toEqual({ ok: false, reason: "action_failed" });
   });
 
   it("an unrecognized shape fails closed", () => {
     expect(unwrapActionResult({} as never)).toEqual({ ok: false, reason: "action_failed" });
     expect(unwrapActionResult(null as never)).toEqual({ ok: false, reason: "action_failed" });
+  });
+});
+
+/* -------------------------------------------- review-pass extractions (Unit 14) */
+
+function miniProgram(): DeepReadonly<ProgramContent> {
+  return {
+    versionId: "test",
+    phases: [
+      {
+        num: "01",
+        key: "SELL",
+        subtitle: "s",
+        seq: 1,
+        criteria: [
+          {
+            id: "1.1",
+            seq: 1,
+            passCriterion: "Pitch: no notes",
+            tasks: [
+              { id: "1.1.1", seq: 1, title: "a", body: "b", doneWhen: "d", bandVariants: {}, completesCriterion: false },
+              { id: "1.1.2", seq: 2, title: "a2", body: "b2", doneWhen: "d2", bandVariants: {}, completesCriterion: true },
+            ],
+          },
+        ],
+      },
+    ],
+  } as DeepReadonly<ProgramContent>;
+}
+
+describe("resolveTaskInProgram — the not-found contract the pages map to 404", () => {
+  it("resolves a known task with its phase and criterion", () => {
+    const hit = resolveTaskInProgram(miniProgram(), "1.1.2");
+    expect(hit).not.toBeNull();
+    expect(hit!.phase.num).toBe("01");
+    expect(hit!.criterion.id).toBe("1.1");
+    expect(hit!.task.title).toBe("a2");
+  });
+
+  it("a well-formed but absent task id returns null (removed/renumbered content)", () => {
+    expect(resolveTaskInProgram(miniProgram(), "1.1.9")).toBeNull();
+  });
+
+  it("a criterion absent from the program returns null", () => {
+    expect(resolveTaskInProgram(miniProgram(), "9.9.1")).toBeNull();
+  });
+});
+
+describe("resolveCriterionNow — the current step within one criterion", () => {
+  const scoped = [
+    ...criterion("1.1", ["verified", "in_progress", "locked", "locked", "locked"], [T(1), T(2)]),
+  ];
+
+  it("the journey-wide Now wins when it lives in this criterion", () => {
+    expect(resolveCriterionNow("1.1.2", scoped)).toBe("1.1.2");
+  });
+
+  it("a journey Now living elsewhere falls back to the criterion's own selection", () => {
+    expect(resolveCriterionNow("2.3.1", scoped)).toBe("1.1.2");
+  });
+
+  it("neither applies → null (everything verified or locked)", () => {
+    const done = criterion("1.1", ["verified", "verified", "verified", "verified", "verified"]);
+    expect(resolveCriterionNow(null, done)).toBeNull();
+  });
+});
+
+describe("latestReviewStateByCriterion", () => {
+  it("highest attempt wins regardless of input order", () => {
+    const { states, dropped } = latestReviewStateByCriterion([
+      { scopeId: "1.1", attempt: 2, state: "returned" },
+      { scopeId: "1.1", attempt: 3, state: "review_underway" },
+      { scopeId: "1.1", attempt: 1, state: "cleared" },
+      { scopeId: "1.2", attempt: 1, state: "review_underway" },
+    ]);
+    expect(states).toEqual({ "1.1": "review_underway", "1.2": "review_underway" });
+    expect(dropped).toEqual([]);
+  });
+
+  it("an unrecognized state is dropped fail-closed and reported, never coerced", () => {
+    const { states, dropped } = latestReviewStateByCriterion([
+      { scopeId: "1.1", attempt: 1, state: "cleared" },
+      { scopeId: "1.2", attempt: 1, state: "garbage" },
+    ]);
+    expect(states).toEqual({ "1.1": "cleared" });
+    expect(dropped).toEqual(["1.2:garbage"]);
+  });
+});
+
+describe("decisionFromEvents — the reviewer's words on the task page", () => {
+  it("a verify with a comment renders as verified", () => {
+    expect(decisionFromEvents([{ transition: "verify", note: "Real sale, Maya." }])).toEqual({
+      kind: "verified",
+      note: "Real sale, Maya.",
+    });
+  });
+
+  it("a not_yet note renders as not_yet", () => {
+    expect(decisionFromEvents([{ transition: "not_yet", note: "Add the date." }])).toEqual({
+      kind: "not_yet",
+      note: "Add the date.",
+    });
+  });
+
+  it("a REVOKE surfaces its note as the not-yet explanation (correctness review)", () => {
+    expect(
+      decisionFromEvents([
+        { transition: "revoke", note: "Reopening — let's redo the log." },
+        { transition: "verify", note: "Stale old praise." },
+      ])
+    ).toEqual({ kind: "not_yet", note: "Reopening — let's redo the log." });
+  });
+
+  it("a noteless latest decision shows NOTHING — never a stale older note", () => {
+    expect(
+      decisionFromEvents([
+        { transition: "revoke", note: null },
+        { transition: "verify", note: "Old praise." },
+      ])
+    ).toBeNull();
+  });
+
+  it("non-decision transitions are skipped", () => {
+    expect(
+      decisionFromEvents([
+        { transition: "submit", note: null },
+        { transition: "verify", note: "Nice." },
+      ])
+    ).toEqual({ kind: "verified", note: "Nice." });
+  });
+
+  it("no decisions at all → null", () => {
+    expect(decisionFromEvents([])).toBeNull();
+  });
+});
+
+describe("transition choreography (state → required sequence)", () => {
+  it("submit from available opens first; from not_yet resumes first; else nothing", () => {
+    expect(transitionsBeforeSubmit("available")).toEqual(["open"]);
+    expect(transitionsBeforeSubmit("not_yet")).toEqual(["resume"]);
+    expect(transitionsBeforeSubmit("in_progress")).toEqual([]);
+    expect(transitionsBeforeSubmit("submitted")).toEqual([]);
+    expect(transitionsBeforeSubmit("verified")).toEqual([]);
+    expect(transitionsBeforeSubmit("locked")).toEqual([]);
+  });
+
+  it("capture touches the state the same way (opened / evidence added)", () => {
+    expect(transitionsAfterCapture("available")).toEqual(["open"]);
+    expect(transitionsAfterCapture("not_yet")).toEqual(["resume"]);
+    expect(transitionsAfterCapture("in_progress")).toEqual([]);
+  });
+});
+
+describe("derivePhaseViews — revoke-across-phases semantics (pinned)", () => {
+  it("a later fully-verified phase STAYS complete when an earlier phase reopens", () => {
+    // Earned progress is never retroactively hidden (D23 posture).
+    const phase = (id: string, criteria: Parameters<typeof deriveCriterionView>[0][]) => ({
+      id,
+      criteria: criteria.map(deriveCriterionView),
+    });
+    const views = derivePhaseViews([
+      phase("01", [{ id: "1.1", taskStates: ["verified", "not_yet", "verified", "verified", "verified"], review: "returned" }]),
+      phase("02", [{ id: "2.1", taskStates: ["verified", "verified", "verified", "verified", "verified"], review: "cleared" }]),
+    ]);
+    expect(views[0]).toMatchObject({ status: "active" });
+    expect(views[1]).toMatchObject({ status: "complete" });
   });
 });

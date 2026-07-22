@@ -252,23 +252,26 @@ export async function insertEvidenceItem(
 }
 
 /** Upsert a log-table evidence row (kind='log'). ON CONFLICT (id) updates the rows
- *  — a log is edited in place until the task latches (the action gates that). */
+ *  — a log is edited in place until the task latches (the action gates that).
+ *
+ *  `caption` is written ONLY when the caller supplied one (`undefined` = leave
+ *  it alone). LogTable's save never sends a caption, and a full-row overwrite
+ *  here would deterministically wipe whatever `editEvidenceCaption` set — the
+ *  Unit 14 adversarial review's guaranteed lost-update. */
 export async function upsertLogEvidence(
   db: Db,
-  p: { id: string; taskProgressId: string; studentId: string; rows: unknown[]; caption: string | null }
+  p: { id: string; taskProgressId: string; studentId: string; rows: unknown[]; caption?: string | null }
 ): Promise<void> {
-  const { error } = await db.from("path_evidence_items").upsert(
-    {
-      id: p.id,
-      task_progress_id: p.taskProgressId,
-      student_id: p.studentId,
-      kind: "log",
-      log_data: p.rows,
-      caption: p.caption,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
+  const payload: Record<string, unknown> = {
+    id: p.id,
+    task_progress_id: p.taskProgressId,
+    student_id: p.studentId,
+    kind: "log",
+    log_data: p.rows,
+    updated_at: new Date().toISOString(),
+  };
+  if (p.caption !== undefined) payload.caption = p.caption;
+  const { error } = await db.from("path_evidence_items").upsert(payload, { onConflict: "id" });
   if (error) throw new Error(`upsertLogEvidence(${p.id}) failed: ${error.message}`);
 }
 
@@ -390,53 +393,61 @@ export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise
   if (error) throw new Error(`loadEvidenceViews(${taskProgressId}) failed: ${error.message}`);
 
   const nowMs = Date.now();
-  const out: EvidenceReadRow[] = [];
-  for (const r of data ?? []) {
-    const kind = r.kind;
-    if (!isEvidenceKind(kind)) {
-      console.error(`[path/evidence] dropped row ${String(r.id)} with unrecognized kind ${String(kind)}`);
-      continue;
-    }
-    const redactedAt = (r.redacted_at as string | null) ?? null;
+  // Items resolve CONCURRENTLY — a same-session batch of uploads shares one
+  // expiry window, so the remint case is the common one, and a serial loop
+  // would pay 2N sequential Storage round trips on exactly that page load
+  // (Unit 14 performance/reliability reviews). freshSignedUrl isolates its own
+  // failures, so parallelizing changes latency, never failure semantics.
+  const out = await Promise.all(
+    (data ?? []).map(async (r): Promise<EvidenceReadRow | null> => {
+      const kind = r.kind;
+      if (!isEvidenceKind(kind)) {
+        console.error(`[path/evidence] dropped row ${String(r.id)} with unrecognized kind ${String(kind)}`);
+        return null;
+      }
+      const redactedAt = (r.redacted_at as string | null) ?? null;
 
-    let url: string | null = null;
-    let posterUrl: string | null = null;
-    if (!redactedAt) {
-      url = await freshSignedUrl(db, {
-        evidenceId: r.id as string,
-        objectPath: (r.object_path as string | null) ?? null,
-        storedUrl: (r.signed_url as string | null) ?? null,
-        storedExpiresAt: (r.signed_url_expires_at as string | null) ?? null,
-        urlColumn: "signed_url",
-        expiryColumn: "signed_url_expires_at",
-        nowMs,
-      });
-      posterUrl = await freshSignedUrl(db, {
-        evidenceId: r.id as string,
-        objectPath: (r.poster_object_path as string | null) ?? null,
-        storedUrl: (r.poster_signed_url as string | null) ?? null,
-        storedExpiresAt: (r.poster_signed_url_expires_at as string | null) ?? null,
-        urlColumn: "poster_signed_url",
-        expiryColumn: "poster_signed_url_expires_at",
-        nowMs,
-      });
-    }
+      let url: string | null = null;
+      let posterUrl: string | null = null;
+      if (!redactedAt) {
+        [url, posterUrl] = await Promise.all([
+          freshSignedUrl(db, {
+            evidenceId: r.id as string,
+            objectPath: (r.object_path as string | null) ?? null,
+            storedUrl: (r.signed_url as string | null) ?? null,
+            storedExpiresAt: (r.signed_url_expires_at as string | null) ?? null,
+            urlColumn: "signed_url",
+            expiryColumn: "signed_url_expires_at",
+            nowMs,
+          }),
+          freshSignedUrl(db, {
+            evidenceId: r.id as string,
+            objectPath: (r.poster_object_path as string | null) ?? null,
+            storedUrl: (r.poster_signed_url as string | null) ?? null,
+            storedExpiresAt: (r.poster_signed_url_expires_at as string | null) ?? null,
+            urlColumn: "poster_signed_url",
+            expiryColumn: "poster_signed_url_expires_at",
+            nowMs,
+          }),
+        ]);
+      }
 
-    out.push({
-      id: r.id as string,
-      kind,
-      url,
-      posterUrl,
-      contentType: (r.content_type as string | null) ?? null,
-      caption: (r.caption as string | null) ?? null,
-      linkUrl: (r.link_url as string | null) ?? null,
-      logRows: Array.isArray(r.log_data) ? (r.log_data as Record<string, unknown>[]) : [],
-      redactedAt,
-      addedAfterVerification: r.added_after_verification === true,
-      createdAt: r.created_at as string,
-    });
-  }
-  return out;
+      return {
+        id: r.id as string,
+        kind,
+        url,
+        posterUrl,
+        contentType: (r.content_type as string | null) ?? null,
+        caption: (r.caption as string | null) ?? null,
+        linkUrl: (r.link_url as string | null) ?? null,
+        logRows: Array.isArray(r.log_data) ? (r.log_data as Record<string, unknown>[]) : [],
+        redactedAt,
+        addedAfterVerification: r.added_after_verification === true,
+        createdAt: r.created_at as string,
+      };
+    })
+  );
+  return out.filter((r): r is EvidenceReadRow => r !== null);
 }
 
 /** Reuse the stored signed URL, or remint near expiry and PERSIST the new one.

@@ -18,8 +18,9 @@ import { cn } from "@/app/path/components/system/cn";
 import { Icon } from "@/app/path/components/system/Icon";
 import { ProgressMeter } from "@/app/path/components/system/ProgressMeter";
 import { phaseByKey, phaseColor, phaseColorAlpha } from "@/app/path/components/system/phases";
-import { FirstRunHero, NoOpenTasks } from "@/app/path/components/EmptyStates";
-import type { JourneyPhaseCard, NowCardData } from "./journey-view-types";
+import { FirstRunHero, JourneyNotReady, NoOpenTasks } from "@/app/path/components/EmptyStates";
+import type { JourneyPhaseCard, NowCardData } from "@/app/path/lib/journey-view-types";
+import type { JourneyPresentation } from "@/app/path/lib/now-card-rules";
 
 function LandmarkPip({
   n,
@@ -69,7 +70,7 @@ export function TrailTerritoryMap({
   gradeLabel,
   verifiedTotal,
   totalTasks,
-  firstRun,
+  presentation,
   now,
   phases,
 }: {
@@ -77,7 +78,7 @@ export function TrailTerritoryMap({
   gradeLabel: string | null;
   verifiedTotal: number;
   totalTasks: number;
-  firstRun: boolean;
+  presentation: JourneyPresentation;
   now: NowCardData | null;
   phases: JourneyPhaseCard[];
 }) {
@@ -112,7 +113,8 @@ export function TrailTerritoryMap({
         <ProgressMeter value={verifiedTotal} total={totalTasks} label="stamped" />
       </div>
 
-      {firstRun && firstCriterion && (
+      {presentation === "not_ready" && <JourneyNotReady skin="trail" firstName={firstName} />}
+      {presentation === "first_run" && firstCriterion && (
         <FirstRunHero
           skin="trail"
           firstName={firstName}

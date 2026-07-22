@@ -1,19 +1,28 @@
 "use server";
 
 /**
- * The Path evidence Server Actions (T1 Unit 10). The CONFIRM step Unit 9's
- * uploader hands its stored object up to (`onUploaded` → an EvidenceItem row),
- * plus the log-table, link-overflow, delete, and redaction actions. Same canon as
- * every other Path action: gate → zod → authorize/decide (pure) → fail-loud I/O →
- * typed result. Bodies never throw from their own logic — `requirePathUser` may
- * `redirect()` (a control-flow throw a client caller still wraps in
- * try/catch/finally), and loaders throw on I/O errors, which these CATCH and map
- * to a typed `unavailable`.
+ * The Path evidence Server Actions (T1 Unit 10; first mounted by Unit 14's
+ * task surface). The CONFIRM step Unit 9's uploader hands its stored object up
+ * to (`onUploaded` → an EvidenceItem row), plus the log-table, link-overflow,
+ * caption-edit, delete, and redaction actions. Same canon as every other Path
+ * action: gate → zod → authorize/decide (pure) → fail-loud I/O → typed result.
+ * Bodies never throw from their own logic — `requirePathUser` may `redirect()`
+ * (a control-flow throw a client caller still wraps in try/catch/finally), and
+ * loaders throw on I/O errors, which these CATCH and map to a typed
+ * `unavailable`.
  *
- * No caller exists yet (the surfaces land in Unit 14; student sessions in Unit 6);
- * this establishes the contract they consume. The table's shape and constraints
- * were verified against production with a manual rolled-back DO-block (the Unit 8/9
- * pattern); the pure decisions these actions delegate to are unit-tested.
+ * CALLER CHOREOGRAPHY (agent-native review): a successful confirm/link/log on
+ * a task in `available` or `not_yet` should be followed by the matching
+ * `applyTransition` from `transitionsAfterCapture(state)` (now-card-rules) —
+ * the state diagram's "opened / evidence added". The UI does this in
+ * TaskSurface; a direct caller that skips it leaves the task's state behind
+ * its evidence.
+ *
+ * DELIBERATE STATE POSTURE (Decision 10: evidence always attaches): these
+ * actions do not refuse by task state below the append-only latch. Evidence
+ * arriving while a task sits `submitted`/in review is legal — Unit 12's review
+ * surface derives "arrived after the review opened" from `created_at` vs
+ * `review_opened_at` (no extra column needed) and renders it to the reviewer.
  */
 
 import { z } from "zod";
@@ -56,11 +65,18 @@ function safeIso(s: string | undefined): string | null {
   return Number.isNaN(Date.parse(s)) ? null : s;
 }
 
-/** An object path must live under the resolved student's own folder — the last
- *  line of defense against a forged path pointing at another child's evidence
- *  (the folder-1 segment is what the storage RLS keys on). */
-function underStudentFolder(objectPath: string, sid: string): boolean {
-  return objectPath.startsWith(`${sid}/`);
+/**
+ * An object path must live under THIS evidence item's own folder —
+ * `{studentId}/{evidenceId}/…`, exactly the shape the slot mint issues. The
+ * student-folder prefix alone is NOT enough (Unit 14 adversarial review): a
+ * forged posterObjectPath aliasing a DIFFERENT evidence row's object (same
+ * student folder) would let the pre-verification delete carve-out physically
+ * destroy a VERIFIED item's media via the alias. Binding both paths to the
+ * confirming evidenceId closes that structurally — each id is a unique PK, so
+ * no two rows can ever reference the same folder.
+ */
+function underEvidenceFolder(objectPath: string, sid: string, evidenceId: string): boolean {
+  return objectPath.startsWith(`${sid}/${evidenceId}/`);
 }
 
 // ── confirm an uploaded object (photo/video/audio/document) ─────────────────────
@@ -126,9 +142,12 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
   if (!canCaptureEvidence(grants, { studentId: student.studentId, familyId: student.familyId })) {
     return { ok: false, reason: "forbidden" };
   }
-  // Paths must sit under this student's folder (defense against a forged path).
-  if (!underStudentFolder(p.objectPath, student.studentId)) return { ok: false, reason: "forbidden" };
-  if (p.posterObjectPath && !underStudentFolder(p.posterObjectPath, student.studentId)) {
+  // Paths must sit under THIS evidence item's own folder (defense against a
+  // forged path aliasing another row's object — see underEvidenceFolder).
+  if (!underEvidenceFolder(p.objectPath, student.studentId, p.evidenceId)) {
+    return { ok: false, reason: "forbidden" };
+  }
+  if (p.posterObjectPath && !underEvidenceFolder(p.posterObjectPath, student.studentId, p.evidenceId)) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -178,15 +197,22 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
   // expiry — never minted per render). The poster frame gets its own (Unit 14):
   // a video row always carries a renderable thumbnail without a per-render mint.
   let minted;
-  let posterMinted: { signedUrl: string; expiresAtMs: number } | null = null;
   try {
     minted = await mintSignedDownloadUrl(db, p.objectPath);
-    if (p.posterObjectPath) {
-      posterMinted = await mintSignedDownloadUrl(db, p.posterObjectPath);
-    }
   } catch (e) {
     console.error(`[path/confirm] signed-url mint failed for ${p.objectPath}:`, e);
     return { ok: false, reason: "unavailable" };
+  }
+  // Poster mint is BEST-EFFORT: a transient poster-side hiccup must never
+  // refuse an otherwise-valid confirm (the clip is the evidence; the read
+  // loader remints a missing poster URL on demand).
+  let posterMinted: { signedUrl: string; expiresAtMs: number } | null = null;
+  if (p.posterObjectPath) {
+    try {
+      posterMinted = await mintSignedDownloadUrl(db, p.posterObjectPath);
+    } catch (e) {
+      console.error(`[path/confirm] poster mint failed for ${p.posterObjectPath} (non-fatal):`, e);
+    }
   }
 
   let inserted;
@@ -307,7 +333,10 @@ export async function saveLogEvidence(input: unknown): Promise<SaveLogResult> {
       taskProgressId,
       studentId: student.studentId,
       rows: p.rows,
-      caption: p.caption ?? null,
+      // undefined = leave the stored caption alone (LogTable saves rows only;
+      // clobbering here would erase what editEvidenceCaption set — Unit 14
+      // adversarial review's deterministic lost-update).
+      caption: p.caption,
     });
   } catch (e) {
     console.error(`[path/log] upsert failed for ${p.evidenceId}:`, e);

@@ -96,6 +96,33 @@ export function EmptyEvidence({ skin }: { skin: Skin }) {
   );
 }
 
+/**
+ * Rendered when the journey has NO available tasks at all (the provisioning
+ * materialization hasn't run or failed) — an honest "being set up" card, never
+ * a healthy-looking day one with zero clickable steps (Unit 14 reliability
+ * review: the stranded-student shape must be distinguishable).
+ */
+export function JourneyNotReady({ skin, firstName }: { skin: Skin; firstName: string }) {
+  const trail = skin === "trail";
+  return (
+    <section
+      className={cn(
+        "mb-5 rounded-[20px] border-2 p-5",
+        trail ? "border-trail-mist bg-trail-surface" : "rounded-2xl border-hq-border bg-hq-canvas shadow-hq"
+      )}
+    >
+      <h2 className={cn("font-path-display text-xl font-semibold", trail ? "text-trail-ink" : "text-hq-ink")}>
+        {firstName ? `Almost ready, ${firstName}.` : "Almost ready."}
+      </h2>
+      <p className={cn("mt-2 font-path-body text-sm leading-relaxed", trail ? "text-trail-ink-soft" : "text-hq-ink-soft")}>
+        {trail
+          ? "Your map is still being drawn. Check back in a little while — if it stays like this, tell a parent."
+          : "Your Path is still being set up. Check back shortly — if this doesn't clear, ask a parent to get in touch."}
+      </p>
+    </section>
+  );
+}
+
 /** Rendered when no task is open at all (e.g. everything submitted at a phase
  *  boundary while reviews run) — states the situation, never a blank card. */
 export function NoOpenTasks({ skin }: { skin: Skin }) {

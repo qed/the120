@@ -10,18 +10,15 @@
  * here, same posture as Unit 9/10's actions). The machine-bound seed script
  * reaches the same core directly with the service-role key.
  *
- * ⚠️ T1 TRUST BOUNDARY — a Unit 15 BLOCKER, not just a note. Authority is
- * checked against the client-supplied familyId (isParentOfFamily); nothing
- * DB-side proves the supplied childId "belongs to" that family. A signed-in
- * parent could therefore pair their own familyId with ANY child row in the
- * shared public.children roster and provision it into their family — permanently
- * squatting that child (the unique child_id makes it un-reprovisionable by the
- * real family). This is bounded TODAY only because parent accounts + grants
- * exist solely via the machine-bound seed script (no self-serve parent signup),
- * so every caller is a staff-provisioned, consenting test family. **Unit 15 MUST
- * add the CRM-side childId↔family ownership check before it opens any parent
- * self-serve entry — this is a hard gate, recorded in the plan's Unit 15
- * carry-forwards and flagged by the Unit 6 security review.**
+ * TRUST BOUNDARY — closed by Unit 15 (the Unit 6 security review's hard gate).
+ * Authority here is still checked against the client-supplied familyId
+ * (isParentOfFamily), but the shared core now enforces the CRM-side ownership
+ * check: the child's roster parent (children.parent_id) must hold a
+ * parent/family grant for that same family, or provisionStudent refuses
+ * `child_not_in_family` before any write. A signed-in parent can therefore no
+ * longer pair their own familyId with a foreign childId and squat it. The gate
+ * lives in provision-core (not here) so every caller passes through it; the
+ * pure verdict is onboarding-rules.childFamilyVerdict, tested both sides.
  */
 
 import { z } from "zod";
@@ -78,6 +75,22 @@ export async function provisionStudentAction(
       return {
         success: false,
         error: "This child has no name on the roster yet — add it before creating their account.",
+      };
+    case "child_not_in_family":
+      return {
+        success: false,
+        error: "That child isn't on your family's roster.",
+      };
+    case "child_grade_missing":
+      return {
+        success: false,
+        error:
+          "This child has no grade on the roster yet — add it first, so The Path can set their band.",
+      };
+    case "child_grade_out_of_range":
+      return {
+        success: false,
+        error: "The Path covers Grades 3–12 — this child's roster grade is outside that range.",
       };
     case "already_provisioned":
       return { success: false, error: "This child already has a Path account." };

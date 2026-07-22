@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { signOutPath } from "@/app/path/lib/actions/sign-out";
@@ -30,21 +31,20 @@ export default async function PathJourneyPage() {
   const db = supabaseAdmin();
   const self = await resolveStudentSelf(db, grants);
 
-  // A signed-in non-student: a parent (their surfaces are Unit 15) or a
-  // grant-less anomaly requirePathUser already 404'd. Keep Unit 6's message.
+  // A signed-in non-student: a parent goes to their family dashboard
+  // (Unit 15); a grant-less anomaly requirePathUser already 404'd.
   if (!self) {
     const isParent = grants.some((g) => g.role === "parent" && g.scopeType === "family");
+    if (isParent) redirect("/path/family");
     return (
       <main className="flex min-h-screen flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-md rounded-2xl border border-hq-border bg-hq-surface p-8 shadow-hq sm:p-10">
           <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">The 120</p>
           <h1 className="mt-2 font-path-display text-3xl font-semibold tracking-tight text-hq-ink">
-            {isParent ? "You're signed in." : "The Path"}
+            The Path
           </h1>
           <p className="mt-3 font-path-body text-sm leading-6 text-hq-ink-soft">
-            {isParent
-              ? "The family tools — adding a founder, reviewing work — are being built and arrive here soon."
-              : "Your account is set up, but there's nothing here for it yet."}
+            Your account is set up, but there&apos;s nothing here for it yet.
           </p>
           <form action={signOutPath} className="mt-8">
             <Button type="submit" skin="hq" variant="secondary" size="md">

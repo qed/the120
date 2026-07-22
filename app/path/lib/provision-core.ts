@@ -10,16 +10,30 @@
  * best-practices/shared-db-taking-core-must-not-live-in-a-use-server-file-…
  * and …/server-only-import-breaks-tsx-scripts-plain-core-re-export-….
  *
- * What provisioning does, in order (all decisions live in provision-rules.ts):
+ * What provisioning does, in order (all decisions live in provision-rules.ts
+ * and onboarding-rules.ts):
  *   1. load the roster child (public.children stays authoritative, R31);
- *   2. refuse if a profile already links this child (unique child_id);
- *   3. resolve the CURRENT program version (Unit 4's is_current) — the D27 pin,
+ *   2. the family must exist;
+ *   3. THE OWNERSHIP HARD GATE (Unit 15; Unit 6 security review P1): the
+ *      child's CRM parent (children.parent_id, which IS an auth user id) must
+ *      hold a parent/family grant for the supplied familyId. Without this a
+ *      signed-in parent could pair their own familyId with ANY roster child
+ *      and permanently squat it. Enforced HERE in the shared core — not only
+ *      in the action — so every caller (parent action, staff, scripts) passes
+ *      through it;
+ *   4. refuse if a profile already links this child (unique child_id);
+ *   5. refuse a band-less grade (null or out of range) with a SPECIFIC reason —
+ *      the decided Unit 15 UX is refuse-and-tell, never a silently-recorded
+ *      default band (ensureStudentProgress's no_band refusal stays as
+ *      defense-in-depth but is now unreachable via provisioning);
+ *   6. resolve the CURRENT program version (Unit 4's is_current) — the D27 pin,
  *      set here and never touched by content deploys; NO fallback if none;
- *   4. enforce the R29 password floor;
- *   5. admin.createUser with buildStudentCreateUserPayload — which carries the
+ *   7. enforce the R29 password floor;
+ *   8. admin.createUser with buildStudentCreateUserPayload — which carries the
  *      mandatory email_confirm: true (the lockout flag; see provision-rules);
- *   6. insert the profile row (pinned version, family, optional cohort);
- *   7. upsert the two-grant pair (self + family membership).
+ *   9. insert the profile row (pinned version, family, optional cohort);
+ *  10. upsert the two-grant pair (self + family membership);
+ *  11. materialize the initial progress rows (ensureStudentProgress).
  *
  * Partial-failure posture: every step is idempotent-or-repairable, so a re-run
  * COMPLETES a stranded provisioning instead of wedging against it — an
@@ -40,6 +54,7 @@ import {
   type SeedCriterionRow,
   type SeedTaskRow,
 } from "./progress-core";
+import { bandVerdictForGrade, childFamilyVerdict } from "./onboarding-rules";
 import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
@@ -64,6 +79,9 @@ export type ProvisionStudentResult =
       reason:
         | "child_not_found"
         | "child_name_missing"
+        | "child_not_in_family"
+        | "child_grade_missing"
+        | "child_grade_out_of_range"
         | "family_not_found"
         | "already_provisioned"
         | "no_current_program_version"
@@ -78,8 +96,13 @@ export async function provisionStudent(
   const { childId, familyId, password } = input;
   const cohortId = input.cohortId ?? null;
 
-  // 1. The authoritative roster row — name and grade live here, never copied.
-  const childRes = await db.from("children").select("id, first_name").eq("id", childId).maybeSingle();
+  // 1. The authoritative roster row — name, grade, and the CRM parent linkage
+  // live here, never copied.
+  const childRes = await db
+    .from("children")
+    .select("id, first_name, grade, parent_id")
+    .eq("id", childId)
+    .maybeSingle();
   if (childRes.error) {
     console.error(`[path/provision] child load failed for ${childId}: ${childRes.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -94,7 +117,43 @@ export async function provisionStudent(
   // reported as success. Fail loudly at provisioning instead (Unit 6 review).
   if (firstName.trim().length === 0) return { ok: false, reason: "child_name_missing" };
 
-  // 2. One profile per child, ever (unique child_id backs this check under race).
+  // 2. The family must exist before we mint an account into it.
+  const family = await db.from("path_families").select("id").eq("id", familyId).maybeSingle();
+  if (family.error) {
+    console.error(`[path/provision] family load failed for ${familyId}: ${family.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!family.data) return { ok: false, reason: "family_not_found" };
+
+  // 3. THE OWNERSHIP HARD GATE (Unit 15; closes Unit 6's security P1). The
+  // child's CRM parent — children.parent_id, which IS an auth user id
+  // (public.parents.id references auth.users) — must hold a parent/family
+  // grant for THIS family. Keyed on the CHILD's parent, not the caller, so an
+  // invited co-parent can provision while an outsider pairing their own
+  // familyId with a foreign childId is refused BEFORE any probe reveals
+  // whether that child is provisioned. Runs before every write.
+  const familyParents = await db
+    .from("path_role_grants")
+    .select("user_id")
+    .eq("role", "parent")
+    .eq("scope_type", "family")
+    .eq("scope_id", familyId);
+  if (familyParents.error) {
+    console.error(
+      `[path/provision] family parent grants load failed for ${familyId}: ${familyParents.error.message}`
+    );
+    return { ok: false, reason: "unavailable" };
+  }
+  const childParentUserId =
+    typeof childRes.data.parent_id === "string" ? childRes.data.parent_id : null;
+  const familyParentUserIds = (familyParents.data ?? [])
+    .map((r) => r.user_id)
+    .filter((id): id is string => typeof id === "string");
+  if (childFamilyVerdict({ childParentUserId, familyParentUserIds }) !== "ok") {
+    return { ok: false, reason: "child_not_in_family" };
+  }
+
+  // 4. One profile per child, ever (unique child_id backs this check under race).
   const existing = await db
     .from("path_student_profiles")
     .select("id")
@@ -106,15 +165,20 @@ export async function provisionStudent(
   }
   if (existing.data) return { ok: false, reason: "already_provisioned" };
 
-  // 3. The family must exist before we mint an account into it.
-  const family = await db.from("path_families").select("id").eq("id", familyId).maybeSingle();
-  if (family.error) {
-    console.error(`[path/provision] family load failed for ${familyId}: ${family.error.message}`);
-    return { ok: false, reason: "unavailable" };
+  // 5. The band gate (Unit 15's decided UX): a grade The Path has no band for
+  // refuses NOW, with a specific reason, before any account exists — never a
+  // silently-recorded default. Runs after the dup probe so a provisioned child
+  // whose grade was later nulled still reads already_provisioned.
+  const grade = typeof childRes.data.grade === "number" ? childRes.data.grade : null;
+  const bandVerdict = bandVerdictForGrade(grade);
+  if (!bandVerdict.ok) {
+    return {
+      ok: false,
+      reason: bandVerdict.reason === "no_grade" ? "child_grade_missing" : "child_grade_out_of_range",
+    };
   }
-  if (!family.data) return { ok: false, reason: "family_not_found" };
 
-  // 4. The D27 pin: the currently-designated version, resolved NOW, immutable
+  // 6. The D27 pin: the currently-designated version, resolved NOW, immutable
   // after. No row → refuse loudly; a silent fallback would let a half-seeded
   // deploy pin students to nothing (the getProgram never-falls-back posture).
   const version = await db
@@ -131,11 +195,11 @@ export async function provisionStudent(
     return { ok: false, reason: "no_current_program_version" };
   }
 
-  // 5. R29 floor — the child's own name is the most guessable string around.
+  // 7. R29 floor — the child's own name is the most guessable string around.
   const verdict = validateStudentPassword(password, { studentName: firstName });
   if (!verdict.ok) return { ok: false, reason: "weak_password", message: verdict.error };
 
-  // 6. The auth account, on the derived non-deliverable address. The payload
+  // 8. The auth account, on the derived non-deliverable address. The payload
   // builder pins email_confirm: true at the type level (the lockout flag).
   let user: User;
   let repaired = false;
@@ -189,7 +253,7 @@ export async function provisionStudent(
     user = created.data.user;
   }
 
-  // 7. The profile row — the D27 pin happens here.
+  // 9. The profile row — the D27 pin happens here.
   let profileId: string;
   const inserted = await db
     .from("path_student_profiles")
@@ -230,7 +294,7 @@ export async function provisionStudent(
     return { ok: false, reason: "unavailable" };
   }
 
-  // 8. The two-grant pair. Upsert-on-unique so a repair run is a no-op.
+  // 10. The two-grant pair. Upsert-on-unique so a repair run is a no-op.
   const grants = await db
     .from("path_role_grants")
     .upsert(buildStudentGrants({ userId: user.id, profileId, familyId }), {
@@ -242,7 +306,7 @@ export async function provisionStudent(
     return { ok: false, reason: "unavailable" };
   }
 
-  // 9. Materialize the student's progress rows (Unit 14): every task locked,
+  // 11. Materialize the student's progress rows (Unit 14): every task locked,
   // the first task of each first-phase criterion available with the band
   // snapshotted. Without these the transition RPC has nothing to update and no
   // task can ever open. Idempotent, so a repair run completes a stranded one.
@@ -356,6 +420,63 @@ export async function findAuthUserByEmail(
     if (hit) return hit;
     if (data.users.length < perPage) return null;
   }
+}
+
+/* ------------------------------------------------- family linkage (R31) */
+
+/**
+ * Ensure a path family exists for a CRM parent's auth user, and that the user
+ * holds its parent/family grant — the R31 linkage step. Adopt-by-grant first
+ * (the grant IS the membership truth the ownership gate reads), so a re-run is
+ * a no-op and never mints a second family for the same parent. Used by the
+ * seed script and the staff-run backfill (scripts/backfill-path-families.ts);
+ * a future staff surface can call it too. Plain-module rule as above: callers
+ * own their gate.
+ */
+export async function ensurePathFamilyForParent(
+  db: SupabaseClient,
+  input: { userId: string }
+): Promise<
+  | { ok: true; familyId: string; created: boolean }
+  | { ok: false; reason: "unavailable" }
+> {
+  const grant = await db
+    .from("path_role_grants")
+    .select("scope_id")
+    .eq("user_id", input.userId)
+    .eq("role", "parent")
+    .eq("scope_type", "family")
+    .maybeSingle();
+  if (grant.error) {
+    console.error(
+      `[path/family-link] grant probe failed for ${input.userId}: ${grant.error.message}`
+    );
+    return { ok: false, reason: "unavailable" };
+  }
+  if (typeof grant.data?.scope_id === "string") {
+    return { ok: true, familyId: grant.data.scope_id, created: false };
+  }
+
+  const fam = await db.from("path_families").insert({}).select("id").single();
+  if (fam.error || typeof fam.data?.id !== "string") {
+    console.error(
+      `[path/family-link] family insert failed for ${input.userId}: ${fam.error?.message ?? "no id"}`
+    );
+    return { ok: false, reason: "unavailable" };
+  }
+  const familyId = fam.data.id;
+
+  const grantIns = await db.from("path_role_grants").upsert(
+    [{ user_id: input.userId, role: "parent", scope_type: "family", scope_id: familyId }],
+    { onConflict: "user_id,role,scope_type,scope_id", ignoreDuplicates: true }
+  );
+  if (grantIns.error) {
+    console.error(
+      `[path/family-link] grant upsert failed for ${input.userId}: ${grantIns.error.message}`
+    );
+    return { ok: false, reason: "unavailable" };
+  }
+  return { ok: true, familyId, created: true };
 }
 
 /* -------------------------------------- initial progress materialization */

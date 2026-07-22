@@ -61,6 +61,21 @@ export const SIGN_IN_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, l
  */
 export const UPLOAD_SLOT_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 30 };
 
+/**
+ * Co-parent invite creation (Unit 15): each successful send is the counted
+ * event, keyed by the inviting user. A family has at most one co-parent to
+ * invite (R4 caps at two), so 5 / 15 min covers re-sends and typo corrections
+ * while bounding an abusive mail loop from one account.
+ */
+export const INVITE_CREATE_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 5 };
+
+/**
+ * Invite acceptance (Unit 15): keyed by client IP — the accept action is
+ * unauthenticated (the token is the credential), so this bounds token
+ * guessing. Tokens are 256-bit random, making the limit belt-and-braces.
+ */
+export const INVITE_ACCEPT_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 10 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

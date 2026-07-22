@@ -33,13 +33,23 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
-import { ensureStudentProgress, findAuthUserByEmail, provisionStudent } from "@/app/path/lib/provision-core";
+import {
+  ensurePathFamilyForParent,
+  ensureStudentProgress,
+  findAuthUserByEmail,
+  provisionStudent,
+} from "@/app/path/lib/provision-core";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";
 const PARENT_NAME = { first_name: "Path", last_name: "Testparent" };
 const TEST_CHILDREN = [
-  { first_name: "Maya", last_name: "Pathtest", grade: 4 },
-  { first_name: "Dev", last_name: "Pathtest", grade: 7 },
+  { first_name: "Maya", last_name: "Pathtest", grade: 4, rosterOnly: false },
+  { first_name: "Dev", last_name: "Pathtest", grade: 7, rosterOnly: false },
+  // Roster-only rows for Unit 15's onboarding verification: Kai is the linkable
+  // founder the browser pass provisions end-to-end (g9_12 band card); Nia is the
+  // null-grade CRM draft the link path must refuse with a specific message.
+  { first_name: "Kai", last_name: "Pathtest", grade: 9, rosterOnly: true },
+  { first_name: "Nia", last_name: "Pathtest", grade: null, rosterOnly: true },
 ] as const;
 
 const PASSWORD_FILE = path.resolve(process.cwd(), "scripts/.path-passwords.local.txt");
@@ -126,53 +136,42 @@ async function main() {
   }
 
   // 3. Roster children.
-  const childIds: { first_name: string; id: string }[] = [];
+  const childIds: { first_name: string; id: string; rosterOnly: boolean }[] = [];
   for (const child of TEST_CHILDREN) {
+    const { rosterOnly, ...row } = child;
     const existing = await db
       .from("children")
       .select("id")
       .eq("parent_id", parent.id)
-      .eq("first_name", child.first_name)
+      .eq("first_name", row.first_name)
       .maybeSingle();
     if (existing.error) throw existing.error;
     if (existing.data) {
-      childIds.push({ first_name: child.first_name, id: existing.data.id as string });
+      childIds.push({ first_name: row.first_name, id: existing.data.id as string, rosterOnly });
       continue;
     }
     const inserted = await db
       .from("children")
-      .insert({ parent_id: parent.id, ...child })
+      .insert({ parent_id: parent.id, ...row })
       .select("id")
       .single();
     if (inserted.error) throw inserted.error;
-    childIds.push({ first_name: child.first_name, id: inserted.data.id as string });
+    childIds.push({ first_name: row.first_name, id: inserted.data.id as string, rosterOnly });
   }
 
-  // 4. Path family — adopt the one the parent's grant already points at, else create.
-  let familyId: string;
-  const grant = await db
-    .from("path_role_grants")
-    .select("scope_id")
-    .eq("user_id", parent.id)
-    .eq("role", "parent")
-    .eq("scope_type", "family")
-    .maybeSingle();
-  if (grant.error) throw grant.error;
-  if (grant.data) {
-    familyId = grant.data.scope_id as string;
-  } else {
-    const fam = await db.from("path_families").insert({}).select("id").single();
-    if (fam.error) throw fam.error;
-    familyId = fam.data.id as string;
-    const grantIns = await db.from("path_role_grants").upsert(
-      { user_id: parent.id, role: "parent", scope_type: "family", scope_id: familyId },
-      { onConflict: "user_id,role,scope_type,scope_id", ignoreDuplicates: true }
-    );
-    if (grantIns.error) throw grantIns.error;
-  }
+  // 4. Path family — the shared R31 linkage helper (adopt-by-grant, else create;
+  // the same code path the staff backfill script runs).
+  const familyRes = await ensurePathFamilyForParent(db, { userId: parent.id });
+  if (!familyRes.ok) throw new Error(`path family linkage failed: ${familyRes.reason}`);
+  const familyId = familyRes.familyId;
 
-  // 5. Students, through the SHARED core.
+  // 5. Students, through the SHARED core. Roster-only children stay unprovisioned
+  // on purpose — they are Unit 15's onboarding fixtures (linkable / needs-grade).
   for (const child of childIds) {
+    if (child.rosterOnly) {
+      console.log(`${child.first_name}: roster-only fixture — left unprovisioned.`);
+      continue;
+    }
     const password = generatedPassword();
     const result = await provisionStudent(db, { childId: child.id, familyId, password });
     if (result.ok) {

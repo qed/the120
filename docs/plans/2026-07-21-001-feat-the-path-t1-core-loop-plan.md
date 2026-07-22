@@ -740,7 +740,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 13: Design foundation — tokens, fonts, and the skin architecture**
+- [x] **Unit 13: Design foundation — tokens, fonts, and the skin architecture**
 
 **Goal:** Settle Decision 9 in code before a single component is written, and land the design system both skins render through.
 
@@ -763,6 +763,13 @@ browser                    Server Action            Supabase Storage
 - Test expectation: the components themselves are not unit-testable here (no jsdom) — they are covered by the manual verification below.
 
 **Verification:** a marketing page's rendered CSS and computed fonts are unchanged; env-less `npm run build` passes; a scratch page renders the same component under both skins with visibly different tokens.
+
+**Prerequisite findings / verified state (2026-07-22):** Decision 9 confirmed against compiled output — `bg-hq-canvas` and `bg-trail-canvas` are distinct utilities and `/opacity` composes via `color-mix` on the `hsl(var(--x))` form; the two-namespace-plus-classname-swap pattern is documented at `docs/solutions/best-practices/tailwind-v4-theme-not-scopable-inline-literals-two-namespace-classname-swap-2026-07-22.md`. Decision 3 verified live — on the marketing homepage the three Path fonts report `loaded:0` with zero preload links and the body font is unchanged (Space Grotesk). Ported 9 handoff primitives (Button/StatusChip/ProgressMeter/Crest/Seal/Icon/HQTaskCard/PhaseRow/TrailStep) reusing the domain PhaseKey/Band/TaskState types + `motion/react`; `skin-tokens.ts` is the pure, test-first resolver. Env-less build passes, tsc clean, eslint clean on changed files, 1203 tests green.
+
+**Carried out of Unit 13's review, for later units** *(9-agent `/ce:review`; 0 P0/P1; in-scope P2s applied — reduced-motion on Seal/TrailStep, a non-distributive `SkinToken<S>` guard so a widened `Skin` can't smuggle a cross-namespace token, and `phases.ts` tests incl. a `--phase-*`↔globals.css channel guard):*
+- **[Unit 14]** Wire `skin-tokens.ts` into the app shells — the resolver's real consumer (choose the skin once at the subtree root; resolve neutral bg/text/border via `skinClass`; a widened `Skin` is restricted to shared tokens, so narrow to a literal for skin-specific ones). Wire the `Icon` registry into surface/nav chrome. Add `<MotionConfig reducedMotion="user">` at the shell root as defense-in-depth (Unit 13 gates Seal + TrailStep motion per-component; HQTaskCard's `layout` is auto-suppressed by motion).
+- **[Unit 14 / design]** Confirm against the handoff screenshots whether a Trail **pending Seal** and a Trail **locked Crest** should adopt `trail-mist` neutrals instead of the HQ neutrals ported verbatim from the prototype (the prototype hardcodes HQ neutrals for the unsealed/locked state in both skins — faithful port, flagged for design sign-off). Likewise whether `TrailStep` should render `not_yet` distinctly from `submitted` (the prototype conflates them into one shimmer).
+- **[Unit 14 / no-CI]** Nothing automatically guards that marketing stays font-inert, or that `skin-tokens`' `CLASS_TABLE` literals still match the compiled utilities — both are verified manually today. If CI ever lands, add a `next build` CSS-output assertion.
 
 ---
 

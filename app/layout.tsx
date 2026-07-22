@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import {
+  Space_Grotesk,
+  IBM_Plex_Mono,
+  Fraunces,
+  Inter,
+  Spline_Sans_Mono,
+} from "next/font/google";
 import "./globals.css";
 import AccountModalProvider from "@/app/components/account/AccountModalProvider";
 
@@ -16,6 +22,32 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+// The Path fonts (T1 Unit 13, plan Decision 3). `preload: false` is the whole
+// point: these are declared on the root layout so /path never triggers a full
+// page reload from a route-group split, but marketing pages — which use none of
+// the font-path-* utilities — declare the @font-face without ever FETCHING the
+// files. All three are variable fonts, so no `weight` is specified.
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
+
+const splineSansMono = Spline_Sans_Mono({
+  variable: "--font-spline-mono",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
+
 export const metadata: Metadata = {
   title: "The 120 — Toronto's most motivated and engaged kids",
   description:
@@ -30,7 +62,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`}
+      className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} ${fraunces.variable} ${inter.variable} ${splineSansMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-paper text-ink">
         <AccountModalProvider>{children}</AccountModalProvider>

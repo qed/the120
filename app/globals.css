@@ -50,6 +50,73 @@
   --font-display: var(--font-space-grotesk), "Space Grotesk", sans-serif;
   --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", monospace;
   --font-serif: Georgia, "Times New Roman", serif;
+
+  /* ============================================================
+     THE PATH — design foundation (T1 Unit 13)
+     ------------------------------------------------------------
+     /path is an authenticated app with TWO skins, HQ and Trail,
+     rendered from ONE token set. Per plan Decision 9 both skin
+     namespaces (--color-hq-* AND --color-trail-*) ship in this
+     single global block and are swapped by CLASS NAME at a subtree
+     root (bg-hq-ink vs bg-trail-ink) — NOT by overriding a CSS
+     variable under a `.trail` class. `@theme inline` compiles
+     utilities to LITERAL values, so a runtime variable override
+     would do nothing; the class-name swap IS the architecture.
+
+     Numeric values are authored once as HSL channel triplets in the
+     :root block at the foot of this file (the design handoff's
+     native format) and referenced here as hsl(var(--x)). One source
+     of truth, and it lets the ported components compose alpha at
+     runtime — hsl(var(--x) / a) inline and Tailwind's `/opacity`
+     modifier on utilities — which a flat hex value cannot. The
+     marketing tokens above stay hex and are untouched. */
+
+  /* Phase spine — constant across both skins */
+  --color-phase-sell: hsl(var(--phase-sell));
+  --color-phase-build: hsl(var(--phase-build));
+  --color-phase-validate: hsl(var(--phase-validate));
+  --color-phase-grow: hsl(var(--phase-grow));
+  --color-phase-scale: hsl(var(--phase-scale));
+
+  /* Verification semantics — Not Yet is amber, never red */
+  --color-verified: hsl(var(--verified));
+  --color-awaiting: hsl(var(--awaiting));
+  --color-not-yet: hsl(var(--not-yet));
+
+  /* Ceremony — reserved for stamps and seals */
+  --color-wax: hsl(var(--wax));
+  --color-gold-leaf: hsl(var(--gold-leaf));
+
+  /* HQ skin — the founder dashboard (ink on warm paper) */
+  --color-hq-canvas: hsl(var(--hq-canvas));
+  --color-hq-surface: hsl(var(--hq-surface));
+  --color-hq-sunken: hsl(var(--hq-sunken));
+  --color-hq-border: hsl(var(--hq-border));
+  --color-hq-border-strong: hsl(var(--hq-border-strong));
+  --color-hq-ink: hsl(var(--hq-ink));
+  --color-hq-ink-soft: hsl(var(--hq-ink-soft));
+  --color-hq-ink-muted: hsl(var(--hq-ink-muted));
+
+  /* Trail skin — the illustrated journey (ink on parchment) */
+  --color-trail-canvas: hsl(var(--trail-canvas));
+  --color-trail-surface: hsl(var(--trail-surface));
+  --color-trail-ink: hsl(var(--trail-ink));
+  --color-trail-ink-soft: hsl(var(--trail-ink-soft));
+  --color-trail-mist: hsl(var(--trail-mist));
+
+  /* Warm-tinted shadows (never neutral) */
+  --shadow-hq: 0 1px 2px rgb(30 24 16 / 0.04), 0 1px 3px rgb(30 24 16 / 0.06);
+  --shadow-hq-lg: 0 4px 12px rgb(30 24 16 / 0.06), 0 12px 32px rgb(30 24 16 / 0.08);
+  --shadow-trail: 0 2px 0 rgb(120 80 40 / 0.12), 0 8px 24px rgb(120 80 40 / 0.14);
+
+  /* The Path fonts — declared on the root layout with preload:false,
+     so marketing pages declare but never fetch them (Decision 3).
+     next/font sets --font-fraunces/--font-inter/--font-spline-mono on
+     <html>; these role tokens reference them, mirroring the marketing
+     --font-display → --font-space-grotesk pattern above. */
+  --font-path-display: var(--font-fraunces), "Fraunces", Georgia, serif;
+  --font-path-body: var(--font-inter), "Inter", system-ui, sans-serif;
+  --font-path-mono: var(--font-spline-mono), "Spline Sans Mono", ui-monospace, monospace;
 }
 
 /* Anchor jumps are instant — smooth scrolling read as dizzying on long pages. */
@@ -213,4 +280,69 @@ html:has(.gauntlet-root) body {
 .display .accent-blush {
   font-style: italic;
   color: var(--color-blush);
+}
+
+/* ============================================================
+   THE PATH — runtime channels & motion (T1 Unit 13)
+   ------------------------------------------------------------
+   HSL channel triplets backing the --color-hq-* / --color-trail-*
+   / phase / verification / ceremony tokens in the @theme block
+   above. Kept as channels (not hsl()/hex) so both the generated
+   utilities and the components' inline styles can compose alpha —
+   hsl(var(--phase-sell) / 0.34). Inert on marketing pages: unused
+   custom properties with no visual effect. Values from the design
+   handoff tokens. */
+:root {
+  /* HQ neutrals — ink on warm paper */
+  --hq-canvas: 0 0% 100%;
+  --hq-surface: 40 30% 99%;
+  --hq-sunken: 40 24% 96%;
+  --hq-border: 40 14% 89%;
+  --hq-border-strong: 40 10% 80%;
+  --hq-ink: 30 12% 12%;
+  --hq-ink-soft: 30 8% 34%;
+  --hq-ink-muted: 30 6% 52%;
+  /* Trail neutrals — parchment & warm dusk */
+  --trail-canvas: 38 46% 95%;
+  --trail-surface: 40 55% 97%;
+  --trail-ink: 25 34% 20%;
+  --trail-ink-soft: 25 20% 38%;
+  --trail-mist: 34 20% 82%;
+  /* The five phases — constant across skins */
+  --phase-sell: 14 78% 54%;
+  --phase-build: 217 74% 56%;
+  --phase-validate: 265 52% 58%;
+  --phase-grow: 150 52% 42%;
+  --phase-scale: 41 88% 52%;
+  /* Verification semantics — Not Yet is amber, never red */
+  --verified: 150 52% 40%;
+  --awaiting: 217 60% 56%;
+  --not-yet: 36 92% 48%;
+  /* Ceremony */
+  --wax: 4 62% 46%;
+  --gold-leaf: 41 74% 50%;
+}
+
+/* Wax-stamp thump — a Trail task verified (the signature motion) */
+@keyframes path-stamp-thump {
+  0% { transform: scale(2.4) rotate(-14deg); opacity: 0; }
+  55% { transform: scale(0.9) rotate(-8deg); opacity: 1; }
+  70% { transform: scale(1.06) rotate(-8deg); }
+  100% { transform: scale(1) rotate(-8deg); opacity: 1; }
+}
+.animate-stamp { animation: path-stamp-thump 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* Being-inspected shimmer — a satchel resting under review */
+@keyframes path-shimmer {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.animate-shimmer { animation: path-shimmer 1.8s ease-in-out infinite; }
+
+/* Motion restraint — honor the OS setting (design rule, both skins) */
+@media (prefers-reduced-motion: reduce) {
+  .animate-stamp,
+  .animate-shimmer {
+    animation: none;
+  }
 }

@@ -26,13 +26,23 @@
  *      mismatched target. This is exactly where an IDOR would live.
  */
 
-/** A Path authorization role. NOT a column on the user (Decision 2): a human
- *  holds grants, and can be a `parent` in one family and a `guide` of a cohort
- *  at the same time. */
-export type PathRole = "student" | "parent" | "guide";
+/** The closed set of Path authorization roles, and the scopes a grant targets.
+ *  These const arrays are the SINGLE source of truth: the PathRole/PathScope
+ *  types are DERIVED from them (so the type can't gain a member the runtime
+ *  guard misses), and they must stay in lockstep with the DB CHECK constraints
+ *  in the path_identity migration. NOT a column on the user (Decision 2): a human
+ *  holds grants, and can be a `parent` in one family and a `guide` of a cohort at
+ *  once. `scope_id` is polymorphic against `scope_type`. */
+export const PATH_ROLES = ["student", "parent", "guide"] as const;
+export const PATH_SCOPES = ["student", "family", "cohort"] as const;
 
-/** What a grant is scoped to. `scope_id` is polymorphic against this. */
-export type PathScope = "student" | "family" | "cohort";
+export type PathRole = (typeof PATH_ROLES)[number];
+export type PathScope = (typeof PATH_SCOPES)[number];
+
+export const isPathRole = (x: unknown): x is PathRole =>
+  typeof x === "string" && (PATH_ROLES as readonly string[]).includes(x);
+export const isPathScope = (x: unknown): x is PathScope =>
+  typeof x === "string" && (PATH_SCOPES as readonly string[]).includes(x);
 
 /**
  * One `path_role_grants` row, reduced to what the decision needs. A student is
@@ -48,6 +58,32 @@ export type RoleGrant = {
   scopeType: PathScope;
   scopeId: string;
 };
+
+/**
+ * Narrow ONE untyped `path_role_grants` row (from the untyped service-role
+ * client) into a RoleGrant, or `null` if it fails the closed unions or shape.
+ *
+ * FAIL CLOSED: a row whose role/scope_type is outside the union, or whose
+ * scope_id is not a string, is rejected — never coerced into a trusted grant.
+ * The DB CHECK constraints forbid such rows today; this is defense-in-depth for
+ * a future CHECK widening, a renamed column, or a manual DB edit, at the single
+ * service-role boundary protecting another family's evidence. Pure and here (not
+ * inline in the server-only wrapper) so the drop-vs-keep decision is unit-tested,
+ * per the repo convention that all decision logic lives in a testable module.
+ * The caller (auth.ts) logs each dropped row so a fail-closed drop is as visible
+ * as a query error — a silent partial drop would otherwise understate a real
+ * member's access with no trace.
+ */
+export function parseRoleGrant(row: {
+  role?: unknown;
+  scope_type?: unknown;
+  scope_id?: unknown;
+}): RoleGrant | null {
+  if (isPathRole(row.role) && isPathScope(row.scope_type) && typeof row.scope_id === "string") {
+    return { role: row.role, scopeType: row.scope_type, scopeId: row.scope_id };
+  }
+  return null;
+}
 
 /**
  * What is being accessed. `position` = a student's place on the path and their

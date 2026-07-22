@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPathRole,
+  isPathScope,
+  parseRoleGrant,
+  PATH_ROLES,
+  PATH_SCOPES,
   resolvePathAccess,
   type AccessTarget,
   type RoleGrant,
@@ -188,18 +193,17 @@ describe("resolvePathAccess — no session and defensive cases", () => {
     );
   });
 
-  it("scopeType disambiguates a shared id — a cohort grant never acts as a family grant", () => {
-    // The single load-bearing invariant behind "no cross-scope leak": has() keys on
-    // role AND scopeType AND scopeId, so the same id used as both a family id and a
-    // cohort id must not let a Guide grant authorize a family/sibling target.
+  it("a shared id across roles — a Guide grant reads cohortId, never familyId", () => {
+    // Proves the Guide branch keys on the COHORT id (not the family id) even when
+    // the same value appears as both: a guide grant is authorized where cohortId
+    // matches, and forbidden for a position target that shares only the familyId.
+    // (This catches a field-selection bug; scopeType disambiguation is proven by
+    // the SAME-ROLE test below, which a role change here would mask.)
     const SHARED = "shared-id";
     const guideOnly: RoleGrant[] = [{ role: "guide", scopeType: "cohort", scopeId: SHARED }];
-    // Correct: authorized as a Guide where the cohort id matches.
     expect(
       resolvePathAccess({ session: SESSION, grants: guideOnly, target: target("evidence", { cohortId: SHARED }) })
     ).toBe("ok");
-    // But the SAME value as a family id must NOT authorize the Guide as a sibling:
-    // a position target whose familyId is SHARED (cohort elsewhere) is forbidden.
     expect(
       resolvePathAccess({
         session: SESSION,
@@ -207,6 +211,18 @@ describe("resolvePathAccess — no session and defensive cases", () => {
         target: target("position", { familyId: SHARED, cohortId: "coh-x" }),
       })
     ).toBe("forbidden");
+  });
+
+  it("scopeType disambiguates a SAME-role shared id (self grant is not a family grant)", () => {
+    // The precise invariant test: a student's SELF grant {student,student,X} must
+    // NOT satisfy the sibling branch, which needs {student,family,target.familyId}.
+    // Role is identical (student) and scopeId collides (X), so ONLY the scopeType
+    // check in has() forbids it — drop that check and this position target leaks.
+    const selfGrant: RoleGrant[] = [{ role: "student", scopeType: "student", scopeId: "shared" }];
+    const siblingPosition = target("position", { studentId: "someone-else", familyId: "shared" });
+    expect(resolvePathAccess({ session: SESSION, grants: selfGrant, target: siblingPosition })).toBe(
+      "forbidden"
+    );
   });
 
   it("an empty-string scope id is an exact value, not a wildcard", () => {
@@ -237,5 +253,35 @@ describe("resolvePathAccess — no session and defensive cases", () => {
         target: target("evidence", { studentId: "sZ", familyId: "famZ" }),
       })
     ).toBe("ok");
+  });
+});
+
+describe("parseRoleGrant + guards — fail-closed narrowing of untyped rows", () => {
+  it("isPathRole / isPathScope accept only their closed set", () => {
+    for (const r of PATH_ROLES) expect(isPathRole(r)).toBe(true);
+    for (const s of PATH_SCOPES) expect(isPathScope(s)).toBe(true);
+    for (const bad of ["admin", "", "GUIDE", "families", null, undefined, 3, {}]) {
+      expect(isPathRole(bad)).toBe(false);
+      expect(isPathScope(bad)).toBe(false);
+    }
+  });
+
+  it("parses a well-formed row into a RoleGrant, renaming snake_case → camelCase", () => {
+    expect(parseRoleGrant({ role: "parent", scope_type: "family", scope_id: "fam1" })).toEqual({
+      role: "parent",
+      scopeType: "family",
+      scopeId: "fam1",
+    });
+  });
+
+  it("DROPS (returns null) a row with an out-of-union role or scope_type — fail closed", () => {
+    expect(parseRoleGrant({ role: "admin", scope_type: "family", scope_id: "x" })).toBeNull();
+    expect(parseRoleGrant({ role: "parent", scope_type: "org", scope_id: "x" })).toBeNull();
+  });
+
+  it("DROPS a row whose scope_id is not a string (null / number / absent)", () => {
+    expect(parseRoleGrant({ role: "parent", scope_type: "family", scope_id: null })).toBeNull();
+    expect(parseRoleGrant({ role: "parent", scope_type: "family", scope_id: 123 })).toBeNull();
+    expect(parseRoleGrant({ role: "parent", scope_type: "family" })).toBeNull();
   });
 });

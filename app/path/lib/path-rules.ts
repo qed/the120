@@ -2,12 +2,15 @@
  * The Path progress engine (T1 Unit 7) — pure decision logic over the
  * transition table. This is the heart of the product and the only part this
  * repo's node-only test setup can genuinely defend, so every reachable branch is
- * tested (two branches are forward-compat seams for T2/T3 — `gate_closed` via
- * `ctx.submitGate`, and §9.5's post-clear guard — and are covered as such).
+ * tested. Two things are deliberately NOT reachable in T1 and are documented
+ * rather than covered: the `submitGate` seam is a T3 hook (exercised via a
+ * `ctx.submitGate` fixture), and §9.5's "revoke only until the review clears"
+ * gate has no code yet — a criterion cannot reach `cleared` until T2 adds that
+ * state (see the `revoke` precondition comment in transition-table.ts).
  *
  * Two responsibilities:
- *   1. `evaluateTransition` — apply the table to a materialised context: state
- *      match, R6 / actor gate, precondition, then the declarative cascade.
+ *   1. `evaluateTransition` — apply the table to a materialised context: R6 /
+ *      actor gate, state match, precondition, then the declarative cascade.
  *      Returns a typed verdict, NEVER throws (a refused transition is data, not
  *      an exception).
  *   2. Resolve every task / criterion lookup through the STUDENT'S PINNED
@@ -18,7 +21,7 @@
  *
  * See `transition-table.ts` for the CALLER OBLIGATIONS this pure layer trusts
  * (server-derived actor identity, authoritative/complete snapshots, atomic
- * application of the cascade).
+ * application of the cascade, re-authorization on `already_in_target_state`).
  *
  * PURE: no next / supabase / react imports. The only side effect a caller must
  * have arranged is importing the pinned version's generated module, so
@@ -38,6 +41,7 @@ import {
   type TransitionCtx,
   type TransitionName,
   type TransitionRefusal,
+  type TransitionScope,
 } from "./transition-table";
 
 // Re-exported here as the engine's read API; defined in transition-table.ts so
@@ -57,37 +61,26 @@ export type TransitionOutcome =
  * so the guard below FAILS CLOSED (no_such_transition) rather than defaulting to
  * a legal state that happens to match the only phase-scope row's `from`.
  */
-function currentStateForScope(
-  scope: "task" | "criterion" | "phase",
-  ctx: TransitionCtx
-): string | undefined {
+function currentStateForScope(scope: TransitionScope, ctx: TransitionCtx): string | undefined {
   if (scope === "task") return ctx.task.state;
   if (scope === "criterion") return ctx.criterion.state;
   return ctx.phase?.state; // undefined when omitted → fails the from-match, closed
 }
 
 /**
- * Evaluate a requested transition against the table. Order matters and mirrors
- * the plan's layering: existence → state match → R6 → actor class → precondition
- * → cascade. R6 is checked BEFORE the generic actor-class match so a student
- * attempting a verifying transition always reports `actor_not_permitted` for the
- * R6 reason, not an incidental class mismatch.
+ * Evaluate a requested transition against the table. Order matters:
+ * existence → R6 → actor class → state match → precondition → cascade.
+ *
+ * R6 and the actor-class gate run BEFORE the state match on purpose: an
+ * unauthorized actor must always surface `actor_not_permitted`, never be masked
+ * by an `already_in_target_state` verdict when the target state happens to be
+ * reached already. The row's own precondition (identity/note/membership) runs
+ * AFTER the state match, so `already_in_target_state` is returned without it —
+ * callers must re-authorize on that path (caller obligation #7).
  */
 export function evaluateTransition(name: TransitionName, ctx: TransitionCtx): TransitionOutcome {
   const row = TRANSITIONS.find((r) => r.name === name);
   if (!row) return { ok: false, reason: "no_such_transition" };
-
-  const current = currentStateForScope(row.scope, ctx);
-  if (current !== row.from) {
-    // Distinguish "ahead" (already AT the target — idempotent no-op) from
-    // "behind"/inapplicable, so Unit 8's echo interpretation can adopt the DB
-    // value on the ahead case instead of looping (coerce-not-raise / three-way
-    // echo doc). A missing phase (current === undefined) is never the target.
-    if (current !== undefined && current === row.to) {
-      return { ok: false, reason: "already_in_target_state" };
-    }
-    return { ok: false, reason: "no_such_transition" };
-  }
 
   // R6 (belt): a student may never drive a verifying transition, whatever the
   // client posts. Enumerated across the whole table by the tests.
@@ -100,6 +93,20 @@ export function evaluateTransition(name: TransitionName, ctx: TransitionCtx): Tr
   // an adult in their own session has no business driving the child's own steps.
   if (ctx.actorRole !== row.actor) {
     return { ok: false, reason: "actor_not_permitted" };
+  }
+
+  const current = currentStateForScope(row.scope, ctx);
+  if (current !== row.from) {
+    // Ahead (idempotent) vs behind — but ONLY a task-scope target is genuinely
+    // idempotent: `verified` means "this task is verified", full stop. A criterion
+    // or phase resting at `returned` is NOT "the return you just asked for already
+    // happened" — it could be an earlier, different return — so those never report
+    // `already_in_target_state`; a return requested out of `review_underway` is a
+    // plain `no_such_transition` Unit 8 must not silently adopt as done.
+    if (row.scope === "task" && current !== undefined && current === row.to) {
+      return { ok: false, reason: "already_in_target_state" };
+    }
+    return { ok: false, reason: "no_such_transition" };
   }
 
   const pre = row.precondition(ctx);

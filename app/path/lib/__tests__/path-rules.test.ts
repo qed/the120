@@ -15,8 +15,10 @@ import {
   TASK_STATES,
   TRANSITIONS,
   type ActorClass,
+  type CascadeEffect,
   type CriterionSnapshot,
-  type CriterionState,
+  type PhaseCascade,
+  type TaskCascade,
   type TaskSnapshot,
   type TaskState,
   type TransitionCtx,
@@ -68,6 +70,19 @@ function ctx(over: Partial<TransitionCtx> = {}): TransitionCtx {
   };
 }
 
+/** Assert-and-narrow a cascade to its scope variant (the DU keeps taskTo/phaseTo
+ *  off the wrong scope, so consumers narrow before reading them). */
+function taskCascade(c: CascadeEffect): TaskCascade {
+  expect(c.scope).toBe("task");
+  if (c.scope !== "task") throw new Error("expected a task cascade");
+  return c;
+}
+function phaseCascade(c: CascadeEffect): PhaseCascade {
+  expect(c.scope).toBe("phase");
+  if (c.scope !== "phase") throw new Error("expected a phase cascade");
+  return c;
+}
+
 /* --------------------------------------------------- the table is coherent */
 
 describe("transition table — structural invariants", () => {
@@ -92,7 +107,6 @@ describe("transition table — structural invariants", () => {
     for (const name of NAMES) {
       expect(TRANSITIONS.filter((r) => r.name === name)).toHaveLength(1);
     }
-    // and no row exists for a name outside that set
     expect(TRANSITIONS).toHaveLength(NAMES.length);
   });
 
@@ -105,6 +119,21 @@ describe("transition table — structural invariants", () => {
     for (const row of TRANSITIONS) {
       expect(legal[row.scope]).toContain(row.from);
       expect(legal[row.scope]).toContain(row.to);
+    }
+  });
+
+  it("every row's cascade reports its own scope, and taskTo/phaseTo appear only on their scope", () => {
+    // Enumerate the whole table (not spot-checks): call each row's cascade with a
+    // context it can consume and assert the scope/field pairing the DU promises.
+    for (const row of TRANSITIONS) {
+      const c = ctxForRow(row.name, row.actor === "system" ? "system" : "adult");
+      const cascade = row.cascade(c);
+      expect(cascade.scope).toBe(row.scope);
+      if (cascade.scope === "task") {
+        expect(cascade.taskTo).toBeDefined();
+      } else if (cascade.scope === "phase") {
+        expect(cascade.phaseTo).toBe("returned");
+      }
     }
   });
 
@@ -123,20 +152,22 @@ describe("transition table — structural invariants", () => {
     }
   });
 
-  it("evaluateTransition NEVER throws — for every row across a spread of adversarial contexts", () => {
-    // The header promises a typed verdict, never an exception. Enumerate the
-    // whole table against contexts missing optional fields, in wrong states,
-    // with null ids and empty arrays.
+  it("evaluateTransition NEVER throws — every row reached with well-formed AND malformed contexts", () => {
+    // Includes task states `submitted`/`in_progress` so submit/withdraw/verify/
+    // not_yet preconditions are actually executed (not short-circuited on the
+    // state guard), and a phase ctx with returnedCriterionIds OMITTED.
     const wild: TransitionCtx[] = [
       ctx(),
       { actorRole: "system", actorId: null, task: task({ state: "locked" }), criterion: criterionOf(1, "locked") },
       { actorRole: "adult", actorId: null, task: task({ state: "verified", verifiedBy: null }), criterion: criterionOf(2, "verified", { state: "returned" }) },
       { actorRole: "student", actorId: "", task: task({ state: "not_yet" }), criterion: criterionOf(4, "not_yet") },
-      // criterion/phase-scope shapes with fields omitted
-      { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified", { state: "review_underway" }) },
+      { actorRole: "student", actorId: "s", task: task({ state: "in_progress" }), criterion: criterionOf(3, "in_progress") },
+      { actorRole: "adult", actorId: "mum", task: task({ state: "submitted" }), criterion: criterionOf(3, "submitted") },
+      { actorRole: "adult", actorId: "mum", task: task({ state: "submitted", verifiedBy: null }), criterion: criterionOf(3, "submitted") }, // note omitted
       { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified", { state: "review_underway" }), returnedTaskIds: [] },
       { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified", { state: "review_underway" }), returnedTaskIds: ["nope"], note: "x" },
-      { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified"), phase: { id: "01", state: "review_underway" }, returnedCriterionIds: [] },
+      { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified"), phase: { id: "01", state: "review_underway", criterionIds: ["c"] }, returnedCriterionIds: [] },
+      { actorRole: "adult", actorId: "mum", task: task(), criterion: criterionOf(3, "verified"), phase: { id: "01", state: "review_underway", criterionIds: ["c"] } }, // returnedCriterionIds omitted
     ];
     for (const row of TRANSITIONS) {
       for (const c of wild) {
@@ -151,8 +182,6 @@ describe("transition table — structural invariants", () => {
 describe("R6 — a student can never drive a verifying transition (enumerated)", () => {
   it("every `verifying` row refuses a student actor — the whole table, not named cases", () => {
     const verifyingRows = TRANSITIONS.filter((r) => r.verifying);
-    // Guard: the five adult decisions must all be flagged verifying, or this
-    // enumeration would silently skip them.
     expect(verifyingRows.map((r) => r.name).sort()).toEqual(
       ["criterion_return", "not_yet", "phase_return", "revoke", "verify"].sort()
     );
@@ -163,6 +192,13 @@ describe("R6 — a student can never drive a verifying transition (enumerated)",
       expect(out.ok).toBe(false);
       if (!out.ok) expect(out.reason).toBe("actor_not_permitted");
     }
+  });
+
+  it("a student verifying an ALREADY-verified task is refused for R6, not masked as already_in_target_state", () => {
+    // R6 runs before the state match, so the authz signal always wins.
+    const out = evaluateTransition("verify", ctx({ task: task({ state: "verified" }), actorRole: "student" }));
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe("actor_not_permitted");
   });
 
   it("clampStudentTaskState coerces a forged verifying target back to current (mirrors effectiveReviewStatus)", () => {
@@ -181,12 +217,13 @@ describe("R6 — a student can never drive a verifying transition (enumerated)",
   });
 });
 
-/** Build a ctx whose scope-state matches the row's `from`, with a chosen actor. */
+/** Build a ctx whose scope-state matches the row's `from`, with a chosen actor.
+ *  Relies on discriminated-union narrowing (no `as` casts needed). */
 function ctxForRow(name: TransitionName, actorRole: ActorClass): TransitionCtx {
   const row = TRANSITIONS.find((r) => r.name === name)!;
   if (row.scope === "task") {
     const c = criterionOf(3, "verified");
-    const t = task({ id: "c.2", seq: 2, state: row.from as TaskState, verifiedBy: "mum" });
+    const t = task({ id: "c.2", seq: 2, state: row.from, verifiedBy: "mum" });
     c.tasks[1] = t;
     return {
       actorRole,
@@ -198,7 +235,7 @@ function ctxForRow(name: TransitionName, actorRole: ActorClass): TransitionCtx {
     };
   }
   if (row.scope === "criterion") {
-    const c = criterionOf(3, "verified", { state: row.from as CriterionState });
+    const c = criterionOf(3, "verified", { state: row.from });
     return {
       actorRole,
       actorId: "mum",
@@ -215,7 +252,7 @@ function ctxForRow(name: TransitionName, actorRole: ActorClass): TransitionCtx {
     actorId: "mum",
     task: c.tasks[0],
     criterion: c,
-    phase: { id: "01", state: "review_underway" },
+    phase: { id: "01", state: "review_underway", criterionIds: ["c"] },
     returnedCriterionIds: ["c"],
   };
 }
@@ -246,31 +283,33 @@ describe("actor-class gate", () => {
 /* ----------------------------------------- state-match: behind vs ahead */
 
 describe("state match — behind (no_such_transition) vs ahead (already_in_target_state)", () => {
-  it("a transition requested from the wrong from-state is no_such_transition (task/criterion scope)", () => {
-    // verify wants `submitted`; the task is `available` (behind).
-    const taskOut = evaluateTransition("verify", ctx({ task: task({ state: "available" }), actorRole: "adult", actorId: "mum" }));
-    expect(taskOut.ok).toBe(false);
-    if (!taskOut.ok) expect(taskOut.reason).toBe("no_such_transition");
-
-    // criterion_return wants `review_underway`; the criterion is `active`.
-    const critOut = evaluateTransition(
-      "criterion_return",
-      ctx({ criterion: criterionOf(3, "verified", { state: "active" }), actorRole: "adult", actorId: "mum", returnedTaskIds: ["c.1"], note: "x" })
-    );
-    expect(critOut.ok).toBe(false);
-    if (!critOut.ok) expect(critOut.reason).toBe("no_such_transition");
+  it("a task transition from the wrong from-state is no_such_transition (behind)", () => {
+    const out = evaluateTransition("verify", ctx({ task: task({ state: "available" }), actorRole: "adult", actorId: "mum" }));
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe("no_such_transition");
   });
 
-  it("a transition whose target equals the current state is already_in_target_state (idempotent), not no_such_transition", () => {
-    // verify on an already-`verified` task: ahead of intent — adopt, don't loop.
+  it("a TASK transition whose target equals the current state is already_in_target_state (idempotent)", () => {
     const out = evaluateTransition("verify", ctx({ task: task({ state: "verified" }), actorRole: "adult", actorId: "mum" }));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("already_in_target_state");
 
-    // submit on an already-`submitted` task, likewise.
     const out2 = evaluateTransition("submit", ctx({ task: task({ state: "submitted" }) }));
     expect(out2.ok).toBe(false);
     if (!out2.ok) expect(out2.reason).toBe("already_in_target_state");
+  });
+
+  it("a CRITERION already at `returned` is NOT already_in_target_state — a second return is no_such_transition", () => {
+    // `returned` is not "the return you asked for already happened" (it may be an
+    // earlier, different return), so criterion_return out of review_underway is a
+    // plain no_such_transition Unit 8 must not silently adopt.
+    const c = criterionOf(3, "verified", { state: "returned" });
+    const out = evaluateTransition(
+      "criterion_return",
+      ctx({ task: c.tasks[0], criterion: c, actorRole: "adult", actorId: "mum", returnedTaskIds: ["c.1"], note: "found another" })
+    );
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe("no_such_transition");
   });
 });
 
@@ -288,8 +327,7 @@ describe("forward transitions (student)", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.to).toBe("submitted");
-      expect(out.cascade.scope).toBe("task");
-      expect(out.cascade.taskTo).toBe("submitted");
+      expect(taskCascade(out.cascade).taskTo).toBe("submitted");
       expect(out.cascade.notifications).toContainEqual({ audience: "parents", kind: "submitted" });
     }
   });
@@ -387,12 +425,7 @@ describe("not_yet", () => {
   it("Not Yet with a note moves submitted → not_yet and notifies the student", () => {
     const out = evaluateTransition(
       "not_yet",
-      ctx({
-        task: task({ state: "submitted" }),
-        actorRole: "adult",
-        actorId: "mum",
-        note: "needs three clean runs in a row",
-      })
+      ctx({ task: task({ state: "submitted" }), actorRole: "adult", actorId: "mum", note: "needs three clean runs in a row" })
     );
     expect(out.ok).toBe(true);
     if (out.ok) {
@@ -407,13 +440,10 @@ describe("not_yet", () => {
 describe("unlock (system)", () => {
   it("unlocking a task whose predecessor is unverified is refused", () => {
     const c = criterionOf(2, "verified");
-    c.tasks[0] = task({ id: "c.1", seq: 1, state: "submitted" }); // predecessor NOT verified
+    c.tasks[0] = task({ id: "c.1", seq: 1, state: "submitted" });
     const locked = task({ id: "c.2", seq: 2, state: "locked" });
     c.tasks[1] = locked;
-    const out = evaluateTransition(
-      "unlock",
-      ctx({ task: locked, criterion: c, actorRole: "system", actorId: null })
-    );
+    const out = evaluateTransition("unlock", ctx({ task: locked, criterion: c, actorRole: "system", actorId: null }));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("predecessor_unverified");
   });
@@ -423,10 +453,7 @@ describe("unlock (system)", () => {
 
 describe("withdraw (D6 — legal only before the review is opened)", () => {
   it("withdraw with reviewOpenedAt null succeeds (submitted → in_progress)", () => {
-    const out = evaluateTransition(
-      "withdraw",
-      ctx({ task: task({ state: "submitted", reviewOpenedAt: null }) })
-    );
+    const out = evaluateTransition("withdraw", ctx({ task: task({ state: "submitted", reviewOpenedAt: null }) }));
     expect(out.ok).toBe(true);
     if (out.ok) expect(out.to).toBe("in_progress");
   });
@@ -441,10 +468,7 @@ describe("withdraw (D6 — legal only before the review is opened)", () => {
   });
 
   it("withdraw treats an empty-string reviewOpenedAt as NOT opened (fail-safe on a resolver slip)", () => {
-    const out = evaluateTransition(
-      "withdraw",
-      ctx({ task: task({ state: "submitted", reviewOpenedAt: "" }) })
-    );
+    const out = evaluateTransition("withdraw", ctx({ task: task({ state: "submitted", reviewOpenedAt: "" }) }));
     expect(out.ok).toBe(true);
   });
 });
@@ -452,16 +476,14 @@ describe("withdraw (D6 — legal only before the review is opened)", () => {
 /* ------------------------------------------------ revoke (§9.5 actor-scoped) */
 
 describe("revoke (§9.5 — only the verifier who made it)", () => {
-  const verified = () => criterionOf(3, "verified", { state: "review_underway" });
+  const verified = (state: CriterionSnapshot["state"] = "review_underway") =>
+    criterionOf(3, "verified", { state });
 
   it("revoke by the ORIGINAL verifier succeeds and renders the crest provisional (D23)", () => {
     const c = verified();
     const t = task({ id: "c.2", seq: 2, state: "verified", verifiedBy: "mum" });
     c.tasks[1] = t;
-    const out = evaluateTransition(
-      "revoke",
-      ctx({ task: t, criterion: c, actorRole: "adult", actorId: "mum" })
-    );
+    const out = evaluateTransition("revoke", ctx({ task: t, criterion: c, actorRole: "adult", actorId: "mum" }));
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.to).toBe("not_yet");
@@ -470,36 +492,50 @@ describe("revoke (§9.5 — only the verifier who made it)", () => {
     }
   });
 
+  it("revoke is legal while the criterion is still `active` (before the whole criterion reaches review)", () => {
+    // §9.5: a verifier may revoke their own verification any time before the
+    // criterion review clears — including before it has even opened.
+    const c = verified("active");
+    const t = task({ id: "c.2", seq: 2, state: "verified", verifiedBy: "mum" });
+    c.tasks[1] = t;
+    const out = evaluateTransition("revoke", ctx({ task: t, criterion: c, actorRole: "adult", actorId: "mum" }));
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.cascade.criterionTo).toBe("active");
+  });
+
   it("revoke by the OTHER parent is refused (not the original verifier)", () => {
     const c = verified();
     const t = task({ id: "c.2", seq: 2, state: "verified", verifiedBy: "mum" });
     c.tasks[1] = t;
-    const out = evaluateTransition(
-      "revoke",
-      ctx({ task: t, criterion: c, actorRole: "adult", actorId: "dad" })
-    );
+    const out = evaluateTransition("revoke", ctx({ task: t, criterion: c, actorRole: "adult", actorId: "dad" }));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("not_original_verifier");
   });
 
-  it("revoke fails closed on degenerate identities: empty actorId, or a null verifiedBy", () => {
-    const c1 = verified();
-    c1.tasks[1] = task({ id: "c.2", seq: 2, state: "verified", verifiedBy: "" });
-    const emptyBoth = evaluateTransition(
-      "revoke",
-      ctx({ task: c1.tasks[1], criterion: c1, actorRole: "adult", actorId: "" })
-    );
-    expect(emptyBoth.ok).toBe(false);
-    if (!emptyBoth.ok) expect(emptyBoth.reason).toBe("not_original_verifier");
+  it("revoke fails closed on degenerate identities: empty, whitespace-only, or null", () => {
+    const cases: { actorId: string | null; verifiedBy: string | null }[] = [
+      { actorId: "", verifiedBy: "" },
+      { actorId: "   ", verifiedBy: "   " }, // whitespace-only both sides must NOT match
+      { actorId: "mum", verifiedBy: null },
+    ];
+    for (const { actorId, verifiedBy } of cases) {
+      const c = verified();
+      c.tasks[1] = task({ id: "c.2", seq: 2, state: "verified", verifiedBy });
+      const out = evaluateTransition("revoke", ctx({ task: c.tasks[1], criterion: c, actorRole: "adult", actorId }));
+      expect(out.ok).toBe(false);
+      if (!out.ok) expect(out.reason).toBe("not_original_verifier");
+    }
+  });
 
-    const c2 = verified();
-    c2.tasks[1] = task({ id: "c.2", seq: 2, state: "verified", verifiedBy: null });
-    const nullVerifiedBy = evaluateTransition(
-      "revoke",
-      ctx({ task: c2.tasks[1], criterion: c2, actorRole: "adult", actorId: "mum" })
-    );
-    expect(nullVerifiedBy.ok).toBe(false);
-    if (!nullVerifiedBy.ok) expect(nullVerifiedBy.reason).toBe("not_original_verifier");
+  it("revoke is NOT gated by display-block — a reviewer may reopen a verified task even behind an earlier return", () => {
+    // Deliberate asymmetry: display-block gates STUDENT forward progress, not a
+    // reviewer's correction. c.4 is verified but sits behind returned c.2.
+    const c = criterionOf(5, "verified", { state: "returned" });
+    c.tasks[1] = task({ id: "c.2", seq: 2, state: "not_yet" });
+    c.tasks[3] = task({ id: "c.4", seq: 4, state: "verified", verifiedBy: "mum" });
+    expect(isDisplayBlocked(c.tasks[3], c)).toBe(true);
+    const out = evaluateTransition("revoke", ctx({ task: c.tasks[3], criterion: c, actorRole: "adult", actorId: "mum" }));
+    expect(out.ok).toBe(true);
   });
 });
 
@@ -510,19 +546,11 @@ describe("criterion_return", () => {
     const c = criterionOf(5, "verified", { state: "review_underway" });
     const out = evaluateTransition(
       "criterion_return",
-      ctx({
-        task: c.tasks[0],
-        criterion: c,
-        actorRole: "adult",
-        actorId: "mum",
-        note: "the funnel math doesn't hold up",
-        returnedTaskIds: ["c.2"],
-      })
+      ctx({ task: c.tasks[0], criterion: c, actorRole: "adult", actorId: "mum", note: "the funnel math doesn't hold up", returnedTaskIds: ["c.2"] })
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.cascade.scope).toBe("criterion");
-    expect(out.cascade.taskTo).toBeUndefined(); // criterion scope: no primary task write
     expect(out.cascade.criterionTo).toBe("returned");
     expect(out.cascade.successors).toContainEqual({ taskId: "c.2", to: "not_yet" });
     expect(out.cascade.notifications).toContainEqual({ audience: "student", kind: "criterion_returned" });
@@ -533,11 +561,23 @@ describe("criterion_return", () => {
       tasks: c.tasks.map((t) => (t.id === "c.2" ? { ...t, state: "not_yet" as TaskState } : t)),
     };
     const task5 = projected.tasks[4];
-    expect(task5.state).toBe("verified"); // stays verified — NOT relocked
-    expect(isDisplayBlocked(task5, projected)).toBe(true); // …but blocked
+    expect(task5.state).toBe("verified");
+    expect(isDisplayBlocked(task5, projected)).toBe(true);
     expect(isSubmittable(task5, projected)).toBe(false);
     expect(projected.tasks[1].state).toBe("not_yet");
     expect(isDisplayBlocked(projected.tasks[0], projected)).toBe(false);
+  });
+
+  it("duplicate ids in returnedTaskIds collapse to one successor (harmless)", () => {
+    const c = criterionOf(3, "verified", { state: "review_underway" });
+    const out = evaluateTransition(
+      "criterion_return",
+      ctx({ task: c.tasks[0], criterion: c, actorRole: "adult", actorId: "mum", returnedTaskIds: ["c.2", "c.2"], note: "x" })
+    );
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.cascade.successors).toEqual([{ taskId: "c.2", to: "not_yet" }]);
+    }
   });
 
   it("refuses an empty return list (nothing_to_return)", () => {
@@ -560,7 +600,7 @@ describe("criterion_return", () => {
     if (!out.ok) expect(out.reason).toBe("note_required");
   });
 
-  it("refuses a return naming a task that is not a member of the criterion (unknown_returned_task) — no stuck 'returned' with zero successors", () => {
+  it("refuses a return naming a non-member task (unknown_returned_task) — no stuck 'returned' with zero successors", () => {
     const c = criterionOf(3, "verified", { state: "review_underway" });
     const out = evaluateTransition(
       "criterion_return",
@@ -581,7 +621,7 @@ describe("phase_return (§9.4 returned outcome — modeled in T1, triggered in T
       actorId: "mum",
       task: c.tasks[0],
       criterion: c,
-      phase: { id: "01", state: "review_underway" },
+      phase: { id: "01", state: "review_underway", criterionIds: ["c", "d"] },
       returnedCriterionIds: ["c"],
       ...over,
     };
@@ -591,28 +631,33 @@ describe("phase_return (§9.4 returned outcome — modeled in T1, triggered in T
     const out = evaluateTransition("phase_return", phaseCtx());
     expect(out.ok).toBe(true);
     if (!out.ok) return;
-    expect(out.cascade.scope).toBe("phase");
-    expect(out.cascade.taskTo).toBeUndefined();
-    expect(out.cascade.phaseTo).toBe("returned");
+    expect(phaseCascade(out.cascade).phaseTo).toBe("returned");
     expect(out.cascade.criterionTo).toBe("returned");
     expect(out.cascade.awards).toBe("provisional");
     expect(out.cascade.notifications).toContainEqual({ audience: "student", kind: "phase_returned" });
   });
 
   it("a criterion NOT in the reopened list keeps its state", () => {
-    const c = criterionOf(3, "verified", { id: "other", state: "review_underway" });
+    // 'd' is a real member of the phase but is not the criterion in this call's ctx.
+    const c = criterionOf(3, "verified", { id: "d", state: "review_underway" });
     const out = evaluateTransition(
       "phase_return",
-      phaseCtx({ criterion: c, task: c.tasks[0], returnedCriterionIds: ["someone-else"] })
+      phaseCtx({ criterion: c, task: c.tasks[0], returnedCriterionIds: ["c"] })
     );
     expect(out.ok).toBe(true);
-    if (out.ok) expect(out.cascade.criterionTo).toBe("review_underway"); // unchanged
+    if (out.ok) expect(out.cascade.criterionTo).toBe("review_underway");
   });
 
   it("refuses an empty reopen list (nothing_to_return)", () => {
     const out = evaluateTransition("phase_return", phaseCtx({ returnedCriterionIds: [] }));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("nothing_to_return");
+  });
+
+  it("refuses a reopen naming a criterion not in the phase (unknown_returned_criterion) — mirrors criterion_return", () => {
+    const out = evaluateTransition("phase_return", phaseCtx({ returnedCriterionIds: ["ghost-999"] }));
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe("unknown_returned_criterion");
   });
 
   it("FAILS CLOSED when ctx.phase is omitted — no_such_transition, never a silent match on a default state", () => {
@@ -622,7 +667,7 @@ describe("phase_return (§9.4 returned outcome — modeled in T1, triggered in T
   });
 
   it("refuses when the phase is not actually in review_underway", () => {
-    const out = evaluateTransition("phase_return", phaseCtx({ phase: { id: "01", state: "locked" } }));
+    const out = evaluateTransition("phase_return", phaseCtx({ phase: { id: "01", state: "locked", criterionIds: ["c"] } }));
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("no_such_transition");
   });
@@ -631,9 +676,6 @@ describe("phase_return (§9.4 returned outcome — modeled in T1, triggered in T
 /* ------------------------------- display-block enforcement (post-return rework) */
 
 describe("display-block enforcement — the engine, not just the UI, blocks out-of-order work after a return", () => {
-  // A 5-task criterion returned to `returned`, with c.2 and c.4 reopened to
-  // not_yet (a two-task return). The student must rework in sequence: c.2 first,
-  // c.4 stays blocked until c.2 re-verifies.
   const returnedCriterion = (c4State: TaskState): CriterionSnapshot => {
     const c = criterionOf(5, "verified", { state: "returned" });
     c.tasks[1] = task({ id: "c.2", seq: 2, state: "not_yet" });
@@ -661,14 +703,11 @@ describe("display-block enforcement — the engine, not just the UI, blocks out-
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.reason).toBe("display_blocked");
 
-    // c.2 (the earliest returned task) has only verified predecessors → workable.
     const workable = evaluateTransition("resume", ctx({ task: c.tasks[1], criterion: c, actorRole: "student" }));
     expect(workable.ok).toBe(true);
   });
 
   it("verify on a display-blocked task is refused even though its IMMEDIATE predecessor is verified (the multi-task-return gap)", () => {
-    // c.2 not_yet, c.3 verified, c.4 submitted. c.4's immediate predecessor c.3
-    // is verified, but c.2 (further back) is not — verify must still refuse.
     const c = criterionOf(5, "verified", { state: "returned" });
     c.tasks[1] = task({ id: "c.2", seq: 2, state: "not_yet" });
     c.tasks[3] = task({ id: "c.4", seq: 4, state: "submitted" });
@@ -682,16 +721,14 @@ describe("display-block enforcement — the engine, not just the UI, blocks out-
 
 describe("a returned criterion stays returned until every task re-verifies", () => {
   it("re-verifying a non-final outstanding task keeps criterionTo returned; the last flips it to review_underway", () => {
-    // returned criterion: c.1 verified, c.2 submitted, c.3 submitted, c.4/c.5 verified.
     const c = criterionOf(5, "verified", { state: "returned" });
     c.tasks[1] = task({ id: "c.2", seq: 2, state: "submitted" });
     c.tasks[2] = task({ id: "c.3", seq: 3, state: "submitted" });
 
     const first = evaluateTransition("verify", ctx({ task: c.tasks[1], criterion: c, actorRole: "adult", actorId: "mum" }));
     expect(first.ok).toBe(true);
-    if (first.ok) expect(first.cascade.criterionTo).toBe("returned"); // c.3 still outstanding
+    if (first.ok) expect(first.cascade.criterionTo).toBe("returned");
 
-    // Apply c.2 → verified, then verify the last outstanding (c.3).
     c.tasks[1] = { ...c.tasks[1], state: "verified", verifiedBy: "mum" };
     const last = evaluateTransition("verify", ctx({ task: c.tasks[2], criterion: c, actorRole: "adult", actorId: "mum" }));
     expect(last.ok).toBe(true);
@@ -714,7 +751,7 @@ describe("band snapshot at first available", () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.to).toBe("available");
-      expect(out.cascade.snapshotBand).toBe("g6_8");
+      expect(taskCascade(out.cascade).snapshotBand).toBe("g6_8");
     }
   });
 
@@ -728,25 +765,23 @@ describe("band snapshot at first available", () => {
 /* --------------------------------------------- concurrency (§9.2 parallel criteria) */
 
 describe("concurrency — criteria within a phase run in parallel (§9.2)", () => {
-  it("a transition on one criterion leaves the other criteria of the phase untouched", () => {
-    // One phase, three criteria, each with its first task in_progress.
+  it("a transition does not mutate the criterion snapshot it was handed (nor the phase's siblings)", () => {
     const phase = ["1.1", "1.2", "1.3"].map((id) => {
       const c = criterionOf(3, "available", { id });
       c.tasks[0] = task({ id: `${id}.1`, seq: 1, state: "in_progress" });
       return c;
     });
-    const before = JSON.parse(JSON.stringify(phase));
+    const before = structuredClone(phase);
 
-    // Submit the first criterion's open task.
-    const out = evaluateTransition(
-      "submit",
-      ctx({ task: phase[0].tasks[0], criterion: phase[0], actorRole: "student" })
-    );
+    const out = evaluateTransition("submit", ctx({ task: phase[0].tasks[0], criterion: phase[0], actorRole: "student" }));
     expect(out.ok).toBe(true);
-    if (out.ok) expect(out.cascade.successors).toEqual([]); // no cross-criterion effect
+    if (out.ok) expect(out.cascade.successors).toEqual([]);
 
-    // The other two criteria are byte-for-byte unchanged — the engine reads only
-    // ctx.criterion, so operating on one cannot mutate the siblings.
+    // Purity: the ACTED-ON criterion's own input snapshot is unchanged (the cascade
+    // returns state changes for the applier; it never mutates ctx.criterion) — the
+    // property a future applyChanges/cascade refactor could actually violate.
+    expect(phase[0]).toEqual(before[0]);
+    // And the untouched siblings are of course unchanged.
     expect(phase[1]).toEqual(before[1]);
     expect(phase[2]).toEqual(before[2]);
   });

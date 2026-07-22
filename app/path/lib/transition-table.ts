@@ -38,31 +38,40 @@
  *   3. Emit `null` (never `""`) for an unset `reviewOpenedAt`, and fail-closed
  *      narrow every DB state string into these unions before it reaches here
  *      (the `parseRoleGrant` pattern, one layer up).
- *   4. Treat `CascadeEffect` as a spec to APPLY atomically: write `taskTo` only
- *      for task-scope outcomes, apply `successors`, then derive/write the
+ *   4. Treat `CascadeEffect` as a spec to APPLY atomically, switching on
+ *      `cascade.scope`: write `taskTo` only for a `"task"` cascade, `phaseTo`
+ *      only for a `"phase"` cascade, then apply `successors` and derive/write the
  *      criterion aggregate. Because `criterionTo` is computed from a point-in-time
  *      snapshot, two concurrent verifies of DIFFERENT tasks in one criterion can
  *      each compute a stale aggregate — the RPC must re-derive it from all
  *      siblings under the same CAS/transaction, not blind-write this value.
  *   5. Not re-COALESCE `snapshotBand` against a fresh DB read — it is resolved
  *      here (freeze-if-null); a second COALESCE against a stale read can misfire.
+ *   6. `phase_return` is modeled but has NO T1 trigger, and must be invoked once
+ *      per criterion (each call's `CascadeEffect` reports only the one criterion
+ *      in `ctx.criterion`). It validates `returnedCriterionIds` membership against
+ *      `ctx.phase.criterionIds` — so T2's phase-review unit MUST populate that
+ *      with the phase's real criteria, exactly as the criterion loader populates
+ *      `criterion.tasks`.
+ *   7. `already_in_target_state` is returned WITHOUT running the row's precondition
+ *      (identity/note/membership are not evaluated when the target state is already
+ *      reached). Unit 8 must independently re-authorize the actor before treating
+ *      an `already_in_target_state` verdict as a successful no-op — obligation #1
+ *      still applies on that path.
  */
 
 import type { Band } from "@/app/path/content/types";
 
 /* ------------------------------------------------------------------- states */
 
+// The state literals are the SINGLE source of truth (the access-rules.ts idiom):
+// the TaskState/CriterionState/PhaseState types are DERIVED from these arrays, so
+// a type can never gain a member the runtime array (and the legal-states tests)
+// miss, and vice versa. Adding a state is a one-line array edit.
+
 /** The six task states (brief §9.1). `not_yet` is a resting state, not a
  *  transient — a task sits there until the student resumes it. */
-export type TaskState =
-  | "locked"
-  | "available"
-  | "in_progress"
-  | "submitted"
-  | "not_yet"
-  | "verified";
-
-export const TASK_STATES: readonly TaskState[] = [
+export const TASK_STATES = [
   "locked",
   "available",
   "in_progress",
@@ -70,34 +79,23 @@ export const TASK_STATES: readonly TaskState[] = [
   "not_yet",
   "verified",
 ] as const;
+export type TaskState = (typeof TASK_STATES)[number];
 
 /**
  * Criterion states for T1. `cleared` (the crest-awarding Tier 2 ceremony) is
  * T2 — its absence here is deliberate: T1 opens the review and can return it,
  * but does not close it. `returned` holds until every task re-verifies.
  */
-export type CriterionState = "active" | "review_underway" | "returned";
-
-export const CRITERION_STATES: readonly CriterionState[] = [
-  "active",
-  "review_underway",
-  "returned",
-] as const;
+export const CRITERION_STATES = ["active", "review_underway", "returned"] as const;
+export type CriterionState = (typeof CRITERION_STATES)[number];
 
 /**
  * Phase states. Phase review / seal / countersign is T2 (scope boundary); this
- * type exists only so `phase_return` — which the plan requires the table to
+ * set exists only so `phase_return` — which the plan requires the table to
  * model — has a legal `from`/`to`. No T1 trigger reaches `sealed`.
  */
-export type PhaseState = "locked" | "active" | "review_underway" | "sealed" | "returned";
-
-export const PHASE_STATES: readonly PhaseState[] = [
-  "locked",
-  "active",
-  "review_underway",
-  "sealed",
-  "returned",
-] as const;
+export const PHASE_STATES = ["locked", "active", "review_underway", "sealed", "returned"] as const;
+export type PhaseState = (typeof PHASE_STATES)[number];
 
 export type TransitionScope = "task" | "criterion" | "phase";
 
@@ -155,6 +153,10 @@ export type CriterionSnapshot = {
 export type PhaseSnapshot = {
   id: string;
   state: PhaseState;
+  /** The phase's criterion ids. `phase_return` validates `returnedCriterionIds`
+   *  against this — the criterion_return membership guard, at phase scope. T2's
+   *  phase-review unit populates it from the phase's real criteria. */
+  criterionIds: string[];
 };
 
 export type GateStatus = { open: true } | { open: false; reason: string };
@@ -198,6 +200,7 @@ export type TransitionRefusal =
   | "display_blocked"
   | "nothing_to_return"
   | "unknown_returned_task"
+  | "unknown_returned_criterion"
   | "gate_closed";
 
 export type PreconditionResult = { ok: true } | { ok: false; reason: TransitionRefusal };
@@ -215,10 +218,11 @@ export type AwardEffect = "none" | "provisional";
  * `criterion_returned` / `phase_returned` = the wider ceremonies) so Unit 16 can
  * render distinct copy from the event kind alone. Callers still persist the
  * originating ids/note alongside each intent — `kind` names the event, not its
- * subject.
+ * subject. `audience` is only what T1 actually PRODUCES; Unit 12 extends it (a
+ * `guide` audience for §13's countersign/digest paths) when those channels land.
  */
 export type NotificationIntent = {
-  audience: "student" | "parents" | "reviewer" | "guide";
+  audience: "student" | "parents";
   kind:
     | "submitted"
     | "verified"
@@ -231,29 +235,45 @@ export type NotificationIntent = {
 
 export type TaskStateChange = { taskId: string; to: TaskState };
 
-export type CascadeEffect = {
-  /** Which scope this transition acted on — the applier switches on this to
-   *  decide whether `taskTo`/`phaseTo` are load-bearing. */
-  scope: TransitionScope;
-  /** The primary task's resulting state — set ONLY for task-scope transitions.
-   *  Omitted for criterion/phase scope, so the applier never mistakes an echo of
-   *  a placeholder task for a state to persist. */
-  taskTo?: TaskState;
+/** Fields common to every cascade, whatever its scope. */
+type CascadeBase = {
   /** Follow-on task changes: the next task unlocking, or tasks reverted on return. */
   successors: TaskStateChange[];
   /** The criterion's resulting state (always meaningful; unchanged where a
    *  transition does not affect the aggregate). */
   criterionTo: CriterionState;
-  /** The phase's resulting state — set only by `phase_return`. */
-  phaseTo?: PhaseState;
   awards: AwardEffect;
   notifications: NotificationIntent[];
-  /** For any transition INTO `available`: the band to freeze if not already set. */
-  snapshotBand?: Band | null;
 };
 
+/**
+ * The cascade is a DISCRIMINATED UNION on `scope`, so `taskTo`/`phaseTo`/
+ * `snapshotBand` exist ONLY on the scope where they are load-bearing — a
+ * task-scope cascade that forgot `taskTo`, or a criterion-scope cascade that set
+ * one, is a COMPILE error, not hand-discipline. Unit 8's applier narrows on
+ * `cascade.scope` and the type then hands it exactly the fields it may write.
+ */
+export type TaskCascade = CascadeBase & {
+  scope: "task";
+  /** The primary task's resulting state — the one field the applier persists. */
+  taskTo: TaskState;
+  /** For a transition INTO `available`: the band to freeze if not already set. */
+  snapshotBand?: Band | null;
+};
+export type CriterionCascade = CascadeBase & { scope: "criterion" };
+export type PhaseCascade = CascadeBase & { scope: "phase"; phaseTo: PhaseState };
+export type CascadeEffect = TaskCascade | CriterionCascade | PhaseCascade;
+
+/** The cascade variant a row of scope `S` must return. */
+type CascadeForScope<S extends TransitionScope> = S extends "task"
+  ? TaskCascade
+  : S extends "criterion"
+    ? CriterionCascade
+    : PhaseCascade;
+
 /** One transition row, keyed on scope so `from`/`to` are the scope's own state
- *  union — a typo'd literal is a COMPILE error, not a silently-unmatchable row. */
+ *  union (a typo'd literal is a COMPILE error) and its `cascade` returns exactly
+ *  the cascade variant that scope allows. */
 type Row<S extends TransitionScope, St extends string> = {
   name: TransitionName;
   scope: S;
@@ -263,7 +283,7 @@ type Row<S extends TransitionScope, St extends string> = {
   /** An adult verifying action a student may never drive (R6). Enumerated by tests. */
   verifying: boolean;
   precondition: (ctx: TransitionCtx) => PreconditionResult;
-  cascade: (ctx: TransitionCtx) => CascadeEffect;
+  cascade: (ctx: TransitionCtx) => CascadeForScope<S>;
 };
 
 export type TransitionRow =
@@ -298,8 +318,12 @@ export function clampStudentTaskState(requested: TaskState, current: TaskState):
  * The submit gate hook (D: additive math gate). T1 reads `ctx.submitGate`, which
  * T1 callers never set — so the gate is open by default. T3's math gate populates
  * `ctx.submitGate` with `{ open: false, reason }`, and `submit`'s precondition
- * refuses with `gate_closed` — substantive with ZERO change to the transition,
- * exactly "additive rather than structural".
+ * refuses with `gate_closed` — substantive with ZERO change to the transition.
+ *
+ * NOTE: `evaluateTransition` surfaces only the `gate_closed` reason code, not the
+ * `reason` string — a consumer that needs the specific gate reason must keep the
+ * original `ctx.submitGate`. If T3 needs reason-specific UI, prefer a structured
+ * `{ code, message }` over free text before wiring it, to avoid a breaking change.
  */
 export function submitGateStatus(ctx: TransitionCtx): GateStatus {
   return ctx.submitGate ?? { open: true };
@@ -316,7 +340,9 @@ export function submitGateStatus(ctx: TransitionCtx): GateStatus {
  * `revoke` or `criterion_return` reopens an earlier task. This is the pure
  * derivation behind the plan's "later verified tasks stay verified but become
  * display-blocked and un-submittable", and the guard `open`/`submit`/`resume`/
- * `verify` consult so the ENGINE enforces it, not just the UI.
+ * `verify` consult so the ENGINE enforces it, not just the UI. (`revoke` does NOT
+ * consult it: it is a REVIEWER correction, not student forward progress, and §9.5
+ * lets the original verifier un-verify any task they verified.)
  *
  * Lives here (not in path-rules.ts) so the table's own preconditions can call it
  * without a circular import; `path-rules.ts` re-exports it as the read API.
@@ -353,7 +379,8 @@ function nextCriterionState(prev: CriterionState, tasks: readonly TaskSnapshot[]
 }
 
 /** Apply a set of task state changes to the criterion's tasks (for projecting
- *  the post-transition state the criterion aggregate is derived from). */
+ *  the post-transition state the criterion aggregate is derived from). Pure —
+ *  returns a fresh array, never mutates the input snapshot. */
 function applyChanges(
   tasks: readonly TaskSnapshot[],
   changes: readonly TaskStateChange[]
@@ -463,7 +490,11 @@ export const TRANSITIONS: readonly TransitionRow[] = [
 
   /* submitted → verified (adult): NO earlier task in the criterion may be
    * unverified (not merely the immediate predecessor — a multi-task return could
-   * leave an earlier gap). Unlocks the next task, or opens the review when last. */
+   * leave an earlier gap). Refuses `predecessor_unverified` — deliberately a
+   * DIFFERENT reason from the student actions' `display_blocked`, though both
+   * derive from `isDisplayBlocked`: this is the reviewer-facing "verify in order",
+   * that is the student-facing "you can't work ahead". Unlocks the next task, or
+   * opens the review when this was the last. */
   {
     name: "verify",
     scope: "task",
@@ -553,9 +584,16 @@ export const TRANSITIONS: readonly TransitionRow[] = [
     verifying: true,
     precondition: (ctx) => {
       // §9.5: revocation is legal only until the criterion review clears. In T1 a
-      // criterion never reaches `cleared` (that ceremony is T2), so no clear-state
-      // guard is needed here; T2 adds `cleared` to CriterionState and refuses it.
-      if (!ctx.actorId || ctx.task.verifiedBy === null || ctx.actorId !== ctx.task.verifiedBy) {
+      // criterion never reaches `cleared` (that ceremony is T2), so there is no
+      // clear-state guard to write yet — T2 adds `cleared` to CriterionState and a
+      // guard here refusing it.
+      // `.trim()` fails closed on a whitespace-only id, so two blank identities
+      // from an upstream auth slip can never read as "the same verifier".
+      if (
+        !ctx.actorId?.trim() ||
+        !ctx.task.verifiedBy?.trim() ||
+        ctx.actorId !== ctx.task.verifiedBy
+      ) {
         return refuse("not_original_verifier");
       }
       return OK;
@@ -616,7 +654,9 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   /* review_underway → returned (adult), PHASE scope: the phase-review "returned"
    * outcome (§9.4) reopens named criteria. Phase review is T2 (no T1 trigger);
    * modeled here because the plan requires the table to name phase_return. A
-   * phase-scope call with `ctx.phase` omitted fails closed in path-rules.ts. */
+   * phase-scope call with `ctx.phase` omitted fails closed in path-rules.ts. See
+   * caller obligation #6: this row cannot validate criterion membership (a
+   * PhaseSnapshot has no criterion list), so T2 must add that before wiring it. */
   {
     name: "phase_return",
     scope: "phase",
@@ -624,10 +664,15 @@ export const TRANSITIONS: readonly TransitionRow[] = [
     to: "returned",
     actor: "adult",
     verifying: true,
-    precondition: (ctx) =>
-      ctx.returnedCriterionIds && ctx.returnedCriterionIds.length > 0
-        ? OK
-        : refuse("nothing_to_return"),
+    precondition: (ctx) => {
+      const ids = ctx.returnedCriterionIds ?? [];
+      if (ids.length === 0) return refuse("nothing_to_return");
+      // Membership guard, mirrored from criterion_return: a stale/garbage id can't
+      // flip the phase to `returned` with no real criterion reopened.
+      const known = new Set(ctx.phase?.criterionIds ?? []);
+      if (!ids.every((id) => known.has(id))) return refuse("unknown_returned_criterion");
+      return OK;
+    },
     cascade: (ctx) => {
       const reopened = new Set(ctx.returnedCriterionIds ?? []);
       const criterionTo: CriterionState = reopened.has(ctx.criterion.id)

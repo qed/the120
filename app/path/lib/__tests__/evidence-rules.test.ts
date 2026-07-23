@@ -301,12 +301,16 @@ describe("isSafeHttpUrl — the link-overflow XSS guard", () => {
   });
 });
 
-describe("selectOrphans — the 48h reaper closes the quota's blind spot", () => {
+describe("selectOrphans — the 7-day reaper closes the quota's blind spot", () => {
   const now = 1_000_000_000_000;
-  const orphanAge = ORPHAN_MIN_AGE_MS + HOUR_MS; // 49h old
-  const freshAge = ORPHAN_MIN_AGE_MS - HOUR_MS; // 47h old
+  const orphanAge = ORPHAN_MIN_AGE_MS + HOUR_MS; // an hour past the window
+  const freshAge = ORPHAN_MIN_AGE_MS - HOUR_MS; // an hour inside the window
 
-  it("selects an unconfirmed object past 48h", () => {
+  it("pins the window at 7 days — wide enough that Unit 11's offline queue can defer a confirm for days without the reaper eating the uploaded object", () => {
+    expect(ORPHAN_MIN_AGE_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("selects an unconfirmed object past the window", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - orphanAge }],
       confirmedPaths: [],
@@ -315,7 +319,7 @@ describe("selectOrphans — the 48h reaper closes the quota's blind spot", () =>
     expect(out).toEqual(["s/e/x.jpg"]);
   });
 
-  it("spares an unconfirmed object younger than 48h (past the 24h TUS window, safely)", () => {
+  it("spares an unconfirmed object still inside the window (a deferred offline confirm survives)", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - freshAge }],
       confirmedPaths: [],
@@ -333,7 +337,7 @@ describe("selectOrphans — the 48h reaper closes the quota's blind spot", () =>
     expect(out).toEqual([]);
   });
 
-  it("treats exactly 48h as reapable (>=), erring toward reclaiming abandoned bytes", () => {
+  it("treats exactly the window boundary as reapable (>=), erring toward reclaiming abandoned bytes", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - ORPHAN_MIN_AGE_MS }],
       confirmedPaths: [],

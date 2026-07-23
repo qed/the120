@@ -295,6 +295,54 @@ export function resultForEcho(
   }
 }
 
+/* ------------------------------------- the review-return echo (Unit 12) */
+
+/** The `return_path_criterion` RPC's echo: whether OUR decide wrote, plus the
+ *  criterion's CURRENT latest attempt row (won or lost). Null = no review row
+ *  has ever existed for this criterion. */
+export type ReturnEcho = {
+  decided: boolean;
+  reviewId: string;
+  reviewState: string;
+  reviewAttempt: number;
+  decidedBy: string | null;
+  decidedAt: string | null;
+} | null;
+
+export type ReturnOutcome =
+  /** Our decide wrote the attempt row — the ceremony applied. */
+  | { kind: "applied" }
+  /** The SAME attempt was already returned by someone else — show the winner's
+   *  identity and time, never an error (the two-parent race rule). */
+  | { kind: "superseded"; decidedBy: string | null; decidedAt: string | null }
+  /** The reviewer's view predates a newer cycle (a later attempt exists, the
+   *  attempt number is bogus, or the review cleared) — refresh to truth. */
+  | { kind: "stale" }
+  /** The row still matches what we targeted but our write didn't land —
+   *  near-unreachable race residue; safe to retry. */
+  | { kind: "retry" }
+  /** No review row exists for the criterion at all. */
+  | { kind: "not_found" };
+
+/**
+ * Interpret the return RPC's echo against the attempt the reviewer SAW. The
+ * review decide is ATTEMPT-BASED, not a simple CAS on a task row (Unit 8
+ * carry-forward): the verdict keys on (attempt, state), and a lost decide
+ * distinguishes "this exact attempt was returned by the other parent"
+ * (superseded — tell them who/when) from "a whole return/re-complete cycle
+ * happened since you loaded" (stale — refresh).
+ */
+export function interpretReturnEcho(echo: ReturnEcho, expectedAttempt: number): ReturnOutcome {
+  if (echo === null) return { kind: "not_found" };
+  if (echo.decided) return { kind: "applied" };
+  if (echo.reviewAttempt !== expectedAttempt) return { kind: "stale" };
+  if (echo.reviewState === "returned") {
+    return { kind: "superseded", decidedBy: echo.decidedBy, decidedAt: echo.decidedAt };
+  }
+  if (echo.reviewState === "review_underway") return { kind: "retry" };
+  return { kind: "stale" }; // cleared (T2) or anything else — refresh to truth
+}
+
 /* --------------------------------------- initial progress materialization */
 
 /** The DB row shapes the builder consumes — `path_criteria` / `path_unit_tasks`

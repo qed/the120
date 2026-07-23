@@ -573,23 +573,42 @@ export async function redactEvidence(
   }
 }
 
+/** Storage listings and PostgREST reads both cap at 1000 rows per call; the
+ *  reaper paginates BOTH (Unit 12, before scheduling it unattended). */
+const REAPER_PAGE_SIZE = 1000;
+
 /** Recursively list every stored object under the bucket ({student}/{evidence}/
- *  file), collecting path + created-at. Bounded by the bucket size (T1 scale). A
- *  list error THROWS. Pseudo-folder entries (id === null) are recursed, not
- *  collected. */
+ *  file), collecting path + created-at, PAGINATED per folder (a folder with
+ *  >1000 entries would otherwise silently truncate — fail-safe for orphans,
+ *  but paginate anyway). Sibling folders list concurrently, bounded by the
+ *  two-level path shape. A list error THROWS. Pseudo-folder entries
+ *  (id === null) are recursed, not collected. */
 async function listAllObjects(db: Db): Promise<{ path: string; createdAtMs: number }[]> {
   const out: { path: string; createdAtMs: number }[] = [];
   async function walk(prefix: string): Promise<void> {
-    const { data, error } = await db.storage.from(EVIDENCE_BUCKET).list(prefix, { limit: 1000 });
-    if (error) throw new Error(`listAllObjects(${prefix || "/"}) failed: ${error.message}`);
-    for (const entry of data ?? []) {
-      const full = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.id === null) {
-        await walk(full); // a folder
-      } else {
-        const created = entry.created_at ? Date.parse(entry.created_at) : NaN;
-        out.push({ path: full, createdAtMs: Number.isFinite(created) ? created : 0 });
+    const folders: string[] = [];
+    for (let offset = 0; ; offset += REAPER_PAGE_SIZE) {
+      const { data, error } = await db.storage
+        .from(EVIDENCE_BUCKET)
+        .list(prefix, { limit: REAPER_PAGE_SIZE, offset });
+      if (error) throw new Error(`listAllObjects(${prefix || "/"}) failed: ${error.message}`);
+      const page = data ?? [];
+      for (const entry of page) {
+        const full = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.id === null) {
+          folders.push(full);
+        } else {
+          const created = entry.created_at ? Date.parse(entry.created_at) : NaN;
+          out.push({ path: full, createdAtMs: Number.isFinite(created) ? created : 0 });
+        }
       }
+      if (page.length < REAPER_PAGE_SIZE) break;
+    }
+    // Recurse folders in bounded batches — parallel within a level (the serial
+    // per-folder walk was the Unit 10 carry-forward's scale concern).
+    const BATCH = 8;
+    for (let i = 0; i < folders.length; i += BATCH) {
+      await Promise.all(folders.slice(i, i + BATCH).map((f) => walk(f)));
     }
   }
   await walk("");
@@ -597,18 +616,27 @@ async function listAllObjects(db: Db): Promise<{ path: string; createdAtMs: numb
 }
 
 /** The set of object paths that DO have a confirmed evidence row (object + poster,
- *  including redacted tombstones whose object is already gone). */
+ *  including redacted tombstones whose object is already gone). PAGINATED:
+ *  PostgREST caps a read at ~1000 rows, and a silently truncated confirmed-set
+ *  would make the reaper DELETE CONFIRMED OBJECTS — the one direction this
+ *  function must never fail in. */
 async function loadConfirmedObjectPaths(db: Db): Promise<Set<string>> {
-  const { data, error } = await db
-    .from("path_evidence_items")
-    .select("object_path, poster_object_path");
-  if (error) throw new Error(`loadConfirmedObjectPaths failed: ${error.message}`);
   const set = new Set<string>();
-  for (const r of data ?? []) {
-    const op = r.object_path as string | null;
-    const pp = r.poster_object_path as string | null;
-    if (op) set.add(op);
-    if (pp) set.add(pp);
+  for (let offset = 0; ; offset += REAPER_PAGE_SIZE) {
+    const { data, error } = await db
+      .from("path_evidence_items")
+      .select("object_path, poster_object_path")
+      .order("id", { ascending: true })
+      .range(offset, offset + REAPER_PAGE_SIZE - 1);
+    if (error) throw new Error(`loadConfirmedObjectPaths failed: ${error.message}`);
+    const page = data ?? [];
+    for (const r of page) {
+      const op = r.object_path as string | null;
+      const pp = r.poster_object_path as string | null;
+      if (op) set.add(op);
+      if (pp) set.add(pp);
+    }
+    if (page.length < REAPER_PAGE_SIZE) break;
   }
   return set;
 }

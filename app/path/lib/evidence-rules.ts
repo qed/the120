@@ -38,12 +38,20 @@ import { columnsForBand, type LogColumn, type LogTemplate } from "@/app/path/con
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /**
- * Objects with no confirmed evidence row are reaped after 48h — comfortably past
- * the 24h TUS upload-URL window, so a still-resumable transfer is never deleted
- * out from under a client. Closes the quota's blind spot: an in-flight/abandoned
- * upload has no size metadata and is invisible to `path_student_storage_bytes`.
+ * Objects with no confirmed evidence row are reaped after 7 DAYS. Widened from
+ * 48h when the reaper was scheduled (Unit 12, re-examining the Unit 10
+ * carry-forward against Unit 11's offline queue): a device can complete an
+ * upload, die before the confirm, and stay offline for days — the queued entry
+ * then replays confirm-first against the already-uploaded object, and a 48h
+ * window could have reaped it out from under that legitimate deferred confirm.
+ * Seven days aligns with iOS's 7-day script-storage wipe horizon: past it, an
+ * uninstalled client's queue is presumed dead anyway. Still comfortably past
+ * the 24h TUS window (a resumable transfer is never deleted mid-flight), and
+ * the cost is only that abandoned bytes linger five extra days. Closes the
+ * quota's blind spot: an in-flight/abandoned upload has no size metadata and
+ * is invisible to `path_student_storage_bytes`.
  */
-export const ORPHAN_MIN_AGE_MS = 48 * 60 * 60 * 1000;
+export const ORPHAN_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * The stored signed-download URL's lifetime. Kept SHORT because signed URLs use a

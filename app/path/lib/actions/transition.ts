@@ -43,6 +43,7 @@ import {
   moveTask,
   type StudentContext,
 } from "@/app/path/lib/progress-loader";
+import { notifyAfterTransition } from "@/app/path/lib/notify/send";
 import type { CriterionSnapshot, TransitionCtx } from "@/app/path/lib/transition-table";
 
 // NOTE: no `export type { TransitionResult }` here. This is a `"use server"`
@@ -156,8 +157,27 @@ export async function applyTransition(input: unknown): Promise<TransitionResult>
     return { ok: false, reason: "unavailable" };
   }
 
-  return resultForEcho(interpretEcho({ from: task.state, to: transitionTarget(transition) }, echo), {
+  const result = resultForEcho(interpretEcho({ from: task.state, to: transitionTarget(transition) }, echo), {
     transition,
     actorId: userId,
   });
+
+  // Unit 12: durable notification. Derived from the authoritative event row the
+  // RPC just appended (never the engine's stale cascade projection), enqueued
+  // idempotently, and attempted inline for real-time delivery; the cron heals
+  // anything this drops. Only when OUR CAS provably wrote — a superseded
+  // caller's winner already enqueued the identical plan (same dedupe keys).
+  // Never throws; a notification failure must never fail the transition.
+  if (result.ok && result.byCaller) {
+    await notifyAfterTransition(db, {
+      studentId,
+      familyId: student.familyId,
+      programVersionId: student.programVersionId,
+      taskId,
+      criterionId: criterionIdOf(taskId),
+      transition,
+    });
+  }
+
+  return result;
 }

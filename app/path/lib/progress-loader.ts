@@ -27,6 +27,7 @@ import {
   narrowTaskState,
   type ProgressEcho,
   type ProgressRow,
+  type ReturnEcho,
   type TaskTransition,
 } from "./progress-core";
 import type { CriterionSnapshot, TaskState } from "./transition-table";
@@ -157,6 +158,48 @@ export async function moveTask(
     state,
     verifiedBy: (row.verified_by as string | null) ?? null,
     decidedAt: (row.decided_at as string | null) ?? null,
+  };
+}
+
+/** Call the attempt-based `return_path_criterion` RPC and narrow its echo
+ *  (Unit 12's review ceremony). Returns undefined on a query error (logged;
+ *  the action maps it to `unavailable`); null inside `ReturnEcho` means the
+ *  criterion has no review row at all. */
+export async function returnCriterion(
+  db: Db,
+  p: {
+    studentId: string;
+    criterionId: string;
+    attempt: number;
+    returnedTaskIds: readonly string[];
+    actor: string;
+    note: string;
+  }
+): Promise<ReturnEcho | undefined> {
+  const { data, error } = await db.rpc("return_path_criterion", {
+    p_student_id: p.studentId,
+    p_criterion_id: p.criterionId,
+    p_attempt: p.attempt,
+    p_returned_task_ids: p.returnedTaskIds as string[],
+    p_actor: p.actor,
+    p_note: p.note,
+  });
+  if (error) {
+    console.error(
+      `[path/progress] return_path_criterion(${p.studentId}, ${p.criterionId}, ${p.attempt}) failed: ${error.message}`
+    );
+    return undefined;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null; // no review row for the criterion at all
+
+  return {
+    decided: row.decided === true,
+    reviewId: row.review_id as string,
+    reviewState: String(row.review_state ?? ""),
+    reviewAttempt: typeof row.review_attempt === "number" ? row.review_attempt : -1,
+    decidedBy: (row.review_decided_by as string | null) ?? null,
+    decidedAt: (row.review_decided_at as string | null) ?? null,
   };
 }
 

@@ -126,3 +126,9 @@ Pure decision helpers (`deriveEventKey`, `isFresh`, `cancelUidMatches`) live in
 `app/lib/calcom/events.ts` and are exhaustively unit-tested; the db-taking glue is
 thin — see also the shared-core module-boundary rule in
 `docs/solutions/best-practices/shared-db-taking-core-must-not-live-in-a-use-server-file-server-action-boundary-2026-07-17.md`.
+
+**See also (2026-07-22):** the REPLAY-side twin of this doc's ordering guard —
+[idempotent-reconciler-replaying-one-way-flags-needs-temporal-scope-2026-07-22.md](idempotent-reconciler-replaying-one-way-flags-needs-temporal-scope-2026-07-22.md).
+This doc gates a destructive effect against out-of-order *delivery*; that one gates it against a
+healer cron's trailing-window *re-derivation* (a stale reversal replayed against fresher state),
+and adds the `occurred_at`-vs-`created_at` backfill distinction the created-at comparison misses.

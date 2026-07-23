@@ -17,6 +17,7 @@ import {
   shouldRemintSignedUrl,
   shouldRepairAddedAfterVerification,
   isSafeHttpUrl,
+  evidenceFingerprint,
 } from "../evidence-rules";
 import { logTemplateFor } from "@/app/path/content/log-templates";
 
@@ -301,12 +302,16 @@ describe("isSafeHttpUrl — the link-overflow XSS guard", () => {
   });
 });
 
-describe("selectOrphans — the 48h reaper closes the quota's blind spot", () => {
+describe("selectOrphans — the 7-day reaper closes the quota's blind spot", () => {
   const now = 1_000_000_000_000;
-  const orphanAge = ORPHAN_MIN_AGE_MS + HOUR_MS; // 49h old
-  const freshAge = ORPHAN_MIN_AGE_MS - HOUR_MS; // 47h old
+  const orphanAge = ORPHAN_MIN_AGE_MS + HOUR_MS; // an hour past the window
+  const freshAge = ORPHAN_MIN_AGE_MS - HOUR_MS; // an hour inside the window
 
-  it("selects an unconfirmed object past 48h", () => {
+  it("pins the window at 7 days — wide enough that Unit 11's offline queue can defer a confirm for days without the reaper eating the uploaded object", () => {
+    expect(ORPHAN_MIN_AGE_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("selects an unconfirmed object past the window", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - orphanAge }],
       confirmedPaths: [],
@@ -315,7 +320,7 @@ describe("selectOrphans — the 48h reaper closes the quota's blind spot", () =>
     expect(out).toEqual(["s/e/x.jpg"]);
   });
 
-  it("spares an unconfirmed object younger than 48h (past the 24h TUS window, safely)", () => {
+  it("spares an unconfirmed object still inside the window (a deferred offline confirm survives)", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - freshAge }],
       confirmedPaths: [],
@@ -333,13 +338,34 @@ describe("selectOrphans — the 48h reaper closes the quota's blind spot", () =>
     expect(out).toEqual([]);
   });
 
-  it("treats exactly 48h as reapable (>=), erring toward reclaiming abandoned bytes", () => {
+  it("treats exactly the window boundary as reapable (>=), erring toward reclaiming abandoned bytes", () => {
     const out = selectOrphans({
       objects: [{ path: "s/e/x.jpg", createdAtMs: now - ORPHAN_MIN_AGE_MS }],
       confirmedPaths: [],
       nowMs: now,
     });
     expect(out).toEqual(["s/e/x.jpg"]);
+  });
+});
+
+describe("evidenceFingerprint — the verify TOCTOU guard's identity", () => {
+  const a = { id: "a", updatedAt: null, createdAt: "2026-07-22T10:00:00Z" };
+  const b = { id: "b", updatedAt: "2026-07-22T11:00:00Z", createdAt: "2026-07-22T10:30:00Z" };
+
+  it("is order-independent and stable", () => {
+    expect(evidenceFingerprint([a, b])).toBe(evidenceFingerprint([b, a]));
+    expect(evidenceFingerprint([a, b])).toBe(evidenceFingerprint([a, b]));
+  });
+
+  it("changes when an item is added, removed, or MUTATED (a caption edit asks for another look)", () => {
+    const base = evidenceFingerprint([a, b]);
+    expect(evidenceFingerprint([a])).not.toBe(base); // removed
+    expect(evidenceFingerprint([a, b, { id: "c", updatedAt: null, createdAt: "2026-07-22T12:00:00Z" }])).not.toBe(base); // added
+    expect(evidenceFingerprint([a, { ...b, updatedAt: "2026-07-22T12:00:00Z" }])).not.toBe(base); // mutated
+  });
+
+  it("an empty set fingerprints to the empty string — a submit with no evidence still round-trips", () => {
+    expect(evidenceFingerprint([])).toBe("");
   });
 });
 

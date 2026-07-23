@@ -10,6 +10,7 @@ import {
   firstNameFromChildJoin,
   gradeFromChildJoin,
   interpretEcho,
+  interpretReturnEcho,
   isTaskTransition,
   narrowTaskState,
   resultForEcho,
@@ -56,6 +57,24 @@ describe("TASK_TRANSITION_TARGETS — the hardcoded target the RPC's SQL CASE mi
     }
     // …and the SQL has no extra arms the TS map doesn't know about.
     expect(Object.keys(sqlMap).sort()).toEqual([...TASK_TRANSITIONS].sort());
+  });
+
+  it("the Unit 12 revoke-lock migration's re-created RPC carries the IDENTICAL CASE (fourth encoding pinned)", () => {
+    // 20260723130000 re-creates move_path_task to add the revoke-branch
+    // advisory lock; its copy of the transition CASE must never drift from
+    // the TS map either.
+    const sql = readFileSync(
+      path.resolve(process.cwd(), "supabase/migrations/20260723130000_path_revoke_review_lock.sql"),
+      "utf8"
+    );
+    const arms = [...sql.matchAll(/when\s+'(\w+)'\s+then\s+'([a-z_]+)'/g)];
+    const sqlMap = Object.fromEntries(arms.map((m) => [m[1], m[2]]));
+    for (const t of TASK_TRANSITIONS) {
+      expect(sqlMap[t], `SQL CASE arm for "${t}"`).toBe(TASK_TRANSITION_TARGETS[t]);
+    }
+    expect(Object.keys(sqlMap).sort()).toEqual([...TASK_TRANSITIONS].sort());
+    // The whole point of the file: revoke's review reconcile is now serialized.
+    expect(sql).toContain("pg_advisory_xact_lock");
   });
 
   it("transitionTarget resolves the map", () => {
@@ -376,5 +395,61 @@ describe("firstNameFromChildJoin — join-shape narrowing for the shell header",
     expect(firstNameFromChildJoin({ first_name: 42 })).toBeNull();
     expect(firstNameFromChildJoin({ first_name: "" })).toBeNull();
     expect(firstNameFromChildJoin([])).toBeNull();
+  });
+});
+
+/* ------------------------------------- the review-return echo (Unit 12) */
+
+describe("interpretReturnEcho — the attempt-based criterion-return verdict", () => {
+  const echo = (over: Partial<{
+    decided: boolean;
+    reviewState: string;
+    reviewAttempt: number;
+    decidedBy: string | null;
+    decidedAt: string | null;
+  }> = {}) => ({
+    decided: false,
+    reviewId: "rrrrrrrr-rrrr-rrrr-rrrr-rrrrrrrrrrrr",
+    reviewState: "returned",
+    reviewAttempt: 1,
+    decidedBy: "dad-uuid",
+    decidedAt: "2026-07-23T10:00:00+00:00",
+    ...over,
+  });
+
+  it("decided → applied (our decide wrote the attempt row)", () => {
+    expect(interpretReturnEcho(echo({ decided: true }), 1)).toEqual({ kind: "applied" });
+  });
+
+  it("not decided, same attempt already returned → superseded with the winner's identity and time", () => {
+    expect(interpretReturnEcho(echo(), 1)).toEqual({
+      kind: "superseded",
+      decidedBy: "dad-uuid",
+      decidedAt: "2026-07-23T10:00:00+00:00",
+    });
+  });
+
+  it("a NEWER attempt exists → stale (the reviewer's view predates a whole return/re-complete cycle)", () => {
+    expect(interpretReturnEcho(echo({ reviewAttempt: 2, reviewState: "review_underway" }), 1)).toEqual({
+      kind: "stale",
+    });
+  });
+
+  it("a bogus future attempt from the client → stale, never applied", () => {
+    expect(interpretReturnEcho(echo({ reviewAttempt: 1, reviewState: "review_underway" }), 5)).toEqual({
+      kind: "stale",
+    });
+  });
+
+  it("same attempt still review_underway (near-unreachable race residue) → retry", () => {
+    expect(interpretReturnEcho(echo({ reviewState: "review_underway" }), 1)).toEqual({ kind: "retry" });
+  });
+
+  it("a cleared review (T2 outcome) → stale, never a T1 verdict", () => {
+    expect(interpretReturnEcho(echo({ reviewState: "cleared" }), 1)).toEqual({ kind: "stale" });
+  });
+
+  it("no review row at all → not_found", () => {
+    expect(interpretReturnEcho(null, 1)).toEqual({ kind: "not_found" });
   });
 });

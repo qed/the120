@@ -384,6 +384,9 @@ export type EvidenceReadRow = {
   redactedAt: string | null;
   addedAfterVerification: boolean;
   createdAt: string;
+  /** Last mutation time — participates in the review queue's evidence-set
+   *  fingerprint (a caption edit also asks the reviewer for another look). */
+  updatedAt: string | null;
 };
 
 /**
@@ -402,7 +405,7 @@ export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise
   const { data, error } = await db
     .from("path_evidence_items")
     .select(
-      "id, kind, object_path, poster_object_path, content_type, caption, link_url, log_data, signed_url, signed_url_expires_at, poster_signed_url, poster_signed_url_expires_at, redacted_at, added_after_verification, created_at"
+      "id, kind, object_path, poster_object_path, content_type, caption, link_url, log_data, signed_url, signed_url_expires_at, poster_signed_url, poster_signed_url_expires_at, redacted_at, added_after_verification, created_at, updated_at"
     )
     .eq("task_progress_id", taskProgressId)
     .order("created_at", { ascending: true });
@@ -460,6 +463,7 @@ export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise
         redactedAt,
         addedAfterVerification: r.added_after_verification === true,
         createdAt: r.created_at as string,
+        updatedAt: (r.updated_at as string | null) ?? null,
       };
     })
   );
@@ -573,23 +577,42 @@ export async function redactEvidence(
   }
 }
 
+/** Storage listings and PostgREST reads both cap at 1000 rows per call; the
+ *  reaper paginates BOTH (Unit 12, before scheduling it unattended). */
+const REAPER_PAGE_SIZE = 1000;
+
 /** Recursively list every stored object under the bucket ({student}/{evidence}/
- *  file), collecting path + created-at. Bounded by the bucket size (T1 scale). A
- *  list error THROWS. Pseudo-folder entries (id === null) are recursed, not
- *  collected. */
+ *  file), collecting path + created-at, PAGINATED per folder (a folder with
+ *  >1000 entries would otherwise silently truncate — fail-safe for orphans,
+ *  but paginate anyway). Sibling folders list concurrently, bounded by the
+ *  two-level path shape. A list error THROWS. Pseudo-folder entries
+ *  (id === null) are recursed, not collected. */
 async function listAllObjects(db: Db): Promise<{ path: string; createdAtMs: number }[]> {
   const out: { path: string; createdAtMs: number }[] = [];
   async function walk(prefix: string): Promise<void> {
-    const { data, error } = await db.storage.from(EVIDENCE_BUCKET).list(prefix, { limit: 1000 });
-    if (error) throw new Error(`listAllObjects(${prefix || "/"}) failed: ${error.message}`);
-    for (const entry of data ?? []) {
-      const full = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.id === null) {
-        await walk(full); // a folder
-      } else {
-        const created = entry.created_at ? Date.parse(entry.created_at) : NaN;
-        out.push({ path: full, createdAtMs: Number.isFinite(created) ? created : 0 });
+    const folders: string[] = [];
+    for (let offset = 0; ; offset += REAPER_PAGE_SIZE) {
+      const { data, error } = await db.storage
+        .from(EVIDENCE_BUCKET)
+        .list(prefix, { limit: REAPER_PAGE_SIZE, offset });
+      if (error) throw new Error(`listAllObjects(${prefix || "/"}) failed: ${error.message}`);
+      const page = data ?? [];
+      for (const entry of page) {
+        const full = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.id === null) {
+          folders.push(full);
+        } else {
+          const created = entry.created_at ? Date.parse(entry.created_at) : NaN;
+          out.push({ path: full, createdAtMs: Number.isFinite(created) ? created : 0 });
+        }
       }
+      if (page.length < REAPER_PAGE_SIZE) break;
+    }
+    // Recurse folders in bounded batches — parallel within a level (the serial
+    // per-folder walk was the Unit 10 carry-forward's scale concern).
+    const BATCH = 8;
+    for (let i = 0; i < folders.length; i += BATCH) {
+      await Promise.all(folders.slice(i, i + BATCH).map((f) => walk(f)));
     }
   }
   await walk("");
@@ -597,27 +620,43 @@ async function listAllObjects(db: Db): Promise<{ path: string; createdAtMs: numb
 }
 
 /** The set of object paths that DO have a confirmed evidence row (object + poster,
- *  including redacted tombstones whose object is already gone). */
+ *  including redacted tombstones whose object is already gone). PAGINATED with a
+ *  KEYSET cursor on `id` (not offset — a concurrent insert sorting before the
+ *  current offset would shift pages and silently SKIP a row, and a truncated
+ *  confirmed-set would make the reaper DELETE CONFIRMED OBJECTS — the one
+ *  direction this function must never fail in). */
 async function loadConfirmedObjectPaths(db: Db): Promise<Set<string>> {
-  const { data, error } = await db
-    .from("path_evidence_items")
-    .select("object_path, poster_object_path");
-  if (error) throw new Error(`loadConfirmedObjectPaths failed: ${error.message}`);
   const set = new Set<string>();
-  for (const r of data ?? []) {
-    const op = r.object_path as string | null;
-    const pp = r.poster_object_path as string | null;
-    if (op) set.add(op);
-    if (pp) set.add(pp);
+  let cursor: string | null = null;
+  for (;;) {
+    let query = db
+      .from("path_evidence_items")
+      .select("id, object_path, poster_object_path")
+      .order("id", { ascending: true })
+      .limit(REAPER_PAGE_SIZE);
+    if (cursor !== null) query = query.gt("id", cursor);
+    const { data, error } = await query;
+    if (error) throw new Error(`loadConfirmedObjectPaths failed: ${error.message}`);
+    const page = data ?? [];
+    for (const r of page) {
+      const op = r.object_path as string | null;
+      const pp = r.poster_object_path as string | null;
+      if (op) set.add(op);
+      if (pp) set.add(pp);
+    }
+    if (page.length < REAPER_PAGE_SIZE) break;
+    cursor = page[page.length - 1].id as string;
   }
   return set;
 }
 
 /**
- * Reap orphaned objects — those with no confirmed evidence row, older than 48h
- * (`selectOrphans`). Deletes via the Storage API in one call (NEVER SQL). Returns
- * how many were reaped and how many were considered. Closes the quota's blind spot:
- * an abandoned upload has no size metadata and is invisible to the byte-sum.
+ * Reap orphaned objects — those with no confirmed evidence row, older than the
+ * ORPHAN_MIN_AGE_MS window (7 days — see evidence-rules.ts for why it widened
+ * from 48h; `selectOrphans` decides). Deletes via the Storage API in one call
+ * (NEVER SQL). Returns how many were reaped and how many were considered.
+ * Closes the quota's blind spot: an abandoned upload has no size metadata and
+ * is invisible to the byte-sum.
  */
 export async function reapOrphans(
   db: Db,

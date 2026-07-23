@@ -17,6 +17,21 @@
 -- until after the ~Jul 28 Chicago-rehearsal checkpoint. Nothing here is urgent
 -- ahead of that — no guide can be provisioned before the FW cohorts exist.
 --
+-- ⚠️ DEPLOY ORDER (data-migrations review). This file has NO SQL dependency on
+-- Unit 1's migration — it references auth.users and nothing else, so it can be
+-- applied in isolation. But Unit 2's CODE does: `loadFwCohort` and
+-- `listFwCohortsForActor` both read `path_cohorts.kind`, which only Unit 1's
+-- migration adds. Code deploys on merge (Vercel) while migrations apply by hand
+-- (Management API), so there is a real window where the code is live against a
+-- table with no `kind` column. It fails CLOSED and does not crash — every read
+-- is `res.error ? fallback : data` — but the observable result is that every FW
+-- cohort surface reports "not found"/empty with only a server-side
+-- `[fw/guide] cohort … failed` line to explain it. Before treating the FW
+-- surfaces as working in production, confirm:
+--   select column_name from information_schema.columns
+--    where table_schema='public' and table_name='path_cohorts' and column_name='kind';
+--   -- 1 row required; 0 rows means Unit 1 has not been applied yet.
+--
 -- Rollout phase: SCHEMA ONLY. Creates one empty table; seeds and backfills
 -- nothing. Idempotent (create if not exists) — re-applying is a no-op.
 --

@@ -42,6 +42,7 @@
  */
 
 import type { RoleGrant, SessionLike } from "./access-rules";
+import { isFwStudentAddress } from "./fw-provision-rules";
 
 /** The `path_cohorts.kind` value that makes a cohort a Founders Weekend cohort.
  *  Mirrors the migration's CHECK (`kind in ('path','fw')`); the parity test pins
@@ -217,13 +218,8 @@ export type FwGuideCreateUserPayload = {
  */
 export function buildFwGuideCreateUserPayload({
   email,
-  isFwStudentAddress,
 }: {
   email: string;
-  /** Injected rather than imported so this module stays a leaf (fw-provision-
-   *  rules.ts owns the address vocabulary; this module owns authorization).
-   *  The impure shell wires the real predicate; the test wires the real one too. */
-  isFwStudentAddress: (email: string) => boolean;
 }): FwGuideCreateUserPayload {
   const normalized = email.trim().toLowerCase();
   if (normalized.length === 0) {
@@ -238,17 +234,24 @@ export function buildFwGuideCreateUserPayload({
 }
 
 /**
- * Whether an existing auth account may be ADOPTED as the guide for a new grant
- * (the `email_exists` branch of provisioning).
+ * Whether an auth account is one this system minted as an FW guide.
  *
- * Only an account this system already minted as a guide qualifies. Everything
- * else is refused, and the reason is an escalation rather than tidiness: the
- * invite this provisioning issues can SET THE ACCOUNT'S PASSWORD. Adopting a
- * parent's, a student's, or — worst — a staff member's account would turn "add
- * a guide" into "mail a password-reset link for that person's account to
- * whoever staff typed in the address field".
+ * THE SAME PREDICATE GUARDS ALL THREE CREDENTIAL OPERATIONS, and the reason is
+ * escalation rather than tidiness — each of them can hand someone control of the
+ * account it names:
+ *
+ *   1. provisioning's `email_exists` branch — may this existing account be
+ *      ADOPTED as the guide for a new grant?
+ *   2. invite issue/re-issue — may this account be mailed a link that SETS ITS
+ *      PASSWORD?
+ *   3. the claim itself — may this password write land on this account?
+ *
+ * Adopting or crediting a parent's, a student's, or — worst — a staff member's
+ * account would turn "add a guide" into "mail a working credential for that
+ * person's account to whoever staff typed in the address field". All three call
+ * sites check independently, so no one of them is load-bearing alone.
  */
-export function canAdoptAsGuideAccount(account: {
+export function isGuideAccount(account: {
   app_metadata?: Record<string, unknown> | null;
 } | null): boolean {
   return account?.app_metadata?.role === FW_GUIDE_ROLE;
@@ -315,4 +318,34 @@ export function fwGuideInviteVerdict({
 /** The expiry stamp a freshly issued (or re-issued) guide invite carries. */
 export function fwGuideInviteExpiry(now: number): string {
   return new Date(now + FW_GUIDE_INVITE_TTL_MS).toISOString();
+}
+
+/**
+ * Whether a failed claim attempt should KEEP its per-IP rate-limit strike or
+ * RELEASE it — pure so the policy is testable, because the action layer that
+ * applies it has no test harness in this repo (next/headers).
+ *
+ * The distinction is the one the rate-limiter learning states: a strike exists
+ * to bound TOKEN GUESSING, so only an attempt that was actually a guess may cost
+ * one.
+ *
+ *   dead_link      → KEEP. This is the guess. It is also the only outcome an
+ *                    attacker with a wrong token can provoke.
+ *   weak_password  → RELEASE. The token was already verified live; the guide
+ *                    simply chose a password below the floor. Charging for it
+ *                    would let a guide lock themselves out by typing "12345"
+ *                    ten times at the check-in table.
+ *   unavailable    → RELEASE. An outage is not an attempt (the sign-in action's
+ *                    documented store contract). This one is load-bearing after
+ *                    the reliability review: an Auth API blip during the
+ *                    Friday-morning claim rush must not silently consume the
+ *                    venue's shared per-IP budget.
+ *
+ * An inverted condition here is invisible until an event morning, which is
+ * exactly why it is pinned by test rather than left inline in the action.
+ */
+export function fwClaimStrikeDisposition(
+  reason: "dead_link" | "weak_password" | "unavailable"
+): "keep" | "release" {
+  return reason === "dead_link" ? "keep" : "release";
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 
 /**
@@ -40,8 +41,14 @@ export default async function FwCohortPage({
 
   return (
     <main className="mx-auto w-full max-w-md px-5 py-10">
+      {/* Via the shared predicate, not a hand-rolled `via === "bridge"`. The
+          same commit that exports a helper to stop callers re-deriving a
+          security-adjacent boolean should thread it through its own call sites,
+          or the helper ships with its test as its only caller — the shape
+          docs/solutions/security-issues/guard-function-with-no-callers-…md
+          warns about (learnings + maintainability review). */}
       <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
-        {verdict.via === "bridge" ? "Staff" : "Guide"}
+        {isFwStaffActor(verdict) ? "Staff" : "Guide"}
       </p>
       <h1 className="mt-2 font-path-display text-2xl font-semibold tracking-tight text-hq-ink">
         {cohort.id}

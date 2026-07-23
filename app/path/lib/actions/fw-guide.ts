@@ -25,17 +25,17 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { sendEmail } from "@/app/lib/email";
-import { SITE_URL } from "@/app/lib/site";
-import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { clientIp } from "@/app/path/lib/client-ip";
+import { fwClaimStrikeDisposition } from "@/app/path/lib/fw-access-rules";
 import { resolveFwStaffGate } from "@/app/path/lib/fw-auth";
 import {
   claimFwGuideInvite,
   issueFwGuideInvite,
   provisionFwGuide,
 } from "@/app/path/lib/fw-guide-core";
+import { buildFwGuideInviteEmail } from "@/app/path/lib/fw-guide-invite-email";
 import { assertNoAuthMailToFwStudent } from "@/app/path/lib/fw-provision-rules";
 import { normalizeEmail } from "@/app/path/lib/onboarding-rules";
 import {
@@ -54,8 +54,19 @@ const STAFF_ONLY = "That action is staff-only.";
 const GUIDE_SIGN_IN_FAILED =
   "That email and password don't match. Check both and try again.";
 const RATE_LIMITED = "Too many tries for now. Wait a few minutes, then try again.";
+/**
+ * One message for every dead-link shape (never issued / already claimed /
+ * expired / not a guide account) so an unauthenticated caller learns nothing
+ * about whether a token ever existed.
+ *
+ * It names signing in FIRST, deliberately (adversarial review): the most likely
+ * way a real guide meets this message is retrying a claim whose response was
+ * lost on venue wifi — their password IS set and they can sign in right now. The
+ * previous copy sent that guide to find staff mid-event over a problem they did
+ * not have.
+ */
 const INVITE_DEAD =
-  "This link isn't valid any more — ask The 120 staff for a fresh one.";
+  "This link isn't usable. If you already set a password, sign in on the guide page — otherwise ask The 120 staff for a fresh link.";
 
 /* ──────────────────────────────────────────────────────────── guide sign-in ── */
 
@@ -168,10 +179,18 @@ export async function provisionGuideAction(
     return { success: false, error: provisionFailureMessage(provisioned.reason) };
   }
 
+  // "ensure", NOT "reissue" (merged correctness + adversarial P1). Provisioning
+  // is idempotent by design so that adding a guide to a SECOND weekend is just
+  // calling it again — and a blind re-issue there would un-mark an actively
+  // working guide as unclaimed, corrupt the pre-event "all guides claimed"
+  // checklist, and mail them a live password-setting link they never asked for.
+  // Rotating a claimed credential is a deliberate act; it lives in
+  // reissueGuideInviteAction, where staff have to choose it.
   const issued = await issueFwGuideInvite(db, {
     userId: provisioned.userId,
     createdBy: gate.userId,
     now: Date.now(),
+    mode: "ensure",
   });
   if (!issued.ok) {
     return {
@@ -179,6 +198,17 @@ export async function provisionGuideAction(
       email: provisioned.email,
       created: provisioned.created,
       invited: false,
+    };
+  }
+  if (!issued.issued) {
+    // Already credentialed — nothing minted, nothing to mail. `invited: true`
+    // is the honest answer to "can this guide get in?", which is what the ops
+    // copy asks.
+    return {
+      success: true,
+      email: provisioned.email,
+      created: provisioned.created,
+      invited: true,
     };
   }
 
@@ -236,15 +266,18 @@ export async function reissueGuideInviteAction(
     userId: parsed.data.userId,
     createdBy: gate.userId,
     now: Date.now(),
+    // The explicit recovery path: rotate unconditionally and re-open the claim,
+    // even for an already-claimed guide. That IS the forgotten-password fix.
+    mode: "reissue",
   });
   if (!issued.ok) {
-    return {
-      success: false,
-      error:
-        issued.reason === "unavailable"
-          ? GENERIC_ERROR
-          : "That guide account can't be sent a link — check the guide list.",
-    };
+    return { success: false, error: reissueFailureMessage(issued.reason) };
+  }
+  if (!issued.issued) {
+    // Unreachable in "reissue" mode (it always rotates), but handled rather than
+    // asserted so a future mode change surfaces here instead of silently
+    // reporting success for a link that was never minted.
+    return { success: false, error: GENERIC_ERROR };
   }
 
   const sent = await sendGuideInviteEmail({ to: issued.email, token: issued.token });
@@ -252,6 +285,25 @@ export async function reissueGuideInviteAction(
     return { success: false, error: "The link was created but the email didn't send — try again." };
   }
   return { success: true };
+}
+
+/**
+ * A `switch` with no `default` and a declared `string` return, mirroring
+ * `provisionFailureMessage` above: TypeScript's TS2366 makes a newly added
+ * failure reason a COMPILE error here rather than something that silently lands
+ * on whatever copy the previous `else` branch happened to hold (kieran-typescript
+ * review — the ternary this replaces swallowed every reason but one).
+ */
+function reissueFailureMessage(
+  reason: "guide_not_found" | "not_a_guide_account" | "unavailable"
+): string {
+  switch (reason) {
+    case "guide_not_found":
+    case "not_a_guide_account":
+      return "That guide account can't be sent a link — check the guide list.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
 }
 
 /**
@@ -268,23 +320,7 @@ export async function reissueGuideInviteAction(
 async function sendGuideInviteEmail({ to, token }: { to: string; token: string }) {
   assertNoAuthMailToFwStudent(to, "fw guide invite");
 
-  const url = `${SITE_URL}/path/fw/invite/${token}`;
-  const subject = "Your Founders Weekend guide access";
-  const text = [
-    "You're set up as a guide for Founders Weekend.",
-    "",
-    "Open the link below to choose a password. You'll use it to sign in on the check-in iPads.",
-    "",
-    `Set your password (valid 14 days): ${url}`,
-    "",
-    "If the link has expired, ask The 120 staff to send a fresh one — there's no self-service reset.",
-  ].join("\n");
-  const html = `
-  <p style="margin:0 0 16px;">You're set up as a guide for <strong>Founders Weekend</strong>.</p>
-  <p style="margin:0 0 16px;">Open the link below to choose a password. You'll use it to sign in on the check-in iPads.</p>
-  <p style="margin:0 0 24px;"><a href="${escapeHtml(url)}" style="background:#16233b;color:#ffffff;text-decoration:none;padding:12px 22px;font-size:15px;">Set your password</a></p>
-  <p style="margin:0 0 16px;color:#667;">The link is valid for 14 days. If it has expired, ask The 120 staff to send a fresh one — there's no self-service reset.</p>`;
-
+  const { subject, html, text } = buildFwGuideInviteEmail({ token });
   const sent = await sendEmail({ to, subject, html, text });
   if (!sent.ok) {
     console.error(`[fw/guide] invite send failed for ${to}: ${sent.error ?? "unknown"}`);
@@ -335,17 +371,28 @@ export async function claimGuideInviteAction(
     now: Date.now(),
   });
   if (!claimed.ok) {
-    if (claimed.reason === "weak_password") {
-      // A rejected password is not a token guess; the link is still live.
+    // The keep-vs-release policy is a pure, tested decision rather than an
+    // inline condition: only a genuine token guess (`dead_link`) may cost a
+    // strike, and an inverted comparison here is invisible until an event
+    // morning. See fwClaimStrikeDisposition.
+    if (fwClaimStrikeDisposition(claimed.reason) === "release") {
       releaseRateLimitEvent(rateKey);
+    }
+    if (claimed.reason === "weak_password") {
       return { success: false, error: claimed.message ?? GENERIC_ERROR };
     }
     if (claimed.reason === "unavailable") {
-      releaseRateLimitEvent(rateKey);
       return { success: false, error: GENERIC_ERROR };
     }
     return { success: false, error: INVITE_DEAD };
   }
+
+  // A SUCCESSFUL claim releases its strike too, mirroring signInGuide's
+  // clear-on-success. The bucket is keyed by IP alone, so without this every
+  // guide claiming from the venue's single NAT'd address stacks onto one
+  // 10-per-15-minute budget and the eleventh legitimate guide of the morning is
+  // told "too many tries" having made none (reliability review).
+  releaseRateLimitEvent(rateKey);
 
   const supabase = await supabaseServer();
   const signedIn = await supabase.auth.signInWithPassword({

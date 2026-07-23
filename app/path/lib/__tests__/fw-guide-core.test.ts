@@ -43,9 +43,17 @@ type Seed = {
   /** Force one table+op to error, to exercise the compensation branches. */
   failTable?: { table: string; op: "upsert" | "update" | "select"; message: string } | null;
   updateUserError?: string | null;
+  /** Force getUserById to report an API FAILURE rather than a clean not-found —
+   *  the distinction the reliability review found conflated. */
+  getUserByIdError?: string | null;
   /** Runs after the claim CAS wins, before the password write — the only way to
    *  model a concurrent re-issue landing mid-claim. */
   afterClaimCas?: (tables: Record<string, Row[]>) => void;
+  /** Runs immediately BEFORE the claim CAS executes, so a genuinely interleaved
+   *  second claim (or a re-issue) can be modelled — the CAS's own race-losing
+   *  branch is otherwise unreachable, since every sequential test short-circuits
+   *  earlier at the pure verdict (testing review). */
+  beforeClaimCas?: (tables: Record<string, Row[]>) => void;
 };
 
 function makeFakeDb(seed: Seed) {
@@ -95,6 +103,9 @@ function makeFakeDb(seed: Seed) {
       },
       in(col: string, vals: unknown[]) {
         inFilter = [col, vals];
+        return builder;
+      },
+      limit() {
         return builder;
       },
       async maybeSingle() {
@@ -147,7 +158,9 @@ function makeFakeDb(seed: Seed) {
             return chain;
           },
           select() {
-            // The claim CAS is the only `.update(...).select(...)` here.
+            // The only `.update(...).select(...)` calls are the claim CAS and
+            // the "ensure"-mode invite refresh CAS.
+            seed.beforeClaimCas?.(tables);
             const result = run();
             claimCasRuns += 1;
             if (!result.error && (result.data ?? []).length > 0) seed.afterClaimCas?.(tables);
@@ -189,10 +202,13 @@ function makeFakeDb(seed: Seed) {
         },
         async getUserById(id: string) {
           calls.getUserById += 1;
+          // An API FAILURE and a clean not-found are DIFFERENT facts; the real
+          // client can return either, and the code must not conflate them.
+          if (seed.getUserByIdError) {
+            return { data: { user: null }, error: { message: seed.getUserByIdError } };
+          }
           const user = authUsers.find((u) => u.id === id);
-          return user
-            ? { data: { user }, error: null }
-            : { data: { user: null }, error: { message: "not found" } };
+          return user ? { data: { user }, error: null } : { data: { user: null }, error: null };
         },
         async updateUserById(id: string, patch: Row) {
           calls.updateUser += 1;
@@ -216,8 +232,13 @@ function makeFakeDb(seed: Seed) {
     },
   };
 
+  /** Attach failure hooks AFTER setup, so seeding a fixture doesn't trip the
+   *  very hook the test is arming. The builders read `seed` lazily by property,
+   *  so assigning onto it takes effect from the next call. */
+  const arm = (next: Seed) => Object.assign(seed, next);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { db: db as any, tables, authUsers, calls, casRuns: () => claimCasRuns };
+  return { db: db as any, tables, authUsers, calls, arm, casRuns: () => claimCasRuns };
 }
 
 /* ═══════════════════════════════════════════════ authorization inputs (reads) ══ */
@@ -267,34 +288,43 @@ describe("listFwCohortsForActor", () => {
   it("staff see every fw cohort and no path cohort", async () => {
     const { db } = makeFakeDb({});
     const list = await listFwCohortsForActor(db, { grantedCohortIds: [], isStaff: true });
-    expect(list.map((c) => c.id).sort()).toEqual([BOSTON, HAMPTONS]);
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    expect(list.cohorts.map((c) => c.id).sort()).toEqual([BOSTON, HAMPTONS]);
   });
 
   it("a guide sees only their granted fw cohorts", async () => {
     const { db } = makeFakeDb({});
     const list = await listFwCohortsForActor(db, { grantedCohortIds: [BOSTON], isStaff: false });
-    expect(list).toEqual([{ id: BOSTON, slug: "boston-2026-08" }]);
+    expect(list).toEqual({ ok: true, cohorts: [{ id: BOSTON, slug: "boston-2026-08" }] });
   });
 
   it("a guide grant naming a PATH cohort surfaces nothing — kind is re-read, not trusted", async () => {
     const { db } = makeFakeDb({});
     expect(
       await listFwCohortsForActor(db, { grantedCohortIds: [PATH_COHORT], isStaff: false })
-    ).toEqual([]);
+    ).toEqual({ ok: true, cohorts: [] });
   });
 
   it("a grant-less non-staff session short-circuits to empty without a query", async () => {
     const { db } = makeFakeDb({});
-    expect(await listFwCohortsForActor(db, { grantedCohortIds: [], isStaff: false })).toEqual([]);
+    expect(await listFwCohortsForActor(db, { grantedCohortIds: [], isStaff: false })).toEqual({
+      ok: true,
+      cohorts: [],
+    });
   });
 
-  it("a read error degrades to empty, never a throw into the shell", async () => {
+  it("a read error reports FAILURE, never an empty list", async () => {
+    // The distinction the reliability review caught: this runs AFTER the caller
+    // is authorized, so collapsing an outage to [] buys no safety and costs a
+    // lie — the landing page renders "you aren't a guide on any cohort" for it,
+    // sending a real guide to find staff over something a refresh fixes.
     const failing = makeFakeDb({
       failTable: { table: "path_cohorts", op: "select", message: "boom" },
     });
-    expect(await listFwCohortsForActor(failing.db, { grantedCohortIds: [], isStaff: true })).toEqual(
-      []
-    );
+    expect(
+      await listFwCohortsForActor(failing.db, { grantedCohortIds: [], isStaff: true })
+    ).toEqual({ ok: false });
   });
 });
 
@@ -360,6 +390,25 @@ describe("provisionFwGuide — the mint path", () => {
       createUserOutcomes: [{ ok: false, code: "500", message: "auth is down" }],
     });
     expect(await provisionFwGuide(db, RAVI)).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("detects a collision reported ONLY by message, with no email_exists code", async () => {
+    // The regex fallback exists precisely because the Admin API does not always
+    // set the code — but the fake used to always set it, so only the code branch
+    // was ever exercised and a broken regex would have shipped green (testing
+    // review). Without this branch the adoption path is missed entirely and a
+    // real collision reports "unavailable".
+    const { db, authUsers } = makeFakeDb({
+      authUsers: [{ id: "user-ravi", email: "ravi@example.com", app_metadata: { role: "guide" } }],
+      createUserOutcomes: [{ ok: false, message: "Email address already registered" }],
+    });
+    expect(await provisionFwGuide(db, RAVI)).toEqual({
+      ok: true,
+      userId: "user-ravi",
+      email: "ravi@example.com",
+      created: false,
+    });
+    expect(authUsers).toHaveLength(1);
   });
 });
 
@@ -434,6 +483,24 @@ describe("provisionFwGuide — adoption and idempotency", () => {
     expect(authUsers).toHaveLength(1);
     expect(calls.deleteUser).toBe(0);
   });
+
+  it("SKIPS the compensation delete when a concurrent caller already granted the account", async () => {
+    // Adversarial review: two staff double-submit the same NEW guide into two
+    // cohorts. The loser adopts the winner's account. If the winner's own grant
+    // write then fails, deleting "the account I minted" would yank it out from
+    // under the loser's in-flight grant, failing BOTH staff for what looked like
+    // one successful mint. `created` is necessary but not sufficient — the probe
+    // is what makes it safe.
+    const { db, authUsers, calls } = makeFakeDb({
+      grants: [
+        { id: "g-concurrent", user_id: "user-1", role: "guide", scope_type: "cohort", scope_id: HAMPTONS },
+      ],
+      failTable: { table: "path_role_grants", op: "upsert", message: "grants are down" },
+    });
+    expect(await provisionFwGuide(db, RAVI)).toEqual({ ok: false, reason: "unavailable" });
+    expect(calls.deleteUser).toBe(0);
+    expect(authUsers).toHaveLength(1);
+  });
 });
 
 /* ═════════════════════════════════════════════════════ invite issue/re-issue ══ */
@@ -450,8 +517,8 @@ describe("issueFwGuideInvite", () => {
     const { db, tables } = makeFakeDb({ authUsers: [seedGuide()] });
     const res = await issueFwGuideInvite(db, { userId: "user-ravi", createdBy: STAFF, now: NOW });
 
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
+    expect(res.ok && res.issued).toBe(true);
+    if (!res.ok || !res.issued) return;
     const row = tables.path_fw_guide_invites[0];
     expect(row.token_hash).toBe(hashGuideInviteToken(res.token));
     // A database read must never reconstruct a live link.
@@ -467,8 +534,8 @@ describe("issueFwGuideInvite", () => {
     // "kills the old hash" structural rather than a discipline.
     const { db, tables } = makeFakeDb({ authUsers: [seedGuide()] });
     const first = await issueFwGuideInvite(db, { userId: "user-ravi", createdBy: STAFF, now: NOW });
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
+    expect(first.ok && first.issued).toBe(true);
+    if (!first.ok || !first.issued) return;
     // Simulate the guide having claimed it already (the forgot-password case).
     tables.path_fw_guide_invites[0].claimed_at = "2026-08-11T09:00:00Z";
 
@@ -476,9 +543,10 @@ describe("issueFwGuideInvite", () => {
       userId: "user-ravi",
       createdBy: STAFF,
       now: NOW + 86_400_000,
+      mode: "reissue",
     });
-    expect(second.ok).toBe(true);
-    if (!second.ok) return;
+    expect(second.ok && second.issued).toBe(true);
+    if (!second.ok || !second.issued) return;
 
     expect(tables.path_fw_guide_invites).toHaveLength(1);
     expect(second.token).not.toBe(first.token);
@@ -508,6 +576,90 @@ describe("issueFwGuideInvite", () => {
     ).toEqual({ ok: false, reason: "unavailable" });
   });
 
+  it("distinguishes an Admin API FAILURE from a genuinely absent account", async () => {
+    // Reliability review: collapsing these told staff "that guide account can't
+    // be sent a link — check the guide list" (sending them to investigate the
+    // roster) when the truthful answer was "the lookup call failed, retry".
+    const { db } = makeFakeDb({
+      authUsers: [seedGuide()],
+      getUserByIdError: "auth API is down",
+    });
+    expect(
+      await issueFwGuideInvite(db, { userId: "user-ravi", createdBy: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+});
+
+describe("issueFwGuideInvite — 'ensure' mode (the merged P1 fix)", () => {
+  it("mints for a guide who has no invite row yet", async () => {
+    const { db, tables } = makeFakeDb({ authUsers: [seedGuide()] });
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW,
+      mode: "ensure",
+    });
+    expect(res.ok && res.issued).toBe(true);
+    expect(tables.path_fw_guide_invites).toHaveLength(1);
+  });
+
+  it("REFUSES to touch an already-CLAIMED invite — the whole point of the fix", async () => {
+    // Provisioning is idempotent so "a guide works Boston AND Hamptons" is just
+    // calling it again. Under the old unconditional re-issue, that flow un-marked
+    // an actively working guide as unclaimed (corrupting the pre-event "all
+    // guides claimed" checklist) and mailed them a live password-setting link
+    // they never asked for — which, clicked mid-event on a shared iPad, would
+    // silently overwrite the password they were working with.
+    const { db, tables } = await seedIssued();
+    const before = { ...tables.path_fw_guide_invites[0] };
+    tables.path_fw_guide_invites[0].claimed_at = "2026-08-21T09:00:00Z";
+
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW + 86_400_000,
+      mode: "ensure",
+    });
+
+    expect(res).toEqual({ ok: true, issued: false, email: "ravi@example.com" });
+    // Token untouched, claim untouched, expiry untouched.
+    expect(tables.path_fw_guide_invites[0].token_hash).toBe(before.token_hash);
+    expect(tables.path_fw_guide_invites[0].claimed_at).toBe("2026-08-21T09:00:00Z");
+    expect(tables.path_fw_guide_invites[0].expires_at).toBe(before.expires_at);
+  });
+
+  it("REFRESHES an outstanding (unclaimed) invite — that is what ensure is for", async () => {
+    const { db, tables, token } = await seedIssued();
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW + 86_400_000,
+      mode: "ensure",
+    });
+    expect(res.ok && res.issued).toBe(true);
+    if (!res.ok || !res.issued) return;
+    expect(res.token).not.toBe(token);
+    expect(tables.path_fw_guide_invites[0].token_hash).toBe(hashGuideInviteToken(res.token));
+  });
+
+  it("does NOT rotate on top of a claim that lands between the probe and the write", async () => {
+    // The CAS on `claimed_at is null` closes the probe→write window: a guide who
+    // credentials themselves in that gap must not be silently un-claimed.
+    const { db, tables } = await seedIssued({
+      beforeClaimCas: (t) => {
+        t.path_fw_guide_invites[0].claimed_at = "2026-08-21T09:00:00Z";
+      },
+    });
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW + 60_000,
+      mode: "ensure",
+    });
+    expect(res).toEqual({ ok: true, issued: false, email: "ravi@example.com" });
+    expect(tables.path_fw_guide_invites[0].claimed_at).toBe("2026-08-21T09:00:00Z");
+  });
+
   it("reports unavailable when the row write fails", async () => {
     const { db } = makeFakeDb({
       authUsers: [seedGuide()],
@@ -524,13 +676,22 @@ describe("issueFwGuideInvite", () => {
 const PASSWORD = "harbour lantern quilt";
 
 async function seedIssued(seed: Seed = {}) {
-  const fake = makeFakeDb({ authUsers: [seedGuide()], ...seed });
+  // Seed the row WITHOUT the hooks/errors under test, then attach them — a
+  // beforeClaimCas hook (or a forced getUserById failure) must not fire during
+  // setup, or the fixture the test needs never gets written.
+  const fake = makeFakeDb({
+    authUsers: [seedGuide()],
+    ...seed,
+    beforeClaimCas: undefined,
+    getUserByIdError: null,
+  });
   const issued = await issueFwGuideInvite(fake.db, {
     userId: "user-ravi",
     createdBy: STAFF,
     now: NOW,
   });
-  if (!issued.ok) throw new Error("seed failed");
+  if (!issued.ok || !issued.issued) throw new Error("seed failed");
+  fake.arm(seed);
   return { ...fake, token: issued.token };
 }
 
@@ -651,6 +812,40 @@ describe("claimFwGuideInvite", () => {
       ok: false,
       reason: "dead_link",
     });
+  });
+
+  it("reports UNAVAILABLE (not dead_link) when the account lookup itself fails", async () => {
+    // The reliability P1. `user_id ... on delete restrict` makes a live invite
+    // pointing at a deleted account near-impossible, so an error here is almost
+    // always a venue-wifi blip. Reporting dead_link told the guide their fresh
+    // link was dead AND kept their rate-limit strike (only unavailable and
+    // weak_password release one) — eating a shared per-IP attempt.
+    const { db, authUsers, token } = await seedIssued({ getUserByIdError: "auth API is down" });
+    expect(await claimFwGuideInvite(db, { token, password: PASSWORD, now: NOW + 1 })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(authUsers[0].password).toBeUndefined();
+  });
+
+  it("loses the CAS to a genuinely interleaved claim — exactly one winner", async () => {
+    // Every other dead_link test short-circuits at the pure verdict; this is the
+    // only one that reaches `(claimed.data ?? []).length === 0`, the line whose
+    // own comment calls it the property that "cardinality picks the winner of
+    // two simultaneous claims" (testing review).
+    const { db, tables, authUsers, token } = await seedIssued({
+      beforeClaimCas: (t) => {
+        // A rival claim commits between our SELECT/verdict and our CAS.
+        t.path_fw_guide_invites[0].claimed_at = "2026-08-21T09:00:00Z";
+      },
+    });
+    expect(await claimFwGuideInvite(db, { token, password: PASSWORD, now: NOW + 1 })).toEqual({
+      ok: false,
+      reason: "dead_link",
+    });
+    // The rival's claim stands; we neither stole it nor set a password.
+    expect(tables.path_fw_guide_invites[0].claimed_at).toBe("2026-08-21T09:00:00Z");
+    expect(authUsers[0].password).toBeUndefined();
   });
 
   it("reports unavailable (not dead link) on a read outage, so the caller can retry", async () => {

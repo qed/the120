@@ -20,6 +20,13 @@ import ClaimGuideInviteForm from "./ClaimGuideInviteForm";
  * case to carve out, because a guide invite is bound to its account and the
  * claim replaces whatever session the shared iPad was holding.
  *
+ * A READ FAILURE is a fourth, separate state (reliability review). It used to
+ * collapse into the dead-link card on the reasoning that "the action re-runs the
+ * authoritative verdict on submit" — which is FALSE here, because the dead-link
+ * branch does not render the form at all, so there is no submit to fall back on.
+ * A guide opening a perfectly good link during a DB blip was told, terminally,
+ * to go find staff. It now gets its own retryable state.
+ *
  * Force-dynamic: the token lookup needs the service-role client at request time,
  * and the env-less build must never try to prerender it.
  */
@@ -64,9 +71,8 @@ export default async function FwGuideInvitePage({
     .select("email, expires_at, claimed_at")
     .eq("token_hash", hashGuideInviteToken(token))
     .maybeSingle();
-  // A read failure renders the dead-link card rather than throwing — the action
-  // is the authoritative path and will report honestly on submit.
-  const { verdict, email } = verdictForRow(res.error ? null : res.data);
+  const unreachable = Boolean(res.error);
+  const { verdict, email } = verdictForRow(unreachable ? null : res.data);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-hq-canvas px-6 py-12">
@@ -78,9 +84,24 @@ export default async function FwGuideInvitePage({
           Guide access
         </h1>
 
-        {!verdict.ok ? (
+        {unreachable ? (
+          <p
+            role="alert"
+            className="mt-4 rounded-lg border border-not-yet/40 bg-not-yet/10 p-3 font-path-body text-sm leading-6 text-hq-ink"
+          >
+            We couldn&apos;t check your link just now. Reload the page to try again — your link is
+            probably fine.
+          </p>
+        ) : !verdict.ok ? (
           <p className="mt-4 font-path-body text-sm leading-6 text-hq-ink-soft">
-            This link isn&apos;t valid any more — ask The 120 staff to send you a fresh one.
+            This link isn&apos;t usable. If you already set a password,{" "}
+            <a
+              href="/path/fw/sign-in"
+              className="underline underline-offset-2 hover:text-hq-ink"
+            >
+              sign in
+            </a>{" "}
+            — otherwise ask The 120 staff for a fresh link.
           </p>
         ) : (
           <>

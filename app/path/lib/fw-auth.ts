@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -44,10 +45,20 @@ export type FwSession = {
   hasAdminClaim: boolean;
 };
 
-/** Load the FW session, or null when there is none. Never redirects — callers
- *  that want a redirect use `requireFwSession`; the invite/claim surfaces
- *  deliberately work session-less. */
-export async function loadFwSession(): Promise<FwSession | null> {
+/**
+ * Load the FW session, or null when there is none. Never redirects — callers
+ * that want a redirect use `requireFwSession`; the invite/claim surfaces
+ * deliberately work session-less.
+ *
+ * REQUEST-MEMOIZED with React's `cache()`, following the precedent
+ * `loadFamilyContextCached` set in `family-loader.ts` ("one set of queries per
+ * request instead of two"). Next 16 layouts do not re-render on navigation but
+ * they DO run on a full render, so `(app)/layout.tsx`'s gate and the page's own
+ * gate would otherwise each pay a `getUser()` round trip plus a grants query —
+ * four network hops where two will do, on every iPad reload and every hard
+ * navigation into the FW subtree, over venue wifi (performance review).
+ */
+export const loadFwSession = cache(async function loadFwSession(): Promise<FwSession | null> {
   const supabase = await supabaseServer();
   const {
     data: { user },
@@ -82,7 +93,7 @@ export async function loadFwSession(): Promise<FwSession | null> {
     grants,
     hasAdminClaim: user.app_metadata?.role === "admin",
   };
-}
+});
 
 /** Session or the guide door. For FW pages inside the guarded subtree. */
 export async function requireFwSession(): Promise<FwSession> {
@@ -107,7 +118,17 @@ export type FwActorContext = {
  * events into a real Path student's record.
  */
 export async function resolveFwActorForCohort(cohortId: string): Promise<FwActorContext> {
-  const session = await loadFwSession();
+  const db = supabaseAdmin();
+  // The session and the cohort are INDEPENDENT reads — `cohortId` is known up
+  // front and the cohort row does not depend on who is asking — so they run
+  // concurrently rather than serializing a third network hop onto every guide
+  // page render and (from Unit 3) every check-in action (performance review).
+  // The cost of the parallelism is one wasted cohort read on the session-less
+  // path, which the layout's redirect already makes rare.
+  const [session, cohort] = await Promise.all([
+    loadFwSession(),
+    loadFwCohort(db, cohortId),
+  ]);
   if (!session) {
     return {
       session: { userId: "", grants: [], hasAdminClaim: false },
@@ -116,10 +137,9 @@ export async function resolveFwActorForCohort(cohortId: string): Promise<FwActor
     };
   }
 
-  const db = supabaseAdmin();
-  const cohort = await loadFwCohort(db, cohortId);
   // Skip the staff-row read entirely when the claim is absent — the bridge needs
-  // both, so a claim-less session can never be promoted by this row.
+  // both, so a claim-less session can never be promoted by this row. Sequenced
+  // after the session by necessity: it is keyed on the session's user id.
   const staffRowActive = session.hasAdminClaim
     ? await loadStaffRowActive(db, session.userId)
     : false;

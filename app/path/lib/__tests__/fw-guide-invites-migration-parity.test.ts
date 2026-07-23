@@ -104,8 +104,19 @@ describe("path_fw_guide_invites — delete and access posture", () => {
   });
 
   it("has the open-invites index the pre-event 'all guides claimed' check reads", () => {
-    expect(sql).toMatch(/create index if not exists path_fw_guide_invites_open_idx/);
-    expect(sql).toMatch(/where claimed_at is null/);
+    // ONE statement, asserted as one. Matching the index name and the WHERE
+    // predicate as independent substrings anywhere in the file would still pass
+    // if a refactor split them across unrelated statements, leaving the partial
+    // index un-predicated and the ops query scanning every invite ever issued
+    // (data-migrations review).
+    const statement = sql
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.includes("path_fw_guide_invites_open_idx"));
+    expect(statement, "no statement creates path_fw_guide_invites_open_idx").toBeDefined();
+    expect(statement).toMatch(/create index if not exists/);
+    expect(statement).toMatch(/on public\.path_fw_guide_invites\s*\(\s*issued_at\s*\)/);
+    expect(statement).toMatch(/where claimed_at is null/);
   });
 
   it("seeds and backfills nothing — schema-only phase", () => {

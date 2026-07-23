@@ -27,13 +27,12 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import {
   buildFwGuideCreateUserPayload,
-  canAdoptAsGuideAccount,
   fwGuideInviteExpiry,
   fwGuideInviteVerdict,
+  isGuideAccount,
   FW_COHORT_KIND,
   type FwCohortLike,
 } from "./fw-access-rules";
-import { isFwStudentAddress } from "./fw-provision-rules";
 import { normalizeEmail } from "./onboarding-rules";
 import { validateStudentPassword } from "./provision-rules";
 import { findAuthUserByEmail } from "./provision-core";
@@ -111,12 +110,21 @@ export type FwCohortSummary = { id: string; slug: string };
  * BOTH paths re-read `kind` from the cohort rows rather than trusting the grant:
  * a `guide`/`cohort` grant can name a Path cohort (that is the Path's own D25
  * reviewer grant) and must not surface here.
+ *
+ * TRI-STATE ON PURPOSE (reliability review). `loadFwCohort` and
+ * `loadStaffRowActive` collapse a read failure into "no" because that is an
+ * AUTHORIZATION fail-closed rule — an outage must never grant access. This
+ * function runs AFTER the caller is already authorized, so the same collapse
+ * would buy no safety and cost a lie: an empty array is indistinguishable from
+ * "you hold no grants", and the landing page renders exactly that copy. A guide
+ * hitting a DB blip at the start of an event-morning shift would be told to go
+ * find staff over something a refresh fixes. So the failure is reported.
  */
 export async function listFwCohortsForActor(
   db: SupabaseClient,
   input: { grantedCohortIds: readonly string[]; isStaff: boolean }
-): Promise<FwCohortSummary[]> {
-  if (!input.isStaff && input.grantedCohortIds.length === 0) return [];
+): Promise<{ ok: true; cohorts: FwCohortSummary[] } | { ok: false }> {
+  if (!input.isStaff && input.grantedCohortIds.length === 0) return { ok: true, cohorts: [] };
 
   let query = db.from("path_cohorts").select("id, slug, kind").eq("kind", FW_COHORT_KIND);
   if (!input.isStaff) {
@@ -125,14 +133,17 @@ export async function listFwCohortsForActor(
   const res = await query;
   if (res.error) {
     console.error(`[fw/guide] cohort list failed: ${res.error.message}`);
-    return [];
+    return { ok: false };
   }
-  return (res.data ?? [])
-    .filter(
-      (r): r is { id: string; slug: string; kind: string } =>
-        typeof r.id === "string" && typeof r.slug === "string" && r.kind === FW_COHORT_KIND
-    )
-    .map((r) => ({ id: r.id, slug: r.slug }));
+  return {
+    ok: true,
+    cohorts: (res.data ?? [])
+      .filter(
+        (r): r is { id: string; slug: string; kind: string } =>
+          typeof r.id === "string" && typeof r.slug === "string" && r.kind === FW_COHORT_KIND
+      )
+      .map((r) => ({ id: r.id, slug: r.slug })),
+  };
 }
 
 /* ───────────────────────────────────────────────────── guide provisioning ──── */
@@ -191,7 +202,7 @@ export async function provisionFwGuide(
 
   let payload;
   try {
-    payload = buildFwGuideCreateUserPayload({ email, isFwStudentAddress });
+    payload = buildFwGuideCreateUserPayload({ email });
   } catch {
     // The one throwing case is the FW student namespace — a typo that would put
     // a password-carrying account inside the dormant minors' namespace.
@@ -219,7 +230,7 @@ export async function provisionFwGuide(
     // The escalation guard: an invite issued against this account can SET ITS
     // PASSWORD. Adopting a staff/parent/student account would turn "add a guide"
     // into "mail a credential for that person's account to whoever staff typed".
-    if (!canAdoptAsGuideAccount(found)) {
+    if (!isGuideAccount(found)) {
       console.error(
         `[fw/guide] refusing to adopt non-guide account for ${email} (role=${String(found.app_metadata?.role)})`
       );
@@ -240,11 +251,38 @@ export async function provisionFwGuide(
       `[fw/guide] grant upsert failed for ${user.id}/${cohort.id}: ${grant.error.message}`
     );
     if (created) {
-      const del = await db.auth.admin.deleteUser(user.id);
-      if (del.error) {
+      // `created` says THIS call minted the account, which is necessary but no
+      // longer sufficient (adversarial review): two staff double-submitting the
+      // same new guide into two cohorts race, the loser ADOPTS the winner's
+      // account, and if the winner's grant write then fails it would delete an
+      // account the loser is mid-way through granting — leaving the loser's
+      // insert to fail on a vanished FK and BOTH staff staring at an error for
+      // what looked like one successful mint. Re-probe first: any grant row
+      // means the account is no longer solely ours to withdraw.
+      const referenced = await db
+        .from("path_role_grants")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .maybeSingle();
+      if (referenced.error) {
+        // Cannot prove the account is unreferenced — leave it. An orphan account
+        // is recoverable (the next provisioning run adopts it); deleting one
+        // another caller is using is not.
         console.error(
-          `[fw/guide] compensation deleteUser failed for ${user.id}: ${del.error.message} — account is grant-less; staff can remove it`
+          `[fw/guide] compensation probe failed for ${user.id}: ${referenced.error.message} — leaving the account in place`
         );
+      } else if (referenced.data) {
+        console.warn(
+          `[fw/guide] skipping compensation for ${user.id}: a concurrent caller already granted it`
+        );
+      } else {
+        const del = await db.auth.admin.deleteUser(user.id);
+        if (del.error) {
+          console.error(
+            `[fw/guide] compensation deleteUser failed for ${user.id}: ${del.error.message} — account is grant-less; staff can remove it`
+          );
+        }
       }
     }
     return { ok: false, reason: "unavailable" };
@@ -255,9 +293,35 @@ export async function provisionFwGuide(
 
 /* ──────────────────────────────────────────────────── invite issue / re-issue ── */
 
+/**
+ * Why issuance has two modes (correctness + adversarial review, merged P1).
+ *
+ * `provisionFwGuide` is deliberately idempotent so that "a guide works Boston
+ * AND Hamptons" is just calling it again with the second cohort id. Issuing
+ * unconditionally after every successful provision turned that documented,
+ * intended flow into a credential rotation: an already-claimed guide being added
+ * to a second weekend had their invite row reset to unclaimed, their token
+ * rotated, and a fresh 14-day "choose a password" link mailed to them —
+ * corrupting the pre-event "all guides claimed" checklist (the very thing the
+ * table's partial index exists to serve) and putting a live password-setting
+ * link in the inbox of someone who, mid-event on a shared iPad, might well click
+ * it and silently overwrite the password they are actively working with.
+ *
+ *   "ensure"  — provisioning. Give a guide a credential only if they do not
+ *               already have one. Never touches a claimed invite.
+ *   "reissue" — staff recovery (Decision 12). Rotate unconditionally and re-open
+ *               the claim. This is the deliberate, rare action; it stays
+ *               deliberate by being reachable only from its own staff action.
+ */
+export type IssueFwGuideInviteMode = "ensure" | "reissue";
+
 export type IssueFwGuideInviteResult =
-  | { ok: true; token: string; email: string; expiresAt: string }
-  | { ok: false; reason: "guide_not_found" | "not_a_guide_account" | "unavailable" };
+  /** A fresh token was minted and must be mailed. */
+  | { ok: true; issued: true; token: string; email: string; expiresAt: string }
+  /** "ensure" mode found a live claimed credential and deliberately left it
+   *  alone. Nothing to mail; the guide already has a password. */
+  | { ok: false; reason: "guide_not_found" | "not_a_guide_account" | "unavailable" }
+  | { ok: true; issued: false; email: string };
 
 /**
  * Issue — or RE-issue — the tokened link a guide sets their password with.
@@ -277,17 +341,35 @@ export type IssueFwGuideInviteResult =
  */
 export async function issueFwGuideInvite(
   db: SupabaseClient,
-  input: { userId: string; createdBy: string; now: number }
+  input: {
+    userId: string;
+    createdBy: string;
+    now: number;
+    /** Defaults to "reissue" — the explicit staff action's semantics. */
+    mode?: IssueFwGuideInviteMode;
+  }
 ): Promise<IssueFwGuideInviteResult> {
+  const mode = input.mode ?? "reissue";
+
   const account = await db.auth.admin.getUserById(input.userId);
-  if (account.error || !account.data?.user) {
+  // An Admin API FAILURE is not the same fact as "no such account", and
+  // conflating them tells staff the guide's account is broken (sending them to
+  // the roster) when the truthful answer is "retry" (reliability review). The
+  // FK is `on delete restrict`, so a live invite row pointing at a genuinely
+  // deleted account is close to structurally impossible — which is exactly why
+  // an error here is almost always the call, not the account.
+  if (account.error) {
     console.error(
-      `[fw/guide] invite target ${input.userId} not found: ${account.error?.message ?? "no user"}`
+      `[fw/guide] invite target lookup failed for ${input.userId}: ${account.error.message}`
     );
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!account.data?.user) {
+    console.error(`[fw/guide] invite target ${input.userId} does not exist`);
     return { ok: false, reason: "guide_not_found" };
   }
   const user = account.data.user;
-  if (!canAdoptAsGuideAccount(user)) {
+  if (!isGuideAccount(user)) {
     console.error(
       `[fw/guide] refusing to issue an invite for a non-guide account ${input.userId} (role=${String(user.app_metadata?.role)})`
     );
@@ -302,29 +384,69 @@ export async function issueFwGuideInvite(
   const token = randomBytes(32).toString("base64url");
   const expiresAt = fwGuideInviteExpiry(input.now);
   const issuedAt = new Date(input.now).toISOString();
+  const row = {
+    user_id: input.userId,
+    email,
+    token_hash: hashGuideInviteToken(token),
+    expires_at: expiresAt,
+    // Re-open the claim. Correct for "reissue" — that is the whole point of the
+    // recovery path — and gated behind the claimed-check below for "ensure".
+    claimed_at: null,
+    issued_at: issuedAt,
+    created_by: input.createdBy,
+  };
 
-  const upserted = await db.from("path_fw_guide_invites").upsert(
-    [
-      {
-        user_id: input.userId,
-        email,
-        token_hash: hashGuideInviteToken(token),
-        expires_at: expiresAt,
-        // Re-open the claim. A re-issue exists precisely because the previous
-        // credential is gone or unusable.
-        claimed_at: null,
-        issued_at: issuedAt,
-        created_by: input.createdBy,
-      },
-    ],
-    { onConflict: "user_id" }
-  );
+  if (mode === "ensure") {
+    const existing = await db
+      .from("path_fw_guide_invites")
+      .select("id, claimed_at")
+      .eq("user_id", input.userId)
+      .maybeSingle();
+    if (existing.error) {
+      console.error(
+        `[fw/guide] invite probe failed for ${input.userId}: ${existing.error.message}`
+      );
+      return { ok: false, reason: "unavailable" };
+    }
+    if (existing.data) {
+      if (typeof existing.data.claimed_at === "string") {
+        // Already credentialed. Leave it entirely alone — no rotation, no mail.
+        return { ok: true, issued: false, email };
+      }
+      // An outstanding (possibly expired) invite: refreshing it is exactly what
+      // "ensure" is for. CAS on `claimed_at is null` so a claim that lands
+      // between the probe above and this write is not silently un-claimed —
+      // zero rows means the guide just credentialed themselves and we must not
+      // rotate on top of them.
+      const refreshed = await db
+        .from("path_fw_guide_invites")
+        .update(row)
+        .eq("user_id", input.userId)
+        .is("claimed_at", null)
+        .select("id");
+      if (refreshed.error) {
+        console.error(
+          `[fw/guide] invite refresh failed for ${input.userId}: ${refreshed.error.message}`
+        );
+        return { ok: false, reason: "unavailable" };
+      }
+      if ((refreshed.data ?? []).length === 0) {
+        return { ok: true, issued: false, email };
+      }
+      return { ok: true, issued: true, token, email, expiresAt };
+    }
+    // No row yet — fall through to the insert-or-update below.
+  }
+
+  const upserted = await db
+    .from("path_fw_guide_invites")
+    .upsert([row], { onConflict: "user_id" });
   if (upserted.error) {
     console.error(`[fw/guide] invite upsert failed for ${input.userId}: ${upserted.error.message}`);
     return { ok: false, reason: "unavailable" };
   }
 
-  return { ok: true, token, email, expiresAt };
+  return { ok: true, issued: true, token, email, expiresAt };
 }
 
 /* ────────────────────────────────────────────────────────────── invite claim ── */
@@ -408,13 +530,22 @@ export async function claimFwGuideInvite(
   }
 
   const account = await db.auth.admin.getUserById(userId);
-  if (account.error || !account.data?.user) {
-    console.error(
-      `[fw/guide] claim target ${userId} missing: ${account.error?.message ?? "no user"}`
-    );
+  // An Admin API FAILURE must not read as a dead link (reliability review, P1).
+  // `user_id ... references auth.users on delete restrict` makes a live invite
+  // pointing at a deleted account close to structurally impossible, so an error
+  // here is almost always the CALL failing — a venue-wifi blip during the
+  // Friday-morning claim rush. Reporting `dead_link` would tell a guide their
+  // brand-new link is dead AND keep their rate-limit strike (only `unavailable`
+  // and `weak_password` release it), eating one of ten shared per-IP attempts.
+  if (account.error) {
+    console.error(`[fw/guide] claim target lookup failed for ${userId}: ${account.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!account.data?.user) {
+    console.error(`[fw/guide] claim target ${userId} does not exist`);
     return { ok: false, reason: "dead_link" };
   }
-  if (!canAdoptAsGuideAccount(account.data.user)) {
+  if (!isGuideAccount(account.data.user)) {
     console.error(
       `[fw/guide] refusing to claim onto a non-guide account ${userId} (role=${String(account.data.user.app_metadata?.role)})`
     );

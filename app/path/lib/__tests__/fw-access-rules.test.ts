@@ -3,16 +3,16 @@ import { describe, expect, it } from "vitest";
 import type { RoleGrant } from "../access-rules";
 import {
   buildFwGuideCreateUserPayload,
-  canAdoptAsGuideAccount,
+  fwClaimStrikeDisposition,
   fwGuideInviteExpiry,
   fwGuideInviteVerdict,
   isFwStaffActor,
+  isGuideAccount,
   resolveFwActor,
   FW_COHORT_KIND,
   FW_GUIDE_INVITE_TTL_MS,
   FW_GUIDE_ROLE,
 } from "../fw-access-rules";
-import { isFwStudentAddress } from "../fw-provision-rules";
 import { PARENT_INVITE_TTL_MS } from "../onboarding-rules";
 
 /**
@@ -195,7 +195,7 @@ describe("isFwStaffActor", () => {
 });
 
 describe("buildFwGuideCreateUserPayload — the guide account's shape (FW-R5)", () => {
-  const build = (email: string) => buildFwGuideCreateUserPayload({ email, isFwStudentAddress });
+  const build = (email: string) => buildFwGuideCreateUserPayload({ email });
 
   it("pins email_confirm and the guide role, and carries NO password", () => {
     const payload = build("Ravi@Example.com");
@@ -233,21 +233,41 @@ describe("buildFwGuideCreateUserPayload — the guide account's shape (FW-R5)", 
   });
 });
 
-describe("canAdoptAsGuideAccount — the provisioning escalation guard", () => {
-  it("adopts an existing guide account", () => {
-    expect(canAdoptAsGuideAccount({ app_metadata: { role: "guide" } })).toBe(true);
+describe("isGuideAccount — the guard on all three credential operations", () => {
+  it("accepts an account this system minted as a guide", () => {
+    expect(isGuideAccount({ app_metadata: { role: "guide" } })).toBe(true);
   });
 
   it("REFUSES every other account class", () => {
-    // The invite this provisioning issues can SET THE ACCOUNT'S PASSWORD.
-    // Adopting a staff account would turn "add a guide" into "mail a credential
-    // for that person's account to whoever staff typed in the address field".
+    // Each of the three call sites (adopt / issue / claim) can hand someone
+    // control of the named account. Adopting or crediting a staff account would
+    // turn "add a guide" into "mail a working credential for that person's
+    // account to whoever staff typed in the address field".
     for (const role of ["admin", "parent", "student", "Guide", "", undefined]) {
-      expect(canAdoptAsGuideAccount({ app_metadata: { role } }), String(role)).toBe(false);
+      expect(isGuideAccount({ app_metadata: { role } }), String(role)).toBe(false);
     }
-    expect(canAdoptAsGuideAccount({ app_metadata: null })).toBe(false);
-    expect(canAdoptAsGuideAccount({})).toBe(false);
-    expect(canAdoptAsGuideAccount(null)).toBe(false);
+    expect(isGuideAccount({ app_metadata: null })).toBe(false);
+    expect(isGuideAccount({})).toBe(false);
+    expect(isGuideAccount(null)).toBe(false);
+  });
+});
+
+describe("fwClaimStrikeDisposition — only a real token guess costs a strike", () => {
+  it("KEEPS the strike for a dead link — the only outcome a wrong token produces", () => {
+    expect(fwClaimStrikeDisposition("dead_link")).toBe("keep");
+  });
+
+  it("RELEASES on a weak password — the token was already verified live", () => {
+    // Otherwise a guide types "12345" ten times at the check-in table and locks
+    // themselves (and everyone behind the venue's NAT) out.
+    expect(fwClaimStrikeDisposition("weak_password")).toBe("release");
+  });
+
+  it("RELEASES on unavailable — an outage is not an attempt", () => {
+    // Load-bearing after the reliability review: an Auth API blip during the
+    // Friday-morning claim rush must not consume the venue's shared per-IP
+    // budget. This is the branch an inverted comparison would silently break.
+    expect(fwClaimStrikeDisposition("unavailable")).toBe("release");
   });
 });
 

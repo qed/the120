@@ -37,10 +37,11 @@ export default async function FwHomePage() {
   // here). Skipped entirely without the claim, so no claim-less session can be
   // promoted by this row.
   const isStaff = session.hasAdminClaim ? await loadStaffRowActive(db, session.userId) : false;
-  const cohorts = await listFwCohortsForActor(db, {
+  const listed = await listFwCohortsForActor(db, {
     grantedCohortIds: grantedCohortIds(session.grants),
     isStaff,
   });
+  const cohorts = listed.ok ? listed.cohorts : [];
 
   return (
     <main className="mx-auto w-full max-w-md px-5 py-10">
@@ -48,7 +49,18 @@ export default async function FwHomePage() {
         {isStaff ? "Weekends you can run" : "Your weekends"}
       </h1>
 
-      {cohorts.length === 0 ? (
+      {!listed.ok ? (
+        // A read failure is NOT "you hold no grants" (reliability review). Saying
+        // so would send a legitimately-provisioned guide to find staff at the
+        // start of an event-morning shift over something a refresh fixes.
+        <p
+          role="alert"
+          className="mt-3 rounded-lg border border-not-yet/40 bg-not-yet/10 p-3 font-path-body text-sm leading-6 text-hq-ink"
+        >
+          We couldn&apos;t load your weekends just now. Reload the page — if it keeps happening, tell
+          The 120 staff.
+        </p>
+      ) : cohorts.length === 0 ? (
         <p className="mt-3 font-path-body text-sm leading-6 text-hq-ink-soft">
           You&apos;re signed in, but you aren&apos;t a guide on any Founders Weekend cohort yet. Ask
           The 120 staff to add you.

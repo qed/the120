@@ -20,11 +20,21 @@
  *     ChunkLoadError).
  *   - Uploads/queue NEVER run here — iOS kills a backgrounded SW mid-transfer.
  *     The Background Sync handler only nudges open pages ("path-drain").
+ *
+ * TWO caches: the PRECACHE (the /offline page + its assets — replaced whole
+ * at install, never trimmed) and the RUNTIME cache (content-hashed static
+ * assets, bounded — see STATIC_CACHE_MAX_ENTRIES). The version literals are
+ * static, so activate()'s sweep only fires when this file changes; the
+ * runtime bound is what stops superseded builds' hashed assets accumulating
+ * forever on a child's phone (performance review).
  */
 
-const CACHE_NAME = "path-sw-v1";
+const PRECACHE_NAME = "path-sw-precache-v1";
+const RUNTIME_CACHE_NAME = "path-sw-runtime-v1";
 const OFFLINE_URL = "/offline";
 const STATIC_PREFIX = "/_next/static/";
+/** Cap on runtime-cached static assets — oldest-inserted trimmed on insert. */
+const STATIC_CACHE_MAX_ENTRIES = 80;
 
 /** Precache the offline page AND the hashed assets its HTML references, so the
  *  fallback renders styled even on a cold offline start. */
@@ -45,7 +55,7 @@ async function precacheOffline(cache) {
 
 self.addEventListener("install", (event) => {
   // Deliberately NO skip-waiting here — see the message handler.
-  event.waitUntil(caches.open(CACHE_NAME).then(precacheOffline));
+  event.waitUntil(caches.open(PRECACHE_NAME).then(precacheOffline));
 });
 
 self.addEventListener("activate", (event) => {
@@ -53,7 +63,9 @@ self.addEventListener("activate", (event) => {
     (async () => {
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME && k.startsWith("path-sw-")).map((k) => caches.delete(k))
+        keys
+          .filter((k) => k !== PRECACHE_NAME && k !== RUNTIME_CACHE_NAME && k.startsWith("path-sw-"))
+          .map((k) => caches.delete(k))
       );
       await self.clients.claim();
     })()
@@ -96,15 +108,27 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Content-hashed static assets: cache-first (a hash change is a new URL).
+  // caches.match() checks the precache too, so the offline page's own assets
+  // are served from the untrimmed precache even after runtime trimming.
   if (url.pathname.startsWith(STATIC_PREFIX)) {
     event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
+      (async () => {
+        const cached = await caches.match(request);
         if (cached) return cached;
+        const cache = await caches.open(RUNTIME_CACHE_NAME);
         const response = await fetch(request);
-        if (response.ok) await cache.put(request, response.clone());
+        if (response.ok) {
+          await cache.put(request, response.clone());
+          // Bounded: trim oldest-inserted runtime entries past the cap. The
+          // precache (the offline page + its assets) is a separate cache and
+          // is never trimmed.
+          const keys = await cache.keys();
+          if (keys.length > STATIC_CACHE_MAX_ENTRIES) {
+            await Promise.all(keys.slice(0, keys.length - STATIC_CACHE_MAX_ENTRIES).map((k) => cache.delete(k)));
+          }
+        }
         return response;
-      })
+      })()
     );
   }
 

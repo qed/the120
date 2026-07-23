@@ -36,8 +36,8 @@ import { EvidenceUploader } from "@/app/path/components/EvidenceUploader";
 import { VideoCapture, type CapturedVideo } from "@/app/path/components/VideoCapture";
 import { LogTable } from "@/app/path/components/LogTable";
 import { EmptyEvidence } from "@/app/path/components/EmptyStates";
-import { SyncStatus } from "@/app/path/components/SyncStatus";
-import { probeVideoDuration, uploadEvidenceFile, type SlotRefusal } from "@/app/path/components/upload-client";
+import { scheduleCoalescedRefresh, SyncStatus } from "@/app/path/components/SyncStatus";
+import { probeVideoDuration, uploadEvidenceFile, type SlotRefusal } from "@/app/path/lib/upload-client";
 import { getEntry, isQueueSupported } from "@/app/path/lib/offline-queue";
 import {
   drainQueue,
@@ -48,6 +48,7 @@ import {
   type DrainContext,
 } from "@/app/path/lib/sync-engine";
 import { isSafeHttpUrl } from "@/app/path/lib/evidence-rules";
+import { isNextRedirect } from "@/app/path/lib/next-redirect";
 import {
   addLinkEvidence,
   confirmUploadedEvidence,
@@ -117,17 +118,6 @@ type ConfirmParams = {
 /** A never-firing subscription for capability snapshots (useSyncExternalStore
  *  wants one; browser capability never changes within a session). */
 const noSubscription = () => () => {};
-
-/** Next's redirect() control-flow throw (the auth guard firing before the
- *  action body) — must route to sign-in, never a generic "try again". */
-function isNextRedirect(e: unknown): boolean {
-  return (
-    typeof e === "object" &&
-    e !== null &&
-    "digest" in e &&
-    String((e as { digest: unknown }).digest).startsWith("NEXT_REDIRECT")
-  );
-}
 
 export function TaskSurface(props: TaskSurfaceProps) {
   const {
@@ -408,18 +398,22 @@ export function TaskSurface(props: TaskSurfaceProps) {
     [studentId]
   );
 
-  /** Drain now; report whether the given entry fully landed. */
+  /** Drain now; report whether the given entry fully landed. `wait: true` —
+   *  a user-waited-on save queues behind an in-flight background drain rather
+   *  than silently losing the lock race and lying "you're offline". */
   const drainAndSettle = useCallback(
     async (entryId: string): Promise<"resolved" | "queued"> => {
       setUploadProgress(0);
       try {
-        await drainQueue(drainCtx());
+        await drainQueue(drainCtx(), { wait: true });
       } finally {
         if (mountedRef.current) setUploadProgress(null);
       }
       const remaining = await getEntry(entryId);
       if (!remaining) {
-        if (mountedRef.current) router.refresh();
+        // Coalesced: SyncStatus's queue-cleared refresh can land in the same
+        // beat — one RSC refetch serves both (julik review).
+        if (mountedRef.current) scheduleCoalescedRefresh(() => router.refresh());
         return "resolved";
       }
       // Still queued: offline (pending — reassure) or blocked (SyncStatus
@@ -452,6 +446,18 @@ export function TaskSurface(props: TaskSurfaceProps) {
       });
       if (!enqueued.ok) {
         if (enqueued.reason === "unsupported") return "fallback";
+        if (enqueued.reason === "storage_failed") {
+          // IndexedDB couldn't hold the Blob (device storage pressure). The
+          // bytes are NOT durably saved — online, fall back to the direct
+          // upload so they still land; offline, say exactly what happened
+          // (reliability review: never the generic "try again").
+          if (navigator.onLine !== false) return "fallback";
+          setNotice({
+            tone: "error",
+            text: "This device can't save that right now — its storage looks full. Free up some space and capture it again.",
+          });
+          return "done";
+        }
         handleFailure("link_overflow"); // refused at capture — never queued (D21)
         return "done";
       }

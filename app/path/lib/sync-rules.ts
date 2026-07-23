@@ -86,36 +86,96 @@ export const TOKEN_REMINT_MARGIN_MS = 5 * 60 * 1000;
 // ── Queue entry model ─────────────────────────────────────────────────────────
 // Stored via structured clone (Blobs kept as Blobs — far cheaper than base64).
 
+/**
+ * The persisted entry-shape version, stamped on every entry at enqueue. The
+ * queue is a CROSS-DEPLOY contract: an entry can sit on a device for days
+ * while the app redeploys, so a future change to any QueueEntry field shape
+ * MUST bump this and either migrate old entries forward in the reader or let
+ * `isRecognizedEntry` route them to the surfaced needs-attention state —
+ * never feed an old shape raw into the drain.
+ */
+export const QUEUE_ENTRY_SCHEMA_VERSION = 1;
+
+/**
+ * The tombstone/blocked reasons the ENGINE itself mints (as opposed to typed
+ * refusal reasons passed through from server actions). Shared constants so
+ * the producer (sync-engine) and the consumer (SyncStatus's retry-vs-dismiss
+ * split) can never drift on a bare string literal.
+ */
+export const TOMBSTONE_REASONS = {
+  /** Task gone — kept as a dismissible notice, never a silent delete. */
+  DROPPED: "dropped",
+  /** Resolved with a note (e.g. criterion returned; log frozen). Dismiss-only. */
+  NOTED: "noted",
+  /** Case 3 — the phase locked the task again. Dismiss-only. */
+  PHASE_LOCKED: "phase_locked",
+  /** The persisted shape predates this app version — dismiss (or app update). */
+  UNRECOGNIZED: "unrecognized_entry",
+} as const;
+
+/** Tombstones only dismiss; anything else blocked can also retry. */
+export function isTombstoneReason(reason: string): boolean {
+  return (
+    reason === TOMBSTONE_REASONS.DROPPED ||
+    reason === TOMBSTONE_REASONS.NOTED ||
+    reason === TOMBSTONE_REASONS.PHASE_LOCKED ||
+    reason === TOMBSTONE_REASONS.UNRECOGNIZED
+  );
+}
+
 type QueueEntryBase = {
-  /** Entry identity (uuid) — distinct from any evidence identity. */
+  /** Entry identity (uuid) — distinct from any evidence identity, EXCEPT for
+   *  log entries, whose id IS their evidenceId so a re-save is an atomic
+   *  keyed upsert (no read-then-write TOCTOU). */
   id: string;
+  /** See QUEUE_ENTRY_SCHEMA_VERSION. */
+  schemaVersion: number;
   studentId: string;
   taskId: string;
-  /** Client clock at enqueue (ISO). Drain order and submit ordering key on it. */
+  /** Client clock at enqueue (ISO). Drain order keys on it (display/FIFO only —
+   *  the submit hold deliberately does NOT trust it; see planDrain). */
   enqueuedAt: string;
-  /** Failed drain attempts (diagnostics + SyncStatus escalation). */
+  /** Failed drain attempts — read by the stuck-escalation policy (planDrain's
+   *  auto-retry ceiling + entryDisplayState's "still trying" surface). */
   attempts: number;
   lastAttemptAt: string | null;
   /**
    * Terminal outcome, surfaced in SyncStatus and excluded from auto-drain.
-   * `reason` is the typed refusal; `note` is the student-readable line. A
-   * dropped entry keeps a tombstone here until dismissed — never silent.
+   * `reason` is the typed refusal (or a TOMBSTONE_REASONS value); `note` is
+   * the student-readable line. A dropped entry keeps a tombstone here until
+   * dismissed — never silent.
    */
   blocked: { reason: string; note: string } | null;
 };
 
-/** The minted slot, persisted so a resume survives the session (U9 carry). */
-export type StoredSlot = {
-  strategy: "plain" | "tus";
-  bucket: string;
-  objectPath: string;
-  token: string;
-  /** TUS only. */
-  endpoint?: string;
-  chunkSize?: number;
-  /** Server-issued mint time (ISO) — the 2h token clock. */
-  mintedAt: string;
-};
+/**
+ * The minted slot, persisted so a resume survives the session (U9 carry).
+ * Discriminated by strategy — the TUS arm REQUIRES endpoint/chunkSize, so a
+ * hand-built slot missing them is a compile error, never a silent upload to
+ * an empty endpoint.
+ *
+ * `mintedAt` is the CLIENT clock at the moment the slot was received — never
+ * the server's `tusMintedAt`. Freshness is elapsed-client-time against
+ * client `Date.now()`; mixing clock sources would let a behind-running device
+ * judge a genuinely dead token "fresh" forever (adversarial review).
+ */
+export type StoredSlot =
+  | {
+      strategy: "plain";
+      bucket: string;
+      objectPath: string;
+      token: string;
+      mintedAt: string;
+    }
+  | {
+      strategy: "tus";
+      bucket: string;
+      objectPath: string;
+      token: string;
+      endpoint: string;
+      chunkSize: number;
+      mintedAt: string;
+    };
 
 export type MediaQueueEntry = QueueEntryBase & {
   kind: "media";
@@ -193,16 +253,26 @@ export type ClampResult =
   | { value: string; clamped: true; original: string };
 
 /**
- * A client clock can run ahead; a future `capturedAt`/`submittedAt` is clamped
- * to now and the clamp is RECORDED (never silently rewritten). An unparseable
- * value degrades to now, recorded — a corrupt timestamp must never abort a
- * child's capture.
+ * No honest evidence timestamp predates the program's existence — a value
+ * below this floor means the device clock was corrupt at capture (the classic
+ * dead-RTC 1970 reset). Clamped and recorded exactly like a future value:
+ * when the clock is broken, the only trustworthy time is receipt time.
+ */
+export const EVIDENCE_TIME_FLOOR_MS = Date.parse("2025-01-01T00:00:00.000Z");
+
+/**
+ * A client clock can run ahead (or be flat-out corrupt): a future OR
+ * absurd-past `capturedAt`/`submittedAt` is clamped to now and the clamp is
+ * RECORDED (never silently rewritten) — the permanent record must carry the
+ * anomaly, not the fiction. An unparseable value degrades to now, recorded —
+ * a corrupt timestamp must never abort a child's capture.
  */
 export function clampToNow(isoValue: string, nowMs: number): ClampResult {
   const parsed = Date.parse(isoValue);
   const nowIso = new Date(nowMs).toISOString();
   if (Number.isNaN(parsed)) return { value: nowIso, clamped: true, original: isoValue };
   if (parsed > nowMs) return { value: nowIso, clamped: true, original: isoValue };
+  if (parsed < EVIDENCE_TIME_FLOOR_MS) return { value: nowIso, clamped: true, original: isoValue };
   return { value: isoValue, clamped: false };
 }
 
@@ -215,6 +285,11 @@ export type UploadFreshness = "fresh" | "token_stale" | "url_expired";
  * minted early by TOKEN_REMINT_MARGIN_MS); the TUS upload URL lives 24h from
  * ITS creation (`isTusUrlExpired`). A >2h pause re-mints the token and KEEPS
  * the URL — resume, not restart. Past 24h the URL is dead: restart from zero.
+ *
+ * BOTH timestamps must come from the CLIENT clock (StoredSlot's contract). A
+ * mintedAt in the FUTURE is impossible under one clock — it means clock
+ * sources got mixed or the clock moved; fail toward a cheap re-mint rather
+ * than judging a possibly-dead token "fresh" forever (adversarial review).
  */
 export function classifyUploadFreshness(input: {
   slotMintedAtMs: number | null;
@@ -225,6 +300,7 @@ export function classifyUploadFreshness(input: {
     return "url_expired";
   }
   if (input.slotMintedAtMs === null) return "token_stale";
+  if (input.slotMintedAtMs > input.nowMs) return "token_stale";
   if (input.nowMs - input.slotMintedAtMs >= SIGNED_UPLOAD_TOKEN_TTL_MS - TOKEN_REMINT_MARGIN_MS) {
     return "token_stale";
   }
@@ -284,18 +360,37 @@ export type DrainPlan = {
   /** Entry ids in execution order (enqueue order, FIFO). */
   runnable: string[];
   /** Entries deliberately not run this drain, each with a reason. */
-  held: { id: string; reason: "awaiting_evidence" | "needs_attention_first" }[];
+  held: { id: string; reason: "awaiting_evidence" | "needs_attention_first" | "stuck" }[];
 };
 
 /**
+ * Past this many failed attempts an entry stops AUTO-retrying (every
+ * foreground signal would otherwise re-attempt a permanently-failing entry
+ * forever, with the UI implying "just a matter of time" — the dishonest-state
+ * failure this unit exists to prevent). It surfaces as "still trying" in
+ * SyncStatus (entryDisplayState) and drains again on a MANUAL signal (Send
+ * now / Try again), which also resets the count.
+ */
+export const AUTO_RETRY_ATTEMPT_CEILING = 8;
+
+/**
  * FIFO by `enqueuedAt` (id tiebreak, so the order is total and stable). A
- * SUBMIT for task T is held while any earlier NON-submit entry for T is still
- * in the queue: submitting before the evidence lands would present the parent
- * an emptier task than the child actually finished. If the earlier entry is
+ * SUBMIT for task T is held while ANY NON-submit entry for T is still in the
+ * queue — submitting before the evidence lands would present the parent an
+ * emptier task than the child actually finished. Deliberately NOT a timestamp
+ * comparison: an NTP correction between capture and submit can make the
+ * submit's `enqueuedAt` read EARLIER than its own evidence's, which would
+ * defeat a `<=`-based hold (adversarial review). Queue membership is the
+ * invariant; wall-clock order is display only. If the pending entry is
  * BLOCKED, the submit holds with `needs_attention_first` — surfaced, so the
  * student resolves or dismisses the stuck item rather than waiting forever.
+ *
+ * `includeStuck` lifts the auto-retry ceiling for MANUAL drains only.
  */
-export function planDrain(entries: readonly QueueEntry[]): DrainPlan {
+export function planDrain(
+  entries: readonly QueueEntry[],
+  opts: { includeStuck?: boolean } = {}
+): DrainPlan {
   const ordered = [...entries].sort((a, b) => {
     const at = Date.parse(a.enqueuedAt);
     const bt = Date.parse(b.enqueuedAt);
@@ -308,18 +403,19 @@ export function planDrain(entries: readonly QueueEntry[]): DrainPlan {
 
   for (const entry of ordered) {
     if (entry.blocked) continue; // manual retry/dismiss only
+    if (!opts.includeStuck && entry.attempts >= AUTO_RETRY_ATTEMPT_CEILING) {
+      held.push({ id: entry.id, reason: "stuck" });
+      continue;
+    }
     if (entry.kind === "submit") {
-      const earlier = ordered.filter(
-        (e) =>
-          e.kind !== "submit" &&
-          e.taskId === entry.taskId &&
-          Date.parse(e.enqueuedAt) <= Date.parse(entry.enqueuedAt)
+      const pendingEvidence = ordered.filter(
+        (e) => e.kind !== "submit" && e.taskId === entry.taskId
       );
-      if (earlier.some((e) => e.blocked)) {
+      if (pendingEvidence.some((e) => e.blocked)) {
         held.push({ id: entry.id, reason: "needs_attention_first" });
         continue;
       }
-      if (earlier.length > 0) {
+      if (pendingEvidence.length > 0) {
         held.push({ id: entry.id, reason: "awaiting_evidence" });
         continue;
       }
@@ -328,6 +424,22 @@ export function planDrain(entries: readonly QueueEntry[]): DrainPlan {
   }
 
   return { runnable, held };
+}
+
+// ── Per-entry display state (SyncStatus) ──────────────────────────────────────
+
+export type EntryDisplayState = "pending" | "still_trying" | "attention";
+
+/**
+ * How SyncStatus should present one entry. "still_trying" is the honest
+ * middle state the reliability review demanded: many failed attempts, not
+ * terminally blocked, no longer auto-retried — the copy must stop promising
+ * "it'll send the moment you're back online" and offer the manual retry.
+ */
+export function entryDisplayState(entry: Pick<QueueEntry, "attempts" | "blocked">): EntryDisplayState {
+  if (entry.blocked) return "attention";
+  if (entry.attempts >= AUTO_RETRY_ATTEMPT_CEILING) return "still_trying";
+  return "pending";
 }
 
 /**
@@ -420,12 +532,30 @@ export function interpretSubmitRefusal(reason: string): RefusalInterpretation {
   };
 }
 
-/** A submit that returns ok is DONE — including `byCaller: false`, which is
- *  applyTransition's lost-echo re-read ("the write committed, the response was
- *  lost") or a concurrent winner. Either way: delete the entry, never re-apply. */
-export function resolveSubmitResult(result: { ok: true; byCaller: boolean }): { outcome: "done" } {
-  void result;
-  return { outcome: "done" };
+/**
+ * Route a FAILED task-state read (getTaskState) before a submit rebase. The
+ * correctness review found `forbidden` silently folded into retry-forever:
+ * a grant change while the entry was queued is TERMINAL for this session —
+ * block with a note, never spin. `not_found` is the rebase's task-missing
+ * case; the transient reasons retry; `login` pauses for re-auth.
+ */
+export function routeStateReadFailure(
+  reason: string
+):
+  | { outcome: "task_missing" }
+  | { outcome: "retry" }
+  | { outcome: "auth" }
+  | { outcome: "blocked"; note: string } {
+  if (reason === "login") return { outcome: "auth" };
+  if (reason === "not_found") return { outcome: "task_missing" };
+  if (reason === "forbidden") {
+    return {
+      outcome: "blocked",
+      note: "This step can't be sent from this sign-in any more. Open the step to see where it stands.",
+    };
+  }
+  // unavailable / invalid / anything new — transient posture.
+  return { outcome: "retry" };
 }
 
 // ── Attach failures (media confirm / link / log) ──────────────────────────────
@@ -581,7 +711,13 @@ export function decideDurabilityWarning(input: {
 export type QueueSummary = {
   /** Entries still trying (not blocked). */
   pendingCount: number;
-  /** Bytes of pending media — the durability-warning input. */
+  /**
+   * Bytes of ALL queued media — blocked included. This feeds the iOS
+   * durability warning ("N MB not safe yet"), and a BLOCKED 45 MB video is
+   * every bit as exposed to the 7-day wipe as a pending one; excluding it
+   * would understate exactly the risk the banner exists to communicate
+   * (adversarial review).
+   */
   queuedBytes: number;
   /** Blocked entries needing a human, each with its student-readable note. */
   attention: { id: string; note: string }[];
@@ -592,12 +728,38 @@ export function summarizeQueue(entries: readonly QueueEntry[]): QueueSummary {
   let queuedBytes = 0;
   const attention: QueueSummary["attention"] = [];
   for (const entry of entries) {
+    if (entry.kind === "media") queuedBytes += entry.bytes;
     if (entry.blocked) {
       attention.push({ id: entry.id, note: entry.blocked.note });
       continue;
     }
     pendingCount += 1;
-    if (entry.kind === "media") queuedBytes += entry.bytes;
   }
   return { pendingCount, queuedBytes, attention };
+}
+
+// ── Persisted-shape recognition (cross-deploy tolerant reader) ────────────────
+
+const ENTRY_KINDS = new Set(["media", "link", "log", "submit"]);
+
+/**
+ * Whether a record read back from IndexedDB is a shape this app version knows
+ * how to drain. Entries written by a FUTURE version (or corrupted) must never
+ * be fed raw into the drain's typed switches — the engine routes them to the
+ * surfaced UNRECOGNIZED tombstone instead (dismissible; an app update usually
+ * resolves it). Never a silent drop: the record may hold a child's evidence.
+ */
+export function isRecognizedEntry(x: unknown): x is QueueEntry {
+  if (typeof x !== "object" || x === null) return false;
+  const e = x as Record<string, unknown>;
+  return (
+    typeof e.id === "string" &&
+    typeof e.studentId === "string" &&
+    typeof e.taskId === "string" &&
+    typeof e.enqueuedAt === "string" &&
+    typeof e.attempts === "number" &&
+    typeof e.kind === "string" &&
+    ENTRY_KINDS.has(e.kind) &&
+    (e.schemaVersion === undefined || e.schemaVersion === QUEUE_ENTRY_SCHEMA_VERSION)
+  );
 }

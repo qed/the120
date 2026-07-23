@@ -3,9 +3,10 @@
  *
  * Every decision it takes comes from sync-rules.ts (pure, tested): what to
  * enqueue (`admitCapture`), what runs and in what order (`planDrain`,
- * `selectDrainable`), the next step of a media entry (`nextMediaStep`), how a
- * queued submit rebases onto moved server state (`planSubmitTransitions`,
- * `interpretSubmitRefusal`), and how failures classify
+ * `selectDrainable`, the stuck ceiling), the next step of a media entry
+ * (`nextMediaStep`), how a queued submit rebases onto moved server state
+ * (`planSubmitTransitions`, `interpretSubmitRefusal`,
+ * `routeStateReadFailure`), and how failures classify
  * (`interpretAttachFailure`). This file only performs I/O in the order those
  * functions dictate.
  *
@@ -22,8 +23,14 @@
  * A crash between effect and delete replays into the idempotency key and
  * yields exactly one row.
  *
- * Single-drainer: Web Locks (`ifAvailable`) with an in-module fallback — two
- * tabs never race one queue entry into two TUS clients (the 409 case).
+ * Single-drainer: Web Locks serialize drains across tabs (background signals
+ * use `ifAvailable` and skip; interactive callers pass `wait: true` and queue
+ * behind the running drain instead of no-oping — a user's save must never be
+ * silently skipped by a lock race). Where Web Locks don't exist (pre-15.4
+ * Safari) the fallback promise chain serializes drains WITHIN one tab only —
+ * two no-Locks tabs can genuinely race, bounded by the already-exists→success
+ * upload mapping and the confirm's evidenceId idempotency (reliability
+ * review: the residue is wasted bandwidth, never duplicate rows).
  */
 
 import {
@@ -34,9 +41,10 @@ import {
 import { applyTransition } from "@/app/path/lib/actions/transition";
 import { getTaskState } from "@/app/path/lib/actions/journey-read";
 import { requestUploadSlot } from "@/app/path/lib/actions/upload-slot";
-import { sha256Hex, uploadWithSlot } from "@/app/path/components/upload-client";
+import { sha256Hex, uploadWithSlot } from "@/app/path/lib/upload-client";
 import { extensionFor } from "@/app/path/lib/upload-rules";
 import { transitionsAfterCapture } from "@/app/path/lib/now-card-rules";
+import { isNextRedirect } from "@/app/path/lib/next-redirect";
 import {
   deleteEntry,
   getEntry,
@@ -52,10 +60,14 @@ import {
   clampToNow,
   interpretAttachFailure,
   interpretSubmitRefusal,
+  isRecognizedEntry,
   nextMediaStep,
   planDrain,
   planSubmitTransitions,
+  QUEUE_ENTRY_SCHEMA_VERSION,
+  routeStateReadFailure,
   selectDrainable,
+  TOMBSTONE_REASONS,
   type CaptureAdmission,
   type LinkQueueEntry,
   type LogQueueEntry,
@@ -69,7 +81,8 @@ import {
 
 const listeners = new Set<() => void>();
 let authRequired = false;
-let fallbackDrainActive = false;
+/** No-Web-Locks fallback: serializes drains WITHIN this tab (see header). */
+let fallbackDrainChain: Promise<void> = Promise.resolve();
 
 /** Subscribe to queue mutations (SyncStatus/InstallPrompt re-read on change). */
 export function subscribeQueue(listener: () => void): () => void {
@@ -93,28 +106,23 @@ function notify(): void {
   }
 }
 
-/** Next's redirect() control-flow throw — the auth guard firing before an
- *  action body. In a background drain this means "session expired": pause. */
-function isNextRedirect(e: unknown): boolean {
-  return (
-    typeof e === "object" &&
-    e !== null &&
-    "digest" in e &&
-    String((e as { digest: unknown }).digest).startsWith("NEXT_REDIRECT")
-  );
-}
-
 // ── enqueue ───────────────────────────────────────────────────────────────────
 
 export type EnqueueResult =
   | { ok: true; id: string }
   | { ok: false; reason: "unsupported" }
+  /** IndexedDB refused the write (quota, corruption) — the item was NOT
+   *  durably saved. The caller must say so specifically (and, online, fall
+   *  back to a direct upload) — never the generic "try again" (reliability
+   *  review: this is the one loss path no retry loop covers). */
+  | { ok: false; reason: "storage_failed" }
   | Extract<CaptureAdmission, { ok: false }>;
 
 const nowIso = () => new Date().toISOString();
 
 const baseEntry = (studentId: string, taskId: string) => ({
   id: crypto.randomUUID(),
+  schemaVersion: QUEUE_ENTRY_SCHEMA_VERSION,
   studentId,
   taskId,
   enqueuedAt: nowIso(),
@@ -122,6 +130,18 @@ const baseEntry = (studentId: string, taskId: string) => ({
   lastAttemptAt: null,
   blocked: null,
 });
+
+/** Persist a fresh entry, mapping an IndexedDB failure to `storage_failed`. */
+async function storeNewEntry(entry: QueueEntry): Promise<EnqueueResult> {
+  try {
+    await putEntry(entry);
+  } catch (e) {
+    console.error(`[path/sync] enqueue persist failed for ${entry.kind}:`, e);
+    return { ok: false, reason: "storage_failed" };
+  }
+  notify();
+  return { ok: true, id: entry.id };
+}
 
 /**
  * Queue a media capture BEFORE any network I/O — upload-then-die and
@@ -167,9 +187,7 @@ export async function enqueueMediaCapture(p: {
     uploadedBytes: 0,
     uploaded: false,
   };
-  await putEntry(entry);
-  notify();
-  return { ok: true, id: entry.id };
+  return storeNewEntry(entry);
 }
 
 export async function enqueueLink(p: {
@@ -186,9 +204,7 @@ export async function enqueueLink(p: {
     url: p.url,
     ...(p.caption !== undefined ? { caption: p.caption } : {}),
   };
-  await putEntry(entry);
-  notify();
-  return { ok: true, id: entry.id };
+  return storeNewEntry(entry);
 }
 
 export async function enqueueLog(p: {
@@ -201,24 +217,19 @@ export async function enqueueLog(p: {
   caption?: string;
 }): Promise<EnqueueResult> {
   if (!isQueueSupported()) return { ok: false, reason: "unsupported" };
-  const entries = await listEntries();
-  // A re-save of the same log replaces the queued rows (last write wins locally
-  // — the server upsert has the same semantics).
-  const existing = entries.find(
-    (e): e is LogQueueEntry => e.kind === "log" && e.evidenceId === p.evidenceId
-  );
-  const entry: LogQueueEntry = existing
-    ? { ...existing, rows: p.rows, ...(p.caption !== undefined ? { caption: p.caption } : {}), blocked: null }
-    : {
-        ...baseEntry(p.studentId, p.taskId),
-        kind: "log",
-        evidenceId: p.evidenceId,
-        rows: p.rows,
-        ...(p.caption !== undefined ? { caption: p.caption } : {}),
-      };
-  await putEntry(entry);
-  notify();
-  return { ok: true, id: entry.id };
+  // The entry id IS the evidenceId: a re-save of the same log is an ATOMIC
+  // keyed upsert (last write wins locally — the server upsert has the same
+  // semantics). No read-then-check, so no TOCTOU window between two rapid
+  // saves (learnings review: the in-memory-rate-limiter-toctou family).
+  const entry: LogQueueEntry = {
+    ...baseEntry(p.studentId, p.taskId),
+    id: p.evidenceId,
+    kind: "log",
+    evidenceId: p.evidenceId,
+    rows: p.rows,
+    ...(p.caption !== undefined ? { caption: p.caption } : {}),
+  };
+  return storeNewEntry(entry);
 }
 
 /** Queue a submit. `submittedAt` is the ENQUEUE-time client clock (R30) — the
@@ -230,9 +241,7 @@ export async function enqueueSubmit(p: { studentId: string; taskId: string }): P
     kind: "submit",
     submittedAt: nowIso(),
   };
-  await putEntry(entry);
-  notify();
-  return { ok: true, id: entry.id };
+  return storeNewEntry(entry);
 }
 
 /** Dismiss a tombstone / stuck entry (the student saw the note). */
@@ -241,13 +250,15 @@ export async function dismissEntry(id: string): Promise<void> {
   notify();
 }
 
-/** Manual retry of a blocked entry: clear the block and drain. */
+/** Manual retry of a blocked entry: clear the block, reset the stuck counter,
+ *  and drain — waiting behind any in-flight drain (a user-initiated retry
+ *  must never no-op on a lock race). */
 export async function retryEntry(id: string, ctx: DrainContext): Promise<void> {
   const entry = await getEntry(id);
   if (!entry) return;
   await putEntry({ ...entry, blocked: null, attempts: 0 });
   notify();
-  await drainQueue(ctx);
+  await drainQueue(ctx, { wait: true });
 }
 
 // ── drain ─────────────────────────────────────────────────────────────────────
@@ -258,6 +269,14 @@ export type DrainContext = {
   onEntryProgress?: (id: string, pct: number) => void;
 };
 
+export type DrainOptions = {
+  /** Queue behind an in-flight drain instead of skipping (interactive callers:
+   *  a user-waited-on save must not silently lose the lock race). */
+  wait?: boolean;
+  /** Lift the auto-retry ceiling (manual Send now / Try again). */
+  includeStuck?: boolean;
+};
+
 type ExecResult = "resolved" | "pending" | "auth";
 
 async function persist(entry: QueueEntry): Promise<void> {
@@ -266,10 +285,7 @@ async function persist(entry: QueueEntry): Promise<void> {
 }
 
 /** Apply an interpretAttachFailure outcome to an entry. */
-async function applyAttachFailure(
-  entry: QueueEntry,
-  reason: string
-): Promise<ExecResult> {
+async function applyAttachFailure(entry: QueueEntry, reason: string): Promise<ExecResult> {
   const failure = interpretAttachFailure(entry.kind, reason);
   switch (failure.outcome) {
     case "auth":
@@ -280,10 +296,10 @@ async function applyAttachFailure(
     case "drop":
       // A tombstone, not a silent delete — SyncStatus surfaces the note until
       // the student dismisses it.
-      await persist({ ...entry, blocked: { reason: "dropped", note: failure.note } });
+      await persist({ ...entry, blocked: { reason: TOMBSTONE_REASONS.DROPPED, note: failure.note } });
       return "pending";
     case "done_with_note":
-      await persist({ ...entry, blocked: { reason: "noted", note: failure.note } });
+      await persist({ ...entry, blocked: { reason: TOMBSTONE_REASONS.NOTED, note: failure.note } });
       return "pending";
     case "blocked":
       await persist({ ...entry, blocked: { reason, note: failure.note } });
@@ -291,10 +307,14 @@ async function applyAttachFailure(
   }
 }
 
+/** StoredSlot from a successful mint. `mintedAt` is stamped from the CLIENT
+ *  clock for BOTH strategies — freshness math must never mix the server's
+ *  clock with client Date.now() (see StoredSlot's contract; adversarial
+ *  review: a behind-running device would judge a dead token fresh forever). */
 function toStoredSlot(
   slot:
     | { strategy: "plain"; bucket: string; objectPath: string; token: string }
-    | { strategy: "tus"; bucket: string; objectPath: string; token: string; endpoint: string; chunkSize: number; tusMintedAt: string }
+    | { strategy: "tus"; bucket: string; objectPath: string; token: string; endpoint: string; chunkSize: number }
 ): StoredSlot {
   return slot.strategy === "plain"
     ? { strategy: "plain", bucket: slot.bucket, objectPath: slot.objectPath, token: slot.token, mintedAt: nowIso() }
@@ -305,7 +325,7 @@ function toStoredSlot(
         token: slot.token,
         endpoint: slot.endpoint,
         chunkSize: slot.chunkSize,
-        mintedAt: slot.tusMintedAt,
+        mintedAt: nowIso(),
       };
 }
 
@@ -347,35 +367,28 @@ async function execMedia(entry: MediaQueueEntry, ctx: DrainContext): Promise<Exe
     if (next.step === "upload") {
       const slot = current.slot;
       if (!slot) continue; // impossible (nextMediaStep minted first) — re-plan
-      let persistedBytes = current.uploadedBytes;
       const result = await uploadWithSlot({
-        slot:
-          slot.strategy === "plain"
-            ? { strategy: "plain", bucket: slot.bucket, objectPath: slot.objectPath, token: slot.token }
-            : {
-                strategy: "tus",
-                bucket: slot.bucket,
-                objectPath: slot.objectPath,
-                token: slot.token,
-                endpoint: slot.endpoint ?? "",
-                chunkSize: slot.chunkSize ?? 6 * 1024 * 1024,
-              },
+        slot,
         file: current.file,
         contentType: current.mime,
         resumeUrl: next.resumeUrl,
         onTusUrl: (url) => {
+          // The resume point — the ONE progress-time persist worth a full
+          // entry write (the write chain orders it; .catch logs, never
+          // unhandled — a lost checkpoint only costs a from-zero restart).
           current = { ...current, tus: { url, createdAt: nowIso() } };
-          void putEntry(current);
+          putEntry(current).catch((e) =>
+            console.error("[path/sync] TUS-URL checkpoint persist failed (non-fatal):", e)
+          );
         },
         onProgress: (pct, uploadedBytes) => {
           ctx.onEntryProgress?.(current.id, pct);
-          // Persist resume progress at most every ~6 MB — an IDB write per
-          // chunk, not per XHR progress tick.
-          if (uploadedBytes - persistedBytes >= 6 * 1024 * 1024) {
-            persistedBytes = uploadedBytes;
-            current = { ...current, uploadedBytes };
-            void putEntry(current);
-          }
+          // In-memory only, DELIBERATELY not persisted per chunk: TUS resume
+          // reads its offset from the server (HEAD), so uploadedBytes has no
+          // durability value — and a per-6MB put would structured-clone the
+          // whole Blob each time (~10x write amplification on a 50 MB video;
+          // performance review P1).
+          current = { ...current, uploadedBytes };
         },
       });
       if (result.outcome === "success") {
@@ -405,17 +418,7 @@ async function execMedia(entry: MediaQueueEntry, ctx: DrainContext): Promise<Exe
           });
           if (slot.ok) {
             const up = await uploadWithSlot({
-              slot:
-                slot.strategy === "plain"
-                  ? { strategy: "plain", bucket: slot.bucket, objectPath: slot.objectPath, token: slot.token }
-                  : {
-                      strategy: "tus",
-                      bucket: slot.bucket,
-                      objectPath: slot.objectPath,
-                      token: slot.token,
-                      endpoint: slot.endpoint,
-                      chunkSize: slot.chunkSize,
-                    },
+              slot: toStoredSlot(slot),
               file: poster.blob,
               contentType: "image/jpeg",
             });
@@ -522,15 +525,27 @@ async function execSubmit(entry: SubmitQueueEntry): Promise<ExecResult> {
     return "pending";
   }
 
-  const plan = stateRes.ok
-    ? planSubmitTransitions(stateRes.data.state)
-    : stateRes.reason === "not_found"
-      ? planSubmitTransitions(null)
-      : null;
-  if (plan === null) {
-    // unavailable/invalid — transient; try again on the next signal.
-    await persist({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
-    return "pending";
+  let plan;
+  if (stateRes.ok) {
+    plan = planSubmitTransitions(stateRes.data.state);
+  } else {
+    // Route the failure through the tested pure table (correctness review:
+    // `forbidden` — a grant change while queued — is terminal, never an
+    // infinite transparent retry).
+    const route = routeStateReadFailure(stateRes.reason);
+    switch (route.outcome) {
+      case "auth":
+        return "auth";
+      case "task_missing":
+        plan = planSubmitTransitions(null);
+        break;
+      case "blocked":
+        await persist({ ...entry, blocked: { reason: stateRes.reason, note: route.note } });
+        return "pending";
+      case "retry":
+        await persist({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
+        return "pending";
+    }
   }
 
   switch (plan.kind) {
@@ -544,7 +559,10 @@ async function execSubmit(entry: SubmitQueueEntry): Promise<ExecResult> {
     case "drop":
       await persist({
         ...entry,
-        blocked: { reason: plan.kind === "drop" ? "dropped" : "phase_locked", note: plan.note },
+        blocked: {
+          reason: plan.kind === "drop" ? TOMBSTONE_REASONS.DROPPED : TOMBSTONE_REASONS.PHASE_LOCKED,
+          note: plan.note,
+        },
       });
       return "pending";
     case "chain": {
@@ -572,15 +590,15 @@ async function execSubmit(entry: SubmitQueueEntry): Promise<ExecResult> {
               await persist({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
               return "pending";
             case "done_with_note":
-              await persist({ ...entry, blocked: { reason: "noted", note: refusal.note } });
+              await persist({ ...entry, blocked: { reason: TOMBSTONE_REASONS.NOTED, note: refusal.note } });
               return "pending";
             case "blocked":
               await persist({ ...entry, blocked: { reason: result.reason, note: refusal.note } });
               return "pending";
           }
         }
-        // ok — including byCaller:false (lost echo re-read / concurrent winner):
-        // resolveSubmitResult says done either way, never a re-apply.
+        // ok — including byCaller:false (applyTransition's lost-echo re-read /
+        // a concurrent winner): done either way, never a re-apply.
       }
       await deleteEntry(entry.id);
       notify();
@@ -629,11 +647,42 @@ async function runCaptureChoreography(taskIds: Set<string>, studentIdByTask: Map
   }
 }
 
+/** Read the queue, quarantining any record this app version can't drain
+ *  (future-schema or corrupt) as a surfaced, dismissible tombstone — never
+ *  fed raw into the typed drain, never silently dropped (api-contract
+ *  review: the queue is a cross-deploy contract). */
+async function listRecognizedEntries(): Promise<QueueEntry[]> {
+  const raw = (await listEntries()) as unknown[];
+  const recognized: QueueEntry[] = [];
+  for (const record of raw) {
+    if (isRecognizedEntry(record)) {
+      recognized.push(record);
+      continue;
+    }
+    const shell = record as { id?: unknown; blocked?: unknown };
+    if (typeof shell.id === "string" && !shell.blocked) {
+      try {
+        await putEntry({
+          ...(record as object),
+          blocked: {
+            reason: TOMBSTONE_REASONS.UNRECOGNIZED,
+            note: "This saved item is from a different app version and can't be sent. Dismiss it, or update the app and try again.",
+          },
+        } as QueueEntry);
+        notify();
+      } catch (e) {
+        console.error("[path/sync] could not quarantine unrecognized entry:", e);
+      }
+    }
+  }
+  return recognized;
+}
+
 /**
  * Drain the queue once: plan → execute → re-plan (a resolved capture can free
- * a held submit) until nothing new is runnable. Single-flight across tabs.
+ * a held submit) until nothing new is runnable. Single-drainer per the header.
  */
-export async function drainQueue(ctx: DrainContext): Promise<void> {
+export async function drainQueue(ctx: DrainContext, opts: DrainOptions = {}): Promise<void> {
   if (!isQueueSupported()) return;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return;
 
@@ -645,8 +694,8 @@ export async function drainQueue(ctx: DrainContext): Promise<void> {
 
     // Re-plan after each pass: resolving a media entry can free a held submit.
     for (let pass = 0; pass < 6; pass++) {
-      const entries = selectDrainable(await listEntries(), ctx.actableStudentIds);
-      const plan = planDrain(entries);
+      const entries = selectDrainable(await listRecognizedEntries(), ctx.actableStudentIds);
+      const plan = planDrain(entries, { includeStuck: opts.includeStuck ?? false });
       const ids = plan.runnable.filter((id) => !executed.has(id));
       if (ids.length === 0) break;
 
@@ -675,19 +724,23 @@ export async function drainQueue(ctx: DrainContext): Promise<void> {
     await runCaptureChoreography(toChoreograph, studentIdByTask);
   };
 
-  // Single-drainer across tabs (two TUS clients on one URL → 409).
+  // Single-drainer (two TUS clients on one URL → 409). Background signals
+  // skip when a drain is running; interactive callers wait their turn.
   if (typeof navigator !== "undefined" && "locks" in navigator && navigator.locks) {
-    await navigator.locks.request("path-offline-drain", { ifAvailable: true }, async (lock) => {
-      if (lock) await run();
-    });
+    if (opts.wait) {
+      await navigator.locks.request("path-offline-drain", run);
+    } else {
+      await navigator.locks.request("path-offline-drain", { ifAvailable: true }, async (lock) => {
+        if (lock) await run();
+      });
+    }
     return;
   }
-  if (fallbackDrainActive) return;
-  fallbackDrainActive = true;
-  try {
-    await run();
-  } finally {
-    fallbackDrainActive = false;
+  // No Web Locks: a within-tab promise chain (see header for the honest limits).
+  const turn = fallbackDrainChain.then(run);
+  fallbackDrainChain = turn.catch(() => {});
+  if (opts.wait) {
+    await turn;
   }
 }
 

@@ -7,14 +7,18 @@
  * durable queue entry now, and this surface is where a student sees it,
  * retries a stuck one, or dismisses a resolved note.
  *
- * States, per entry (all decided in sync-rules, rendered here):
- *   - pending  — "saved on this device"; sending when online, waiting when not
- *   - attention — blocked with a student-readable note + Retry / Dismiss
- *   - auth      — the drain hit an expired session; one line, sign-in fixes it
+ * States, per entry (all decided in sync-rules' entryDisplayState):
+ *   - pending      — "saved on this device"; sending when online, waiting when not
+ *   - still_trying — many failed attempts, auto-retry ceiling reached: the
+ *     copy stops promising "it'll send" and offers the manual retry
+ *     (reliability review — the honest middle state)
+ *   - attention    — blocked with a student-readable note + Retry / Dismiss
+ *     (tombstones — dropped/noted/phase_locked/unrecognized — dismiss only)
+ * Plus one auth line when the drain hit an expired session.
  *
- * Retryable-vs-terminal is already folded into the entry by the drain
- * (interpretAttachFailure): retryables stay pending and re-drain on foreground
- * signals; only terminal refusals surface here as attention items.
+ * "Send now" renders whenever anything is pending, even while the browser
+ * claims offline — navigator.onLine false-negatives are real, and a manual
+ * attempt while genuinely offline fails harmlessly into retry posture.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -29,7 +33,11 @@ import {
   retryEntry,
   subscribeQueue,
 } from "@/app/path/lib/sync-engine";
-import type { QueueEntry } from "@/app/path/lib/sync-rules";
+import {
+  entryDisplayState,
+  isTombstoneReason,
+  type QueueEntry,
+} from "@/app/path/lib/sync-rules";
 import type { Skin } from "@/app/path/lib/skin-tokens";
 
 const KIND_LABEL: Record<QueueEntry["kind"], string> = {
@@ -50,6 +58,21 @@ const subscribeOnline = (cb: () => void) => {
   };
 };
 const readOnline = () => navigator.onLine !== false;
+
+/**
+ * Coalesce router.refresh() calls: a background drain's queue-cleared refresh
+ * and TaskSurface's own post-drain refresh can land in the same beat (julik
+ * review) — one RSC refetch serves both.
+ */
+let refreshScheduled = false;
+export function scheduleCoalescedRefresh(refresh: () => void): void {
+  if (refreshScheduled) return;
+  refreshScheduled = true;
+  setTimeout(() => {
+    refreshScheduled = false;
+    refresh();
+  }, 120);
+}
 
 export function SyncStatus({
   studentId,
@@ -80,12 +103,14 @@ export function SyncStatus({
           // A BACKGROUND drain (the engine's online/visibility signal, not this
           // surface's own action flow) just landed this task's queued work —
           // refresh so the satchel shows it, rather than staying stale until
-          // the next navigation.
+          // the next navigation. Coalesced: TaskSurface may refresh too.
           const pendingNow = mine.some((e) => !e.blocked);
-          if (hadPendingRef.current && !pendingNow) router.refresh();
+          if (hadPendingRef.current && !pendingNow) {
+            scheduleCoalescedRefresh(() => router.refresh());
+          }
           hadPendingRef.current = pendingNow;
         })
-        .catch(() => {});
+        .catch((e) => console.error("[path/SyncStatus] queue read failed:", e));
     };
     refresh();
     const unsubscribe = subscribeQueue(refresh);
@@ -96,19 +121,33 @@ export function SyncStatus({
   }, [studentId, taskId, router]);
 
   const retry = useCallback(
-    (id: string) => void retryEntry(id, { actableStudentIds: [studentId] }),
+    (id: string) =>
+      void retryEntry(id, { actableStudentIds: [studentId] }).catch((e) =>
+        console.error("[path/SyncStatus] retry failed:", e)
+      ),
     [studentId]
   );
-  const dismiss = useCallback((id: string) => void dismissEntry(id), []);
+  const dismiss = useCallback(
+    (id: string) =>
+      void dismissEntry(id).catch((e) => console.error("[path/SyncStatus] dismiss failed:", e)),
+    []
+  );
   const sendNow = useCallback(
-    () => void drainQueue({ actableStudentIds: [studentId] }),
+    () =>
+      void drainQueue({ actableStudentIds: [studentId] }, { wait: true, includeStuck: true }).catch(
+        (e) => console.error("[path/SyncStatus] manual drain failed:", e)
+      ),
     [studentId]
   );
 
-  const pending = entries.filter((e) => !e.blocked);
-  const attention = entries.filter((e) => e.blocked !== null);
-  if (pending.length === 0 && attention.length === 0 && !authNeeded) return null;
+  const pending = entries.filter((e) => entryDisplayState(e) === "pending");
+  const stillTrying = entries.filter((e) => entryDisplayState(e) === "still_trying");
+  const attention = entries.filter((e) => entryDisplayState(e) === "attention");
+  if (pending.length === 0 && stillTrying.length === 0 && attention.length === 0 && !authNeeded) {
+    return null;
+  }
 
+  const ink = trail ? "text-trail-ink" : "text-hq-ink";
   const inkSoft = trail ? "text-trail-ink-soft" : "text-hq-ink-soft";
   const cardBorder = trail ? "border-trail-ink/12" : "border-hq-border";
   const surface = trail ? "bg-trail-canvas" : "bg-hq-surface";
@@ -125,15 +164,32 @@ export function SyncStatus({
               ? `Sending ${pending.length} ${pending.length === 1 ? "item" : "items"}…`
               : `${pending.length} ${pending.length === 1 ? "item is" : "items are"} saved on this device — they'll send when you're back online.`}
           </p>
-          {online && (
-            <button
-              type="button"
-              onClick={sendNow}
-              className={cn("font-path-body text-[11.5px] underline-offset-2 hover:underline", inkSoft)}
-            >
-              <Icon name="refresh" size={13} title="Send now" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={sendNow}
+            className={cn("font-path-body text-[11.5px] underline-offset-2 hover:underline", inkSoft)}
+          >
+            <Icon name="refresh" size={13} title="Send now" />
+          </button>
+        </div>
+      )}
+
+      {stillTrying.length > 0 && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-not-yet/30 bg-not-yet/10 px-3 py-2.5">
+          <span className="flex-shrink-0 text-not-yet">
+            <Icon name="clock" size={15} />
+          </span>
+          <p className={cn("flex-1 font-path-body text-[12px] leading-snug", ink)}>
+            {stillTrying.length === 1 ? "One item keeps" : `${stillTrying.length} items keep`} not going
+            through. It&rsquo;s still safe on this device — but it may need attention.
+          </p>
+          <button
+            type="button"
+            onClick={sendNow}
+            className={cn("font-path-body text-[11.5px] font-semibold underline underline-offset-2", ink)}
+          >
+            Try again
+          </button>
         </div>
       )}
 
@@ -147,17 +203,15 @@ export function SyncStatus({
             <Icon name="alert-triangle" size={15} />
           </span>
           <div className="flex-1">
-            <p className={cn("font-path-body text-[12px] leading-snug", trail ? "text-trail-ink" : "text-hq-ink")}>
-              {entry.blocked?.note}
-            </p>
+            <p className={cn("font-path-body text-[12px] leading-snug", ink)}>{entry.blocked?.note}</p>
             <div className="mt-1.5 flex items-center gap-3">
-              {/* Tombstones (dropped / resolved-with-note) only dismiss; stuck
-                  items can also retry. */}
-              {entry.blocked?.reason !== "dropped" && entry.blocked?.reason !== "noted" && (
+              {/* Tombstones (dropped / noted / phase-locked / unrecognized)
+                  only dismiss; stuck items can also retry. */}
+              {entry.blocked && !isTombstoneReason(entry.blocked.reason) && (
                 <button
                   type="button"
                   onClick={() => retry(entry.id)}
-                  className={cn("font-path-body text-[11.5px] font-semibold underline-offset-2 hover:underline", trail ? "text-trail-ink" : "text-hq-ink")}
+                  className={cn("font-path-body text-[11.5px] font-semibold underline-offset-2 hover:underline", ink)}
                 >
                   Try again
                 </button>

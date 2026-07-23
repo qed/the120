@@ -69,8 +69,12 @@ describe("isUnguarded", () => {
     expect(isUnguarded("/path/apple-icon.png")).toBe(true);
     // Next may append a content-hash query/suffix to file-convention icons.
     expect(isUnguarded("/path/apple-icon-abc123.png")).toBe(true);
-    // The gate itself is unchanged for everything nearby.
+    // The gate itself is unchanged for everything nearby — a route that merely
+    // SHARES the prefix must never inherit the bypass (delimiter required).
     expect(isUnguarded("/path/apple")).toBe(false);
+    expect(isUnguarded("/path/apple-icon")).toBe(false);
+    expect(isUnguarded("/path/apple-iconography")).toBe(false);
+    expect(isUnguarded("/path/apple-icon2/secret")).toBe(false);
   });
 });
 

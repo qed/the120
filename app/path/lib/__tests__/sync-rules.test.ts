@@ -2,18 +2,23 @@ import { describe, expect, it } from "vitest";
 import {
   admitCapture,
   applyUploadOutcome,
+  AUTO_RETRY_ATTEMPT_CEILING,
   buildConfirmParams,
   buildSubmitParams,
   clampToNow,
   classifyUploadFreshness,
   decideDurabilityWarning,
+  entryDisplayState,
   interpretAttachFailure,
   interpretSubmitRefusal,
+  isRecognizedEntry,
+  isTombstoneReason,
   nextMediaStep,
   OFFLINE_URL,
   planDrain,
   planSubmitTransitions,
-  resolveSubmitResult,
+  QUEUE_ENTRY_SCHEMA_VERSION,
+  routeStateReadFailure,
   selectDrainable,
   shouldRegisterServiceWorker,
   SIGNED_UPLOAD_TOKEN_TTL_MS,
@@ -21,6 +26,7 @@ import {
   SW_SCOPE,
   SW_URL,
   TOKEN_REMINT_MARGIN_MS,
+  TOMBSTONE_REASONS,
   type LinkQueueEntry,
   type LogQueueEntry,
   type MediaQueueEntry,
@@ -36,6 +42,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 const base = () => ({
   id: "e1",
+  schemaVersion: QUEUE_ENTRY_SCHEMA_VERSION,
   studentId: "11111111-1111-4111-8111-111111111111",
   taskId: "1.1.1",
   enqueuedAt: iso(T0),
@@ -146,6 +153,16 @@ describe("clampToNow", () => {
     const r = clampToNow("not-a-date", T0);
     expect(r).toEqual({ value: iso(T0), clamped: true, original: "not-a-date" });
   });
+
+  it("clamps an absurd-past timestamp (dead-RTC 1970 reset) to now, recorded — the permanent record carries the anomaly, not the fiction", () => {
+    const r = clampToNow("1970-01-01T00:00:07.000Z", T0);
+    expect(r).toEqual({ value: iso(T0), clamped: true, original: "1970-01-01T00:00:07.000Z" });
+  });
+
+  it("an ordinary past timestamp above the floor is untouched", () => {
+    const r = clampToNow("2026-01-15T10:00:00.000Z", T0);
+    expect(r).toEqual({ value: "2026-01-15T10:00:00.000Z", clamped: false });
+  });
 });
 
 // ── upload freshness (the U9 carry: 2h token vs 24h TUS URL) ──────────────────
@@ -172,6 +189,18 @@ describe("classifyUploadFreshness", () => {
 
   it("no slot yet means token_stale (mint first)", () => {
     expect(classifyUploadFreshness({ slotMintedAtMs: null, tusCreatedAtMs: null, nowMs: T0 })).toBe("token_stale");
+  });
+
+  it("the exact re-mint boundary: one ms before is fresh, AT the threshold is stale (>= not >)", () => {
+    const threshold = T0 + SIGNED_UPLOAD_TOKEN_TTL_MS - TOKEN_REMINT_MARGIN_MS;
+    expect(classifyUploadFreshness({ slotMintedAtMs: T0, tusCreatedAtMs: null, nowMs: threshold - 1 })).toBe("fresh");
+    expect(classifyUploadFreshness({ slotMintedAtMs: T0, tusCreatedAtMs: null, nowMs: threshold })).toBe("token_stale");
+  });
+
+  it("a mintedAt in the FUTURE is stale — mixed/moved clocks fail toward a cheap re-mint, never a token judged fresh forever", () => {
+    expect(classifyUploadFreshness({ slotMintedAtMs: T0 + 60_000, tusCreatedAtMs: null, nowMs: T0 })).toBe(
+      "token_stale"
+    );
   });
 });
 
@@ -305,6 +334,42 @@ describe("planDrain", () => {
     expect(plan.runnable).toEqual([]);
     expect(plan.held).toEqual([{ id: "s1", reason: "needs_attention_first" }]);
   });
+
+  it("adversarial: a clock correction that makes the submit's enqueuedAt EARLIER than its own evidence still holds it — queue membership, not wall-clock, is the invariant", () => {
+    const entries: QueueEntry[] = [
+      // NTP rollback between capture and submit: the media entry carries a
+      // LATER wall-clock stamp than the submit that depends on it.
+      mediaEntry({ id: "m1", taskId: "1.1.1", enqueuedAt: iso(T0 + 60_000) }),
+      submitEntry({ id: "s1", taskId: "1.1.1", enqueuedAt: iso(T0) }),
+    ];
+    const plan = planDrain(entries);
+    expect(plan.runnable).toEqual(["m1"]);
+    expect(plan.held).toEqual([{ id: "s1", reason: "awaiting_evidence" }]);
+  });
+
+  it("an entry past the auto-retry ceiling is held as stuck — manual drains lift it", () => {
+    const stuck = mediaEntry({ id: "m1", attempts: AUTO_RETRY_ATTEMPT_CEILING });
+    expect(planDrain([stuck])).toEqual({ runnable: [], held: [{ id: "m1", reason: "stuck" }] });
+    expect(planDrain([stuck], { includeStuck: true }).runnable).toEqual(["m1"]);
+  });
+});
+
+describe("entryDisplayState", () => {
+  it("splits pending / still_trying / attention honestly", () => {
+    expect(entryDisplayState({ attempts: 0, blocked: null })).toBe("pending");
+    expect(entryDisplayState({ attempts: AUTO_RETRY_ATTEMPT_CEILING, blocked: null })).toBe("still_trying");
+    expect(entryDisplayState({ attempts: 0, blocked: { reason: "forbidden", note: "n" } })).toBe("attention");
+  });
+});
+
+describe("tombstone reasons", () => {
+  it("tombstones (dropped/noted/phase_locked/unrecognized) only dismiss; typed refusals can retry", () => {
+    for (const reason of Object.values(TOMBSTONE_REASONS)) {
+      expect(isTombstoneReason(reason)).toBe(true);
+    }
+    expect(isTombstoneReason("forbidden")).toBe(false);
+    expect(isTombstoneReason("quota_exceeded")).toBe(false);
+  });
 });
 
 // ── the rebase, not a replay (Decision 10 — the four cases, each explicit) ────
@@ -346,7 +411,8 @@ describe("planSubmitTransitions (the rebase table)", () => {
   it("plan scenario: a task that no longer exists drops with a surfaced note, never silently", () => {
     const plan = planSubmitTransitions(null);
     expect(plan.kind).toBe("drop");
-    if (plan.kind === "drop") expect(plan.note.length).toBeGreaterThan(0);
+    // The REAL student-readable copy, not just non-empty (testing review).
+    if (plan.kind === "drop") expect(plan.note).toMatch(/no longer exists/i);
   });
 });
 
@@ -370,18 +436,34 @@ describe("interpretSubmitRefusal", () => {
   it("an unknown refusal blocks with a note — fail closed, never an infinite retry", () => {
     const r = interpretSubmitRefusal("some_new_reason");
     expect(r.outcome).toBe("blocked");
-    if (r.outcome === "blocked") expect(r.note.length).toBeGreaterThan(0);
+    if (r.outcome === "blocked") expect(r.note).toMatch(/couldn't be sent/i);
   });
 });
 
-describe("resolveSubmitResult", () => {
-  it("plan scenario: a submit whose response was lost but committed resolves on re-read, not double-applied", () => {
-    // applyTransition re-reads on a lost echo and reports ok byCaller:false —
-    // the queue treats that as done and deletes the entry, never re-submits.
-    expect(resolveSubmitResult({ ok: true, byCaller: false })).toEqual({ outcome: "done" });
-    expect(resolveSubmitResult({ ok: true, byCaller: true })).toEqual({ outcome: "done" });
+describe("routeStateReadFailure (the rebase's state-read failure table)", () => {
+  it("not_found routes to the task-missing rebase case", () => {
+    expect(routeStateReadFailure("not_found")).toEqual({ outcome: "task_missing" });
+  });
+
+  it("forbidden is TERMINAL — a grant change while queued must never spin as a transparent retry forever", () => {
+    const r = routeStateReadFailure("forbidden");
+    expect(r.outcome).toBe("blocked");
+    if (r.outcome === "blocked") expect(r.note).toMatch(/can't be sent/i);
+  });
+
+  it("transient reasons retry; login pauses for re-auth", () => {
+    expect(routeStateReadFailure("unavailable")).toEqual({ outcome: "retry" });
+    expect(routeStateReadFailure("invalid")).toEqual({ outcome: "retry" });
+    expect(routeStateReadFailure("login")).toEqual({ outcome: "auth" });
   });
 });
+
+// Plan scenario 7 note: "a submit whose response was lost but committed is
+// detected on re-read, not double-applied" is applyTransition's own contract
+// (U8: lost echo → re-read → ok byCaller:false; tested in progress-core). The
+// engine's obligation — treat ANY ok as done, never re-apply — is inline where
+// the chain runs; planSubmitTransitions("submitted") → done covers the
+// next-drain replay above.
 
 // ── attach failures ───────────────────────────────────────────────────────────
 
@@ -389,7 +471,7 @@ describe("interpretAttachFailure", () => {
   it("plan scenario: a queued item whose task no longer exists is dropped with a surfaced note", () => {
     const r = interpretAttachFailure("media", "not_found");
     expect(r.outcome).toBe("drop");
-    if (r.outcome === "drop") expect(r.note.length).toBeGreaterThan(0);
+    if (r.outcome === "drop") expect(r.note).toMatch(/no longer exists/i);
   });
 
   it("a log queued against a since-verified task resolves with a note (append-only froze it)", () => {
@@ -406,7 +488,7 @@ describe("interpretAttachFailure", () => {
   it("terminal refusals block with a student-readable note", () => {
     const r = interpretAttachFailure("media", "quota_exceeded");
     expect(r.outcome).toBe("blocked");
-    if (r.outcome === "blocked") expect(r.note.length).toBeGreaterThan(0);
+    if (r.outcome === "blocked") expect(r.note).toMatch(/storage is full/i);
   });
 });
 
@@ -525,7 +607,7 @@ describe("selectDrainable", () => {
 // ── SyncStatus view model ─────────────────────────────────────────────────────
 
 describe("summarizeQueue", () => {
-  it("counts pending work and bytes, and surfaces attention items", () => {
+  it("counts pending work, surfaces attention items, and counts BLOCKED media bytes too — a stuck 45MB video is exactly as exposed to the 7-day wipe as a pending one", () => {
     const entries: QueueEntry[] = [
       mediaEntry({ id: "m1", bytes: 1000 }),
       linkEntry({ id: "l1" }),
@@ -538,11 +620,36 @@ describe("summarizeQueue", () => {
     ];
     const s = summarizeQueue(entries);
     expect(s.pendingCount).toBe(2);
-    expect(s.queuedBytes).toBe(1000);
+    // 1000 pending + 2000 blocked: the durability banner must never
+    // understate the at-risk bytes (adversarial review).
+    expect(s.queuedBytes).toBe(3000);
     expect(s.attention).toEqual([{ id: "m2", note: "Storage is full" }]);
   });
 
   it("an empty queue summarizes to zero, no attention", () => {
     expect(summarizeQueue([])).toEqual({ pendingCount: 0, queuedBytes: 0, attention: [] });
+  });
+});
+
+describe("isRecognizedEntry (cross-deploy tolerant reader)", () => {
+  it("recognizes every current entry kind", () => {
+    expect(isRecognizedEntry(mediaEntry())).toBe(true);
+    expect(isRecognizedEntry(linkEntry())).toBe(true);
+    expect(isRecognizedEntry(logEntry())).toBe(true);
+    expect(isRecognizedEntry(submitEntry())).toBe(true);
+  });
+
+  it("tolerates a missing schemaVersion (entries written before the field existed are v1)", () => {
+    const { schemaVersion, ...legacy } = mediaEntry();
+    void schemaVersion;
+    expect(isRecognizedEntry(legacy)).toBe(true);
+  });
+
+  it("refuses a future schema version, an unknown kind, and junk — never fed raw into the drain", () => {
+    expect(isRecognizedEntry({ ...mediaEntry(), schemaVersion: QUEUE_ENTRY_SCHEMA_VERSION + 1 })).toBe(false);
+    expect(isRecognizedEntry({ ...mediaEntry(), kind: "hologram" })).toBe(false);
+    expect(isRecognizedEntry(null)).toBe(false);
+    expect(isRecognizedEntry("garbage")).toBe(false);
+    expect(isRecognizedEntry({})).toBe(false);
   });
 });

@@ -28,7 +28,7 @@ import {
   uploadEvidenceFile,
   type SlotRefusal,
   type UploadedEvidence,
-} from "./upload-client";
+} from "@/app/path/lib/upload-client";
 
 export type { UploadedEvidence };
 

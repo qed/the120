@@ -18,7 +18,7 @@
  *     entries are queued; the drain itself always runs in page context.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { InstallPrompt } from "@/app/path/components/pwa/InstallPrompt";
 import { listEntries } from "@/app/path/lib/offline-queue";
 import { drainQueue, startSyncEngine, subscribeQueue } from "@/app/path/lib/sync-engine";
@@ -37,6 +37,20 @@ type SyncCapableRegistration = ServiceWorkerRegistration & {
   sync?: { register(tag: string): Promise<void> };
 };
 
+/** Platform snapshots via useSyncExternalStore (never computed in the render
+ *  body): the server snapshot says "not iOS / not installed", so SSR renders
+ *  no prompt and the client corrects after hydration — the render-body
+ *  typeof-guard version would MISMATCH at hydration on the exact device this
+ *  component targets (project-standards review). */
+const noSubscription = () => () => {};
+const readIsIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent);
+const subscribeStandalone = (cb: () => void) => {
+  const mq = window.matchMedia("(display-mode: standalone)");
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+const readStandalone = () => window.matchMedia("(display-mode: standalone)").matches;
+
 export function PathPwa({
   actableStudentIds,
   skin,
@@ -49,6 +63,8 @@ export function PathPwa({
   const [summary, setSummary] = useState<QueueSummary>({ pendingCount: 0, queuedBytes: 0, attention: [] });
   const [updating, setUpdating] = useState(false);
   const reloadArmedRef = useRef(false);
+  const isIOS = useSyncExternalStore(noSubscription, readIsIOS, () => false);
+  const isStandalone = useSyncExternalStore(subscribeStandalone, readStandalone, () => true);
 
   // ── sync engine lifecycle + queue summary ──────────────────────────────────
   useEffect(() => {
@@ -59,7 +75,13 @@ export function PathPwa({
     const refresh = () => {
       void listEntries()
         .then((entries) => {
-          if (!cancelled) setSummary(summarizeQueue(entries));
+          if (cancelled) return;
+          // Scope the SUMMARY exactly like the drain: this session's own
+          // students only. A sibling's queued entries on a shared device must
+          // not leak their byte counts/urgency into this account's banner
+          // (security review — display scope must match selectDrainable's).
+          const actable = new Set(actableStudentIds);
+          setSummary(summarizeQueue(entries.filter((e) => actable.has(e.studentId))));
         })
         .catch(() => {
           /* queue unsupported — summary stays empty */
@@ -92,26 +114,32 @@ export function PathPwa({
     if (!shouldRegisterServiceWorker(window.location.hostname)) return;
 
     let cancelled = false;
+    // The registration outlives this component — the updatefound listener must
+    // be removed on unmount or a remount stacks stale closures (julik review).
+    let registration: ServiceWorkerRegistration | null = null;
+    const onUpdateFound = () => {
+      const installing = registration?.installing;
+      installing?.addEventListener("statechange", () => {
+        // "installed" with an existing controller = an UPDATE is waiting.
+        // (Without a controller it's the very first install — no toast.)
+        if (!cancelled && installing.state === "installed" && navigator.serviceWorker.controller) {
+          setWaitingWorker(installing);
+        }
+      });
+    };
     navigator.serviceWorker
       .register(SW_URL, { scope: SW_SCOPE, updateViaCache: "none" })
       .then((reg) => {
         if (cancelled) return;
+        registration = reg;
         // A worker already waiting (an update installed on a previous visit).
         if (reg.waiting && navigator.serviceWorker.controller) setWaitingWorker(reg.waiting);
-        reg.addEventListener("updatefound", () => {
-          const installing = reg.installing;
-          installing?.addEventListener("statechange", () => {
-            // "installed" with an existing controller = an UPDATE is waiting.
-            // (Without a controller it's the very first install — no toast.)
-            if (installing.state === "installed" && navigator.serviceWorker.controller) {
-              setWaitingWorker(installing);
-            }
-          });
-        });
+        reg.addEventListener("updatefound", onUpdateFound);
       })
       .catch((e) => console.error("[path/pwa] SW registration failed:", e));
     return () => {
       cancelled = true;
+      registration?.removeEventListener("updatefound", onUpdateFound);
     };
   }, []);
 
@@ -137,13 +165,14 @@ export function PathPwa({
   }, [waitingWorker]);
 
   const retryDrain = useCallback(() => {
-    void drainQueue({ actableStudentIds });
+    void drainQueue({ actableStudentIds }, { wait: true, includeStuck: true }).catch((e) =>
+      console.error("[path/pwa] manual drain failed:", e)
+    );
   }, [actableStudentIds]);
 
   const warning = decideDurabilityWarning({
-    isIOS: typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent),
-    isStandalone:
-      typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches,
+    isIOS,
+    isStandalone,
     queuedCount: summary.pendingCount + summary.attention.length,
   });
 

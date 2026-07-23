@@ -15,6 +15,23 @@
  * IndexedDB after 7 days without interaction unless the app is installed to
  * the home screen. The queue is durable, not eternal — decideDurabilityWarning
  * (sync-rules) escalates whenever queued bytes exist un-installed.
+ *
+ * SIGN-OUT POSTURE (deliberate, security-reviewed): the queue is NOT cleared
+ * on sign-out. Deleting un-synced evidence at sign-out is precisely the
+ * permanent-loss failure this unit exists to prevent — entries persist so
+ * their owner (or a parent, on a shared family device) drains them on a later
+ * sign-in (`selectDrainable` scopes execution; PathPwa scopes display). The
+ * at-rest residue on a genuinely shared NON-family browser is a T2 hardening
+ * question (drained-only purge / at-rest encryption), recorded in the plan's
+ * carry-forwards — never an auto-delete.
+ *
+ * WRITE ORDERING: every mutation (put/delete) is serialized through one
+ * module-level promise chain. Each withStore call opens its own connection
+ * and transaction, and IndexedDB does NOT guarantee commit order across
+ * independent connections — an unawaited earlier put could otherwise land
+ * AFTER a later awaited one (or after a delete) and resurrect stale state
+ * (julik + correctness reviews, independently). Chaining makes call order ==
+ * commit order structurally. Reads stay unserialized (they don't mutate).
  */
 
 import { QUEUE_DB_NAME, QUEUE_DB_VERSION, QUEUE_STORE, type QueueEntry } from "./sync-rules";
@@ -58,9 +75,22 @@ async function withStore<T>(
   }
 }
 
-/** Insert or replace one entry (put — the engine persists progress by re-putting). */
-export async function putEntry(entry: QueueEntry): Promise<void> {
-  await withStore("readwrite", (store) => store.put(entry));
+/** The write chain — see WRITE ORDERING in the header. A failed write must
+ *  not wedge the chain, so each link swallows into the returned promise
+ *  (callers still see their own rejection). */
+let writeChain: Promise<unknown> = Promise.resolve();
+
+function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const result = writeChain.then(fn);
+  writeChain = result.catch(() => {});
+  return result;
+}
+
+/** Insert or replace one entry (put — the engine persists step changes by re-putting). */
+export function putEntry(entry: QueueEntry): Promise<void> {
+  return enqueueWrite(async () => {
+    await withStore("readwrite", (store) => store.put(entry));
+  });
 }
 
 export async function getEntry(id: string): Promise<QueueEntry | null> {
@@ -73,6 +103,8 @@ export async function listEntries(): Promise<QueueEntry[]> {
   return result ?? [];
 }
 
-export async function deleteEntry(id: string): Promise<void> {
-  await withStore("readwrite", (store) => store.delete(id));
+export function deleteEntry(id: string): Promise<void> {
+  return enqueueWrite(async () => {
+    await withStore("readwrite", (store) => store.delete(id));
+  });
 }

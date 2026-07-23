@@ -3,10 +3,12 @@ import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolveStudentSelf } from "@/app/path/lib/journey-loader";
 import { loadFamilyStudentIds, resolveParentFamily } from "@/app/path/lib/family-loader";
+import { loadReplayPlan, type ReplayPlan } from "@/app/path/lib/notifications-loader";
 import { signOutPath } from "@/app/path/lib/actions/sign-out";
 import { PathShell } from "@/app/path/components/shell/PathShell";
 import { ParentShell } from "@/app/path/components/shell/ParentShell";
 import { PathPwa } from "@/app/path/components/pwa/PathPwa";
+import { TaskVerifiedMoment } from "@/app/path/components/TaskVerifiedMoment";
 
 /**
  * The authed /path app shell (T1 Unit 14 + 15). The `(app)` route group
@@ -45,6 +47,16 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
     return <div className="min-h-screen bg-hq-canvas font-path-body">{children}</div>;
   }
 
+  // The Unit 16 moment replay: unseen events, planned server-side by the pure
+  // rules. Load failure degrades to an empty replay — the chrome must never
+  // take the whole shell down over a garnish (the feed page fails loud).
+  let replay: ReplayPlan = { moments: [], stampWithoutPlaying: [] };
+  try {
+    replay = await loadReplayPlan(db, self.ctx, self.skin);
+  } catch (e) {
+    console.error(`[path/layout] replay load failed for student ${self.ctx.studentId}:`, e);
+  }
+
   const skinLabel = self.skin === "trail" ? "Trail" : "HQ";
   return (
     <PathShell
@@ -52,9 +64,15 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
       studentName={self.firstName}
       roleLabel={`Student · ${skinLabel}`}
       signOut={signOutPath}
+      unseenNews={replay.moments.length}
     >
       {children}
       <PathPwa actableStudentIds={[self.ctx.studentId]} skin={self.skin} />
+      <TaskVerifiedMoment
+        skin={self.skin}
+        moments={replay.moments}
+        stampWithoutPlaying={replay.stampWithoutPlaying}
+      />
     </PathShell>
   );
 }

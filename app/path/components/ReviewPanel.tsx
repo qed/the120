@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * The parent review queue (T1 Unit 12; handoff's Review Queue surface, basic
- * form — richer superseded/diverged copy is Unit 16's). ALWAYS the grounded HQ
- * register (Unit 15's parent rule; never a kid skin).
+ * The parent review queue (T1 Unit 12; Unit 16 finished the concurrency copy
+ * and extracted the shared card scaffolding). ALWAYS the grounded HQ register
+ * (Unit 15's parent rule; never a kid skin).
  *
  * The verification moment (§9.3, R6): the parent reads the DONE-WHEN line —
  * that is the standard, not vibes — looks at the evidence, and either
@@ -13,10 +13,12 @@
  * panel only drives applyTransition).
  *
  * Concurrency copy (the two-parent race, Unit 8 carry): a superseded action
- * shows the WINNER's identity and time ("Sarah verified this at 7:42"), never
- * an error and never "you did it". A diverged one refreshes to truth. A
- * `retry` refusal auto-retries ONCE, then asks for a click (the retry
- * ceiling).
+ * shows the WINNER's identity, decision, and time ("Sarah said Not Yet at
+ * 7:42"), never an error and never "you did it". A diverged one refreshes to
+ * truth. A `retry` refusal auto-retries ONCE, then asks for a click (the
+ * retry ceiling — owned by `useReviewCardScaffolding`, shared by both card
+ * types). A card that VANISHES between refreshes without this session acting
+ * on it gets a queue-level toast — the co-parent handled it while you read.
  *
  * Every awaited action is wrapped try/catch/finally — the auth guard can
  * redirect() (throws) before the action's own body. Free-text (captions,
@@ -59,14 +61,136 @@ function atClause(iso: string | null | undefined): string {
  *  reveals the winner's identity destroys it sub-second (race review). */
 const NOTICE_LINGER_MS = 4000;
 
+/** How long the vanished-card toast stays up. */
+const VANISH_TOAST_MS = 8000;
+
+const GENERIC_ERROR = "That didn't go through — try again in a moment.";
+
 function waitingLabel(hours: number): string {
   if (hours < 1) return "waiting under an hour";
   if (hours < 48) return `waiting ${hours} hour${hours === 1 ? "" : "s"}`;
   return `waiting ${Math.floor(hours / 24)} days`;
 }
 
+/* ────────────────────────────── the shared card scaffolding (Unit 16) */
+
+/**
+ * Everything both card types duplicated (the Unit 12 → 16 carry): the
+ * mounted ref, the linger-then-refresh timer, busy, notice, and the
+ * retry-ceiling runner. `run(step)` gives the step one automatic retry for a
+ * transient refusal — the step returns "retry" to spend it (only offered
+ * while `canRetry`) — and owns the try/catch/finally posture: the auth guard
+ * can redirect() (throws) before the action body, and busy must always clear.
+ */
+function useReviewCardScaffolding() {
+  const router = useRouter();
+  const mountedRef = useRef(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [notice, setNoticeState] = useState<Notice | null>(null);
+
+  /** Mounted-guarded setter — steps call this freely after awaits. */
+  const setNotice = useCallback((n: Notice | null) => {
+    if (mountedRef.current) setNoticeState(n);
+  }, []);
+
+  /** Refresh after the notice has had time to be READ — the refresh removes
+   *  the card (its row left the queried state), so an immediate one would
+   *  destroy the copy it just revealed. */
+  const refreshAfterNotice = useCallback(() => {
+    refreshTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) router.refresh();
+    }, NOTICE_LINGER_MS);
+  }, [router]);
+
+  const refreshNow = useCallback(() => router.refresh(), [router]);
+
+  const run = useCallback(
+    async (step: (canRetry: boolean) => Promise<"retry" | "done">) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      setNoticeState(null);
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const outcome = await step(attempt === 0);
+          if (!mountedRef.current) return;
+          if (outcome !== "retry") return;
+        }
+      } catch {
+        // The guard can redirect() (throws) — anything else lands here too.
+        if (mountedRef.current) setNoticeState({ tone: "error", text: GENERIC_ERROR });
+      } finally {
+        busyRef.current = false;
+        if (mountedRef.current) setBusy(false);
+      }
+    },
+    []
+  );
+
+  return { mountedRef, busy, notice, setNotice, refreshAfterNotice, refreshNow, run };
+}
+
+/* ─────────────────────────────────────────────────────────── the panel */
+
+function taskCardKey(task: ReviewQueueTask): string {
+  return `task:${task.studentId}:${task.taskId}`;
+}
+
+function criterionCardKey(criterion: ReviewQueueCriterion): string {
+  return `criterion:${criterion.studentId}:${criterion.criterionId}:${criterion.attempt}`;
+}
+
 export function ReviewPanel({ queue }: { queue: ReviewQueue }) {
   const empty = queue.tasks.length === 0 && queue.criteria.length === 0;
+
+  // The vanishing-untouched-card toast (Unit 12 → 16 carry): a card that
+  // leaves the queue WITHOUT this session acting on it was handled elsewhere
+  // — most likely the co-parent. Cards this session decided register in
+  // actedRef (their own notice already names the winner).
+  const actedRef = useRef<Set<string>>(new Set());
+  const prevKeysRef = useRef<Map<string, string> | null>(null);
+  const [vanishToast, setVanishToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+
+  const markActed = useCallback((key: string) => {
+    actedRef.current.add(key);
+  }, []);
+
+  useEffect(() => {
+    const currentKeys = new Map<string, string>();
+    for (const task of queue.tasks) {
+      currentKeys.set(taskCardKey(task), `${task.studentName} · ${task.taskId}`);
+    }
+    for (const criterion of queue.criteria) {
+      currentKeys.set(criterionCardKey(criterion), `${criterion.studentName} · Landmark ${criterion.criterionId}`);
+    }
+    const prev = prevKeysRef.current;
+    prevKeysRef.current = currentKeys;
+    if (!prev) return;
+    const vanished = [...prev.entries()].filter(([key]) => !currentKeys.has(key) && !actedRef.current.has(key));
+    if (vanished.length === 0) return;
+    const labels = vanished.map(([, label]) => label);
+    setVanishToast(
+      labels.length === 1
+        ? `${labels[0]} was handled while you were reading — likely your co-parent. Nothing left to do there.`
+        : `${labels.length} items were handled while you were reading — likely your co-parent.`
+    );
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setVanishToast(null), VANISH_TOAST_MS);
+  }, [queue]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -83,6 +207,12 @@ export function ReviewPanel({ queue }: { queue: ReviewQueue }) {
         </p>
       </header>
 
+      {vanishToast && (
+        <p role="status" className="rounded-lg bg-hq-sunken px-3 py-2 font-path-body text-[12.5px] text-hq-ink">
+          {vanishToast}
+        </p>
+      )}
+
       {empty && (
         <div className="rounded-xl border border-hq-border bg-hq-surface p-6 text-center shadow-hq">
           <p className="font-path-body text-[14px] text-hq-ink">The queue is clear.</p>
@@ -94,10 +224,11 @@ export function ReviewPanel({ queue }: { queue: ReviewQueue }) {
 
       {queue.tasks.map((task) => (
         <ReviewTaskCard
-          key={`${task.studentId}:${task.taskId}`}
+          key={taskCardKey(task)}
           task={task}
           parentNames={queue.parentNames}
           nudgeThresholdHours={queue.nudgeThresholdHours}
+          onActed={() => markActed(taskCardKey(task))}
         />
       ))}
 
@@ -106,9 +237,10 @@ export function ReviewPanel({ queue }: { queue: ReviewQueue }) {
           <h2 className="font-path-display text-[16px] font-semibold text-hq-ink">Landmarks in review</h2>
           {queue.criteria.map((criterion) => (
             <CriterionReviewCard
-              key={`${criterion.studentId}:${criterion.criterionId}:${criterion.attempt}`}
+              key={criterionCardKey(criterion)}
               criterion={criterion}
               parentNames={queue.parentNames}
+              onActed={() => markActed(criterionCardKey(criterion))}
             />
           ))}
         </section>
@@ -123,115 +255,89 @@ function ReviewTaskCard({
   task,
   parentNames,
   nudgeThresholdHours,
+  onActed,
 }: {
   task: ReviewQueueTask;
   parentNames: Record<string, string>;
   nudgeThresholdHours: number;
+  /** Tells the panel this session decided the card — the vanish toast must
+   *  not fire for a removal this card's own notice already explains. */
+  onActed: () => void;
 }) {
-  const router = useRouter();
-  const mountedRef = useRef(true);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    };
-  }, []);
+  const { busy, notice, setNotice, refreshAfterNotice, refreshNow, run } = useReviewCardScaffolding();
 
   const [mode, setMode] = useState<"idle" | "not_yet">("idle");
   const [comment, setComment] = useState("");
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
 
   const stale = task.waitingHours !== null && task.waitingHours >= nudgeThresholdHours;
 
-  /** Refresh after the notice has had time to be READ — the refresh removes
-   *  this card (its row left the queried state), so an immediate one would
-   *  destroy the copy it just revealed. */
-  const refreshAfterNotice = useCallback(() => {
-    refreshTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) router.refresh();
-    }, NOTICE_LINGER_MS);
-  }, [router]);
-
-  const run = useCallback(
-    async (transition: "verify" | "not_yet", noteText: string | undefined) => {
-      if (busy) return;
-      setBusy(true);
-      setNotice(null);
-      try {
-        // The retry ceiling: at most one automatic retry per click for a
-        // transient `retry` refusal — never an unbounded loop.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const result = await applyTransition({
-            studentId: task.studentId,
-            taskId: task.taskId,
-            transition,
-            ...(noteText ? { note: noteText } : {}),
-            // The TOCTOU guard: verify attests to the evidence the page LOADED.
-            ...(transition === "verify"
-              ? { expectedEvidenceFingerprint: task.evidenceFingerprint }
-              : {}),
-          });
-          if (!mountedRef.current) return;
-          if (result.ok) {
-            if (!result.byCaller) {
-              const winner = result.winner;
-              const who = winner?.verifiedBy
-                ? (parentNames[winner.verifiedBy] ?? "Your co-parent")
-                : "Your co-parent";
-              setNotice({
-                tone: "superseded",
-                text:
-                  result.state === "verified"
-                    ? `${who} verified this${atClause(winner?.decidedAt)} — nothing left to do.`
-                    : `Already handled${atClause(winner?.decidedAt)}.`,
-              });
-              refreshAfterNotice();
-            } else {
-              router.refresh();
-            }
-            return;
-          }
-          // Refusals — closed union.
-          if (result.reason === "retry" && attempt === 0) continue;
-          if (result.reason === "diverged") {
+  const decide = useCallback(
+    (transition: "verify" | "not_yet", noteText: string | undefined) =>
+      run(async (canRetry) => {
+        const result = await applyTransition({
+          studentId: task.studentId,
+          taskId: task.taskId,
+          transition,
+          ...(noteText ? { note: noteText } : {}),
+          // The TOCTOU guard: verify attests to the evidence the page LOADED.
+          ...(transition === "verify"
+            ? { expectedEvidenceFingerprint: task.evidenceFingerprint }
+            : {}),
+        });
+        if (result.ok) {
+          onActed();
+          if (!result.byCaller) {
             const winner = result.winner;
-            const who = winner?.verifiedBy ? (parentNames[winner.verifiedBy] ?? "your co-parent") : "someone";
+            const who = winner?.verifiedBy
+              ? (parentNames[winner.verifiedBy] ?? "Your co-parent")
+              : "Your co-parent";
+            // Richer superseded copy (Unit 16): name the DECISION, not just
+            // "handled" — a Not Yet and a verify are different news.
             setNotice({
               tone: "superseded",
-              text: `This task changed while you were looking (${who}${atClause(winner?.decidedAt)}) — refreshing.`,
+              text:
+                result.state === "verified"
+                  ? `${who} verified this${atClause(winner?.decidedAt)} — nothing left to do.`
+                  : result.state === "not_yet"
+                    ? `${who} said Not Yet${atClause(winner?.decidedAt)} — the note is with ${task.studentName}.`
+                    : `Already handled${atClause(winner?.decidedAt)}.`,
             });
             refreshAfterNotice();
-            return;
+          } else {
+            refreshNow();
           }
-          if (result.reason === "evidence_changed") {
-            setNotice({
-              tone: "superseded",
-              text: `${task.studentName}'s satchel changed since you loaded this — take another look, then verify.`,
-            });
-            refreshAfterNotice();
-            return;
-          }
-          if (result.reason === "note_required") {
-            setNotice({ tone: "error", text: "Not Yet needs a note — say what to work on." });
-            return;
-          }
-          setNotice({ tone: "error", text: "That didn't go through — try again in a moment." });
-          return;
+          return "done";
         }
-      } catch {
-        // The guard can redirect() (throws) — anything else lands here too.
-        if (mountedRef.current) {
-          setNotice({ tone: "error", text: "That didn't go through — try again in a moment." });
+        // Refusals — closed union.
+        if (result.reason === "retry" && canRetry) return "retry";
+        if (result.reason === "diverged") {
+          onActed();
+          const winner = result.winner;
+          const who = winner?.verifiedBy ? (parentNames[winner.verifiedBy] ?? "your co-parent") : "someone";
+          setNotice({
+            tone: "superseded",
+            text: `This task changed while you were looking (${who}${atClause(winner?.decidedAt)}) — refreshing.`,
+          });
+          refreshAfterNotice();
+          return "done";
         }
-      } finally {
-        if (mountedRef.current) setBusy(false);
-      }
-    },
-    [busy, task, parentNames, router, refreshAfterNotice]
+        if (result.reason === "evidence_changed") {
+          setNotice({
+            tone: "superseded",
+            text: `${task.studentName}'s satchel changed since you loaded this — take another look, then verify.`,
+          });
+          refreshAfterNotice();
+          return "done";
+        }
+        if (result.reason === "note_required") {
+          setNotice({ tone: "error", text: "Not Yet needs a note — say what to work on." });
+          return "done";
+        }
+        setNotice({ tone: "error", text: GENERIC_ERROR });
+        return "done";
+      }),
+    [run, task, parentNames, setNotice, refreshAfterNotice, refreshNow, onActed]
   );
 
   return (
@@ -330,7 +436,7 @@ function ReviewTaskCard({
               skin="hq"
               size="sm"
               disabled={busy}
-              onClick={() => void run("verify", comment.trim() || undefined)}
+              onClick={() => void decide("verify", comment.trim() || undefined)}
             >
               {busy ? "Working…" : "Verify — it meets the line"}
             </Button>
@@ -376,7 +482,7 @@ function ReviewTaskCard({
               size="sm"
               disabled={busy || note.trim().length === 0}
               className="bg-not-yet text-white hover:bg-not-yet/90"
-              onClick={() => void run("not_yet", note.trim())}
+              onClick={() => void decide("not_yet", note.trim())}
             >
               {busy ? "Working…" : "Send back with this note"}
             </Button>
@@ -395,26 +501,17 @@ function ReviewTaskCard({
 function CriterionReviewCard({
   criterion,
   parentNames,
+  onActed,
 }: {
   criterion: ReviewQueueCriterion;
   parentNames: Record<string, string>;
+  onActed: () => void;
 }) {
-  const router = useRouter();
-  const mountedRef = useRef(true);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    };
-  }, []);
+  const { busy, notice, setNotice, refreshAfterNotice, refreshNow, run } = useReviewCardScaffolding();
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
 
   const toggle = (taskId: string) => {
     setSelected((prev) => {
@@ -425,64 +522,47 @@ function CriterionReviewCard({
     });
   };
 
-  /** See ReviewTaskCard's twin — the notice must outlive the refresh. */
-  const refreshAfterNotice = useCallback(() => {
-    refreshTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) router.refresh();
-    }, NOTICE_LINGER_MS);
-  }, [router]);
-
-  const submitReturn = useCallback(async () => {
-    if (busy || selected.size === 0 || note.trim().length === 0) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      // At most one automatic retry per click (the retry ceiling).
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const result = await applyCriterionReturn({
-          studentId: criterion.studentId,
-          criterionId: criterion.criterionId,
-          attempt: criterion.attempt,
-          returnedTaskIds: [...selected],
-          note: note.trim(),
-        });
-        if (!mountedRef.current) return;
-        if (result.ok) {
-          if (!result.byCaller) {
-            const who = result.winner?.decidedBy
-              ? (parentNames[result.winner.decidedBy] ?? "Your co-parent")
-              : "Your co-parent";
-            setNotice({
-              tone: "superseded",
-              text: `${who} already decided this review${atClause(result.winner?.decidedAt)}.`,
-            });
-            refreshAfterNotice();
-          } else {
-            router.refresh();
-          }
-          return;
-        }
-        if (result.reason === "retry" && attempt === 0) continue;
-        if (result.reason === "stale_review") {
-          setNotice({ tone: "superseded", text: "This review moved on while you were looking — refreshing." });
+  const submitReturn = useCallback(() => {
+    if (selected.size === 0 || note.trim().length === 0) return;
+    return run(async (canRetry) => {
+      const result = await applyCriterionReturn({
+        studentId: criterion.studentId,
+        criterionId: criterion.criterionId,
+        attempt: criterion.attempt,
+        returnedTaskIds: [...selected],
+        note: note.trim(),
+      });
+      if (result.ok) {
+        onActed();
+        if (!result.byCaller) {
+          const who = result.winner?.decidedBy
+            ? (parentNames[result.winner.decidedBy] ?? "Your co-parent")
+            : "Your co-parent";
+          setNotice({
+            tone: "superseded",
+            text: `${who} already decided this review${atClause(result.winner?.decidedAt)}.`,
+          });
           refreshAfterNotice();
-          return;
+        } else {
+          refreshNow();
         }
-        if (result.reason === "note_required") {
-          setNotice({ tone: "error", text: "A return needs a note — say why." });
-          return;
-        }
-        setNotice({ tone: "error", text: "That didn't go through — try again in a moment." });
-        return;
+        return "done";
       }
-    } catch {
-      if (mountedRef.current) {
-        setNotice({ tone: "error", text: "That didn't go through — try again in a moment." });
+      if (result.reason === "retry" && canRetry) return "retry";
+      if (result.reason === "stale_review") {
+        onActed();
+        setNotice({ tone: "superseded", text: "This review moved on while you were looking — refreshing." });
+        refreshAfterNotice();
+        return "done";
       }
-    } finally {
-      if (mountedRef.current) setBusy(false);
-    }
-  }, [busy, selected, note, criterion, parentNames, router, refreshAfterNotice]);
+      if (result.reason === "note_required") {
+        setNotice({ tone: "error", text: "A return needs a note — say why." });
+        return "done";
+      }
+      setNotice({ tone: "error", text: GENERIC_ERROR });
+      return "done";
+    });
+  }, [run, selected, note, criterion, parentNames, setNotice, refreshAfterNotice, refreshNow, onActed]);
 
   return (
     <article className="rounded-xl border border-hq-border bg-hq-surface p-4 shadow-hq">

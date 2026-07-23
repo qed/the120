@@ -29,6 +29,7 @@ import { resolvePathAccess, type RoleGrant } from "./access-rules";
 import type { EvidenceItemView } from "./journey-view-types";
 import { loadEvidenceViews } from "./evidence-loader";
 import {
+  DECISION_TRANSITIONS,
   decisionFromEvents,
   deriveCriterionView,
   deriveMutability,
@@ -401,10 +402,11 @@ export async function loadTaskDetail(
   const band: Band = snapshotBand ?? ctx.band ?? "g6_8";
 
   // The latest reviewer decision on this task (verifier comment / Not-Yet
-  // note). REVOKE is included — its note is the reason the adult reverted,
-  // shown as the not-yet explanation (Unit 14 correctness review: excluding
-  // it left a bare not_yet chip with no words). Mapping is the pure, tested
-  // decisionFromEvents.
+  // note). The query filter is DECISION_TRANSITIONS — the same list the pure
+  // decisionFromEvents narrows on, so the two can never drift (Unit 16's
+  // live drill caught exactly that: a hand-listed filter here dropped
+  // 'criterion_return' before the rules ever saw it, leaving a returned
+  // task's chip with no explanation — the revoke omission's sibling).
   let decision: TaskDetail["decision"] = null;
   if (row) {
     const { data: events, error: evError } = await db
@@ -412,7 +414,7 @@ export async function loadTaskDetail(
       .select("transition, note, at")
       .eq("student_id", ctx.studentId)
       .eq("task_id", taskId)
-      .in("transition", ["verify", "not_yet", "revoke"])
+      .in("transition", [...DECISION_TRANSITIONS])
       .order("at", { ascending: false })
       .limit(3);
     if (evError) throw new Error(`loadTaskDetail(${ctx.studentId}, ${taskId}) events failed: ${evError.message}`);

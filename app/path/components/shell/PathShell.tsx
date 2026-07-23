@@ -44,15 +44,18 @@ function navItemsFor(skin: Skin): ShellNavItem[] {
     ? [
         { href: "/path", label: "Territory Map" },
         { href: "/path/now", label: "Your step" },
+        { href: "/path/notifications", label: "Your news" },
       ]
     : [
         { href: "/path", label: "Dashboard" },
         { href: "/path/now", label: "Current Task" },
+        { href: "/path/notifications", label: "Notifications" },
       ];
 }
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/path") return pathname === "/path";
+  if (href === "/path/notifications") return pathname.startsWith("/path/notifications");
   // /path/now is the stable alias for the current task/criterion surfaces.
   return pathname.startsWith("/path/now") || pathname.startsWith("/path/task") || pathname.startsWith("/path/criterion");
 }
@@ -62,6 +65,7 @@ export function PathShell({
   studentName,
   roleLabel,
   signOut,
+  unseenNews = 0,
   children,
 }: {
   skin: Skin;
@@ -70,6 +74,8 @@ export function PathShell({
   roleLabel: string;
   /** The sign-out Server Action, passed through to a <form action>. */
   signOut: (formData: FormData) => void;
+  /** Unseen notification count — the nav badge / phone bell dot (Unit 16). */
+  unseenNews?: number;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -124,6 +130,14 @@ export function PathShell({
                     aria-hidden
                   />
                   {item.label}
+                  {item.href === "/path/notifications" && unseenNews > 0 && (
+                    <span
+                      className="ml-auto rounded-full bg-awaiting px-1.5 py-0.5 font-path-mono text-[10px] font-semibold leading-none text-white"
+                      aria-label={`${unseenNews} unseen`}
+                    >
+                      {unseenNews}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -178,6 +192,20 @@ export function PathShell({
               </div>
             </div>
             <div className="flex items-center gap-2.5">
+              {/* the bell — the phone shell's only route to the news feed */}
+              <Link
+                href="/path/notifications"
+                aria-label={unseenNews > 0 ? `Notifications — ${unseenNews} unseen` : "Notifications"}
+                className={cn("relative inline-flex p-1", inkSoft)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+                  <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+                </svg>
+                {unseenNews > 0 && (
+                  <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-awaiting" aria-hidden />
+                )}
+              </Link>
               <span
                 className={cn(
                   "rounded-full px-2.5 py-1 font-path-body text-[10.5px] font-semibold",

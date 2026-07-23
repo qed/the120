@@ -65,9 +65,35 @@ describe("crm_audit_log action allowlist — TS enum vs DB CHECK parity", () => 
     expect(defs.length).toBeGreaterThan(0);
   });
 
+  it("ignores an unrelated table's `action` CHECK (the scoping guard)", () => {
+    // A synthetic fixture, not a real file: the regression this pins is that an
+    // unrelated migration defining its own `action` column — which really
+    // happened, path_fw_replay_rejects — used to be adopted as THE audit
+    // allowlist by the unscoped regex, because the scan takes the last matching
+    // file in timestamp order. Testing it against a fixture rather than against
+    // whichever real migration happens to sort last keeps the guard meaningful
+    // when that file is renamed or its column removed.
+    const unrelated = `
+      create table if not exists public.path_fw_replay_rejects (
+        id uuid primary key,
+        action text not null check (action in ('checkmark', 'not_yet', 'undo'))
+      );
+    `;
+    expect(lastActionListIn(unrelated)).toBeNull();
+
+    // And a file that DOES define the audit log is still read correctly, even
+    // when an unrelated `action` CHECK sits later in the same file.
+    const mixed = `
+      alter table public.crm_audit_log
+        add constraint crm_audit_log_action_check check (action in ('merge', 'reopen'));
+      create table public.something_else (
+        action text not null check (action in ('nope'))
+      );
+    `;
+    expect(lastActionListIn(mixed)).toEqual(["merge", "reopen"]);
+  });
+
   it("only crm_audit_log's own migrations are considered", () => {
-    // The scoping guard, pinned: a migration that merely defines some OTHER
-    // table with an `action` CHECK must never be read as the audit allowlist.
     for (const def of defs) {
       expect(
         readFileSync(path.join(MIGRATIONS_DIR, def.file), "utf8").includes("crm_audit_log"),

@@ -167,6 +167,26 @@ describe("FW migration parity: all seven DDL groups landed", () => {
     ).toBe(true);
   });
 
+  it("2b. every index the migration's own comments call load-bearing exists", () => {
+    // Each of these is named in-file as supporting a specific hot read (the
+    // board's 3-5s cohort scan, celebration grouping, the roster read on every
+    // guide session start, the ops surface's open-reject list). Without an
+    // assertion, dropping one leaves the suite green while those reads quietly
+    // degrade to sequential scans under live-event load.
+    for (const index of [
+      "path_task_events_cohort_at_idx",
+      "path_task_events_action_id_idx",
+      "path_cohort_members_cohort_idx",
+      "path_fw_replay_rejects_open_idx",
+      "path_student_profiles_normalized_name_idx",
+    ]) {
+      expect(
+        new RegExp(`create\\s+index\\s+if\\s+not\\s+exists\\s+${index}\\b`, "i").test(sql),
+        index
+      ).toBe(true);
+    }
+  });
+
   it("3. path_cohort_members exists and admits a student to a cohort exactly once", () => {
     expect(/create\s+table\s+if\s+not\s+exists\s+public\.path_cohort_members/i.test(sql)).toBe(true);
     expect(/unique\s*\(\s*student_id\s*,\s*cohort_id\s*\)/i.test(sql)).toBe(true);

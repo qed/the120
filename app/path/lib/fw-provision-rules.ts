@@ -29,10 +29,22 @@
  *           confirmations ON — config.toml lies about it; see docs/solutions/
  *           integration-issues/supabase-admin-createuser-non-deliverable-email-
  *           requires-email-confirm-2026-07-21.md);
- *       (c) `assertNoAuthMailToFwStudent` is the single choke-point every
- *           future mail-capable call must pass, with a regression test.
- *     Standing ops invariant that pairs with all three: no Workspace catch-all
- *     ever arms `*.fw@the120.school`.
+ *       (c) `assertNoAuthMailToFwStudent` — the guard every SERVER-SIDE
+ *           mail-capable call must pass. ⚠️ Read `no-auth-mail-guard.test.ts`
+ *           before trusting this bullet: as of Unit 1 the guard has no
+ *           production caller, and it CANNOT gate the two pre-existing
+ *           `resetPasswordForEmail` forms (`app/dashboard/SignIn.tsx`,
+ *           `app/crm/login/LoginForm.tsx`) because those call Supabase from the
+ *           BROWSER with the public anon key — no server-side function sits in
+ *           that path. That hole is closed at the platform level or not at all;
+ *           the test named above fails if a new server-side mail call appears
+ *           without this guard, and documents the client-side gap it cannot fix.
+ *     Standing ops invariant that pairs with all three, and the reason the
+ *     client-side gap is currently inert: no Workspace catch-all ever arms
+ *     `*.fw@the120.school`, so recovery mail addressed there bounces into
+ *     nothing. Arming that catch-all (which FW-D2 contemplates) turns the gap
+ *     live — the two probes in the plan's Operational Notes exist to prove the
+ *     current state, and must be re-run before any catch-all is enabled.
  *
  *   - The address is a PROMISE. `maya.chen.fw@` names a specific child, so when
  *     that child is anonymized (Decision 10) the freed local part is recorded in
@@ -69,22 +81,71 @@ export const FW_NAME_PART_MAX = 24;
 export const MAX_FW_LOCAL_ATTEMPTS = 200;
 
 /**
- * ASCII-fold one human name fragment: NFKC compose, decompose-and-strip
- * diacritics, drop elision marks, lowercase, trim. `José` → `jose`,
- * `O’Brien` → `obrien`, `Ægis` → `gis` is NOT wanted — but note that characters
- * with no decomposition (æ, ø, ß) survive folding and are removed by the
- * caller's alphanumeric filter, which is the fail-closed direction: a name that
- * folds to nothing is REFUSED rather than silently mangled into someone else's
- * address.
+ * Latin-script characters with NO Unicode decomposition, so `NFD` + strip-marks
+ * cannot reduce them. Transliterated explicitly rather than dropped, because
+ * dropping is the silent-mangling failure this module exists to avoid: `Weiß`
+ * must not become `wei`, and `Ørsted` must not become `rsted`.
  */
-function foldToAscii(raw: string): string {
-  return raw
+const LATIN_TRANSLITERATIONS: readonly (readonly [RegExp, string])[] = [
+  [/ß/g, "ss"],
+  [/æ/g, "ae"],
+  [/œ/g, "oe"],
+  [/ø/g, "o"],
+  [/ð/g, "d"],
+  [/đ/g, "d"],
+  [/þ/g, "th"],
+  [/ł/g, "l"],
+  [/ı/g, "i"],
+  [/ŋ/g, "n"],
+];
+
+/**
+ * ASCII-fold one human name fragment: NFKC compose, decompose-and-strip
+ * diacritics, transliterate the undecomposable Latin letters, drop elision
+ * marks, lowercase. `José` → `jose`, `O’Brien` → `obrien`, `Weiß` → `weiss`.
+ *
+ * THROWS on two classes the caller must never store or mint from — both of
+ * which previously slipped through as a silent dash substitution, producing an
+ * address for a DIFFERENT child than the one whose name was typed:
+ *
+ *   1. Unicode control/format characters (bidi overrides, zero-width joiners).
+ *      `Ma‮ya` used to fold to `ma-ya`; the raw string, override intact,
+ *      was then stored and would later render on a guide roster and a projected
+ *      board with its display order spoofed.
+ *   2. Any letter or digit that survives folding without becoming ASCII — i.e.
+ *      a homoglyph or a non-Latin script. `Mаya` (Cyrillic а, visually
+ *      identical to `Maya` in most fonts) used to fold to `m-ya`, minting
+ *      `m-ya.chen@…` for a child the roster shows as "Maya Chen", and producing
+ *      a normalized key that would never match the real Maya.
+ *
+ * Refusing is the right answer for both: the guide is standing at the table and
+ * can retype. Silently minting a near-miss address is unrecoverable, because
+ * FW-D2 makes that address a lasting contact channel for the family.
+ */
+function foldToAscii(raw: string, label: string): string {
+  // Lowercase BEFORE transliterating and before stripping marks. Both orderings
+  // matter: the transliteration table is lowercase-only, so `Ørsted` would
+  // otherwise miss and be refused; and `İ` lowercases INTO a combining dot,
+  // which only a mark-strip that runs afterwards can remove.
+  let folded = raw
     .normalize("NFKC")
-    .normalize("NFD")
-    .replace(/\p{M}+/gu, "") // combining marks: é → e
-    .replace(/['’ʼ`´]/g, "") // elisions join: O'Brien → OBrien
     .toLowerCase()
-    .trim();
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, ""); // é → e
+  for (const [pattern, replacement] of LATIN_TRANSLITERATIONS) {
+    folded = folded.replace(pattern, replacement);
+  }
+  folded = folded.replace(/['’ʼ`´]/g, ""); // O'Brien → obrien
+
+  if (/\p{C}/u.test(folded)) {
+    throw new Error(`${label} contains a Unicode control or format character`);
+  }
+  // What is left after removing the ASCII alphanumerics: if any of it is still a
+  // letter or a digit, folding did not actually reach ASCII.
+  if (/[\p{L}\p{N}]/u.test(folded.replace(/[a-z0-9]/g, ""))) {
+    throw new Error(`${label} has characters that cannot be folded to ASCII — retype it in Latin letters`);
+  }
+  return folded.trim();
 }
 
 /**
@@ -99,13 +160,20 @@ function foldToAscii(raw: string): string {
  * same student to the matcher — the realistic guide-typing variance.
  * Returns "" when nothing survives; callers treat that as unmatched, never as a
  * wildcard.
+ *
+ * THROWS on the same two refusal classes as `buildFwLocalBase` (see
+ * `foldToAscii`). A homoglyph must not be allowed to produce a *quietly
+ * different* match key — that is the failure mode where the roster shows one
+ * "Maya Chen" and the matcher insists there is no such student.
  */
 export function buildNormalizedFwName(firstName: string, lastName: string): string {
-  const part = (raw: string) =>
-    foldToAscii(raw)
+  const part = (raw: string, label: string) =>
+    foldToAscii(raw, label)
       .replace(/[^a-z0-9]+/g, " ")
       .trim();
-  return [part(firstName), part(lastName)].filter((p) => p.length > 0).join(" ");
+  return [part(firstName, "first name"), part(lastName, "last name")]
+    .filter((p) => p.length > 0)
+    .join(" ");
 }
 
 /**
@@ -120,7 +188,7 @@ export function buildNormalizedFwName(firstName: string, lastName: string): stri
  */
 export function buildFwLocalBase(firstName: string, lastName: string): string {
   const part = (raw: string, label: string) => {
-    const folded = foldToAscii(raw)
+    const folded = foldToAscii(raw, label)
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, FW_NAME_PART_MAX)
@@ -158,16 +226,36 @@ export function isFwStudentAddress(email: string): boolean {
 }
 
 /**
- * THE CHOKE-POINT. Any code path that could cause Supabase (or our own mailer)
- * to send to a recipient must pass through here first. Throws — loudly, not a
- * typed refusal — because a stray auth mail to a minor's real address is not a
- * recoverable branch to render copy for, and the throw is what makes the
- * omission visible in a test rather than in a parent's inbox.
+ * The SERVER-SIDE choke-point. Every server-side path that could cause Supabase
+ * (or our own mailer) to send to a recipient must pass through here first.
+ * Throws — loudly, not a typed refusal — because a stray auth mail to a minor's
+ * real address is not a recoverable branch to render copy for, and the throw is
+ * what makes the omission visible in a test rather than in a parent's inbox.
+ *
+ * ⚠️ WHAT THIS DOES NOT COVER, stated plainly because the plan's "mechanism-
+ * enforced" language reads stronger than the mechanism is: a pure function
+ * cannot gate a call the BROWSER makes. `app/dashboard/SignIn.tsx` and
+ * `app/crm/login/LoginForm.tsx` both call
+ * `supabaseBrowser().auth.resetPasswordForEmail(<user-typed address>)` directly
+ * against Supabase with the public anon key. Nothing server-side is in that
+ * path, so nothing server-side can stop a request addressed to a guessable
+ * `<first>.<last>.fw@the120.school`. Closing that requires either routing those
+ * two forms through a Server Action or a project-level Supabase Auth
+ * send-email hook — an open decision recorded in the plan, not something this
+ * function can do. `no-auth-mail-guard.test.ts` pins both the coverage and the
+ * gap so neither drifts silently.
  *
  * Covers the anonymize tombstone address too (`removed-<id>.fw@`), which is
  * deliberately kept INSIDE this namespace for exactly that reason.
+ *
+ * Also refuses a blank recipient: "not an FW address" and "not an address at
+ * all" must not share an outcome, or a caller passing an unpopulated field
+ * would read as cleared-to-send.
  */
 export function assertNoAuthMailToFwStudent(email: string, context: string): void {
+  if (email.trim().length === 0) {
+    throw new Error(`${context}: refusing to send mail to a blank recipient`);
+  }
   if (isFwStudentAddress(email)) {
     throw new Error(
       `${context}: refusing to send mail to the FW student namespace (${email}). ` +

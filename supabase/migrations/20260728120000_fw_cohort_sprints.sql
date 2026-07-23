@@ -35,6 +35,58 @@
 -- Decision 1 (Path-wide): every table is RLS-enabled with ZERO policies —
 -- service-role only. Authorization is the pure resolver's job, not RLS's.
 --
+-- ─────────────────────────────────────────────── LOCKING POSTURE (accepted) ──
+-- Two groups of statements below touch LIVE tables and take blocking locks. The
+-- trade-off is accepted rather than engineered around, and here is why:
+--
+--   * The four ADD CONSTRAINT … CHECK statements are written WITHOUT `NOT
+--     VALID`, so each validates every existing row under ACCESS EXCLUSIVE.
+--     All four pass trivially — band/identity check against brand-new all-NULL
+--     columns, kind against the just-applied 'path' default, window against
+--     brand-new all-NULL columns — so the cost is scan duration, not a risk of
+--     rejection. The NOT VALID + VALIDATE CONSTRAINT split would halve the lock
+--     at the cost of doubling the statements; at the Path's current table size
+--     (days old) that is not worth the complexity. RE-EVALUATE IF path_student_
+--     profiles EXCEEDS ~100k ROWS.
+--   * The three path_task_events indexes are built WITHOUT `CONCURRENTLY`,
+--     which blocks writes to that table for the build. CONCURRENTLY is not
+--     merely unused here — it is INCOMPATIBLE with this repo's apply path: the
+--     Management API playbook submits the whole file as one query, Postgres runs
+--     that as one implicit transaction, and CREATE INDEX CONCURRENTLY cannot run
+--     inside a transaction block. Using it would mean splitting the apply into
+--     separate non-transactional calls and giving up all-or-nothing rollback.
+--
+-- PRE-APPLY (run before submitting, in the same Management API session):
+--   1. select to_regclass('public.path_student_profiles'),
+--             to_regclass('public.path_cohorts'),
+--             to_regclass('public.path_task_events');        -- all non-null
+--   2. select count(*) from public.path_student_profiles where child_id is null;
+--      -- MUST be 0. This is the one assumption behind "the CHECKs pass
+--      -- trivially"; a non-zero count means the identity CHECK will ABORT the
+--      -- apply, and the rows must be understood first.
+--   3. select count(*) from public.path_student_profiles;
+--      select count(*) from public.path_task_events;
+--      -- bounds the scan/lock durations above. If path_task_events is large,
+--      -- apply outside an active Path session window.
+-- POST-APPLY (verify BEFORE recording the version):
+--   4. to_regclass on all four new tables — non-null.
+--   5. select conname, convalidated from pg_constraint where conname in
+--      ('path_student_profiles_band_check','path_student_profiles_identity_present',
+--       'path_cohorts_kind_check','path_cohorts_window_ordered');  -- 4 rows, all valid
+--   6. select relname, relrowsecurity from pg_class where relname in
+--      ('path_cohort_members','path_fw_board_tokens','path_fw_replay_rejects',
+--       'path_fw_released_aliases');                          -- all true
+--   7. select count(*) from pg_policies where tablename in (those four);  -- 0
+--   8. Smoke: load a Path parent dashboard and a student task view — exercises
+--      the now-nullable child_id against real (still non-null) rows.
+--   9. Only then: insert the version into supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: six of the seven groups drop cleanly (the four new tables are empty;
+-- the added columns/constraints/indexes are droppable). The exception is
+-- `child_id DROP NOT NULL`, which is reversible ONLY while every row still has a
+-- child — i.e. only until the first FW student is provisioned by Unit 2/3. That
+-- is a go/no-go checkpoint before those units deploy, not before this applies.
+--
 -- Seven DDL groups, in dependency order:
 --   1. path_student_profiles  — the FW student shape (no child, own name+band)
 --   2. path_task_events       — cohort stamp, capture time, action/idempotency

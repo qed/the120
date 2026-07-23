@@ -330,3 +330,49 @@ describe("buildFwProgressRows — the all-locked FW materialization", () => {
     ).toThrow(/zero tasks/);
   });
 });
+
+describe("name refusals — homoglyphs, control characters, and undecomposable Latin", () => {
+  it("transliterates Latin letters that have no Unicode decomposition", () => {
+    // NFD cannot reduce these, so stripping marks leaves them intact. Dropping
+    // them silently would turn Weiß into "wei" and Ørsted into "rsted" —
+    // an address for a child whose name is not that.
+    expect(emailFor("Weiß", "Chen")).toBe("weiss.chen.fw@the120.school");
+    expect(emailFor("Lars", "Ørsted")).toBe("lars.orsted.fw@the120.school");
+    expect(emailFor("Æsa", "Ng")).toBe("aesa.ng.fw@the120.school");
+  });
+
+  it("REFUSES a homoglyph rather than minting a near-miss address", () => {
+    // Cyrillic а in "Mаya" is visually identical to Latin a in most fonts.
+    // This used to fold to "m-ya", minting m-ya.chen@ for a child the roster
+    // shows as "Maya Chen" — and producing a match key that would never find
+    // the real Maya again.
+    expect(() => buildFwLocalBase("Mаya", "Chen")).toThrow(/cannot be folded/);
+    expect(() => buildNormalizedFwName("Mаya", "Chen")).toThrow(/cannot be folded/);
+  });
+
+  it("REFUSES a non-Latin script outright", () => {
+    expect(() => buildFwLocalBase("Маша", "Chen")).toThrow();
+    expect(() => buildFwLocalBase("Maya", "陈")).toThrow();
+  });
+
+  it("REFUSES Unicode control and format characters (bidi override, zero-width)", () => {
+    // U+202E flips display order; U+200B is invisible. Either one stored in a
+    // name renders spoofed on a guide roster and a projected board.
+    expect(() => buildFwLocalBase("Ma‮ya", "Chen")).toThrow(/control or format/);
+    expect(() => buildFwLocalBase("Ma​ya", "Chen")).toThrow(/control or format/);
+    expect(() => buildNormalizedFwName("Ma‮ya", "Chen")).toThrow(/control or format/);
+  });
+
+  it("still accepts every ordinary name shape after the tightening", () => {
+    for (const [f, l] of [
+      ["Maya", "Chen"],
+      ["José", "Peña"],
+      ["Jean-Luc", "O Brien"],
+      ["Zoë", "Ng"],
+      ["Mary Kate", "van der Berg"],
+      ["Aoife", "Ní Bhriain"],
+    ] as const) {
+      expect(() => buildFwLocalBase(f, l), `${f} ${l}`).not.toThrow();
+    }
+  });
+});

@@ -65,8 +65,10 @@ import {
   buildFwStudentCreateUserPayload,
   buildFwProgressRows,
   buildNormalizedFwName,
+  isFwStudentAddress,
   pickFwLocalPart,
   MAX_FW_LOCAL_ATTEMPTS,
+  type FwLocalPartPick,
 } from "./fw-provision-rules";
 import {
   buildStudentCreateUserPayload,
@@ -717,12 +719,21 @@ export type ProvisionFwStudentInput = {
 };
 
 export type ProvisionFwStudentFailure =
-  /** The name folds to nothing address-safe — refuse rather than mangle. */
+  /** The name folds to nothing address-safe, or carries homoglyphs/control
+   *  characters — refuse rather than mint a near-miss address. */
   | "invalid_name"
   | "cohort_not_found"
   | "cohort_not_fw"
   | "no_current_program_version"
   | "profile_not_found"
+  /** Resume target is not an FW-shaped profile (has a child, or has no band) —
+   *  almost certainly a caller-side identity-resolution bug. */
+  | "not_fw_profile"
+  /** Resume target exists and is FW-shaped, but is a DIFFERENT student than the
+   *  name submitted. The guard against silently completing the wrong child. */
+  | "identity_mismatch"
+  /** Resume target's auth account no longer exists. */
+  | "account_missing"
   | "address_exhausted"
   /** Account + profile landed; the cohort membership did not. Retry in place. */
   | "membership_failed"
@@ -793,9 +804,16 @@ export async function provisionFwStudent(
 
   if (input.existingProfileId) {
     // ── Resume path: the account exists; finish its remaining legs. ──
+    //
+    // The caller decides identity (importer resume keying, PROPOSED-1 matching),
+    // but "the caller decides" is not "the caller is trusted". Everything below
+    // re-derives from the authoritative row, because the very next statement
+    // writes a cohort membership — and a membership written for the wrong
+    // profile enrolls a real child in a weekend they are not at, with nothing
+    // downstream that would notice.
     const existing = await db
       .from("path_student_profiles")
-      .select("id, user_id")
+      .select("id, user_id, child_id, first_name, last_name, band")
       .eq("id", input.existingProfileId)
       .maybeSingle();
     if (existing.error) {
@@ -805,9 +823,66 @@ export async function provisionFwStudent(
       return { ok: false, reason: "unavailable" };
     }
     if (!existing.data) return { ok: false, reason: "profile_not_found" };
-    profileId = existing.data.id as string;
-    userId = existing.data.user_id as string;
-    email = "";
+
+    // Fail-closed narrowing at the service-role boundary (the parseCandidateRow
+    // discipline): `db` is untyped here, so an `as string` would be a promise to
+    // the compiler with nothing behind it.
+    const row = existing.data;
+    if (typeof row.id !== "string" || typeof row.user_id !== "string") {
+      console.error(`[fw/provision] resume profile ${input.existingProfileId} has a malformed id/user_id`);
+      return { ok: false, reason: "unavailable" };
+    }
+
+    // Shape gate: this must be an FW-shaped profile. Without it, handing in a
+    // PATH student's id silently enrolls that child in an FW cohort — and the
+    // only thing that would eventually complain is ensureFwStudentProgress's
+    // no_band refusal, which fires AFTER the membership row is already written
+    // and is never compensated.
+    if (row.child_id !== null || typeof row.band !== "string") {
+      console.error(
+        `[fw/provision] refusing to resume ${row.id}: not an FW-shaped profile (child_id set or band missing)`
+      );
+      return { ok: false, reason: "not_fw_profile", profileId: row.id };
+    }
+
+    // Identity gate: the name the caller submitted must be the name on the row.
+    // A resume against a DIFFERENT FW student passes every check above (they are
+    // FW-shaped and banded) and would otherwise return ok:true naming the wrong
+    // child — the failure the shape gate cannot see.
+    let submittedKey: string;
+    try {
+      submittedKey = buildNormalizedFwName(firstName, lastName);
+    } catch {
+      return { ok: false, reason: "invalid_name" };
+    }
+    const storedKey = buildNormalizedFwName(
+      typeof row.first_name === "string" ? row.first_name : "",
+      typeof row.last_name === "string" ? row.last_name : ""
+    );
+    if (storedKey !== submittedKey) {
+      console.error(
+        `[fw/provision] refusing to resume ${row.id}: submitted name does not match the stored profile`
+      );
+      return { ok: false, reason: "identity_mismatch", profileId: row.id };
+    }
+
+    // The account must still exist. The resume path never mints, so if the auth
+    // user is gone (a compensation that half-ran, a manual deletion) every leg
+    // below would "succeed" against a profile nobody can ever be.
+    const account = await db.auth.admin.getUserById(row.user_id);
+    if (account.error || !account.data?.user) {
+      console.error(
+        `[fw/provision] resume account ${row.user_id} missing for profile ${row.id}: ${account.error?.message ?? "no user"}`
+      );
+      return { ok: false, reason: "account_missing", profileId: row.id };
+    }
+
+    profileId = row.id;
+    userId = row.user_id;
+    // The REAL address, not a placeholder. An empty string here would be a lie in
+    // the result type and would read as "cleared to send" to any caller that
+    // passes it toward a mail-capable call.
+    email = account.data.user.email ?? "";
     adopted = true;
   } else {
     // ── Mint path. ──
@@ -848,41 +923,74 @@ export async function provisionFwStudent(
       console.error(`[fw/provision] released-alias probe failed for ${localBase}: ${released.error.message}`);
       return { ok: false, reason: "unavailable" };
     }
-    const taken = new Set<string>(
-      (released.data ?? [])
-        .map((r) => r.local_part)
-        .filter((p): p is string => typeof p === "string")
-    );
+    // Fail CLOSED on a malformed ledger row. Dropping it would be fail-OPEN with
+    // respect to the one invariant this table exists to hold: a dropped row is a
+    // released address that stops counting as taken and can be re-minted.
+    const releasedParts = (released.data ?? []).map((r) => r.local_part);
+    if (releasedParts.some((p) => typeof p !== "string")) {
+      console.error(`[fw/provision] released-alias ledger returned a malformed local_part for ${localBase}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    const taken = new Set<string>(releasedParts as string[]);
 
     let user: User | null = null;
-    let pick = pickFwLocalPart({ firstName, lastName, taken });
+    let pick: FwLocalPartPick;
+    try {
+      pick = pickFwLocalPart({ firstName, lastName, taken });
+    } catch {
+      // Reachable when the ledger alone already holds every candidate for this
+      // name. Wrapped for the same reason the re-picks below are: every way this
+      // function can fail must arrive as a typed reason, never as a throw.
+      return { ok: false, reason: "address_exhausted" };
+    }
+
     for (let attempt = 0; attempt < MAX_FW_LOCAL_ATTEMPTS; attempt += 1) {
       const created = await db.auth.admin.createUser(
         buildFwStudentCreateUserPayload({ email: pick.email })
       );
-      if (!created.error) {
+      if (!created.error && created.data?.user) {
         user = created.data.user;
         break;
       }
-      const emailExists =
-        created.error.code === "email_exists" ||
-        /already.*(registered|exists)/i.test(created.error.message);
-      if (!emailExists) {
-        console.error(`[fw/provision] createUser failed for ${pick.email}: ${created.error.message}`);
-        return { ok: false, reason: "unavailable" };
+
+      // ANY failure here — a real collision, a venue-wifi timeout, or a response
+      // we cannot read — is ambiguous about what landed server-side, so we ask
+      // the server instead of guessing. This is the Path sibling's repair
+      // discipline (see provisionStudent step 8), and skipping it is how the
+      // clean address gets burned: a createUser that timed out AFTER Supabase
+      // committed leaves an orphan at `maya.chen.fw@`, and a naive retry reads
+      // it as "taken by someone else" and permanently shifts the real Maya to
+      // `maya.chen2` with no record of why.
+      const claim = await classifyFwAddress(db, pick.email);
+      if (claim.kind === "stranded") {
+        // Ours (or an earlier failed run's) — an FW student account with no
+        // profile behind it. Adopt rather than step past.
+        console.warn(`[fw/provision] adopting stranded FW account for ${pick.email}`);
+        user = claim.user;
+        break;
       }
-      // A live account holds it — record and step to the next integer. This IS
-      // the "probe existing accounts" half of the collision rule.
-      taken.add(pick.localPart);
-      try {
-        pick = pickFwLocalPart({ firstName, lastName, taken });
-      } catch {
-        return { ok: false, reason: "address_exhausted" };
+      if (claim.kind === "claimed") {
+        // A real, fully-provisioned student holds it. Step to the next integer.
+        taken.add(pick.localPart);
+        try {
+          pick = pickFwLocalPart({ firstName, lastName, taken });
+        } catch {
+          return { ok: false, reason: "address_exhausted" };
+        }
+        continue;
       }
+      // `absent` (nothing exists at that address) or `unknown` (we could not
+      // find out). Either way this was a genuine failure, not a collision —
+      // report it rather than minting a suffixed address the guide never asked
+      // for. Nothing was created, so there is nothing to compensate.
+      console.error(
+        `[fw/provision] createUser failed for ${pick.email} (cohort ${cohortId}): ${created.error?.message ?? "no user returned"}`
+      );
+      return { ok: false, reason: "unavailable" };
     }
     if (!user) return { ok: false, reason: "address_exhausted" };
     userId = user.id;
-    email = pick.email;
+    email = user.email ?? pick.email;
 
     // The private single-student family. path_student_profiles.family_id stays
     // NOT NULL (see the migration's group-1 note): an FW student has no family
@@ -890,7 +998,11 @@ export async function provisionFwStudent(
     // assume. No parent grant ever points here, so nothing can read across it.
     const family = await db.from("path_families").insert({}).select("id").single();
     if (family.error || typeof family.data?.id !== "string") {
-      console.error(`[fw/provision] family insert failed: ${family.error?.message ?? "no id"}`);
+      // Identify the row: during a 90-student import this line firing on row 47
+      // is otherwise byte-identical to it firing on row 1.
+      console.error(
+        `[fw/provision] family insert failed for ${email} (cohort ${cohortId}): ${family.error?.message ?? "no id"}`
+      );
       await compensateFwMint(db, { userId, familyId: null });
       return { ok: false, reason: "unavailable" };
     }
@@ -948,11 +1060,56 @@ export async function provisionFwStudent(
 }
 
 /**
+ * What is actually sitting at an FW address, asked of the server rather than
+ * inferred from a `createUser` error string.
+ *
+ *   stranded — an FW student account with NO profile row behind it. Either this
+ *              call's own timed-out mint, or an earlier run whose compensation
+ *              did not complete. Safe (and necessary) to adopt: leaving it would
+ *              burn the clean, name-derived address for the child it was typed
+ *              for, and FW-D2 makes that address a lasting contact channel.
+ *   claimed  — a fully-provisioned student holds it, OR the account is not an
+ *              FW student account at all (never adopt one of those — the Path
+ *              repair path's same defense-in-depth rule). Step to the next
+ *              integer.
+ *   absent   — nothing is there, so the failure was real, not a collision.
+ *   unknown  — we could not find out; treated as `absent` by the caller, which
+ *              fails the row rather than minting a suffix nobody asked for.
+ */
+type FwAddressClaim =
+  | { kind: "stranded"; user: User }
+  | { kind: "claimed" }
+  | { kind: "absent" }
+  | { kind: "unknown" };
+
+async function classifyFwAddress(db: SupabaseClient, email: string): Promise<FwAddressClaim> {
+  const found = await findAuthUserByEmail(db, email);
+  if (!found) return { kind: "absent" };
+
+  // Never adopt an account this system did not mint as an FW student.
+  if (found.app_metadata?.role !== "student" || !isFwStudentAddress(found.email ?? "")) {
+    return { kind: "claimed" };
+  }
+
+  const profile = await db
+    .from("path_student_profiles")
+    .select("id")
+    .eq("user_id", found.id)
+    .maybeSingle();
+  if (profile.error) {
+    console.error(`[fw/provision] claim probe failed for ${email}: ${profile.error.message}`);
+    return { kind: "unknown" };
+  }
+  return profile.data ? { kind: "claimed" } : { kind: "stranded", user: found };
+}
+
+/**
  * Best-effort rollback of a half-minted FW account. Failures are logged and
  * swallowed: the caller is already returning an error, and a compensation that
  * throws would replace an actionable failure with an opaque one. What is left
- * behind if this fails is an orphan auth user, which the next run's
- * `email_exists` retry steps past rather than trips over.
+ * behind if this fails is an orphan auth user — which is recoverable rather
+ * than permanent, because `classifyFwAddress` adopts exactly that shape on the
+ * next attempt for the same name instead of stepping past it.
  */
 async function compensateFwMint(
   db: SupabaseClient,

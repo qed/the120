@@ -213,6 +213,16 @@ export async function loadFounderCards(db: Db, familyId: string): Promise<Founde
   const cards = await Promise.all(
     (profiles.data ?? []).map(async (row): Promise<FounderCardWithIds | null> => {
       const profileId = row.id as string;
+      // child_id is NULLABLE since the FW migration (an FW student has a typed
+      // name and no roster row). A null here means a non-Path-shaped profile
+      // reached a family card list, which should be impossible — FW students get
+      // a private family no parent grant points at — so treat it the same way as
+      // the vanished-mid-read case below: skip loudly rather than cast a null
+      // into `childId: string` and hand a broken card to the dashboard.
+      if (typeof row.child_id !== "string") {
+        console.error(`[path/family] profile ${profileId} has no child_id — card skipped`);
+        return null;
+      }
       const ctx = await loadStudentContext(db, profileId);
       if (!ctx) {
         // Deleted mid-read — skip rather than throw, but never silently
@@ -268,7 +278,7 @@ export async function loadFounderCards(db: Db, familyId: string): Promise<Founde
           now,
         }),
         profileId,
-        childId: row.child_id as string,
+        childId: row.child_id,
       };
     })
   );

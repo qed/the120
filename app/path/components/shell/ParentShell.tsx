@@ -29,6 +29,9 @@ import { skinClass } from "@/app/path/lib/skin-tokens";
 import { cn } from "@/app/path/components/system/cn";
 
 const NAV = [
+  // The handoff's sidebar order: the queue leads — reviewing is the parent's
+  // primary verb (landed with Unit 12's review surface, as promised above).
+  { href: "/path/review", label: "Review Queue" },
   { href: "/path/family", label: "Family" },
   { href: "/path/onboarding", label: "Add a founder" },
 ];

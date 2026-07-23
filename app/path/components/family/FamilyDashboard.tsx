@@ -162,6 +162,15 @@ function FounderCard({ card }: { card: FounderCardProps }) {
               />
               {card.awaitingCount} awaiting your review
             </span>
+            {/* The handoff's per-card "Open" — routes into Unit 12's queue. */}
+            {card.awaitingCount > 0 && (
+              <Link
+                href="/path/review"
+                className="rounded-lg bg-hq-ink px-3 py-1.5 font-path-body text-[12px] font-semibold text-white shadow-hq hover:bg-hq-ink/90"
+              >
+                Open
+              </Link>
+            )}
             <button
               type="button"
               disabled={busy}

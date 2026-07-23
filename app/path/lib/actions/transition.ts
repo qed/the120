@@ -44,6 +44,7 @@ import {
   type StudentContext,
 } from "@/app/path/lib/progress-loader";
 import { notifyAfterTransition } from "@/app/path/lib/notify/send";
+import { evidenceFingerprint } from "@/app/path/lib/evidence-rules";
 import type { CriterionSnapshot, TransitionCtx } from "@/app/path/lib/transition-table";
 
 // NOTE: no `export type { TransitionResult }` here. This is a `"use server"`
@@ -61,6 +62,12 @@ const transitionSchema = z.object({
   note: z.string().trim().max(2000).optional(),
   /** Client-supplied, skew-clamped submit time (Unit 11's offline queue). */
   submittedAt: z.iso.datetime({ offset: true }).optional(),
+  /** The evidence-set fingerprint the reviewer's page LOADED (review queue
+   *  only, verify only) — recomputed server-side at click time; a mismatch
+   *  refuses with `evidence_changed` so a withdraw+resubmit swap can never be
+   *  verified sight-unseen (Unit 12 adversarial TOCTOU guard). Optional: the
+   *  student surfaces and offline queue never send it. */
+  expectedEvidenceFingerprint: z.string().max(20000).optional(),
 });
 
 export async function applyTransition(input: unknown): Promise<TransitionResult> {
@@ -70,7 +77,8 @@ export async function applyTransition(input: unknown): Promise<TransitionResult>
 
   const parsed = transitionSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
-  const { studentId, taskId, transition, note, submittedAt } = parsed.data;
+  const { studentId, taskId, transition, note, submittedAt, expectedEvidenceFingerprint } =
+    parsed.data;
 
   // `z.enum` already narrowed it, but keep the guard as the single source of the
   // task-vs-ceremony boundary (criterion/phase return are Unit 12).
@@ -126,6 +134,41 @@ export async function applyTransition(input: unknown): Promise<TransitionResult>
     return { ok: false, reason: decision.reason };
   }
 
+  // The TOCTOU guard (verify only, when the reviewer's surface supplied a
+  // fingerprint): recompute the evidence-set fingerprint NOW and refuse on
+  // mismatch — the parent must attest to the evidence they actually saw, not
+  // whatever a withdraw+resubmit swapped in under their open tab. Shrinks the
+  // swap window from minutes to the RPC round-trip.
+  if (transition === "verify" && expectedEvidenceFingerprint !== undefined) {
+    try {
+      const { data: progressRow, error: progressError } = await db
+        .from("path_task_progress")
+        .select("id")
+        .eq("student_id", studentId)
+        .eq("task_id", taskId)
+        .maybeSingle();
+      if (progressError || !progressRow) return { ok: false, reason: "unavailable" };
+      const { data: evidenceRows, error: evidenceError } = await db
+        .from("path_evidence_items")
+        .select("id, updated_at, created_at")
+        .eq("task_progress_id", progressRow.id as string);
+      if (evidenceError) return { ok: false, reason: "unavailable" };
+      const current = evidenceFingerprint(
+        (evidenceRows ?? []).map((r) => ({
+          id: r.id as string,
+          updatedAt: (r.updated_at as string | null) ?? null,
+          createdAt: r.created_at as string,
+        }))
+      );
+      if (current !== expectedEvidenceFingerprint) {
+        return { ok: false, reason: "evidence_changed" };
+      }
+    } catch (e) {
+      console.error(`[path/transition] fingerprint check failed for ${studentId}/${taskId}:`, e);
+      return { ok: false, reason: "unavailable" };
+    }
+  }
+
   // Apply atomically. `expectedFrom` is the snapshot state — the CAS predicate.
   const echo = await moveTask(db, {
     studentId,
@@ -167,17 +210,32 @@ export async function applyTransition(input: unknown): Promise<TransitionResult>
   // idempotently, and attempted inline for real-time delivery; the cron heals
   // anything this drops. Only when OUR CAS provably wrote — a superseded
   // caller's winner already enqueued the identical plan (same dedupe keys).
-  // Never throws; a notification failure must never fail the transition.
+  // Never throws; a notification failure must never fail the transition — and
+  // never HANGS it either: the race caps the wall-clock this await can add to
+  // the student's submit tap (only sendEmail has its own timeout; the Supabase
+  // calls in the chain have none — reliability review). On timeout the work
+  // may still finish in the background; the cron heals it if not.
   if (result.ok && result.byCaller) {
-    await notifyAfterTransition(db, {
-      studentId,
-      familyId: student.familyId,
-      programVersionId: student.programVersionId,
-      taskId,
-      criterionId: criterionIdOf(taskId),
-      transition,
-    });
+    await Promise.race([
+      notifyAfterTransition(db, {
+        studentId,
+        familyId: student.familyId,
+        programVersionId: student.programVersionId,
+        taskId,
+        criterionId: criterionIdOf(taskId),
+        transition,
+      }),
+      new Promise<void>((resolve) =>
+        setTimeout(() => {
+          console.error(`[path/transition] inline notify timed out for ${studentId}/${taskId} — cron will heal`);
+          resolve();
+        }, INLINE_NOTIFY_TIMEOUT_MS)
+      ),
+    ]);
   }
 
   return result;
 }
+
+/** The inline notify's wall-clock cap on the transition response (see above). */
+const INLINE_NOTIFY_TIMEOUT_MS = 10_000;

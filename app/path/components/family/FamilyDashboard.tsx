@@ -16,7 +16,7 @@
  * the Unit 6 → 14 → 15 carry-forward this component finally consumes.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PhaseKey } from "@/app/path/content/types";
@@ -57,6 +57,17 @@ function FounderCard({ card }: { card: FounderCardProps }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
+  // The Open button beside the reset form makes navigating away mid-reset
+  // likely; without this guard the resolving action's setState lands on an
+  // unmounted card (silent no-op — the ReviewPanel/TaskSurface idiom).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // card.phase.key is the literal PhaseKey union end to end (Unit 15 review:
   // no widening, no unchecked cast back).
   const phaseKey: PhaseKey = card.phase?.key ?? "SELL";
@@ -71,6 +82,7 @@ function FounderCard({ card }: { card: FounderCardProps }) {
       const result = unwrapActionResult(
         await resetStudentPasswordAction({ profileId: card.profileId, newPassword: password })
       );
+      if (!mountedRef.current) return;
       if (result.ok) {
         setNote({ kind: "ok", text: `${card.firstName}'s password is set — they sign in with it now.` });
         setPassword("");
@@ -79,9 +91,11 @@ function FounderCard({ card }: { card: FounderCardProps }) {
         setNote({ kind: "error", text: failureMessage(result) });
       }
     } catch {
-      setNote({ kind: "error", text: "Something went wrong — please try again." });
+      if (mountedRef.current) {
+        setNote({ kind: "error", text: "Something went wrong — please try again." });
+      }
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 

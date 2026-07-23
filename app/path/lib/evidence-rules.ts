@@ -328,6 +328,27 @@ export function selectOrphans(input: {
     .map((o) => o.path);
 }
 
+// ── Evidence-set fingerprint (the verify TOCTOU guard) ─────────────────────────
+
+/**
+ * A stable fingerprint of a task's evidence SET, order-independent: the sorted
+ * per-item `id:version` pairs joined. The review queue snapshots this when the
+ * parent loads the page; `applyTransition(verify)` recomputes it at click time
+ * and refuses with `evidence_changed` on mismatch — closing the window where a
+ * withdraw + resubmit swaps the evidence between what the parent SAW and what
+ * their click would attest to (Unit 12 adversarial review; R6 means the adult
+ * reviewed the evidence behind the record, not merely clicked near it).
+ * `updatedAt` participates so a caption edit also asks for another look.
+ */
+export function evidenceFingerprint(
+  items: readonly { id: string; updatedAt: string | null; createdAt: string }[]
+): string {
+  return items
+    .map((i) => `${i.id}:${i.updatedAt ?? i.createdAt}`)
+    .sort()
+    .join("|");
+}
+
 // ── Signed-download-URL freshness ───────────────────────────────────────────────
 
 /**

@@ -59,20 +59,56 @@ export type SendKind = (typeof SEND_KINDS)[number];
 /** A send row is retried until this many attempts, then parked loudly. */
 export const MAX_SEND_ATTEMPTS = 5;
 
+/**
+ * A claim older than this with no success stamp is STALE — the claiming
+ * process died mid-send — and the row becomes claimable again. Safe because
+ * the stable Idempotency-Key makes a re-send of an actually-delivered attempt
+ * a provider-side no-op within Resend's 24h window, and this TTL is minutes.
+ */
+export const STALE_CLAIM_TTL_MS = 10 * 60 * 1000;
+
 /** Reviewer stall nudge default (hours a task sits `submitted` before the
  *  family is nudged); `path_families.review_nudge_hours` overrides per family. */
 export const NUDGE_DEFAULT_THRESHOLD_HOURS = 72;
 
-/** How far back the cron's reconcile pass re-derives notifications from the
- *  event/review spines. Bounds the query, not correctness — anything older has
- *  either been delivered or parked. */
-export const RECONCILE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How far back the cron's reconcile pass re-derives notifications from the
+ * event/review spines. Sized for the healer's real job — repairing an inline
+ * enqueue that crashed — with 24h ≈ 144 missed cron runs of margin (the
+ * performance review's over-scan finding: 7 days re-scanned every 10 minutes
+ * was almost entirely re-confirming already-healed work). Anything older than
+ * this with no notification row means inline AND a full day of cron runs all
+ * failed; a manual invocation with a wider window remains possible (the
+ * function takes windowMs as a parameter).
+ */
+export const RECONCILE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Repeated submits of the SAME task inside this bucket collapse into ONE
+ * parent email (the adversarial review's flood fix): the submit send key is
+ * derived from (student, task, time-bucket), not the per-event UUID, so a
+ * submit/withdraw cycle — scripted or fat-fingered — cannot mint unbounded
+ * real sends. A genuine resubmit in a later bucket notifies again. In-app
+ * student events are unaffected (they stay per-event).
+ */
+export const SUBMIT_NOTIFY_BUCKET_MS = 30 * 60 * 1000;
 
 /* ─────────────────────────────────────────────────────── dedupe keys */
 
 /** In-app event / send-source key for one task-transition event row. */
 export function taskEventKey(taskEventId: string): string {
   return `task_event:${taskEventId}`;
+}
+
+/** The submit EMAIL's source key: time-bucketed per (student, task) — see
+ *  SUBMIT_NOTIFY_BUCKET_MS. Derived identically by the inline path and the
+ *  reconcile healer (both read the event's own `at`), so the two stay
+ *  idempotent against each other. An unparseable timestamp buckets to 0 —
+ *  deterministic, never a throw. */
+export function submittedSourceKey(studentId: string, taskId: string, atIso: string): string {
+  const ms = Date.parse(atIso);
+  const bucket = Number.isFinite(ms) ? Math.floor(ms / SUBMIT_NOTIFY_BUCKET_MS) : 0;
+  return `submitted:${studentId}:${taskId}:${bucket}`;
 }
 
 /** The student event key for a review attempt entering review. */
@@ -119,9 +155,14 @@ export type TaskEventInput = {
   taskId: string;
   transition: string;
   note: string | null;
+  /** The event's own `at` — buckets the submit send key and stamps
+   *  occurredAt on derived in-app events. */
+  at: string;
 };
 
-/** One `path_reviews` row, as the derivation reads it. */
+/** One `path_reviews` row, as the derivation reads it. openedAt/decidedAt
+ *  stamp occurredAt on the derived events (and carry the fast-path winner in
+ *  the ceremony action); null-tolerant for callers that lack them. */
 export type ReviewInput = {
   id: string;
   studentId: string;
@@ -130,6 +171,9 @@ export type ReviewInput = {
   attempt: number;
   state: string;
   note: string | null;
+  openedAt?: string | null;
+  decidedAt?: string | null;
+  decidedBy?: string | null;
 };
 
 export type EventInsert = {
@@ -138,6 +182,9 @@ export type EventInsert = {
   kind: NotificationEventKind;
   taskId: string | null;
   scopeId: string | null;
+  /** When the SOURCE moment happened — the supersede comparison's clock (a
+   *  backfilled row's created_at is the heal time, not the moment). */
+  occurredAt: string | null;
   /** Render-time inputs (R27): ids and the adult's words — NEVER rendered
    *  copy; Unit 16 resolves the register (Trail/HQ) at read time. */
   params: Record<string, unknown>;
@@ -173,6 +220,25 @@ const STUDENT_EVENT_KIND_BY_TRANSITION: Record<string, NotificationEventKind> = 
 };
 
 /**
+ * Every task transition that produces ANY notification — the single source
+ * the executor's inline gate and the reconcile query both import, so the
+ * three sites can never drift (maintainability review; the same discipline
+ * as the SQL/vercel parity tests). Derived, not hand-listed.
+ */
+export const NOTIFYING_TRANSITIONS: readonly string[] = [
+  "submit",
+  ...Object.keys(STUDENT_EVENT_KIND_BY_TRANSITION),
+];
+
+/** Fail-closed narrowing for a DB `kind` string (the narrowTaskState idiom) —
+ *  an unknown value must be skipped BEFORE a claim, never crash after one. */
+export function narrowSendKind(x: unknown): SendKind | null {
+  return typeof x === "string" && (SEND_KINDS as readonly string[]).includes(x)
+    ? (x as SendKind)
+    : null;
+}
+
+/**
  * Derive the notification plan for one task-transition event (§13 / the
  * engine's NotificationIntents, resolved against the authoritative event row
  * rather than the point-in-time cascade projection — a stale projection could
@@ -188,11 +254,14 @@ const STUDENT_EVENT_KIND_BY_TRANSITION: Record<string, NotificationEventKind> = 
  */
 export function planForTaskEvent(ev: TaskEventInput, ctx: TaskEventCtx): NotificationPlan {
   if (ev.transition === "submit") {
-    const source = taskEventKey(ev.id);
+    // Time-bucketed source key — the flood fix; see SUBMIT_NOTIFY_BUCKET_MS.
+    const source = submittedSourceKey(ev.studentId, ev.taskId, ev.at);
     const sends: SendInsert[] = [];
     for (const parent of ctx.parents) {
       const email = parent.email?.trim();
-      if (!email) continue; // never a null-recipient row; caller logs the skip
+      // Never a null-recipient row; resolveParentRecipients logs the anomaly
+      // at resolution time (the single chokepoint).
+      if (!email) continue;
       sends.push({
         dedupeKey: sendDedupeKey(source, parent.userId),
         studentId: ev.studentId,
@@ -221,6 +290,7 @@ export function planForTaskEvent(ev: TaskEventInput, ctx: TaskEventCtx): Notific
         kind,
         taskId: ev.taskId,
         scopeId: null,
+        occurredAt: ev.at ?? null,
         params: { taskId: ev.taskId, note: ev.note },
       },
     ],
@@ -247,6 +317,7 @@ export function planForReview(review: ReviewInput): NotificationPlan {
       kind: "review_underway",
       taskId: null,
       scopeId: review.scopeId,
+      occurredAt: review.openedAt ?? null,
       params: { criterionId: review.scopeId, attempt: review.attempt },
     },
   ];
@@ -257,6 +328,7 @@ export function planForReview(review: ReviewInput): NotificationPlan {
       kind: "criterion_returned",
       taskId: null,
       scopeId: review.scopeId,
+      occurredAt: review.decidedAt ?? null,
       params: { criterionId: review.scopeId, attempt: review.attempt, note: review.note },
     });
   }
@@ -272,19 +344,34 @@ export function mergePlans(plans: readonly NotificationPlan[]): NotificationPlan
 
 /* ─────────────────────────────────────────────────── supersede rules */
 
-/** A live in-app event row, as the supersede derivation reads it. */
+/** A live in-app event row, as the supersede derivation reads it.
+ *  `occurredAt` is the source moment; `createdAt` is the row-insert fallback
+ *  for pre-occurredAt rows. */
 export type LiveEventRow = {
   id: string;
   kind: string;
   taskId: string | null;
   scopeId: string | null;
   supersededAt: string | null;
+  occurredAt: string | null;
+  createdAt: string;
 };
 
 export type SupersedeTrigger =
-  | { kind: "reopened"; taskId: string }
-  | { kind: "criterion_returned"; scopeId: string; returnedTaskIds: readonly string[] }
-  | { kind: string; taskId?: string; scopeId?: string };
+  | { kind: "reopened"; taskId: string; occurredAt: string | null }
+  | {
+      kind: "criterion_returned";
+      scopeId: string;
+      returnedTaskIds: readonly string[];
+      occurredAt: string | null;
+    }
+  | { kind: string; taskId?: string; scopeId?: string; occurredAt?: string | null };
+
+/** The moment an event row describes, for the temporal comparison. */
+function eventMomentMs(e: LiveEventRow): number {
+  const ms = Date.parse(e.occurredAt ?? e.createdAt);
+  return Number.isFinite(ms) ? ms : NaN;
+}
 
 /**
  * Which existing event rows a reversal supersedes (INSERT-plus-supersede-flag,
@@ -296,11 +383,25 @@ export type SupersedeTrigger =
  *                                      the returned tasks' live `verified` events
  *   anything else                    → nothing (forward progress never erases)
  *
+ * TEMPORAL SCOPE (the adversarial review's replay fix): a reversal only ever
+ * supersedes events that happened BEFORE it. The reconcile healer re-applies
+ * every in-window reversal on every run, so without this a revoke → redo →
+ * re-verify sequence would have its FRESH celebration falsely flagged by the
+ * stale revoke's replay — permanently (the flag is one-way). A trigger with no
+ * usable timestamp supersedes NOTHING (fail safe, never guess), as does an
+ * event row with no parseable moment.
+ *
  * Already-superseded rows are never re-flagged (the original correction's
  * timestamp is itself history).
  */
 export function supersedePlan(trigger: SupersedeTrigger, live: readonly LiveEventRow[]): string[] {
-  const alive = live.filter((e) => e.supersededAt === null);
+  const triggerMs = trigger.occurredAt != null ? Date.parse(trigger.occurredAt) : NaN;
+  if (!Number.isFinite(triggerMs)) return []; // no clock → never guess
+  const alive = live.filter((e) => {
+    if (e.supersededAt !== null) return false;
+    const momentMs = eventMomentMs(e);
+    return Number.isFinite(momentMs) && momentMs < triggerMs;
+  });
   if (trigger.kind === "reopened" && "taskId" in trigger && trigger.taskId) {
     return alive
       .filter((e) => e.kind === "verified" && e.taskId === trigger.taskId)

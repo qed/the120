@@ -33,18 +33,31 @@ import { EvidenceList } from "./EvidenceList";
 import { Button } from "./system/Button";
 import { cn } from "./system/cn";
 
-type Notice = { tone: "info" | "error" | "superseded"; text: string };
+type Notice = { tone: "error" | "superseded"; text: string };
 
-function formatWhen(iso: string | null): string {
-  if (!iso) return "just now";
+/** A short human time, or null when the timestamp is unknown — callers
+ *  compose the "at …" clause only when real (never a "just now" lie). */
+function formatWhen(iso: string | null | undefined): string | null {
+  if (!iso) return null;
   const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return "just now";
+  if (!Number.isFinite(ms)) return null;
   return new Intl.DateTimeFormat(undefined, {
     weekday: "short",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(ms));
 }
+
+/** " at Wed 9:41" when the time is known, "" otherwise. */
+function atClause(iso: string | null | undefined): string {
+  const when = formatWhen(iso);
+  return when ? ` at ${when}` : "";
+}
+
+/** How long a superseded/diverged notice stays readable before the refresh
+ *  that (correctly) removes the card — without this, the same call that
+ *  reveals the winner's identity destroys it sub-second (race review). */
+const NOTICE_LINGER_MS = 4000;
 
 function waitingLabel(hours: number): string {
   if (hours < 1) return "waiting under an hour";
@@ -117,10 +130,12 @@ function ReviewTaskCard({
 }) {
   const router = useRouter();
   const mountedRef = useRef(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
@@ -131,6 +146,15 @@ function ReviewTaskCard({
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const stale = task.waitingHours !== null && task.waitingHours >= nudgeThresholdHours;
+
+  /** Refresh after the notice has had time to be READ — the refresh removes
+   *  this card (its row left the queried state), so an immediate one would
+   *  destroy the copy it just revealed. */
+  const refreshAfterNotice = useCallback(() => {
+    refreshTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) router.refresh();
+    }, NOTICE_LINGER_MS);
+  }, [router]);
 
   const run = useCallback(
     async (transition: "verify" | "not_yet", noteText: string | undefined) => {
@@ -146,6 +170,10 @@ function ReviewTaskCard({
             taskId: task.taskId,
             transition,
             ...(noteText ? { note: noteText } : {}),
+            // The TOCTOU guard: verify attests to the evidence the page LOADED.
+            ...(transition === "verify"
+              ? { expectedEvidenceFingerprint: task.evidenceFingerprint }
+              : {}),
           });
           if (!mountedRef.current) return;
           if (result.ok) {
@@ -158,11 +186,13 @@ function ReviewTaskCard({
                 tone: "superseded",
                 text:
                   result.state === "verified"
-                    ? `${who} verified this at ${formatWhen(winner?.decidedAt ?? null)} — nothing left to do.`
-                    : `Already handled at ${formatWhen(winner?.decidedAt ?? null)}.`,
+                    ? `${who} verified this${atClause(winner?.decidedAt)} — nothing left to do.`
+                    : `Already handled${atClause(winner?.decidedAt)}.`,
               });
+              refreshAfterNotice();
+            } else {
+              router.refresh();
             }
-            router.refresh();
             return;
           }
           // Refusals — closed union.
@@ -172,9 +202,17 @@ function ReviewTaskCard({
             const who = winner?.verifiedBy ? (parentNames[winner.verifiedBy] ?? "your co-parent") : "someone";
             setNotice({
               tone: "superseded",
-              text: `This task changed while you were looking (${who}, ${formatWhen(winner?.decidedAt ?? null)}) — refreshing.`,
+              text: `This task changed while you were looking (${who}${atClause(winner?.decidedAt)}) — refreshing.`,
             });
-            router.refresh();
+            refreshAfterNotice();
+            return;
+          }
+          if (result.reason === "evidence_changed") {
+            setNotice({
+              tone: "superseded",
+              text: `${task.studentName}'s satchel changed since you loaded this — take another look, then verify.`,
+            });
+            refreshAfterNotice();
             return;
           }
           if (result.reason === "note_required") {
@@ -193,7 +231,7 @@ function ReviewTaskCard({
         if (mountedRef.current) setBusy(false);
       }
     },
-    [busy, task.studentId, task.taskId, parentNames, router]
+    [busy, task, parentNames, router, refreshAfterNotice]
   );
 
   return (
@@ -265,9 +303,7 @@ function ReviewTaskCard({
         <p
           className={cn(
             "mt-3 rounded-lg px-3 py-2 font-path-body text-[12.5px]",
-            notice.tone === "error" && "bg-not-yet/10 text-not-yet",
-            notice.tone === "superseded" && "bg-hq-sunken text-hq-ink",
-            notice.tone === "info" && "bg-hq-sunken text-hq-ink-soft"
+            notice.tone === "error" ? "bg-not-yet/10 text-not-yet" : "bg-hq-sunken text-hq-ink"
           )}
           role="status"
         >
@@ -365,10 +401,12 @@ function CriterionReviewCard({
 }) {
   const router = useRouter();
   const mountedRef = useRef(true);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
@@ -386,6 +424,13 @@ function CriterionReviewCard({
       return next;
     });
   };
+
+  /** See ReviewTaskCard's twin — the notice must outlive the refresh. */
+  const refreshAfterNotice = useCallback(() => {
+    refreshTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) router.refresh();
+    }, NOTICE_LINGER_MS);
+  }, [router]);
 
   const submitReturn = useCallback(async () => {
     if (busy || selected.size === 0 || note.trim().length === 0) return;
@@ -409,16 +454,18 @@ function CriterionReviewCard({
               : "Your co-parent";
             setNotice({
               tone: "superseded",
-              text: `${who} already decided this review at ${formatWhen(result.winner?.decidedAt ?? null)}.`,
+              text: `${who} already decided this review${atClause(result.winner?.decidedAt)}.`,
             });
+            refreshAfterNotice();
+          } else {
+            router.refresh();
           }
-          router.refresh();
           return;
         }
         if (result.reason === "retry" && attempt === 0) continue;
         if (result.reason === "stale_review") {
           setNotice({ tone: "superseded", text: "This review moved on while you were looking — refreshing." });
-          router.refresh();
+          refreshAfterNotice();
           return;
         }
         if (result.reason === "note_required") {
@@ -435,7 +482,7 @@ function CriterionReviewCard({
     } finally {
       if (mountedRef.current) setBusy(false);
     }
-  }, [busy, selected, note, criterion, parentNames, router]);
+  }, [busy, selected, note, criterion, parentNames, router, refreshAfterNotice]);
 
   return (
     <article className="rounded-xl border border-hq-border bg-hq-surface p-4 shadow-hq">

@@ -84,4 +84,12 @@ describe("renderSendEmail — stall_nudge", () => {
     expect(email.html).not.toContain("<img src=x");
     expect(email.html).toContain("&lt;img");
   });
+
+  it("missing/malformed params render neutral fallbacks, never 'undefined' (mirrors the submitted guard)", () => {
+    const email = renderSendEmail("stall_nudge", {});
+    expect(email.subject).not.toContain("undefined");
+    expect(email.html).not.toContain("undefined");
+    expect(email.text).not.toContain("undefined");
+    expect(`${email.subject} ${email.text}`).toContain("0 hours"); // the pinned zero-fallback
+  });
 });

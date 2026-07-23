@@ -20,9 +20,9 @@
  * time (`superseded`), never an error. A reviewer whose view predates a whole
  * return/re-complete cycle sees `stale_review` — refresh to truth.
  *
- * NOTE: no `export type` here — a type re-export from a `"use server"` file
- * registers a server reference and crashes at module load (Unit 14 learning).
- * Import result types from progress-core.
+ * NOTE: the export list here is ACTIONS ONLY (the use-server-type-reexport
+ * learning): `CriterionReturnActionResult` lives in progress-core.ts and is
+ * imported, exactly as transition.ts imports `TransitionResult`.
  */
 
 import { z } from "zod";
@@ -30,7 +30,10 @@ import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolveActorRole } from "@/app/path/lib/access-rules";
 import { evaluateTransition } from "@/app/path/lib/path-rules";
-import { interpretReturnEcho } from "@/app/path/lib/progress-core";
+import {
+  interpretReturnEcho,
+  type CriterionReturnActionResult,
+} from "@/app/path/lib/progress-core";
 import {
   loadCriterionSnapshot,
   loadStudentContext,
@@ -48,25 +51,6 @@ const returnSchema = z.object({
   returnedTaskIds: z.array(z.string().regex(/^\d+\.\d+\.\d+$/)).min(1).max(10),
   note: z.string().trim().min(1).max(2000),
 });
-
-type ReturnWinner = { decidedBy: string | null; decidedAt: string | null };
-
-export type CriterionReturnActionResult =
-  | { ok: true; byCaller: boolean; winner?: ReturnWinner }
-  | {
-      ok: false;
-      reason:
-        | "invalid_input"
-        | "not_found"
-        | "forbidden"
-        | "unavailable"
-        | "not_in_review"
-        | "note_required"
-        | "unknown_returned_task"
-        | "nothing_to_return"
-        | "stale_review"
-        | "retry";
-    };
 
 /** Narrow a review-row state string into the criterion-state the engine reads;
  *  anything unrecognized (cleared is T2) maps to `active`, whose from-match
@@ -114,12 +98,14 @@ export async function applyCriterionReturn(input: unknown): Promise<CriterionRet
   if (review.state === "returned") {
     // The exact attempt the reviewer saw was already returned — idempotent
     // success by the OTHER decider (actor is already authorized above; mirrors
-    // applyTransition's already_in_target_state path). Winner identity comes
-    // from the echo path below only on a raced decide; here the pre-read
-    // suffices via a fresh probe of decided_by/decided_at — but the list read
-    // omits them, so report superseded without identity and let the surface
-    // refresh; the common race path (below) carries the full winner.
-    return { ok: true, byCaller: false };
+    // applyTransition's already_in_target_state path). The pre-read carries
+    // the winner's identity and time, so this branch reports the SAME shape
+    // as the raced-decide path below — never a timestamp-less "just now".
+    return {
+      ok: true,
+      byCaller: false,
+      winner: { decidedBy: review.decidedBy ?? null, decidedAt: review.decidedAt ?? null },
+    };
   }
 
   // Decide legality with the pure engine (note, membership, actor class). The
@@ -168,15 +154,18 @@ export async function applyCriterionReturn(input: unknown): Promise<CriterionRet
     case "applied": {
       // Enqueue + flag the student-facing notification trail (in-app event,
       // supersede of the reopened celebrations). Never throws; cron heals.
+      // `review.id` is the decided attempt row (the decide is attempt-based,
+      // targeting exactly the pre-read row) — no non-null assertion needed.
       await notifyCriterionReturned(db, {
         review: {
-          id: echo!.reviewId,
+          id: review.id,
           studentId,
           scope: "criterion",
           scopeId: criterionId,
           attempt,
           state: "returned",
           note,
+          decidedAt: echo?.decidedAt ?? new Date().toISOString(),
         },
         returnedTaskIds,
       });

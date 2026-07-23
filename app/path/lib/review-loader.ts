@@ -25,7 +25,9 @@ import { resolveVariant } from "@/app/path/content/parse-curriculum";
 import type { Band, UnitTask } from "@/app/path/content/types";
 import { resolvePathAccess, type RoleGrant } from "./access-rules";
 import { loadEvidenceViews } from "./evidence-loader";
+import { evidenceFingerprint } from "./evidence-rules";
 import type { EvidenceItemView } from "./journey-view-types";
+import { NUDGE_DEFAULT_THRESHOLD_HOURS } from "./notify/notify-rules";
 import { splitCriterionLabel } from "./now-card-rules";
 import { bandForGrade, gradeFromChildJoin, firstNameFromChildJoin } from "./progress-core";
 
@@ -53,6 +55,10 @@ export type ReviewQueueTask = {
   /** Whole hours since submit_received_at; null when the timestamp is absent. */
   waitingHours: number | null;
   evidence: ReviewEvidenceItem[];
+  /** The evidence-set fingerprint at LOAD time — threaded through the verify
+   *  click so the action can refuse with `evidence_changed` if a withdraw +
+   *  resubmit swapped the set under the reviewer's open tab (TOCTOU guard). */
+  evidenceFingerprint: string;
 };
 
 export type ReviewQueueCriterion = {
@@ -163,7 +169,8 @@ export async function loadReviewQueue(
       tasks: [],
       criteria: [],
       parentNames,
-      nudgeThresholdHours: typeof nudgeHours === "number" && nudgeHours > 0 ? nudgeHours : 72,
+      nudgeThresholdHours:
+        typeof nudgeHours === "number" && nudgeHours > 0 ? nudgeHours : NUDGE_DEFAULT_THRESHOLD_HOURS,
     };
   }
 
@@ -223,6 +230,25 @@ export async function loadReviewQueue(
 
         const reviewOpenedAt = (row.review_opened_at as string | null) ?? null;
         const openedMs = reviewOpenedAt ? Date.parse(reviewOpenedAt) : NaN;
+
+        // Fingerprint from the SAME query shape the verify action recomputes
+        // (id, updated_at, created_at over ALL rows — no view-layer filtering),
+        // so load-time and click-time inputs can never diverge structurally.
+        const { data: fpRows, error: fpError } = await db
+          .from("path_evidence_items")
+          .select("id, updated_at, created_at")
+          .eq("task_progress_id", row.id as string);
+        if (fpError) {
+          throw new Error(`loadReviewQueue fingerprint read failed: ${fpError.message}`);
+        }
+        const fingerprint = evidenceFingerprint(
+          (fpRows ?? []).map((r) => ({
+            id: r.id as string,
+            updatedAt: (r.updated_at as string | null) ?? null,
+            createdAt: r.created_at as string,
+          }))
+        );
+
         let evidence: ReviewEvidenceItem[] = [];
         if (canReadEvidence) {
           const views = await loadEvidenceViews(db, row.id as string);
@@ -245,7 +271,12 @@ export async function loadReviewQueue(
           });
         }
 
-        const band = ((row.snapshot_band as Band | null) ?? profile.band ?? "g6_8") as Band;
+        const rawBand = row.snapshot_band;
+        // Fail-closed band narrowing (the narrowTaskState idiom) — a corrupt
+        // value falls back to the derived band, never resolves a wrong variant.
+        const snapshotBand: Band | null =
+          rawBand === "g3_5" || rawBand === "g6_8" || rawBand === "g9_12" ? rawBand : null;
+        const band: Band = snapshotBand ?? profile.band ?? "g6_8";
         const submitReceivedAt = (row.submit_received_at as string | null) ?? null;
         const submitMs = submitReceivedAt ? Date.parse(submitReceivedAt) : NaN;
         return {
@@ -262,6 +293,7 @@ export async function loadReviewQueue(
           submitReceivedAt,
           waitingHours: Number.isFinite(submitMs) ? Math.max(0, Math.floor((nowMs - submitMs) / 3600_000)) : null,
           evidence,
+          evidenceFingerprint: fingerprint,
         };
       })
     )
@@ -296,6 +328,7 @@ export async function loadReviewQueue(
     tasks,
     criteria,
     parentNames,
-    nudgeThresholdHours: typeof nudgeHours === "number" && nudgeHours > 0 ? nudgeHours : 72,
+    nudgeThresholdHours:
+        typeof nudgeHours === "number" && nudgeHours > 0 ? nudgeHours : NUDGE_DEFAULT_THRESHOLD_HOURS,
   };
 }

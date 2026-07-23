@@ -59,10 +59,21 @@ create table if not exists public.path_notification_events (
   -- The supersede FLAG — the only column a later write may touch, and only
   -- null → non-null. Unit 16 renders superseded events past-tense.
   superseded_at timestamptz,
+  -- When the SOURCE moment actually happened (the task event's `at` / the
+  -- review's opened_at/decided_at) — distinct from created_at, which for a
+  -- cron-backfilled row is the heal time, not the moment. Supersede matching
+  -- compares THIS against the reversal's own time, so a stale revoke replayed
+  -- by reconcile can never flag a celebration that came after it (the
+  -- re-verify protection). Nullable: pre-existing rows fall back to created_at.
+  occurred_at timestamptz,
   -- Unit 16 stamps this when the student sees the moment (celebration replay).
   seen_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- Idempotent add for a table created by an earlier apply of this same file.
+alter table public.path_notification_events
+  add column if not exists occurred_at timestamptz;
 
 -- Unit 16's read: a student's feed, newest first.
 create index if not exists path_notification_events_student_created_idx
@@ -88,16 +99,27 @@ create table if not exists public.path_notification_sends (
   kind text not null
     check (kind in ('submitted', 'stall_nudge')),
   params jsonb not null default '{}'::jsonb,
-  -- THE claim stamp. NULL = pending. Set optimistically by the atomic claim
-  -- (UPDATE … WHERE sent_at IS NULL), cleared by the CAS-guarded unclaim on
-  -- failure. Non-null = sent (or an in-flight claim for the seconds of the
-  -- attempt). Value is minted in JS — never DEFAULT now(), never touched by SQL.
+  -- The SUCCESS stamp. NULL = not yet delivered to the provider. Set (CAS-
+  -- guarded on the claim below) only after sendEmail reports ok. Value is
+  -- minted in JS — never DEFAULT now(), never touched by SQL.
   sent_at timestamptz,
+  -- The in-flight CLAIM stamp, split from sent_at (the reliability review's
+  -- stuck-claim fix): claim = UPDATE … WHERE sent_at IS NULL AND (claimed_at
+  -- IS NULL OR claimed_at < stale-cutoff). A process killed mid-send leaves
+  -- claimed_at set and sent_at null — after the stale TTL the row is claimable
+  -- again (the stable Resend Idempotency-Key makes a re-send of an actually-
+  -- delivered attempt a provider-side no-op within its 24h window, and the TTL
+  -- is minutes). Success rows (sent_at non-null) are never reclaimed.
+  claimed_at timestamptz,
   attempts int not null default 0,
   last_error text,
   last_attempt_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- Idempotent add for a table created by an earlier apply of this same file.
+alter table public.path_notification_sends
+  add column if not exists claimed_at timestamptz;
 
 -- The cron's drain: pending rows, oldest first.
 create index if not exists path_notification_sends_pending_idx
@@ -108,6 +130,14 @@ create index if not exists path_notification_sends_pending_idx
 -- (student_id, task_id) index; the cron queries by time).
 create index if not exists path_task_events_at_idx
   on public.path_task_events (at);
+
+-- The same windowed scan on the review spine (performance review: the sibling
+-- table got its time index; reviews are windowed on opened_at OR decided_at).
+create index if not exists path_reviews_opened_at_idx
+  on public.path_reviews (opened_at);
+create index if not exists path_reviews_decided_at_idx
+  on public.path_reviews (decided_at)
+  where decided_at is not null;
 
 -- ──────────────────────────────────────── path_families.review_nudge_hours ──
 -- The family-set stall threshold (R30's "nothing responds to a parent sitting
@@ -132,6 +162,12 @@ set search_path = public
 as $$
 begin
   if NEW.role = 'parent' and NEW.scope_type = 'family' then
+    -- Lock FIRST (data-migrations review): the duplicate exemption must read
+    -- under the same serialization point as the cap count, or two truly
+    -- concurrent inserts of the IDENTICAL grant both see exists()=false, both
+    -- pass the exemption, and the second spuriously raises at the cap after
+    -- the first commits.
+    perform pg_advisory_xact_lock(hashtext('path_parent_cap'), hashtext(NEW.scope_id::text));
     -- An exact-duplicate grant is NOT a new seat: BEFORE INSERT fires ahead of
     -- ON CONFLICT DO NOTHING, so without this exemption every idempotent
     -- re-upsert (invite re-accept, seed re-runs) would raise at the cap
@@ -143,7 +179,6 @@ begin
     ) then
       return NEW;
     end if;
-    perform pg_advisory_xact_lock(hashtext('path_parent_cap'), hashtext(NEW.scope_id::text));
     if (
       select count(*)
       from public.path_role_grants

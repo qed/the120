@@ -59,6 +59,24 @@ describe("TASK_TRANSITION_TARGETS — the hardcoded target the RPC's SQL CASE mi
     expect(Object.keys(sqlMap).sort()).toEqual([...TASK_TRANSITIONS].sort());
   });
 
+  it("the Unit 12 revoke-lock migration's re-created RPC carries the IDENTICAL CASE (fourth encoding pinned)", () => {
+    // 20260723130000 re-creates move_path_task to add the revoke-branch
+    // advisory lock; its copy of the transition CASE must never drift from
+    // the TS map either.
+    const sql = readFileSync(
+      path.resolve(process.cwd(), "supabase/migrations/20260723130000_path_revoke_review_lock.sql"),
+      "utf8"
+    );
+    const arms = [...sql.matchAll(/when\s+'(\w+)'\s+then\s+'([a-z_]+)'/g)];
+    const sqlMap = Object.fromEntries(arms.map((m) => [m[1], m[2]]));
+    for (const t of TASK_TRANSITIONS) {
+      expect(sqlMap[t], `SQL CASE arm for "${t}"`).toBe(TASK_TRANSITION_TARGETS[t]);
+    }
+    expect(Object.keys(sqlMap).sort()).toEqual([...TASK_TRANSITIONS].sort());
+    // The whole point of the file: revoke's review reconcile is now serialized.
+    expect(sql).toContain("pg_advisory_xact_lock");
+  });
+
   it("transitionTarget resolves the map", () => {
     expect(transitionTarget("verify")).toBe("verified");
     expect(transitionTarget("submit")).toBe("submitted");

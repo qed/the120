@@ -17,6 +17,7 @@ import {
   shouldRemintSignedUrl,
   shouldRepairAddedAfterVerification,
   isSafeHttpUrl,
+  evidenceFingerprint,
 } from "../evidence-rules";
 import { logTemplateFor } from "@/app/path/content/log-templates";
 
@@ -344,6 +345,27 @@ describe("selectOrphans — the 7-day reaper closes the quota's blind spot", () 
       nowMs: now,
     });
     expect(out).toEqual(["s/e/x.jpg"]);
+  });
+});
+
+describe("evidenceFingerprint — the verify TOCTOU guard's identity", () => {
+  const a = { id: "a", updatedAt: null, createdAt: "2026-07-22T10:00:00Z" };
+  const b = { id: "b", updatedAt: "2026-07-22T11:00:00Z", createdAt: "2026-07-22T10:30:00Z" };
+
+  it("is order-independent and stable", () => {
+    expect(evidenceFingerprint([a, b])).toBe(evidenceFingerprint([b, a]));
+    expect(evidenceFingerprint([a, b])).toBe(evidenceFingerprint([a, b]));
+  });
+
+  it("changes when an item is added, removed, or MUTATED (a caption edit asks for another look)", () => {
+    const base = evidenceFingerprint([a, b]);
+    expect(evidenceFingerprint([a])).not.toBe(base); // removed
+    expect(evidenceFingerprint([a, b, { id: "c", updatedAt: null, createdAt: "2026-07-22T12:00:00Z" }])).not.toBe(base); // added
+    expect(evidenceFingerprint([a, { ...b, updatedAt: "2026-07-22T12:00:00Z" }])).not.toBe(base); // mutated
+  });
+
+  it("an empty set fingerprints to the empty string — a submit with no evidence still round-trips", () => {
+    expect(evidenceFingerprint([])).toBe("");
   });
 });
 

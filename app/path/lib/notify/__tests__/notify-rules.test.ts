@@ -4,8 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_SEND_ATTEMPTS,
   NOTIFICATION_EVENT_KINDS,
+  NOTIFYING_TRANSITIONS,
   NUDGE_DEFAULT_THRESHOLD_HOURS,
+  RECONCILE_WINDOW_MS,
   SEND_KINDS,
+  STALE_CLAIM_TTL_MS,
+  SUBMIT_NOTIFY_BUCKET_MS,
   buildNudgeSends,
   dueNudges,
   idempotencyKeyFor,
@@ -13,6 +17,7 @@ import {
   interpretSendClaimMiss,
   isSendDue,
   mergePlans,
+  narrowSendKind,
   nudgeSourceKey,
   planForReview,
   planForTaskEvent,
@@ -21,8 +26,10 @@ import {
   reviewReturnedKey,
   sendDedupeKey,
   sendUnclaimOutcome,
+  submittedSourceKey,
   supersedePlan,
   taskEventKey,
+  type LiveEventRow,
   type NotificationPlan,
   type ParentRecipient,
   type ReviewInput,
@@ -37,6 +44,8 @@ const REVIEW = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const MUM: ParentRecipient = { userId: "22222222-2222-2222-2222-222222222222", email: "mum@example.invalid" };
 const DAD: ParentRecipient = { userId: "33333333-3333-3333-3333-333333333333", email: "dad@example.invalid" };
 
+const AT = "2026-07-22T10:00:00.000Z";
+
 function taskEvent(overrides: Partial<TaskEventInput> = {}): TaskEventInput {
   return {
     id: EVENT,
@@ -44,6 +53,7 @@ function taskEvent(overrides: Partial<TaskEventInput> = {}): TaskEventInput {
     taskId: "1.1.1",
     transition: "submit",
     note: null,
+    at: AT,
     ...overrides,
   };
 }
@@ -79,8 +89,32 @@ describe("dedupe keys", () => {
       reviewOpenedKey(REVIEW),
       reviewReturnedKey(REVIEW),
       nudgeSourceKey("tp-1", "2026-07-22T10:00:00.000Z"),
+      submittedSourceKey(STUDENT, "1.1.1", AT),
     ];
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("submit source keys BUCKET by time — cycles inside one bucket share a key, later buckets do not (the flood fix)", () => {
+    const a = submittedSourceKey(STUDENT, "1.1.1", AT);
+    const sameBucket = submittedSourceKey(
+      STUDENT,
+      "1.1.1",
+      new Date(Date.parse(AT) + SUBMIT_NOTIFY_BUCKET_MS - 1000).toISOString()
+    );
+    const nextBucket = submittedSourceKey(
+      STUDENT,
+      "1.1.1",
+      new Date(Date.parse(AT) + SUBMIT_NOTIFY_BUCKET_MS).toISOString()
+    );
+    // AT sits exactly on a bucket boundary (10:00 UTC), so +bucket-1s stays inside.
+    expect(sameBucket).toBe(a);
+    expect(nextBucket).not.toBe(a);
+    // Distinct tasks and students never collide.
+    expect(submittedSourceKey(STUDENT, "1.1.2", AT)).not.toBe(a);
+    // An unparseable timestamp buckets deterministically, never throws.
+    expect(submittedSourceKey(STUDENT, "1.1.1", "garbage")).toBe(
+      submittedSourceKey(STUDENT, "1.1.1", "garbage")
+    );
   });
 
   it("send keys append the recipient so two parents never collide", () => {
@@ -122,6 +156,21 @@ describe("planForTaskEvent", () => {
     );
   });
 
+  it("a submit/withdraw CYCLE inside one bucket derives the SAME send keys — no email flood", () => {
+    const first = planForTaskEvent(taskEvent({ transition: "submit" }), CTX);
+    const replay = planForTaskEvent(
+      taskEvent({
+        id: "dddddddd-dddd-dddd-dddd-dddddddddddd", // a DIFFERENT event row
+        transition: "submit",
+        at: new Date(Date.parse(AT) + 60_000).toISOString(), // one minute later
+      }),
+      CTX
+    );
+    expect(replay.sends.map((s) => s.dedupeKey).sort()).toEqual(
+      first.sends.map((s) => s.dedupeKey).sort()
+    );
+  });
+
   it("a parent with no email is skipped, never a null-recipient row", () => {
     const plan = planForTaskEvent(taskEvent({ transition: "submit" }), {
       ...CTX,
@@ -140,6 +189,7 @@ describe("planForTaskEvent", () => {
       studentId: STUDENT,
       kind: "verified",
       taskId: "1.1.1",
+      occurredAt: AT, // the SOURCE moment — the supersede comparison's clock
       params: { taskId: "1.1.1", note: "Proud of you" },
     });
   });
@@ -202,15 +252,19 @@ describe("planForReview", () => {
     });
   });
 
-  it("returned → a criterion_returned event carrying the reviewer's note", () => {
-    const plan = planForReview(review({ state: "returned", note: "Redo the ledger" }));
+  it("returned → a criterion_returned event carrying the reviewer's note and the decide time", () => {
+    const plan = planForReview(
+      review({ state: "returned", note: "Redo the ledger", openedAt: "2026-07-22T08:00:00Z", decidedAt: "2026-07-22T12:00:00Z" })
+    );
     // BOTH the opened and the returned event are planned — a return implies the
     // open happened; reconcile inserts whichever is missing (dedupe keys differ).
     expect(plan.events).toHaveLength(2);
+    expect(plan.events.find((e) => e.kind === "review_underway")?.occurredAt).toBe("2026-07-22T08:00:00Z");
     const returned = plan.events.find((e) => e.kind === "criterion_returned");
     expect(returned).toMatchObject({
       dedupeKey: reviewReturnedKey(REVIEW),
       scopeId: "1.1",
+      occurredAt: "2026-07-22T12:00:00Z",
       params: { criterionId: "1.1", note: "Redo the ledger" },
     });
   });
@@ -224,30 +278,76 @@ describe("planForReview", () => {
 /* ─────────────────────────────────────────────────────── supersede rules */
 
 describe("supersedePlan", () => {
-  const live = [
-    { id: "e1", kind: "verified", taskId: "1.1.1", scopeId: null, supersededAt: null },
-    { id: "e2", kind: "verified", taskId: "1.1.2", scopeId: null, supersededAt: null },
-    { id: "e3", kind: "review_underway", taskId: null, scopeId: "1.1", supersededAt: null },
-    { id: "e4", kind: "verified", taskId: "1.1.1", scopeId: null, supersededAt: "2026-07-20T00:00:00Z" },
-    { id: "e5", kind: "not_yet", taskId: "1.1.1", scopeId: null, supersededAt: null },
+  // Every fixture event happened at T0; triggers happen at T1 (later).
+  const T0 = "2026-07-22T09:00:00.000Z";
+  const T1 = "2026-07-22T12:00:00.000Z";
+  const T2 = "2026-07-22T15:00:00.000Z"; // AFTER the trigger — the re-verify case
+  const row = (over: Partial<LiveEventRow>): LiveEventRow => ({
+    id: "e?",
+    kind: "verified",
+    taskId: null,
+    scopeId: null,
+    supersededAt: null,
+    occurredAt: T0,
+    createdAt: T0,
+    ...over,
+  });
+  const live: LiveEventRow[] = [
+    row({ id: "e1", kind: "verified", taskId: "1.1.1" }),
+    row({ id: "e2", kind: "verified", taskId: "1.1.2" }),
+    row({ id: "e3", kind: "review_underway", scopeId: "1.1" }),
+    row({ id: "e4", kind: "verified", taskId: "1.1.1", supersededAt: "2026-07-20T00:00:00Z" }),
+    row({ id: "e5", kind: "not_yet", taskId: "1.1.1" }),
   ];
 
   it("a reopened task supersedes ONLY that task's live verified events", () => {
-    const ids = supersedePlan({ kind: "reopened", taskId: "1.1.1" }, live);
+    const ids = supersedePlan({ kind: "reopened", taskId: "1.1.1", occurredAt: T1 }, live);
     expect(ids).toEqual(["e1"]); // e4 already superseded; e2 is another task; e5 is not a celebration
   });
 
   it("a criterion return supersedes the review_underway event and the returned tasks' verified events", () => {
     const ids = supersedePlan(
-      { kind: "criterion_returned", scopeId: "1.1", returnedTaskIds: ["1.1.1", "1.1.2"] },
+      { kind: "criterion_returned", scopeId: "1.1", returnedTaskIds: ["1.1.1", "1.1.2"], occurredAt: T1 },
       live
     );
     expect([...ids].sort()).toEqual(["e1", "e2", "e3"]);
   });
 
+  it("REGRESSION (adversarial P0): a replayed stale trigger never flags an event that happened AFTER it", () => {
+    // revoke at T1 → student redoes → RE-verified at T2. The reconcile cron
+    // re-applies the T1 revoke on every run for the whole window; the fresh
+    // celebration must survive every replay.
+    const withFreshReverify = [
+      ...live,
+      row({ id: "e6", kind: "verified", taskId: "1.1.1", occurredAt: T2 }),
+    ];
+    const ids = supersedePlan({ kind: "reopened", taskId: "1.1.1", occurredAt: T1 }, withFreshReverify);
+    expect(ids).toEqual(["e1"]); // e6 (the re-verify) untouched
+    // Same for a stale attempt-1 return vs attempt-2's fresh review_underway.
+    const withFreshReview = [
+      ...live,
+      row({ id: "e7", kind: "review_underway", scopeId: "1.1", occurredAt: T2 }),
+    ];
+    const returned = supersedePlan(
+      { kind: "criterion_returned", scopeId: "1.1", returnedTaskIds: ["1.1.1"], occurredAt: T1 },
+      withFreshReview
+    );
+    expect(returned.sort()).toEqual(["e1", "e3"]); // e7 untouched
+  });
+
+  it("a pre-occurredAt row falls back to created_at for the temporal comparison", () => {
+    const legacy = [row({ id: "e8", kind: "verified", taskId: "1.1.1", occurredAt: null, createdAt: T0 })];
+    expect(supersedePlan({ kind: "reopened", taskId: "1.1.1", occurredAt: T1 }, legacy)).toEqual(["e8"]);
+  });
+
+  it("a trigger with no usable timestamp supersedes NOTHING (never guess)", () => {
+    expect(supersedePlan({ kind: "reopened", taskId: "1.1.1", occurredAt: null }, live)).toEqual([]);
+    expect(supersedePlan({ kind: "reopened", taskId: "1.1.1", occurredAt: "garbage" }, live)).toEqual([]);
+  });
+
   it("forward-progress kinds never supersede anything (append-only history)", () => {
-    expect(supersedePlan({ kind: "verified", taskId: "1.1.1" }, live)).toEqual([]);
-    expect(supersedePlan({ kind: "not_yet", taskId: "1.1.1" }, live)).toEqual([]);
+    expect(supersedePlan({ kind: "verified", taskId: "1.1.1", occurredAt: T1 }, live)).toEqual([]);
+    expect(supersedePlan({ kind: "not_yet", taskId: "1.1.1", occurredAt: T1 }, live)).toEqual([]);
   });
 });
 
@@ -287,6 +387,19 @@ describe("claim-then-send state machine", () => {
     expect(isSendDue({ sentAt: null, attempts: MAX_SEND_ATTEMPTS - 1 })).toBe(true);
     expect(isSendDue({ sentAt: null, attempts: MAX_SEND_ATTEMPTS })).toBe(false); // parked loudly
     expect(isSendDue({ sentAt: "2026-07-22T10:00:00.000Z", attempts: 1 })).toBe(false);
+  });
+
+  it("narrowSendKind fails closed on anything outside the union (never crash after a claim)", () => {
+    for (const k of SEND_KINDS) expect(narrowSendKind(k)).toBe(k);
+    expect(narrowSendKind("verified")).toBeNull(); // an EVENT kind, not a send kind
+    expect(narrowSendKind("")).toBeNull();
+    expect(narrowSendKind(null)).toBeNull();
+    expect(narrowSendKind(42)).toBeNull();
+  });
+
+  it("the stale-claim TTL is minutes — far inside the 24h idempotency window that makes a reclaim safe", () => {
+    expect(STALE_CLAIM_TTL_MS).toBe(10 * 60 * 1000);
+    expect(STALE_CLAIM_TTL_MS).toBeLessThan(24 * 60 * 60 * 1000);
   });
 });
 
@@ -328,6 +441,33 @@ describe("stall nudges", () => {
       nowMs: NOW,
     });
     expect(due).toHaveLength(1);
+  });
+
+  it("a row with an unparseable submit timestamp is skipped — never a NaN-hours nudge", () => {
+    expect(
+      dueNudges({
+        submitted: [{ taskProgressId: "tp-x", studentId: STUDENT, taskId: "1.1.1", submitReceivedAt: "not-a-date" }],
+        thresholdHours: 72,
+        existingSourceKeys: new Set(),
+        nowMs: NOW,
+      })
+    ).toEqual([]);
+  });
+
+  it("buildNudgeSends skips a parent with no email, like every other send derivation", () => {
+    const [due] = dueNudges({
+      submitted: [submitted(80)],
+      thresholdHours: 72,
+      existingSourceKeys: new Set(),
+      nowMs: NOW,
+    });
+    const sends = buildNudgeSends(due, {
+      parents: [MUM, { userId: DAD.userId, email: null }],
+      studentFirstName: "Maya",
+      taskTitle: "Make your pitch",
+    });
+    expect(sends).toHaveLength(1);
+    expect(sends[0].recipientUserId).toBe(MUM.userId);
   });
 
   it("nudges once per submit cycle — an existing source key suppresses; a re-submit re-arms", () => {
@@ -390,7 +530,11 @@ describe("stall nudges", () => {
 describe("reconcilePlan", () => {
   it("plans only what is missing — existing dedupe keys are skipped", () => {
     const verifyEvent = taskEvent({ transition: "verify", note: "Nice" });
-    const submitEvent = taskEvent({ id: "cccccccc-cccc-cccc-cccc-cccccccccccc", transition: "submit" });
+    const submitEvent = taskEvent({
+      id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      transition: "submit",
+      taskId: "1.1.2", // distinct task: distinct bucketed source key
+    });
     const full = mergePlans([
       planForTaskEvent(verifyEvent, CTX),
       planForTaskEvent(submitEvent, CTX),
@@ -407,7 +551,7 @@ describe("reconcilePlan", () => {
     // Simulate: the verify event row and ONE parent's submit send already exist.
     const existingEventKeys = new Set([taskEventKey(EVENT)]);
     const existingSendKeys = new Set([
-      sendDedupeKey(taskEventKey("cccccccc-cccc-cccc-cccc-cccccccccccc"), MUM.userId),
+      sendDedupeKey(submittedSourceKey(STUDENT, "1.1.2", AT), MUM.userId),
     ]);
     const missing = reconcilePlan(full, { existingEventKeys, existingSendKeys });
     expect(missing.events.map((e) => e.dedupeKey).sort()).toEqual([reviewOpenedKey(REVIEW)]);
@@ -456,6 +600,28 @@ describe("migration and config parity", () => {
 
   it("no CASCADE anywhere in the notifications migration (RESTRICT posture, PII scope)", () => {
     expect(migration.toLowerCase()).not.toContain("on delete cascade");
+  });
+
+  it("the claim/success split and the occurred_at clock exist in the schema", () => {
+    expect(tableBlock("path_notification_sends")).toContain("claimed_at timestamptz");
+    expect(tableBlock("path_notification_events")).toContain("occurred_at timestamptz");
+  });
+
+  it("privilege posture survives edits: RLS enabled on both tables, RPC revoked from anon/authenticated", () => {
+    // A refactor that silently drops these lines must fail a test, not a
+    // production audit (security review).
+    expect(migration).toContain("alter table public.path_notification_events enable row level security");
+    expect(migration).toContain("alter table public.path_notification_sends enable row level security");
+    expect(migration).toMatch(/revoke all on function public\.return_path_criterion[^;]+from anon, authenticated/);
+    expect(migration).toMatch(/grant execute on function public\.return_path_criterion[^;]+to service_role/);
+  });
+
+  it("NOTIFYING_TRANSITIONS is the single derived source (pin its contents)", () => {
+    expect([...NOTIFYING_TRANSITIONS].sort()).toEqual(["not_yet", "revoke", "submit", "verify"]);
+  });
+
+  it("the reconcile window is sized for the healer, not an archive scan (24h)", () => {
+    expect(RECONCILE_WINDOW_MS).toBe(24 * 60 * 60 * 1000);
   });
 
   it("vercel.json schedules BOTH the notification cron and the evidence reaper", () => {

@@ -243,6 +243,10 @@ export type TransitionFailureReason =
   | "forbidden"
   | "unavailable"
   | "diverged"
+  /** The evidence set changed between what the reviewer LOADED and their
+   *  verify click (withdraw + resubmit swap) — look again, then re-verify
+   *  (Unit 12 adversarial TOCTOU guard). */
+  | "evidence_changed"
   | "retry";
 
 /**
@@ -323,6 +327,32 @@ export type ReturnOutcome =
   | { kind: "retry" }
   /** No review row exists for the criterion at all. */
   | { kind: "not_found" };
+
+/** The winning decider a losing return caller is shown (never an error). */
+export type ReturnWinner = { decidedBy: string | null; decidedAt: string | null };
+
+/**
+ * The criterion-return action's client-facing result. Lives HERE — the plain
+ * core — because a `"use server"` file's export list is actions only (the
+ * use-server-type-reexport learning); `actions/review.ts` imports it exactly
+ * as `actions/transition.ts` imports `TransitionResult`.
+ */
+export type CriterionReturnActionResult =
+  | { ok: true; byCaller: boolean; winner?: ReturnWinner }
+  | {
+      ok: false;
+      reason:
+        | "invalid_input"
+        | "not_found"
+        | "forbidden"
+        | "unavailable"
+        | "not_in_review"
+        | "note_required"
+        | "unknown_returned_task"
+        | "nothing_to_return"
+        | "stale_review"
+        | "retry";
+    };
 
 /**
  * Interpret the return RPC's echo against the attempt the reviewer SAW. The

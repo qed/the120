@@ -384,6 +384,9 @@ export type EvidenceReadRow = {
   redactedAt: string | null;
   addedAfterVerification: boolean;
   createdAt: string;
+  /** Last mutation time — participates in the review queue's evidence-set
+   *  fingerprint (a caption edit also asks the reviewer for another look). */
+  updatedAt: string | null;
 };
 
 /**
@@ -402,7 +405,7 @@ export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise
   const { data, error } = await db
     .from("path_evidence_items")
     .select(
-      "id, kind, object_path, poster_object_path, content_type, caption, link_url, log_data, signed_url, signed_url_expires_at, poster_signed_url, poster_signed_url_expires_at, redacted_at, added_after_verification, created_at"
+      "id, kind, object_path, poster_object_path, content_type, caption, link_url, log_data, signed_url, signed_url_expires_at, poster_signed_url, poster_signed_url_expires_at, redacted_at, added_after_verification, created_at, updated_at"
     )
     .eq("task_progress_id", taskProgressId)
     .order("created_at", { ascending: true });
@@ -460,6 +463,7 @@ export async function loadEvidenceViews(db: Db, taskProgressId: string): Promise
         redactedAt,
         addedAfterVerification: r.added_after_verification === true,
         createdAt: r.created_at as string,
+        updatedAt: (r.updated_at as string | null) ?? null,
       };
     })
   );
@@ -616,18 +620,22 @@ async function listAllObjects(db: Db): Promise<{ path: string; createdAtMs: numb
 }
 
 /** The set of object paths that DO have a confirmed evidence row (object + poster,
- *  including redacted tombstones whose object is already gone). PAGINATED:
- *  PostgREST caps a read at ~1000 rows, and a silently truncated confirmed-set
- *  would make the reaper DELETE CONFIRMED OBJECTS — the one direction this
- *  function must never fail in. */
+ *  including redacted tombstones whose object is already gone). PAGINATED with a
+ *  KEYSET cursor on `id` (not offset — a concurrent insert sorting before the
+ *  current offset would shift pages and silently SKIP a row, and a truncated
+ *  confirmed-set would make the reaper DELETE CONFIRMED OBJECTS — the one
+ *  direction this function must never fail in). */
 async function loadConfirmedObjectPaths(db: Db): Promise<Set<string>> {
   const set = new Set<string>();
-  for (let offset = 0; ; offset += REAPER_PAGE_SIZE) {
-    const { data, error } = await db
+  let cursor: string | null = null;
+  for (;;) {
+    let query = db
       .from("path_evidence_items")
-      .select("object_path, poster_object_path")
+      .select("id, object_path, poster_object_path")
       .order("id", { ascending: true })
-      .range(offset, offset + REAPER_PAGE_SIZE - 1);
+      .limit(REAPER_PAGE_SIZE);
+    if (cursor !== null) query = query.gt("id", cursor);
+    const { data, error } = await query;
     if (error) throw new Error(`loadConfirmedObjectPaths failed: ${error.message}`);
     const page = data ?? [];
     for (const r of page) {
@@ -637,15 +645,18 @@ async function loadConfirmedObjectPaths(db: Db): Promise<Set<string>> {
       if (pp) set.add(pp);
     }
     if (page.length < REAPER_PAGE_SIZE) break;
+    cursor = page[page.length - 1].id as string;
   }
   return set;
 }
 
 /**
- * Reap orphaned objects — those with no confirmed evidence row, older than 48h
- * (`selectOrphans`). Deletes via the Storage API in one call (NEVER SQL). Returns
- * how many were reaped and how many were considered. Closes the quota's blind spot:
- * an abandoned upload has no size metadata and is invisible to the byte-sum.
+ * Reap orphaned objects — those with no confirmed evidence row, older than the
+ * ORPHAN_MIN_AGE_MS window (7 days — see evidence-rules.ts for why it widened
+ * from 48h; `selectOrphans` decides). Deletes via the Storage API in one call
+ * (NEVER SQL). Returns how many were reaped and how many were considered.
+ * Closes the quota's blind spot: an abandoned upload has no size metadata and
+ * is invisible to the byte-sum.
  */
 export async function reapOrphans(
   db: Db,

@@ -25,9 +25,10 @@
  */
 
 import { escapeHtml } from "@/app/crm/lib/library-rules";
+import { SITE_URL } from "@/app/lib/site";
 import type { SendKind } from "./notify-rules";
 
-export const REVIEW_QUEUE_URL = "https://the120.school/path/review";
+export const REVIEW_QUEUE_URL = `${SITE_URL}/path/review`;
 
 export type RenderedEmail = { subject: string; html: string; text: string };
 

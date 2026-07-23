@@ -33,6 +33,7 @@ import { StatusChip } from "@/app/path/components/system/StatusChip";
 import { phaseColor, phaseColorAlpha } from "@/app/path/components/system/phases";
 import { EvidenceList, type EvidenceItemView } from "@/app/path/components/EvidenceList";
 import { EvidenceUploader } from "@/app/path/components/EvidenceUploader";
+import { NotYetPanel } from "@/app/path/components/NotYetPanel";
 import { VideoCapture, type CapturedVideo } from "@/app/path/components/VideoCapture";
 import { LogTable } from "@/app/path/components/LogTable";
 import { EmptyEvidence } from "@/app/path/components/EmptyStates";
@@ -238,16 +239,28 @@ export function TaskSurface(props: TaskSurfaceProps) {
       const result = await applyTransition({ studentId, taskId, transition });
       if (!mountedRef.current) return false;
       if (result.ok) {
-        if (!result.byCaller && result.winner?.verifiedBy) {
-          // Superseded — someone else got it there. Never claim "you did it".
-          setNotice({ tone: "info", text: "Already done — this had just been handled elsewhere." });
+        if (!result.byCaller) {
+          // Superseded — the task reached this state, but not through this
+          // tap (another tab, a queued sync, or an adult acting first). The
+          // goal holds; never claim "you did it" (Unit 12 → 16 carry: the
+          // richer copy names WHAT happened, register-true).
+          setNotice({
+            tone: "info",
+            text: result.winner?.verifiedBy
+              ? skin === "trail"
+                ? "A grown-up already stamped this one — the moment is waiting in Your news!"
+                : "Already verified — the verification is in your notifications."
+              : skin === "trail"
+                ? "Already done — this step had just been moved along somewhere else (maybe another tab)."
+                : "Already done — this had just been handled elsewhere (another tab or a queued sync).",
+          });
         }
         return true;
       }
       handleFailure(result.reason);
       return false;
     },
-    [studentId, taskId, handleFailure]
+    [studentId, taskId, skin, handleFailure]
   );
 
   /** After a successful capture: the tested choreography rule (the state
@@ -738,6 +751,13 @@ export function TaskSurface(props: TaskSurfaceProps) {
         <p className={cn("font-path-body text-[13px] leading-normal", ink)}>{props.doneWhen}</p>
       </div>
 
+      {/* the Not Yet moment — the reviewer's note BESIDE the Done-when line
+          (brief §5.2; Unit 16's NotYetPanel, extracted from the Unit 14
+          inline block): information, not judgement. */}
+      {state === "not_yet" && props.decision?.kind === "not_yet" && (
+        <NotYetPanel skin={skin} note={props.decision.note} className="mb-3.5" />
+      )}
+
       {props.variant && (
         <div className={cn("mb-3 rounded-xl border px-3.5 py-2.5", cardBorder, surface)}>
           <div className={cn("mb-1 font-path-body text-[9.5px] font-bold uppercase tracking-[0.06em]", trail ? "text-trail-ink-soft" : "text-hq-ink-muted")}>
@@ -766,22 +786,6 @@ export function TaskSurface(props: TaskSurfaceProps) {
           </span>
           <p className={cn("font-path-body text-[11.5px] leading-snug", inkSoft)}>
             <b className={ink}>Safety:</b> {props.safetyFlags.map((f) => SAFETY_COPY[f]).join(" ")}
-          </p>
-        </div>
-      )}
-
-      {/* reviewer decision — the adult's words are the best reward in the system */}
-      {state === "not_yet" && props.decision?.kind === "not_yet" && (
-        <div className="mb-4 rounded-[14px] border-[1.5px] border-not-yet/30 bg-not-yet/10 px-3.5 py-3">
-          <div className={cn("mb-1 flex items-center gap-2 font-path-body text-sm font-semibold", ink)}>
-            <span className="text-not-yet">
-              <Icon name="circle-dot" size={16} />
-            </span>
-            Not yet — and that&rsquo;s okay.
-          </div>
-          <p className={cn("font-path-body text-[12.5px] leading-snug", inkSoft)}>{props.decision.note}</p>
-          <p className={cn("mt-2 font-path-body text-[11.5px]", inkSoft)}>
-            Your evidence is safe. Fix the one thing and try again — not done, <i>yet</i>.
           </p>
         </div>
       )}

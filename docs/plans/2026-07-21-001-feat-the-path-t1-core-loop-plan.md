@@ -1,7 +1,8 @@
 ---
 title: "feat: The Path T1 — the core loop at /path"
 type: feat
-status: active
+status: completed
+completed: 2026-07-23
 date: 2026-07-21
 deepened: 2026-07-21
 origin: docs/brainstorms/2026-07-21-the-path-app-requirements.md
@@ -872,7 +873,7 @@ browser                    Server Action            Supabase Storage
 
 ---
 
-- [ ] **Unit 16: Tier 1 celebration, the Not Yet moment, and the in-app notification surface**
+- [x] **Unit 16: Tier 1 celebration, the Not Yet moment, and the in-app notification surface**
 
 **Goal:** The moment the loop pays off, and the only guaranteed channel an under-13 student has.
 
@@ -899,6 +900,10 @@ browser                    Server Action            Supabase Storage
 - Error path: an event referencing a deleted task is skipped with a note, never rendered blank.
 
 **Verification:** an under-13 student with no inbox learns of a verification and of a Not Yet, entirely in-app.
+
+**Prerequisite findings / applied state (2026-07-22/23):** the R27 store's first reader shipped: pure `celebration-tier1-rules.ts` (ordering by coalesce(occurred_at, created_at) with deterministic tie-breaks; replay plan = unseen+live+resolvable → ordered moments, superseded/unresolvable → `stampWithoutPlaying` cursor advances with NO re-celebration; supersede pairing renders past-tense with the correction inline, matched by reversal shape + superseded_at PROXIMITY so multi-cycle returns attribute the right ceremony; unknown kind / deleted task → skipped-with-a-note, never blank; register copy resolved at read time from the caller's skin — NOTHING rendered is stored), `notifications-loader.ts` (program-pinned resolvers per D27), `TaskVerifiedMoment.tsx` (non-modal fixed-corner host, ~3.2s/moment, wax thump + user-activation-gated chime on Trail / chip-flip + meter tick on HQ, reduced-motion suppresses motion never the moment, seen stamped per moment played, keyed by studentId so a shared-device session switch discards the queue), `NotYetPanel.tsx` beside the Done-when line (copy single-sourced via `NOT_YET_COPY`), `/path/notifications` feed + `MarkSeenOnMount` (stamps via Server Action on mount, never a mutation on GET), agent-parity `actions/notifications-read.ts` + `actions/notifications.ts` (student-self-only, `seen_at IS NULL` one-way fence, ids chunked to the shared `MAX_SEEN_IDS_PER_CALL`), shell nav item + badge + phone bell. **Found live and fixed:** `decisionFromEvents` dropped `criterion_return` notes AND journey-loader's hand-listed SQL pre-filter dropped them independently — a returned task showed a bare chip; both now consume one exported `DECISION_TRANSITIONS` (`satisfies readonly TransitionName[]`). **Verified live on prod data (test family):** Maya's 9-event fixture replayed 7 moments in source-moment order (DB seen_at stamps narrate the cadence; both superseded events batch-stamped WITHOUT playing), feed renders past-tense + corrections + notes verbatim (em-dashes intact), full live loop (submit 1.2.2 → parent verify with comment → student sees the moment + meter 6/125 + badge), feed-page mount-stamp (unseen 0 in DB), replay-once-then-stamped on reload, badge 7→0 via post-drain refresh. Reduced-motion: CSS media block verified in compiled output + per-component gates mirror the Unit-13-verified Seal/TrailStep pattern (OS-level emulation not reachable from this harness — on Peter's device checklist). Carries applied: ReviewPanel scaffolding extracted (`useReviewCardScaffolding`), vanishing-card toast (per-cycle `taskCardKey`), richer superseded/diverged copy in ReviewPanel AND TaskSurface. 14-agent `/ce:review` (13 reviewers + fixer): 0 P0; 1 P1 (unchunked seen-stamp vs the zod ceiling — 3-reviewer agreement) + 9 P2 + 7 P3 all applied; security/standards/learnings clean; run artifact `.context/compound-engineering/ce-review/2026-07-22-unit16/run.md`. Compound learning: docs/solutions/best-practices/pure-decision-function-starved-by-hand-listed-sql-prefilter-export-one-allowlist-satisfies-pinned-2026-07-22.md. Verified: 1577/1577 runnable assertions (2 suites still ENOENT from the uncommitted artifacts rename, now `artifacts/First Profit/`), tsc clean, eslint clean on changed files, env-less build passes.
+
+**Carried out of Unit 16's review — recorded in the T2 plan's context:** two-tab replay double-play (needs cross-tab coordination); display-time supersede TOCTOU (a reversal landing mid-replay still plays; correction surfaces on feed/task page — accepted T1 residual); twin same-name confirm UX (U15 carry — U16 never touched the create path); Trail pending-Seal/locked-Crest neutrals design sign-off (U13 carry, still open — Peter); FEED_ROW_CAP=400 with no truncation indicator; tone-icon map + `/path/notifications` route string each spelled twice; FeedItem tone/correction as a discriminated union; TaskVerifiedMoment hosts all tones despite its name (revisit when Tier 2–3 land); chime is user-activation-gated WebAudio (silent before first gesture — flag to Peter for the device pass).
 
 ## System-Wide Impact
 
@@ -941,9 +946,10 @@ browser                    Server Action            Supabase Storage
 
 ## Next Steps
 
-Implement this plan with `/ce:work docs/plans/2026-07-21-001-feat-the-path-t1-core-loop-plan.md`.
+**T1 COMPLETE (2026-07-23).** All sixteen units shipped, reviewed, and merged. **T1-exit check against "a family can work criterion 1.1 end to end":** verified with the TEST family on desktop browsers — provisioning/link/sign-in (R1–R3), capture/submit/verify/Not-Yet/return/celebrate at Tier 1 (§5, §9.1–9.3), offline queue + sync (R17), durable parent notification (Decision 8) and the in-app under-13 channel (R27), all live against prod. What genuinely waits on a REAL family + Peter's devices: the iPhone half (install sheet, IDB volume spike, airplane-mode capture, 40 MB mid-upload resume, phone-shell polish pass — the Unit 11 checklist), OS-level reduced-motion + the chime on real hardware, the Trail pending-Seal/locked-Crest neutrals design sign-off (U13), and the TP-1 test-families-only posture itself. Reduced form per the Overview: the crest reveal and Criterion Recap that CLOSE 1.1's ceremony are T2 Units 5/8 by design.
 
-**Nothing blocks this plan. Start at Unit 1.**
+**The next step is:**
+`/ce:work docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md` — T2, *The Year*. **Do not start T2 before Peter signs off on the real-family verification above.** Every T2 unit assumes the state machine, evidence pipeline, and notification transport are trustworthy.
 
 The items previously listed here were resolved or deferred on 2026-07-21. Data residency is **cleared by counsel**. The remaining compliance review (`TP-1`, on/after 2026-10-21), kid-register authoring (`TP-2`, before Trail meets Grades 3–5), and the Vercel/Supabase tier checks (`TP-3`, at 30 users) all live in `artifacts/roadmap.md` and none of them gates this build.
 

@@ -643,6 +643,21 @@ describe("decisionFromEvents — the reviewer's words on the task page", () => {
     ).toEqual({ kind: "not_yet", note: "Reopening — let's redo the log." });
   });
 
+  it("a CRITERION RETURN surfaces its note as the not-yet explanation (Unit 16; the migration writes one 'criterion_return' event per returned task exactly so this note lands on the task page)", () => {
+    expect(
+      decisionFromEvents([
+        { transition: "criterion_return", note: "Redo the delivery with a stranger." },
+        { transition: "verify", note: "Stale old praise." },
+      ])
+    ).toEqual({ kind: "not_yet", note: "Redo the delivery with a stranger." });
+  });
+
+  it("a phase_return note surfaces the same way (modeled for T2 — never a bare chip)", () => {
+    expect(
+      decisionFromEvents([{ transition: "phase_return", note: "The whole territory needs one more pass." }])
+    ).toEqual({ kind: "not_yet", note: "The whole territory needs one more pass." });
+  });
+
   it("a noteless latest decision shows NOTHING — never a stale older note", () => {
     expect(
       decisionFromEvents([

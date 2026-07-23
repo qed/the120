@@ -32,7 +32,7 @@
 
 import type { Band, Criterion, DeepReadonly, Phase, ProgramContent, UnitTask } from "@/app/path/content/types";
 import type { Skin } from "./skin-tokens";
-import type { TaskState } from "./transition-table";
+import type { TaskState, TransitionName } from "./transition-table";
 
 // ── skin resolution ───────────────────────────────────────────────────────────
 
@@ -344,20 +344,35 @@ export function latestReviewStateByCriterion(
 
 /**
  * The latest reviewer decision to show on a task, from its event history
- * (newest first). `verify` carries the verifier's comment; `not_yet` AND
- * `revoke` both surface as the not-yet note — a revoke's note is the reason
- * the adult reverted, which is exactly what the student needs to see (the
- * Unit 14 correctness review: excluding revoke left a bare not_yet chip with
- * no explanation). Events without a note are skipped — an older noted
- * decision beats a newer silent one only when the newer one said nothing.
+ * (newest first). `verify` carries the verifier's comment; `not_yet`,
+ * `revoke`, `criterion_return`, and `phase_return` all surface as the
+ * not-yet note — each is the reason an adult sent the task back, which is
+ * exactly what the student needs to see. The Unit 14 correctness review
+ * caught the revoke omission (a bare not_yet chip with no explanation);
+ * Unit 16's live drill caught the same class for criterion_return — the
+ * migration writes one 'criterion_return' event per returned task precisely
+ * so this note lands beside the Done-when line. Events without a note are
+ * skipped — an older noted decision beats a newer silent one only when the
+ * newer one said nothing.
  */
+export const DECISION_TRANSITIONS = [
+  "verify",
+  "not_yet",
+  "revoke",
+  "criterion_return",
+  "phase_return",
+  // `satisfies` pins every member to the engine's TransitionName union — a
+  // typo'd or renamed transition is a compile error here, not a silently
+  // non-matching SQL filter (the exact drift this list exists to prevent).
+] as const satisfies readonly TransitionName[];
+
+const DECISION_TRANSITION_SET: ReadonlySet<string> = new Set(DECISION_TRANSITIONS);
+
 export function decisionFromEvents(
   eventsNewestFirst: readonly { transition: string; note: string | null }[]
 ): { kind: "verified" | "not_yet"; note: string } | null {
   for (const event of eventsNewestFirst) {
-    if (event.transition !== "verify" && event.transition !== "not_yet" && event.transition !== "revoke") {
-      continue;
-    }
+    if (!DECISION_TRANSITION_SET.has(event.transition)) continue;
     if (!event.note) return null; // the LATEST decision said nothing — show nothing stale
     return { kind: event.transition === "verify" ? "verified" : "not_yet", note: event.note };
   }

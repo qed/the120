@@ -15,6 +15,7 @@ import {
   reconcileMetadata,
   selectOrphans,
   shouldRemintSignedUrl,
+  shouldRepairAddedAfterVerification,
   isSafeHttpUrl,
 } from "../evidence-rules";
 import { logTemplateFor } from "@/app/path/content/log-templates";
@@ -362,5 +363,20 @@ describe("exported caps", () => {
   it("the in-app recording cap is a modest number of seconds (D21 / storage bill)", () => {
     expect(MAX_VIDEO_RECORDING_SECONDS).toBeGreaterThanOrEqual(60);
     expect(MAX_VIDEO_RECORDING_SECONDS).toBeLessThanOrEqual(90);
+  });
+});
+
+describe("shouldRepairAddedAfterVerification — the Unit 11 rebase repair (R6)", () => {
+  it("repairs a stale false when the task is verified at post-insert re-read", () => {
+    expect(shouldRepairAddedAfterVerification({ stored: false, currentlyVerified: true })).toBe(true);
+  });
+
+  it("never un-flags — true stays true even if the task moved off verified", () => {
+    expect(shouldRepairAddedAfterVerification({ stored: true, currentlyVerified: false })).toBe(false);
+    expect(shouldRepairAddedAfterVerification({ stored: true, currentlyVerified: true })).toBe(false);
+  });
+
+  it("no repair when the task is not verified", () => {
+    expect(shouldRepairAddedAfterVerification({ stored: false, currentlyVerified: false })).toBe(false);
   });
 });

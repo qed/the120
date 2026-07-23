@@ -352,6 +352,22 @@ export async function updateEvidenceCaption(
   return (data ?? []).length > 0;
 }
 
+/**
+ * The Unit 11 rebase repair (R6): flip a stale `added_after_verification` from
+ * false to TRUE after a post-insert re-read found the task verified. One-
+ * directional by construction — the WHERE pins `= false`, so a legitimate true
+ * can never be un-flagged, and re-running is a no-op. A zero-row match is fine
+ * (the flag was already correct, or the row was redacted in between).
+ */
+export async function repairAddedAfterVerification(db: Db, evidenceId: string): Promise<void> {
+  const { error } = await db
+    .from("path_evidence_items")
+    .update({ added_after_verification: true, updated_at: new Date().toISOString() })
+    .eq("id", evidenceId)
+    .eq("added_after_verification", false);
+  if (error) throw new Error(`repairAddedAfterVerification(${evidenceId}) failed: ${error.message}`);
+}
+
 /* ------------------------------------------------------------- read views */
 
 /** One evidence item as the task surface renders it (EvidenceList's shape,

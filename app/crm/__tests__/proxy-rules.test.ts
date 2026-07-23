@@ -64,6 +64,14 @@ describe("isUnguarded", () => {
     expect(isUnguarded("/path/invites/x")).toBe(false);
     expect(isUnguarded("/path/invite-x")).toBe(false);
   });
+
+  it("the apple-touch-icon is unguarded — iOS fetches it session-less during Add to Home Screen (Unit 11)", () => {
+    expect(isUnguarded("/path/apple-icon.png")).toBe(true);
+    // Next may append a content-hash query/suffix to file-convention icons.
+    expect(isUnguarded("/path/apple-icon-abc123.png")).toBe(true);
+    // The gate itself is unchanged for everything nearby.
+    expect(isUnguarded("/path/apple")).toBe(false);
+  });
 });
 
 describe("resolveProxyOutcome — /crm (unchanged behaviour)", () => {

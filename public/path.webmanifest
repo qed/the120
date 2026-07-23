@@ -1,0 +1,23 @@
+{
+  "name": "The Path",
+  "short_name": "The Path",
+  "description": "Real-world evidence, verified by your family — The 120's entrepreneurship curriculum.",
+  "id": "/path",
+  "start_url": "/path",
+  "scope": "/path",
+  "display": "standalone",
+  "background_color": "#f8f4ec",
+  "theme_color": "#e0562b",
+  "icons": [
+    {
+      "src": "/path-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/path-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

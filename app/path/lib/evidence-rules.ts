@@ -203,6 +203,24 @@ export function decideEvidenceMutation(input: {
   return input.latched ? { ok: false, reason: "append_only" } : { ok: true };
 }
 
+/**
+ * The Unit 11 rebase repair (R6, the U10 carry-forward): `confirmUploadedEvidence`
+ * snapshots `added_after_verification` from the task state read BEFORE its meta
+ * reads and mints — a verify landing inside that I/O window yields a stale
+ * `false`, silently violating R6 ("no evidence lands on a verified task
+ * invisibly"). After the insert, the action re-reads the task and repairs
+ * one-directionally: false→true when the task is NOW verified. Never true→false
+ * — when the ordering is ambiguous (the verify and the confirm raced), erring
+ * toward reviewer VISIBILITY is the honest side, and a flag on evidence that
+ * arrived at the verification boundary is mild; invisible evidence is not.
+ */
+export function shouldRepairAddedAfterVerification(input: {
+  stored: boolean;
+  currentlyVerified: boolean;
+}): boolean {
+  return !input.stored && input.currentlyVerified;
+}
+
 // ── Redaction blast radius ──────────────────────────────────────────────────────
 
 export type RedactionPlan = {

@@ -38,6 +38,7 @@ import {
   decideEvidenceMutation,
   isSafeHttpUrl,
   reconcileMetadata,
+  shouldRepairAddedAfterVerification,
   type UploadEvidenceKind,
 } from "@/app/path/lib/evidence-rules";
 import {
@@ -48,6 +49,7 @@ import {
   mintSignedDownloadUrl,
   readObjectMeta,
   redactEvidence,
+  repairAddedAfterVerification,
   resolveEvidenceOwner,
   resolveTaskProgress,
   updateEvidenceCaption,
@@ -253,6 +255,23 @@ export async function confirmUploadedEvidence(input: unknown): Promise<ConfirmEv
     return { ok: false, reason: "invalid_input" };
   }
 
+  // R6 rebase repair (Unit 11): `addedAfterVerification` was snapshotted BEFORE
+  // the meta reads and mints above — a verify landing inside that window would
+  // leave a stale false, silently violating R6. Re-read once and repair
+  // one-directionally (false→true only; ambiguity errs toward reviewer
+  // visibility). Best-effort: a repair hiccup must never fail a landed confirm —
+  // the row exists and is correct except possibly this flag.
+  if (!addedAfterVerification) {
+    try {
+      const now = await resolveTaskProgress(db, student.studentId, p.taskId);
+      if (shouldRepairAddedAfterVerification({ stored: false, currentlyVerified: now?.state === "verified" })) {
+        await repairAddedAfterVerification(db, p.evidenceId);
+      }
+    } catch (e) {
+      console.error(`[path/confirm] added_after_verification repair failed for ${p.evidenceId} (non-fatal):`, e);
+    }
+  }
+
   return { ok: true, evidenceId: p.evidenceId, kind, sizeBytes: rec.storedSizeBytes, sizeMismatch: rec.sizeMismatch, hashDuplicateOf: decision.hashDuplicateOf, idempotent: false };
 }
 
@@ -434,6 +453,19 @@ export async function addLinkEvidence(input: unknown): Promise<AddLinkResult> {
   if (!inserted.ok) {
     console.error(`[path/link] evidenceId ${p.evidenceId} conflicts with an existing row's owner`);
     return { ok: false, reason: "invalid_input" };
+  }
+
+  // Same R6 rebase repair as confirm (smaller window here — one read between the
+  // snapshot and the insert — but the same class). Best-effort, never fatal.
+  if (task.state !== "verified") {
+    try {
+      const now = await resolveTaskProgress(db, student.studentId, p.taskId);
+      if (shouldRepairAddedAfterVerification({ stored: false, currentlyVerified: now?.state === "verified" })) {
+        await repairAddedAfterVerification(db, p.evidenceId);
+      }
+    } catch (e) {
+      console.error(`[path/link] added_after_verification repair failed for ${p.evidenceId} (non-fatal):`, e);
+    }
   }
   return { ok: true, evidenceId: p.evidenceId, idempotent: false };
 }

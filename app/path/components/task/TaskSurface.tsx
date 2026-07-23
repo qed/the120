@@ -24,7 +24,7 @@
  *   - SyncStatus is Unit 11's seam — deliberately NOT invented here.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/app/path/components/system/cn";
@@ -36,7 +36,18 @@ import { EvidenceUploader } from "@/app/path/components/EvidenceUploader";
 import { VideoCapture, type CapturedVideo } from "@/app/path/components/VideoCapture";
 import { LogTable } from "@/app/path/components/LogTable";
 import { EmptyEvidence } from "@/app/path/components/EmptyStates";
-import { uploadEvidenceFile, type SlotRefusal } from "@/app/path/components/upload-client";
+import { SyncStatus } from "@/app/path/components/SyncStatus";
+import { probeVideoDuration, uploadEvidenceFile, type SlotRefusal } from "@/app/path/components/upload-client";
+import { getEntry, isQueueSupported } from "@/app/path/lib/offline-queue";
+import {
+  drainQueue,
+  enqueueLink,
+  enqueueLog,
+  enqueueMediaCapture,
+  enqueueSubmit,
+  type DrainContext,
+} from "@/app/path/lib/sync-engine";
+import { isSafeHttpUrl } from "@/app/path/lib/evidence-rules";
 import {
   addLinkEvidence,
   confirmUploadedEvidence,
@@ -103,6 +114,10 @@ type ConfirmParams = {
   capturedAt: string;
 };
 
+/** A never-firing subscription for capability snapshots (useSyncExternalStore
+ *  wants one; browser capability never changes within a session). */
+const noSubscription = () => () => {};
+
 /** Next's redirect() control-flow throw (the auth guard firing before the
  *  action body) — must route to sign-in, never a generic "try again". */
 function isNextRedirect(e: unknown): boolean {
@@ -133,10 +148,16 @@ export function TaskSurface(props: TaskSurfaceProps) {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [videoProgress, setVideoProgress] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
   const [captionDraft, setCaptionDraft] = useState<{ id: string; text: string } | null>(null);
+  /** LEGACY-mode only (no IndexedDB): the in-memory confirm-retry params. The
+   *  durable queue replaced this for every queue-supported browser (Unit 11). */
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmParams | null>(null);
+  /** Whether the durable capture queue exists in this browser (Unit 11).
+   *  A capability snapshot: false during SSR/hydration (server snapshot), the
+   *  real answer on the client — no setState-in-effect, no hydration drift. */
+  const queueSupported = useSyncExternalStore(noSubscription, isQueueSupported, () => false);
   const mountedRef = useRef(true);
   const videoUploadRef = useRef<import("tus-js-client").Upload | null>(null);
   // A fresh log's evidence identity, stable across edits until it lands.
@@ -247,19 +268,50 @@ export function TaskSurface(props: TaskSurfaceProps) {
     }
   }, [state, runTransition]);
 
+  /** Queue the submit for the next foreground signal (Unit 11 — R30: the
+   *  client submit time is recorded NOW, at intent, not at drain). */
+  const queueSubmit = useCallback(async () => {
+    const enqueued = await enqueueSubmit({ studentId, taskId });
+    if (!mountedRef.current) return;
+    if (enqueued.ok) {
+      setNotice({
+        tone: "info",
+        text: trail
+          ? "Your satchel's packed! It'll send for review the moment you're back online."
+          : "Saved — your submit will send the moment you're back online.",
+      });
+    } else {
+      setNotice({ tone: "amber", text: "You're offline and this browser can't save the submit — try again when you're connected." });
+    }
+  }, [studentId, taskId, trail]);
+
   const submit = useCallback(
     () =>
       runGuarded("submit", async () => {
-        // submit runs from in_progress; chain the state there first when needed.
-        for (const transition of transitionsBeforeSubmit(state)) {
-          if (!(await runTransition(transition))) return;
+        // Known-offline: queue immediately (the transition chain is re-derived
+        // from real server state at drain — the rebase, Decision 10).
+        if (queueSupported && navigator.onLine === false) {
+          await queueSubmit();
+          return;
         }
-        if (await runTransition("submit")) {
-          setNotice({ tone: "info", text: trail ? "Your satchel's in!" : "Submitted for review." });
-          if (mountedRef.current) router.refresh();
+        try {
+          // submit runs from in_progress; chain the state there first when needed.
+          for (const transition of transitionsBeforeSubmit(state)) {
+            if (!(await runTransition(transition))) return;
+          }
+          if (await runTransition("submit")) {
+            setNotice({ tone: "info", text: trail ? "Your satchel's in!" : "Submitted for review." });
+            if (mountedRef.current) router.refresh();
+          }
+        } catch (e) {
+          // A mid-flight network drop (navigator.onLine lied, as it does):
+          // queue the intent instead of losing it. Auth redirects propagate to
+          // runGuarded, which routes to sign-in.
+          if (isNextRedirect(e) || !queueSupported) throw e;
+          await queueSubmit();
         }
       }),
-    [state, runGuarded, runTransition, router, trail]
+    [state, queueSupported, queueSubmit, runGuarded, runTransition, router, trail]
   );
 
   const withdraw = useCallback(
@@ -340,11 +392,149 @@ export function TaskSurface(props: TaskSurfaceProps) {
     [handleFailure]
   );
 
+  // ── the DURABLE capture path (Unit 11) ─────────────────────────────────────
+  // Every capture writes an IndexedDB queue entry BEFORE any network I/O, then
+  // drains immediately — online, that IS the upload; offline (or on a killed
+  // tab) the entry survives and the sync engine finishes it on the next
+  // foreground signal. SyncStatus (mounted below) renders whatever remains.
+
+  const drainCtx = useCallback(
+    (): DrainContext => ({
+      actableStudentIds: [studentId],
+      onEntryProgress: (_id, pct) => {
+        if (mountedRef.current) setUploadProgress(pct);
+      },
+    }),
+    [studentId]
+  );
+
+  /** Drain now; report whether the given entry fully landed. */
+  const drainAndSettle = useCallback(
+    async (entryId: string): Promise<"resolved" | "queued"> => {
+      setUploadProgress(0);
+      try {
+        await drainQueue(drainCtx());
+      } finally {
+        if (mountedRef.current) setUploadProgress(null);
+      }
+      const remaining = await getEntry(entryId);
+      if (!remaining) {
+        if (mountedRef.current) router.refresh();
+        return "resolved";
+      }
+      // Still queued: offline (pending — reassure) or blocked (SyncStatus
+      // already shows the note; no duplicate banner).
+      if (!remaining.blocked && mountedRef.current) {
+        setNotice({
+          tone: "info",
+          text: "Saved on this device — it'll send the moment you're back online.",
+        });
+      }
+      return "queued";
+    },
+    [drainCtx, router]
+  );
+
+  const durableCapture = useCallback(
+    async (p: {
+      file: Blob;
+      fileName: string;
+      poster?: Blob | null;
+      durationSeconds?: number;
+    }): Promise<"done" | "fallback"> => {
+      const enqueued = await enqueueMediaCapture({
+        studentId,
+        taskId,
+        file: p.file,
+        fileName: p.fileName,
+        poster: p.poster ?? null,
+        ...(p.durationSeconds !== undefined ? { durationSeconds: p.durationSeconds } : {}),
+      });
+      if (!enqueued.ok) {
+        if (enqueued.reason === "unsupported") return "fallback";
+        handleFailure("link_overflow"); // refused at capture — never queued (D21)
+        return "done";
+      }
+      await drainAndSettle(enqueued.id);
+      return "done";
+    },
+    [studentId, taskId, drainAndSettle, handleFailure]
+  );
+
+  /** LEGACY direct upload (no IndexedDB): Unit 9/14's in-session flow, with the
+   *  in-memory pendingConfirm as its only upload-then-die affordance. */
+  const legacyDirectUpload = useCallback(
+    async (file: File) => {
+      const uploaded = await uploadEvidenceFile({
+        studentId,
+        taskId,
+        file,
+        fileName: file.name,
+        isMounted: () => mountedRef.current,
+        onProgress: (pct) => {
+          if (mountedRef.current) setUploadProgress(pct);
+        },
+        registerUpload: (u) => {
+          videoUploadRef.current = u;
+        },
+      });
+      if (!mountedRef.current) return;
+      if (!uploaded.ok) {
+        if (uploaded.kind === "refused") onSlotRefused(uploaded.refusal);
+        else setNotice({ tone: "amber", text: uploaded.message });
+        return;
+      }
+      await confirmUpload({
+        evidenceId: uploaded.uploaded.evidenceId,
+        objectPath: uploaded.uploaded.objectPath,
+        sha256: uploaded.uploaded.sha256,
+        sizeBytes: uploaded.uploaded.sizeBytes,
+        contentType: uploaded.uploaded.contentType,
+        capturedAt: new Date().toISOString(),
+      });
+    },
+    [studentId, taskId, confirmUpload, onSlotRefused]
+  );
+
+  const onFilePicked = useCallback(
+    (file: File) =>
+      runGuarded("upload", async () => {
+        setUploadProgress(0);
+        try {
+          const durationSeconds = file.type.startsWith("video/")
+            ? await probeVideoDuration(file)
+            : undefined;
+          const outcome = await durableCapture({
+            file,
+            fileName: file.name,
+            ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+          });
+          if (outcome === "fallback") await legacyDirectUpload(file);
+        } finally {
+          if (mountedRef.current) setUploadProgress(null);
+        }
+      }),
+    [runGuarded, durableCapture, legacyDirectUpload]
+  );
+
   const onVideoCaptured = useCallback(
     (captured: CapturedVideo) =>
       runGuarded("video", async () => {
-        setVideoProgress(0);
+        setUploadProgress(0);
         try {
+          // DURABLE path (Unit 11): queue first — a recorded clip survives a
+          // killed tab, and the poster rides in the same entry.
+          if (queueSupported) {
+            await durableCapture({
+              file: captured.file,
+              fileName: captured.file.name || "capture.mp4",
+              poster: captured.poster ?? null,
+              durationSeconds: captured.durationSeconds,
+            });
+            return;
+          }
+
+          // LEGACY direct path (no IndexedDB) — Unit 14's in-session flow.
           const evidenceId = crypto.randomUUID();
           const file = captured.file;
           const uploaded = await uploadEvidenceFile({
@@ -356,7 +546,7 @@ export function TaskSurface(props: TaskSurfaceProps) {
             durationSeconds: captured.durationSeconds,
             isMounted: () => mountedRef.current,
             onProgress: (pct) => {
-              if (mountedRef.current) setVideoProgress(pct);
+              if (mountedRef.current) setUploadProgress(pct);
             },
             // Abort-on-unmount, same as the picker path (correctness review).
             registerUpload: (u) => {
@@ -397,20 +587,40 @@ export function TaskSurface(props: TaskSurfaceProps) {
             capturedAt: new Date().toISOString(),
           });
         } finally {
-          if (mountedRef.current) setVideoProgress(null);
+          if (mountedRef.current) setUploadProgress(null);
         }
       }),
-    [studentId, taskId, runGuarded, confirmUpload, onSlotRefused]
+    [studentId, taskId, queueSupported, durableCapture, runGuarded, confirmUpload, onSlotRefused]
   );
 
   const addLink = useCallback(() => {
-    if (!linkUrl.trim()) return;
+    const url = linkUrl.trim();
+    if (!url) return;
     return runGuarded("link", async () => {
+      // Validate BEFORE queueing (Unit 11): a bad URL must fail inline, in the
+      // moment — not as a queue-attention note after an offline drain. Same
+      // pure rule the server enforces.
+      if (!isSafeHttpUrl(url)) {
+        setNotice({ tone: "error", text: "That doesn't look like a web link — it needs to start with https://" });
+        return;
+      }
+
+      // DURABLE path: enqueue + drain (online, that IS the save).
+      if (queueSupported) {
+        const enqueued = await enqueueLink({ studentId, taskId, url });
+        if (enqueued.ok) {
+          setLinkUrl("");
+          await drainAndSettle(enqueued.id);
+          return;
+        }
+        // unsupported raced off — fall through to the direct call
+      }
+
       const result = await addLinkEvidence({
         studentId,
         taskId,
         evidenceId: crypto.randomUUID(),
-        url: linkUrl.trim(),
+        url,
       });
       if (!mountedRef.current) return;
       if (result.ok) {
@@ -423,7 +633,7 @@ export function TaskSurface(props: TaskSurfaceProps) {
         handleFailure(result.reason);
       }
     });
-  }, [linkUrl, studentId, taskId, runGuarded, touchStateAfterCapture, router, handleFailure]);
+  }, [linkUrl, studentId, taskId, queueSupported, drainAndSettle, runGuarded, touchStateAfterCapture, router, handleFailure]);
 
   const saveCaption = useCallback(() => {
     if (!captionDraft) return;
@@ -638,6 +848,11 @@ export function TaskSurface(props: TaskSurfaceProps) {
         </div>
       )}
 
+      {/* the durable queue, made visible (Unit 11's seam, now filled): queued
+          items, offline reassurance, stuck-item retry/dismiss. Rendered in
+          every regime — a submitted task can still hold queued evidence. */}
+      <SyncStatus studentId={studentId} taskId={taskId} skin={skin} />
+
       {/* state-driven action area */}
       {mutability === "locked" && (
         <div className={cn("mb-4 rounded-xl border-2 border-dashed p-4 text-center", trail ? "border-trail-mist" : "border-hq-border")}>
@@ -776,7 +991,26 @@ export function TaskSurface(props: TaskSurfaceProps) {
             evidenceId={logItem?.id ?? draftLogId}
             initialRows={logItem?.logRows ?? []}
             readOnly={!captureAllowed || mutability === "append_only"}
-            onSaved={() => void onLogSaved()}
+            // DURABLE save (Unit 11): rows survive a killed tab; the drain's own
+            // choreography + refresh replace onLogSaved on this path.
+            saveOverride={
+              queueSupported
+                ? async (rows) => {
+                    const enqueued = await enqueueLog({
+                      studentId,
+                      taskId,
+                      evidenceId: logItem?.id ?? draftLogId,
+                      rows,
+                    });
+                    if (!enqueued.ok) return { ok: false, message: "Could not save the log. Please try again." };
+                    await drainAndSettle(enqueued.id);
+                    return { ok: true };
+                  }
+                : undefined
+            }
+            onSaved={() => {
+              if (!queueSupported) void onLogSaved();
+            }}
             onError={(message) => setNotice({ tone: "error", text: message })}
           />
         </div>
@@ -806,6 +1040,9 @@ export function TaskSurface(props: TaskSurfaceProps) {
               studentId={studentId}
               taskId={taskId}
               disabled={busy !== null}
+              // DURABLE mode (Unit 11): the file routes through the offline
+              // queue; without IndexedDB the component's own legacy flow runs.
+              onPick={queueSupported ? (file) => void onFilePicked(file) : undefined}
               onUploaded={(u) =>
                 void confirmUpload({
                   evidenceId: u.evidenceId,
@@ -829,12 +1066,13 @@ export function TaskSurface(props: TaskSurfaceProps) {
                 onError={(message) => setNotice({ tone: "amber", text: message })}
               />
             </div>
-            {videoProgress !== null && (
-              <p role="status" className={cn("mt-1 font-path-body text-[11.5px]", inkSoft)}>
-                Uploading video… {videoProgress}%
-              </p>
-            )}
           </div>
+
+          {uploadProgress !== null && (
+            <p role="status" className={cn("mt-2 font-path-body text-[11.5px]", inkSoft)}>
+              Uploading… {uploadProgress}%
+            </p>
+          )}
 
           <div className={cn("mt-3 flex items-center gap-2 border-t pt-3", cardBorder)}>
             <input

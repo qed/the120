@@ -184,6 +184,20 @@ export type FounderCardWithIds = FounderCard & {
  * everything in-family, so no per-child access check is needed beyond the
  * family scoping of the profile query itself.
  */
+/**
+ * The family's provisioned student profile ids — the parent session's DRAIN
+ * SCOPE (T1 Unit 11): a parent may act on any of their children's queued
+ * evidence on a shared device. One cheap indexed read.
+ */
+export async function loadFamilyStudentIds(db: Db, familyId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from("path_student_profiles")
+    .select("id")
+    .eq("family_id", familyId);
+  if (error) throw new Error(`loadFamilyStudentIds(${familyId}) failed: ${error.message}`);
+  return (data ?? []).map((r) => r.id as string);
+}
+
 export async function loadFounderCards(db: Db, familyId: string): Promise<FounderCardWithIds[]> {
   const profiles = await db
     .from("path_student_profiles")

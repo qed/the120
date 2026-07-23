@@ -628,12 +628,35 @@ describe("issueFwGuideInvite — 'ensure' mode (the merged P1 fix)", () => {
     expect(tables.path_fw_guide_invites[0].expires_at).toBe(before.expires_at);
   });
 
-  it("REFRESHES an outstanding (unclaimed) invite — that is what ensure is for", async () => {
+  it("LEAVES a live unclaimed invite alone — a link in the inbox IS a credential", async () => {
+    // Round-2 adversarial: rotating a still-valid unclaimed link reproduces a
+    // narrower form of the original bug. The guide may be opening that link right
+    // now; rotating it makes their claim CAS miss the old hash, hands them the
+    // dead-link message, CHARGES them a strike for a legitimate attempt, and
+    // mails a replacement they have no reason to look for.
+    const { db, tables, token } = await seedIssued();
+    const before = { ...tables.path_fw_guide_invites[0] };
+
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW + 86_400_000, // still inside the 14-day window
+      mode: "ensure",
+    });
+
+    expect(res).toEqual({ ok: true, issued: false, email: "ravi@example.com" });
+    expect(tables.path_fw_guide_invites[0].token_hash).toBe(before.token_hash);
+    // …and the original link still claims cleanly.
+    expect((await claimFwGuideInvite(db, { token, password: PASSWORD, now: NOW + 86_400_001 })).ok)
+      .toBe(true);
+  });
+
+  it("REFRESHES an EXPIRED invite — then the guide genuinely has no credential", async () => {
     const { db, tables, token } = await seedIssued();
     const res = await issueFwGuideInvite(db, {
       userId: "user-ravi",
       createdBy: STAFF,
-      now: NOW + 86_400_000,
+      now: NOW + FW_GUIDE_INVITE_TTL_MS + 1000,
       mode: "ensure",
     });
     expect(res.ok && res.issued).toBe(true);
@@ -642,9 +665,56 @@ describe("issueFwGuideInvite — 'ensure' mode (the merged P1 fix)", () => {
     expect(tables.path_fw_guide_invites[0].token_hash).toBe(hashGuideInviteToken(res.token));
   });
 
+  it("REFRESHES a row with a malformed expiry rather than leaving a guide stranded", async () => {
+    const { db, tables } = await seedIssued();
+    tables.path_fw_guide_invites[0].expires_at = "not-a-date";
+    const res = await issueFwGuideInvite(db, {
+      userId: "user-ravi",
+      createdBy: STAFF,
+      now: NOW + 1000,
+      mode: "ensure",
+    });
+    expect(res.ok && res.issued).toBe(true);
+  });
+
+  it("reports unavailable when the ensure-mode PROBE fails", async () => {
+    // The probe decides whether a credential already exists. Failing it open —
+    // falling through to the upsert — would rotate a claimed guide's token on a
+    // read blip, which is the exact bug "ensure" mode exists to prevent.
+    const { db, arm } = await seedIssued();
+    arm({ failTable: { table: "path_fw_guide_invites", op: "select", message: "down" } });
+    expect(
+      await issueFwGuideInvite(db, {
+        userId: "user-ravi",
+        createdBy: STAFF,
+        now: NOW + 1000,
+        mode: "ensure",
+      })
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("reports unavailable when the ensure-mode REFRESH write fails", async () => {
+    // An EXPIRED invite, so the refresh branch is actually reached (a live one
+    // now returns early, untouched).
+    const { db, arm, tables } = await seedIssued();
+    const before = { ...tables.path_fw_guide_invites[0] };
+    arm({ failTable: { table: "path_fw_guide_invites", op: "update", message: "down" } });
+    expect(
+      await issueFwGuideInvite(db, {
+        userId: "user-ravi",
+        createdBy: STAFF,
+        now: NOW + FW_GUIDE_INVITE_TTL_MS + 1000,
+        mode: "ensure",
+      })
+    ).toEqual({ ok: false, reason: "unavailable" });
+    // A failed refresh leaves the existing row intact rather than half-rotated.
+    expect(tables.path_fw_guide_invites[0].token_hash).toBe(before.token_hash);
+  });
+
   it("does NOT rotate on top of a claim that lands between the probe and the write", async () => {
     // The CAS on `claimed_at is null` closes the probe→write window: a guide who
-    // credentials themselves in that gap must not be silently un-claimed.
+    // credentials themselves in that gap must not be silently un-claimed. Uses an
+    // EXPIRED invite so the refresh branch (and therefore the CAS) is reached.
     const { db, tables } = await seedIssued({
       beforeClaimCas: (t) => {
         t.path_fw_guide_invites[0].claimed_at = "2026-08-21T09:00:00Z";
@@ -653,7 +723,7 @@ describe("issueFwGuideInvite — 'ensure' mode (the merged P1 fix)", () => {
     const res = await issueFwGuideInvite(db, {
       userId: "user-ravi",
       createdBy: STAFF,
-      now: NOW + 60_000,
+      now: NOW + FW_GUIDE_INVITE_TTL_MS + 1000,
       mode: "ensure",
     });
     expect(res).toEqual({ ok: true, issued: false, email: "ravi@example.com" });

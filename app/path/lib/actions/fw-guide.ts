@@ -387,11 +387,27 @@ export async function claimGuideInviteAction(
     return { success: false, error: INVITE_DEAD };
   }
 
-  // A SUCCESSFUL claim releases its strike too, mirroring signInGuide's
-  // clear-on-success. The bucket is keyed by IP alone, so without this every
-  // guide claiming from the venue's single NAT'd address stacks onto one
-  // 10-per-15-minute budget and the eleventh legitimate guide of the morning is
-  // told "too many tries" having made none (reliability review).
+  // A SUCCESSFUL claim releases its own strike. The bucket is keyed by IP ALONE,
+  // so without this every guide claiming from the venue's single NAT'd address
+  // stacks onto one 10-per-15-minute budget and the eleventh legitimate guide of
+  // the morning is told "too many tries" having made none (reliability review).
+  //
+  // `releaseRateLimitEvent` (drop ONE event), deliberately NOT the
+  // `clearRateLimitBucket` (forget the whole key) that signInGuide uses on
+  // success: sign-in's bucket is per (ip, email) so clearing it discards only
+  // that account's strikes, while THIS key is shared by everyone behind the IP
+  // and clearing it wholesale would forgive every concurrent caller's strikes at
+  // once.
+  //
+  // Stated precisely, because a stronger claim would be false (round-2
+  // adversarial review): `releaseRateLimitEvent` drops the bucket's MOST RECENT
+  // event, which under concurrent traffic on a shared venue IP may not be the
+  // one this invocation recorded. So a successful claim can refund a co-located
+  // caller's strike, and a run of legitimate Friday-morning claims does top the
+  // shared budget up. That is ACCEPTED, on the posture the plan's own risk table
+  // states: 256-bit token entropy and expiry are the security here; this limiter
+  // is noise and cost control, never the thing standing between an attacker and
+  // a valid token.
   releaseRateLimitEvent(rateKey);
 
   const supabase = await supabaseServer();

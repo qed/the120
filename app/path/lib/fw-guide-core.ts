@@ -279,8 +279,14 @@ export async function provisionFwGuide(
       } else {
         const del = await db.auth.admin.deleteUser(user.id);
         if (del.error) {
+          // Deliberately NOT "the account is grant-less" (round-2 adversarial
+          // review): the probe and this delete are separate requests, so a
+          // concurrent grant can land between them — and if it did, THIS error
+          // is most likely `path_role_grants`' ON DELETE RESTRICT refusing, i.e.
+          // evidence a grant now exists. Asserting grant-less here would invite
+          // an operator to hand-delete an account that is genuinely in use.
           console.error(
-            `[fw/guide] compensation deleteUser failed for ${user.id}: ${del.error.message} — account is grant-less; staff can remove it`
+            `[fw/guide] compensation deleteUser failed for ${user.id}: ${del.error.message} — a concurrent grant may now reference it; verify before any manual cleanup`
           );
         }
       }
@@ -399,7 +405,7 @@ export async function issueFwGuideInvite(
   if (mode === "ensure") {
     const existing = await db
       .from("path_fw_guide_invites")
-      .select("id, claimed_at")
+      .select("id, claimed_at, expires_at")
       .eq("user_id", input.userId)
       .maybeSingle();
     if (existing.error) {
@@ -409,15 +415,36 @@ export async function issueFwGuideInvite(
       return { ok: false, reason: "unavailable" };
     }
     if (existing.data) {
-      if (typeof existing.data.claimed_at === "string") {
-        // Already credentialed. Leave it entirely alone — no rotation, no mail.
+      // "Do they already have a usable credential?" — decided by the SAME pure
+      // verdict the claim page and the claim action use, so the three can never
+      // disagree about what "live" means.
+      //
+      // A LIVE UNCLAIMED invite counts as having one (round-2 adversarial
+      // review). Rotating it would reproduce a narrower version of the very bug
+      // this mode exists to prevent: an unclaimed link is one a guide may be
+      // opening right now, and rotating mid-claim makes their CAS miss on the
+      // old hash, hands them the dead-link message, CHARGES them a rate-limit
+      // strike for a legitimate attempt, and quietly mails a replacement they
+      // have no reason to look for. Only a genuinely dead invite is refreshed.
+      const existingVerdict = fwGuideInviteVerdict({
+        invite:
+          typeof existing.data.expires_at === "string"
+            ? {
+                expiresAt: existing.data.expires_at,
+                claimedAt:
+                  typeof existing.data.claimed_at === "string" ? existing.data.claimed_at : null,
+              }
+            : null,
+        now: input.now,
+      });
+      if (existingVerdict.ok || existingVerdict.reason === "already_claimed") {
         return { ok: true, issued: false, email };
       }
-      // An outstanding (possibly expired) invite: refreshing it is exactly what
-      // "ensure" is for. CAS on `claimed_at is null` so a claim that lands
-      // between the probe above and this write is not silently un-claimed —
-      // zero rows means the guide just credentialed themselves and we must not
-      // rotate on top of them.
+      // Expired (or a malformed row, which `not_found` covers) — the guide has
+      // no usable credential, so minting one is exactly what "ensure" is for.
+      // Still CAS on `claimed_at is null`: a claim landing between the probe and
+      // this write must not be silently un-claimed. Zero rows means the guide
+      // just credentialed themselves and we must not rotate on top of them.
       const refreshed = await db
         .from("path_fw_guide_invites")
         .update(row)
@@ -436,6 +463,25 @@ export async function issueFwGuideInvite(
       return { ok: true, issued: true, token, email, expiresAt };
     }
     // No row yet — fall through to the insert-or-update below.
+  }
+
+  // "reissue" rotates with NO precondition — that is the recovery path's whole
+  // point, and it must work on a claimed invite. The accepted consequence
+  // (round-2 adversarial review): a reissue landing in the gap between a claim's
+  // CAS win and its password write leaves the row reading unclaimed even though
+  // the guide is credentialed and working. Logged rather than prevented, because
+  // preventing it would break the case the action exists for — but a silent
+  // version of this is what makes the "all guides claimed" checklist lie, so it
+  // is made observable.
+  const priorClaim = await db
+    .from("path_fw_guide_invites")
+    .select("claimed_at")
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  if (!priorClaim.error && typeof priorClaim.data?.claimed_at === "string") {
+    console.warn(
+      `[fw/guide] reissue re-opening an ALREADY-CLAIMED invite for ${input.userId} (claimed ${priorClaim.data.claimed_at}) — the guide's existing password stays valid until they use the new link`
+    );
   }
 
   const upserted = await db

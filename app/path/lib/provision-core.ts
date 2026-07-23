@@ -42,10 +42,15 @@
  * intent and the run continues; a duplicate-key on the profile insert adopts
  * the existing row; the grants upsert ignores duplicates. Never inserts into
  * public.parents, so the on_parent_created trigger cannot fire.
+ *
+ * The Founders Weekend siblings (`provisionFwStudent`, `ensureFwStudentProgress`)
+ * live at the bottom of this file. They share the row-shape helpers and NONE of
+ * the policy — read the banner there before assuming either half generalizes.
  */
 
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
+import type { Band } from "@/app/path/content/types";
 import {
   bandForGrade,
   buildInitialProgressRows,
@@ -55,6 +60,14 @@ import {
   type SeedTaskRow,
 } from "./progress-core";
 import { bandVerdictForGrade, childFamilyVerdict } from "./onboarding-rules";
+import {
+  buildFwLocalBase,
+  buildFwStudentCreateUserPayload,
+  buildFwProgressRows,
+  buildNormalizedFwName,
+  pickFwLocalPart,
+  MAX_FW_LOCAL_ATTEMPTS,
+} from "./fw-provision-rules";
 import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
@@ -578,4 +591,383 @@ export async function ensureStudentProgress(
   }
 
   return { ok: true, created: (inserted.data ?? []).length };
+}
+
+/* ══════════════════════════════════════════════ Founders Weekend (FW Unit 1) ══
+ *
+ * The FW student is a SIBLING account model, not a mode of the Path's, and the
+ * two functions below are siblings of `provisionStudent` / `ensureStudentProgress`
+ * for the same reason: every step above reads `public.children` (the authoritative
+ * roster row) and gates on a parent's ownership of it. An FW student has no roster
+ * row and no parent in the system — a guide typed their name at a check-in table
+ * ninety seconds ago — so reusing the Path functions would mean loosening every
+ * one of those gates for the Path too. Instead the row-shape helpers are shared
+ * and the policy is not.
+ *
+ * Plain-module rule as above: no `"use server"`, callers own their gate (the FW
+ * actions gate with `resolveFwActor`, the importer with the staff bridge).
+ */
+
+/**
+ * Materialize an FW student's `path_task_progress` rows — the FW sibling of
+ * `ensureStudentProgress`, and NOT a call into it.
+ *
+ * Three concrete reasons the Path function cannot be reused here, each of which
+ * would be a silent live-event bug:
+ *   1. it derives the band from the `children(grade)` join, which is null for
+ *      every FW row — it would fail closed with `no_band` on every student;
+ *   2. it promotes the first task of each first-phase criterion to `available`,
+ *      a gating distinction FW does not make (FW-D5: a guide reaches any task in
+ *      the catalog and taps it);
+ *   3. it writes `unlock` events for those promotions, which would put ~25
+ *      phantom system events per student into the log the projected board reads.
+ *
+ * FW's band lives on the profile itself (there is no grade to derive it from) and
+ * is read here as a FAIL-CLOSED shape check: a profile with no band is not an
+ * FW-shaped profile, and materializing all-locked rows for a Path student would
+ * strand them below their real position.
+ *
+ * Idempotent — `upsert … ignoreDuplicates` on `unique (student_id, task_id)` — so
+ * a retry-in-place after a failed leg (Decision 13) completes rather than
+ * duplicates.
+ */
+export async function ensureFwStudentProgress(
+  db: SupabaseClient,
+  input: { profileId: string }
+): Promise<
+  | { ok: true; created: number }
+  | { ok: false; reason: "profile_not_found" | "no_band" | "no_content" | "unavailable" }
+> {
+  const profile = await db
+    .from("path_student_profiles")
+    .select("id, program_version_id, band")
+    .eq("id", input.profileId)
+    .maybeSingle();
+  if (profile.error) {
+    console.error(`[fw/progress-seed] profile load failed for ${input.profileId}: ${profile.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!profile.data) return { ok: false, reason: "profile_not_found" };
+  const versionId = profile.data.program_version_id as string;
+  if (typeof profile.data.band !== "string") return { ok: false, reason: "no_band" };
+
+  // Only the task rows: an FW row's criterion_id comes off the task itself, and
+  // with no first-phase promotion there is nothing to look phases or criteria up
+  // for. (The three-column FK on path_task_progress still pins each row's
+  // criterion to the task's true criterion.)
+  const tasks = await db
+    .from("path_unit_tasks")
+    .select("task_id, criterion_id, seq")
+    .eq("program_version_id", versionId);
+  if (tasks.error) {
+    console.error(`[fw/progress-seed] content load failed for ${versionId}: ${tasks.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if ((tasks.data ?? []).length === 0) return { ok: false, reason: "no_content" };
+
+  let rows: InitialProgressRow[];
+  try {
+    rows = buildFwProgressRows({
+      studentId: input.profileId,
+      programVersionId: versionId,
+      tasks: (tasks.data ?? []) as SeedTaskRow[],
+    });
+  } catch (e) {
+    console.error(`[fw/progress-seed] row build failed for ${input.profileId}:`, e);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  const inserted = await db
+    .from("path_task_progress")
+    .upsert(rows, { onConflict: "student_id,task_id", ignoreDuplicates: true })
+    .select("task_id");
+  if (inserted.error) {
+    console.error(`[fw/progress-seed] progress upsert failed for ${input.profileId}: ${inserted.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  // Deliberately NO events. The Path's materializer records `unlock` events for
+  // the rows it promoted; FW promotes nothing, so the event log stays empty until
+  // a guide's first tap — which is what makes the board's "opens at zero on
+  // Friday" honest (Decision 16).
+  return { ok: true, created: (inserted.data ?? []).length };
+}
+
+export type ProvisionFwStudentInput = {
+  firstName: string;
+  lastName: string;
+  band: Band;
+  /** Must be a `kind='fw'` cohort — verified here, not assumed. */
+  cohortId: string;
+  /**
+   * Decision 13: the adult who attested the family has seen the program notice.
+   * Persisted on the profile, not merely a form gate. Null for paths that have
+   * not attested yet (the PROPOSED-3 importer stamps it when its notice sequence
+   * completes).
+   */
+  noticeAttestedBy?: string | null;
+  /**
+   * Repair / resume: complete an EXISTING profile's remaining legs instead of
+   * minting a new account. The caller decides identity — same-name dedupe is the
+   * importer's resume keying (Unit 7) and cross-cohort matching is PROPOSED-1's
+   * `fw-match-rules` (Unit 4); this core carries no matching policy, so it can
+   * never silently merge two different children who share a name.
+   */
+  existingProfileId?: string | null;
+};
+
+export type ProvisionFwStudentFailure =
+  /** The name folds to nothing address-safe — refuse rather than mangle. */
+  | "invalid_name"
+  | "cohort_not_found"
+  | "cohort_not_fw"
+  | "no_current_program_version"
+  | "profile_not_found"
+  | "address_exhausted"
+  /** Account + profile landed; the cohort membership did not. Retry in place. */
+  | "membership_failed"
+  /** Account + profile + membership landed; the 125 rows did not. Retry in place. */
+  | "materialization_failed"
+  | "unavailable";
+
+export type ProvisionFwStudentResult =
+  | { ok: true; profileId: string; userId: string; email: string; adopted: boolean }
+  | {
+      ok: false;
+      reason: ProvisionFwStudentFailure;
+      /** Present once a profile exists — the handle a retry-in-place passes back
+       *  as `existingProfileId` so the guide never lands in a tap-dead tree. */
+      profileId?: string;
+    };
+
+/**
+ * Mint (or complete) one dormant FW student account: auth user → private family →
+ * profile → cohort membership → 125 locked progress rows.
+ *
+ * COMPENSABLE, per docs/solutions/best-practices/no-transaction-multi-step-write-
+ * compensation-post-write-verify-cas-scoped-claim-2026-07-22.md — there is no
+ * transaction spanning the Auth API and PostgREST, so a failure between them is
+ * cleaned up explicitly:
+ *   - profile insert fails → the just-created auth user and family row are
+ *     best-effort deleted, leaving nothing half-minted for the next run to trip
+ *     over (and no orphan account holding a name-derived address hostage);
+ *   - membership or materialization fails → the profile is KEPT and its id is
+ *     returned with the failure, because those legs are idempotent and a
+ *     retry-in-place completes them (Decision 13). Deleting here would throw away
+ *     a good account in front of a kid standing at the table.
+ *
+ * Address collisions resolve in two layers: the released-alias ledger is probed
+ * up front (Decision 10 — a freed address is never re-minted), and `email_exists`
+ * from `createUser` drives the retry loop. The second layer is what actually
+ * probes LIVE accounts: it is authoritative, race-proof, and costs one extra API
+ * call per genuine collision, where a listUsers page-walk would cost a full scan
+ * per imported row.
+ */
+export async function provisionFwStudent(
+  db: SupabaseClient,
+  input: ProvisionFwStudentInput
+): Promise<ProvisionFwStudentResult> {
+  const { firstName, lastName, band, cohortId } = input;
+  const attestedBy = input.noticeAttestedBy ?? null;
+
+  // The cohort must exist AND be an FW cohort. Minting an FW-shaped student into
+  // a Path cohort would put a child-less profile in front of Path reads that
+  // assume a roster row.
+  const cohort = await db
+    .from("path_cohorts")
+    .select("id, kind")
+    .eq("id", cohortId)
+    .maybeSingle();
+  if (cohort.error) {
+    console.error(`[fw/provision] cohort load failed for ${cohortId}: ${cohort.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!cohort.data) return { ok: false, reason: "cohort_not_found" };
+  if (cohort.data.kind !== "fw") return { ok: false, reason: "cohort_not_fw" };
+
+  let profileId: string;
+  let userId: string;
+  let email: string;
+  let adopted = false;
+  let createdFamilyId: string | null = null;
+
+  if (input.existingProfileId) {
+    // ── Resume path: the account exists; finish its remaining legs. ──
+    const existing = await db
+      .from("path_student_profiles")
+      .select("id, user_id")
+      .eq("id", input.existingProfileId)
+      .maybeSingle();
+    if (existing.error) {
+      console.error(
+        `[fw/provision] resume profile load failed for ${input.existingProfileId}: ${existing.error.message}`
+      );
+      return { ok: false, reason: "unavailable" };
+    }
+    if (!existing.data) return { ok: false, reason: "profile_not_found" };
+    profileId = existing.data.id as string;
+    userId = existing.data.user_id as string;
+    email = "";
+    adopted = true;
+  } else {
+    // ── Mint path. ──
+    let localBase: string;
+    let normalizedName: string;
+    try {
+      localBase = buildFwLocalBase(firstName, lastName);
+      normalizedName = buildNormalizedFwName(firstName, lastName);
+    } catch {
+      return { ok: false, reason: "invalid_name" };
+    }
+
+    // The D27 pin, resolved now and immutable after — no fallback, exactly as the
+    // Path path: a silent fallback would pin a weekend's students to nothing.
+    const version = await db
+      .from("path_program_versions")
+      .select("id")
+      .eq("is_current", true)
+      .maybeSingle();
+    if (version.error) {
+      console.error(`[fw/provision] version load failed: ${version.error.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    const programVersionId = version.data?.id;
+    if (typeof programVersionId !== "string") {
+      return { ok: false, reason: "no_current_program_version" };
+    }
+
+    // Decision 10: every local part this name could produce that has ALREADY been
+    // released by an anonymization is off the table permanently. `like base%`
+    // over-matches (it also catches unrelated longer names), which is harmless —
+    // the only candidates ever generated are base, base2, base3…
+    const released = await db
+      .from("path_fw_released_aliases")
+      .select("local_part")
+      .like("local_part", `${localBase}%`);
+    if (released.error) {
+      console.error(`[fw/provision] released-alias probe failed for ${localBase}: ${released.error.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    const taken = new Set<string>(
+      (released.data ?? [])
+        .map((r) => r.local_part)
+        .filter((p): p is string => typeof p === "string")
+    );
+
+    let user: User | null = null;
+    let pick = pickFwLocalPart({ firstName, lastName, taken });
+    for (let attempt = 0; attempt < MAX_FW_LOCAL_ATTEMPTS; attempt += 1) {
+      const created = await db.auth.admin.createUser(
+        buildFwStudentCreateUserPayload({ email: pick.email })
+      );
+      if (!created.error) {
+        user = created.data.user;
+        break;
+      }
+      const emailExists =
+        created.error.code === "email_exists" ||
+        /already.*(registered|exists)/i.test(created.error.message);
+      if (!emailExists) {
+        console.error(`[fw/provision] createUser failed for ${pick.email}: ${created.error.message}`);
+        return { ok: false, reason: "unavailable" };
+      }
+      // A live account holds it — record and step to the next integer. This IS
+      // the "probe existing accounts" half of the collision rule.
+      taken.add(pick.localPart);
+      try {
+        pick = pickFwLocalPart({ firstName, lastName, taken });
+      } catch {
+        return { ok: false, reason: "address_exhausted" };
+      }
+    }
+    if (!user) return { ok: false, reason: "address_exhausted" };
+    userId = user.id;
+    email = pick.email;
+
+    // The private single-student family. path_student_profiles.family_id stays
+    // NOT NULL (see the migration's group-1 note): an FW student has no family
+    // YET, and a synthetic invisible one beats loosening a column ~12 Path reads
+    // assume. No parent grant ever points here, so nothing can read across it.
+    const family = await db.from("path_families").insert({}).select("id").single();
+    if (family.error || typeof family.data?.id !== "string") {
+      console.error(`[fw/provision] family insert failed: ${family.error?.message ?? "no id"}`);
+      await compensateFwMint(db, { userId, familyId: null });
+      return { ok: false, reason: "unavailable" };
+    }
+    createdFamilyId = family.data.id;
+
+    const inserted = await db
+      .from("path_student_profiles")
+      .insert({
+        user_id: userId,
+        child_id: null,
+        program_version_id: programVersionId,
+        family_id: createdFamilyId,
+        cohort_id: null, // FW membership lives in path_cohort_members, not here
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        band,
+        normalized_name: normalizedName,
+        notice_attested_at: attestedBy ? new Date().toISOString() : null,
+        notice_attested_by: attestedBy,
+      })
+      .select("id")
+      .single();
+    if (inserted.error || typeof inserted.data?.id !== "string") {
+      console.error(
+        `[fw/provision] profile insert failed for ${email}: ${inserted.error?.message ?? "no id"}`
+      );
+      await compensateFwMint(db, { userId, familyId: createdFamilyId });
+      return { ok: false, reason: "unavailable" };
+    }
+    profileId = inserted.data.id;
+  }
+
+  // Membership — the row Decision 3's cohort-stamp verification reads as
+  // authoritative. Upsert so a resume run is a no-op rather than a duplicate.
+  const membership = await db
+    .from("path_cohort_members")
+    .upsert({ student_id: profileId, cohort_id: cohortId }, {
+      onConflict: "student_id,cohort_id",
+      ignoreDuplicates: true,
+    });
+  if (membership.error) {
+    console.error(
+      `[fw/provision] membership upsert failed for ${profileId}/${cohortId}: ${membership.error.message}`
+    );
+    return { ok: false, reason: "membership_failed", profileId };
+  }
+
+  const progress = await ensureFwStudentProgress(db, { profileId });
+  if (!progress.ok) {
+    console.error(`[fw/provision] materialization failed for ${profileId}: ${progress.reason}`);
+    return { ok: false, reason: "materialization_failed", profileId };
+  }
+
+  return { ok: true, profileId, userId, email, adopted };
+}
+
+/**
+ * Best-effort rollback of a half-minted FW account. Failures are logged and
+ * swallowed: the caller is already returning an error, and a compensation that
+ * throws would replace an actionable failure with an opaque one. What is left
+ * behind if this fails is an orphan auth user, which the next run's
+ * `email_exists` retry steps past rather than trips over.
+ */
+async function compensateFwMint(
+  db: SupabaseClient,
+  input: { userId: string; familyId: string | null }
+): Promise<void> {
+  const deleted = await db.auth.admin.deleteUser(input.userId);
+  if (deleted.error) {
+    console.error(`[fw/provision] compensation deleteUser failed for ${input.userId}: ${deleted.error.message}`);
+  }
+  if (input.familyId) {
+    const fam = await db.from("path_families").delete().eq("id", input.familyId);
+    if (fam.error) {
+      console.error(
+        `[fw/provision] compensation family delete failed for ${input.familyId}: ${fam.error.message}`
+      );
+    }
+  }
 }

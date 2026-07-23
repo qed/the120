@@ -14,9 +14,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { markNotificationEventsSeen } from "@/app/path/lib/actions/notifications";
-
-/** Mirrors the action's zod ceiling — larger lists go in batches. */
-const BATCH_SIZE = 100;
+import { MAX_SEEN_IDS_PER_CALL } from "@/app/path/lib/celebration-tier1-rules";
 
 export function MarkSeenOnMount({ eventIds }: { eventIds: string[] }) {
   const router = useRouter();
@@ -26,15 +24,25 @@ export function MarkSeenOnMount({ eventIds }: { eventIds: string[] }) {
     if (firedRef.current || eventIds.length === 0) return;
     firedRef.current = true;
     void (async () => {
-      try {
-        for (let i = 0; i < eventIds.length; i += BATCH_SIZE) {
-          await markNotificationEventsSeen({ eventIds: eventIds.slice(i, i + BATCH_SIZE) });
+      // Best-effort across batches: one batch's typed refusal or throw must
+      // not strand the ones after it (ce-review — the action fails CLOSED
+      // with {ok:false} rather than throwing, so both paths are checked).
+      let stampedAny = false;
+      for (let i = 0; i < eventIds.length; i += MAX_SEEN_IDS_PER_CALL) {
+        const chunk = eventIds.slice(i, i + MAX_SEEN_IDS_PER_CALL);
+        try {
+          const result = await markNotificationEventsSeen({ eventIds: chunk });
+          if (result.ok) stampedAny = true;
+          else console.warn(`[path/notifications] seen stamp refused (${result.reason}) for ${chunk.length} events`);
+        } catch {
+          // The guard can redirect() (throws); anything else just means this
+          // chunk's cursor did not advance — it replays next open.
         }
-        router.refresh();
-      } catch {
-        // The guard can redirect() (throws); anything else just means the
-        // cursor did not advance — the replay fires again next open.
       }
+      // Refresh only when something actually stamped — the badge and "new"
+      // markers settle to the stamped truth; a fully-failed pass changes
+      // nothing worth re-rendering for.
+      if (stampedAny) router.refresh();
     })();
   }, [eventIds, router]);
 

@@ -105,8 +105,12 @@ function useReviewCardScaffolding() {
 
   /** Refresh after the notice has had time to be READ — the refresh removes
    *  the card (its row left the queried state), so an immediate one would
-   *  destroy the copy it just revealed. */
+   *  destroy the copy it just revealed. Clears any prior pending timer first:
+   *  a re-click inside the linger window must not leave an orphaned earlier
+   *  timer firing on its original (sooner) schedule and destroying the NEW
+   *  notice early (ce-review race pass). */
   const refreshAfterNotice = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
       if (mountedRef.current) router.refresh();
     }, NOTICE_LINGER_MS);
@@ -137,13 +141,19 @@ function useReviewCardScaffolding() {
     []
   );
 
-  return { mountedRef, busy, notice, setNotice, refreshAfterNotice, refreshNow, run };
+  return { busy, notice, setNotice, refreshAfterNotice, refreshNow, run };
 }
 
 /* ─────────────────────────────────────────────────────────── the panel */
 
+/** Keyed per SUBMISSION CYCLE (submitReceivedAt), mirroring criterionCardKey's
+ *  `attempt`: a task that cycles through review twice in one mounted session
+ *  must not inherit the first cycle's "this session acted on it" mark — the
+ *  second cycle's co-parent-handled vanish would be silently swallowed
+ *  (ce-review correctness pass). A fresh cycle also remounts the card, which
+ *  correctly resets its comment/note drafts. */
 function taskCardKey(task: ReviewQueueTask): string {
-  return `task:${task.studentId}:${task.taskId}`;
+  return `task:${task.studentId}:${task.taskId}:${task.submitReceivedAt ?? "unsubmitted"}`;
 }
 
 function criterionCardKey(criterion: ReviewQueueCriterion): string {

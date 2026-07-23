@@ -66,6 +66,10 @@ export type MomentTone = "celebrate" | "amber" | "info";
 /** One played moment — the host renders these in order, ~3s each. */
 export type Moment = {
   eventId: string;
+  /** The coalesced source moment (ISO) — the host merges late-arriving
+   *  moments (a healer backfill delivered by a refresh) into its queue by
+   *  this, so replay order survives mid-session arrivals. */
+  whenIso: string;
   kind: NotificationEventKind;
   tone: MomentTone;
   /** "Stamped! · 1.2.4" / "Task verified · 1.2.4" — short, register-true. */
@@ -101,6 +105,32 @@ export type FeedItem = {
 /** §5.1: two to four seconds, never a modal. */
 export const MOMENT_DISPLAY_MS = 3200;
 export const MOMENT_GAP_MS = 350;
+
+/**
+ * The seen-stamp action's per-call id ceiling. Lives HERE (the pure module)
+ * so the action's zod schema and every client caller chunk by the same
+ * number — a caller that sends more gets the whole batch refused (the
+ * ce-review chunking finding: an unchunked 400-id backlog wedged the
+ * cursor).
+ */
+export const MAX_SEEN_IDS_PER_CALL = 100;
+
+/**
+ * The Not Yet copy, single-sourced (brief §5.2) — the task page's standing
+ * panel (NotYetPanel), the replay's amber moment, and the feed item all
+ * speak from this table so the registers can never drift (the ce-review
+ * pass caught NotYetPanel and copyFor already disagreeing on the HQ body).
+ */
+export const NOT_YET_COPY = {
+  trail: {
+    headline: "Not yet — and that's okay.",
+    reassurance: "Your evidence is safe. Fix the one thing and try again — not done, yet.",
+  },
+  hq: {
+    headline: "Not yet.",
+    reassurance: "Evidence intact — resubmit when ready. Not done, yet.",
+  },
+} as const satisfies Record<Skin, { headline: string; reassurance: string }>;
 
 /* ─────────────────────────────────────────────────────── narrow helpers */
 
@@ -201,9 +231,7 @@ function copyFor(kind: NotificationEventKind, subjectId: string, skin: Skin): Co
       return {
         tone: "amber",
         eyebrow: trail ? `Not yet — and that's okay · ${subjectId}` : `Not yet · ${subjectId}`,
-        body: trail
-          ? "Your evidence is safe. Fix the one thing and try again — not done, yet."
-          : "Evidence intact — resubmit when ready.",
+        body: NOT_YET_COPY[skin].reassurance,
       };
     case "reopened":
       return {
@@ -306,10 +334,16 @@ function correctionWhenLabel(iso: string | null): string | null {
 }
 
 /**
- * Find the reversal that superseded `target`: the earliest correction-shaped
- * event at-or-after the target's own moment. Falls back to the flag's own
- * `superseded_at` (reversal outside the loaded window) — a past-tense item
- * always gets a correction sentence, never blank.
+ * Find the reversal that superseded `target` among correction-shaped events
+ * at-or-after the target's own moment. When the target's `superseded_at` is
+ * known, prefer the candidate whose moment is CLOSEST to it — the reversal
+ * that flagged the row stamped `superseded_at` at its own apply time, so
+ * proximity identifies the RIGHT ceremony when a criterion went through
+ * several return cycles that returned different task subsets (the ce-review
+ * adversarial pass: earliest-≥ pairing attributed the wrong cycle's note and
+ * date). Falls back to earliest-≥, and finally to the flag's own timestamp
+ * (reversal outside the loaded window) — a past-tense item always gets a
+ * correction sentence, never blank.
  */
 function findCorrection(target: FeedEventRow, targetKind: NotificationEventKind, all: readonly FeedEventRow[], skin: Skin): string {
   const targetMs = eventWhenMs(target);
@@ -319,7 +353,12 @@ function findCorrection(target: FeedEventRow, targetKind: NotificationEventKind,
     .filter((c) => c.row.id !== target.id && eventWhenMs(c.row) >= targetMs)
     .filter((c) => isCorrectionFor(c, target, targetKind))
     .sort((a, b) => compareAsc(a.row, b.row));
-  const hit = candidates[0];
+  const flaggedMs = target.supersededAt !== null ? Date.parse(target.supersededAt) : NaN;
+  const hit = Number.isFinite(flaggedMs)
+    ? [...candidates].sort(
+        (a, b) => Math.abs(eventWhenMs(a.row) - flaggedMs) - Math.abs(eventWhenMs(b.row) - flaggedMs)
+      )[0]
+    : candidates[0];
   if (hit) return correctionSentence(hit.kind, correctionWhenLabel(whenIso(hit.row)), skin);
   return correctionSentence(null, correctionWhenLabel(target.supersededAt), skin);
 }
@@ -412,6 +451,7 @@ export function planReplay(input: {
     const copy = copyFor(kind, subject.id, skin);
     moments.push({
       eventId: row.id,
+      whenIso: whenIso(row),
       kind,
       tone: copy.tone,
       eyebrow: copy.eyebrow,

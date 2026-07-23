@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_SEEN_IDS_PER_CALL,
   MOMENT_DISPLAY_MS,
   MOMENT_GAP_MS,
+  NOT_YET_COPY,
   buildFeed,
   eventWhenMs,
   meterLine,
@@ -9,6 +11,7 @@ import {
   type FeedEventRow,
   type ProgramResolvers,
 } from "../celebration-tier1-rules";
+import { NOTIFICATION_EVENT_KINDS } from "../notify/notify-rules";
 
 /**
  * The Tier 1 celebration / notification-surface decision layer (T1 Unit 16).
@@ -274,7 +277,46 @@ describe("superseded events (scenario 4)", () => {
     ];
     const past = buildFeed({ rows, resolvers, skin: "trail" })[0];
     expect(past.tone).toBe("past");
-    expect(past.correction).toBeTruthy(); // generic, dated off superseded_at — never blank
+    // The generic fallback sentence, never blank — pinned by content so a
+    // broken skin ternary or date interpolation can't pass as "truthy".
+    expect(past.correction).toMatch(/took another look/i);
+  });
+
+  it("with several return cycles of one criterion, the correction pairs by superseded_at PROXIMITY — never a different cycle's note (adversarial pass)", () => {
+    // verify(1.2.4)@T2 was superseded by attempt-2's ceremony @T5 — but
+    // attempt-1's ceremony @T3 (which returned a DIFFERENT task) also matches
+    // by criterion prefix and is earlier-≥. Proximity to superseded_at (T5)
+    // must pick attempt 2.
+    const rows: FeedEventRow[] = [
+      row({
+        id: "v-124",
+        taskId: "1.2.4",
+        params: { taskId: "1.2.4" },
+        occurredAt: "2026-07-10T10:00:00.000Z", // T2
+        supersededAt: "2026-07-14T10:00:00.000Z", // flagged by attempt 2 (T5)
+      }),
+      row({
+        id: "ceremony-1",
+        kind: "criterion_returned",
+        taskId: null,
+        scopeId: "1.2",
+        params: { criterionId: "1.2", attempt: 1, note: "Redo 1.2.1 only." },
+        occurredAt: "2026-07-11T10:00:00.000Z", // T3 — the WRONG pairing
+      }),
+      row({
+        id: "ceremony-2",
+        kind: "criterion_returned",
+        taskId: null,
+        scopeId: "1.2",
+        params: { criterionId: "1.2", attempt: 2, note: "Now 1.2.4 needs a pass." },
+        occurredAt: "2026-07-14T10:00:00.000Z", // T5 — the RIGHT pairing
+      }),
+    ];
+    const past = buildFeed({ rows, resolvers, skin: "hq" }).find((i) => i.eventId === "v-124");
+    expect(past!.tone).toBe("past");
+    // The correction dates off ceremony-2's moment (Tue Jul 14), not
+    // ceremony-1's (Sat Jul 11).
+    expect(past!.correction).toContain("on Tue");
   });
 });
 
@@ -329,6 +371,19 @@ describe("unresolvable subjects (scenario 6)", () => {
     expect(items[0].tone).toBe("celebrate");
     expect(items[0].headline).toBe("Ask until one yes");
   });
+
+  it("a criterion-scope event with a null scope_id falls back to params.criterionId before skipping (the task-scope fallback's twin)", () => {
+    const items = buildFeed({
+      rows: [
+        row({ kind: "review_underway", taskId: null, scopeId: null, params: { criterionId: "1.1", attempt: 1 } }),
+      ],
+      resolvers,
+      skin: "trail",
+    });
+    expect(items[0].tone).toBe("info");
+    expect(items[0].headline).toBe("Pick something real to sell");
+    expect(items[0].href).toBe("/path/criterion/1.1");
+  });
 });
 
 /* ───────────────────────────────────── the rest of the feed contract */
@@ -369,22 +424,41 @@ describe("buildFeed", () => {
     expect(items.find((i) => i.eventId === "c")!.href).toBe("/path/criterion/1.2");
   });
 
-  it("every known kind renders non-blank copy in both registers (phase_returned included — modeled, no T1 trigger)", () => {
-    const kinds: Array<{ kind: string; taskId: string | null; scopeId: string | null; params: unknown }> = [
-      { kind: "verified", taskId: "1.1.1", scopeId: null, params: { taskId: "1.1.1" } },
-      { kind: "not_yet", taskId: "1.1.1", scopeId: null, params: { taskId: "1.1.1", note: "n" } },
-      { kind: "reopened", taskId: "1.1.1", scopeId: null, params: { taskId: "1.1.1", note: "n" } },
-      { kind: "review_underway", taskId: null, scopeId: "1.1", params: { criterionId: "1.1", attempt: 1 } },
-      { kind: "criterion_returned", taskId: null, scopeId: "1.1", params: { criterionId: "1.1", attempt: 1, note: "n" } },
-      { kind: "phase_returned", taskId: null, scopeId: "1.1", params: { criterionId: "1.1", note: "n" } },
-    ];
+  it("EVERY registered kind renders non-blank copy in both registers — derived from NOTIFICATION_EVENT_KINDS, so a 7th kind added without copy fails here", () => {
+    const TASK_KINDS = new Set(["verified", "not_yet", "reopened"]);
+    const fixtures = NOTIFICATION_EVENT_KINDS.map((kind) =>
+      TASK_KINDS.has(kind)
+        ? { kind, taskId: "1.1.1", scopeId: null, params: { taskId: "1.1.1", note: "n" } }
+        : { kind, taskId: null, scopeId: "1.1", params: { criterionId: "1.1", attempt: 1, note: "n" } }
+    );
     for (const skin of ["trail", "hq"] as const) {
-      const items = buildFeed({ rows: kinds.map((k) => row({ ...k })), resolvers, skin });
+      const items = buildFeed({ rows: fixtures.map((k) => row({ ...k })), resolvers, skin });
+      expect(items).toHaveLength(NOTIFICATION_EVENT_KINDS.length);
       for (const item of items) {
+        expect(item.tone, `${skin} ${item.eyebrow} must not fall to skipped`).not.toBe("skipped");
         expect(item.eyebrow.length, `${skin} eyebrow`).toBeGreaterThan(0);
         expect(item.headline.length, `${skin} headline`).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("the Not Yet copy is single-sourced: copyFor's body IS NOT_YET_COPY's reassurance in both registers", () => {
+    for (const skin of ["trail", "hq"] as const) {
+      const item = buildFeed({
+        rows: [row({ kind: "not_yet", params: { taskId: "1.2.4", note: "n" } })],
+        resolvers,
+        skin,
+      })[0];
+      expect(item.body).toBe(NOT_YET_COPY[skin].reassurance);
+    }
+  });
+
+  it("buildFeed and planReplay handle an empty feed — empty out, no throw (the first-time student)", () => {
+    expect(buildFeed({ rows: [], resolvers, skin: "trail" })).toEqual([]);
+    expect(planReplay({ rows: [], resolvers, skin: "hq", verifiedCount: 0, totalTasks: 125 })).toEqual({
+      moments: [],
+      stampWithoutPlaying: [],
+    });
   });
 
   it("not_yet is amber — information, not judgement (and never the celebrate tone)", () => {
@@ -430,5 +504,23 @@ describe("timing constants", () => {
     expect(MOMENT_DISPLAY_MS).toBeGreaterThanOrEqual(2000);
     expect(MOMENT_DISPLAY_MS).toBeLessThanOrEqual(4000);
     expect(MOMENT_GAP_MS).toBeGreaterThan(0);
+  });
+
+  it("the seen-stamp chunk ceiling is a sane positive bound shared by action and clients", () => {
+    expect(MAX_SEEN_IDS_PER_CALL).toBeGreaterThan(0);
+    expect(Number.isInteger(MAX_SEEN_IDS_PER_CALL)).toBe(true);
+  });
+});
+
+describe("Moment.whenIso — the host's merge-order key", () => {
+  it("every planned moment carries its coalesced source moment, so late-arriving backfills can merge into a live queue in true order", () => {
+    const rows = [
+      row({ id: "live", occurredAt: null, createdAt: "2026-07-20T10:00:00.000Z" }),
+      row({ id: "backfilled", occurredAt: "2026-07-19T08:00:00.000Z", createdAt: "2026-07-21T00:00:00.000Z" }),
+    ];
+    const plan = planReplay({ rows, resolvers, skin: "trail", verifiedCount: 2, totalTasks: 125 });
+    const byId = Object.fromEntries(plan.moments.map((m) => [m.eventId, m.whenIso]));
+    expect(byId.live).toBe("2026-07-20T10:00:00.000Z"); // created_at fallback
+    expect(byId.backfilled).toBe("2026-07-19T08:00:00.000Z"); // the SOURCE moment, not heal time
   });
 });

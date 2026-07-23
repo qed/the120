@@ -21,7 +21,18 @@ import type { Skin } from "@/app/path/lib/skin-tokens";
 /** The signed-in student's own feed, register-resolved for their current
  *  skin, or a typed refusal (parents/guides have no in-app feed — theirs is
  *  the email channel and the review queue). Reading NEVER stamps seen_at —
- *  an agent fetch must not consume a child's celebration replay. */
+ *  an agent fetch must not consume a child's celebration replay.
+ *
+ *  `unseenCount` is the RAW unseen-row count (every seen_at IS NULL row in
+ *  the loaded window). It deliberately differs from the shell nav badge,
+ *  which counts only PLAYABLE moments (superseded/unresolvable unseen rows
+ *  are cursor-advanced silently, never celebrated).
+ *
+ *  Cursor parity for agents: items with `unseen && tone in {celebrate,
+ *  amber, info}` are what the moment host plays; `unseen && tone in {past,
+ *  skipped}` are its stamp-without-playing set. A full replay-equivalent is
+ *  markNotificationEventsSeen over ALL unseen ids (chunked by
+ *  MAX_SEEN_IDS_PER_CALL). */
 export async function getNotificationsFeed(): Promise<
   | { ok: true; skin: Skin; items: FeedItem[]; unseenCount: number }
   | { ok: false; reason: "not_a_student" | "unavailable" }

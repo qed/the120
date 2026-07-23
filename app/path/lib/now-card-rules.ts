@@ -32,7 +32,7 @@
 
 import type { Band, Criterion, DeepReadonly, Phase, ProgramContent, UnitTask } from "@/app/path/content/types";
 import type { Skin } from "./skin-tokens";
-import type { TaskState } from "./transition-table";
+import type { TaskState, TransitionName } from "./transition-table";
 
 // ── skin resolution ───────────────────────────────────────────────────────────
 
@@ -361,7 +361,10 @@ export const DECISION_TRANSITIONS = [
   "revoke",
   "criterion_return",
   "phase_return",
-] as const;
+  // `satisfies` pins every member to the engine's TransitionName union — a
+  // typo'd or renamed transition is a compile error here, not a silently
+  // non-matching SQL filter (the exact drift this list exists to prevent).
+] as const satisfies readonly TransitionName[];
 
 const DECISION_TRANSITION_SET: ReadonlySet<string> = new Set(DECISION_TRANSITIONS);
 

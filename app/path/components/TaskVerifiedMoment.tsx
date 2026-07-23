@@ -37,7 +37,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { markNotificationEventsSeen } from "@/app/path/lib/actions/notifications";
-import { MOMENT_DISPLAY_MS, MOMENT_GAP_MS, type Moment } from "@/app/path/lib/celebration-tier1-rules";
+import {
+  MAX_SEEN_IDS_PER_CALL,
+  MOMENT_DISPLAY_MS,
+  MOMENT_GAP_MS,
+  type Moment,
+} from "@/app/path/lib/celebration-tier1-rules";
 import type { Skin } from "@/app/path/lib/skin-tokens";
 import { StatusChip } from "./system/StatusChip";
 import { Icon } from "./system/Icon";
@@ -104,33 +109,57 @@ export function TaskVerifiedMoment({
     };
   }, []);
 
-  /** Fire-and-forget cursor stamp — every awaited action is guarded (the
+  /** Fire-and-forget cursor stamp. Chunked to the action's zod ceiling (an
+   *  unchunked >100-id backlog would refuse the WHOLE batch and wedge the
+   *  cursor for the session — ce-review), and gated on the TYPED result: a
+   *  chunk that fails (throw or {ok:false}) is removed from stampedRef so a
+   *  later prop refresh can retry it; the DB's seen_at IS NULL fence keeps
+   *  every retry idempotent. Every awaited action runs inside try/catch (the
    *  guard can redirect(), which throws outside the action body). */
   const stamp = useCallback((ids: string[]) => {
     const fresh = ids.filter((id) => !stampedRef.current.has(id));
     if (fresh.length === 0) return;
-    for (const id of fresh) stampedRef.current.add(id);
+    for (const id of fresh) stampedRef.current.add(id); // dedupe concurrent calls
     void (async () => {
-      try {
-        await markNotificationEventsSeen({ eventIds: fresh });
-      } catch {
-        // A failed stamp self-heals: the event replays next open.
+      for (let i = 0; i < fresh.length; i += MAX_SEEN_IDS_PER_CALL) {
+        const chunk = fresh.slice(i, i + MAX_SEEN_IDS_PER_CALL);
+        try {
+          const result = await markNotificationEventsSeen({ eventIds: chunk });
+          if (!result.ok) {
+            // Typed refusal, no throw — surface it and re-arm the retry.
+            console.warn(`[path/moments] seen stamp refused (${result.reason}) for ${chunk.length} events`);
+            for (const id of chunk) stampedRef.current.delete(id);
+          }
+        } catch {
+          // A failed stamp self-heals: re-armed here, replayed next open.
+          for (const id of chunk) stampedRef.current.delete(id);
+        }
       }
     })();
   }, []);
 
-  // Silent cursor advances (superseded / unresolvable — never played).
+  // Silent cursor advances (superseded / unresolvable — never played). On the
+  // feed page the page's own MarkSeenOnMount covers every unseen id — the
+  // layout-side stamp there would be pure duplication (ce-review).
   useEffect(() => {
-    if (stampWithoutPlaying.length > 0) stamp(stampWithoutPlaying);
-  }, [stampWithoutPlaying, stamp]);
+    if (onFeedPage || stampWithoutPlaying.length === 0) return;
+    stamp(stampWithoutPlaying);
+  }, [onFeedPage, stampWithoutPlaying, stamp]);
 
   // Enqueue newly-arrived moments once each (props refresh on router.refresh()).
+  // The merged queue re-sorts by the source moment: a healer-backfilled event
+  // delivered mid-session carries an OLDER whenIso than what is already
+  // queued, and appending it unsorted would play it out of order (ce-review).
   useEffect(() => {
     if (onFeedPage) return; // the feed page owns presentation there
     const fresh = moments.filter((m) => !enqueuedRef.current.has(m.eventId));
     if (fresh.length === 0) return;
     for (const m of fresh) enqueuedRef.current.add(m.eventId);
-    setQueue((q) => [...q, ...fresh]);
+    setQueue((q) =>
+      [...q, ...fresh].sort(
+        (a, b) => Date.parse(a.whenIso) - Date.parse(b.whenIso) || a.eventId.localeCompare(b.eventId)
+      )
+    );
   }, [moments, onFeedPage]);
 
   // Navigating to the feed mid-replay hands presentation over to the page —
@@ -181,8 +210,14 @@ export function TaskVerifiedMoment({
   }, [current, advance]);
 
   // Chime with the stamp — Trail celebrations only (§5.1; HQ is silent).
+  // Ref-guarded per moment so StrictMode's dev double-invoke can't
+  // double-chime (the same idempotency posture as stampedRef).
+  const chimedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (current?.tone === "celebrate" && trail && !reduce) playTrailChime();
+    if (current?.tone !== "celebrate" || !trail || reduce) return;
+    if (chimedForRef.current === current.eventId) return;
+    chimedForRef.current = current.eventId;
+    playTrailChime();
   }, [current, trail, reduce]);
 
   // After a drain that played something, refresh once — the nav badge and any
@@ -261,11 +296,13 @@ export function TaskVerifiedMoment({
                 {current.headline}
               </h3>
 
-              {/* the adult's words — the best reward in the system */}
+              {/* the adult's words — the best reward in the system. Clamped:
+                  a near-2000-char note must not balloon a transient corner
+                  card; the full text lives on the task page and the feed. */}
               {current.note && (
                 <div
                   className={cn(
-                    "mt-2.5 rounded-xl px-3.5 py-2.5 font-path-body text-[13px] italic leading-relaxed",
+                    "mt-2.5 line-clamp-4 rounded-xl px-3.5 py-2.5 font-path-body text-[13px] italic leading-relaxed",
                     current.tone === "celebrate" ? "bg-verified/8" : "bg-not-yet/8",
                     ink
                   )}

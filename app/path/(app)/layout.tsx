@@ -68,7 +68,12 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
     >
       {children}
       <PathPwa actableStudentIds={[self.ctx.studentId]} skin={self.skin} />
+      {/* Keyed by student: a session switch on a shared device (sibling
+          signs in, this tab refreshes) REMOUNTS the host — the previous
+          student's queued moments are discarded, never played into the new
+          identity's shell (ce-review adversarial pass). */}
       <TaskVerifiedMoment
+        key={self.ctx.studentId}
         skin={self.skin}
         moments={replay.moments}
         stampWithoutPlaying={replay.stampWithoutPlaying}

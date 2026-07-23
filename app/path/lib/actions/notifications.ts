@@ -20,13 +20,12 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { requirePathUser } from "@/app/path/lib/auth";
-
-/** Generous ceiling — a full replay stamps a handful of ids; a client sending
- *  hundreds is malformed, not ambitious. */
-const MAX_IDS_PER_CALL = 100;
+import { MAX_SEEN_IDS_PER_CALL } from "@/app/path/lib/celebration-tier1-rules";
 
 const markSeenSchema = z.object({
-  eventIds: z.array(z.string().uuid()).min(1).max(MAX_IDS_PER_CALL),
+  // The ceiling lives in the pure rules module so every client caller chunks
+  // by the same number this schema refuses above.
+  eventIds: z.array(z.string().uuid()).min(1).max(MAX_SEEN_IDS_PER_CALL),
 });
 
 export type MarkSeenResult =

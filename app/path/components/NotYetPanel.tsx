@@ -1,5 +1,6 @@
 import { Icon } from "./system/Icon";
 import { cn } from "./system/cn";
+import { NOT_YET_COPY } from "@/app/path/lib/celebration-tier1-rules";
 import type { Skin } from "@/app/path/lib/skin-tokens";
 
 /**
@@ -10,14 +11,17 @@ import type { Skin } from "@/app/path/lib/skin-tokens";
  *
  *   - TaskSurface — the task page's standing panel while the task sits in
  *     `not_yet` (extracted here from its Unit 14 inline block).
- *   - TaskVerifiedMoment — the replay's not-yet moment reuses the same copy
- *     via the pure rules; this component is the task-surface rendering.
+ *   - TaskVerifiedMoment — the replay's not-yet moment speaks the same
+ *     copy: headline and reassurance come from NOT_YET_COPY in the pure
+ *     rules (single-sourced — the ce-review pass caught this component and
+ *     copyFor drifting when each carried its own literals).
  *
  * Presentational only — no hooks, no actions; the caller decides when it
  * shows (state === "not_yet" with a noted decision).
  */
 export function NotYetPanel({ skin, note, className }: { skin: Skin; note: string; className?: string }) {
   const trail = skin === "trail";
+  const copy = NOT_YET_COPY[skin];
   return (
     <section
       aria-label="Reviewer note"
@@ -32,19 +36,13 @@ export function NotYetPanel({ skin, note, className }: { skin: Skin; note: strin
         <span className="text-not-yet">
           <Icon name="circle-dot" size={16} />
         </span>
-        {trail ? "Not yet — and that's okay." : "Not yet."}
+        {copy.headline}
       </div>
       <p className={cn("font-path-body text-[12.5px] leading-snug", trail ? "text-trail-ink-soft" : "text-hq-ink-soft")}>
         {note}
       </p>
       <p className={cn("mt-2 font-path-body text-[11.5px]", trail ? "text-trail-ink-soft" : "text-hq-ink-soft")}>
-        {trail ? (
-          <>
-            Your evidence is safe. Fix the one thing and try again — not done, <i>yet</i>.
-          </>
-        ) : (
-          <>Evidence intact — resubmit when ready. Not done, <i>yet</i>.</>
-        )}
+        {copy.reassurance}
       </p>
     </section>
   );

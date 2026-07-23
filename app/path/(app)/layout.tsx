@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import { requirePathUser } from "@/app/path/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolveStudentSelf } from "@/app/path/lib/journey-loader";
-import { resolveParentFamily } from "@/app/path/lib/family-loader";
+import { loadFamilyStudentIds, resolveParentFamily } from "@/app/path/lib/family-loader";
 import { signOutPath } from "@/app/path/lib/actions/sign-out";
 import { PathShell } from "@/app/path/components/shell/PathShell";
 import { ParentShell } from "@/app/path/components/shell/ParentShell";
+import { PathPwa } from "@/app/path/components/pwa/PathPwa";
 
 /**
  * The authed /path app shell (T1 Unit 14 + 15). The `(app)` route group
@@ -31,9 +32,13 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
   if (!self) {
     const family = await resolveParentFamily({ userId, grants });
     if (family) {
+      // A parent may act on any of their children's queued evidence (Unit 11's
+      // drain scope on a shared family device).
+      const studentIds = await loadFamilyStudentIds(db, family.familyId);
       return (
         <ParentShell familyLabel={family.familyLabel} signOut={signOutPath}>
           {children}
+          <PathPwa actableStudentIds={studentIds} skin="hq" />
         </ParentShell>
       );
     }
@@ -49,6 +54,7 @@ export default async function PathAppLayout({ children }: { children: ReactNode 
       signOut={signOutPath}
     >
       {children}
+      <PathPwa actableStudentIds={[self.ctx.studentId]} skin={self.skin} />
     </PathShell>
   );
 }

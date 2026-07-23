@@ -32,6 +32,8 @@ import {
   resolveStudentSelf,
 } from "@/app/path/lib/journey-loader";
 import { loadStudentContext, type StudentContext } from "@/app/path/lib/progress-loader";
+import { narrowTaskState } from "@/app/path/lib/progress-core";
+import { resolveTaskProgress } from "@/app/path/lib/evidence-loader";
 
 const journeySchema = z.object({ studentId: z.uuid().optional() });
 const taskSchema = z.object({ taskId: z.string().regex(/^\d+\.\d+\.\d+$/), studentId: z.uuid().optional() });
@@ -88,6 +90,39 @@ export async function getJourney(input?: unknown) {
       now,
     },
   };
+}
+
+/**
+ * The LIGHT task-state read (T1 Unit 11): the sync engine's rebase reads the
+ * task's CURRENT server state before replaying a queued submit — `getTaskDetail`
+ * would drag the whole spec sheet (evidence rows, signed-URL upkeep) along for
+ * one field. Evidence-level access (the drain acts on evidence). `not_found`
+ * covers both an unknown task id and an unprovisioned one — the queue drops the
+ * entry with a surfaced note either way.
+ */
+export async function getTaskState(input: unknown) {
+  const viewer = await requirePathUser();
+  const parsed = taskSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, reason: "invalid" as const };
+
+  const db = supabaseAdmin();
+  const target = await resolveTarget(db, viewer, parsed.data.studentId, "evidence");
+  if (!target.ok) return { ok: false as const, reason: target.reason };
+
+  let row: { id: string; state: string } | null;
+  try {
+    row = await resolveTaskProgress(db, target.ctx.studentId, parsed.data.taskId);
+  } catch (e) {
+    console.error(`[path/getTaskState] read failed for ${parsed.data.taskId}:`, e);
+    return { ok: false as const, reason: "unavailable" as const };
+  }
+  if (!row) return { ok: false as const, reason: "not_found" as const };
+  const state = narrowTaskState(row.state);
+  if (state === null) {
+    console.error(`[path/getTaskState] corrupt state '${row.state}' on ${parsed.data.taskId}`);
+    return { ok: false as const, reason: "unavailable" as const };
+  }
+  return { ok: true as const, data: { studentId: target.ctx.studentId, taskId: parsed.data.taskId, state } };
 }
 
 /**

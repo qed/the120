@@ -101,7 +101,7 @@ function normalizeTusError(err: unknown): Parameters<typeof interpretUploadRespo
 }
 
 async function uploadPlain(
-  slot: Extract<UploadSlotResult, { ok: true; strategy: "plain" }>,
+  slot: { bucket: string; objectPath: string; token: string },
   file: Blob,
   contentType: string,
   isMounted: () => boolean
@@ -129,19 +129,36 @@ async function uploadPlain(
 }
 
 function uploadTus(
-  slot: Extract<UploadSlotResult, { ok: true; strategy: "tus" }>,
+  slot: { bucket: string; objectPath: string; token: string; endpoint: string; chunkSize: number },
   file: Blob,
   contentType: string,
   callbacks: {
     isMounted: () => boolean;
-    onProgress?: (pct: number) => void;
+    onProgress?: (pct: number, uploadedBytes: number) => void;
     /** Receives the live Upload (for abort-on-unmount) and null when it settles. */
     registerUpload?: (upload: Upload | null) => void;
-  }
+    /** Fires once the creation POST assigned the resumable URL — Unit 11's sync
+     *  engine persists it (with its creation time) so a killed tab resumes. */
+    onTusUrl?: (url: string) => void;
+  },
+  /** A previously persisted resumable URL (< 24h old — the CALLER classifies
+   *  freshness via sync-rules). Set, creation is skipped and the transfer
+   *  resumes from the server's offset. */
+  resumeUrl?: string | null
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    let reportedUrl: string | null = resumeUrl ?? null;
+    const reportUrl = () => {
+      if (upload.url && upload.url !== reportedUrl) {
+        reportedUrl = upload.url;
+        callbacks.onTusUrl?.(upload.url);
+      }
+    };
     const upload = new Upload(file, {
       endpoint: slot.endpoint,
+      // Resume a known upload URL instead of creating a fresh one (TUS spec:
+      // a HEAD reads the offset, the PATCH continues from it).
+      ...(resumeUrl ? { uploadUrl: resumeUrl } : {}),
       chunkSize: slot.chunkSize, // exactly 6 MiB — Supabase requires it
       retryDelays: [0, 3000, 5000, 10000, 20000],
       // x-signature authorizes the leg without a session; x-upsert omitted =
@@ -156,9 +173,13 @@ function uploadTus(
         cacheControl: "3600",
       },
       onProgress: (sent, total) => {
-        if (callbacks.isMounted()) callbacks.onProgress?.(total ? Math.round((sent / total) * 100) : 0);
+        reportUrl();
+        if (callbacks.isMounted()) {
+          callbacks.onProgress?.(total ? Math.round((sent / total) * 100) : 0, sent);
+        }
       },
       onSuccess: () => {
+        reportUrl();
         callbacks.registerUpload?.(null);
         resolve();
       },
@@ -176,6 +197,52 @@ function uploadTus(
     callbacks.registerUpload?.(upload);
     upload.start();
   });
+}
+
+/**
+ * The Unit 11 engine's upload leg: drive ONE already-minted slot to completion
+ * and report a typed outcome instead of throwing — the drain engine folds it
+ * into the queue entry via sync-rules' `applyUploadOutcome`. Reuses the exact
+ * plain/TUS machinery above (upsert disabled, already-exists → success on both
+ * legs), plus TUS resume from a persisted URL.
+ */
+export async function uploadWithSlot(p: {
+  slot:
+    | { strategy: "plain"; bucket: string; objectPath: string; token: string }
+    | { strategy: "tus"; bucket: string; objectPath: string; token: string; endpoint: string; chunkSize: number };
+  file: Blob;
+  contentType: string;
+  resumeUrl?: string | null;
+  isMounted?: () => boolean;
+  onProgress?: (pct: number, uploadedBytes: number) => void;
+  onTusUrl?: (url: string) => void;
+  registerUpload?: (upload: Upload | null) => void;
+}): Promise<{ outcome: "success" } | { outcome: "retry"; message: string }> {
+  const isMounted = p.isMounted ?? (() => true);
+  try {
+    if (p.slot.strategy === "plain") {
+      await uploadPlain(p.slot, p.file, p.contentType, isMounted);
+    } else {
+      await uploadTus(
+        p.slot,
+        p.file,
+        p.contentType,
+        {
+          isMounted,
+          onProgress: p.onProgress,
+          onTusUrl: p.onTusUrl,
+          registerUpload: p.registerUpload,
+        },
+        p.resumeUrl
+      );
+    }
+    return { outcome: "success" };
+  } catch (e) {
+    // Every failure here is RETRY posture for the queue: transient network is
+    // the common case, and the stale-token/expired-URL cases are handled by the
+    // engine's freshness re-mint BEFORE the next attempt (sync-rules).
+    return { outcome: "retry", message: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /**

@@ -22,6 +22,11 @@ import {
   ShieldCheckIcon,
   ClipboardCheckIcon,
   SparklesIcon,
+  TriangleAlertIcon,
+  DownloadIcon,
+  ShareIcon,
+  CloudOffIcon,
+  RefreshCwIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +68,11 @@ const REGISTRY = {
   "shield-check": ShieldCheckIcon,
   "clipboard-check": ClipboardCheckIcon,
   sparkles: SparklesIcon,
+  "alert-triangle": TriangleAlertIcon,
+  download: DownloadIcon,
+  share: ShareIcon,
+  "cloud-off": CloudOffIcon,
+  refresh: RefreshCwIcon,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof REGISTRY;

@@ -28,7 +28,7 @@ import {
   uploadEvidenceFile,
   type SlotRefusal,
   type UploadedEvidence,
-} from "./upload-client";
+} from "@/app/path/lib/upload-client";
 
 export type { UploadedEvidence };
 
@@ -38,6 +38,7 @@ export function EvidenceUploader({
   studentId,
   taskId,
   disabled = false,
+  onPick,
   onUploaded,
   onRefused,
   onError,
@@ -45,6 +46,14 @@ export function EvidenceUploader({
   studentId: string;
   taskId: string;
   disabled?: boolean;
+  /**
+   * DURABLE mode (T1 Unit 11): when set, the picked File is handed straight up
+   * — the parent enqueues it in the offline queue and the sync engine drives
+   * the same slot→upload machinery. The in-component flow below then never
+   * runs; it remains as the LEGACY direct path for browsers without IndexedDB
+   * (private-mode Safari), where a durable queue cannot exist.
+   */
+  onPick?: (file: File) => void;
   onUploaded?: (evidence: UploadedEvidence) => void;
   onRefused?: (refusal: SlotRefusal) => void;
   onError?: (message: string) => void;
@@ -130,7 +139,14 @@ export function EvidenceUploader({
         disabled={disabled || busy}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void handleFile(file);
+          if (!file) return;
+          if (onPick) {
+            onPick(file);
+            // The parent owns the flow now — just re-arm the picker.
+            if (inputRef.current) inputRef.current.value = "";
+            return;
+          }
+          void handleFile(file);
         }}
       />
       {status === "preparing" && <p role="status">Preparing…</p>}

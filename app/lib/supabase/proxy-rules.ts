@@ -48,8 +48,16 @@ const UNGUARDED = new Set([
  * by design — the emailed token in the path is the credential, and the page
  * only READS (acceptance is a POSTed action). The trailing slash is required:
  * a bare /path/invite has no token and may stay behind the gate.
+ *
+ * /path/apple-icon (Unit 11): the file-convention apple-touch-icon for the
+ * /path subtree. iOS fetches it during Add to Home Screen — including from the
+ * session-less sign-in page — and a redirect here ships HTML as the icon. A
+ * static PNG route handler; nothing to protect. The prefix requires a "." or
+ * "-" delimiter (apple-icon.png / apple-icon-<hash>.png — Next's two emitted
+ * shapes) so a future route that merely SHARES the prefix (/path/apple-iconX)
+ * can never silently inherit the bypass (security review).
  */
-const UNGUARDED_PREFIXES = ["/path/invite/"];
+const UNGUARDED_PREFIXES = ["/path/invite/", "/path/apple-icon.", "/path/apple-icon-"];
 
 export function isUnguarded(pathname: string): boolean {
   return UNGUARDED.has(pathname) || UNGUARDED_PREFIXES.some((p) => pathname.startsWith(p));

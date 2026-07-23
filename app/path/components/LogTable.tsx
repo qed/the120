@@ -32,6 +32,7 @@ export function LogTable({
   readOnly = false,
   onSaved,
   onError,
+  saveOverride,
 }: {
   studentId: string;
   taskId: string;
@@ -43,6 +44,12 @@ export function LogTable({
   readOnly?: boolean;
   onSaved?: () => void;
   onError?: (message: string) => void;
+  /**
+   * DURABLE save (T1 Unit 11): when set, rows route through the offline queue
+   * instead of the direct action — an offline save survives a killed tab. The
+   * direct call below remains the legacy path for browsers without IndexedDB.
+   */
+  saveOverride?: (rows: LogRow[]) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   const template = logTemplateFor(taskId);
   const view = describeLogTable({ template, band, rowCount: initialRows.length });
@@ -70,6 +77,13 @@ export function LogTable({
   const save = useCallback(async () => {
     setSaving(true);
     try {
+      if (saveOverride) {
+        const result = await saveOverride(rows);
+        if (!mountedRef.current) return;
+        if (result.ok) onSaved?.();
+        else onError?.(result.message);
+        return;
+      }
       const result = await saveLogEvidence({ studentId, taskId, evidenceId, rows });
       if (!mountedRef.current) return;
       if (result.ok) onSaved?.();
@@ -81,7 +95,7 @@ export function LogTable({
     } finally {
       if (mountedRef.current) setSaving(false);
     }
-  }, [studentId, taskId, evidenceId, rows, onSaved, onError]);
+  }, [studentId, taskId, evidenceId, rows, onSaved, onError, saveOverride]);
 
   // Absent: this task has no log template at all — render nothing (distinct from a
   // present-but-empty log, which renders the headers below).

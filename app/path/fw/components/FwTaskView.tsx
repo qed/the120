@@ -7,6 +7,8 @@ import { Button } from "@/app/path/components/system/Button";
 import { Icon } from "@/app/path/components/system/Icon";
 import { applyFwCheckIn } from "@/app/path/lib/actions/fw-checkin";
 import type { FwCheckInActionResult } from "@/app/path/lib/fw-checkin-core";
+import { enqueueFwCheckIns, readPendingFwOpsFor } from "@/app/path/lib/fw-sync-client";
+import { projectFwPendingState } from "@/app/path/lib/fw-sync-rules";
 import {
   fwBatchStudentIds,
   searchFwRoster,
@@ -17,6 +19,7 @@ import {
   createFwClientIdLedger,
   decideFwAction,
   foldFwSurfaceOutcome,
+  fwActionTarget,
   fwResultsForFailedAction,
   fwRetryStudentIds,
   isFirstDollarTask,
@@ -118,6 +121,7 @@ function resultLine(result: FwStudentResult, nameOf: (id: string) => string): st
 
 export default function FwTaskView({
   cohortId,
+  actorUserId,
   student,
   roster,
   taskId,
@@ -131,6 +135,8 @@ export default function FwTaskView({
   rosterHref,
 }: {
   cohortId: string;
+  /** The signed-in guide — stamped on an offline capture as the capturing actor. */
+  actorUserId: string;
   student: { studentId: string; firstName: string; lastName: string };
   /**
    * The whole cohort, for the batch picker. Roster-scoped by construction —
@@ -176,6 +182,11 @@ export default function FwTaskView({
     action: FwAction;
     studentIds: string[];
   } | null>(null);
+  /** Set when a tap was CAPTURED OFFLINE rather than sent — visibly distinct from a
+   *  recorded tap (a neutral note) and from a failed one (the red alert). The global
+   *  queued indicator (FwPwa) carries the count; this is the per-tap acknowledgment
+   *  so the guide is not left wondering whether their tap took. */
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
 
   /**
    * Whether this view is still mounted. Every post-await write is gated on it —
@@ -190,6 +201,29 @@ export default function FwTaskView({
       mounted.current = false;
     };
   }, []);
+
+  // Whether the guide has interacted (submitted/queued) since mount. Once they have,
+  // the local `state` is authoritative and the async mount-reconciliation below must
+  // NOT overwrite it with a value derived from the pre-tap queue snapshot.
+  const interacted = useRef(false);
+
+  // Reconcile the server-supplied initial state with this guide's OWN pending offline
+  // captures (correctness review): mid-outage the page renders from a stale SW-cached
+  // shell that predates the guide's queued taps, so a revisit would show the task as
+  // untouched. Folding the pending ops through the canonical decision table shows the
+  // true pending position — the guide sees Undo, not a conflicting fresh decision.
+  useEffect(() => {
+    let cancelled = false;
+    void readPendingFwOpsFor({ cohortId, studentId: student.studentId, taskId, actorUserId }).then(
+      (ops) => {
+        if (cancelled || ops.length === 0 || !mounted.current || interacted.current) return;
+        setState(projectFwPendingState(initialState, ops));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [cohortId, student.studentId, taskId, actorUserId, initialState]);
 
   // One ledger per mounted task view, created ONCE. `useRef`'s argument is
   // evaluated on every render, so calling the factory inline allocated a fresh
@@ -218,13 +252,104 @@ export default function FwTaskView({
     [roster, student.studentId, pickerQuery]
   );
 
+  /**
+   * The durable backstop for an ONLINE tap that couldn't reach the server (Unit 8
+   * P0). `navigator.onLine` reports link-layer only, so an iPad associated with a
+   * venue AP whose uplink is dead reads `online: true` and takes the online branch —
+   * the single most common venue-wifi failure. When that branch fails (a throw, or an
+   * `unavailable` result), the tap must NOT be left in ephemeral React state a "Next
+   * student" tap would discard; it is captured to the queue instead, keyed by the
+   * SAME client ids the failed online call used, so the drain's replay is idempotent
+   * if the write had in fact partly landed. Returns false when the device cannot
+   * queue at all (private mode), so the caller falls through to the visible error.
+   */
+  const queueBackstop = async (
+    action: FwAction,
+    studentIds: readonly string[],
+    opts: { silent?: boolean } = {}
+  ): Promise<boolean> => {
+    const enq = await enqueueFwCheckIns({
+      cohortId,
+      taskId,
+      action,
+      actorUserId,
+      studentIds: [...studentIds],
+      actionId: crypto.randomUUID(),
+      capturedAt: new Date().toISOString(),
+      clientIds: ledger.idsFor({ taskId, action, studentIds }),
+    });
+    if (!enq.ok) return false;
+    // Silent mode durably captures ambiguous PER-STUDENT outcomes inside an otherwise
+    // successful batch without disturbing the surface (which already shows each
+    // student's real result); the global indicator carries the queued count.
+    if (!opts.silent && mounted.current) {
+      setState(fwActionTarget(action));
+      setExtras([]);
+      setPickerNote(null);
+      setQueuedNote(
+        studentIds.length === 1
+          ? "Couldn't reach the server — saved. It'll send when you're back online."
+          : `Couldn't reach the server — saved for ${studentIds.length} students. They'll send when you're back online.`
+      );
+    }
+    return true;
+  };
+
   const submit = async (action: FwAction, studentIds: readonly string[]) => {
     if (busy || studentIds.length === 0) return;
+    // From here the local state is user-driven; the mount reconcile must stand down.
+    interacted.current = true;
     setBusy(true);
     setError(null);
     setRetryable(false);
+    setQueuedNote(null);
     setLastAction(action);
     setLastSubmitted([...studentIds]);
+
+    // OFFLINE: capture to the IndexedDB queue instead of calling the server (Unit
+    // 8). The tap is not lost and does not mislead — it drains on reconnect through
+    // `runFwCheckIn`, the same gate a live tap passes, with the same-actor guard and
+    // the minimal-legal-sequence reduction applied. A batch shares ONE action id so
+    // the board still groups its celebration on drain.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      try {
+        const enq = await enqueueFwCheckIns({
+          cohortId,
+          taskId,
+          action,
+          actorUserId,
+          studentIds: [...studentIds],
+          actionId: crypto.randomUUID(),
+          capturedAt: new Date().toISOString(),
+        });
+        if (!mounted.current) return;
+        if (!enq.ok && enq.reason === "unsupported") {
+          setError("This device can't save check-ins offline. Keep a signal, or use paper as backup.");
+          setSurface((prev) =>
+            foldFwSurfaceOutcome(
+              prev,
+              { outcomes: fwResultsForFailedAction(studentIds), firstDollar: [] },
+              studentIds
+            )
+          );
+          return;
+        }
+        // Optimistically reflect the tap on THIS student's control; the board and
+        // the true state confirm on reconnect. The batch clears like an online tap.
+        setState(fwActionTarget(action));
+        setExtras([]);
+        setPickerNote(null);
+        setQueuedNote(
+          studentIds.length === 1
+            ? "Saved. It'll send when you're back online."
+            : `Saved for ${studentIds.length} students. They'll send when you're back online.`
+        );
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+      return;
+    }
+
     try {
       // Minted (or re-used) BEFORE the call, so a retry of this same tap carries
       // the same keys and cannot append a phantom re-attempt event.
@@ -238,6 +363,10 @@ export default function FwTaskView({
       });
 
       if (!res.ok) {
+        // `unavailable` = the server was unreachable or a server-side read failed
+        // (the associated-but-dead venue-wifi case navigator.onLine can't detect).
+        // Capture the tap durably rather than leave it in ephemeral state (P0).
+        if (res.reason === "unavailable" && (await queueBackstop(action, studentIds))) return;
         setRetryable(res.reason === "unavailable" || res.reason === "invalid_input");
         setError(
           res.reason === "no_session"
@@ -246,7 +375,7 @@ export default function FwTaskView({
               ? "You can't record check-ins for this weekend. Find The 120 staff."
               : res.reason === "invalid_input"
                 ? "Something about that tap didn't look right. Try again."
-                : "That didn't go through. Tap Retry."
+                : "That didn't go through, and this device can't save it offline. Keep a signal, or use paper as backup."
         );
         // The action failed OUTRIGHT — no per-student outcomes came back. Report
         // every submitted student as unavailable rather than leaving the PREVIOUS
@@ -299,13 +428,26 @@ export default function FwTaskView({
       // Keeps the tree's counts and the roster's resume chips honest when the
       // guide navigates back.
       router.refresh();
+
+      // Durably capture any PER-STUDENT ambiguous outcome (a batch where the request
+      // succeeded but one student's write timed out) so a "Next student" tap can't
+      // discard it with the in-memory ledger (adversarial re-review P1). Idempotent by
+      // the same client ids still held for those students.
+      const unsettled = fwRetryStudentIds(res.outcomes);
+      if (unsettled.length > 0) void queueBackstop(action, unsettled, { silent: true });
     } catch {
       // A Server Action can REJECT rather than return — on venue wifi that is
       // the likely shape (docs/solutions/ui-bugs/server-action-rejection-no-try-
-      // finally-freezes-capture-modal-2026-07-20.md).
+      // finally-freezes-capture-modal-2026-07-20.md). Capture the tap durably
+      // FIRST — even if the guide already navigated away (unmounting this view),
+      // the enqueue must still run, because a navigate-away-before-throw is exactly
+      // the loss this backstop exists to prevent (queueBackstop guards only its OWN
+      // setState on mounted, so calling it while unmounted is safe). The mount check
+      // gates only the visible error UI below.
+      if (await queueBackstop(action, studentIds)) return;
       if (!mounted.current) return;
       setRetryable(true);
-      setError("That didn't go through. Tap Retry.");
+      setError("That didn't go through, and this device can't save it offline. Keep a signal, or use paper as backup.");
       setSurface((prev) =>
         foldFwSurfaceOutcome(
           prev,
@@ -576,6 +718,18 @@ export default function FwTaskView({
         </div>
       )}
 
+      {/* Offline capture acknowledgment — neutral, distinct from the red failure
+          surface. The global indicator (FwPwa) carries the running queued count. */}
+      {queuedNote && (
+        <p
+          role="status"
+          className="mt-4 flex items-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface p-4 font-path-body text-sm leading-6 text-hq-ink"
+        >
+          <Icon name="clock" size={18} className="shrink-0 text-hq-ink-soft" />
+          {queuedNote}
+        </p>
+      )}
+
       {surface.firstDollar.length > 0 && (
         <p className="mt-4 rounded-xl border border-verified/50 bg-verified/10 p-4 font-path-display text-lg font-semibold text-hq-ink">
           First dollar — {surface.firstDollar.map(nameOf).join(", ")}. Ring the bell.
@@ -583,8 +737,9 @@ export default function FwTaskView({
       )}
 
       {/* Decision 14: a prominent next-student affordance, and the view stays
-          exactly where it is until the guide uses it. */}
-      {surface.results.length > 0 && (
+          exactly where it is until the guide uses it — after a sent tap OR a queued
+          one, so the offline loop moves at the same pace as the online one. */}
+      {(surface.results.length > 0 || queuedNote) && (
         <Link
           href={rosterHref}
           className="mt-4 flex min-h-[56px] items-center justify-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface font-path-body text-base font-medium text-hq-ink shadow-hq active:bg-hq-sunken"

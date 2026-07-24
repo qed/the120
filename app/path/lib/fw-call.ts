@@ -102,16 +102,25 @@ export async function fwRead<R extends { data: unknown; error: { message: string
  * ops core that holds by construction, and each case is recoverable by the same
  * refresh staff would do anyway:
  *
- *   - audit insert   → reported `audited: false`; a row that lands anyway is a
- *                      truthful record we merely under-claimed.
+ *   - grant add / revoke → POST-WRITE VERIFIED. This one is NOT merely
+ *                      "recoverable by a refresh", and an earlier version of
+ *                      this note wrongly said so. The audit row is a side-record
+ *                      nothing else can reconstruct, and the idempotent retry
+ *                      HIDES a landed-but-timed-out write (ON CONFLICT DO NOTHING
+ *                      reports "inserted nothing", `grant_not_found` reports the
+ *                      row is already gone) — so the loss would be permanent and
+ *                      invisible. `provisionFwGuide`/`revokeFwGuideGrant`
+ *                      therefore re-read on the error branch and audit what
+ *                      actually landed. See docs/solutions/logic-errors/audit-
+ *                      side-record-gated-on-primary-writes-reported-success-….
  *   - cohort insert  → a retry meets `slug_taken`, which names the cohort that
  *                      now exists rather than silently minting a second one.
  *   - token insert   → the compensation's restore is refused by the partial
  *                      unique index if the insert did land, so two live tokens
  *                      cannot result.
- *   - revoke / delete → idempotent by predicate (`is null` / four `eq`s); the
- *                      second attempt reports `no_active_token` /
- *                      `grant_not_found`, which is the truth.
+ *   - token revoke   → idempotent by predicate (`is null`, plus the
+ *                      `expectedTokenId` CAS); the second attempt reports
+ *                      `no_active_token`/`stale_view`, which is the truth.
  */
 export async function fwWrite<R extends { data: unknown; error: { message: string } | null }>(
   call: () => PromiseLike<R>,

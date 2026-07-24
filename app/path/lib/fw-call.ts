@@ -214,3 +214,22 @@ export async function fetchAllRows<T>(
   );
   return { ok: false };
 }
+
+/* ═══════════════════════════════════════════════════ Postgres error shapes ══ */
+
+/**
+ * Postgres unique-violation (SQLSTATE 23505), checked by CODE not by matching a
+ * message — the message is localized-ish, unstable, and varies by constraint.
+ *
+ * Lives HERE, beside `fwRead`/`fwWrite`, because both the ops core and the import
+ * core branch on it right after an `fwWrite` and a single definition is the point:
+ * a timed-out write's synthetic `{ message }` error has no `code`, so this returns
+ * FALSE for it — routing it to a post-write verify rather than to "already
+ * exists". The two cores each had their own copy before Unit 7's review folded
+ * them here (maintainability review).
+ */
+export function isUniqueViolation(
+  error: { code?: string } | { message: string } | null
+): boolean {
+  return error !== null && "code" in error && error.code === "23505";
+}

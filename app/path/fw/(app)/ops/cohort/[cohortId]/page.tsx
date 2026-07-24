@@ -4,12 +4,14 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwBoardToken from "@/app/path/fw/components/FwBoardToken";
 import FwGuideRoster from "@/app/path/fw/components/FwGuideRoster";
+import FwImportExceptions from "@/app/path/fw/components/FwImportExceptions";
 import FwMatchResolver from "@/app/path/fw/components/FwMatchResolver";
 import FwReplayRejects from "@/app/path/fw/components/FwReplayRejects";
 import FwStudentRoster from "@/app/path/fw/components/FwStudentRoster";
 import FwWindowLabel from "@/app/path/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
+import { listFwImportExceptions } from "@/app/path/lib/fw-import-core";
 import {
   listFwCohortGuides,
   listFwOpsStudents,
@@ -55,14 +57,15 @@ export const metadata: Metadata = {
 async function loadOpsCohortPage(cohortId: string) {
   const db = supabaseAdmin();
   const now = Date.now();
-  const [cohort, token, guides, students, rejects] = await Promise.all([
+  const [cohort, token, guides, students, rejects, importExceptions] = await Promise.all([
     loadFwOpsCohort(db, cohortId),
     loadFwOpsBoardToken(db, { cohortId, now }),
     listFwCohortGuides(db, { cohortId, now }),
     listFwOpsStudents(db, { cohortId }),
     listFwReplayRejects(db, { cohortId }),
+    listFwImportExceptions(db, { cohortId }),
   ]);
-  return { cohort, token, guides, students, rejects };
+  return { cohort, token, guides, students, rejects, importExceptions };
 }
 
 export default async function FwOpsCohortPage({
@@ -74,7 +77,8 @@ export default async function FwOpsCohortPage({
   const { verdict } = await resolveFwActorForCohort(cohortId);
   if (!isFwStaffActor(verdict)) notFound();
 
-  const { cohort, token, guides, students, rejects } = await loadOpsCohortPage(cohortId);
+  const { cohort, token, guides, students, rejects, importExceptions } =
+    await loadOpsCohortPage(cohortId);
   // The gate already proved this cohort is `kind='fw'` and that the caller may
   // act in it; a null here is a read failure, not an authorization answer.
   if (!cohort) {
@@ -179,8 +183,38 @@ export default async function FwOpsCohortPage({
 
       <section className="mt-10">
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
-          Students
+          Import exceptions
         </h2>
+        <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+          Roster rows the import couldn&apos;t place on its own — a name that matches more than one
+          student, or one at a different band. Nothing was added for them. Resolve each before the
+          weekend&apos;s doors open.
+        </p>
+        {importExceptions.ok ? (
+          <FwImportExceptions cohortId={cohort.id} exceptions={importExceptions.exceptions} />
+        ) : (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
+          >
+            We couldn&apos;t load the import exceptions just now. Reload the page — this is not the
+            same thing as &ldquo;none&rdquo;.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-10">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+            Students
+          </h2>
+          <Link
+            href={`/path/fw/ops/cohort/${cohort.id}/import`}
+            className="inline-flex min-h-[44px] items-center font-path-body text-sm text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
+          >
+            Import a roster (CSV)
+          </Link>
+        </div>
         <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
           Removing a student anonymizes their record in place — their name is erased and their
           address is retired so it&apos;s never reused. It cannot be undone.

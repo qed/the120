@@ -464,7 +464,47 @@ describe("loadFwMatchCandidates", () => {
       ok: true,
       candidates: [],
     });
-    expect(queries.map((q) => q.table)).toEqual(["path_student_profiles"]);
+    // The two NAME lookups run (profiles + the G7 import-exception widening), but
+    // the membership hop is skipped when neither returned a candidate.
+    const tables = queries.map((q) => q.table);
+    expect(tables).toContain("path_student_profiles");
+    expect(tables).toContain("path_fw_import_exceptions");
+    expect(tables).not.toContain("path_cohort_members");
+  });
+
+  it("surfaces a PENDING import exception as an import_exception candidate (G7)", async () => {
+    // The importer parks an ambiguous name here; quick-create (and a re-import)
+    // must see it, scoped to the cohort the import targeted, or a second account
+    // is minted for a child staff are already resolving.
+    const { db } = makeFakeDb({
+      profiles: [],
+      members: [],
+      rawRows: {
+        path_fw_import_exceptions: [
+          { id: "x-1", cohort_id: BOSTON, band: "g6_8", normalized_name: KEY, state: "pending" },
+        ],
+      },
+    });
+    const res = await loadFwMatchCandidates(db, KEY);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.candidates).toEqual([
+      { profileId: "x-1", normalizedName: KEY, band: "g6_8", cohortIds: [BOSTON], source: "import_exception" },
+    ]);
+  });
+
+  it("FAILS the lookup on an unreadable import-exception row — never silently drops one", async () => {
+    // Same asymmetry as the profile candidates: this feeds a duplicate check, so
+    // a dropped exception is a silent wrong answer.
+    const { db } = makeFakeDb({
+      profiles: [],
+      members: [],
+      rawRows: {
+        path_fw_import_exceptions: [
+          { id: "x-1", cohort_id: 42, band: "g6_8", normalized_name: KEY, state: "pending" },
+        ],
+      },
+    });
+    expect(await loadFwMatchCandidates(db, KEY)).toEqual({ ok: false });
   });
 
   it("short-circuits an empty key without touching the database", async () => {
@@ -500,8 +540,12 @@ describe("loadFwMatchCandidates", () => {
     expect(await loadFwMatchCandidates(db, KEY)).toEqual({ ok: false });
   });
 
-  it("reports a read failure on either query", async () => {
-    for (const table of ["path_student_profiles", "path_cohort_members"]) {
+  it("reports a read failure on any of the three queries", async () => {
+    for (const table of [
+      "path_student_profiles",
+      "path_cohort_members",
+      "path_fw_import_exceptions",
+    ]) {
       const { db } = makeFakeDb({ ...BASE, errors: { [table]: "boom" } });
       expect(await loadFwMatchCandidates(db, KEY)).toEqual({ ok: false });
     }

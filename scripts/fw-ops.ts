@@ -34,6 +34,14 @@
  *   npm run fw -- match          --cohort <uuid> --first Maya --last Chen [--json]
  *   npm run fw -- link           --cohort <uuid> --student <uuid> [--json]
  *
+ * Bulk import (FW Unit 7) — Boston's roster path. `import` is SAFE TO RE-RUN:
+ * students already on the roster are skipped, so a re-run mints nothing new.
+ * `--dry-run` previews what each row WOULD do (no accounts created):
+ *
+ *   npm run fw -- import         --cohort <uuid> --file roster.csv [--chunk 8] [--dry-run] [--json]
+ *   npm run fw -- import-exceptions        --cohort <uuid> [--all] [--json]
+ *   npm run fw -- import-exception-resolve --cohort <uuid> --exception <uuid> [--dismiss] [--json]
+ *
  * ── Why this exists
  *
  * The whole read and write path is deliberately built as plain, `db`-first
@@ -61,6 +69,8 @@
  * defaults to the first active staff row so every write is still attributed to
  * a real person rather than to nobody.
  */
+
+import { readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -94,6 +104,22 @@ import {
   fwReplayRejectReasonCopy,
   normalizeFwCohortSlug,
 } from "../app/path/lib/fw-ops-rules";
+import {
+  DEFAULT_FW_IMPORT_CHUNK_SIZE,
+  FW_IMPORT_PARSE_ERROR_COPY,
+  decideFwImportRowMatch,
+  dedupeFwImportRows,
+  parseFwImportCsv,
+  planFwImportChunks,
+} from "../app/path/lib/fw-import-rules";
+import {
+  listFwImportExceptions,
+  resolveFwImportException,
+  runFwImportChunk,
+  type FwImportOutcome,
+} from "../app/path/lib/fw-import-core";
+import { loadFwMatchCandidates } from "../app/path/lib/fw-loader";
+import { fwMatchKey } from "../app/path/lib/fw-match-rules";
 import { isFwAction } from "../app/path/lib/fw-rules";
 import { runFwQuickCreate } from "../app/path/lib/fw-student-core";
 
@@ -117,6 +143,9 @@ const COMMANDS = [
   "anonymize",
   "match",
   "link",
+  "import",
+  "import-exceptions",
+  "import-exception-resolve",
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
@@ -154,6 +183,9 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   anonymize: ["--cohort", "--student", "--confirm-name", "--force"],
   match: ["--cohort", "--first", "--last"],
   link: ["--cohort", "--student"],
+  import: ["--cohort", "--file", "--chunk", "--dry-run"],
+  "import-exceptions": ["--cohort", "--all"],
+  "import-exception-resolve": ["--cohort", "--exception", "--dismiss"],
 };
 
 function arg(name: string): string | null {
@@ -607,6 +639,196 @@ fresh link emailed to ${issued.email}`);
           ? `\n${studentId} is already in ${cohortId}`
           : `\n${studentId} linked into ${cohortId}`
       )
+    );
+    return;
+  }
+
+  /* ─────────────────────────────────────────────── bulk import (FW Unit 7) ── */
+  // `import` drives the SAME runFwImportChunk the ops page calls — a second front
+  // door to one core, so a student imported here is indistinguishable from one
+  // imported in a browser, and the compensation on a failed row is the same. It
+  // runs ALL chunks in one process (no serverless maxDuration on a script), so it
+  // is also how per-row timing is MEASURED to size the ops page's chunks.
+
+  if (command === "import") {
+    const cohortId = required("cohort");
+    // A `--chunk` with no value must not silently fall back to the default — the
+    // same no-silent-no-op posture assertKnownFlags enforces for flag NAMES.
+    if (process.argv.includes("--chunk") && arg("chunk") === null) {
+      throw new Error("--chunk requires a value (e.g. --chunk 8)");
+    }
+    const text = readFileSync(required("file"), "utf8");
+    const parsed = parseFwImportCsv(text);
+    if (!parsed.ok) {
+      // Human guidance PLUS the stable machine tag, so a scripting agent can match
+      // on the tag and a person can read what to fix.
+      throw new Error(`import parse failed: ${FW_IMPORT_PARSE_ERROR_COPY[parsed.reason]} (${parsed.reason})`);
+    }
+    const { unique, duplicates } = dedupeFwImportRows(parsed.rows);
+    // A shortfall between physical lines and parsed rows means a quoted field
+    // swallowed line breaks — surface it rather than importing a truncated roster.
+    if (parsed.dataRowCount < parsed.sourceDataLineCount) {
+      console.error(
+        `[fw] WARNING: ${parsed.sourceDataLineCount} lines in the file but only ${parsed.dataRowCount} parsed as rows — likely a stray or unclosed quote. Fix the file before importing.`
+      );
+    }
+    const chunkSize = arg("chunk") ? Number(arg("chunk")) : DEFAULT_FW_IMPORT_CHUNK_SIZE;
+
+    // ── Dry run: parse + dedupe + a READ-ONLY per-row match pass. Writes NOTHING,
+    // so an operator (or agent) can inspect what a CSV would do — mint/link/skip/
+    // exception per row — before minting ~90 real, hard-to-unwind accounts
+    // (agent-native review). Requires a second, --dry-run-less invocation to run.
+    if (process.argv.includes("--dry-run")) {
+      const plan: { rowNumber: number; name: string; band: string; action: string }[] = [];
+      for (const r of unique) {
+        const key = fwMatchKey(r.firstName, r.lastName);
+        let action = "mint";
+        if (key === null) action = "invalid_name";
+        else {
+          const c = await loadFwMatchCandidates(db, key);
+          action = c.ok
+            ? decideFwImportRowMatch({ candidates: c.candidates, cohortId, band: r.band }).action
+            : "match_unavailable";
+        }
+        plan.push({ rowNumber: r.rowNumber, name: `${r.firstName} ${r.lastName}`, band: r.band, action });
+      }
+      emit(
+        {
+          dryRun: true,
+          parse: {
+            dataRows: parsed.dataRowCount,
+            sourceLines: parsed.sourceDataLineCount,
+            toImport: unique.length,
+            duplicatesCollapsed: duplicates.length,
+            rejected: parsed.rejected,
+          },
+          plan,
+        },
+        () => {
+          console.log(`\nDRY RUN — nothing written. ${unique.length} row(s) would be processed:`);
+          const tally = new Map<string, number>();
+          for (const p of plan) tally.set(p.action, (tally.get(p.action) ?? 0) + 1);
+          for (const [a, n] of tally) console.log(`  ${a}: ${n}`);
+          for (const p of plan) console.log(`    row ${p.rowNumber}  ${p.name} (${p.band}) → ${p.action}`);
+          for (const r of parsed.rejected) console.log(`    parse row ${r.rowNumber} rejected: ${r.reason}`);
+        }
+      );
+      return;
+    }
+
+    const actor = await resolveActor();
+    const chunks = planFwImportChunks(unique, chunkSize);
+
+    const outcomes: FwImportOutcome[] = [];
+    const started = Date.now();
+    for (const chunk of chunks) {
+      const res = await runFwImportChunk(db, { cohortId, actorUserId: actor, rows: chunk });
+      outcomes.push(...res.outcomes);
+      // Progress to stderr so a 90-row import over venue wifi never looks hung.
+      console.error(`[fw] import: ${outcomes.length}/${unique.length} rows processed`);
+    }
+    const elapsedMs = Date.now() - started;
+    const perRowMs = unique.length ? Math.round(elapsedMs / unique.length) : 0;
+
+    const tally = new Map<string, number>();
+    for (const o of outcomes) tally.set(o.kind, (tally.get(o.kind) ?? 0) + 1);
+
+    emit(
+      {
+        parse: {
+          dataRows: parsed.dataRowCount,
+          toImport: unique.length,
+          duplicatesCollapsed: duplicates.length,
+          rejected: parsed.rejected,
+        },
+        chunkSize,
+        elapsedMs,
+        perRowMs,
+        outcomes,
+      },
+      () => {
+        console.log(
+          `\nimported ${unique.length} row(s) into ${cohortId} in ${chunks.length} chunk(s) of ${chunkSize}`
+        );
+        console.log(
+          `  ${parsed.dataRowCount} data rows · ${duplicates.length} duplicate(s) collapsed · ${parsed.rejected.length} rejected at parse`
+        );
+        for (const [kind, n] of tally) console.log(`  ${kind}: ${n}`);
+        // The measurement the plan asks for: real per-row timing against production.
+        console.log(`  timing: ${elapsedMs}ms total, ~${perRowMs}ms/row`);
+        const notable = outcomes.filter((o) => o.kind === "exception" || o.kind === "failed");
+        if (notable.length > 0) {
+          console.log("\n  needs attention:");
+          for (const o of notable) {
+            console.log(
+              `    row ${o.rowNumber}  ${o.firstName} ${o.lastName} (${o.band}) — ${o.kind}${o.reason ? ` (${o.reason})` : ""}`
+            );
+          }
+        }
+        for (const r of parsed.rejected) {
+          console.log(`    parse row ${r.rowNumber} rejected: ${r.reason}`);
+        }
+      }
+    );
+    // A partial import is a designed, reported state — but an operator scripting
+    // this needs a non-zero exit AND a stderr breadcrumb (the `guides`/
+    // `import-exceptions` convention: a bare exit 1 is indistinguishable from a
+    // crash to anything scripting this).
+    const attention = outcomes.filter((o) => o.kind === "failed" || o.kind === "exception");
+    if (attention.length > 0) {
+      console.error(
+        `[fw] import: ${attention.length} of ${outcomes.length} row(s) need attention (exit 1)`
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "import-exceptions") {
+    const cohortId = required("cohort");
+    const includeResolved = process.argv.includes("--all");
+    const res = await listFwImportExceptions(db, { cohortId, includeResolved });
+    if (!res.ok) throw new Error(`import-exceptions read failed for ${cohortId}`);
+    emit(res.exceptions, () => {
+      console.log(
+        `\n${res.exceptions.length} ${includeResolved ? "" : "pending "}import exception(s) on ${cohortId}\n`
+      );
+      for (const e of res.exceptions) {
+        console.log(`  ${e.id}  ${e.firstName} ${e.lastName} (${e.band}) — ${e.state} · ${e.reason}`);
+      }
+    });
+    // The G7 pre-event gate as an exit code: any still-open exception fails it.
+    const pending = res.exceptions.filter((e) => e.state === "pending");
+    if (pending.length > 0) {
+      console.error(`[fw] ${pending.length} import exception(s) still open (exit 1)`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "import-exception-resolve") {
+    const cohortId = required("cohort");
+    const exceptionId = required("exception");
+    const disposition = process.argv.includes("--dismiss") ? "dismissed" : "resolved";
+    const res = await resolveFwImportException(db, {
+      exceptionId,
+      cohortId,
+      actorUserId: await resolveActor(),
+      disposition,
+      now: Date.now(),
+    });
+    if (!res.ok) {
+      // `not_open` is the benign, expected outcome on a safe retry (already
+      // handled) — name it so an agent doesn't chase a non-problem.
+      throw new Error(
+        res.reason === "not_open"
+          ? `exception ${exceptionId} is already resolved or dismissed — nothing to do`
+          : `import-exception-resolve: ${res.reason}`
+      );
+    }
+    // Echo the inputs so a scripted resolve-loop can correlate each result.
+    emit({ ...res, exceptionId, cohortId, disposition }, () =>
+      console.log(`\nexception ${exceptionId} ${disposition}`)
     );
     return;
   }

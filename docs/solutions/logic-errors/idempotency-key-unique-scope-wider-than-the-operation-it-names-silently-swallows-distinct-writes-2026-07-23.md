@@ -1,8 +1,9 @@
 ---
-title: "An idempotency key whose UNIQUENESS SCOPE is wider than the operation it names silently swallows distinct writes — and reports them as successful replays"
+title: "A dedupe/idempotency key whose column set does not match the entity's identity silently swallows distinct writes — and reports them as successful replays"
 date: 2026-07-23
+last_updated: 2026-07-24
 category: docs/solutions/logic-errors
-module: path / First Profit (FW) check-in write path — fw_move_task
+module: path / First Profit (FW) — dedupe keys (fw_move_task client_id; import-exception park)
 problem_type: logic_error
 component: database
 symptoms:
@@ -10,7 +11,8 @@ symptoms:
   - "`replayed` is a success-shaped outcome, so the guide was told the tap had already been captured — no error, no retry prompt"
   - "Under concurrency the same collision moved a progress row to `verified` while ON CONFLICT DO NOTHING silently dropped its event, leaving a state change with no audit row"
   - "The column's own schema comment said 'the EXACTLY-ONCE key, per (student, task, tap)' while the unique index was on (client_id) alone"
-  - "Every test passed: the suite only ever replayed one client_id against the SAME (student, task)"
+  - "Second instance (Unit 7): the import-exception dedupe keyed on (cohort, name) but the identity is (cohort, name, BAND), so a same-name-different-band child was swallowed as `alreadyParked` — at BOTH a pure decision function AND the partial unique index"
+  - "Every test passed: the suite only ever replayed one key against the SAME entity, never a second distinct entity sharing it"
 root_cause: logic_error
 resolution_type: code_fix
 severity: high
@@ -18,8 +20,9 @@ tags:
   - idempotency
   - exactly-once
   - partial-unique-index
-  - on-conflict
   - dedupe-key
+  - compound-key-identity
+  - on-conflict
   - append-only-audit
   - postgres
   - code-review
@@ -155,8 +158,54 @@ The concurrent state/event split disappears for the same reason. That failure
 needed two writes to *different rows* to collide on the *same key*; once the key
 includes the row's identity, two different rows can never collide.
 
+## Second instance — Unit 7, one column short AND at two layers (2026-07-24)
+
+The bulk CSV importer parks an *ambiguous* roster row (a name matching more than
+one existing student) as a pending "import exception" for staff to resolve, and
+must not park the same one twice. The importer's own module says, in bold, that
+the identity tuple is **`(name, band)`** — "two 'Alex Kim's at different bands
+are two children." But both the deduping layers omitted band:
+
+```ts
+// the pure decision function — fires BEFORE the row is even provisioned
+if (candidates.some((c) => c.source === "import_exception" && c.cohortIds.includes(cohortId))) {
+  return { action: "skip_pending_exception" };   // ← no `&& c.band === band`
+}
+```
+
+```sql
+-- the DB backstop the park writer treats a unique violation as "alreadyParked"
+create unique index … path_fw_import_exceptions_one_pending_per_name_idx
+  on public.path_fw_import_exceptions (cohort_id, normalized_name)   -- ← no band
+  where state = 'pending';
+```
+
+A pending "Alex Kim g3_5" exception therefore swallowed a genuinely different
+"Alex Kim g9_12" child: the decision function short-circuited to
+`skip_pending_exception` (a success-shaped outcome), so the g9_12 child was never
+minted, never linked, never parked — and invisible to the G7 pre-event gate,
+which reported zero open exceptions once staff resolved the one they could see.
+Even after fixing the decision function, the DB index would still have collided
+the second park and the writer's `isUniqueViolation → alreadyParked` would have
+masked it. **The same key was under-scoped at two independent enforcement points,
+and both had to be widened** — the app filter to `&& c.band === band`, and the
+index (migration `20260803130000`) to `(cohort_id, normalized_name, band)`.
+
+This is the SAME lesson as the client_id case, generalized: the mismatch need not
+be "wider than the operation" — it can equally be "narrower than the identity"
+(missing a column the entity is distinguished by). Either way, two distinct
+entities share one key, collide, and one is silently discarded.
+
 ## Prevention
 
+- **A dedupe key's column set must equal the entity's TRUE identity — at every
+  layer that gates on it.** If the identity is `(X, Y, band)`, then the unique
+  index, every `ON CONFLICT`/probe, AND every pure decision function that
+  short-circuits on "already have one" all key on `(X, Y, band)` — not `(X, Y)`
+  and not `(key)` alone. Read the identity the code documents and each dedupe
+  site *as a diff* against it. The Unit 7 bug lived in a pure, exhaustively
+  unit-tested TypeScript function AND in a SQL index; fixing either alone left the
+  other to collide.
 - **A dedupe key's unique index must be scoped to exactly the tuple its name and
   documentation claim.** If the comment says "per (X, Y, tap)", the index is
   `unique (X, Y, key)` — not `unique (key)`. Read the comment and the constraint
@@ -196,5 +245,7 @@ includes the row's identity, two different rows can never collide.
   — found in the same review; the parity test that was supposed to pin this SQL
   had assertions that could not fail.
 - Migrations: `20260728120000_fw_cohort_sprints.sql` (the original global index),
-  `20260731120000_fw_client_id_scoped.sql` (the fix).
-  Plan: `docs/plans/2026-07-23-001-feat-fw-cohort-sprints-plan.md` (Unit 3).
+  `20260731120000_fw_client_id_scoped.sql` (the Unit 3 fix);
+  `20260803120000_fw_import_exceptions.sql` (the original band-less exception
+  index), `20260803130000_fw_import_exceptions_band.sql` (the Unit 7 fix).
+  Plan: `docs/plans/2026-07-23-001-feat-fw-cohort-sprints-plan.md` (Units 3, 7).

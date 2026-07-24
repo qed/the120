@@ -1,0 +1,62 @@
+-- First Profit — Weekend Cohort Sprints, Unit 7 (review fix): widen the import
+-- exceptions' one-pending-per-name unique index to include BAND.
+--
+-- Surfaced by the Unit 7 code review (correctness + data-migration + adversarial,
+-- all P1). The importer's identity tuple is (normalized_name, band) everywhere —
+-- two "Alex Kim"s at different grade bands are two different children. Unit 7's
+-- original index, `(cohort_id, normalized_name) WHERE state='pending'`, omitted
+-- band, so a second, genuinely distinct same-name-different-band child who is
+-- also ambiguous would collide with the first child's already-pending exception
+-- at INSERT time; `parkFwImportException` treats a unique violation as
+-- "alreadyParked", so the second child's exception would be silently discarded —
+-- neither minted, linked, nor parked, and invisible to the G7 pre-event gate.
+--
+-- The app-layer fix (decideFwImportRowMatch's pending-exception filter now also
+-- compares band) is necessary but not sufficient: without this index change, the
+-- second exception still collides at the database. This migration is the DB half.
+--
+-- Apply via the Management API — `supabase db push` is dead here (no DB
+-- password). See docs/solutions/integration-issues/supabase-cli-stale-db-
+-- password-management-api-workaround-2026-07-13.md.
+--
+-- APPLY IMMEDIATELY. Chicago cancelled (2026-07-23), no migration holds. This is a
+-- NEW migration, not an edit to 20260803120000 (which is already applied).
+--
+-- Rollout phase: SCHEMA ONLY (drop + recreate one index). Seeds/backfills nothing.
+-- Idempotent: `drop index if exists` then `create unique index if not exists`, so
+-- applying the file always leaves exactly the 3-column index in place. Built
+-- WITHOUT `CONCURRENTLY` (incompatible with the Management API's single implicit
+-- transaction); the table holds no rows in production (Unit 7's live rehearsal
+-- import raised zero exceptions), so the lock window is instant.
+--
+-- WIDENING is safe on a populated table too: going from a UNIQUE (a, b) to
+-- UNIQUE (a, b, c) only ADMITS more distinct rows — no pair of existing rows that
+-- satisfied the narrower constraint can violate the wider one.
+--
+-- PRE-APPLY (same Management API session):
+--   1. select to_regclass('public.path_fw_import_exceptions');   -- non-null
+--   2. select indexdef from pg_indexes
+--        where indexname='path_fw_import_exceptions_one_pending_per_name_idx';
+--      -- confirm it is currently the 2-column (cohort_id, normalized_name) form.
+--   3. select cohort_id, normalized_name, band, count(*)
+--        from public.path_fw_import_exceptions where state='pending'
+--        group by 1,2,3 having count(*) > 1;   -- MUST be 0 rows (else the new
+--      -- UNIQUE build aborts; understand the duplicates first).
+-- POST-APPLY (verify BEFORE recording the version):
+--   4. select indexdef from pg_indexes
+--        where indexname='path_fw_import_exceptions_one_pending_per_name_idx';
+--      -- confirm UNIQUE, on (cohort_id, normalized_name, band), WHERE state='pending'.
+--   5. Only then: insert the version into supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: drop the 3-column index and recreate the 2-column form —
+--   drop index if exists public.path_fw_import_exceptions_one_pending_per_name_idx;
+--   create unique index path_fw_import_exceptions_one_pending_per_name_idx
+--     on public.path_fw_import_exceptions (cohort_id, normalized_name)
+--     where state='pending';
+-- (safe only while no two pending rows share a (cohort, name) at different bands).
+
+drop index if exists public.path_fw_import_exceptions_one_pending_per_name_idx;
+
+create unique index if not exists path_fw_import_exceptions_one_pending_per_name_idx
+  on public.path_fw_import_exceptions (cohort_id, normalized_name, band)
+  where state = 'pending';

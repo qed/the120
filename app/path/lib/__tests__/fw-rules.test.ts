@@ -18,6 +18,7 @@ import {
   FW_OUTCOMES,
   type FwAction,
   type FwEcho,
+  type FwOutcome,
   type FwStudentResult,
 } from "../fw-rules";
 import { TASK_STATES, type TaskState } from "../transition-table";
@@ -224,10 +225,25 @@ describe("named race scenario — checkmark × undo on one `verified` row", () =
     expect(run.state).toBe("locked");
   });
 
-  it("the reverse order re-verifies honestly — and never lies about it", () => {
-    // If the undo genuinely commits first, the checkmark now acts on a `locked`
-    // row and IS a real decision. Two events is the correct answer here, not a
-    // double-ring: each event's from_state matches the row it actually saw.
+  it("ACCEPTED DEVIATION: the reverse order re-verifies, and says so honestly", () => {
+    // The plan's Decision 2 says checkmark × undo on a `verified` row yields
+    // "exactly one event", without qualifying the ordering. That holds for the
+    // order above. It does NOT hold if the undo commits FIRST: the checkmark then
+    // acts on a `locked` row, which is its primary legal source (every FW row
+    // starts locked), so it applies — two events, ending at `verified`.
+    //
+    // This is a consequence of FW-D5, not a defect, and it cannot be fixed by
+    // narrowing the legal-from set: excluding `locked` from checkmark would break
+    // the ONLY path that matters (a guide checkmarking a fresh task). The
+    // alternative — a caller-supplied `expected_from` CAS, as `move_path_task`
+    // uses — was deliberately dropped from this RPC's signature by the plan.
+    //
+    // What IS guaranteed in every ordering is the invariant asserted below: an
+    // event exists iff the row moved, and every event's from_state is the state
+    // the writer actually saw. No ordering produces a lie, a lost update, or a
+    // duplicate event for one decision. The Unit 4 surface reduces the exposure
+    // further (post-tap the view stays in place, so a guide sees the current
+    // state before tapping again).
     const run = runSerial("verified", ["undo", "checkmark"]);
     expect(run.events).toEqual([
       { action: "undo", from: "verified", to: "locked" },
@@ -300,8 +316,15 @@ describe("narrowFwOutcome — fail-closed narrowing at the service-role boundary
 });
 
 describe("resultForFwEcho — the RPC echo becomes a per-student result", () => {
-  const echo = (outcome: string, state: TaskState, verifiedBy: string | null = null): FwEcho =>
-    ({ outcome, state, verifiedBy }) as FwEcho;
+  /** A well-typed echo. `outcome` is FwOutcome so a typo'd outcome in a future
+   *  test is a COMPILE error — `resultForFwEcho`'s switch has no default arm, so
+   *  an off-union value would otherwise fall through to `undefined` at runtime
+   *  and only surface as a confusing toEqual mismatch. */
+  const echo = (
+    outcome: FwOutcome,
+    state: TaskState | null,
+    verifiedBy: string | null = null
+  ): FwEcho => ({ outcome, state, verifiedBy });
 
   it("applied carries the winning state", () => {
     expect(resultForFwEcho("s1", "checkmark", echo("applied", "verified", GUIDE))).toEqual({
@@ -378,7 +401,7 @@ describe("resultForFwEcho — the RPC echo becomes a per-student result", () => 
   });
 
   it("`missing` is the ONLY outcome allowed to carry a null state", () => {
-    expect(resultForFwEcho("s1", "checkmark", echo("missing", null as never))).toEqual({
+    expect(resultForFwEcho("s1", "checkmark", echo("missing", null))).toEqual({
       studentId: "s1",
       kind: "failed",
       reason: "missing_progress",
@@ -389,9 +412,9 @@ describe("resultForFwEcho — the RPC echo becomes a per-student result", () => 
     // The RPC held a row lock for each of these, so a state it cannot name means
     // the echo did not narrow. Reporting success here would tell a guide their
     // tap landed on a row nobody can describe.
-    for (const outcome of ["applied", "re_attempt", "already_done", "replayed", "refused"]) {
+    for (const outcome of ["applied", "re_attempt", "already_done", "replayed", "refused"] as const) {
       expect(
-        resultForFwEcho("s1", "checkmark", echo(outcome, null as never)),
+        resultForFwEcho("s1", "checkmark", echo(outcome, null)),
         outcome
       ).toEqual({ studentId: "s1", kind: "failed", reason: "unavailable" });
     }
@@ -508,7 +531,7 @@ describe("First Dollar (FW-D16, Decision 6) — the bell rings on a NEW verify o
   });
 
   it("does NOT fire for not-yet or undo, whatever the task", () => {
-    for (const action of ["not_yet", "undo"] as FwAction[]) {
+    for (const action of ["not_yet", "undo"] as const) {
       expect(
         fwFirstDollarStudents({ taskId: "1.2.4", action, results: [applied("s1")] }),
         action

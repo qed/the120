@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  FW_CALL_TIMEOUT_MS,
   fwMoveTask,
   loadFwCohortMemberIds,
   runFwCheckIn,
@@ -46,6 +47,11 @@ type Seed = {
   rpcErrorFor?: string | null;
   /** Return a completely empty rpc result (no row). */
   rpcEmpty?: boolean;
+  /** Make one student's RPC call THROW rather than resolve with an error field —
+   *  supabase-js reports most failures in-band, but a network abort can throw. */
+  rpcThrowsFor?: string | null;
+  /** Make one student's RPC call never settle, to exercise the timeout. */
+  rpcHangsFor?: string | null;
 };
 
 function makeFakeDb(seed: Seed) {
@@ -95,6 +101,8 @@ function makeFakeDb(seed: Seed) {
     async rpc(name: string, params: Record<string, unknown>) {
       rpcCalls.push({ name, ...params });
       const student = params.p_student_id as string;
+      if (seed.rpcThrowsFor === student) throw new TypeError("fetch failed");
+      if (seed.rpcHangsFor === student) return new Promise(() => {}) as never;
       if (seed.rpcError) return { data: null, error: { message: seed.rpcError } };
       if (seed.rpcErrorFor === student) return { data: null, error: { message: "boom" } };
       if (seed.rpcEmpty) return { data: [], error: null };
@@ -491,6 +499,123 @@ describe("First Dollar — the effect chained onto an idempotent primitive's suc
     const { result } = run({ members: [] }, { taskId: FIRST_DOLLAR });
     const r = await result;
     expect(r.ok && r.firstDollar).toEqual([]);
+  });
+});
+
+/* ══════════════════════════════════════ hostile transports: hang and throw ══ */
+
+describe("runFwCheckIn — a bad transport degrades to a typed failure, never a hang or a crash", () => {
+  it("a hung RPC times out and reports `failed` instead of waiting forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = run({ members: ["s1"], rpcHangsFor: "s1" });
+      await vi.advanceTimersByTimeAsync(FW_CALL_TIMEOUT_MS + 10);
+      const r = await result;
+      expect(r.ok && r.outcomes[0]).toEqual({
+        studentId: "s1",
+        kind: "failed",
+        reason: "unavailable",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("one student's hung call does not stop the others from being written", async () => {
+    // The batch is issued concurrently, so a stall on s2 must not delay or
+    // cancel s1 and s3 — before the concurrency fix this was a sequential block.
+    vi.useFakeTimers();
+    try {
+      const { result, rpcCalls } = run(
+        { members: ["s1", "s2", "s3"], rpcHangsFor: "s2" },
+        { studentIds: ["s1", "s2", "s3"] }
+      );
+      await vi.advanceTimersByTimeAsync(FW_CALL_TIMEOUT_MS + 10);
+      const r = await result;
+      expect(kinds(r)).toEqual(["s1:applied", "s2:failed", "s3:applied"]);
+      expect(rpcCalls).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a THROWING rpc is caught — the batch still reports every student", async () => {
+    // An exception escaping fwMoveTask would unwind the whole batch and hide
+    // writes that already committed for the other students.
+    const { result, rpcCalls } = run(
+      { members: ["s1", "s2", "s3"], rpcThrowsFor: "s2" },
+      { studentIds: ["s1", "s2", "s3"] }
+    );
+    const r = await result;
+    expect(kinds(r)).toEqual(["s1:applied", "s2:failed", "s3:applied"]);
+    expect(rpcCalls).toHaveLength(3);
+  });
+
+  it("maps every echo back to the RIGHT student, not to completion order", async () => {
+    // The concurrent batch indexes results positionally; pin that the mapping
+    // survives interleaving.
+    const { result } = run(
+      {
+        members: ["s1", "s2", "s3"],
+        replies: {
+          s1: [{ outcome: "already_done", state: "not_yet" }],
+          s2: [{ outcome: "refused", state: "verified" }],
+          s3: [{ outcome: "applied", state: "not_yet" }],
+        },
+      },
+      { studentIds: ["s1", "s2", "s3"], action: "not_yet" }
+    );
+    const r = await result;
+    expect(r.ok && r.outcomes).toEqual([
+      { studentId: "s1", kind: "already_done", state: "not_yet" },
+      { studentId: "s2", kind: "refused", reason: "undo_first", state: "verified" },
+      { studentId: "s3", kind: "applied", state: "not_yet" },
+    ]);
+  });
+});
+
+/* ═══════════════════ retry safety is NOT uniform across the three actions ══ */
+
+describe("retry after an ambiguous failure — the property Unit 4 must close", () => {
+  it("checkmark is idempotent by state: the retry lands on already_done, ringing nothing", async () => {
+    const { result } = run(
+      { members: ["s1"], replies: { s1: [{ outcome: "already_done", state: "verified" }] } },
+      { taskId: FIRST_DOLLAR }
+    );
+    const r = await result;
+    expect(kinds(r)).toEqual(["s1:already_done"]);
+    expect(r.ok && r.firstDollar).toEqual([]);
+  });
+
+  it("undo is idempotent by state likewise", async () => {
+    const { result } = run(
+      { members: ["s1"], replies: { s1: [{ outcome: "already_done", state: "locked" }] } },
+      { action: "undo" }
+    );
+    expect(kinds(await result)).toEqual(["s1:already_done"]);
+  });
+
+  it("KNOWN GAP: not-yet WITHOUT a client id cannot be deduped on an ambiguous retry", async () => {
+    // Documented rather than fixed here, because the fix is a Unit 4 wiring
+    // decision (mint a client id per tap ONLINE too) and the whole path already
+    // exists. The RPC cannot distinguish "the guide genuinely tapped twice" —
+    // a real FW-D4 repeat-struggle signal — from "the first response was lost
+    // over venue wifi" unless the tap carries the exactly-once key.
+    const { result, rpcCalls } = run(
+      { members: ["s1"], replies: { s1: [{ outcome: "re_attempt", state: "not_yet" }] } },
+      { action: "not_yet" }
+    );
+    expect(kinds(await result)).toEqual(["s1:re_attempt"]);
+    expect(rpcCalls[0].p_client_id).toBeNull();
+  });
+
+  it("…and WITH a client id the same retry is a no-op, proving the fix works end to end", async () => {
+    const { result, rpcCalls } = run(
+      { members: ["s1"], replies: { s1: [{ outcome: "replayed", state: "not_yet" }] } },
+      { action: "not_yet", clientIds: { s1: "tap-abc" } }
+    );
+    expect(kinds(await result)).toEqual(["s1:replayed"]);
+    expect(rpcCalls[0].p_client_id).toBe("tap-abc");
   });
 });
 

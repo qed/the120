@@ -19,17 +19,18 @@
  *
  * ── The three encodings this module is the source of truth for
  *
- * The action→target map and the per-action legal-from sets exist twice: here, and
- * in the SQL of `supabase/migrations/20260801120000_fw_move_task.sql`.
- * `__tests__/fw-move-task-parity.test.ts` parses that migration and pins both
- * against these constants, so a drift on either side fails a test rather than an
+ * The action→target map and the per-action legal-from sets exist in SQL as well
+ * as here — in `supabase/migrations/20260730120000_fw_move_task.sql` and again in
+ * `20260731120000_fw_client_id_scoped.sql`, which re-scopes the idempotency key
+ * and is the definition the live database runs.
+ * `__tests__/fw-move-task-parity.test.ts` parses BOTH and pins them so a drift on either side fails a test rather than an
  * event weekend (the `progress-core.ts` parity idiom, and the reason it exists:
  * docs/solutions/test-failures/security-definer-sql-case-third-untested-copy-
  * parse-migration-file-2026-07-22.md).
  */
 
 import { clampToNow } from "./sync-rules";
-import { TASK_STATES, type TaskState } from "./transition-table";
+import { type TaskState } from "./transition-table";
 
 /* ══════════════════════════════════════════ the action set and its targets ══ */
 
@@ -139,7 +140,7 @@ export type FwDecision =
  */
 export function decideFwAction({ action, from }: { action: FwAction; from: TaskState }): FwDecision {
   if (FW_ACTION_LEGAL_FROM[action].includes(from)) {
-    return { kind: "apply", to: FW_ACTION_TARGETS[action] };
+    return { kind: "apply", to: fwActionTarget(action) };
   }
 
   // A FRESH not-yet tap on an already-not-yet task appends a re-attempt event
@@ -150,7 +151,7 @@ export function decideFwAction({ action, from }: { action: FwAction; from: TaskS
   // decision table, it is a property of the tap.)
   if (action === "not_yet" && from === "not_yet") return { kind: "re_attempt" };
 
-  if (from === FW_ACTION_TARGETS[action]) return { kind: "already_done" };
+  if (from === fwActionTarget(action)) return { kind: "already_done" };
 
   return {
     kind: "refused",
@@ -270,12 +271,15 @@ export function resultForFwEcho(
       // Re-derive the REASON from the same table the RPC refused by, rather than
       // widening the RPC's return with a reason string that could drift from it.
       const decision = decideFwAction({ action, from: state });
-      return {
-        studentId,
-        kind: "refused",
-        reason: decision.kind === "refused" ? decision.reason : "not_a_decision",
-        state,
-      };
+      if (decision.kind !== "refused") {
+        // The RPC refused and this table would not have. That is parity DRIFT
+        // between the SQL and this module — exactly what fw-move-task-parity
+        // exists to prevent — so fail closed rather than hand the guide a
+        // specific, plausible, possibly-wrong reason. "Try again / find staff"
+        // is the honest answer when the two halves disagree about the rules.
+        return { studentId, kind: "failed", reason: "unavailable" };
+      }
+      return { studentId, kind: "refused", reason: decision.reason, state };
     }
   }
 }
@@ -405,7 +409,3 @@ export function clampFwCapturedAt(
   const clamp = clampToNow(capturedAt, nowMs);
   return { value: clamp.value, clamped: clamp.clamped };
 }
-
-/** Re-exported so callers that need the state union do not reach past this
- *  module into the Path's transition table for it. */
-export { TASK_STATES, type TaskState };

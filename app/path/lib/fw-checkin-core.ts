@@ -45,6 +45,64 @@ import {
 } from "./fw-rules";
 import { narrowTaskState } from "./progress-core";
 
+/* ═══════════════════════════════════════════════════════════ the wall clock ══ */
+
+/**
+ * The cap on any single Supabase round trip in this write path.
+ *
+ * Nothing in the Supabase client sets a fetch timeout, and no route here
+ * configures `maxDuration`, so without this a stalled connection is bounded only
+ * by the platform's implicit budget. That matters more here than in the Path's
+ * `actions/transition.ts` (which caps only its inline notify): the calls below
+ * ARE the write the guide is standing at a table waiting on, over venue wifi that
+ * is expected to drop — and because the batch loop is sequential, ONE hung call
+ * would mean students 2 and 3 are never even attempted.
+ *
+ * Eight seconds is chosen to sit well inside the plan's ~5 s tap-to-board budget
+ * plus a retry, while being long enough that a merely slow link still lands.
+ */
+export const FW_CALL_TIMEOUT_MS = 8_000;
+
+/**
+ * Race a Supabase call against the clock.
+ *
+ * Returns a DISCRIMINATED result rather than a fabricated error object: the
+ * Supabase response types are specific (`PostgrestError` carries `code`,
+ * `details`, `hint`, …), and inventing one would mean asserting a shape we do not
+ * have — the exact thing this repo's fail-closed narrowing rule exists to stop.
+ * A timeout is not an error the database returned; it is the absence of an answer,
+ * and the type says so.
+ *
+ * Giving up on WAITING is not the same as cancelling the write — the request may
+ * still land server-side. That is deliberate and safe under this design's stated
+ * recovery model: checkmark and undo are idempotent by state (a retry lands on
+ * the `already_done` arm), so a timed-out call that actually succeeded costs
+ * nothing on retry. The one action where that is NOT true is `not_yet` without a
+ * client id — see the note on `fwMoveTask`.
+ */
+async function withTimeout<T>(
+  promise: PromiseLike<T>,
+  label: string
+): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise).then((value) => ({ timedOut: false as const, value })),
+      new Promise<{ timedOut: true }>((resolve) => {
+        timer = setTimeout(() => {
+          console.error(
+            `[fw/checkin] ${label} exceeded ${FW_CALL_TIMEOUT_MS}ms — giving up on the wait`
+          );
+          resolve({ timedOut: true });
+        }, FW_CALL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    // Always clear: a pending timer keeps the serverless invocation alive.
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════ the RPC ══ */
 
 export type FwMoveTaskParams = {
@@ -64,45 +122,82 @@ export type FwMoveTaskParams = {
 /**
  * Call `fw_move_task` and narrow its echo FAIL-CLOSED.
  *
- * Returns null on any shape the caller cannot trust — an RPC error, an empty
- * result, an outcome outside the union. `resultForFwEcho` turns that into a
+ * Returns null on any shape the caller cannot trust — an RPC error, a timeout, an
+ * empty result, an outcome outside the union. `resultForFwEcho` turns that into a
  * `failed` result rather than an optimistic success: an errored response is not
- * proof the write failed, but it is not proof it landed either, and FW's recovery
- * is the guide tapping again (idempotent by state, and by `client_id` when the
- * offline queue carried one).
+ * proof the write failed, but it is not proof it landed either.
+ *
+ * RETRY SAFETY IS NOT UNIFORM ACROSS THE THREE ACTIONS, and the difference is
+ * worth stating precisely because "the guide taps again" is the whole recovery
+ * model:
+ *
+ *   - `checkmark` / `undo` are idempotent BY STATE. A retry after an ambiguous
+ *     failure lands on the `already_done` arm — zero rows, zero events, no bell.
+ *   - `not_yet` is NOT, unless a `client_id` is carried. A second tap on an
+ *     already-`not_yet` row is DEFINED to append a re-attempt event (that is the
+ *     FW-D4 repeat-struggle signal), so the RPC cannot distinguish "the guide
+ *     genuinely tapped twice" from "the first response was lost over venue wifi"
+ *     without the exactly-once key. Online taps currently carry none.
+ *
+ * That gap is a Unit 4 wiring requirement, not a Unit 3 schema change: the whole
+ * path (`RunFwCheckInInput.clientIds` -> `p_client_id` -> the partial unique
+ * index) already exists, so the guide surface should mint a client id per tap
+ * ONLINE as well as offline. `fw-checkin-core.test.ts` pins the current behaviour
+ * so the gap is visible in the suite rather than discovered at an event.
  */
 export async function fwMoveTask(
   db: SupabaseClient,
   p: FwMoveTaskParams
 ): Promise<FwEcho | null> {
-  const { data, error } = await db.rpc("fw_move_task", {
-    p_student_id: p.studentId,
-    p_task_id: p.taskId,
-    p_action: p.action,
-    p_actor: p.actor,
-    p_cohort_id: p.cohortId,
-    p_captured_at: p.capturedAt,
-    p_action_id: p.actionId,
-    p_client_id: p.clientId,
-  });
+  const where = `${p.studentId}, ${p.taskId}, ${p.action}, cohort ${p.cohortId}, actor ${p.actor}`;
 
-  if (error) {
-    console.error(
-      `[fw/checkin] fw_move_task(${p.studentId}, ${p.taskId}, ${p.action}) failed: ${error.message}`
+  // try/catch, not just the { data, error } shape: supabase-js reports most
+  // failures in-band, but a network abort or a malformed response can THROW, and
+  // an exception escaping here would unwind the caller's sequential loop — so
+  // students already written would never be reported even though their writes
+  // committed, silently breaking this file's "one student's failure never aborts
+  // the others" guarantee.
+  let raced;
+  try {
+    raced = await withTimeout(
+      db.rpc("fw_move_task", {
+        p_student_id: p.studentId,
+        p_task_id: p.taskId,
+        p_action: p.action,
+        p_actor: p.actor,
+        p_cohort_id: p.cohortId,
+        p_captured_at: p.capturedAt,
+        p_action_id: p.actionId,
+        p_client_id: p.clientId,
+      }),
+      `fw_move_task(${where})`
     );
+  } catch (e) {
+    console.error(`[fw/checkin] fw_move_task(${where}) threw:`, e);
+    return null;
+  }
+  if (raced.timedOut) return null;
+
+  const { data, error } = raced.value;
+  if (error) {
+    console.error(`[fw/checkin] fw_move_task(${where}) failed: ${error.message}`);
     return null;
   }
 
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) {
-    console.error(`[fw/checkin] fw_move_task(${p.studentId}, ${p.taskId}) returned no row`);
+    console.error(`[fw/checkin] fw_move_task(${where}) returned no row`);
     return null;
   }
 
   const outcome = narrowFwOutcome(row.outcome);
   if (outcome === null) {
-    // Never coerced: this value decides whether a bell rings in a room.
-    console.error(`[fw/checkin] fw_move_task echoed an unrecognized outcome: ${String(row.outcome)}`);
+    // Never coerced: this value decides whether a bell rings in a room. Logged
+    // WITH its coordinates — this is a schema-drift signal somebody may have to
+    // diagnose at 9pm on a Saturday with no engineer on site.
+    console.error(
+      `[fw/checkin] fw_move_task(${where}) echoed an unrecognized outcome: ${String(row.outcome)}`
+    );
     return null;
   }
 
@@ -140,11 +235,22 @@ export async function loadFwCohortMemberIds(
 ): Promise<{ ok: true; memberIds: string[] } | { ok: false }> {
   if (studentIds.length === 0) return { ok: true, memberIds: [] };
 
-  const res = await db
-    .from("path_cohort_members")
-    .select("student_id")
-    .eq("cohort_id", cohortId)
-    .in("student_id", [...studentIds]);
+  let raced;
+  try {
+    raced = await withTimeout(
+      db
+        .from("path_cohort_members")
+        .select("student_id")
+        .eq("cohort_id", cohortId)
+        .in("student_id", [...studentIds]),
+      `membership read (cohort ${cohortId})`
+    );
+  } catch (e) {
+    console.error(`[fw/checkin] membership load for cohort ${cohortId} threw:`, e);
+    return { ok: false };
+  }
+  if (raced.timedOut) return { ok: false };
+  const res = raced.value;
 
   if (res.error) {
     console.error(`[fw/checkin] membership load failed for cohort ${cohortId}: ${res.error.message}`);
@@ -214,20 +320,25 @@ export type RunFwCheckInResult =
 /**
  * Run one check-in action across one or more students.
  *
- * Sequence: verify membership → plan (pure) → N atomic RPC calls sharing one
- * `action_id` → interpret each echo → derive the celebration from the results.
+ * Sequence: verify membership → plan (pure) → N atomic RPC calls (concurrent,
+ * sharing one `action_id`) → interpret each echo → derive the celebration from
+ * the results.
  *
  * ── Three properties worth stating, each a bug this shape prevents
  *
  * 1. **A failed membership read refuses the whole action.** Writing with an
  *    unverified cohort stamp is not a degraded success; it is a permanent lie in
  *    an append-only log (a Hamptons tap counted in Boston's weekend numbers).
+ *    The accepted cost, stated: a transient blip blocks the guide from recording
+ *    anything until they retap. Unit 8's offline queue — not a partial write
+ *    here — is the mitigation for a sustained outage.
  *
  * 2. **One student's failure never aborts the others.** The guide tapped for all
  *    of them; each write is independently atomic, and a partial batch is a
  *    DESIGNED, REPORTED state — the plan tolerates partial `action_id` groups
- *    explicitly. Aborting midway would leave the same partial write with a less
- *    honest report.
+ *    explicitly. This is why `fwMoveTask` catches and times out rather than
+ *    letting anything escape: an exception would unwind the whole batch and hide
+ *    writes that already committed.
  *
  * 3. **The celebration is derived from RESULTS, not from reaching the end.**
  *    `fwFirstDollarStudents` filters on `kind === "applied"`, so `already_done`
@@ -265,23 +376,34 @@ export async function runFwCheckIn(
     });
   }
 
-  // Sequential, not Promise.all: each call takes a row lock, and the venue-wifi
-  // reality is that a burst of parallel writes over a flaky link fails together
-  // rather than degrading. Three rows at most (FW_BATCH_MAX), so the wall clock
-  // is three round trips on the slowest path the guide will ever hit.
-  for (const target of plan.targets) {
-    const echo = await fwMoveTask(db, {
-      studentId: target.studentId,
-      taskId: input.taskId,
-      action: input.action,
-      actor: input.actorUserId,
-      cohortId: input.cohortId,
-      capturedAt: captured.value,
-      actionId,
-      clientId: target.clientId,
-    });
-    byStudent.set(target.studentId, resultForFwEcho(target.studentId, input.action, echo));
-  }
+  // CONCURRENT, deliberately. An earlier revision ran these sequentially and
+  // justified it by row locks — which is wrong, and the performance review caught
+  // it: `planFwBatch` has already de-duplicated by student, so the (at most
+  // FW_BATCH_MAX) targets are always DISTINCT (student_id, task_id) rows. They
+  // share no lock, so serializing them bought nothing and cost a full round trip
+  // per extra student — ~600ms of the plan's ~5s tap-to-board budget on a 3-student
+  // tap over venue wifi, every time.
+  //
+  // Safe to parallelize because each call is an independently atomic transaction
+  // and `fwMoveTask` never throws (it catches, times out, and fails closed to
+  // null), so `Promise.all` cannot reject and cannot lose a sibling's result.
+  const echoes = await Promise.all(
+    plan.targets.map((target) =>
+      fwMoveTask(db, {
+        studentId: target.studentId,
+        taskId: input.taskId,
+        action: input.action,
+        actor: input.actorUserId,
+        cohortId: input.cohortId,
+        capturedAt: captured.value,
+        actionId,
+        clientId: target.clientId,
+      })
+    )
+  );
+  plan.targets.forEach((target, i) => {
+    byStudent.set(target.studentId, resultForFwEcho(target.studentId, input.action, echoes[i]));
+  });
 
   const outcomes = ordered.map(
     (studentId) =>

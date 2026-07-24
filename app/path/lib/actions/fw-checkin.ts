@@ -30,7 +30,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import { runFwCheckIn, type FwCheckInActionResult } from "@/app/path/lib/fw-checkin-core";
-import { FW_ACTIONS, FW_BATCH_MAX } from "@/app/path/lib/fw-rules";
+import { isFwAction, FW_ACTIONS, FW_BATCH_MAX } from "@/app/path/lib/fw-rules";
 
 // NOTE: no `export type { FwCheckInActionResult }` here — a type re-export from a
 // "use server" file registers a server reference that throws at module load.
@@ -62,6 +62,13 @@ export async function applyFwCheckIn(input: unknown): Promise<FwCheckInActionRes
   const parsed = fwCheckInSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
   const { cohortId, taskId, action, studentIds, clientIds, capturedAt, actionId } = parsed.data;
+
+  // `z.enum` already narrowed it. This guard is kept anyway, mirroring
+  // `actions/transition.ts`'s `isTaskTransition` check, as the single runtime
+  // source of the FW-vs-Path action boundary: the RPC `raise exception`s on an
+  // unrecognized action, and that would surface to a guide as a bare
+  // `unavailable` rather than a refusal they can act on.
+  if (!isFwAction(action)) return { ok: false, reason: "invalid_input" };
 
   // Gate: every Server Function verifies auth itself — the proxy matcher does not
   // reliably cover Server Actions (Next 16). This resolves the actor FOR THIS

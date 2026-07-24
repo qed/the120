@@ -397,15 +397,31 @@ export async function loadFwMatchCandidates(
 ): Promise<{ ok: true; candidates: FwMatchCandidate[] } | { ok: false }> {
   if (normalizedName.length === 0) return { ok: true, candidates: [] };
 
-  const profiles = await fetchAllRows<Record<string, unknown>>("match lookup", (from, to) =>
-    db
-      .from("path_student_profiles")
-      .select("id, normalized_name, band")
-      .eq("normalized_name", normalizedName)
-      .range(from, to)
-  );
-  if (!profiles.ok) return { ok: false };
-  if (profiles.rows.length === 0) return { ok: true, candidates: [] };
+  // Two INDEPENDENT lookups of the same name — real students and the pending
+  // import exceptions Unit 7 parks (gap G7). Run concurrently; both must succeed
+  // (this list feeds a DUPLICATE CHECK, so a dropped candidate is a silent wrong
+  // answer — see the profile narrowing note below).
+  const [profiles, exceptions] = await Promise.all([
+    fetchAllRows<Record<string, unknown>>("match lookup", (from, to) =>
+      db
+        .from("path_student_profiles")
+        .select("id, normalized_name, band")
+        .eq("normalized_name", normalizedName)
+        .range(from, to)
+    ),
+    fetchAllRows<Record<string, unknown>>("match exception lookup", (from, to) =>
+      db
+        .from("path_fw_import_exceptions")
+        .select("id, cohort_id, band, normalized_name")
+        .eq("normalized_name", normalizedName)
+        .eq("state", "pending")
+        .range(from, to)
+    ),
+  ]);
+  if (!profiles.ok || !exceptions.ok) return { ok: false };
+  if (profiles.rows.length === 0 && exceptions.rows.length === 0) {
+    return { ok: true, candidates: [] };
+  }
 
   // NARROWED ONCE, HERE, and carried forward as narrowed values — there is no
   // second pass casting the same row back out. Every field is checked even
@@ -414,7 +430,7 @@ export async function loadFwMatchCandidates(
   // that makes safety a property of one query's shape rather than of the code.
   // Widening the select or relaxing the filter later would silently reintroduce
   // a fail-open cast on the value the duplicate check keys on (security review).
-  const candidates: FwMatchCandidate[] = [];
+  const profileCandidates: FwMatchCandidate[] = [];
   for (const row of profiles.rows) {
     const band = narrowFwBand(row.band);
     if (typeof row.id !== "string" || typeof row.normalized_name !== "string" || band === null) {
@@ -423,41 +439,72 @@ export async function loadFwMatchCandidates(
       );
       return { ok: false };
     }
-    candidates.push({
+    profileCandidates.push({
       profileId: row.id,
       normalizedName: row.normalized_name,
       band,
       cohortIds: [],
-      // Unit 7's importer parks unresolved exceptions in their own table and
-      // will widen this; every row a profile lookup returns is a real profile.
       source: "profile" satisfies FwMatchSource,
     });
   }
 
-  const members = await fetchAllRows<Record<string, unknown>>(
-    "match membership load",
-    (from, to) =>
-      db
-        .from("path_cohort_members")
-        .select("student_id, cohort_id")
-        .in("student_id", candidates.map((c) => c.profileId))
-        .range(from, to)
-  );
-  if (!members.ok) return { ok: false };
+  // Memberships only for the REAL profiles — an exception carries its own cohort
+  // scope, and has no `path_cohort_members` row.
+  if (profileCandidates.length > 0) {
+    const members = await fetchAllRows<Record<string, unknown>>(
+      "match membership load",
+      (from, to) =>
+        db
+          .from("path_cohort_members")
+          .select("student_id, cohort_id")
+          .in("student_id", profileCandidates.map((c) => c.profileId))
+          .range(from, to)
+    );
+    if (!members.ok) return { ok: false };
 
-  const cohortsByStudent = new Map<string, string[]>();
-  for (const m of members.rows) {
-    if (typeof m.student_id !== "string" || typeof m.cohort_id !== "string") {
-      console.error("[fw/loader] refusing a match lookup with an unreadable membership row");
+    const cohortsByStudent = new Map<string, string[]>();
+    for (const m of members.rows) {
+      if (typeof m.student_id !== "string" || typeof m.cohort_id !== "string") {
+        console.error("[fw/loader] refusing a match lookup with an unreadable membership row");
+        return { ok: false };
+      }
+      const bucket = cohortsByStudent.get(m.student_id);
+      if (bucket) bucket.push(m.cohort_id);
+      else cohortsByStudent.set(m.student_id, [m.cohort_id]);
+    }
+    for (const candidate of profileCandidates) {
+      candidate.cohortIds = cohortsByStudent.get(candidate.profileId) ?? [];
+    }
+  }
+
+  // Pending import exceptions become candidates too (G7). They have no profile
+  // yet, so `profileId` carries the EXCEPTION ROW's id (a stable handle, never
+  // opened as a student) and `cohortIds` is the single cohort the import
+  // targeted — so the matcher treats a Boston exception as same-cohort for a
+  // Boston guide (the "· pending import" confirm) and the importer skips
+  // re-parking it. Fail-closed on a malformed row, like the profiles above.
+  const exceptionCandidates: FwMatchCandidate[] = [];
+  for (const row of exceptions.rows) {
+    const band = narrowFwBand(row.band);
+    if (
+      typeof row.id !== "string" ||
+      typeof row.cohort_id !== "string" ||
+      typeof row.normalized_name !== "string" ||
+      band === null
+    ) {
+      console.error(
+        `[fw/loader] refusing a match lookup with an unreadable import exception (id=${String(row.id)})`
+      );
       return { ok: false };
     }
-    const bucket = cohortsByStudent.get(m.student_id);
-    if (bucket) bucket.push(m.cohort_id);
-    else cohortsByStudent.set(m.student_id, [m.cohort_id]);
+    exceptionCandidates.push({
+      profileId: row.id,
+      normalizedName: row.normalized_name,
+      band,
+      cohortIds: [row.cohort_id],
+      source: "import_exception" satisfies FwMatchSource,
+    });
   }
 
-  for (const candidate of candidates) {
-    candidate.cohortIds = cohortsByStudent.get(candidate.profileId) ?? [];
-  }
-  return { ok: true, candidates };
+  return { ok: true, candidates: [...profileCandidates, ...exceptionCandidates] };
 }

@@ -276,10 +276,28 @@ function makeFakeDb(seed: Seed) {
             ) {
               return { data: null, error: { code: "23505", message: "already a member" } };
             }
+            // path_fw_ops_audit: partial UNIQUE index — one 'student_anonymized'
+            // per subject (20260801160000). Guide-grant rows are unconstrained.
+            if (
+              table === "path_fw_ops_audit" &&
+              r.action === "student_anonymized" &&
+              tables[table].some(
+                (x) => x.subject_user_id === r.subject_user_id && x.action === "student_anonymized"
+              )
+            ) {
+              return {
+                data: null,
+                error: { code: "23505", message: "one anonymize per subject" },
+              };
+            }
             const row = { id: `${table}-${idSeq++}`, created_at: "2026-08-22T15:00:00Z", ...r };
             tables[table].push(row);
             written.push(row);
           }
+          // applyAnyway: the writes above committed; NOW report the error — a
+          // landed-but-reported-failed insert (mirrors delete()).
+          const after = failingAfter("insert");
+          if (after) return { data: null, error: after };
           return { data: null, error: null };
         };
         const chain = {
@@ -336,6 +354,10 @@ function makeFakeDb(seed: Seed) {
             };
           }
           hits.forEach((r) => Object.assign(r, patch));
+          // applyAnyway: the patch above committed; NOW report the error — a
+          // landed-but-reported-failed update (mirrors delete()/insert()).
+          const after = failingAfter("update");
+          if (after) return { data: null, error: after };
           return { data: hits.map((r) => ({ id: r.id })), error: null };
         };
         const chain = {
@@ -1434,7 +1456,7 @@ describe("resolveFwReplayReject", () => {
 /* ══════════════════════════════════════════════ Unit 5b — the ops roster ══ */
 
 describe("listFwOpsStudents", () => {
-  it("lists members with band, the anonymized marker, and the open-reject count", async () => {
+  it("lists members with band, the anonymized marker, and the open-reject count, sorted by name", async () => {
     const { db } = makeFakeDb({
       profiles: [
         ...PROFILES,
@@ -1458,17 +1480,66 @@ describe("listFwOpsStudents", () => {
         { id: "r2", student_id: MAYA, cohort_id: BOSTON, actor: RAVI, action: "undo", reason: "x", resolved_at: null },
         { id: "r3", student_id: OMAR, cohort_id: BOSTON, actor: RAVI, action: "undo", reason: "x", resolved_at: "2026-08-22T15:00:00Z" },
       ],
+      // stu-gone is tombstoned AND has its audit row → a COMPLETE removal.
+      audit: [
+        { id: "a1", actor: STAFF, action: "student_anonymized", subject_user_id: "auth-gone", cohort_id: BOSTON, created_at: "1" },
+      ],
     });
     const res = await listFwOpsStudents(db, { cohortId: BOSTON });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    // Sorted by last name: Chen, Diaz, student(tombstone).
+    // The sort itself is asserted (last name: Chen, Diaz, student), not just the
+    // individual lookups — a dropped/reversed sort would otherwise ship green.
+    expect(res.students.map((s) => s.studentId)).toEqual([MAYA, OMAR, "stu-gone"]);
     const maya = res.students.find((s) => s.studentId === MAYA)!;
     expect(maya).toMatchObject({ firstName: "Maya", band: "g6_8", anonymized: false, openRejects: 2 });
     const omar = res.students.find((s) => s.studentId === OMAR)!;
     expect(omar.openRejects).toBe(0); // its only reject is resolved
     const gone = res.students.find((s) => s.studentId === "stu-gone")!;
-    expect(gone.anonymized).toBe(true);
+    expect(gone).toMatchObject({ anonymized: true, anonymizeComplete: true });
+  });
+
+  it("marks a tombstoned student with NO audit row as anonymizeComplete: false (resumable)", async () => {
+    // The partial-failure state: name tombstoned, but the rename or audit never
+    // finished — the surface must offer to resume, not render it as done.
+    const { db } = makeFakeDb({
+      profiles: [
+        {
+          id: "stu-partial",
+          user_id: "auth-partial",
+          child_id: null,
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g6_8",
+          normalized_name: null,
+        },
+      ],
+      members: [{ student_id: "stu-partial", cohort_id: BOSTON }],
+      audit: [], // no student_anonymized row → incomplete
+    });
+    const res = await listFwOpsStudents(db, { cohortId: BOSTON });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.students[0]).toMatchObject({ anonymized: true, anonymizeComplete: false });
+  });
+
+  it("fails the whole roster if the anonymize-audit read fails — never mislabels a partial removal as done", async () => {
+    const { db } = makeFakeDb({
+      profiles: [
+        {
+          id: "stu-gone",
+          user_id: "auth-gone",
+          child_id: null,
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g3_5",
+          normalized_name: null,
+        },
+      ],
+      members: [{ student_id: "stu-gone", cohort_id: BOSTON }],
+      failTable: { table: "path_fw_ops_audit", op: "select", message: "boom" },
+    });
+    expect(await listFwOpsStudents(db, { cohortId: BOSTON })).toEqual({ ok: false });
   });
 
   it("returns an empty list for a cohort with no members", async () => {
@@ -1675,6 +1746,9 @@ describe("anonymizeFwStudent — idempotence and self-healing audit", () => {
   it("does NOT write a second audit row when one already exists", async () => {
     const { db, tables } = makeFakeDb(
       anonymizeSeed({
+        // email tombstone ⟹ name tombstone (the sequence tombstones the name
+        // before renaming, so a real name here is an unreachable state).
+        profiles: [{ ...PROFILES[0], first_name: FW_TOMBSTONE_FIRST_NAME, last_name: FW_TOMBSTONE_LAST_NAME, normalized_name: null }],
         authUsers: [
           { id: MAYA_AUTH, email: buildFwTombstoneEmail(MAYA), app_metadata: { role: "student" } },
         ],
@@ -1930,6 +2004,171 @@ describe("linkFwStudentToCohort", () => {
     expect(await linkFwStudentToCohort(db, { studentId: "nope", cohortId: BOSTON })).toEqual({
       ok: false,
       reason: "student_not_found",
+    });
+  });
+
+  it("REFUSES an anonymized student — never resurrect a retired identity onto a roster", async () => {
+    // Adversarial P1: loadFwMatchResolution hides anonymized students, but a
+    // stale match entry (looked up before a concurrent anonymize) could still be
+    // clicked. A tombstoned profile keeps its band/child_id, so the FW-shape gate
+    // passes — this guard is what stops a "Removed student" becoming a live,
+    // checkin-able membership row.
+    const { db, tables } = makeFakeDb({
+      profiles: [
+        {
+          id: MAYA,
+          user_id: MAYA_AUTH,
+          child_id: null,
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g6_8",
+          normalized_name: null,
+        },
+      ],
+      cohorts: [{ id: BOSTON, slug: "b", kind: "fw" }],
+      members: [],
+    });
+    expect(await linkFwStudentToCohort(db, { studentId: MAYA, cohortId: BOSTON })).toEqual({
+      ok: false,
+      reason: "student_anonymized",
+    });
+    expect(tables.path_cohort_members).toHaveLength(0);
+  });
+
+  it("recovers a membership insert that LANDED but reported an error", async () => {
+    const { db, tables } = makeFakeDb({
+      profiles: PROFILES,
+      cohorts: [{ id: BOSTON, slug: "b", kind: "fw" }],
+      members: [],
+      failTables: [{ table: "path_cohort_members", op: "insert", message: "reset", applyAnyway: true }],
+    });
+    // The insert commits then errors; the post-write-verify finds the row present.
+    expect(await linkFwStudentToCohort(db, { studentId: MAYA, cohortId: BOSTON })).toEqual({
+      ok: true,
+      alreadyMember: false,
+    });
+    expect(tables.path_cohort_members).toHaveLength(1);
+  });
+
+  it("reports unavailable when the membership insert genuinely fails", async () => {
+    const { db, tables } = makeFakeDb({
+      profiles: PROFILES,
+      cohorts: [{ id: BOSTON, slug: "b", kind: "fw" }],
+      members: [],
+      failTable: { table: "path_cohort_members", op: "insert", message: "down" },
+    });
+    expect(await linkFwStudentToCohort(db, { studentId: MAYA, cohortId: BOSTON })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(tables.path_cohort_members).toHaveLength(0);
+  });
+});
+
+/* ══════════════════════ Unit 5b — review-driven partial-failure coverage ══ */
+
+describe("anonymizeFwStudent — the remaining failure branches", () => {
+  it("leaves alias recorded and email unchanged when the NAME TOMBSTONE update fails", async () => {
+    // Step 6's own error path — every other write in the sequence had a failure
+    // test; this one did not. Alias landed (step 5), name unchanged, email
+    // unchanged, no audit.
+    const { db, tables, authUsers } = makeFakeDb(
+      anonymizeSeed({ failTable: { table: "path_student_profiles", op: "update", message: "tombstone down" } })
+    );
+    expect(
+      await anonymizeFwStudent(db, { studentId: MAYA, cohortId: BOSTON, actorUserId: STAFF, confirmName: "Maya Chen" })
+    ).toEqual({ ok: false, reason: "unavailable" });
+    expect(tables.path_fw_released_aliases).toHaveLength(1); // step 5 landed
+    expect(tables.path_student_profiles[0].first_name).toBe("Maya"); // step 6 did not
+    expect(authUsers.find((u) => u.id === MAYA_AUTH)!.email).toBe("maya.chen.fw@the120.school");
+    expect(tables.path_fw_ops_audit).toHaveLength(0);
+  });
+
+  it("CONTINUES when the alias insert reports an error but actually landed (post-write verify)", async () => {
+    // The insert-side landed-but-reported-failed path — untestable until the
+    // harness honored applyAnyway on insert(). The sequence must NOT return
+    // unavailable: the post-write verify finds the alias row and carries on.
+    const { db, tables, authUsers } = makeFakeDb(
+      anonymizeSeed({
+        failTables: [{ table: "path_fw_released_aliases", op: "insert", message: "reset", applyAnyway: true }],
+      })
+    );
+    const res = await anonymizeFwStudent(db, {
+      studentId: MAYA,
+      cohortId: BOSTON,
+      actorUserId: STAFF,
+      confirmName: "Maya Chen",
+    });
+    expect(res).toMatchObject({ ok: true, alreadyAnonymized: false, audited: true });
+    expect(tables.path_fw_released_aliases).toHaveLength(1);
+    expect(authUsers.find((u) => u.id === MAYA_AUTH)!.email).toBe(buildFwTombstoneEmail(MAYA));
+  });
+
+  it("reports unavailable — NOT account_missing — when the account read errors transiently", async () => {
+    // Reliability: a timed-out getUserById must read as 'try again', not 'their
+    // record is gone — tell an engineer'. Distinct from the genuinely-missing
+    // case (authUsers: []), which stays account_missing.
+    const { db } = makeFakeDb(anonymizeSeed({ getUserByIdError: "auth down" }));
+    expect(
+      await anonymizeFwStudent(db, { studentId: MAYA, cohortId: BOSTON, actorUserId: STAFF, confirmName: "Maya Chen" })
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("writes exactly ONE audit row when one already exists for the subject (concurrency-safe)", async () => {
+    // The idempotent audit: a prior anonymize already recorded the subject, and a
+    // fresh run (email still real) must NOT write a second immutable liability row
+    // — the probe finds the existing one. Backstopped by the partial unique index
+    // the harness models.
+    const { db, tables } = makeFakeDb(
+      anonymizeSeed({
+        audit: [
+          { id: "a1", actor: STAFF, action: "student_anonymized", subject_user_id: MAYA_AUTH, cohort_id: BOSTON, created_at: "1" },
+        ],
+      })
+    );
+    const res = await anonymizeFwStudent(db, {
+      studentId: MAYA,
+      cohortId: BOSTON,
+      actorUserId: STAFF,
+      confirmName: "Maya Chen",
+    });
+    expect(res).toMatchObject({ ok: true, audited: true });
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+  });
+});
+
+describe("loadFwMatchResolution — the read-failure paths", () => {
+  it("fails the lookup on a malformed membership row, never silently omitting it", async () => {
+    const { db } = makeFakeDb({
+      profiles: PROFILES,
+      cohorts: [{ id: BOSTON, slug: "b", kind: "fw" }],
+      // student_id matches the candidate (so the .in() filter keeps it) but
+      // cohort_id is malformed — the narrow guard must fail the whole read.
+      members: [{ student_id: MAYA, cohort_id: 12345 }],
+    });
+    expect(await loadFwMatchResolution(db, { cohortId: BOSTON, firstName: "Maya", lastName: "Chen" })).toEqual({
+      ok: false,
+    });
+  });
+
+  it("reports a read failure when the membership read fails", async () => {
+    const { db } = makeFakeDb({
+      profiles: PROFILES,
+      failTable: { table: "path_cohort_members", op: "select", message: "boom" },
+    });
+    expect(await loadFwMatchResolution(db, { cohortId: BOSTON, firstName: "Maya", lastName: "Chen" })).toEqual({
+      ok: false,
+    });
+  });
+
+  it("reports a read failure when the cohort-slug read fails", async () => {
+    const { db } = makeFakeDb({
+      profiles: PROFILES,
+      members: [{ student_id: MAYA, cohort_id: HAMPTONS }],
+      failTable: { table: "path_cohorts", op: "select", message: "boom" },
+    });
+    expect(await loadFwMatchResolution(db, { cohortId: BOSTON, firstName: "Maya", lastName: "Chen" })).toEqual({
+      ok: false,
     });
   });
 });

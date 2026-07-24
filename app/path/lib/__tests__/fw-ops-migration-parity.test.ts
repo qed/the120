@@ -24,6 +24,7 @@ import { FW_OPS_AUDIT_ACTIONS } from "../fw-ops-rules";
 const AUDIT_MIGRATION = "supabase/migrations/20260801120000_fw_ops_audit.sql";
 const TZ_MIGRATION = "supabase/migrations/20260801130000_fw_cohort_time_zone.sql";
 const ANONYMIZE_MIGRATION = "supabase/migrations/20260801150000_fw_anonymize_action.sql";
+const INDEX_MIGRATION = "supabase/migrations/20260801160000_fw_ops_5b_indexes.sql";
 
 /** The two actions the CREATE-TABLE migration (20260801120000) shipped with — a
  *  frozen historical fact, because that file's text never changes. The LIVE
@@ -40,13 +41,26 @@ const strip = (raw: string) => raw.replace(/--[^\n]*/g, "");
 const auditSql = strip(read(AUDIT_MIGRATION));
 const tzSql = strip(read(TZ_MIGRATION));
 const anonymizeSql = strip(read(ANONYMIZE_MIGRATION));
+const indexSql = strip(read(INDEX_MIGRATION));
 
-/** Pull the values out of the FIRST `check (action in (…))` in a chunk of SQL. */
+/** Pull the values out of the FIRST `check (action in (…))` in a chunk of SQL.
+ *  Callers pass a chunk already SCOPED to path_fw_ops_audit — an unscoped
+ *  whole-file scan lets an unrelated table's action CHECK hijack the allowlist
+ *  (docs/solutions/test-failures/migration-scanning-parity-test-must-scope-to-
+ *  its-table-…). The create-table body is scoped by construction; the anonymize
+ *  migration is sliced from its `alter table public.path_fw_ops_audit`. */
 function actionCheckValues(sql: string): string[] | null {
   const check = /check\s*\(\s*action\s+in\s*\(([^)]*)\)\s*\)/i.exec(sql);
   if (!check) return null;
   return [...check[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
 }
+
+/** The slice of the anonymize migration from its ALTER on path_fw_ops_audit —
+ *  so the action-CHECK scan can never match a different table's constraint. */
+const anonymizeAuditScope = (() => {
+  const at = anonymizeSql.indexOf("alter table public.path_fw_ops_audit");
+  return at >= 0 ? anonymizeSql.slice(at) : "";
+})();
 
 /** The balanced-paren body of `create table … public.<name> ( … )`. */
 function createTableBody(sql: string, name: string): string {
@@ -211,7 +225,11 @@ describe("path_cohorts.time_zone", () => {
 });
 
 describe("the anonymize action extension (Unit 5b)", () => {
-  const allowed = actionCheckValues(anonymizeSql);
+  const allowed = actionCheckValues(anonymizeAuditScope);
+
+  it("targets path_fw_ops_audit (the CHECK scan is anchored to that table)", () => {
+    expect(anonymizeAuditScope, "no `alter table public.path_fw_ops_audit`").not.toBe("");
+  });
 
   it("re-adds the action CHECK as EXACTLY the vocabulary FW_OPS_AUDIT_ACTIONS declares", () => {
     // This is the LIVE parity assertion, moved here from the create-table
@@ -242,25 +260,65 @@ describe("the anonymize action extension (Unit 5b)", () => {
     expect(anonymizeSql).toMatch(/add constraint path_fw_ops_audit_action_check\b/i);
   });
 
-  it("is guarded so a re-apply is a no-op", () => {
-    // The `if not exists (… ilike '%student_anonymized%')` guard: without it, a
-    // second apply's bare DROP would fail because the constraint it names has
-    // already been replaced.
-    expect(anonymizeSql).toMatch(/if not exists/i);
-    expect(anonymizeSql).toMatch(/student_anonymized/);
+  it("nests the ALTER INSIDE the idempotency guard, not merely near it", () => {
+    // A structural assertion, not two independent substring checks: a re-apply is
+    // safe only if the `alter table … drop/add constraint` runs UNDER the
+    // `if not exists (…) then … end if`. Verify the alter's position falls between
+    // the `then` and the `end if` — an un-indented alter that ran unconditionally
+    // would still contain both substrings elsewhere but reorder to outside the
+    // guard, and a second apply would then error on the bare DROP.
+    const guard = /if not exists\s*\([\s\S]*?\)\s*then([\s\S]*?)end if/i.exec(anonymizeSql);
+    expect(guard, "no `if not exists (…) then … end if` block").not.toBeNull();
+    expect(guard![1]).toMatch(/alter table public\.path_fw_ops_audit/i);
+    expect(guard![1]).toMatch(/drop constraint path_fw_ops_audit_action_check/i);
   });
 
-  it("adds NO subject column and touches NO trigger — the decision against a new column", () => {
+  it("adds NO subject column and touches NO trigger/function — the decision against a new column", () => {
     // Decision: an FW student has a user_id, so subject_user_id already names the
     // anonymized subject. A speculative nullable column here would be a hole an
-    // audit row must not have; the immutability triggers are Unit 5's and stay.
+    // audit row must not have. The immutability triggers are Unit 5's and MUST
+    // survive every later migration — so this asserts not just "creates none" but
+    // "drops/disables none": a later DISABLE TRIGGER on this table would silently
+    // strip the audit table's tamper-resistance while every "create" regex stays
+    // green.
     expect(anonymizeSql).not.toMatch(/add column/i);
     expect(anonymizeSql).not.toMatch(/create trigger/i);
     expect(anonymizeSql).not.toMatch(/create or replace function/i);
+    expect(anonymizeSql).not.toMatch(/drop trigger/i);
+    expect(anonymizeSql).not.toMatch(/disable trigger/i);
+    expect(anonymizeSql).not.toMatch(/drop function/i);
   });
 
   it("seeds and backfills nothing — schema-only phase", () => {
     expect(anonymizeSql).not.toMatch(/\binsert\s+into\b/i);
     expect(anonymizeSql).not.toMatch(/\bupdate\s+public\./i);
+  });
+});
+
+describe("the Unit 5b supporting indexes (20260801160000)", () => {
+  it("adds a partial UNIQUE index enforcing one anonymize per subject", () => {
+    // The concurrency backstop: without this, two staff anonymizing one student
+    // both write an immutable `student_anonymized` row. Partial on the action so
+    // it never constrains guide-grant rows (many per subject).
+    expect(indexSql).toMatch(
+      /create unique index if not exists path_fw_ops_audit_one_anonymize_idx\s+on public\.path_fw_ops_audit \(subject_user_id\)\s+where action = 'student_anonymized'/i
+    );
+  });
+
+  it("adds the student-scoped partial index for open-reject lookups", () => {
+    expect(indexSql).toMatch(
+      /create index if not exists path_fw_replay_rejects_student_open_idx\s+on public\.path_fw_replay_rejects \(student_id\)\s+where resolved_at is null/i
+    );
+  });
+
+  it("is idempotent and touches nothing else — schema-only, no triggers/columns/data", () => {
+    expect(indexSql).toMatch(/if not exists/i);
+    expect(indexSql).not.toMatch(/\binsert\s+into\b/i);
+    expect(indexSql).not.toMatch(/\bupdate\s+public\./i);
+    expect(indexSql).not.toMatch(/add column/i);
+    expect(indexSql).not.toMatch(/drop trigger/i);
+    expect(indexSql).not.toMatch(/create or replace function/i);
+    // Not CONCURRENTLY — incompatible with the single-transaction apply path.
+    expect(indexSql).not.toMatch(/concurrently/i);
   });
 });

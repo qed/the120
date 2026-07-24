@@ -34,6 +34,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchAllRows, fwRead } from "./fw-call";
 import type { FwMatchCandidate, FwMatchSource } from "./fw-match-rules";
+import { isFwTombstoneName } from "./fw-ops-rules";
 import { summarizeFwResume, type FwResume, type FwRosterStudent } from "./fw-nav-rules";
 import { narrowFwBand } from "./fw-provision-rules";
 import { narrowTaskState } from "./progress-core";
@@ -115,6 +116,13 @@ async function loadFwProfiles(
       );
       continue;
     }
+    // An ANONYMIZED student is retired: excluded from every GUIDE-facing roster
+    // (this feeds the roster, the batch picker, and the resume chips) so a
+    // "Removed student" can never appear as a checkin-able row — most importantly
+    // in the OTHER cohorts a returner was anonymized out of (adversarial review).
+    // The staff ops roster (`listFwOpsStudents`) still shows them, marked removed,
+    // because staff need to see and audit them; that is a different read.
+    if (isFwTombstoneName(row.first_name, row.last_name)) continue;
     students.push({
       studentId: row.id,
       firstName: row.first_name,

@@ -1001,9 +1001,14 @@ export type FwOpsStudent = {
   firstName: string;
   lastName: string;
   band: string;
-  /** Already anonymized — the tombstone name, so the surface offers no second
-   *  anonymize and the row reads as removed. */
+  /** The name is the anonymize tombstone — the row reads as removed. */
   anonymized: boolean;
+  /** The anonymize sequence FINISHED (a `student_anonymized` audit row exists),
+   *  distinct from `anonymized` (name tombstoned). A run whose rename or audit
+   *  failed mid-way leaves `anonymized: true, anonymizeComplete: false` — a
+   *  RESUMABLE state, and the surface must offer to finish it rather than treat
+   *  it as done (correctness review: the name alone hid the resume affordance). */
+  anonymizeComplete: boolean;
   /** Unresolved replay rejects still pointing at this student, ACROSS cohorts.
    *  Surfaced so anonymizing does not silently leave orphan rejects (plan's
    *  error scenario) — staff see the count and can resolve them first. */
@@ -1090,7 +1095,7 @@ export async function listFwOpsStudents(
     fetchAllRows<Record<string, unknown>>(`ops student profiles (${input.cohortId})`, (from, to) =>
       db
         .from("path_student_profiles")
-        .select("id, first_name, last_name, band")
+        .select("id, user_id, first_name, last_name, band")
         .in("id", studentIds)
         .order("id", { ascending: true })
         .range(from, to)
@@ -1114,19 +1119,55 @@ export async function listFwOpsStudents(
     }
   }
 
-  const students: FwOpsStudent[] = [];
+  // First pass: narrow, and note the auth id of every ALREADY-tombstoned student
+  // — the only ones whose anonymize might be incomplete (correctness review).
+  type Narrowed = ReturnType<typeof narrowFwProfileName> & { userId: string | null; anonymized: boolean };
+  const narrowedRows: NonNullable<Narrowed>[] = [];
+  const tombstonedUserIds: string[] = [];
   for (const row of profiles.rows) {
     const narrowed = narrowFwProfileName(row);
     if (!narrowed) {
       console.error(`[fw/ops] dropped a non-FW-shaped profile row (id=${String(row.id)})`);
       continue;
     }
-    students.push({
-      ...narrowed,
-      anonymized: isFwTombstoneName(narrowed.firstName, narrowed.lastName),
-      openRejects: openRejects.get(narrowed.studentId) ?? 0,
-    });
+    const userId = typeof row.user_id === "string" ? row.user_id : null;
+    const anonymized = isFwTombstoneName(narrowed.firstName, narrowed.lastName);
+    if (anonymized && userId) tombstonedUserIds.push(userId);
+    narrowedRows.push({ ...narrowed, userId, anonymized });
   }
+
+  // Which tombstoned students have a `student_anonymized` audit row — i.e. their
+  // removal FINISHED. Only read when some student is tombstoned; a read failure
+  // fails the whole roster (fail closed) rather than mislabelling a partial
+  // removal as complete.
+  const completedUserIds = new Set<string>();
+  if (tombstonedUserIds.length > 0) {
+    const audits = await fetchAllRows<Record<string, unknown>>(
+      `ops anonymize audits (${input.cohortId})`,
+      (from, to) =>
+        db
+          .from("path_fw_ops_audit")
+          .select("subject_user_id")
+          .eq("action", "student_anonymized")
+          .in("subject_user_id", tombstonedUserIds)
+          .order("id", { ascending: true })
+          .range(from, to)
+    );
+    if (!audits.ok) return { ok: false };
+    for (const row of audits.rows) {
+      if (typeof row.subject_user_id === "string") completedUserIds.add(row.subject_user_id);
+    }
+  }
+
+  const students: FwOpsStudent[] = narrowedRows.map((r) => ({
+    studentId: r.studentId,
+    firstName: r.firstName,
+    lastName: r.lastName,
+    band: r.band,
+    anonymized: r.anonymized,
+    anonymizeComplete: r.anonymized && r.userId !== null && completedUserIds.has(r.userId),
+    openRejects: openRejects.get(r.studentId) ?? 0,
+  }));
   students.sort(
     (a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName)
   );
@@ -1167,18 +1208,21 @@ export type AnonymizeFwStudentResult =
  * service-role sequence, compensable and RESUMABLE:
  *
  *   1. verify membership (the audit's cohort_id must name a cohort the student
- *      is actually in) and load the FW-shaped profile + its auth account;
- *   2. if the account is already at its tombstone address → already done; ensure
- *      the audit row exists (self-healing) and return;
- *   3. the TYPED CONFIRM: the caller must have typed this child's own name
- *      (`fwAnonymizeConfirmMatches`) — skipped only when the names are already
- *      tombstoned, i.e. a prior run got that far (resume, don't re-ask);
+ *      is actually in) and load the FW-shaped profile;
+ *   2. the TYPED CONFIRM: the caller must have typed this child's own name
+ *      (`fwAnonymizeConfirmMatches`) — checked before the account fetch so a
+ *      mismatch is cheap, and skipped only when the names are already tombstoned,
+ *      i.e. a prior run got that far (resume, don't re-ask);
+ *   3. load the auth account (a read error is transient `unavailable`, not
+ *      `account_missing`); if it is already at its tombstone address → already
+ *      done; ensure the audit row exists (self-healing) and return;
  *   4. record the freed local part in `path_fw_released_aliases`;
  *   5. tombstone the profile's name columns (XOR CHECK still satisfied — band
  *      stays, names become the sentinel, normalized_name is NULLed so the child
  *      is unfindable by name forever);
  *   6. rename the auth email to the tombstone address;
- *   7. write the `student_anonymized` audit row.
+ *   7. write the `student_anonymized` audit row (idempotent — a partial unique
+ *      index and probe-then-insert make a concurrent double-write impossible).
  *
  * ── Ordering deviates from Decision 10's PROSE for crash-safety, deliberately
  *
@@ -1252,17 +1296,33 @@ export async function anonymizeFwStudent(
   const storedFirst = typeof profile.first_name === "string" ? profile.first_name : "";
   const storedLast = typeof profile.last_name === "string" ? profile.last_name : "";
 
-  // 1c. The auth account — needed for the current address (the freed local part)
-  //     and to perform the rename. Its absence is a data fault, not a "no".
+  // 2. The typed confirm — checked FIRST, before the account fetch and the reject
+  //    count, so a mismatch returns without paying for either (performance
+  //    review). Depends only on the stored name, already in hand. Skipped only for
+  //    a resume (names already tombstoned by a prior partial run; the confirm was
+  //    passed then and the name is gone now). Safe to move ahead of the
+  //    already-anonymized check: this sequence tombstones the name (step 5) BEFORE
+  //    renaming the email (step 6), so `email === tombstone` never holds while
+  //    `nameTombstoned` is false — a fresh, un-anonymized student always confirms.
+  const nameTombstoned = isFwTombstoneName(storedFirst, storedLast);
+  if (!nameTombstoned && !fwAnonymizeConfirmMatches(input.confirmName, storedFirst, storedLast)) {
+    return { ok: false, reason: "confirm_mismatch" };
+  }
+
+  // 3. The auth account — needed for the current address (the freed local part)
+  //     and to perform the rename. A READ ERROR is a transient "no answer"
+  //     (reliability review): a timed-out getUserById on venue wifi must read as
+  //     `unavailable` ("try again"), not `account_missing` ("their record is gone
+  //     — tell an engineer"), which is what the same function's membership/profile
+  //     reads above already do. Only a clean "no such user" is `account_missing`.
   const account = await fwRead(
     () => db.auth.admin.getUserById(userId),
     `anonymize account (${userId})`
   );
+  if (account.error) return { ok: false, reason: "unavailable" };
   const user = account.data?.user;
-  if (account.error || !user) {
-    console.error(
-      `[fw/ops] anonymize: account ${userId} missing for ${input.studentId}: ${account.error?.message ?? "no user"}`
-    );
+  if (!user) {
+    console.error(`[fw/ops] anonymize: no auth account for ${userId} (student ${input.studentId})`);
     return { ok: false, reason: "account_missing" };
   }
   const currentEmail = typeof user.email === "string" ? user.email : "";
@@ -1273,7 +1333,7 @@ export async function anonymizeFwStudent(
   // the plan's named error, and this is the count that surfaces it.
   const openRejects = await countOpenRejectsForStudent(db, input.studentId);
 
-  // 2. Already at the tombstone address → idempotent no-op. Ensure the liability
+  // 4. Already at the tombstone address → idempotent no-op. Ensure the liability
   //    row exists even here: if the run that renamed the email failed to audit,
   //    a retry lands on THIS branch, and returning without checking would make
   //    the audit gap permanent.
@@ -1286,14 +1346,7 @@ export async function anonymizeFwStudent(
     return { ok: true, alreadyAnonymized: true, audited, openRejects };
   }
 
-  // 3. The typed confirm — skipped only for a resume (names already tombstoned by
-  //    a prior partial run; the confirm was passed then and the name is gone now).
-  const nameTombstoned = isFwTombstoneName(storedFirst, storedLast);
-  if (!nameTombstoned && !fwAnonymizeConfirmMatches(input.confirmName, storedFirst, storedLast)) {
-    return { ok: false, reason: "confirm_mismatch" };
-  }
-
-  // 4. Record the freed local part FIRST (see the ordering note above). Only an
+  // 5. Record the freed local part FIRST (see the ordering note above). Only an
   //    FW address has a name-derived local part to protect; anything else has
   //    nothing to release, so the alias step is skipped rather than guessed.
   const releasedLocalPart = fwLocalPartFromEmail(currentEmail);
@@ -1329,7 +1382,7 @@ export async function anonymizeFwStudent(
     }
   }
 
-  // 5. Tombstone the name columns (skip if a prior run already did). No
+  // 6. Tombstone the name columns (skip if a prior run already did). No
   //    post-write-verify needed: a landed-but-failed tombstone is recovered by
   //    the resume path — the retry sees the tombstone name, skips the confirm,
   //    and continues.
@@ -1354,7 +1407,7 @@ export async function anonymizeFwStudent(
     }
   }
 
-  // 6. Rename the auth email to the tombstone address. `email_confirm: true`
+  // 7. Rename the auth email to the tombstone address. `email_confirm: true`
   //    marks the new address confirmed so no Supabase change-confirmation flow is
   //    triggered (the no-auth-mail hold): the rename sets the email directly, and
   //    the target lives inside the `.fw@` namespace the guard covers regardless.
@@ -1385,10 +1438,15 @@ export async function anonymizeFwStudent(
     recovered = true;
   }
 
-  // 7. The liability record.
-  const audited = await recordFwOpsAudit(db, {
-    actor: input.actorUserId,
-    action: "student_anonymized",
+  // 8. The liability record — through `ensureAnonymizeAudit` (probe-then-insert,
+  //    unique-violation-as-success), NOT a blind insert. Two staff anonymizing
+  //    the same student concurrently both reach here after sharing the idempotent
+  //    alias/tombstone/rename writes; a blind insert would write TWO immutable
+  //    `student_anonymized` rows for one event, and the partial unique index
+  //    (20260801160000) plus this idempotent writer make a second row impossible
+  //    rather than merely unlikely (correctness + adversarial review).
+  const audited = await ensureAnonymizeAudit(db, {
+    actorUserId: input.actorUserId,
     subjectUserId: userId,
     cohortId: input.cohortId,
     metadata: {
@@ -1420,36 +1478,73 @@ async function countOpenRejectsForStudent(
   return res.ok ? res.rows.length : 0;
 }
 
-/** Write a `student_anonymized` audit row only if one does not already exist for
- *  this subject — the self-healing path for a rename that landed but never
- *  audited. Returns whether the record exists (found OR freshly written). */
+/**
+ * Ensure exactly one `student_anonymized` audit row exists for this subject —
+ * the SOLE audit writer for the anonymize action, used by both the primary
+ * completion path and the already-anonymized self-heal path.
+ *
+ * Idempotent and concurrency-safe (correctness + adversarial review): a blind
+ * insert would let two staff anonymizing the same student write two immutable
+ * liability rows for one event. This probes first, and treats the unique
+ * violation from the partial index (`path_fw_ops_audit_one_anonymize_idx`,
+ * 20260801160000) as SUCCESS — a concurrent run already recorded it. The probe
+ * is `.limit(1)` so it stays multiplicity-safe even if a pre-index row pair
+ * somehow exists (a bare `.maybeSingle()` errors on two rows and would report
+ * `audited: false` over a record that IS present).
+ *
+ * `metadata` is the primary path's `{ releasedLocalPart, … }`; the self-heal
+ * path omits it and the writer stamps `recoveredFromReportedFailure`.
+ */
 async function ensureAnonymizeAudit(
   db: SupabaseClient,
-  input: { actorUserId: string; subjectUserId: string; cohortId: string }
+  input: {
+    actorUserId: string;
+    subjectUserId: string;
+    cohortId: string;
+    metadata?: Record<string, unknown>;
+  }
 ): Promise<boolean> {
-  const existing = await fwRead(
-    () =>
-      db
-        .from("path_fw_ops_audit")
-        .select("id")
-        .eq("subject_user_id", input.subjectUserId)
-        .eq("action", "student_anonymized")
-        .maybeSingle(),
-    `anonymize audit probe (${input.subjectUserId})`
-  );
+  const probe = () =>
+    fwRead(
+      () =>
+        db
+          .from("path_fw_ops_audit")
+          .select("id")
+          .eq("subject_user_id", input.subjectUserId)
+          .eq("action", "student_anonymized")
+          .limit(1)
+          .maybeSingle(),
+      `anonymize audit probe (${input.subjectUserId})`
+    );
+
+  const existing = await probe();
   if (existing.error) {
     // Cannot tell — report false so the surface says "the record didn't save",
     // which is the honest, fail-closed answer rather than a fabricated "saved".
     return false;
   }
   if (existing.data) return true;
-  return recordFwOpsAudit(db, {
-    actor: input.actorUserId,
-    action: "student_anonymized",
-    subjectUserId: input.subjectUserId,
-    cohortId: input.cohortId,
-    metadata: { recoveredFromReportedFailure: true },
-  });
+
+  const inserted = await fwWrite(
+    () =>
+      db.from("path_fw_ops_audit").insert([
+        {
+          actor: input.actorUserId,
+          action: "student_anonymized",
+          subject_user_id: input.subjectUserId,
+          cohort_id: input.cohortId,
+          metadata: input.metadata ?? { recoveredFromReportedFailure: true },
+        },
+      ]),
+    `anonymize audit write (${input.subjectUserId})`
+  );
+  if (!inserted.error) return true;
+  // A unique violation means a concurrent anonymize already recorded it — the row
+  // exists, so the record is present: success.
+  if (isUniqueViolation(inserted.error)) return true;
+  // Any other error (incl. a timed-out write that may have landed): re-probe.
+  const after = await probe();
+  return !after.error && after.data !== null;
 }
 
 /* ═════════════════════════════════════ PROPOSED-1: staff match resolution ══ */
@@ -1589,7 +1684,12 @@ export type LinkFwStudentToCohortResult =
   | { ok: true; alreadyMember: boolean }
   | {
       ok: false;
-      reason: "student_not_found" | "not_fw_profile" | "cohort_not_fw" | "unavailable";
+      reason:
+        | "student_not_found"
+        | "not_fw_profile"
+        | "student_anonymized"
+        | "cohort_not_fw"
+        | "unavailable";
     };
 
 /**
@@ -1605,10 +1705,22 @@ export type LinkFwStudentToCohortResult =
  * NOT an audit action (Scope Boundaries: only anonymize and guide-grant changes
  * write audit rows). The membership row is its own attribution of what happened.
  *
- * Guards both ends: the target must be an FW-shaped profile (never enroll a Path
+ * Guards THREE ends: the target must be an FW-shaped profile (never enroll a Path
  * student into an FW cohort — the same shape gate `provisionFwStudent`'s resume
- * path holds) and the cohort must be `kind='fw'` (never mint an FW membership
- * against a Path cohort).
+ * path holds); the cohort must be `kind='fw'` (never mint an FW membership
+ * against a Path cohort); and the target must NOT be anonymized.
+ *
+ * ── The anonymize guard is the whole point (adversarial review, P1)
+ *
+ * `loadFwMatchResolution` already hides anonymized students (their normalized_name
+ * is NULLed), but the match resolver renders its result into client state with no
+ * TTL — so a candidate looked up BEFORE a concurrent anonymize can still be
+ * clicked AFTER it. Anonymize NULLs normalized_name and tombstones the name but
+ * touches neither `band` nor `child_id`, so a tombstoned profile sails through the
+ * FW-shape gate. Without this check, linking that stale entry would insert a live
+ * `path_cohort_members` row for a "Removed student" — a checkin-able roster ghost
+ * that the guide surface would then let someone tap, resurrecting an identity
+ * Decision 10 promises is permanently retired. Refuse it as its own reason.
  */
 export async function linkFwStudentToCohort(
   db: SupabaseClient,
@@ -1622,7 +1734,7 @@ export async function linkFwStudentToCohort(
     () =>
       db
         .from("path_student_profiles")
-        .select("id, child_id, band")
+        .select("id, child_id, band, first_name, last_name")
         .eq("id", input.studentId)
         .maybeSingle(),
     `link profile (${input.studentId})`
@@ -1631,6 +1743,9 @@ export async function linkFwStudentToCohort(
   if (!profile.data) return { ok: false, reason: "student_not_found" };
   if (profile.data.child_id !== null || typeof profile.data.band !== "string") {
     return { ok: false, reason: "not_fw_profile" };
+  }
+  if (isFwTombstoneName(profile.data.first_name, profile.data.last_name)) {
+    return { ok: false, reason: "student_anonymized" };
   }
 
   const existing = await fwRead(

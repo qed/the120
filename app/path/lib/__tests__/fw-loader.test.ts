@@ -6,6 +6,7 @@ import {
   loadFwStudentDrilldown,
 } from "../fw-loader";
 import { matchFwStudent } from "../fw-match-rules";
+import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
 import { buildNormalizedFwName } from "../fw-provision-rules";
 
 /**
@@ -159,6 +160,30 @@ describe("loadFwCohortRoster", () => {
       firstName: "Aaron",
       band: "g3_5",
     });
+  });
+
+  it("EXCLUDES an anonymized student — a retired identity never appears on the guide roster", async () => {
+    // Decision 10 + adversarial review: an anonymized returner stays a member of
+    // their OTHER weekends, but must NOT show up as a checkin-able 'Removed
+    // student' row there. The tombstone-name filter is the enforcement.
+    const { db } = makeFakeDb({
+      members: [
+        { student_id: "s-maya", cohort_id: BOSTON },
+        { student_id: "s-gone", cohort_id: BOSTON },
+      ],
+      profiles: [
+        profile(),
+        profile({
+          id: "s-gone",
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g3_5",
+        }),
+      ],
+    });
+    const res = await loadFwCohortRoster(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students.map((s) => s.studentId)).toEqual(["s-maya"]);
   });
 
   it("folds each student's decided rows into their resume chip (G21)", async () => {

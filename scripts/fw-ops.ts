@@ -147,7 +147,7 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   students: ["--cohort"],
   rejects: ["--cohort", "--all"],
   "reject-resolve": ["--cohort", "--reject"],
-  anonymize: ["--cohort", "--student", "--confirm-name"],
+  anonymize: ["--cohort", "--student", "--confirm-name", "--force"],
   match: ["--cohort", "--first", "--last"],
   link: ["--cohort", "--student"],
 };
@@ -501,10 +501,22 @@ fresh link emailed to ${issued.email}`);
   if (command === "anonymize") {
     const cohortId = required("cohort");
     const studentId = required("student");
+    // TWO gates, because anonymize is IRREVERSIBLE (cli-readiness review):
+    //   --confirm-name is the informational check (verified server-side against
+    //     the stored name — a wrong id typed with a wrong name refuses), but an
+    //     agent can read that name straight out of `students --json`, so it is
+    //     not friction on its own;
+    //   --force is the deliberate "I intend to run a destructive, irreversible
+    //     action" acknowledgment that is NOT reproducible from a prior read —
+    //     the same posture `token-mint --force` already uses in this file.
+    if (!process.argv.includes("--force")) {
+      throw new Error(
+        `anonymize is IRREVERSIBLE — it erases a student's name and retires their address ` +
+          `permanently. Re-run with --force once you are sure of the student id.`
+      );
+    }
     // The typed confirm — the child's own name, verified server-side against the
-    // stored record. This IS the safety (the surface's typed confirm, at the
-    // terminal): anonymize is irreversible, so a wrong id typed with a wrong name
-    // refuses rather than erasing the wrong child.
+    // stored record.
     const res = await anonymizeFwStudent(db, {
       studentId,
       cohortId,

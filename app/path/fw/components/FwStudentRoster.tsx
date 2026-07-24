@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/app/path/components/system/Button";
 import { anonymizeStudentAction } from "@/app/path/lib/actions/fw-ops";
 import type { FwOpsStudent } from "@/app/path/lib/fw-ops-core";
+import { fwAnonymizeConfirmMatches } from "@/app/path/lib/fw-ops-rules";
 
 /**
  * The cohort's students, and the anonymize (deletion) action (FW Unit 5b;
@@ -15,28 +16,28 @@ import type { FwOpsStudent } from "@/app/path/lib/fw-ops-core";
  * The house rule (CLAUDE.md): a destructive UI action confirms before acting and
  * the copy says exactly what will happen — and for an irreversible one, the
  * confirm is typed. Staff must type the child's OWN NAME, which is the strongest
- * guard against removing the wrong student: the mistake the confirm exists to
- * catch is exactly "acted on the wrong row", and typing the wrong row's name is
- * what it takes to get past this. The button gates on a loose client-side match;
- * the SERVER re-verifies the typed name against the stored record
- * (`fwAnonymizeConfirmMatches`), so a bypassed input still refuses.
+ * guard against removing the wrong student. The submit button gates on the SAME
+ * pure fold the server verifies with (`fwAnonymizeConfirmMatches`), so the
+ * client gate and the server authority can never disagree (an accented name the
+ * server would accept no longer leaves the button stuck disabled).
  *
- * ── The open-reject warning is surfaced BEFORE the click, not after
+ * ── A "removal incomplete" state is resumable, not a dead end
  *
- * If unresolved replay rejects still point at a student, anonymizing them leaves
- * those rejects orphaned (pointing at a now-nameless record). The count shows in
- * the confirm panel so staff can resolve them first — a warning, not a block.
+ * `anonymized` (name tombstoned) and `anonymizeComplete` (the audit row exists,
+ * i.e. the whole sequence finished) are DISTINCT. A run whose auth-email rename
+ * failed mid-way leaves `anonymized: true, anonymizeComplete: false` — a state
+ * the core is built to resume. This surface shows a "Finish removing" affordance
+ * for it (a one-click resume; the confirm was already given on the first attempt)
+ * rather than rendering "Removed" with no way forward.
+ *
+ * ── The open-reject warning is surfaced BEFORE the click
+ *
+ * Anonymizing a student who still has unresolved replay rejects orphans them.
+ * The count shows in the confirm panel so staff can resolve them first — a
+ * warning, not a block.
  *
  * ── ONE busy state, try/catch/FINALLY — the FwGuideRoster shape.
  */
-
-/** Loose, browser-side name equality to enable the button — the SERVER's
- *  normalized compare is the authority (it also folds accents). Lowercase, trim,
- *  and collapse internal whitespace, both sides. */
-function looseNameMatch(typed: string, first: string, last: string): boolean {
-  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
-  return norm(typed).length > 0 && norm(typed) === norm(`${first} ${last}`);
-}
 
 export default function FwStudentRoster({
   cohortId,
@@ -63,17 +64,16 @@ export default function FwStudentRoster({
     setNotice(null);
   };
 
-  const handleAnonymize = async (student: FwOpsStudent) => {
-    if (anyBusy || !looseNameMatch(typed, student.firstName, student.lastName)) return;
+  /** Run the anonymize/resume for one student. `confirmName` is the typed name on
+   *  a first removal; on a resume it is the (tombstoned) display name, which the
+   *  core ignores because the name is already tombstoned. */
+  const runAnonymize = async (student: FwOpsStudent, confirmName: string) => {
+    if (anyBusy) return;
     setBusy(student.studentId);
     setError(null);
     setNotice(null);
     try {
-      const res = await anonymizeStudentAction({
-        cohortId,
-        studentId: student.studentId,
-        confirmName: typed,
-      });
+      const res = await anonymizeStudentAction({ cohortId, studentId: student.studentId, confirmName });
       if (res.success) {
         setConfirming(null);
         setTyped("");
@@ -113,7 +113,8 @@ export default function FwStudentRoster({
         {students.map((student) => {
           const rowBusy = busy === student.studentId;
           const open = confirming === student.studentId;
-          const canSubmit = looseNameMatch(typed, student.firstName, student.lastName);
+          const canSubmit = fwAnonymizeConfirmMatches(typed, student.firstName, student.lastName);
+          const incomplete = student.anonymized && !student.anonymizeComplete;
           return (
             <li
               key={student.studentId}
@@ -131,12 +132,19 @@ export default function FwStudentRoster({
                       {student.openRejects} reject{student.openRejects === 1 ? "" : "s"}
                     </span>
                   )}
-                  <span className="inline-flex items-center rounded-full border border-hq-border bg-hq-sunken px-2.5 py-0.5 font-path-mono text-[11px] uppercase tracking-[0.1em] text-hq-ink-soft">
-                    {student.anonymized ? "Removed" : student.band}
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-path-mono text-[11px] uppercase tracking-[0.1em] ${
+                      incomplete
+                        ? "border-not-yet/40 bg-not-yet/10 text-hq-ink"
+                        : "border-hq-border bg-hq-sunken text-hq-ink-soft"
+                    }`}
+                  >
+                    {incomplete ? "Removal incomplete" : student.anonymized ? "Removed" : student.band}
                   </span>
                 </div>
               </div>
 
+              {/* Active student: the typed-confirm removal flow. */}
               {!student.anonymized && open && (
                 <div className="mt-3 rounded-lg border border-not-yet/40 bg-not-yet/10 p-3">
                   <p role="alert" className="font-path-body text-sm leading-5 text-hq-ink">
@@ -174,7 +182,7 @@ export default function FwStudentRoster({
                       skin="hq"
                       variant="secondary"
                       size="md"
-                      onClick={() => handleAnonymize(student)}
+                      onClick={() => runAnonymize(student, typed)}
                       disabled={anyBusy || !canSubmit}
                     >
                       {rowBusy ? "Removing…" : "Remove this student"}
@@ -204,6 +212,29 @@ export default function FwStudentRoster({
                     disabled={anyBusy}
                   >
                     Remove
+                  </Button>
+                </div>
+              )}
+
+              {/* Removal that stalled part-way: resume it. No re-typed confirm —
+                  it was given on the first attempt; the name is already gone. */}
+              {incomplete && (
+                <div className="mt-3">
+                  <p className="mb-2 font-path-body text-xs leading-5 text-hq-ink-soft">
+                    This removal didn&apos;t finish — the record is partly retired. Finish it to
+                    complete the removal.
+                  </p>
+                  <Button
+                    type="button"
+                    skin="hq"
+                    variant="secondary"
+                    size="md"
+                    onClick={() =>
+                      runAnonymize(student, `${student.firstName} ${student.lastName}`)
+                    }
+                    disabled={anyBusy}
+                  >
+                    {rowBusy ? "Finishing…" : "Finish removing"}
                   </Button>
                 </div>
               )}

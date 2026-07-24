@@ -23,6 +23,16 @@
  *   npm run fw -- guide-reissue --guide <uuid> [--json]
  *   npm run fw -- guide-revoke  --cohort <uuid> --guide <uuid> [--json]
  *
+ * Staff ops COMPLETENESS (FW Unit 5b) — the two deferred surfaces + PROPOSED-1:
+ *
+ *   npm run fw -- students       --cohort <uuid> [--json]
+ *   npm run fw -- rejects        --cohort <uuid> [--all] [--json]
+ *   npm run fw -- reject-resolve --cohort <uuid> --reject <uuid> [--json]
+ *   npm run fw -- anonymize      --cohort <uuid> --student <uuid> \
+ *                                --confirm-name "Maya Chen" [--json]
+ *   npm run fw -- match          --cohort <uuid> --first Maya --last Chen [--json]
+ *   npm run fw -- link           --cohort <uuid> --student <uuid> [--json]
+ *
  * ── Why this exists
  *
  * The whole read and write path is deliberately built as plain, `db`-first
@@ -63,15 +73,25 @@ import { buildFwGuideInviteEmail } from "../app/path/lib/fw-guide-invite-email";
 import { assertNoAuthMailToFwStudent } from "../app/path/lib/fw-provision-rules";
 import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/path/lib/fw-loader";
 import {
+  anonymizeFwStudent,
   createFwCohort,
+  linkFwStudentToCohort,
   listFwCohortGuides,
   listFwOpsCohorts,
+  listFwOpsStudents,
+  listFwReplayRejects,
+  loadFwMatchResolution,
   loadFwOpsBoardToken,
   mintFwBoardToken,
+  resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
 } from "../app/path/lib/fw-ops-core";
-import { fwCohortWindowFromLocal, normalizeFwCohortSlug } from "../app/path/lib/fw-ops-rules";
+import {
+  fwCohortWindowFromLocal,
+  fwReplayRejectReasonCopy,
+  normalizeFwCohortSlug,
+} from "../app/path/lib/fw-ops-rules";
 import { isFwAction } from "../app/path/lib/fw-rules";
 import { runFwQuickCreate } from "../app/path/lib/fw-student-core";
 
@@ -88,6 +108,12 @@ const COMMANDS = [
   "guide-add",
   "guide-reissue",
   "guide-revoke",
+  "students",
+  "rejects",
+  "reject-resolve",
+  "anonymize",
+  "match",
+  "link",
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
@@ -118,6 +144,12 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   "guide-add": ["--cohort", "--email"],
   "guide-reissue": ["--guide"],
   "guide-revoke": ["--cohort", "--guide"],
+  students: ["--cohort"],
+  rejects: ["--cohort", "--all"],
+  "reject-resolve": ["--cohort", "--reject"],
+  anonymize: ["--cohort", "--student", "--confirm-name"],
+  match: ["--cohort", "--first", "--last"],
+  link: ["--cohort", "--student"],
 };
 
 function arg(name: string): string | null {
@@ -403,6 +435,137 @@ fresh link emailed to ${issued.email}`);
       console.log(`\naccess removed for ${required("guide")} on ${required("cohort")}`);
       if (!res.audited) console.log("  ⚠  the audit record did NOT save");
     });
+    return;
+  }
+
+  /* ─────────────────────────────────────── staff ops COMPLETENESS (Unit 5b) ── */
+  // Same second-front-door-to-one-core posture: `anonymize` drives the SAME
+  // anonymizeFwStudent the ops surface calls, with the SAME typed-confirm
+  // verification and the SAME audit row. A student anonymized here is
+  // indistinguishable from one anonymized in a browser. The anonymize CORE is
+  // verifiable this way against the rehearsal-unit4 students; only the SURFACE
+  // render needs a bridge session.
+
+  if (command === "students") {
+    const cohortId = required("cohort");
+    const res = await listFwOpsStudents(db, { cohortId });
+    if (!res.ok) throw new Error(`student roster read failed for ${cohortId}`);
+    emit(res.students, () => {
+      console.log(`\n${res.students.length} student(s) in ${cohortId}\n`);
+      for (const s of res.students) {
+        const flags = [
+          s.anonymized ? "ANONYMIZED" : null,
+          s.openRejects > 0 ? `${s.openRejects} open reject(s)` : null,
+        ].filter(Boolean);
+        console.log(
+          `  ${s.studentId}  ${s.firstName} ${s.lastName} (${s.band})${flags.length ? " — " + flags.join(", ") : ""}`
+        );
+      }
+    });
+    return;
+  }
+
+  if (command === "rejects") {
+    const cohortId = required("cohort");
+    const includeResolved = process.argv.includes("--all");
+    const res = await listFwReplayRejects(db, { cohortId, includeResolved });
+    if (!res.ok) throw new Error(`reject list read failed for ${cohortId}`);
+    emit(res.rejects, () => {
+      console.log(
+        `\n${res.rejects.length} ${includeResolved ? "" : "open "}replay reject(s) on ${cohortId}\n`
+      );
+      for (const r of res.rejects) {
+        const status = r.resolvedAt ? `resolved ${r.resolvedAt}` : "OPEN";
+        console.log(
+          `  ${r.id}  ${r.studentName ?? "(unnamed)"} · ${r.taskId} · ${r.action} — ${status}\n` +
+            `      ${fwReplayRejectReasonCopy(r.reason)}`
+        );
+      }
+    });
+    return;
+  }
+
+  if (command === "reject-resolve") {
+    const cohortId = required("cohort");
+    const res = await resolveFwReplayReject(db, {
+      rejectId: required("reject"),
+      cohortId,
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    if (!res.ok) throw new Error(`reject-resolve: ${res.reason}`);
+    emit(res, () => console.log(`\nreject ${required("reject")} resolved`));
+    return;
+  }
+
+  if (command === "anonymize") {
+    const cohortId = required("cohort");
+    const studentId = required("student");
+    // The typed confirm — the child's own name, verified server-side against the
+    // stored record. This IS the safety (the surface's typed confirm, at the
+    // terminal): anonymize is irreversible, so a wrong id typed with a wrong name
+    // refuses rather than erasing the wrong child.
+    const res = await anonymizeFwStudent(db, {
+      studentId,
+      cohortId,
+      actorUserId: await resolveActor(),
+      confirmName: required("confirm-name"),
+    });
+    if (!res.ok) throw new Error(`anonymize failed: ${res.reason}`);
+    emit(res, () => {
+      console.log(
+        res.alreadyAnonymized
+          ? `\n${studentId} was already anonymized`
+          : `\n${studentId} anonymized — name tombstoned, address released, audit written`
+      );
+      if (!res.audited) console.log("  ⚠  the audit record did NOT save");
+      if (res.openRejects > 0) {
+        console.log(
+          `  ⚠  ${res.openRejects} unresolved replay reject(s) still point at this student — resolve them`
+        );
+      }
+    });
+    return;
+  }
+
+  if (command === "match") {
+    const cohortId = required("cohort");
+    const res = await loadFwMatchResolution(db, {
+      cohortId,
+      firstName: required("first"),
+      lastName: required("last"),
+    });
+    if (!res.ok) throw new Error(`match lookup failed for ${cohortId}`);
+    if (res.kind === "invalid_name") {
+      emit({ kind: "invalid_name" }, () => console.log("\nthat name cannot be looked up — retype it"));
+      return;
+    }
+    emit({ kind: "matches", entries: res.entries }, () => {
+      console.log(`\n${res.entries.length} existing student(s) named "${required("first")} ${required("last")}"\n`);
+      for (const e of res.entries) {
+        const where = e.memberships.map((m) => m.slug).join(", ") || "no cohorts";
+        console.log(
+          `  ${e.profileId}  ${e.firstName} ${e.lastName} (${e.band}) — ${where}` +
+            (e.inActiveCohort ? " · already in this weekend" : "")
+        );
+      }
+      if (res.entries.length === 0) console.log("  none — this is a new student");
+    });
+    return;
+  }
+
+  if (command === "link") {
+    const cohortId = required("cohort");
+    const studentId = required("student");
+    const res = await linkFwStudentToCohort(db, { studentId, cohortId });
+    if (!res.ok) throw new Error(`link failed: ${res.reason}`);
+    emit(res, () =>
+      console.log(
+        res.alreadyMember
+          ? `\n${studentId} is already in ${cohortId}`
+          : `\n${studentId} linked into ${cohortId}`
+      )
+    );
     return;
   }
 

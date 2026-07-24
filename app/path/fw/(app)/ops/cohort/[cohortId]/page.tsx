@@ -4,11 +4,16 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwBoardToken from "@/app/path/fw/components/FwBoardToken";
 import FwGuideRoster from "@/app/path/fw/components/FwGuideRoster";
+import FwMatchResolver from "@/app/path/fw/components/FwMatchResolver";
+import FwReplayRejects from "@/app/path/fw/components/FwReplayRejects";
+import FwStudentRoster from "@/app/path/fw/components/FwStudentRoster";
 import FwWindowLabel from "@/app/path/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import {
   listFwCohortGuides,
+  listFwOpsStudents,
+  listFwReplayRejects,
   loadFwOpsBoardToken,
   loadFwOpsCohort,
 } from "@/app/path/lib/fw-ops-core";
@@ -50,12 +55,14 @@ export const metadata: Metadata = {
 async function loadOpsCohortPage(cohortId: string) {
   const db = supabaseAdmin();
   const now = Date.now();
-  const [cohort, token, guides] = await Promise.all([
+  const [cohort, token, guides, students, rejects] = await Promise.all([
     loadFwOpsCohort(db, cohortId),
     loadFwOpsBoardToken(db, { cohortId, now }),
     listFwCohortGuides(db, { cohortId, now }),
+    listFwOpsStudents(db, { cohortId }),
+    listFwReplayRejects(db, { cohortId }),
   ]);
-  return { cohort, token, guides };
+  return { cohort, token, guides, students, rejects };
 }
 
 export default async function FwOpsCohortPage({
@@ -67,7 +74,7 @@ export default async function FwOpsCohortPage({
   const { verdict } = await resolveFwActorForCohort(cohortId);
   if (!isFwStaffActor(verdict)) notFound();
 
-  const { cohort, token, guides } = await loadOpsCohortPage(cohortId);
+  const { cohort, token, guides, students, rejects } = await loadOpsCohortPage(cohortId);
   // The gate already proved this cohort is `kind='fw'` and that the caller may
   // act in it; a null here is a read failure, not an authorization answer.
   if (!cohort) {
@@ -132,6 +139,61 @@ export default async function FwOpsCohortPage({
           >
             We couldn&apos;t load this weekend&apos;s guides just now. Reload the page — this is
             not the same thing as &ldquo;no guides&rdquo;.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-10">
+        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+          Offline replays that didn&apos;t apply
+        </h2>
+        <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+          Check-ins captured offline that couldn&apos;t be applied at sync — a cross-guide
+          correction, a session that couldn&apos;t re-authenticate, a row that had already
+          moved. Resolve each once you&apos;ve handled it.
+        </p>
+        {rejects.ok ? (
+          <FwReplayRejects cohortId={cohort.id} rejects={rejects.rejects} />
+        ) : (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
+          >
+            We couldn&apos;t load the replay rejects just now. Reload the page — this is not the
+            same thing as &ldquo;none&rdquo;.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-10">
+        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+          Find a returning student
+        </h2>
+        <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+          A guide flagged a possible match from another weekend. Look the name up here to see
+          the full picture, then link the existing student into this weekend or confirm
+          they&apos;re new.
+        </p>
+        <FwMatchResolver cohortId={cohort.id} />
+      </section>
+
+      <section className="mt-10">
+        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+          Students
+        </h2>
+        <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+          Removing a student anonymizes their record in place — their name is erased and their
+          address is retired so it&apos;s never reused. It cannot be undone.
+        </p>
+        {students.ok ? (
+          <FwStudentRoster cohortId={cohort.id} students={students.students} />
+        ) : (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
+          >
+            We couldn&apos;t load this weekend&apos;s students just now. Reload the page — this
+            is not the same thing as &ldquo;no students&rdquo;.
           </p>
         )}
       </section>

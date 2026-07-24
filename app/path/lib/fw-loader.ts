@@ -337,6 +337,15 @@ export async function loadFwStudentDrilldown(
     return { ok: false, reason: "unavailable" };
   }
 
+  // An ANONYMIZED student is retired: 404 the drilldown/task pages rather than
+  // render a "Removed student" tree a guide could tap. `not_found` matches this
+  // function's "never reveal which ids are real" posture. This is the page gate;
+  // the WRITE path itself is guarded in `runFwCheckIn` so a stale tab that
+  // already rendered before the anonymize cannot tap through it either.
+  if (isFwTombstoneName(row.first_name, row.last_name)) {
+    return { ok: false, reason: "not_found" };
+  }
+
   if (!progress.ok) return { ok: false, reason: "unavailable" };
 
   const states: Record<string, TaskState> = {};

@@ -336,6 +336,28 @@ describe("loadFwStudentDrilldown — the read-side of Decision 3", () => {
     });
   });
 
+  it("404s an ANONYMIZED student — the drilldown of a retired identity must not render", async () => {
+    // The student is a member (membership row persists by design) and FW-shaped,
+    // so it passes both prior gates — the tombstone-name check is what 404s the
+    // page, matching the 'never reveal which ids are real' posture.
+    const { db } = makeFakeDb({
+      members: [{ student_id: "s-gone", cohort_id: BOSTON }],
+      profiles: [
+        profile({
+          id: "s-gone",
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g3_5",
+        }),
+      ],
+      progress: [{ student_id: "s-gone", task_id: "1.1.1", state: "verified" }],
+    });
+    expect(await loadFwStudentDrilldown(db, { cohortId: BOSTON, studentId: "s-gone" })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
   it("checks membership BEFORE reading the profile — no read, no leak", async () => {
     const { db, queries } = makeFakeDb(BASE);
     await loadFwStudentDrilldown(db, { cohortId: BOSTON, studentId: "s-ham" });

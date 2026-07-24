@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   clampFwCapturedAt,
+  createFwClientIdLedger,
   decideFwAction,
   fwActionTarget,
   fwFirstDollarStudents,
+  fwRetryStudentIds,
   isFirstDollarTask,
   isFwAction,
+  isFwResultSettled,
   narrowFwOutcome,
   planFwBatch,
   resultForFwEcho,
@@ -599,5 +602,134 @@ describe("clampFwCapturedAt — reuses the Path's capture clamp, does not re-der
       clamped: false,
     });
     expect(clampFwCapturedAt(undefined, now).clamped).toBe(false);
+  });
+});
+
+/* ═════════════════════════════════ the exactly-once key, per tap (Unit 4) ══ */
+
+describe("isFwResultSettled — which outcomes end the tap they name", () => {
+  const settled = (r: FwStudentResult) => isFwResultSettled(r);
+
+  it("settles on every outcome the server actually decided", () => {
+    expect(settled({ studentId: "s", kind: "applied", state: "verified" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "re_attempt", state: "not_yet" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "already_done", state: "verified" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "replayed", state: "verified" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "refused", reason: "undo_first", state: "verified" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "skipped", reason: "not_in_cohort" })).toBe(true);
+  });
+
+  it("settles the two `failed` reasons that are DEFINITE facts, not ambiguity", () => {
+    // A missing progress row and a bad cohort stamp are answers. Retrying them
+    // with the same key buys nothing, and holding the key forever would make a
+    // later, genuine tap on that task read as a replay.
+    expect(settled({ studentId: "s", kind: "failed", reason: "missing_progress" })).toBe(true);
+    expect(settled({ studentId: "s", kind: "failed", reason: "cohort_invalid" })).toBe(true);
+  });
+
+  it("does NOT settle on `unavailable` — the one outcome that proves nothing", () => {
+    // A timeout or a thrown fetch is not proof the write failed and not proof it
+    // landed. The key must survive so the retry is the SAME tap.
+    expect(settled({ studentId: "s", kind: "failed", reason: "unavailable" })).toBe(false);
+  });
+});
+
+describe("fwRetryStudentIds", () => {
+  it("names only the students whose outcome was ambiguous", () => {
+    expect(
+      fwRetryStudentIds([
+        { studentId: "s-a", kind: "applied", state: "verified" },
+        { studentId: "s-b", kind: "failed", reason: "unavailable" },
+        { studentId: "s-c", kind: "failed", reason: "missing_progress" },
+        { studentId: "s-d", kind: "skipped", reason: "over_batch_max" },
+      ])
+    ).toEqual(["s-b"]);
+  });
+
+  it("is empty when everything settled — no retry affordance to render", () => {
+    expect(fwRetryStudentIds([{ studentId: "s-a", kind: "applied", state: "verified" }])).toEqual([]);
+  });
+});
+
+describe("the per-tap client-id ledger (carried from Unit 3)", () => {
+  const ledgerWithCounter = () => {
+    let n = 0;
+    return createFwClientIdLedger(() => `id-${(n += 1)}`);
+  };
+  const intent = (over: Partial<{ taskId: string; action: FwAction; studentIds: string[] }> = {}) => ({
+    taskId: "1.2.4",
+    action: "not_yet" as FwAction,
+    studentIds: ["s-a", "s-b"],
+    ...over,
+  });
+
+  it("mints one distinct id per student in a tap", () => {
+    const ids = ledgerWithCounter().idsFor(intent());
+    expect(Object.keys(ids).sort()).toEqual(["s-a", "s-b"]);
+    expect(new Set(Object.values(ids)).size).toBe(2);
+  });
+
+  it("REUSES the id when the same tap is submitted again — that is the whole point", () => {
+    // The Unit 3 gap, closed. A not-yet retry after an ambiguous failure must
+    // carry the first attempt's key, or the RPC cannot tell "the guide tapped
+    // twice" (a real FW-D4 struggle signal) from "the first response was lost
+    // over venue wifi", and the blocker data silently inflates.
+    const ledger = ledgerWithCounter();
+    const first = ledger.idsFor(intent());
+    expect(ledger.idsFor(intent())).toEqual(first);
+  });
+
+  it("mints a FRESH id for a different action on the same task and student", () => {
+    const ledger = ledgerWithCounter();
+    const notYet = ledger.idsFor(intent({ action: "not_yet", studentIds: ["s-a"] }));
+    const undo = ledger.idsFor(intent({ action: "undo", studentIds: ["s-a"] }));
+    expect(undo["s-a"]).not.toBe(notYet["s-a"]);
+  });
+
+  it("mints a FRESH id for the same action on a different task", () => {
+    const ledger = ledgerWithCounter();
+    const a = ledger.idsFor(intent({ taskId: "1.2.4", studentIds: ["s-a"] }));
+    const b = ledger.idsFor(intent({ taskId: "1.2.5", studentIds: ["s-a"] }));
+    expect(b["s-a"]).not.toBe(a["s-a"]);
+  });
+
+  it("mints only what is missing when a teammate joins mid-selection", () => {
+    const ledger = ledgerWithCounter();
+    const solo = ledger.idsFor(intent({ studentIds: ["s-a"] }));
+    const pair = ledger.idsFor(intent({ studentIds: ["s-a", "s-b"] }));
+    expect(pair["s-a"]).toBe(solo["s-a"]);
+    expect(pair["s-b"]).not.toBe(solo["s-a"]);
+  });
+
+  it("settling frees the key, so the guide's NEXT tap is a new tap", () => {
+    // A deliberate second not-yet IS a re-attempt event. Holding the key would
+    // turn the FW-D4 signal into a permanent no-op for that task.
+    const ledger = ledgerWithCounter();
+    const first = ledger.idsFor(intent({ studentIds: ["s-a"] }));
+    ledger.settle(intent({ studentIds: ["s-a"] }), [
+      { studentId: "s-a", kind: "re_attempt", state: "not_yet" },
+    ]);
+    expect(ledger.idsFor(intent({ studentIds: ["s-a"] }))["s-a"]).not.toBe(first["s-a"]);
+  });
+
+  it("settling KEEPS an ambiguous student's key while freeing their teammates'", () => {
+    const ledger = ledgerWithCounter();
+    const first = ledger.idsFor(intent());
+    ledger.settle(intent(), [
+      { studentId: "s-a", kind: "applied", state: "not_yet" },
+      { studentId: "s-b", kind: "failed", reason: "unavailable" },
+    ]);
+    const next = ledger.idsFor(intent());
+    expect(next["s-a"]).not.toBe(first["s-a"]);
+    expect(next["s-b"]).toBe(first["s-b"]);
+  });
+
+  it("settles only the tap it names, never another task's live keys", () => {
+    const ledger = ledgerWithCounter();
+    const other = ledger.idsFor(intent({ taskId: "3.1.1", studentIds: ["s-a"] }));
+    ledger.settle(intent({ studentIds: ["s-a"] }), [
+      { studentId: "s-a", kind: "applied", state: "not_yet" },
+    ]);
+    expect(ledger.idsFor(intent({ taskId: "3.1.1", studentIds: ["s-a"] }))["s-a"]).toBe(other["s-a"]);
   });
 });

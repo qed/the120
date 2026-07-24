@@ -1,61 +1,58 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
+import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import FwRoster from "@/app/path/fw/components/FwRoster";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
+import { loadFwCohortRoster } from "@/app/path/lib/fw-loader";
 
 /**
- * /path/fw/cohort/[cohortId] — the per-cohort gate (FW Unit 2, STUB).
+ * /path/fw/cohort/[cohortId] — the roster (FW Unit 4; FW-R14, gaps G21/G22).
  *
- * The one surface where `resolveFwActor` actually runs against a real cohort
- * row, which is what makes Unit 2's verification checkable: a granted guide
- * opens their own cohort and 404s on another; a staff session opens any
- * `kind='fw'` cohort with no grant; EVERY session 404s on a `kind='path'`
- * cohort, guide grant or not (a Path guide grant is D25 review authority, not
- * authority to drive the cascade-free FW write path).
+ * The gate runs HERE as well as in the layout, and not as belt-and-braces:
+ * Next 16 layouts do not re-render on navigation, so a page that leaned on its
+ * layout's gate would be checked once per full load and never again. It is
+ * request-memoized, so the second call costs nothing on the render that mounts
+ * the layout.
  *
- * `notFound()` for every refusal, never a message: distinguishing "that cohort
- * isn't yours" from "that cohort doesn't exist" would enumerate cohort ids to a
- * signed-in non-guide. The `no_session` branch cannot be reached here (the
- * layout's `requireFwSession` redirected already) but is handled rather than
- * assumed — this file's gate must stand on its own if the layout ever changes,
- * since Next 16 layouts do not re-render on navigation.
- *
- * Unit 4 replaces the body with the roster and drill-down; the gate stays.
+ * `notFound()` for every refusal, never a message — distinguishing "that cohort
+ * isn't yours" from "that cohort doesn't exist" enumerates cohort ids to a
+ * signed-in non-guide.
  */
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Founders Weekend",
+  title: "Roster · Founders Weekend",
   robots: { index: false, follow: false },
 };
 
-export default async function FwCohortPage({
+export default async function FwRosterPage({
   params,
 }: {
   params: Promise<{ cohortId: string }>;
 }) {
   const { cohortId } = await params;
-  const { cohort, verdict } = await resolveFwActorForCohort(cohortId);
-  if (!verdict.ok || !cohort) notFound();
+  const { verdict } = await resolveFwActorForCohort(cohortId);
+  if (!verdict.ok) notFound();
+
+  const roster = await loadFwCohortRoster(supabaseAdmin(), cohortId);
 
   return (
-    <main className="mx-auto w-full max-w-md px-5 py-10">
-      {/* Via the shared predicate, not a hand-rolled `via === "bridge"`. The
-          same commit that exports a helper to stop callers re-deriving a
-          security-adjacent boolean should thread it through its own call sites,
-          or the helper ships with its test as its only caller — the shape
-          docs/solutions/security-issues/guard-function-with-no-callers-…md
-          warns about (learnings + maintainability review). */}
-      <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
-        {isFwStaffActor(verdict) ? "Staff" : "Guide"}
-      </p>
-      <h1 className="mt-2 font-path-display text-2xl font-semibold tracking-tight text-hq-ink">
-        {cohort.id}
-      </h1>
-      <p className="mt-3 font-path-body text-sm leading-6 text-hq-ink-soft">
-        Check-in lands here in Unit 4.
-      </p>
+    <main className="mx-auto w-full max-w-2xl px-5 py-6">
+      {!roster.ok ? (
+        // A read failure is NOT an empty roster. "Nobody is on this weekend's
+        // roster yet" would send a guide hunting an import problem that does not
+        // exist, at 8:55am, while a queue forms.
+        <p
+          role="alert"
+          className="rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
+        >
+          We couldn&apos;t load the roster just now. Reload the page — if it keeps happening, tell
+          The 120 staff.
+        </p>
+      ) : (
+        <FwRoster cohortId={cohortId} students={roster.students} />
+      )}
     </main>
   );
 }

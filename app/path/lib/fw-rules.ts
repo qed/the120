@@ -284,6 +284,112 @@ export function resultForFwEcho(
   }
 }
 
+/* ══════════════════════════════ the exactly-once key, per tap (FW Unit 4) ══ */
+
+/**
+ * Whether a per-student result ENDS the tap it describes.
+ *
+ * The distinction exists for exactly one action. `checkmark` and `undo` are
+ * idempotent by state, so re-sending them is free either way. `not_yet` is not:
+ * a second tap on an already-`not_yet` row is DEFINED to append a re-attempt
+ * event (the FW-D4 repeat-struggle signal, and FW-R17's "Not-yet is a recorded
+ * state"). Without a per-tap key the RPC cannot tell "the guide genuinely tapped
+ * twice" from "the first response was lost over venue wifi", and the blocker
+ * data — the whole reason Not-yet is recorded — silently inflates.
+ *
+ * So: everything the server actually DECIDED settles, including the two `failed`
+ * reasons that are facts rather than ambiguity (`missing_progress`,
+ * `cohort_invalid`). Only `unavailable` — a timeout, a throw, an echo that would
+ * not narrow — leaves the tap open, because it is neither proof the write landed
+ * nor proof it did not, and the recovery is to send THE SAME TAP again.
+ */
+export function isFwResultSettled(result: FwStudentResult): boolean {
+  return !(result.kind === "failed" && result.reason === "unavailable");
+}
+
+/** The students a retry should re-send: the ambiguous ones, and only those.
+ *  Re-sending a settled student would be a NEW tap on their row — which for
+ *  `not_yet` means a second re-attempt event nobody asked for. */
+export function fwRetryStudentIds(results: readonly FwStudentResult[]): string[] {
+  return results.filter((r) => !isFwResultSettled(r)).map((r) => r.studentId);
+}
+
+/** One tap intent's identity: this action, on this task, for these students. */
+export type FwTapIntent = {
+  taskId: string;
+  action: FwAction;
+  studentIds: readonly string[];
+};
+
+/**
+ * The exactly-once key's scope, spelled once.
+ *
+ * Matches the composite the database enforces — `20260731120000_fw_client_id_
+ * scoped.sql` re-scoped the partial unique index and both `ON CONFLICT` targets
+ * to `(student_id, task_id, client_id)` after Unit 3's review found a globally
+ * unique key silently swallowing a second student's check-in. The ACTION is in
+ * the key here (and not in the index) on purpose: the index prevents two writes
+ * from colliding, while this ledger decides which client-side taps are the same
+ * tap, and a checkmark and an undo on one row are never that.
+ */
+export function fwTapKey(taskId: string, studentId: string, action: FwAction): string {
+  return `${taskId} ${studentId} ${action}`;
+}
+
+export type FwClientIdLedger = {
+  /** The per-student keys for this tap, minting only what is not already held. */
+  idsFor(intent: FwTapIntent): Record<string, string>;
+  /** Release the keys of every student whose outcome settled (see
+   *  `isFwResultSettled`), leaving the ambiguous ones for the retry. */
+  settle(intent: Pick<FwTapIntent, "taskId" | "action">, results: readonly FwStudentResult[]): void;
+};
+
+/**
+ * A tap-scoped client-id ledger for the guide surface.
+ *
+ * ONLINE TAPS MINT ONE TOO — that is this unit's carried requirement from Unit
+ * 3, not an offline nicety. The whole path already exists
+ * (`RunFwCheckInInput.clientIds` → `p_client_id` → the composite partial index);
+ * what was missing was a caller that used it while the network was up, which is
+ * precisely when a venue-wifi timeout produces the ambiguous retry.
+ *
+ * The lifecycle is the design: a key is minted when a tap is first submitted,
+ * REUSED for every retry of that same tap, and released the moment the server
+ * gives a definite answer. Holding it longer would make a guide's deliberate
+ * second Not-yet a no-op forever; releasing it sooner would turn a lost response
+ * into a phantom re-attempt event. Unit 8's queue reuses `fwTapKey` and
+ * `isFwResultSettled` for the same reason on the drain path.
+ *
+ * `mint` is injected rather than calling `crypto.randomUUID()` inline: this
+ * module is imported by the offline queue and by tests, and neither should
+ * depend on which runtime's crypto happens to be present.
+ */
+export function createFwClientIdLedger(mint: () => string): FwClientIdLedger {
+  const held = new Map<string, string>();
+
+  return {
+    idsFor(intent) {
+      const ids: Record<string, string> = {};
+      for (const studentId of intent.studentIds) {
+        const key = fwTapKey(intent.taskId, studentId, intent.action);
+        let id = held.get(key);
+        if (id === undefined) {
+          id = mint();
+          held.set(key, id);
+        }
+        ids[studentId] = id;
+      }
+      return ids;
+    },
+    settle(intent, results) {
+      for (const result of results) {
+        if (!isFwResultSettled(result)) continue;
+        held.delete(fwTapKey(intent.taskId, result.studentId, intent.action));
+      }
+    },
+  };
+}
+
 /* ═══════════════════════════════════════════════════════════ batch planning ══ */
 
 /** The cap the guide's batch picker enforces (Unit 4) and the write path

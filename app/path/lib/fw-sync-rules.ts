@@ -394,6 +394,12 @@ export function interpretFwReplayResult(result: FwStudentResult): FwReplayDispos
     case "failed":
       if (result.reason === "missing_progress") return { kind: "reject", reason: "missing_progress" };
       if (result.reason === "cohort_invalid") return { kind: "reject", reason: "cohort_unresolved" };
+      // The offline-only CAS refused the undo — the decision it targeted changed
+      // authors between the guard read and this replay (Unit 9). A terminal reject
+      // with the SAME reason the client-side same-actor guard raises, because to
+      // staff it is the same fact: an offline undo of a check-in that is not the
+      // guide's to revert.
+      if (result.reason === "cross_actor_undo") return { kind: "reject", reason: "cross_actor_undo" };
       return { kind: "retry" }; // unavailable
   }
 }

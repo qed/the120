@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwRoster from "@/app/path/fw/components/FwRoster";
 import { FwRosterCache } from "@/app/path/fw/components/FwRosterCache";
+import { FwOfflineRoster } from "@/app/path/fw/components/FwOfflineRoster";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import { loadFwCohortRoster } from "@/app/path/lib/fw-loader";
 
@@ -47,14 +48,11 @@ export default async function FwRosterPage({
       {!roster.ok ? (
         // A read failure is NOT an empty roster. "Nobody is on this weekend's
         // roster yet" would send a guide hunting an import problem that does not
-        // exist, at 8:55am, while a queue forms.
-        <p
-          role="alert"
-          className="rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
-        >
-          We couldn&apos;t load the roster just now. Reload the page — if it keeps happening, tell
-          The 120 staff.
-        </p>
+        // exist, at 8:55am, while a queue forms. Instead, fall back to the offline
+        // roster cache (Decision 15): a client component reads the ≤90 names this
+        // device last loaded so the guide can still NAVIGATE — and only shows the
+        // plain "couldn't load" message when there is no usable cache (Unit 9).
+        <FwOfflineRoster cohortId={cohortId} />
       ) : (
         <>
           <FwRoster cohortId={cohortId} students={roster.students} />

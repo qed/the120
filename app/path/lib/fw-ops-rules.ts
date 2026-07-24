@@ -446,8 +446,6 @@ export function fwReplayRejectReasonCopy(reason: string): string {
       return "No task record existed for this student when the check-in was replayed — their task list may not have finished provisioning.";
     case "guard_refused":
       return "The replay was refused by the write path (the state had already moved).";
-    case "cas_lost":
-      return "A concurrent change won the row before this replay landed.";
     default:
       // Truthful, not a guess: an unmapped reason still names itself.
       return `Could not be applied at sync (${reason}).`;

@@ -1,9 +1,17 @@
 /**
- * Seed a Founders Weekend REHEARSAL cohort (FW Unit 4 verification; the plan's
- * Unit 9 seeds a bigger one the same way).
+ * Seed a Founders Weekend REHEARSAL cohort (FW Unit 4 verification; Unit 9 seeds a
+ * 90-student one the same way, for projector legibility at Boston scale).
  *
- *   npm run seed:fw-cohort -- --dry-run          # print the plan, write nothing
+ *   npm run seed:fw-cohort -- --dry-run                      # print the plan, write nothing
  *   npm run seed:fw-cohort -- --slug rehearsal-unit4 --count 30
+ *   npm run seed:fw-cohort -- --slug rehearsal-unit9 --count 90   # the Unit 9 projector cohort
+ *
+ * The 30 curated rows below carry every surface edge case (duplicates, accents,
+ * apostrophes, hyphens, near-miss prefixes). A `--count` above 30 keeps those 30 at
+ * the front and appends deterministic, address-safe filler rows to reach the count —
+ * so a 90-student board renders the real grid geometry a projector has to survive,
+ * without hand-writing sixty more names. Capped at `MAX_SEED` so a fat-fingered
+ * `--count` can never mint a flood of permanent accounts.
  *
  * Machine-bound like `scripts/seed-staff.ts` and `provision-path-family.ts`:
  * `.env.local` carries the service-role key, so env-less machines and worktree
@@ -81,11 +89,63 @@ const ROSTER: SeedStudent[] = [
   { firstName: "Rosa", lastName: "Delgado-Rehearsal", band: "g6_8" },
 ];
 
+/** The ceiling on a single seed run. 90 is the Unit 9 projector target; the
+ *  headroom lets a bigger stress test be requested without editing the file, while
+ *  still refusing an accidental `--count 100000` that would mint permanent
+ *  name-derived accounts by the thousand. */
+const MAX_SEED = 120;
+
+/** Address-safe first names for the generated filler — all ASCII, so every
+ *  derived `<first>.seedNNN-rehearsal.fw@…` address folds cleanly. */
+const FILLER_FIRST_NAMES = [
+  "Alex", "Blair", "Casey", "Devon", "Emery", "Finley", "Gray", "Harper",
+  "Ira", "Jules", "Kai", "Lane", "Marlow", "Nico", "Onyx", "Parker",
+  "Quinn", "Reese", "Sage", "Tatum", "Uri", "Val", "Wynn", "Yael",
+];
+const FILLER_BANDS: Band[] = ["g3_5", "g6_8", "g9_12"];
+
+/**
+ * Deterministic filler rows to pad the curated roster up to `count`.
+ *
+ * The surname `SeedNNN-Rehearsal` (NNN = the 1-based global index) is UNIQUE per
+ * row, so every generated student mints a distinct name-derived address and a
+ * re-run adopts by normalized name exactly like the curated rows. `-Rehearsal`
+ * keeps the same FW-D2 / Decision-10 data-safety the whole roster relies on: no
+ * real child's address is ever burned by a rehearsal seed.
+ */
+function generateFiller(n: number): SeedStudent[] {
+  const out: SeedStudent[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const globalIdx = ROSTER.length + i + 1; // 31, 32, …
+    out.push({
+      firstName: FILLER_FIRST_NAMES[i % FILLER_FIRST_NAMES.length],
+      lastName: `Seed${String(globalIdx).padStart(3, "0")}-Rehearsal`,
+      band: FILLER_BANDS[i % FILLER_BANDS.length],
+    });
+  }
+  return out;
+}
+
+/** The effective roster for a requested count: the curated 30 first, then filler. */
+function buildRoster(count: number): SeedStudent[] {
+  if (count <= ROSTER.length) return ROSTER.slice(0, count);
+  return [...ROSTER, ...generateFiller(count - ROSTER.length)];
+}
+
 const FLAGS = ["--slug", "--count", "--dry-run"];
 
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+  if (i < 0) return fallback;
+  const val = process.argv[i + 1];
+  // Refuse a flag token captured as a value (`--slug --count 90` would otherwise set
+  // slug = "--count"). assertKnownFlags only rejects UNKNOWN flags; this catches a
+  // recognized flag swallowing the next one — a fat-fingered value on a script that
+  // mints permanent name-derived accounts (CLI review).
+  if (!val || val.startsWith("--")) {
+    throw new Error(`--${name} requires a value${val ? ` (got flag "${val}")` : ""}`);
+  }
+  return val;
 }
 
 /** Refuse an unrecognized flag rather than silently using a default. A typo like
@@ -105,6 +165,14 @@ async function main() {
   assertKnownFlags();
   const dryRun = process.argv.includes("--dry-run");
   const slug = arg("slug", "rehearsal-unit4");
+  // Warn on the default: omitting --slug seeds the SHARED default cohort, and this
+  // script mints permanent name-derived accounts — a silent wrong-target write is the
+  // worst failure here (CLI review). Visible in output, not only inferable from the id.
+  if (!process.argv.includes("--slug")) {
+    console.warn(
+      `[seed-fw] no --slug given — defaulting to "${slug}". Pass --slug to target a specific cohort.`
+    );
+  }
   // Parsed so that `--count 0` means zero (an empty cohort, useful for exercising
   // the multi-cohort switcher) rather than falling through to "all of them".
   const rawCount = arg("count", "");
@@ -112,7 +180,16 @@ async function main() {
     // A malformed --count used to coerce to 0 and report a successful empty run.
     throw new Error(`--count must be a non-negative integer, got "${rawCount}"`);
   }
-  const count = rawCount === "" ? ROSTER.length : Math.min(Number(rawCount), ROSTER.length);
+  const requested = rawCount === "" ? ROSTER.length : Number(rawCount);
+  // Warn on the clamp rather than silently minting fewer than asked (CLI review): an
+  // agent parsing the output for "did I get what I asked for?" needs the divergence.
+  if (requested > MAX_SEED) {
+    console.warn(
+      `[seed-fw] requested --count ${requested} exceeds MAX_SEED (${MAX_SEED}); clamping to ${MAX_SEED}.`
+    );
+  }
+  const count = Math.min(requested, MAX_SEED);
+  const roster = buildRoster(count);
   const { url, serviceRoleKey } = loadSupabaseEnv();
   const db = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
 
@@ -174,7 +251,7 @@ async function main() {
   let adopted = 0;
   const failures: string[] = [];
 
-  for (const student of ROSTER.slice(0, count)) {
+  for (const student of roster) {
     const label = `${student.firstName} ${student.lastName} (${student.band})`;
 
     // Dedupe through the SAME module the guide surface uses, so a re-run cannot
@@ -201,7 +278,7 @@ async function main() {
     // had never been created — or mint the wrong variant — across re-runs with a
     // different --count (correctness review). Since this script mints permanent
     // name-derived addresses, a mis-mint needs the Unit 5b anonymize path to undo.
-    const wantedOfBand = ROSTER.slice(0, count).filter(
+    const wantedOfBand = roster.filter(
       (r) => fwMatchKey(r.firstName, r.lastName) === key && r.band === student.band
     ).length;
     const hereOfBand =

@@ -182,6 +182,15 @@ export const FW_OUTCOMES = [
   "missing",
   /** The cohort is not `kind='fw'`, or the student is not a member of it. */
   "cohort_invalid",
+  /**
+   * An offline undo REPLAY whose CAS lost: the decision it targets was authored by
+   * someone else by the time the replay ran (a concurrent cross-actor decision
+   * landed between the drain's same-actor guard read and this replay). Returned
+   * ONLY when `p_expected_verified_by` is non-null — the offline drain path — so an
+   * online undo can never produce it (Unit 9 / Decision 9). The drain maps it to
+   * the `cross_actor_undo` reject, the same disposition the client-side guard raises.
+   */
+  "cross_actor_undo",
 ] as const;
 export type FwOutcome = (typeof FW_OUTCOMES)[number];
 
@@ -220,7 +229,7 @@ export type FwStudentResult =
   | {
       studentId: string;
       kind: "failed";
-      reason: "unavailable" | "missing_progress" | "cohort_invalid";
+      reason: "unavailable" | "missing_progress" | "cohort_invalid" | "cross_actor_undo";
     };
 
 /**
@@ -250,6 +259,14 @@ export function resultForFwEcho(
   if (echo.outcome === "missing") return { studentId, kind: "failed", reason: "missing_progress" };
   if (echo.outcome === "cohort_invalid") {
     return { studentId, kind: "failed", reason: "cohort_invalid" };
+  }
+  // A CAS-refused offline undo replay (Unit 9). The row still exists and echoes a
+  // state, but the decision it targeted is no longer the guide's to revert — a
+  // terminal reject, not a retry. `interpretFwReplayResult` turns this into the
+  // `cross_actor_undo` reject; `isFwResultSettled` treats it as settled (tombstoned,
+  // never re-sent), exactly like the other definite `failed` reasons.
+  if (echo.outcome === "cross_actor_undo") {
+    return { studentId, kind: "failed", reason: "cross_actor_undo" };
   }
   // Every remaining outcome describes a REAL ROW the RPC held a lock on, so a
   // null state here is a shape drift, not a fact. Fail closed — reporting

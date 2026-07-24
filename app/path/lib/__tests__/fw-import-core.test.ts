@@ -58,6 +58,10 @@ type Seed = {
   /** Tables whose read THROWS rather than returning `{data,error}` — a network
    *  abort. The chunk's per-row catch must turn this into one `failed` outcome. */
   throws?: string[];
+  /** `createUser` THROWS (a GoTrue network abort). provisionFwStudent's Auth admin
+   *  calls are NOT timeout-wrapped, so this still escapes as a throw — the importer's
+   *  per-row catch must contain it as `unexpected_error` (crash-containment, G19). */
+  throwCreateUser?: boolean;
 };
 
 let idSeq = 1;
@@ -269,6 +273,7 @@ function makeFakeDb(seed: Seed) {
       admin: {
         async createUser(payload: { email: string; app_metadata?: Row }) {
           calls.createUser += 1;
+          if (seed.throwCreateUser) throw new TypeError("fetch failed: createUser");
           if (authUsers.some((u) => u.email === payload.email)) {
             return { data: { user: null }, error: { code: "email_exists", message: "already registered" } };
           }
@@ -579,11 +584,32 @@ describe("runFwImportChunk — read failures are contained, never crash the chun
     expect(authUsers).toHaveLength(0); // nothing minted on a failed check
   });
 
-  it("CATCHES a thrown provisioning read and reports unexpected_error without crashing the chunk", async () => {
-    // A network abort deep in provisioning THROWS (provision-core uses bare db
-    // calls). The chunk's per-row catch must contain it — every row accounted for,
-    // nothing minted, the chunk returns normally.
+  it("CONTAINS a thrown provisioning read as a typed failure without crashing the chunk", async () => {
+    // A network abort deep in provisioning THROWS. As of Unit 9's hardening,
+    // `provisionFwStudent` routes its PostgREST reads through `fwRead`, which CATCHES
+    // the throw and returns a typed error — so the version read here fails closed to
+    // `unavailable` rather than propagating as an uncaught throw the chunk's per-row
+    // catch would report as `unexpected_error`. Either way the chunk contains it:
+    // every row accounted for, nothing minted, the chunk returns normally — but the
+    // reason is now the more specific, non-crash `unavailable`.
     const { db, authUsers } = makeFakeDb({ throws: ["path_program_versions"] });
+    const { outcomes } = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
+    });
+    expect(kinds(outcomes)).toEqual(["failed", "failed"]);
+    expect(outcomes.every((o) => o.reason === "unavailable")).toBe(true);
+    expect(authUsers).toHaveLength(0);
+  });
+
+  it("CONTAINS a thrown Auth createUser as `unexpected_error` — the crash-containment guarantee (G19)", async () => {
+    // provisionFwStudent's Auth admin calls (createUser/getUserById) are NOT timeout/throw-
+    // wrapped the way its PostgREST calls now are, so a GoTrue network abort still THROWS.
+    // The importer's per-row catch must contain it — every row accounted for, nothing minted,
+    // the chunk returns normally. (This restores the coverage the fwRead-guard change moved
+    // off the `path_program_versions` path above.)
+    const { db, authUsers } = makeFakeDb({ throwCreateUser: true });
     const { outcomes } = await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,

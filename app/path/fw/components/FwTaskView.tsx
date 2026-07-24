@@ -111,11 +111,19 @@ function resultLine(result: FwStudentResult, nameOf: (id: string) => string): st
         ? `${who} — isn't on this weekend's roster, so nothing was recorded`
         : `${who} — not applied (only ${FW_BATCH_MAX} at a time)`;
     case "failed":
-      return result.reason === "missing_progress"
-        ? `${who} — their task list isn't ready. Find The 120 staff.`
-        : result.reason === "cohort_invalid"
-          ? `${who} — isn't on this weekend's roster, so nothing was recorded`
-          : `${who} — didn't go through. Tap Retry.`;
+      switch (result.reason) {
+        case "missing_progress":
+          return `${who} — their task list isn't ready. Find The 120 staff.`;
+        case "cohort_invalid":
+          return `${who} — isn't on this weekend's roster, so nothing was recorded`;
+        case "cross_actor_undo":
+          // Terminal, NOT retryable: someone else's decision now stands (only the offline
+          // drain can produce this today — the online path never sends expectedVerifiedBy —
+          // but the arm is exhaustive so a future online CAS can't fall through to "Tap Retry").
+          return `${who} — another guide changed this, so your undo wasn't applied. Find The 120 staff.`;
+        case "unavailable":
+          return `${who} — didn't go through. Tap Retry.`;
+      }
   }
 }
 

@@ -76,6 +76,20 @@ export const INVITE_CREATE_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000
  */
 export const INVITE_ACCEPT_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 10 };
 
+/**
+ * PROPOSED-1's quick-create match lookup (FW Unit 4): each lookup is the counted
+ * event, keyed by the calling guide.
+ *
+ * The lookup answers "does a student with this name exist, here or elsewhere?"
+ * for an arbitrary typed name, which makes it a name-probe oracle in the hands
+ * of a compromised guide session. It is already a narrow one — the cross-cohort
+ * answer carries no band, id, or cohort — so this bounds volume rather than
+ * information. 60 per 10 minutes is far past a real check-in table's walk-in
+ * rate (the busiest hour of the busiest weekend is a few dozen) and far below
+ * what enumerating a name list needs.
+ */
+export const FW_MATCH_LOOKUP_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 60 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

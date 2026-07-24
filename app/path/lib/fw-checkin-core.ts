@@ -33,6 +33,7 @@
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { withFwTimeout } from "./fw-call";
 import {
   clampFwCapturedAt,
   fwFirstDollarStudents,
@@ -48,60 +49,12 @@ import { narrowTaskState } from "./progress-core";
 /* ═══════════════════════════════════════════════════════════ the wall clock ══ */
 
 /**
- * The cap on any single Supabase round trip in this write path.
- *
- * Nothing in the Supabase client sets a fetch timeout, and no route here
- * configures `maxDuration`, so without this a stalled connection is bounded only
- * by the platform's implicit budget. That matters more here than in the Path's
- * `actions/transition.ts` (which caps only its inline notify): the calls below
- * ARE the write the guide is standing at a table waiting on, over venue wifi that
- * is expected to drop — and because the batch loop is sequential, ONE hung call
- * would mean students 2 and 3 are never even attempted.
- *
- * Eight seconds is chosen to sit well inside the plan's ~5 s tap-to-board budget
- * plus a retry, while being long enough that a merely slow link still lands.
+ * The timeout and the throw-guard this file introduced now live in `fw-call.ts`,
+ * because Unit 4's read path needs exactly the same protection for exactly the
+ * same reason (the reliability review found it missing there). Re-exported so
+ * this module's own tests and callers keep their import.
  */
-export const FW_CALL_TIMEOUT_MS = 8_000;
-
-/**
- * Race a Supabase call against the clock.
- *
- * Returns a DISCRIMINATED result rather than a fabricated error object: the
- * Supabase response types are specific (`PostgrestError` carries `code`,
- * `details`, `hint`, …), and inventing one would mean asserting a shape we do not
- * have — the exact thing this repo's fail-closed narrowing rule exists to stop.
- * A timeout is not an error the database returned; it is the absence of an answer,
- * and the type says so.
- *
- * Giving up on WAITING is not the same as cancelling the write — the request may
- * still land server-side. That is deliberate and safe under this design's stated
- * recovery model: checkmark and undo are idempotent by state (a retry lands on
- * the `already_done` arm), so a timed-out call that actually succeeded costs
- * nothing on retry. The one action where that is NOT true is `not_yet` without a
- * client id — see the note on `fwMoveTask`.
- */
-async function withTimeout<T>(
-  promise: PromiseLike<T>,
-  label: string
-): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(promise).then((value) => ({ timedOut: false as const, value })),
-      new Promise<{ timedOut: true }>((resolve) => {
-        timer = setTimeout(() => {
-          console.error(
-            `[fw/checkin] ${label} exceeded ${FW_CALL_TIMEOUT_MS}ms — giving up on the wait`
-          );
-          resolve({ timedOut: true });
-        }, FW_CALL_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    // Always clear: a pending timer keeps the serverless invocation alive.
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
+export { FW_CALL_TIMEOUT_MS } from "./fw-call";
 
 /* ═══════════════════════════════════════════════════════════════ the RPC ══ */
 
@@ -159,7 +112,7 @@ export async function fwMoveTask(
   // the others" guarantee.
   let raced;
   try {
-    raced = await withTimeout(
+    raced = await withFwTimeout(
       db.rpc("fw_move_task", {
         p_student_id: p.studentId,
         p_task_id: p.taskId,
@@ -237,7 +190,7 @@ export async function loadFwCohortMemberIds(
 
   let raced;
   try {
-    raced = await withTimeout(
+    raced = await withFwTimeout(
       db
         .from("path_cohort_members")
         .select("student_id")

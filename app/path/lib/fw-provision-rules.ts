@@ -54,7 +54,26 @@
  *     `taken` set for that reason, not as a nicety.
  */
 
+import { BANDS, type Band } from "@/app/path/content/types";
 import type { InitialProgressRow, SeedTaskRow } from "./progress-core";
+
+/* ------------------------------------------------------------------- bands */
+
+/**
+ * Narrow a `path_student_profiles.band` value read across the service-role
+ * boundary — the `narrowTaskState` discipline, for the column FW puts in the
+ * place the Path derives from `children(grade)`.
+ *
+ * A bare `as Band` here would be a promise to the compiler with nothing behind
+ * it, on the value that decides which per-band instruction line a guide reads
+ * aloud to a child and which band an FW check-in stamps onto the record. The
+ * migration's CHECK constrains the column, but this function is what stops a
+ * NULL (every Path row has one) or a future fourth band from being cast into
+ * existence by a read.
+ */
+export function narrowFwBand(x: unknown): Band | null {
+  return typeof x === "string" && (BANDS as readonly string[]).includes(x) ? (x as Band) : null;
+}
 
 /* --------------------------------------------------------------- addresses */
 

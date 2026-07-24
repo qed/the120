@@ -7,6 +7,11 @@ import {
   SW_SCOPE,
   SW_URL,
 } from "../sync-rules";
+import {
+  FW_APP_SHELL_PREFIX,
+  FW_BOARD_PREFIX,
+  FW_SHELL_CACHE_NAME,
+} from "../fw-sync-rules";
 import nextConfig from "@/next.config";
 
 /**
@@ -40,19 +45,23 @@ describe("sw.js discipline", () => {
     expect(installHandler).not.toContain("skipWaiting");
   });
 
-  it("only caches the offline page and content-hashed static assets — never navigations or RSC payloads", () => {
-    // The two cache write sites: the offline precache and the static-prefix
-    // runtime cache. Nothing may cache a navigation response.
+  it("caches the offline page and content-hashed static assets — and, since Unit 8, the FW app shell (nothing else)", () => {
     expect(swSource).toContain(`const OFFLINE_URL = "${OFFLINE_URL}"`);
     expect(swSource).toContain('const STATIC_PREFIX = "/_next/static/"');
-    // The navigate branch serves fetch() and falls back to caches.match — it
-    // must not put() anything.
-    const navigateBranch = swSource.slice(
-      swSource.indexOf('request.mode === "navigate"'),
-      swSource.indexOf("STATIC_PREFIX)", swSource.indexOf('request.mode === "navigate"'))
+    // The GENERAL navigate clause — every navigation that is NOT the FW app shell
+    // (all of the Path, and the board) — serves fetch() and falls back to the
+    // cached /offline page. It must never cache a navigation response. This is the
+    // pinned invariant; the FW exception below is the ONE carve-out.
+    const generalNavClause = swSource.slice(
+      swSource.indexOf("// Every other navigation"),
+      swSource.indexOf("STATIC_PREFIX)", swSource.indexOf("// Every other navigation"))
     );
-    expect(navigateBranch).not.toContain("cache.put");
-    expect(navigateBranch).not.toContain("cache.add");
+    expect(generalNavClause).toContain("caches.match(OFFLINE_URL)");
+    // MUTATION GUARD: adding any cache write to the general clause reddens here —
+    // the pin holds for every Path navigation.
+    expect(generalNavClause).not.toContain("cache.put");
+    expect(generalNavClause).not.toContain("cache.add");
+    expect(generalNavClause).not.toContain("caches.open");
   });
 
   it("ignores non-GET and cross-origin requests", () => {
@@ -68,6 +77,61 @@ describe("sw.js discipline", () => {
     expect(syncHandler).toContain('postMessage("path-drain")');
     // No fetch/upload machinery inside the sync handler.
     expect(syncHandler).not.toContain("fetch(");
+  });
+});
+
+describe("the FW app-shell caching exception (Unit 8, Decision 15) — deliberately narrow", () => {
+  it("the SW's constants match the app's (parity with fw-sync-rules)", () => {
+    expect(swSource).toContain(`const FW_SHELL_CACHE_NAME = "${FW_SHELL_CACHE_NAME}"`);
+    expect(swSource).toContain(`const FW_APP_SHELL_PREFIX = "${FW_APP_SHELL_PREFIX}"`);
+    expect(swSource).toContain(`const FW_BOARD_PREFIX = "${FW_BOARD_PREFIX}"`);
+  });
+
+  it("the exception is SCOPED — isFwAppShell requires /path/fw and EXCLUDES the board subtree", () => {
+    const predicate = swSource.slice(
+      swSource.indexOf("function isFwAppShell("),
+      swSource.indexOf("function fwAppShell(")
+    );
+    // Requires the app-shell prefix…
+    expect(predicate).toContain("FW_APP_SHELL_PREFIX");
+    // …and MUTATION GUARD (delete class): removing the board exclusion reddens.
+    expect(predicate).toContain("FW_BOARD_PREFIX");
+    expect(predicate).toContain("return false");
+  });
+
+  it("the FW navigation cache writes ONLY to the FW shell cache, never the runtime/precache", () => {
+    const fwShell = swSource.slice(
+      swSource.indexOf("async function fwAppShell("),
+      swSource.indexOf("async function precacheOffline(")
+    );
+    // The only cache it opens is the FW shell cache…
+    expect(fwShell).toContain("caches.open(FW_SHELL_CACHE_NAME)");
+    // …never the precache or the static runtime cache (relocate-class mutation).
+    expect(fwShell).not.toContain("PRECACHE_NAME");
+    expect(fwShell).not.toContain("RUNTIME_CACHE_NAME");
+  });
+
+  it("the navigate handler routes the FW app shell through the exception, everything else through the pin", () => {
+    const navBranch = swSource.slice(
+      swSource.indexOf('request.mode === "navigate"'),
+      swSource.indexOf("STATIC_PREFIX)", swSource.indexOf('request.mode === "navigate"'))
+    );
+    // The FW clause is gated on the scoping predicate and delegates to fwAppShell.
+    expect(navBranch).toContain("isFwAppShell(url)");
+    expect(navBranch).toContain("fwAppShell(request)");
+    // The FW clause must come BEFORE the general fetch-fallback, or a FW nav would
+    // fall through to the never-cache path and never be cacheable.
+    expect(navBranch.indexOf("isFwAppShell(url)")).toBeLessThan(
+      navBranch.indexOf("caches.match(OFFLINE_URL)")
+    );
+  });
+
+  it("the FW shell cache is PRESERVED by the activate sweep (not swept as a stale path-sw-* cache)", () => {
+    const activate = swSource.slice(
+      swSource.indexOf('addEventListener("activate"'),
+      swSource.indexOf('addEventListener("message"')
+    );
+    expect(activate).toContain("k !== FW_SHELL_CACHE_NAME");
   });
 });
 

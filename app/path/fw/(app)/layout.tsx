@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { FwPwa } from "@/app/path/fw/components/FwPwa";
 import { requireFwSession } from "@/app/path/lib/fw-auth";
 
 /**
@@ -24,9 +25,16 @@ import { requireFwSession } from "@/app/path/lib/fw-auth";
  * on a render costs nothing.
  */
 export default async function FwAppLayout({ children }: { children: ReactNode }) {
-  await requireFwSession();
+  const session = await requireFwSession();
 
   return (
-    <div className="min-h-screen bg-hq-canvas font-path-body text-hq-ink">{children}</div>
+    <div className="min-h-screen bg-hq-canvas font-path-body text-hq-ink">
+      {children}
+      {/* Unit 8: SW registration + the offline drain engine + the queued indicator.
+          Mounted HERE (the guide subtree) because the Path's PathPwa mounts only in
+          the Path (app) layout, which guides never load. The drain scopes to this
+          session's own captures — the author the same-actor guard reads. */}
+      <FwPwa actorUserId={session.userId} />
+    </div>
   );
 }

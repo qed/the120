@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { Icon } from "@/app/path/components/system/Icon";
 import FwCohortMemory from "@/app/path/fw/components/FwCohortMemory";
-import { signOutFwGuide } from "@/app/path/lib/actions/fw-guide";
+import { FwSignOutButton } from "@/app/path/fw/components/FwSignOutButton";
 import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
 import { grantedCohortIds, resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import { listFwCohortsForActor } from "@/app/path/lib/fw-guide-core";
@@ -93,14 +93,9 @@ export default async function FwCohortLayout({
               Switch
             </Link>
           )}
-          <form action={signOutFwGuide}>
-            <button
-              type="submit"
-              className="min-h-[44px] font-path-body text-sm text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
-            >
-              Sign out
-            </button>
-          </form>
+          {/* Block-until-drained (Decision 8): a shared iPad's queue must never be
+              abandoned, so sign-out is gated client-side on the drain verdict. */}
+          <FwSignOutButton actorUserId={session.userId} />
         </div>
       </header>
 

@@ -21,20 +21,62 @@
  *   - Uploads/queue NEVER run here — iOS kills a backgrounded SW mid-transfer.
  *     The Background Sync handler only nudges open pages ("path-drain").
  *
- * TWO caches: the PRECACHE (the /offline page + its assets — replaced whole
- * at install, never trimmed) and the RUNTIME cache (content-hashed static
- * assets, bounded — see STATIC_CACHE_MAX_ENTRIES). The version literals are
- * static, so activate()'s sweep only fires when this file changes; the
- * runtime bound is what stops superseded builds' hashed assets accumulating
- * forever on a child's phone (performance review).
+ * THREE caches: the PRECACHE (the /offline page + its assets — replaced whole
+ * at install, never trimmed), the RUNTIME cache (content-hashed static
+ * assets, bounded — see STATIC_CACHE_MAX_ENTRIES), and the FW APP-SHELL cache
+ * (FW Unit 8 — the ONE narrowly-scoped exception to never-cache-navigations,
+ * see the FW block in the fetch handler). The version literals are static, so
+ * activate()'s sweep only fires when this file changes; the runtime bound is
+ * what stops superseded builds' hashed assets accumulating forever on a child's
+ * phone (performance review).
+ *
+ * FW APP-SHELL EXCEPTION (Unit 8, Decision 15). A guide iPad must NAVIGATE while
+ * offline mid-loop, so this worker may cache navigations — but ONLY under
+ * /path/fw, and NEVER the /path/fw/board token subtree (a live no-store poll
+ * surface whose token URL must not be cached). Every Path navigation, and the
+ * board, keep the original never-cache posture. The roster itself is IndexedDB,
+ * not cached here — this is the smallest possible touch on the pinned invariant,
+ * and app/path/lib/__tests__/sw-discipline.test.ts pins BOTH halves (the FW
+ * exception is scoped; the Path pin still reddens for a Path navigation).
  */
 
 const PRECACHE_NAME = "path-sw-precache-v1";
 const RUNTIME_CACHE_NAME = "path-sw-runtime-v1";
+const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v1";
 const OFFLINE_URL = "/offline";
 const STATIC_PREFIX = "/_next/static/";
+/** The FW guide shell — cacheable navigations (Unit 8). */
+const FW_APP_SHELL_PREFIX = "/path/fw";
+/** The board token subtree — EXCLUDED from the exception (live, no-store). */
+const FW_BOARD_PREFIX = "/path/fw/board";
 /** Cap on runtime-cached static assets — oldest-inserted trimmed on insert. */
 const STATIC_CACHE_MAX_ENTRIES = 80;
+
+/** Whether a navigation URL is a cacheable FW app-shell route: under /path/fw,
+ *  but NOT the board token subtree. The single predicate the exception rests on. */
+function isFwAppShell(url) {
+  const p = url.pathname;
+  if (p !== FW_APP_SHELL_PREFIX && !p.startsWith(FW_APP_SHELL_PREFIX + "/")) return false;
+  if (p === FW_BOARD_PREFIX || p.startsWith(FW_BOARD_PREFIX + "/")) return false;
+  return true;
+}
+
+/** Network-first for the FW app shell: keep the freshest shell, but fall back to
+ *  the last cached one so a mid-loop outage lands on the roster the guide last saw
+ *  rather than the generic /offline page. */
+async function fwAppShell(request) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(FW_SHELL_CACHE_NAME);
+    cache.put(request, response.clone()).catch(() => {
+      /* a shell we could not cache costs an offline nav, never the online one */
+    });
+    return response;
+  } catch {
+    const cached = await caches.match(request, { cacheName: FW_SHELL_CACHE_NAME });
+    return cached || (await caches.match(OFFLINE_URL)) || Response.error();
+  }
+}
 
 /** Precache the offline page AND the hashed assets its HTML references, so the
  *  fallback renders styled even on a cold offline start. */
@@ -64,7 +106,13 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k !== PRECACHE_NAME && k !== RUNTIME_CACHE_NAME && k.startsWith("path-sw-"))
+          .filter(
+            (k) =>
+              k !== PRECACHE_NAME &&
+              k !== RUNTIME_CACHE_NAME &&
+              k !== FW_SHELL_CACHE_NAME &&
+              k.startsWith("path-sw-")
+          )
           .map((k) => caches.delete(k))
       );
       await self.clients.claim();
@@ -95,9 +143,16 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Navigations: network always; the cached /offline page ONLY on failure.
-  // The navigation response itself is never cached.
   if (request.mode === "navigate") {
+    // FW app-shell EXCEPTION (Unit 8): the ONLY navigations this worker caches,
+    // and only the guide shell — never the board token subtree, never anything
+    // outside /path/fw. Network-first with a cached-shell fallback.
+    if (isFwAppShell(url)) {
+      event.respondWith(fwAppShell(request));
+      return;
+    }
+    // Every other navigation — all of the Path, and the board — network always;
+    // the cached /offline page ONLY on failure. The response is NEVER cached.
     event.respondWith(
       fetch(request).catch(async () => {
         const cached = await caches.match(OFFLINE_URL);

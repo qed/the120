@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwRoster from "@/app/path/fw/components/FwRoster";
+import { FwRosterCache } from "@/app/path/fw/components/FwRosterCache";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import { loadFwCohortRoster } from "@/app/path/lib/fw-loader";
+
+/** Informational stamp on the offline roster cache — a deploy changes it, but only
+ *  a schema-version bump invalidates the cache (Decision 15). */
+const BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA ?? "dev";
 
 /**
  * /path/fw/cohort/[cohortId] — the roster (FW Unit 4; FW-R14, gaps G21/G22).
@@ -51,7 +56,23 @@ export default async function FwRosterPage({
           The 120 staff.
         </p>
       ) : (
-        <FwRoster cohortId={cohortId} students={roster.students} />
+        <>
+          <FwRoster cohortId={cohortId} students={roster.students} />
+          {/* Seed the offline roster cache (Decision 15) from this render — so an
+              outage mid-loop still lets the guide navigate the roster they last saw,
+              and a walk-in created on another device appears here after the next
+              online refresh re-seeds it. */}
+          <FwRosterCache
+            cohortId={cohortId}
+            buildId={BUILD_ID}
+            students={roster.students.map((s) => ({
+              studentId: s.studentId,
+              firstName: s.firstName,
+              lastName: s.lastName,
+              band: s.band,
+            }))}
+          />
+        </>
       )}
     </main>
   );

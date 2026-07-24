@@ -7,6 +7,7 @@ import { Button } from "@/app/path/components/system/Button";
 import { Icon } from "@/app/path/components/system/Icon";
 import { applyFwCheckIn } from "@/app/path/lib/actions/fw-checkin";
 import type { FwCheckInActionResult } from "@/app/path/lib/fw-checkin-core";
+import { enqueueFwCheckIns } from "@/app/path/lib/fw-sync-client";
 import {
   fwBatchStudentIds,
   searchFwRoster,
@@ -17,6 +18,7 @@ import {
   createFwClientIdLedger,
   decideFwAction,
   foldFwSurfaceOutcome,
+  fwActionTarget,
   fwResultsForFailedAction,
   fwRetryStudentIds,
   isFirstDollarTask,
@@ -118,6 +120,7 @@ function resultLine(result: FwStudentResult, nameOf: (id: string) => string): st
 
 export default function FwTaskView({
   cohortId,
+  actorUserId,
   student,
   roster,
   taskId,
@@ -131,6 +134,8 @@ export default function FwTaskView({
   rosterHref,
 }: {
   cohortId: string;
+  /** The signed-in guide — stamped on an offline capture as the capturing actor. */
+  actorUserId: string;
   student: { studentId: string; firstName: string; lastName: string };
   /**
    * The whole cohort, for the batch picker. Roster-scoped by construction —
@@ -176,6 +181,11 @@ export default function FwTaskView({
     action: FwAction;
     studentIds: string[];
   } | null>(null);
+  /** Set when a tap was CAPTURED OFFLINE rather than sent — visibly distinct from a
+   *  recorded tap (a neutral note) and from a failed one (the red alert). The global
+   *  queued indicator (FwPwa) carries the count; this is the per-tap acknowledgment
+   *  so the guide is not left wondering whether their tap took. */
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
 
   /**
    * Whether this view is still mounted. Every post-await write is gated on it —
@@ -223,8 +233,54 @@ export default function FwTaskView({
     setBusy(true);
     setError(null);
     setRetryable(false);
+    setQueuedNote(null);
     setLastAction(action);
     setLastSubmitted([...studentIds]);
+
+    // OFFLINE: capture to the IndexedDB queue instead of calling the server (Unit
+    // 8). The tap is not lost and does not mislead — it drains on reconnect through
+    // `runFwCheckIn`, the same gate a live tap passes, with the same-actor guard and
+    // the minimal-legal-sequence reduction applied. A batch shares ONE action id so
+    // the board still groups its celebration on drain.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      try {
+        const enq = await enqueueFwCheckIns({
+          cohortId,
+          taskId,
+          action,
+          actorUserId,
+          studentIds: [...studentIds],
+          actionId: crypto.randomUUID(),
+          capturedAt: new Date().toISOString(),
+        });
+        if (!mounted.current) return;
+        if (!enq.ok && enq.reason === "unsupported") {
+          setError("This device can't save check-ins offline. Keep a signal, or use paper as backup.");
+          setSurface((prev) =>
+            foldFwSurfaceOutcome(
+              prev,
+              { outcomes: fwResultsForFailedAction(studentIds), firstDollar: [] },
+              studentIds
+            )
+          );
+          return;
+        }
+        // Optimistically reflect the tap on THIS student's control; the board and
+        // the true state confirm on reconnect. The batch clears like an online tap.
+        setState(fwActionTarget(action));
+        setExtras([]);
+        setPickerNote(null);
+        setQueuedNote(
+          studentIds.length === 1
+            ? "Saved. It'll send when you're back online."
+            : `Saved for ${studentIds.length} students. They'll send when you're back online.`
+        );
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+      return;
+    }
+
     try {
       // Minted (or re-used) BEFORE the call, so a retry of this same tap carries
       // the same keys and cannot append a phantom re-attempt event.
@@ -576,6 +632,18 @@ export default function FwTaskView({
         </div>
       )}
 
+      {/* Offline capture acknowledgment — neutral, distinct from the red failure
+          surface. The global indicator (FwPwa) carries the running queued count. */}
+      {queuedNote && (
+        <p
+          role="status"
+          className="mt-4 flex items-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface p-4 font-path-body text-sm leading-6 text-hq-ink"
+        >
+          <Icon name="clock" size={18} className="shrink-0 text-hq-ink-soft" />
+          {queuedNote}
+        </p>
+      )}
+
       {surface.firstDollar.length > 0 && (
         <p className="mt-4 rounded-xl border border-verified/50 bg-verified/10 p-4 font-path-display text-lg font-semibold text-hq-ink">
           First dollar — {surface.firstDollar.map(nameOf).join(", ")}. Ring the bell.
@@ -583,8 +651,9 @@ export default function FwTaskView({
       )}
 
       {/* Decision 14: a prominent next-student affordance, and the view stays
-          exactly where it is until the guide uses it. */}
-      {surface.results.length > 0 && (
+          exactly where it is until the guide uses it — after a sent tap OR a queued
+          one, so the offline loop moves at the same pace as the online one. */}
+      {(surface.results.length > 0 || queuedNote) && (
         <Link
           href={rosterHref}
           className="mt-4 flex min-h-[56px] items-center justify-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface font-path-body text-base font-medium text-hq-ink shadow-hq active:bg-hq-sunken"

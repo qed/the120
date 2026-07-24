@@ -42,7 +42,7 @@ export default async function FwTaskPage({
   params: Promise<{ cohortId: string; studentId: string; taskId: string }>;
 }) {
   const { cohortId, studentId, taskId } = await params;
-  const { verdict } = await resolveFwActorForCohort(cohortId);
+  const { verdict, session } = await resolveFwActorForCohort(cohortId);
   if (!verdict.ok) notFound();
 
   const db = supabaseAdmin();
@@ -77,6 +77,9 @@ export default async function FwTaskPage({
     <main className="mx-auto w-full max-w-2xl px-5 py-6">
       <FwTaskView
         cohortId={cohortId}
+        // The AUTHORITATIVE session id, stamped on an offline capture as the
+        // capturing guide — the same-actor undo guard's subject at drain (Unit 8).
+        actorUserId={session.userId}
         student={student}
         roster={roster.ok ? roster.students : []}
         taskId={taskId}

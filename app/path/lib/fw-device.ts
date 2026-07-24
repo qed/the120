@@ -13,11 +13,42 @@
  * write is stamped with).
  */
 
+/** The snapshot React uses during SSR and hydration — a sentinel distinct from
+ *  "not set", so a reader can render nothing until it genuinely knows. */
+export const FW_PREF_UNKNOWN = "__fw_pref_unknown__";
+
 /** The last cohort picked on this device. LABELLED on the picker, never
  *  pre-selected — see `FwCohortPicker` for why that distinction is the point. */
 export const FW_ACTIVE_COHORT_KEY = "fw.activeCohort";
 
-export type FwCohortMemory = { id: string; slug: string };
+/** Renamed from `FwCohortMemory`, which also names the component that WRITES it
+ *  — one identifier meaning two different things depending on the import
+ *  (maintainability review), in a file Unit 8 will add more preferences to. */
+export type FwActiveCohort = { id: string; slug: string };
+
+/**
+ * Read the stored active cohort, or null.
+ *
+ * Here rather than inline in `FwCohortPicker` because a `JSON.parse` plus a
+ * shape check is parsing logic, and parsing logic inside a component is
+ * untestable in a repo with no jsdom — the same reason every other decision in
+ * this unit lives in a plain module (testing review).
+ *
+ * Every failure is null: a corrupt value costs a label, nothing more. It must
+ * never throw, because the picker that reads it is the screen a guide starts
+ * their shift on.
+ */
+export function parseFwActiveCohort(raw: string | null): FwActiveCohort | null {
+  if (raw === null || raw === FW_PREF_UNKNOWN) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { id, slug } = parsed as Record<string, unknown>;
+    return typeof id === "string" && typeof slug === "string" ? { id, slug } : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Whether the FW reading rule banner has been dismissed on this device.
  *  Per-device and re-openable (Decision 14): a guide who dismisses it in the
@@ -61,8 +92,6 @@ export const FW_READING_RULE = {
  * navigation for two days. `FW_PREF_UNKNOWN` lets a reader render nothing until
  * it genuinely knows.
  */
-export const FW_PREF_UNKNOWN = "__fw_pref_unknown__";
-
 const listeners = new Set<() => void>();
 
 export function subscribeFwPrefs(onChange: () => void): () => void {

@@ -25,7 +25,8 @@ import { headers } from "next/headers";
 import { z } from "zod";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { BANDS } from "@/app/path/content/types";
+import type { Band } from "@/app/path/content/types";
+import { narrowFwBand } from "@/app/path/lib/fw-provision-rules";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
 import {
   runFwMatchLookup,
@@ -48,7 +49,23 @@ const matchLookupSchema = z.object({
 });
 
 const quickCreateSchema = matchLookupSchema.extend({
-  band: z.enum(BANDS as unknown as [string, ...string[]]),
+  /**
+   * Validated through `narrowFwBand` — the SAME predicate the loaders use at the
+   * service-role boundary — rather than `z.enum(BANDS as unknown as …)`. The
+   * double cast erased the literal union on the way in, so `parsed.data.band`
+   * came out as plain `string` and had to be cast back to `Band` at the call
+   * site: a bare assertion on the one value a student's record is permanently
+   * stamped with (kieran-typescript review). This keeps one definition of "is
+   * this a band?" and yields a properly-typed `Band`.
+   */
+  band: z.string().transform((value, ctx): Band => {
+    const band = narrowFwBand(value);
+    if (band === null) {
+      ctx.addIssue({ code: "custom", message: "unknown grade band" });
+      return z.NEVER;
+    }
+    return band;
+  }),
   /**
    * Decision 13. Parsed as a LITERAL true rather than a boolean, so an unticked
    * attestation is refused at the schema — a form that posts `false` is not a
@@ -127,9 +144,7 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
   return runFwQuickCreate(supabaseAdmin(), {
     firstName,
     lastName,
-    // Narrowed by the schema's enum against the same BANDS list the profile's
-    // CHECK constraint mirrors.
-    band: band as (typeof BANDS)[number],
+    band,
     cohortId,
     // The AUTHORITATIVE session id, never a client field: it is what lands in
     // `notice_attested_by`, which is the record of who said the family saw the

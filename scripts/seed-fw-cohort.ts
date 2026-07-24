@@ -81,19 +81,38 @@ const ROSTER: SeedStudent[] = [
   { firstName: "Rosa", lastName: "Delgado-Rehearsal", band: "g6_8" },
 ];
 
+const FLAGS = ["--slug", "--count", "--dry-run"];
+
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
+/** Refuse an unrecognized flag rather than silently using a default. A typo like
+ *  `--slugg` would otherwise seed the DEFAULT cohort — a silent wrong-target
+ *  write, which is the worst possible failure for a script that mints permanent
+ *  accounts (agent-native review). */
+function assertKnownFlags(): void {
+  const unknown = process.argv
+    .slice(2)
+    .filter((a) => a.startsWith("--") && !FLAGS.includes(a));
+  if (unknown.length > 0) {
+    throw new Error(`unrecognized flag(s): ${unknown.join(", ")}. Known: ${FLAGS.join(", ")}`);
+  }
+}
+
 async function main() {
+  assertKnownFlags();
   const dryRun = process.argv.includes("--dry-run");
   const slug = arg("slug", "rehearsal-unit4");
   // Parsed so that `--count 0` means zero (an empty cohort, useful for exercising
   // the multi-cohort switcher) rather than falling through to "all of them".
   const rawCount = arg("count", "");
-  const count =
-    rawCount === "" ? ROSTER.length : Math.min(Math.max(0, Math.trunc(Number(rawCount) || 0)), ROSTER.length);
+  if (rawCount !== "" && !/^\d+$/.test(rawCount)) {
+    // A malformed --count used to coerce to 0 and report a successful empty run.
+    throw new Error(`--count must be a non-negative integer, got "${rawCount}"`);
+  }
+  const count = rawCount === "" ? ROSTER.length : Math.min(Number(rawCount), ROSTER.length);
   const { url, serviceRoleKey } = loadSupabaseEnv();
   const db = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
 
@@ -114,7 +133,10 @@ async function main() {
         `cohort "${slug}" exists with kind='${existing.data.kind}' — refusing to convert a Path cohort`
       );
     }
-    cohortId = existing.data.id as string;
+    // Fail-closed narrowing even here: the same rule the request path follows,
+    // and this value decides which cohort 30 permanent accounts land in.
+    if (typeof existing.data.id !== "string") throw new Error("cohort row has a malformed id");
+    cohortId = existing.data.id;
     console.log(`[seed-fw] adopting existing fw cohort ${cohortId}`);
   } else if (dryRun) {
     console.log(`[seed-fw] would CREATE cohort "${slug}" (kind=fw)`);
@@ -144,7 +166,7 @@ async function main() {
   // rows are legitimate, exactly as a guide asserts it at a table.
   const staff = await db.from("staff").select("id").eq("is_active", true).limit(1).maybeSingle();
   const attester = typeof staff.data?.id === "string" ? staff.data.id : null;
-  if (!attester && !dryRun) {
+  if (attester === null && !dryRun) {
     throw new Error("no active staff row to attribute the notice attestation to");
   }
 
@@ -173,13 +195,20 @@ async function main() {
       cohortId,
       candidates: candidates.candidates,
     });
-    // The duplicate PAIR is deliberate, so "already here" is only a skip when
-    // this cohort already holds as many of this name as the roster asks for.
-    const wanted = ROSTER.slice(0, count).filter(
-      (s) => fwMatchKey(s.firstName, s.lastName) === key
+    // Keyed by (name, BAND), not by a bare count. The duplicate pair in this
+    // roster shares a name and differs only by band, so a count comparison could
+    // report a label as "already here" while that label's specific band variant
+    // had never been created — or mint the wrong variant — across re-runs with a
+    // different --count (correctness review). Since this script mints permanent
+    // name-derived addresses, a mis-mint needs the Unit 5b anonymize path to undo.
+    const wantedOfBand = ROSTER.slice(0, count).filter(
+      (r) => fwMatchKey(r.firstName, r.lastName) === key && r.band === student.band
     ).length;
-    const here = verdict.kind === "same_cohort" ? verdict.matches.length : 0;
-    if (here >= wanted) {
+    const hereOfBand =
+      verdict.kind === "same_cohort"
+        ? verdict.matches.filter((m) => m.band === student.band).length
+        : 0;
+    if (hereOfBand >= wantedOfBand) {
       adopted += 1;
       console.log(`[seed-fw] · ${label} — already on this cohort`);
       continue;
@@ -196,7 +225,8 @@ async function main() {
       lastName: student.lastName,
       band: student.band,
       cohortId,
-      actorUserId: attester as string,
+      // Narrowed by the guard above, not cast past it.
+      actorUserId: attester ?? "",
       noticeAttested: true,
     });
     if (res.ok) {

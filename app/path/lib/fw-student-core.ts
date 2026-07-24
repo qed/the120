@@ -34,6 +34,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Band } from "@/app/path/content/types";
+import { fwRead } from "./fw-call";
 import { loadFwMatchCandidates } from "./fw-loader";
 import { fwMatchKey, matchFwStudent, type FwMatchVerdict } from "./fw-match-rules";
 import { provisionFwStudent, type ProvisionFwStudentFailure } from "./provision-core";
@@ -102,11 +103,19 @@ export async function verifyFwStudentLegs(
   db: SupabaseClient,
   input: { profileId: string; cohortId: string }
 ): Promise<FwLegVerification> {
-  const profile = await db
-    .from("path_student_profiles")
-    .select("id, user_id, program_version_id")
-    .eq("id", input.profileId)
-    .maybeSingle();
+  // Every call below goes through `fwRead`: four unbounded sequential I/O calls
+  // on the path a guide is standing at a table waiting on, and a hang here does
+  // not just stall the server — the client's `finally` never runs either,
+  // because it only fires when the awaited action SETTLES (reliability review).
+  const profile = await fwRead(
+    () =>
+      db
+        .from("path_student_profiles")
+        .select("id, user_id, program_version_id")
+        .eq("id", input.profileId)
+        .maybeSingle(),
+    `leg verification profile (${input.profileId})`
+  );
   if (profile.error) {
     console.error(
       `[fw/quick-create] leg verification: profile read failed for ${input.profileId}: ${profile.error.message}`
@@ -122,7 +131,10 @@ export async function verifyFwStudentLegs(
   // The auth account itself, not just the profile's pointer at it. A profile
   // whose user was deleted (a compensation that half-ran) renders a perfectly
   // normal roster row and can never be signed into or converted.
-  const account = await db.auth.admin.getUserById(row.user_id);
+  const account = await fwRead(
+    () => db.auth.admin.getUserById(row.user_id),
+    `leg verification account (${row.user_id})`
+  );
   if (account.error) {
     console.error(
       `[fw/quick-create] leg verification: account lookup failed for ${row.user_id}: ${account.error.message}`
@@ -131,12 +143,16 @@ export async function verifyFwStudentLegs(
   }
   if (!account.data?.user) return { ok: false, leg: "account" };
 
-  const membership = await db
-    .from("path_cohort_members")
-    .select("student_id")
-    .eq("student_id", input.profileId)
-    .eq("cohort_id", input.cohortId)
-    .maybeSingle();
+  const membership = await fwRead(
+    () =>
+      db
+        .from("path_cohort_members")
+        .select("student_id")
+        .eq("student_id", input.profileId)
+        .eq("cohort_id", input.cohortId)
+        .maybeSingle(),
+    `leg verification membership (${input.profileId})`
+  );
   if (membership.error) {
     console.error(
       `[fw/quick-create] leg verification: membership read failed for ${input.profileId}: ${membership.error.message}`
@@ -146,8 +162,14 @@ export async function verifyFwStudentLegs(
   if (!membership.data) return { ok: false, leg: "membership" };
 
   const [tasks, progress] = await Promise.all([
-    db.from("path_unit_tasks").select("task_id").eq("program_version_id", versionId),
-    db.from("path_task_progress").select("task_id").eq("student_id", input.profileId),
+    fwRead(
+      () => db.from("path_unit_tasks").select("task_id").eq("program_version_id", versionId),
+      `leg verification catalog (${versionId})`
+    ),
+    fwRead(
+      () => db.from("path_task_progress").select("task_id").eq("student_id", input.profileId),
+      `leg verification progress (${input.profileId})`
+    ),
   ]);
   if (tasks.error || progress.error) {
     console.error(
@@ -232,6 +254,44 @@ export async function runFwQuickCreate(
   input: FwQuickCreateInput
 ): Promise<FwQuickCreateResult> {
   if (!input.noticeAttested) return { ok: false, reason: "notice_not_attested" };
+
+  // ── The resume handle is scoped to THIS cohort. ──
+  //
+  // `provisionFwStudent` authorizes a resume by NAME MATCH alone, and names are
+  // not secrets. Without this, a caller who knows another weekend's child's
+  // exact name could pass that child's profile id with their own legitimately
+  // authorized cohort id, and the unconditional membership upsert that follows
+  // would enrol an unrelated student into this weekend — producing exactly the
+  // thing `runFwCheckIn` calls unacceptable elsewhere in this unit, "a permanent
+  // lie in an append-only log" (adversarial review).
+  //
+  // The rule that admits every legitimate retry and nothing else: a resume
+  // target must either hold NO membership at all (its membership leg is what
+  // failed) or already be a member of THIS cohort (its materialization leg is
+  // what failed). An established member of some OTHER weekend is refused.
+  if (input.existingProfileId) {
+    const scoped = await fwRead(
+      () =>
+        db
+          .from("path_cohort_members")
+          .select("cohort_id")
+          .eq("student_id", input.existingProfileId as string),
+      `resume scope (${input.existingProfileId})`
+    );
+    if (scoped.error) {
+      console.error(
+        `[fw/quick-create] resume scope check failed for ${input.existingProfileId}: ${scoped.error.message}`
+      );
+      return { ok: false, reason: "unavailable" };
+    }
+    const cohorts = (scoped.data ?? []).map((r) => r.cohort_id);
+    if (cohorts.length > 0 && !cohorts.includes(input.cohortId)) {
+      console.error(
+        `[fw/quick-create] refusing to resume ${input.existingProfileId}: it belongs to another weekend`
+      );
+      return { ok: false, reason: "identity_mismatch" };
+    }
+  }
 
   const provisioned = await provisionFwStudent(db, {
     firstName: input.firstName,

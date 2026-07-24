@@ -29,6 +29,11 @@ type Row = Record<string, unknown>;
 type Seed = {
   tables?: Record<string, Row[]>;
   errors?: Partial<Record<string, string>>;
+  /** Tables whose read THROWS rather than returning `{data,error}`. supabase-js
+   *  reports most failures in band, but a network abort can throw — and an
+   *  escaped throw on a Server Component walks past every typed refusal branch
+   *  (reliability review). */
+  throws?: string[];
   /** auth.admin.getUserById behaviour, keyed by user id. */
   accounts?: Record<string, { missing?: boolean; error?: string }>;
 };
@@ -47,6 +52,7 @@ function makeFakeDb(seed: Seed) {
       const eqs: [string, unknown][] = [];
       const rows = () => {
         reads.push(table);
+        if (seed.throws?.includes(table)) throw new TypeError("fetch failed");
         const err = seed.errors?.[table];
         if (err) return { data: null, error: { message: err } };
         return {
@@ -63,6 +69,7 @@ function makeFakeDb(seed: Seed) {
           return builder;
         },
         in: () => builder,
+        range: () => builder,
         maybeSingle: async () => {
           const res = rows();
           return res.error ? res : { data: res.data?.[0] ?? null, error: null };

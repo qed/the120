@@ -13,6 +13,7 @@ import {
   type FwRosterStudent,
 } from "../fw-nav-rules";
 import { FW_BATCH_MAX } from "../fw-rules";
+import { parseFwActiveCohort, FW_PREF_UNKNOWN } from "../fw-device";
 import type { ProgramContent, UnitTask } from "@/app/path/content/types";
 import type { TaskState } from "../transition-table";
 
@@ -408,5 +409,34 @@ describe("fwBatchStudentIds", () => {
 
   it("never lists the primary twice, even if it leaks into extras", () => {
     expect(fwBatchStudentIds("s-primary", ["s-primary", "s-a"])).toEqual(["s-primary", "s-a"]);
+  });
+});
+
+/* ════════════════════════════════════ the device preference parser ══ */
+
+describe("parseFwActiveCohort", () => {
+  it("reads a well-formed stored value", () => {
+    expect(parseFwActiveCohort(JSON.stringify({ id: "c-1", slug: "boston" }))).toEqual({
+      id: "c-1",
+      slug: "boston",
+    });
+  });
+
+  it("is null for every shape it cannot trust, and NEVER throws", () => {
+    // The picker that reads this is the screen a guide starts their shift on.
+    for (const raw of [
+      null,
+      FW_PREF_UNKNOWN,
+      "not json at all",
+      "null",
+      '"a string"',
+      "[]",
+      JSON.stringify({ id: "c-1" }),
+      JSON.stringify({ slug: "boston" }),
+      JSON.stringify({ id: 42, slug: "boston" }),
+    ]) {
+      expect(() => parseFwActiveCohort(raw)).not.toThrow();
+      expect(parseFwActiveCohort(raw)).toBeNull();
+    }
   });
 });

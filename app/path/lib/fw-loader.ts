@@ -32,7 +32,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Band } from "@/app/path/content/types";
+import { fwRead } from "./fw-call";
 import type { FwMatchCandidate, FwMatchSource } from "./fw-match-rules";
 import { summarizeFwResume, type FwResume, type FwRosterStudent } from "./fw-nav-rules";
 import { narrowFwBand } from "./fw-provision-rules";
@@ -88,7 +88,10 @@ async function fetchAllRows<T>(
   const rows: T[] = [];
   for (let i = 0; i < FW_MAX_PAGES; i += 1) {
     const from = i * FW_PAGE_SIZE;
-    const res = await page(from, from + FW_PAGE_SIZE - 1);
+    // Through `fwRead`, so a stalled page cannot hang the loop and a thrown
+    // network abort becomes a typed error instead of escaping the Server
+    // Component past every "we couldn't load this" branch (reliability review).
+    const res = await fwRead(() => page(from, from + FW_PAGE_SIZE - 1), `${label} page ${i}`);
     if (res.error) {
       console.error(`[fw/loader] ${label} page ${i} failed: ${res.error.message}`);
       return { ok: false };
@@ -270,6 +273,25 @@ export async function loadFwCohortRoster(
   };
 }
 
+/**
+ * The roster WITHOUT resume chips — names and bands only.
+ *
+ * The task view's batch picker needs to name teammates and search them; it never
+ * reads `resume`. Handing it `loadFwCohortRoster` made every task-page render
+ * pay for the paginated decided-rows scan — 1–4 extra sequential round trips, on
+ * the page the plan calls the highest-frequency interaction in the product, to
+ * build data that was then discarded (performance review).
+ */
+export async function loadFwRosterNames(
+  db: SupabaseClient,
+  cohortId: string
+): Promise<{ ok: true; students: FwRosterStudent[] } | { ok: false }> {
+  const members = await loadCohortStudentIds(db, cohortId);
+  if (!members.ok) return { ok: false };
+  if (members.studentIds.length === 0) return { ok: true, students: [] };
+  return loadFwProfiles(db, members.studentIds);
+}
+
 /* ═══════════════════════════════════════════════════════ one student's tree ══ */
 
 export type FwStudentDrilldown = {
@@ -302,12 +324,16 @@ export async function loadFwStudentDrilldown(
 ): Promise<
   { ok: true; value: FwStudentDrilldown } | { ok: false; reason: "not_found" | "unavailable" }
 > {
-  const membership = await db
-    .from("path_cohort_members")
-    .select("student_id")
-    .eq("cohort_id", input.cohortId)
-    .eq("student_id", input.studentId)
-    .maybeSingle();
+  const membership = await fwRead(
+    () =>
+      db
+        .from("path_cohort_members")
+        .select("student_id")
+        .eq("cohort_id", input.cohortId)
+        .eq("student_id", input.studentId)
+        .maybeSingle(),
+    `membership check (${input.studentId}/${input.cohortId})`
+  );
   if (membership.error) {
     console.error(
       `[fw/loader] membership check failed for ${input.studentId}/${input.cohortId}: ${membership.error.message}`
@@ -316,11 +342,31 @@ export async function loadFwStudentDrilldown(
   }
   if (!membership.data) return { ok: false, reason: "not_found" };
 
-  const profile = await db
-    .from("path_student_profiles")
-    .select("id, first_name, last_name, band, program_version_id")
-    .eq("id", input.studentId)
-    .maybeSingle();
+  // Profile and progress are INDEPENDENT of each other — both keyed only on the
+  // student id we already hold — so they run concurrently rather than
+  // serializing a third hop onto every navigation in the guide's main loop
+  // (performance review). They are dispatched only AFTER the membership gate
+  // resolves, deliberately: firing all three together would read a non-member's
+  // profile before deciding not to return it, and "a non-member's profile is
+  // never touched" is a property worth one round trip (security review).
+  const [profile, progress] = await Promise.all([
+    fwRead(
+      () =>
+        db
+          .from("path_student_profiles")
+          .select("id, first_name, last_name, band, program_version_id")
+          .eq("id", input.studentId)
+          .maybeSingle(),
+      `profile load (${input.studentId})`
+    ),
+    fetchAllRows<Record<string, unknown>>(`progress load (${input.studentId})`, (from, to) =>
+      db
+        .from("path_task_progress")
+        .select("task_id, state")
+        .eq("student_id", input.studentId)
+        .range(from, to)
+    ),
+  ]);
   if (profile.error) {
     console.error(`[fw/loader] profile load failed for ${input.studentId}: ${profile.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -343,15 +389,6 @@ export async function loadFwStudentDrilldown(
     return { ok: false, reason: "unavailable" };
   }
 
-  const progress = await fetchAllRows<Record<string, unknown>>(
-    `progress load (${input.studentId})`,
-    (from, to) =>
-      db
-        .from("path_task_progress")
-        .select("task_id, state")
-        .eq("student_id", input.studentId)
-        .range(from, to)
-  );
   if (!progress.ok) return { ok: false, reason: "unavailable" };
 
   const states: Record<string, TaskState> = {};
@@ -403,39 +440,56 @@ export async function loadFwMatchCandidates(
 ): Promise<{ ok: true; candidates: FwMatchCandidate[] } | { ok: false }> {
   if (normalizedName.length === 0) return { ok: true, candidates: [] };
 
-  const profiles = await db
-    .from("path_student_profiles")
-    .select("id, normalized_name, band")
-    .eq("normalized_name", normalizedName);
-  if (profiles.error) {
-    console.error(`[fw/loader] match lookup failed: ${profiles.error.message}`);
-    return { ok: false };
-  }
-  const rows = profiles.data ?? [];
-  if (rows.length === 0) return { ok: true, candidates: [] };
+  const profiles = await fetchAllRows<Record<string, unknown>>("match lookup", (from, to) =>
+    db
+      .from("path_student_profiles")
+      .select("id, normalized_name, band")
+      .eq("normalized_name", normalizedName)
+      .range(from, to)
+  );
+  if (!profiles.ok) return { ok: false };
+  if (profiles.rows.length === 0) return { ok: true, candidates: [] };
 
-  const ids: string[] = [];
-  for (const row of rows) {
-    if (typeof row.id !== "string" || narrowFwBand(row.band) === null) {
+  // NARROWED ONCE, HERE, and carried forward as narrowed values — there is no
+  // second pass casting the same row back out. Every field is checked even
+  // where the query shape appears to guarantee it: `normalized_name` is the
+  // column this lookup filters on, so a non-string could not match today, but
+  // that makes safety a property of one query's shape rather than of the code.
+  // Widening the select or relaxing the filter later would silently reintroduce
+  // a fail-open cast on the value the duplicate check keys on (security review).
+  const candidates: FwMatchCandidate[] = [];
+  for (const row of profiles.rows) {
+    const band = narrowFwBand(row.band);
+    if (typeof row.id !== "string" || typeof row.normalized_name !== "string" || band === null) {
       console.error(
         `[fw/loader] refusing a match lookup with an unreadable candidate (id=${String(row.id)})`
       );
       return { ok: false };
     }
-    ids.push(row.id);
+    candidates.push({
+      profileId: row.id,
+      normalizedName: row.normalized_name,
+      band,
+      cohortIds: [],
+      // Unit 7's importer parks unresolved exceptions in their own table and
+      // will widen this; every row a profile lookup returns is a real profile.
+      source: "profile" satisfies FwMatchSource,
+    });
   }
 
-  const members = await db
-    .from("path_cohort_members")
-    .select("student_id, cohort_id")
-    .in("student_id", ids);
-  if (members.error) {
-    console.error(`[fw/loader] match membership load failed: ${members.error.message}`);
-    return { ok: false };
-  }
+  const members = await fetchAllRows<Record<string, unknown>>(
+    "match membership load",
+    (from, to) =>
+      db
+        .from("path_cohort_members")
+        .select("student_id, cohort_id")
+        .in("student_id", candidates.map((c) => c.profileId))
+        .range(from, to)
+  );
+  if (!members.ok) return { ok: false };
 
   const cohortsByStudent = new Map<string, string[]>();
-  for (const m of members.data ?? []) {
+  for (const m of members.rows) {
     if (typeof m.student_id !== "string" || typeof m.cohort_id !== "string") {
       console.error("[fw/loader] refusing a match lookup with an unreadable membership row");
       return { ok: false };
@@ -445,19 +499,8 @@ export async function loadFwMatchCandidates(
     else cohortsByStudent.set(m.student_id, [m.cohort_id]);
   }
 
-  return {
-    ok: true,
-    candidates: rows.map((row) => {
-      const id = row.id as string;
-      return {
-        profileId: id,
-        normalizedName: row.normalized_name as string,
-        band: narrowFwBand(row.band) as Band,
-        cohortIds: cohortsByStudent.get(id) ?? [],
-        // Unit 7's importer parks unresolved exceptions in their own table and
-        // will widen this; every row a profile lookup returns is a real profile.
-        source: "profile" satisfies FwMatchSource,
-      };
-    }),
-  };
+  for (const candidate of candidates) {
+    candidate.cohortIds = cohortsByStudent.get(candidate.profileId) ?? [];
+  }
+  return { ok: true, candidates };
 }

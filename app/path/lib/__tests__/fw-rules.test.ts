@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   clampFwCapturedAt,
   createFwClientIdLedger,
+  foldFwSurfaceOutcome,
+  fwResultsForFailedAction,
+  stateForFwPrimary,
+  EMPTY_FW_SURFACE,
   decideFwAction,
   fwActionTarget,
   fwFirstDollarStudents,
@@ -731,5 +735,157 @@ describe("the per-tap client-id ledger (carried from Unit 3)", () => {
       { studentId: "s-a", kind: "applied", state: "not_yet" },
     ]);
     expect(ledger.idsFor(intent({ taskId: "3.1.1", studentIds: ["s-a"] }))["s-a"]).toBe(other["s-a"]);
+  });
+});
+
+/* ══════════════════════ what the surface shows after an action (Unit 4) ══ */
+
+describe("stateForFwPrimary", () => {
+  it("picks the caller's OWN echoed state out of a batch response", () => {
+    expect(
+      stateForFwPrimary(
+        [
+          { studentId: "s-a", kind: "applied", state: "verified" },
+          { studentId: "s-me", kind: "already_done", state: "not_yet" },
+        ],
+        "s-me"
+      )
+    ).toBe("not_yet");
+  });
+
+  it("returns undefined for an outcome that carries no state", () => {
+    // `skipped`/`failed` say nothing about where the row is. Leaving the control
+    // alone is the truthful rendering of "we don't know that it moved";
+    // inventing a state would show a checkmark for a write that never landed.
+    expect(stateForFwPrimary([{ studentId: "s-me", kind: "skipped", reason: "not_in_cohort" }], "s-me")).toBeUndefined();
+    expect(stateForFwPrimary([{ studentId: "s-me", kind: "failed", reason: "unavailable" }], "s-me")).toBeUndefined();
+  });
+
+  it("returns undefined when the response says nothing about this student", () => {
+    // A narrowed retry for a teammate must not move the primary's control.
+    expect(
+      stateForFwPrimary([{ studentId: "s-other", kind: "applied", state: "verified" }], "s-me")
+    ).toBeUndefined();
+  });
+
+  it("takes the RPC's echo even when it is not what the tap asked for", () => {
+    // The echo was produced under a row lock, so it is authoritative — a refusal
+    // caused by another guide's concurrent tap self-heals the stale local view.
+    expect(
+      stateForFwPrimary(
+        [{ studentId: "s-me", kind: "refused", reason: "undo_first", state: "verified" }],
+        "s-me"
+      )
+    ).toBe("verified");
+  });
+});
+
+describe("foldFwSurfaceOutcome — the partial-retry merge", () => {
+  const applied = (studentId: string): FwStudentResult => ({
+    studentId,
+    kind: "applied",
+    state: "verified",
+  });
+  const unavailable = (studentId: string): FwStudentResult => ({
+    studentId,
+    kind: "failed",
+    reason: "unavailable",
+  });
+
+  it("keeps a settled teammate's line when a NARROWED retry succeeds", () => {
+    // The P1 the correctness review caught: assigning the retry's response over
+    // the previous state erased the lines of students who had already succeeded.
+    const first = foldFwSurfaceOutcome(
+      EMPTY_FW_SURFACE,
+      { outcomes: [applied("s-primary"), applied("s-a"), unavailable("s-b")], firstDollar: [] },
+      ["s-primary", "s-a", "s-b"]
+    );
+    const afterRetry = foldFwSurfaceOutcome(
+      first,
+      { outcomes: [applied("s-b")], firstDollar: [] },
+      ["s-b"]
+    );
+    expect(afterRetry.results.map((r) => `${r.studentId}:${r.kind}`)).toEqual([
+      "s-primary:applied",
+      "s-a:applied",
+      "s-b:applied",
+    ]);
+  });
+
+  it("keeps a STANDING first dollar when the retry is for somebody else", () => {
+    // The worst half of the same bug: the retry's `firstDollar` was computed
+    // over a set that no longer contained the child whose bell needed ringing.
+    const first = foldFwSurfaceOutcome(
+      EMPTY_FW_SURFACE,
+      { outcomes: [applied("s-primary"), unavailable("s-b")], firstDollar: ["s-primary"] },
+      ["s-primary", "s-b"]
+    );
+    expect(first.firstDollar).toEqual(["s-primary"]);
+    const afterRetry = foldFwSurfaceOutcome(
+      first,
+      { outcomes: [applied("s-b")], firstDollar: [] },
+      ["s-b"]
+    );
+    expect(afterRetry.firstDollar).toEqual(["s-primary"]);
+  });
+
+  it("RETRACTS a first dollar for a student who was submitted again and did not re-earn it", () => {
+    // Undo is submitted for that student and yields no first dollar, so the
+    // banner must go. A plain union would leave a bell standing for a check-in
+    // the guide had just undone.
+    const first = foldFwSurfaceOutcome(
+      EMPTY_FW_SURFACE,
+      { outcomes: [applied("s-primary")], firstDollar: ["s-primary"] },
+      ["s-primary"]
+    );
+    const afterUndo = foldFwSurfaceOutcome(
+      first,
+      {
+        outcomes: [{ studentId: "s-primary", kind: "applied", state: "locked" }],
+        firstDollar: [],
+      },
+      ["s-primary"]
+    );
+    expect(afterUndo.firstDollar).toEqual([]);
+  });
+
+  it("replaces a student's line in place rather than appending a second one", () => {
+    const first = foldFwSurfaceOutcome(
+      EMPTY_FW_SURFACE,
+      { outcomes: [unavailable("s-a")], firstDollar: [] },
+      ["s-a"]
+    );
+    const second = foldFwSurfaceOutcome(first, { outcomes: [applied("s-a")], firstDollar: [] }, ["s-a"]);
+    expect(second.results).toHaveLength(1);
+    expect(second.results[0].kind).toBe("applied");
+  });
+
+  it("preserves existing line order and appends genuinely new students at the end", () => {
+    const first = foldFwSurfaceOutcome(
+      EMPTY_FW_SURFACE,
+      { outcomes: [applied("s-a"), applied("s-b")], firstDollar: [] },
+      ["s-a", "s-b"]
+    );
+    const second = foldFwSurfaceOutcome(
+      first,
+      { outcomes: [applied("s-c"), applied("s-a")], firstDollar: [] },
+      ["s-c", "s-a"]
+    );
+    // The report must not reshuffle under a guide mid-glance.
+    expect(second.results.map((r) => r.studentId)).toEqual(["s-a", "s-b", "s-c"]);
+  });
+});
+
+describe("fwResultsForFailedAction", () => {
+  it("reports every submitted student as unavailable, so no stale line survives", () => {
+    expect(fwResultsForFailedAction(["s-a", "s-b"])).toEqual([
+      { studentId: "s-a", kind: "failed", reason: "unavailable" },
+      { studentId: "s-b", kind: "failed", reason: "unavailable" },
+    ]);
+  });
+
+  it("produces results that keep their client-id keys alive for the retry", () => {
+    // `unavailable` is the one outcome `isFwResultSettled` refuses to settle.
+    for (const r of fwResultsForFailedAction(["s-a"])) expect(isFwResultSettled(r)).toBe(false);
   });
 });

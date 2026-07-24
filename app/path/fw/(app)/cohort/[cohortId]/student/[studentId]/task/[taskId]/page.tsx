@@ -8,7 +8,7 @@ import { getProgram } from "@/app/path/content/manifest";
 import { resolveVariant } from "@/app/path/content/parse-curriculum";
 import FwTaskView from "@/app/path/fw/components/FwTaskView";
 import { resolveFwActorForCohort } from "@/app/path/lib/fw-auth";
-import { loadFwCohortRoster, loadFwStudentDrilldown } from "@/app/path/lib/fw-loader";
+import { loadFwRosterNames, loadFwStudentDrilldown } from "@/app/path/lib/fw-loader";
 import { resolveTaskInProgram } from "@/app/path/lib/now-card-rules";
 
 /**
@@ -46,7 +46,14 @@ export default async function FwTaskPage({
   if (!verdict.ok) notFound();
 
   const db = supabaseAdmin();
-  const loaded = await loadFwStudentDrilldown(db, { cohortId, studentId });
+  // CONCURRENT: the roster needs only `cohortId`, which is known before the
+  // drill-down starts, so awaiting the drill-down first stacked an avoidable
+  // waterfall onto the most time-pressured screen in the product (performance
+  // review). A roster read failure costs the batch picker, not the tap.
+  const [loaded, roster] = await Promise.all([
+    loadFwStudentDrilldown(db, { cohortId, studentId }),
+    loadFwRosterNames(db, cohortId),
+  ]);
   if (!loaded.ok && loaded.reason === "not_found") notFound();
   if (!loaded.ok) {
     return (
@@ -65,11 +72,6 @@ export default async function FwTaskPage({
   const { student, programVersionId, states } = loaded.value;
   const hit = resolveTaskInProgram(getProgram(programVersionId), taskId);
   if (!hit) notFound();
-
-  // A roster read failure costs the batch picker, not the tap. The single
-  // check-in is the load-bearing interaction; refusing to render the task
-  // because a teammate list did not load would be the wrong trade at a table.
-  const roster = await loadFwCohortRoster(db, cohortId);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-5 py-6">

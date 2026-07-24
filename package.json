@@ -13,6 +13,7 @@
     "seed:path-family": "tsx scripts/provision-path-family.ts",
     "seed:fw-cohort": "tsx scripts/seed-fw-cohort.ts",
     "seed:fw-guide": "tsx scripts/seed-fw-guide.ts",
+    "fw": "tsx scripts/fw-ops.ts",
     "backfill:families": "tsx scripts/backfill-families.ts",
     "backfill:welcome": "tsx scripts/backfill-welcome-email.ts",
     "path:build": "tsx scripts/build-path-content.ts"

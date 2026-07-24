@@ -4,12 +4,11 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Icon } from "@/app/path/components/system/Icon";
 import {
+  parseFwActiveCohort,
   readFwPref,
   serverFwPref,
   subscribeFwPrefs,
   FW_ACTIVE_COHORT_KEY,
-  FW_PREF_UNKNOWN,
-  type FwCohortMemory,
 } from "@/app/path/lib/fw-device";
 
 /**
@@ -41,16 +40,7 @@ export default function FwCohortPicker({
     serverFwPref
   );
 
-  let lastUsed: string | null = null;
-  if (stored !== FW_PREF_UNKNOWN && stored !== null) {
-    try {
-      const parsed: FwCohortMemory | null = JSON.parse(stored);
-      lastUsed = typeof parsed?.id === "string" ? parsed.id : null;
-    } catch {
-      // A corrupt value costs a label, nothing more.
-      lastUsed = null;
-    }
-  }
+  const lastUsed = parseFwActiveCohort(stored)?.id ?? null;
 
   return (
     <ul className="mt-5 space-y-3">

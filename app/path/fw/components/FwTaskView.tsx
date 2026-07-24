@@ -1,22 +1,32 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/app/path/components/system/Button";
 import { Icon } from "@/app/path/components/system/Icon";
 import { applyFwCheckIn } from "@/app/path/lib/actions/fw-checkin";
 import type { FwCheckInActionResult } from "@/app/path/lib/fw-checkin-core";
-import type { FwRosterEntry } from "@/app/path/lib/fw-loader";
-import { fwBatchStudentIds, searchFwRoster, toggleFwBatchExtra } from "@/app/path/lib/fw-nav-rules";
+import {
+  fwBatchStudentIds,
+  searchFwRoster,
+  toggleFwBatchExtra,
+  type FwRosterStudent,
+} from "@/app/path/lib/fw-nav-rules";
 import {
   createFwClientIdLedger,
   decideFwAction,
+  foldFwSurfaceOutcome,
+  fwResultsForFailedAction,
   fwRetryStudentIds,
   isFirstDollarTask,
+  stateForFwPrimary,
+  EMPTY_FW_SURFACE,
   FW_BATCH_MAX,
   type FwAction,
+  type FwClientIdLedger,
   type FwStudentResult,
+  type FwSurfaceOutcome,
 } from "@/app/path/lib/fw-rules";
 import type { TaskState } from "@/app/path/lib/transition-table";
 
@@ -53,40 +63,57 @@ import type { TaskState } from "@/app/path/lib/transition-table";
  * affordance — the guide leaves when they decide to, not when the screen does.
  */
 
-const OUTCOME_COPY: Record<string, string> = {
-  applied: "recorded",
-  re_attempt: "not yet again — recorded",
-  already_done: "was already done — nothing changed",
-  replayed: "already recorded from an earlier tap",
-  refused: "couldn't change — undo it first",
-  skipped: "not applied",
-  failed: "didn't go through",
-};
-
 const ACTION_LABEL: Record<FwAction, string> = {
   checkmark: "Checkmark",
   not_yet: "Not yet",
   undo: "Undo",
 };
 
-/** The one place a per-student result becomes a line of copy. Named by the
- *  RESULT KIND, so a new kind is a compile error here rather than silence in
- *  front of a guide. */
+/**
+ * The one place a per-student result becomes a line of copy.
+ *
+ * An EXHAUSTIVE SWITCH, not a lookup table with a `?? result.kind` fallback.
+ * The earlier shape was a `Record<string, string>`, which accepts any key — so a
+ * new `FwStudentResult` kind added by Units 5b/6/7/8 would have compiled
+ * cleanly and rendered the raw internal enum text to a guide, which is exactly
+ * the "silence in front of a guide" this function's own comment claimed was
+ * impossible (maintainability + testing review). Now the compiler enforces the
+ * claim: TS2366 fires the moment a kind has no arm.
+ *
+ * `refused` branches on its REASON. `FwRefusalReason` is two-valued and the two
+ * are reached by different actions — `undo_first` only by `not_yet`,
+ * `not_a_decision` only by `undo` — so the single generic line was actively
+ * backwards for half of them: it told a guide who had just tapped Undo to "undo
+ * it first" (correctness review). Reachable in ordinary use, because the
+ * controls are enabled from the PRIMARY student's state while the action is
+ * submitted for the whole batch.
+ */
 function resultLine(result: FwStudentResult, nameOf: (id: string) => string): string {
   const who = nameOf(result.studentId);
-  if (result.kind === "skipped") {
-    return result.reason === "not_in_cohort"
-      ? `${who} — isn't on this weekend's roster, so nothing was recorded`
-      : `${who} — not applied (only ${FW_BATCH_MAX} at a time)`;
-  }
-  if (result.kind === "failed") {
-    return result.reason === "missing_progress"
-      ? `${who} — their task list isn't ready. Find The 120 staff.`
-      : result.reason === "cohort_invalid"
+  switch (result.kind) {
+    case "applied":
+      return `${who} — recorded`;
+    case "re_attempt":
+      return `${who} — not yet again, recorded`;
+    case "already_done":
+      return `${who} — was already done, nothing changed`;
+    case "replayed":
+      return `${who} — already recorded from an earlier tap`;
+    case "refused":
+      return result.reason === "undo_first"
+        ? `${who} — is already checked. Undo it first.`
+        : `${who} — had nothing to undo`;
+    case "skipped":
+      return result.reason === "not_in_cohort"
         ? `${who} — isn't on this weekend's roster, so nothing was recorded`
-        : `${who} — didn't go through. Tap Retry.`;
+        : `${who} — not applied (only ${FW_BATCH_MAX} at a time)`;
+    case "failed":
+      return result.reason === "missing_progress"
+        ? `${who} — their task list isn't ready. Find The 120 staff.`
+        : result.reason === "cohort_invalid"
+          ? `${who} — isn't on this weekend's roster, so nothing was recorded`
+          : `${who} — didn't go through. Tap Retry.`;
   }
-  return `${who} — ${OUTCOME_COPY[result.kind] ?? result.kind}`;
 }
 
 export default function FwTaskView({
@@ -105,9 +132,16 @@ export default function FwTaskView({
 }: {
   cohortId: string;
   student: { studentId: string; firstName: string; lastName: string };
-  /** The whole cohort, for the batch picker. Roster-scoped by construction —
-   *  there is nobody here who is not in this weekend. */
-  roster: readonly FwRosterEntry[];
+  /**
+   * The whole cohort, for the batch picker. Roster-scoped by construction —
+   * there is nobody here who is not in this weekend.
+   *
+   * `FwRosterStudent`, NOT the richer `FwRosterEntry`: this view names and
+   * searches teammates and never reads a resume chip. Narrowing the prop is what
+   * lets the page skip the paginated decided-rows scan entirely, and it makes
+   * that fact structural rather than a comment (performance review).
+   */
+  roster: readonly FwRosterStudent[];
   taskId: string;
   taskTitle: string;
   taskBody: string;
@@ -127,15 +161,47 @@ export default function FwTaskView({
   const [pickerNote, setPickerNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<FwStudentResult[] | null>(null);
+  /** Whether the current error is one a retry could clear. A session that ended
+   *  or a cohort the guide may not write to will refuse identically forever. */
+  const [retryable, setRetryable] = useState(false);
+  /** What the surface is showing: per-student lines plus any standing first
+   *  dollar. ONE piece of state folded by a tested pure function, rather than
+   *  two that a partial retry could drive out of agreement. */
+  const [surface, setSurface] = useState<FwSurfaceOutcome>(EMPTY_FW_SURFACE);
   const [lastAction, setLastAction] = useState<FwAction | null>(null);
-  const [firstDollar, setFirstDollar] = useState<string[]>([]);
-  const [confirming, setConfirming] = useState<FwAction | null>(null);
+  /** Exactly the students the last submission was for — never the live
+   *  selection, which the picker can change while an error banner is up. */
+  const [lastSubmitted, setLastSubmitted] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState<{
+    action: FwAction;
+    studentIds: string[];
+  } | null>(null);
 
-  // One ledger per mounted task view. `randomUUID` is injected rather than
-  // called inside the rules module, which is imported by tests and by the
-  // offline queue and must not depend on which runtime's crypto is present.
-  const ledger = useRef(createFwClientIdLedger(() => crypto.randomUUID())).current;
+  /**
+   * Whether this view is still mounted. Every post-await write is gated on it —
+   * `router.refresh()` in particular, which is NOT scoped to this component and
+   * would otherwise refresh whatever page a guide navigated to after giving up
+   * on a slow tap. Same pattern as the Path's `TaskSurface.tsx`.
+   */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // One ledger per mounted task view, created ONCE. `useRef`'s argument is
+  // evaluated on every render, so calling the factory inline allocated a fresh
+  // Map per keystroke in the picker and threw it away (julik review).
+  // `randomUUID` is injected rather than called inside the rules module, which
+  // is imported by tests and by the offline queue and must not depend on which
+  // runtime's crypto is present.
+  const ledgerRef = useRef<FwClientIdLedger | null>(null);
+  if (ledgerRef.current === null) {
+    ledgerRef.current = createFwClientIdLedger(() => crypto.randomUUID());
+  }
+  const ledger = ledgerRef.current;
 
   const nameById = useMemo(() => {
     const m = new Map<string, string>([
@@ -156,7 +222,9 @@ export default function FwTaskView({
     if (busy || studentIds.length === 0) return;
     setBusy(true);
     setError(null);
+    setRetryable(false);
     setLastAction(action);
+    setLastSubmitted([...studentIds]);
     try {
       // Minted (or re-used) BEFORE the call, so a retry of this same tap carries
       // the same keys and cannot append a phantom re-attempt event.
@@ -170,6 +238,7 @@ export default function FwTaskView({
       });
 
       if (!res.ok) {
+        setRetryable(res.reason === "unavailable" || res.reason === "invalid_input");
         setError(
           res.reason === "no_session"
             ? "Your session ended. Sign in again."
@@ -179,21 +248,46 @@ export default function FwTaskView({
                 ? "Something about that tap didn't look right. Try again."
                 : "That didn't go through. Tap Retry."
         );
+        // The action failed OUTRIGHT — no per-student outcomes came back. Report
+        // every submitted student as unavailable rather than leaving the PREVIOUS
+        // action's lines on screen beside the new error, where they read as
+        // though they belonged to the tap that just failed (correctness review).
+        if (mounted.current) {
+          setSurface((prev) =>
+            foldFwSurfaceOutcome(
+              prev,
+              { outcomes: fwResultsForFailedAction(studentIds), firstDollar: [] },
+              studentIds
+            )
+          );
+        }
         return;
       }
 
       // Release the keys of every student the server actually decided; the
       // ambiguous ones keep theirs for the retry.
       ledger.settle({ taskId, action }, res.outcomes);
-      setResults(res.outcomes);
-      setFirstDollar(res.firstDollar);
 
-      const mine = res.outcomes.find((o) => o.studentId === student.studentId);
+      // Every post-await write is guarded: a guide who gave up on a slow tap and
+      // navigated away has unmounted this view, and `router.refresh()` is NOT
+      // scoped to it — unguarded, it would refresh whatever page they are now
+      // using (julik review). The pattern is lifted from `TaskSurface.tsx`, the
+      // Path's sibling task view, which already does exactly this.
+      if (!mounted.current) return;
+
+      // MERGED, not assigned. A narrowed retry's response describes only the
+      // students it was asked about; assigning it wiped the settled teammates'
+      // lines and — worse — the standing First Dollar banner (correctness review,
+      // P1). The fold is a tested pure function precisely because this is the
+      // composition layer that has produced a P1 in each of the last two units.
+      setSurface((prev) => foldFwSurfaceOutcome(prev, res, studentIds));
+
       // The AUTHORITATIVE state, echoed from under the RPC's row lock — never a
-      // local guess at what the action must have done. A `skipped`/`failed`
-      // result carries no state, and leaving the control where it was is the
-      // truthful rendering of "we don't know that it moved".
-      if (mine && "state" in mine) setState(mine.state);
+      // local guess at what the action must have done. `undefined` means the
+      // response said nothing about this student, and leaving the control where
+      // it was is the truthful rendering of that.
+      const mine = stateForFwPrimary(res.outcomes, student.studentId);
+      if (mine !== undefined) setState(mine);
 
       // FW-D16: the batch is cleared after the action. A selection that survived
       // would silently ride along on the guide's next, unrelated tap. The cap
@@ -209,24 +303,48 @@ export default function FwTaskView({
       // A Server Action can REJECT rather than return — on venue wifi that is
       // the likely shape (docs/solutions/ui-bugs/server-action-rejection-no-try-
       // finally-freezes-capture-modal-2026-07-20.md).
+      if (!mounted.current) return;
+      setRetryable(true);
       setError("That didn't go through. Tap Retry.");
+      setSurface((prev) =>
+        foldFwSurfaceOutcome(
+          prev,
+          { outcomes: fwResultsForFailedAction(studentIds), firstDollar: [] },
+          studentIds
+        )
+      );
     } finally {
       // EVERY exit path. A stuck flag is a dead iPad in front of a queue.
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
-  /** Decision 6: the confirm fires ONCE PER ACTION and names every selected
-   *  student — never per-student, never skipped, and only on 1.2.4's checkmark. */
-  const request = (action: FwAction) => {
+  /**
+   * THE ONLY WAY A CHECK-IN IS SUBMITTED. Every entry point — the three action
+   * buttons, the action-level Retry, the per-student Retry — comes through here.
+   *
+   * Decision 6's confirm is enforced HERE rather than in the button handler,
+   * because that is what the adversarial review broke: both Retry buttons called
+   * `submit` directly, so a first-dollar batch that failed and was retried rang
+   * the room's bell with no confirm at all. Worse, the confirm used to name the
+   * LIVE selection while the picker stayed interactive behind the error banner —
+   * so a guide who swapped a teammate before retrying could ring the bell for a
+   * child who was never named in any dialog.
+   *
+   * The fix is both halves: the gate cannot be bypassed, and the student list is
+   * SNAPSHOT into the confirm rather than re-read from live state when it
+   * resolves. What the dialog names is exactly what gets written.
+   */
+  const beginSubmit = (action: FwAction, studentIds: readonly string[]) => {
+    if (busy || studentIds.length === 0) return;
     if (action === "checkmark" && isFirstDollarTask(taskId)) {
-      setConfirming(action);
+      setConfirming({ action, studentIds: [...studentIds] });
       return;
     }
-    void submit(action, selected);
+    void submit(action, studentIds);
   };
 
-  const retryIds = results ? fwRetryStudentIds(results) : [];
+  const retryIds = fwRetryStudentIds(surface.results);
 
   return (
     <div>
@@ -274,7 +392,7 @@ export default function FwTaskView({
                 size="lg"
                 variant={action === "checkmark" ? "primary" : "secondary"}
                 disabled={!enabled || busy}
-                onClick={() => request(action)}
+                onClick={() => beginSubmit(action, selected)}
                 icon={
                   <Icon
                     name={action === "checkmark" ? "check" : action === "not_yet" ? "x" : "refresh"}
@@ -406,14 +524,17 @@ export default function FwTaskView({
         >
           <Icon name="alert-triangle" size={20} className="text-not-yet" />
           <p className="flex-1 font-path-body text-sm leading-5 text-hq-ink">{error}</p>
-          {lastAction && (
+          {/* Only for failures a retry can actually fix. Offering Retry beside
+              "Your session ended" or "you can't record check-ins here" is an
+              affordance that cannot succeed (correctness review). */}
+          {lastAction && retryable && (
             <Button
               type="button"
               skin="hq"
               size="md"
               variant="secondary"
               disabled={busy}
-              onClick={() => void submit(lastAction, selected)}
+              onClick={() => beginSubmit(lastAction, lastSubmitted)}
             >
               Retry
             </Button>
@@ -421,7 +542,7 @@ export default function FwTaskView({
         </div>
       )}
 
-      {results && results.length > 0 && (
+      {surface.results.length > 0 && (
         <div
           className={`mt-4 rounded-xl border p-4 ${
             retryIds.length > 0
@@ -433,7 +554,7 @@ export default function FwTaskView({
           }`}
         >
           <ul className="space-y-1">
-            {results.map((r) => (
+            {surface.results.map((r) => (
               <li key={r.studentId} className="font-path-body text-sm leading-5 text-hq-ink">
                 {resultLine(r, nameOf)}
               </li>
@@ -447,7 +568,7 @@ export default function FwTaskView({
               variant="secondary"
               className="mt-3"
               disabled={busy}
-              onClick={() => void submit(lastAction, retryIds)}
+              onClick={() => beginSubmit(lastAction, retryIds)}
             >
               Retry {retryIds.length === 1 ? nameOf(retryIds[0]) : `${retryIds.length} students`}
             </Button>
@@ -455,15 +576,15 @@ export default function FwTaskView({
         </div>
       )}
 
-      {firstDollar.length > 0 && (
+      {surface.firstDollar.length > 0 && (
         <p className="mt-4 rounded-xl border border-verified/50 bg-verified/10 p-4 font-path-display text-lg font-semibold text-hq-ink">
-          First dollar — {firstDollar.map(nameOf).join(", ")}. Ring the bell.
+          First dollar — {surface.firstDollar.map(nameOf).join(", ")}. Ring the bell.
         </p>
       )}
 
       {/* Decision 14: a prominent next-student affordance, and the view stays
           exactly where it is until the guide uses it. */}
-      {results && (
+      {surface.results.length > 0 && (
         <Link
           href={rosterHref}
           className="mt-4 flex min-h-[56px] items-center justify-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface font-path-body text-base font-medium text-hq-ink shadow-hq active:bg-hq-sunken"
@@ -510,7 +631,12 @@ export default function FwTaskView({
               id="fw-first-dollar-title"
               className="font-path-display text-xl font-semibold text-hq-ink"
             >
-              First dollar for {selected.map(nameOf).join(", ")}?
+              {/* The SNAPSHOT taken when the confirm opened — never the live
+                  selection. The picker stays interactive behind an error banner,
+                  so re-reading `selected` here let a swapped-in teammate be
+                  written under a dialog that named somebody else (adversarial
+                  review). What this names is exactly what gets written. */}
+              First dollar for {confirming.studentIds.map(nameOf).join(", ")}?
             </h2>
             <p className="mt-2 font-path-body text-sm leading-6 text-hq-ink-soft">
               This rings the bell.
@@ -523,9 +649,9 @@ export default function FwTaskView({
                 className="flex-1"
                 disabled={busy}
                 onClick={() => {
-                  const action = confirming;
+                  const { action, studentIds } = confirming;
                   setConfirming(null);
-                  void submit(action, selected);
+                  void submit(action, studentIds);
                 }}
               >
                 Yes — ring it

@@ -30,6 +30,17 @@ type Seed = {
   profiles?: Row[];
   progress?: Row[];
   errors?: Partial<Record<string, string>>;
+  /**
+   * Rows returned VERBATIM for a table, bypassing the filters. Models the
+   * server handing back a shape the query did not imply — a widened select, a
+   * relaxed filter, a schema drift. Without it, a guard on the very column a
+   * query filters on is untestable, and "the query makes this impossible" is
+   * exactly the reasoning that leaves a fail-open cast behind when the query
+   * later changes.
+   */
+  rawRows?: Partial<Record<string, Row[]>>;
+  /** Tables whose read THROWS rather than returning `{data,error}`. */
+  throws?: string[];
 };
 
 /**
@@ -64,8 +75,11 @@ function makeFakeDb(seed: Seed) {
       let range: [number, number] | null = null;
       const rows = () => {
         queries.push({ table, eqs: [...eqs], ins: [...ins], range });
+        if (seed.throws?.includes(table)) throw new TypeError("fetch failed");
         const err = seed.errors?.[table];
         if (err) return { data: null, error: { message: err } };
+        const raw = seed.rawRows?.[table];
+        if (raw) return { data: raw.map((r) => ({ ...r })), error: null };
         const matched = (tables[table] ?? []).filter(
           (r) =>
             eqs.every(([c, v]) => r[c] === v) && ins.every(([c, vs]) => vs.includes(r[c] as never))
@@ -415,6 +429,18 @@ describe("loadFwMatchCandidates", () => {
     expect(queries).toEqual([]);
   });
 
+  it("FAILS the lookup on a malformed normalized_name, not just a bad band", async () => {
+    // The column this lookup FILTERS on, so a non-string could not match today —
+    // which is exactly why it was the field left un-narrowed. Pinning it makes
+    // fail-closed a property of the code rather than of one query's shape
+    // (security review).
+    const { db } = makeFakeDb({
+      ...BASE,
+      rawRows: { path_student_profiles: [{ ...profile(), normalized_name: 12345 }] },
+    });
+    expect(await loadFwMatchCandidates(db, KEY)).toEqual({ ok: false });
+  });
+
   it("FAILS the lookup on an unreadable candidate — never silently drops one", async () => {
     // The asymmetry with the roster read, and the reason for it: a dropped
     // candidate makes the matcher answer `none` for a child who already has an
@@ -432,5 +458,72 @@ describe("loadFwMatchCandidates", () => {
       const { db } = makeFakeDb({ ...BASE, errors: { [table]: "boom" } });
       expect(await loadFwMatchCandidates(db, KEY)).toEqual({ ok: false });
     }
+  });
+});
+
+/* ══════════════════════════ the shapes that are NOT `{data, error}` ══ */
+
+describe("reads that throw rather than returning an error", () => {
+  // supabase-js reports most failures in band, but a network abort can THROW —
+  // and a thrown error in a Server Component walks straight past every typed
+  // `{ok:false}` branch and out of the render (reliability review). The fake
+  // could not previously express this shape, so the gap was untestable.
+  it("turns a thrown roster read into a typed refusal, not an escaped exception", async () => {
+    for (const table of ["path_cohort_members", "path_student_profiles", "path_task_progress"]) {
+      const { db } = makeFakeDb({ ...BASE, throws: [table] });
+      await expect(loadFwCohortRoster(db, BOSTON)).resolves.toEqual({ ok: false });
+    }
+  });
+
+  it("turns a thrown drill-down read into `unavailable`, never `not_found`", async () => {
+    for (const table of ["path_cohort_members", "path_student_profiles", "path_task_progress"]) {
+      const { db } = makeFakeDb({ ...BASE, throws: [table] });
+      await expect(
+        loadFwStudentDrilldown(db, { cohortId: BOSTON, studentId: "s-maya" })
+      ).resolves.toEqual({ ok: false, reason: "unavailable" });
+    }
+  });
+
+  it("turns a thrown match lookup into a failed check, never a false `none`", async () => {
+    // `none` would send the guide straight to "New student" and mint a second
+    // permanent account for a child who already has one.
+    const { db } = makeFakeDb({ ...BASE, throws: ["path_student_profiles"] });
+    await expect(
+      loadFwMatchCandidates(db, buildNormalizedFwName("Maya", "Chen"))
+    ).resolves.toEqual({ ok: false });
+  });
+});
+
+/* ═══════════════════════════════════ the remaining fail-closed branches ══ */
+
+describe("malformed rows the review found untested", () => {
+  it("FAILS the match lookup on a malformed MEMBERSHIP row, not just a bad profile", async () => {
+    const { db } = makeFakeDb({
+      ...BASE,
+      rawRows: { path_cohort_members: [{ student_id: "s-maya", cohort_id: 42 }] },
+    });
+    expect(await loadFwMatchCandidates(db, buildNormalizedFwName("Maya", "Chen"))).toEqual({
+      ok: false,
+    });
+  });
+
+  it("drops a malformed progress row from the ROSTER's resume path too", async () => {
+    // The drill-down's equivalent branch was tested; this one — the path the
+    // resume chips are built from — was not (testing review).
+    const { db } = makeFakeDb({
+      ...BASE,
+      progress: [
+        { student_id: "s-maya", task_id: "1.1.1", state: "verified" },
+        { student_id: "s-maya", task_id: "1.1.2", state: "haunted" },
+        { student_id: "s-maya", task_id: 999, state: "verified" },
+      ],
+    });
+    const res = await loadFwCohortRoster(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students.find((s) => s.studentId === "s-maya")?.resume).toEqual({
+      furthestTaskId: "1.1.1",
+      verified: 1,
+      notYet: 0,
+    });
   });
 });

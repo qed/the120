@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/app/path/components/system/Button";
 import { Icon } from "@/app/path/components/system/Icon";
@@ -104,19 +104,44 @@ export default function FwQuickCreate({
   const nameReady = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canSubmit = nameReady && band !== "" && attested && !busy;
 
-  /** PROPOSED-1's lookup, on leaving the last name field. Never blocking: a
-   *  failed lookup is reported and the guide creates anyway. */
+  /**
+   * PROPOSED-1's lookup, on leaving a name field. Never blocking: a failed
+   * lookup is reported and the guide creates anyway.
+   *
+   * SEQUENCED. The lookup fires on the blur of both fields, so a guide who
+   * corrects a typo and blurs again has two requests in flight — and on venue
+   * wifi, whose latency is exactly the variable expected to misbehave, the
+   * stale one can resolve last and overwrite the fresh verdict. The guide would
+   * then be reading a duplicate-match card (or a reassuring "no match") that
+   * describes a name they are no longer typing, which is precisely the mistake
+   * PROPOSED-1 exists to prevent (correctness + julik reviews).
+   *
+   * A monotonic counter is enough: only the newest request may write.
+   */
+  const lookupSeq = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const runLookup = async () => {
     if (!nameReady) return;
+    const seq = ++lookupSeq.current;
+    const isCurrent = () => mounted.current && seq === lookupSeq.current;
     setLookupFailed(false);
     try {
       const res = await lookupFwStudentMatch({ cohortId, firstName, lastName });
+      if (!isCurrent()) return;
       if (res.ok) setVerdict(res.verdict);
       else {
         setVerdict(null);
         setLookupFailed(true);
       }
     } catch {
+      if (!isCurrent()) return;
       setVerdict(null);
       setLookupFailed(true);
     }

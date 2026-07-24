@@ -314,6 +314,118 @@ export function fwRetryStudentIds(results: readonly FwStudentResult[]): string[]
   return results.filter((r) => !isFwResultSettled(r)).map((r) => r.studentId);
 }
 
+/**
+ * The state to render for ONE student after a batch action — their own echoed
+ * state, or undefined when the response says nothing about them.
+ *
+ * Extracted from the task view (testing review) rather than left inline, and the
+ * reason is this repo's own history: `decideFwAction`, `resultForFwEcho`, and the
+ * ledger are each well tested in isolation, and both of the last two units still
+ * shipped a P1 in the COMPOSITION between such pieces. This function is exactly
+ * that composition point — it picks the caller's own result out of a batch
+ * response and decides whether the control the guide is looking at may move.
+ *
+ * `undefined` is a real answer, not a miss. A `skipped` or `failed` result
+ * carries no state, and leaving the control where it was is the truthful
+ * rendering of "we do not know that it moved" — inventing a state there would
+ * show a guide a checkmark for a write that never landed.
+ *
+ * The state comes from the RPC's echo, which it produced under a row lock, so it
+ * is authoritative even when it is NOT what this tap asked for: a refusal caused
+ * by another guide's concurrent tap self-heals the stale local view.
+ */
+export function stateForFwPrimary(
+  results: readonly FwStudentResult[],
+  primaryStudentId: string
+): TaskState | undefined {
+  const mine = results.find((r) => r.studentId === primaryStudentId);
+  return mine && "state" in mine ? mine.state : undefined;
+}
+
+/* ═══════════════════════════════════ what the surface is currently showing ══ */
+
+/** The displayed outcome of the guide's most recent work on one task. */
+export type FwSurfaceOutcome = {
+  /** One line per student the guide has acted on, in first-seen order. */
+  results: FwStudentResult[];
+  /** Students whose first dollar is currently standing. */
+  firstDollar: string[];
+};
+
+export const EMPTY_FW_SURFACE: FwSurfaceOutcome = { results: [], firstDollar: [] };
+
+/**
+ * Fold one action's response into what the surface is showing.
+ *
+ * REPLACING the displayed state with each response is wrong, and the correctness
+ * review caught it as a live P1: a partial retry deliberately re-sends ONLY the
+ * students whose outcome was ambiguous (`fwRetryStudentIds`), so its response
+ * describes a SUBSET. Assigning that subset over the previous state erased the
+ * lines for teammates who had already succeeded — and, worse, wiped the standing
+ * First Dollar banner for a child whose bell genuinely needed ringing, because
+ * the retry's `firstDollar` was computed over a set that no longer contained
+ * them.
+ *
+ * The rule that makes both cases right, and is the whole of this function:
+ * **the response is authoritative for the students it was asked about, and
+ * silent about everyone else.**
+ *
+ *   - a submitted student takes their new result, replacing any old one;
+ *   - a student NOT in this submission keeps the line they already had;
+ *   - first dollar is recomputed as (standing − submitted) ∪ newly applied, so an
+ *     UNDO of a first dollar retracts the banner (the undone student was
+ *     submitted, and undo yields no first dollar) while a narrowed retry of
+ *     somebody else leaves it alone.
+ *
+ * That last clause is why a plain union would not do: it would leave a bell
+ * banner standing for a check-in the guide had just undone.
+ */
+export function foldFwSurfaceOutcome(
+  prev: FwSurfaceOutcome,
+  next: { outcomes: readonly FwStudentResult[]; firstDollar: readonly string[] },
+  submittedStudentIds: readonly string[]
+): FwSurfaceOutcome {
+  const submitted = new Set(submittedStudentIds);
+  const byStudent = new Map(next.outcomes.map((o) => [o.studentId, o] as const));
+
+  // Previous lines first, in their existing order — the report should not
+  // reshuffle under a guide mid-glance.
+  const results: FwStudentResult[] = prev.results.map(
+    (old) => byStudent.get(old.studentId) ?? old
+  );
+  const seen = new Set(results.map((r) => r.studentId));
+  for (const outcome of next.outcomes) {
+    if (!seen.has(outcome.studentId)) results.push(outcome);
+  }
+
+  return {
+    results,
+    firstDollar: [
+      ...prev.firstDollar.filter((id) => !submitted.has(id)),
+      ...next.firstDollar,
+    ],
+  };
+}
+
+/**
+ * The results to show when an action failed OUTRIGHT — no per-student outcomes
+ * came back at all.
+ *
+ * Without this the previous action's lines stay on screen beside the new error,
+ * reading as though they belonged to the tap that just failed. Every submitted
+ * student is reported `unavailable`, which is both true (no answer arrived) and
+ * the outcome that keeps their client-id key alive for the retry.
+ */
+export function fwResultsForFailedAction(
+  submittedStudentIds: readonly string[]
+): FwStudentResult[] {
+  return submittedStudentIds.map((studentId) => ({
+    studentId,
+    kind: "failed" as const,
+    reason: "unavailable" as const,
+  }));
+}
+
 /** One tap intent's identity: this action, on this task, for these students. */
 export type FwTapIntent = {
   taskId: string;

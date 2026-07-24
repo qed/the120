@@ -28,10 +28,11 @@
  * `loadFwCohort`'s authorization read and is its own query.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { FW_COHORT_KIND, fwGuideInviteVerdict } from "./fw-access-rules";
+import { hashFwBoardToken } from "./fw-board-token";
 import {
   fwBoardTokenMintVerdict,
   fwBoardTokenVerdict,
@@ -56,10 +57,11 @@ import {
 /** SHA-256 hex — the ONLY form a board token is ever stored in, so a database
  *  read can never reconstruct a live projector URL. Sibling of
  *  `hashGuideInviteToken`; Unit 6's board route hashes the presented token with
- *  this same function before looking it up. */
-export function hashFwBoardToken(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
-}
+ *  this same function before looking it up. The definition moved to
+ *  `fw-board-token.ts` (a tiny module) so that unauthenticated route need not
+ *  import this whole ops core to hash a token; re-exported here so the mint
+ *  sequence below and every existing caller keep one import site. */
+export { hashFwBoardToken };
 
 /** Postgres unique-violation. Checked by CODE, not by matching an error
  *  message — the message is localized-ish, unstable, and varies by constraint. */

@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   FW_EVENT_TIME_ZONES,
   FW_OPS_AUDIT_ACTIONS,
+  FW_TOMBSTONE_FIRST_NAME,
+  FW_TOMBSTONE_LAST_NAME,
+  fwAnonymizeConfirmMatches,
   fwCohortWindowFromLocal,
   fwEventLocalParts,
+  fwReplayRejectReasonCopy,
+  isFwTombstoneName,
   narrowFwEventTimeZone,
   normalizeFwCohortSlug,
 } from "../fw-ops-rules";
@@ -322,10 +327,103 @@ describe("normalizeFwCohortSlug", () => {
 });
 
 describe("FW_OPS_AUDIT_ACTIONS", () => {
-  it("is exactly the vocabulary the migration's CHECK allows", () => {
+  it("is exactly the vocabulary the migrations' CHECK allows", () => {
     // Pinned against the migration text itself in fw-ops-migration-parity.test
     // — this assertion is the TS half, and the drift it guards is the one
-    // docs/solutions/best-practices/crm-audit-action-allowlist-… is about.
-    expect([...FW_OPS_AUDIT_ACTIONS]).toEqual(["guide_grant_added", "guide_grant_revoked"]);
+    // docs/solutions/best-practices/crm-audit-action-allowlist-… is about. Unit
+    // 5b adds the third value; the live CHECK is superseded by
+    // 20260801150000_fw_anonymize_action.sql, which the parity test pins.
+    expect([...FW_OPS_AUDIT_ACTIONS]).toEqual([
+      "guide_grant_added",
+      "guide_grant_revoked",
+      "student_anonymized",
+    ]);
+  });
+
+  it("has no duplicates — a repeated action would silently pass set-equality", () => {
+    expect(new Set(FW_OPS_AUDIT_ACTIONS).size).toBe(FW_OPS_AUDIT_ACTIONS.length);
+  });
+});
+
+describe("isFwTombstoneName / the anonymize sentinel", () => {
+  it("recognises exactly the tombstone pair, case-sensitively", () => {
+    expect(isFwTombstoneName(FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME)).toBe(true);
+    expect(isFwTombstoneName("Removed", "student")).toBe(true);
+    // A real student named "Removed" is vanishingly unlikely, and even one would
+    // only mis-read as anonymized on the roster chip — but the last-name half
+    // makes the pair, not either token alone.
+    expect(isFwTombstoneName("Removed", "Chen")).toBe(false);
+    expect(isFwTombstoneName("Maya", "student")).toBe(false);
+    expect(isFwTombstoneName("removed", "student")).toBe(false);
+    expect(isFwTombstoneName(null, null)).toBe(false);
+    expect(isFwTombstoneName(undefined, 42)).toBe(false);
+  });
+});
+
+describe("fwAnonymizeConfirmMatches — the typed confirm, verified server-side", () => {
+  it("matches the child's own name across case, spacing, and accents", () => {
+    expect(fwAnonymizeConfirmMatches("Maya Chen", "Maya", "Chen")).toBe(true);
+    expect(fwAnonymizeConfirmMatches("maya   chen", "Maya", "Chen")).toBe(true);
+    expect(fwAnonymizeConfirmMatches("  MAYA CHEN  ", "Maya", "Chen")).toBe(true);
+    // The fold both sides pass through equates these; anonymizing the wrong
+    // child should be hard, but a diacritic typo is not "the wrong child".
+    expect(fwAnonymizeConfirmMatches("José Órsted", "Jose", "Orsted")).toBe(true);
+  });
+
+  it("keeps a multi-word first name whole", () => {
+    // Last whitespace run separates first from last, so "Mary Jane Watson"
+    // confirms a student stored as first "Mary Jane", last "Watson".
+    expect(fwAnonymizeConfirmMatches("Mary Jane Watson", "Mary Jane", "Watson")).toBe(true);
+  });
+
+  it("refuses a different child, a partial name, or an empty confirm", () => {
+    expect(fwAnonymizeConfirmMatches("Maya Chen", "Maya", "Chan")).toBe(false);
+    expect(fwAnonymizeConfirmMatches("Maya", "Maya", "Chen")).toBe(false); // no last name
+    expect(fwAnonymizeConfirmMatches("", "Maya", "Chen")).toBe(false);
+    expect(fwAnonymizeConfirmMatches("   ", "Maya", "Chen")).toBe(false);
+  });
+
+  it("refuses everything against an already-tombstoned / unkeyable stored name", () => {
+    // The stored name folds to a key the confirm cannot reach, so the resume path
+    // (which skips the confirm for a tombstoned row) is the ONLY way past it —
+    // never a typed string.
+    expect(
+      fwAnonymizeConfirmMatches(
+        `${FW_TOMBSTONE_FIRST_NAME} ${FW_TOMBSTONE_LAST_NAME}`,
+        FW_TOMBSTONE_FIRST_NAME,
+        FW_TOMBSTONE_LAST_NAME
+      )
+    ).toBe(true);
+    // A homoglyph stored name cannot be keyed → no confirm matches it.
+    expect(fwAnonymizeConfirmMatches("Mаya Chen", "Mаya", "Chen")).toBe(false);
+  });
+
+  it("treats a homoglyph CONFIRM as no match, never as a wildcard", () => {
+    // Cyrillic а in the typed string throws inside the fold → false, not a pass.
+    expect(fwAnonymizeConfirmMatches("Mаya Chen", "Maya", "Chen")).toBe(false);
+  });
+});
+
+describe("fwReplayRejectReasonCopy", () => {
+  it("renders a sentence for each known drain reason", () => {
+    for (const reason of [
+      "cross_actor_undo",
+      "reauth_failed",
+      "cohort_unresolved",
+      "guard_refused",
+      "cas_lost",
+    ]) {
+      const copy = fwReplayRejectReasonCopy(reason);
+      expect(copy.length).toBeGreaterThan(0);
+      // Known reasons render prose, not the raw machine string.
+      expect(copy).not.toBe(reason);
+    }
+  });
+
+  it("names an unmapped reason rather than dropping it — Unit 8's vocabulary is not frozen", () => {
+    // A reason this table has no copy for still has to be legible: the drain that
+    // writes these rows is not built, so a new machine string must surface as
+    // itself, never as a blank or a crash.
+    expect(fwReplayRejectReasonCopy("some_future_reason")).toContain("some_future_reason");
   });
 });

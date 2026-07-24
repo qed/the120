@@ -8,6 +8,7 @@ import {
   type RunFwCheckInResult,
 } from "../fw-checkin-core";
 import { FW_BATCH_MAX } from "../fw-rules";
+import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
 
 /**
  * The FW check-in COMPOSITION (FW Unit 3), driven through a fake Supabase client.
@@ -37,6 +38,10 @@ type RpcReply = { outcome: string; state: string | null; verified_by?: string | 
 type Seed = {
   /** student ids present in path_cohort_members for COHORT. */
   members?: string[];
+  /** path_student_profiles rows (id + names) — used by the anonymize guard. */
+  profiles?: Row[];
+  /** Force the path_student_profiles (tombstone) read to error. */
+  profileError?: string | null;
   /** Per-student scripted RPC replies, consumed in order. */
   replies?: Record<string, RpcReply[]>;
   /** Force the membership select to error. */
@@ -59,6 +64,7 @@ function makeFakeDb(seed: Seed) {
     student_id,
     cohort_id: COHORT,
   }));
+  const profileRows: Row[] = seed.profiles ?? [];
   const rpcCalls: Record<string, unknown>[] = [];
   const replies: Record<string, RpcReply[]> = JSON.parse(JSON.stringify(seed.replies ?? {}));
 
@@ -85,7 +91,14 @@ function makeFakeDb(seed: Seed) {
               reject
             );
           }
-          const rows = members.filter(
+          if (table === "path_student_profiles" && seed.profileError) {
+            return Promise.resolve({ data: null, error: { message: seed.profileError } }).then(
+              resolve,
+              reject
+            );
+          }
+          const source = table === "path_student_profiles" ? profileRows : members;
+          const rows = source.filter(
             (r) =>
               eqs.every(([c, v]) => r[c] === v) &&
               (!inFilter || inFilter[1].includes(r[inFilter[0]]))
@@ -669,5 +682,74 @@ describe("runFwCheckIn — the not-yet arms round-trip through the report", () =
       kind: "failed",
       reason: "missing_progress",
     });
+  });
+});
+
+describe("runFwCheckIn — the anonymize write-path guard (Unit 5b)", () => {
+  const TOMBSTONE = { first_name: FW_TOMBSTONE_FIRST_NAME, last_name: FW_TOMBSTONE_LAST_NAME };
+
+  it("REFUSES a check-in for an anonymized student — no event, even though the membership row persists", async () => {
+    // The P0 the adversarial re-review found: anonymize keeps the membership row,
+    // so a stale task tab could tap through to fw_move_task. The write path (the
+    // sole caller of fwMoveTask) must exclude a tombstoned student.
+    const { db, rpcCalls } = makeFakeDb({
+      members: ["s1"],
+      profiles: [{ id: "s1", ...TOMBSTONE }],
+    });
+    const r = await runFwCheckIn(db, {
+      actorUserId: GUIDE,
+      cohortId: COHORT,
+      taskId: TASK,
+      action: "checkmark",
+      studentIds: ["s1"],
+      now: NOW,
+    });
+    // Reported skipped (a non-member for check-in purposes), and NO RPC fired —
+    // nothing reached the append-only event log.
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.outcomes[0]).toMatchObject({ studentId: "s1", kind: "skipped" });
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("checks in the live students of a batch while refusing the anonymized one", async () => {
+    const { db, rpcCalls } = makeFakeDb({
+      members: ["s1", "s2"],
+      profiles: [{ id: "s2", ...TOMBSTONE }], // s1 has a real (unseeded) name
+    });
+    const r = await runFwCheckIn(db, {
+      actorUserId: GUIDE,
+      cohortId: COHORT,
+      taskId: TASK,
+      action: "checkmark",
+      studentIds: ["s1", "s2"],
+      now: NOW,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.outcomes.find((o) => o.studentId === "s2")).toMatchObject({ kind: "skipped" });
+    expect(r.outcomes.find((o) => o.studentId === "s1")?.kind).not.toBe("skipped");
+    // Exactly one RPC — for s1 only.
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].p_student_id).toBe("s1");
+  });
+
+  it("FAILS CLOSED — refuses the whole action — when the tombstone read errors", async () => {
+    // A guard that keeps events off a retired child must never silently pass a
+    // student through on a read blip.
+    const { db, rpcCalls } = makeFakeDb({
+      members: ["s1"],
+      profileError: "profiles down",
+    });
+    const r = await runFwCheckIn(db, {
+      actorUserId: GUIDE,
+      cohortId: COHORT,
+      taskId: TASK,
+      action: "checkmark",
+      studentIds: ["s1"],
+      now: NOW,
+    });
+    expect(r).toEqual({ ok: false, reason: "unavailable" });
+    expect(rpcCalls).toHaveLength(0);
   });
 });

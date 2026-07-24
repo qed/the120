@@ -23,6 +23,14 @@ import { FW_OPS_AUDIT_ACTIONS } from "../fw-ops-rules";
 
 const AUDIT_MIGRATION = "supabase/migrations/20260801120000_fw_ops_audit.sql";
 const TZ_MIGRATION = "supabase/migrations/20260801130000_fw_cohort_time_zone.sql";
+const ANONYMIZE_MIGRATION = "supabase/migrations/20260801150000_fw_anonymize_action.sql";
+const INDEX_MIGRATION = "supabase/migrations/20260801160000_fw_ops_5b_indexes.sql";
+
+/** The two actions the CREATE-TABLE migration (20260801120000) shipped with — a
+ *  frozen historical fact, because that file's text never changes. The LIVE
+ *  allowlist is this set widened by 20260801150000; parity against
+ *  FW_OPS_AUDIT_ACTIONS is asserted on the anonymize migration below. */
+const ORIGINAL_AUDIT_ACTIONS = ["guide_grant_added", "guide_grant_revoked"] as const;
 
 const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), "utf8");
 /** Strip `--` line comments so structural assertions test the DDL, never the
@@ -32,6 +40,27 @@ const strip = (raw: string) => raw.replace(/--[^\n]*/g, "");
 
 const auditSql = strip(read(AUDIT_MIGRATION));
 const tzSql = strip(read(TZ_MIGRATION));
+const anonymizeSql = strip(read(ANONYMIZE_MIGRATION));
+const indexSql = strip(read(INDEX_MIGRATION));
+
+/** Pull the values out of the FIRST `check (action in (…))` in a chunk of SQL.
+ *  Callers pass a chunk already SCOPED to path_fw_ops_audit — an unscoped
+ *  whole-file scan lets an unrelated table's action CHECK hijack the allowlist
+ *  (docs/solutions/test-failures/migration-scanning-parity-test-must-scope-to-
+ *  its-table-…). The create-table body is scoped by construction; the anonymize
+ *  migration is sliced from its `alter table public.path_fw_ops_audit`. */
+function actionCheckValues(sql: string): string[] | null {
+  const check = /check\s*\(\s*action\s+in\s*\(([^)]*)\)\s*\)/i.exec(sql);
+  if (!check) return null;
+  return [...check[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+}
+
+/** The slice of the anonymize migration from its ALTER on path_fw_ops_audit —
+ *  so the action-CHECK scan can never match a different table's constraint. */
+const anonymizeAuditScope = (() => {
+  const at = anonymizeSql.indexOf("alter table public.path_fw_ops_audit");
+  return at >= 0 ? anonymizeSql.slice(at) : "";
+})();
 
 /** The balanced-paren body of `create table … public.<name> ( … )`. */
 function createTableBody(sql: string, name: string): string {
@@ -71,16 +100,14 @@ describe("path_fw_ops_audit — the columns the core writes", () => {
     expect(body).toMatch(/cohort_id\s+uuid\s+not null/);
   });
 
-  it("allows EXACTLY the action vocabulary FW_OPS_AUDIT_ACTIONS declares", () => {
-    // The two-enforcement-point drift from docs/solutions/best-practices/
-    // crm-audit-action-allowlist-db-check-constraint-drifts-from-ts-enum-…:
-    // `offer-email` lived in the TS array and not in the CHECK, so the insert
-    // failed at runtime as a lost audit record. Parsing the CONSTRAINT and
-    // comparing SETS (not "contains") means adding to either side alone is red.
-    const check = /check\s*\(\s*action\s+in\s*\(([^)]*)\)\s*\)/i.exec(body);
-    expect(check, "no `check (action in (…))` on path_fw_ops_audit").not.toBeNull();
-    const allowed = [...check![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
-    expect(allowed).toEqual([...FW_OPS_AUDIT_ACTIONS].sort());
+  it("shipped with EXACTLY the two original actions (a frozen historical fact)", () => {
+    // This file's text never changes, so it is pinned to the literal pair it
+    // created — NOT to FW_OPS_AUDIT_ACTIONS, which Unit 5b widened. The LIVE
+    // allowlist parity against the TS array is asserted on the anonymize
+    // migration below; here we only fix what this file did.
+    const allowed = actionCheckValues(body);
+    expect(allowed, "no `check (action in (…))` on path_fw_ops_audit").not.toBeNull();
+    expect(allowed).toEqual([...ORIGINAL_AUDIT_ACTIONS].sort());
   });
 
   it("every FK is ON DELETE RESTRICT — the record outlives the relationship", () => {
@@ -194,5 +221,104 @@ describe("path_cohorts.time_zone", () => {
   it("seeds and backfills nothing", () => {
     expect(tzSql).not.toMatch(/\binsert\s+into\b/i);
     expect(tzSql).not.toMatch(/\bupdate\s+public\./i);
+  });
+});
+
+describe("the anonymize action extension (Unit 5b)", () => {
+  const allowed = actionCheckValues(anonymizeAuditScope);
+
+  it("targets path_fw_ops_audit (the CHECK scan is anchored to that table)", () => {
+    expect(anonymizeAuditScope, "no `alter table public.path_fw_ops_audit`").not.toBe("");
+  });
+
+  it("re-adds the action CHECK as EXACTLY the vocabulary FW_OPS_AUDIT_ACTIONS declares", () => {
+    // This is the LIVE parity assertion, moved here from the create-table
+    // migration: the effective allowlist after all migrations is what THIS file
+    // sets, and it must equal the TS array by set-equality (not "contains"), so
+    // adding to either side alone is red. The drift the CRM learning is about.
+    expect(allowed, "no `check (action in (…))` in the anonymize migration").not.toBeNull();
+    expect(allowed).toEqual([...FW_OPS_AUDIT_ACTIONS].sort());
+  });
+
+  it("is a STRICT SUPERSET of the original two — a widening, so existing rows validate", () => {
+    // A superset is what makes the drop-and-re-add safe on a non-empty table: the
+    // ADD CONSTRAINT's validation scan cannot reject a row already present. A
+    // change that DROPPED one of the originals would redden this even if it still
+    // added the new one — which is the failure this catches that set-equality
+    // against the (also-changed) TS array alone would not.
+    expect(allowed).not.toBeNull();
+    for (const original of ORIGINAL_AUDIT_ACTIONS) {
+      expect(allowed, `dropped the original action ${original}`).toContain(original);
+    }
+    expect(allowed).toContain("student_anonymized");
+  });
+
+  it("names the constraint it drops and the one it re-adds identically", () => {
+    // A drop of one name and an add of another would leave the table with the
+    // wrong constraint name and break the next migration that references it.
+    expect(anonymizeSql).toMatch(/drop constraint path_fw_ops_audit_action_check/i);
+    expect(anonymizeSql).toMatch(/add constraint path_fw_ops_audit_action_check\b/i);
+  });
+
+  it("nests the ALTER INSIDE the idempotency guard, not merely near it", () => {
+    // A structural assertion, not two independent substring checks: a re-apply is
+    // safe only if the `alter table … drop/add constraint` runs UNDER the
+    // `if not exists (…) then … end if`. Verify the alter's position falls between
+    // the `then` and the `end if` — an un-indented alter that ran unconditionally
+    // would still contain both substrings elsewhere but reorder to outside the
+    // guard, and a second apply would then error on the bare DROP.
+    const guard = /if not exists\s*\([\s\S]*?\)\s*then([\s\S]*?)end if/i.exec(anonymizeSql);
+    expect(guard, "no `if not exists (…) then … end if` block").not.toBeNull();
+    expect(guard![1]).toMatch(/alter table public\.path_fw_ops_audit/i);
+    expect(guard![1]).toMatch(/drop constraint path_fw_ops_audit_action_check/i);
+  });
+
+  it("adds NO subject column and touches NO trigger/function — the decision against a new column", () => {
+    // Decision: an FW student has a user_id, so subject_user_id already names the
+    // anonymized subject. A speculative nullable column here would be a hole an
+    // audit row must not have. The immutability triggers are Unit 5's and MUST
+    // survive every later migration — so this asserts not just "creates none" but
+    // "drops/disables none": a later DISABLE TRIGGER on this table would silently
+    // strip the audit table's tamper-resistance while every "create" regex stays
+    // green.
+    expect(anonymizeSql).not.toMatch(/add column/i);
+    expect(anonymizeSql).not.toMatch(/create trigger/i);
+    expect(anonymizeSql).not.toMatch(/create or replace function/i);
+    expect(anonymizeSql).not.toMatch(/drop trigger/i);
+    expect(anonymizeSql).not.toMatch(/disable trigger/i);
+    expect(anonymizeSql).not.toMatch(/drop function/i);
+  });
+
+  it("seeds and backfills nothing — schema-only phase", () => {
+    expect(anonymizeSql).not.toMatch(/\binsert\s+into\b/i);
+    expect(anonymizeSql).not.toMatch(/\bupdate\s+public\./i);
+  });
+});
+
+describe("the Unit 5b supporting indexes (20260801160000)", () => {
+  it("adds a partial UNIQUE index enforcing one anonymize per subject", () => {
+    // The concurrency backstop: without this, two staff anonymizing one student
+    // both write an immutable `student_anonymized` row. Partial on the action so
+    // it never constrains guide-grant rows (many per subject).
+    expect(indexSql).toMatch(
+      /create unique index if not exists path_fw_ops_audit_one_anonymize_idx\s+on public\.path_fw_ops_audit \(subject_user_id\)\s+where action = 'student_anonymized'/i
+    );
+  });
+
+  it("adds the student-scoped partial index for open-reject lookups", () => {
+    expect(indexSql).toMatch(
+      /create index if not exists path_fw_replay_rejects_student_open_idx\s+on public\.path_fw_replay_rejects \(student_id\)\s+where resolved_at is null/i
+    );
+  });
+
+  it("is idempotent and touches nothing else — schema-only, no triggers/columns/data", () => {
+    expect(indexSql).toMatch(/if not exists/i);
+    expect(indexSql).not.toMatch(/\binsert\s+into\b/i);
+    expect(indexSql).not.toMatch(/\bupdate\s+public\./i);
+    expect(indexSql).not.toMatch(/add column/i);
+    expect(indexSql).not.toMatch(/drop trigger/i);
+    expect(indexSql).not.toMatch(/create or replace function/i);
+    // Not CONCURRENTLY — incompatible with the single-transaction apply path.
+    expect(indexSql).not.toMatch(/concurrently/i);
   });
 });

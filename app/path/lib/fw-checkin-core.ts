@@ -34,6 +34,7 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { withFwTimeout } from "./fw-call";
+import { isFwTombstoneName } from "./fw-ops-rules";
 import {
   clampFwCapturedAt,
   fwFirstDollarStudents,
@@ -218,6 +219,55 @@ export async function loadFwCohortMemberIds(
   };
 }
 
+/**
+ * Which of these students are ANONYMIZED — the write-path half of Decision 10's
+ * "permanently retired" guarantee (adversarial review, Unit 5b).
+ *
+ * Anonymize tombstones a student's name but deliberately KEEPS their
+ * `path_cohort_members` row (the record stays; the person is unfindable by name).
+ * The guide roster and quick-create already filter anonymized students out, but
+ * those are LIST reads — a guide with a task page already rendered before the
+ * anonymize (a stale tab, or a race) can still fire a check-in ACTION for that
+ * student, and `fw_move_task` only checks membership + `kind='fw'`. This is the
+ * single choke point every write goes through (`runFwCheckIn` is the only caller
+ * of `fwMoveTask`), so excluding tombstoned students HERE keeps a retired
+ * identity out of the append-only event log without a guessable stale render
+ * routing around it.
+ *
+ * TRI-STATE, like the membership read it runs beside: a read failure refuses the
+ * whole action (`ok:false`), never silently treats a student as non-tombstoned —
+ * the fail-closed posture for a guard that keeps events off a retired child.
+ */
+export async function loadFwTombstonedStudentIds(
+  db: SupabaseClient,
+  studentIds: readonly string[]
+): Promise<{ ok: true; ids: Set<string> } | { ok: false }> {
+  if (studentIds.length === 0) return { ok: true, ids: new Set() };
+
+  let raced;
+  try {
+    raced = await withFwTimeout(
+      db.from("path_student_profiles").select("id, first_name, last_name").in("id", [...studentIds]),
+      `tombstone read (${studentIds.length} students)`
+    );
+  } catch (e) {
+    console.error(`[fw/checkin] tombstone load threw:`, e);
+    return { ok: false };
+  }
+  if (raced.timedOut) return { ok: false };
+  const res = raced.value;
+  if (res.error) {
+    console.error(`[fw/checkin] tombstone load failed: ${res.error.message}`);
+    return { ok: false };
+  }
+
+  const ids = new Set<string>();
+  for (const r of res.data ?? []) {
+    if (typeof r.id === "string" && isFwTombstoneName(r.first_name, r.last_name)) ids.add(r.id);
+  }
+  return { ok: true, ids };
+}
+
 /* ═══════════════════════════════════════════════════ the batch orchestration ══ */
 
 export type RunFwCheckInInput = {
@@ -308,12 +358,21 @@ export async function runFwCheckIn(
   // survives into the report.
   const ordered = [...new Set(input.studentIds)];
 
-  const membership = await loadFwCohortMemberIds(db, input.cohortId, ordered);
-  if (!membership.ok) return { ok: false, reason: "unavailable" };
+  // Membership (Decision 3) AND the anonymize guard (Decision 10) — read
+  // CONCURRENTLY so the retired-identity check costs the hot loop no extra round
+  // trip. A tombstoned student is EXCLUDED from the effective member set, so
+  // `planFwBatch` treats their tap as a non-member skip: their membership row
+  // persists by design, but no new event may be written against a retired child.
+  const [membership, tombstoned] = await Promise.all([
+    loadFwCohortMemberIds(db, input.cohortId, ordered),
+    loadFwTombstonedStudentIds(db, ordered),
+  ]);
+  if (!membership.ok || !tombstoned.ok) return { ok: false, reason: "unavailable" };
+  const activeMemberIds = membership.memberIds.filter((id) => !tombstoned.ids.has(id));
 
   const plan = planFwBatch({
     studentIds: ordered,
-    cohortMemberIds: membership.memberIds,
+    cohortMemberIds: activeMemberIds,
     clientIds: input.clientIds,
   });
 

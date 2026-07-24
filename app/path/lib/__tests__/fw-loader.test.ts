@@ -6,6 +6,7 @@ import {
   loadFwStudentDrilldown,
 } from "../fw-loader";
 import { matchFwStudent } from "../fw-match-rules";
+import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
 import { buildNormalizedFwName } from "../fw-provision-rules";
 
 /**
@@ -161,6 +162,30 @@ describe("loadFwCohortRoster", () => {
     });
   });
 
+  it("EXCLUDES an anonymized student — a retired identity never appears on the guide roster", async () => {
+    // Decision 10 + adversarial review: an anonymized returner stays a member of
+    // their OTHER weekends, but must NOT show up as a checkin-able 'Removed
+    // student' row there. The tombstone-name filter is the enforcement.
+    const { db } = makeFakeDb({
+      members: [
+        { student_id: "s-maya", cohort_id: BOSTON },
+        { student_id: "s-gone", cohort_id: BOSTON },
+      ],
+      profiles: [
+        profile(),
+        profile({
+          id: "s-gone",
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g3_5",
+        }),
+      ],
+    });
+    const res = await loadFwCohortRoster(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students.map((s) => s.studentId)).toEqual(["s-maya"]);
+  });
+
   it("folds each student's decided rows into their resume chip (G21)", async () => {
     const { db } = makeFakeDb({
       ...BASE,
@@ -306,6 +331,28 @@ describe("loadFwStudentDrilldown — the read-side of Decision 3", () => {
   it("gives the same answer for a student who does not exist at all", async () => {
     const { db } = makeFakeDb(BASE);
     expect(await loadFwStudentDrilldown(db, { cohortId: BOSTON, studentId: "nope" })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("404s an ANONYMIZED student — the drilldown of a retired identity must not render", async () => {
+    // The student is a member (membership row persists by design) and FW-shaped,
+    // so it passes both prior gates — the tombstone-name check is what 404s the
+    // page, matching the 'never reveal which ids are real' posture.
+    const { db } = makeFakeDb({
+      members: [{ student_id: "s-gone", cohort_id: BOSTON }],
+      profiles: [
+        profile({
+          id: "s-gone",
+          first_name: FW_TOMBSTONE_FIRST_NAME,
+          last_name: FW_TOMBSTONE_LAST_NAME,
+          band: "g3_5",
+        }),
+      ],
+      progress: [{ student_id: "s-gone", task_id: "1.1.1", state: "verified" }],
+    });
+    expect(await loadFwStudentDrilldown(db, { cohortId: BOSTON, studentId: "s-gone" })).toEqual({
       ok: false,
       reason: "not_found",
     });

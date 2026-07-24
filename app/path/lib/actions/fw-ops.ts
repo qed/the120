@@ -32,12 +32,20 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { isFwStaffActor } from "@/app/path/lib/fw-access-rules";
 import { resolveFwActorForCohort, resolveFwStaffGate } from "@/app/path/lib/fw-auth";
 import {
+  anonymizeFwStudent,
   createFwCohort,
+  linkFwStudentToCohort,
+  loadFwMatchResolution,
   mintFwBoardToken,
+  resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
+  type AnonymizeStudentActionResult,
   type CreateFwCohortActionResult,
+  type LinkStudentActionResult,
+  type MatchLookupActionResult,
   type MintBoardTokenActionResult,
+  type ResolveReplayRejectActionResult,
   type RevokeBoardTokenActionResult,
   type RevokeGuideGrantActionResult,
 } from "@/app/path/lib/fw-ops-core";
@@ -343,6 +351,188 @@ function revokeGrantFailureMessage(reason: "grant_not_found" | "unavailable"): s
   switch (reason) {
     case "grant_not_found":
       return "That guide no longer has access to this weekend — refresh the list.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
+}
+
+/* ═══════════════════════════════════════════════ Unit 5b — replay rejects ══ */
+
+const resolveRejectSchema = z.object({ cohortId: z.uuid(), rejectId: z.uuid() });
+
+/**
+ * Close one replay reject (Decision 9 / G11). NOT a liability action, so it
+ * writes no audit row — just `resolved_by`/`resolved_at` on the row. Re-gated on
+ * `isFwStaffActor` like every action here; a guide who learns the id cannot call
+ * it, and the core additionally scopes the write to this cohort.
+ */
+export async function resolveReplayRejectAction(
+  input: unknown
+): Promise<ResolveReplayRejectActionResult> {
+  const parsed = resolveRejectSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+
+  const resolved = await resolveFwReplayReject(supabaseAdmin(), {
+    rejectId: parsed.data.rejectId,
+    cohortId: parsed.data.cohortId,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!resolved.ok) return { success: false, error: resolveRejectFailureMessage(resolved.reason) };
+
+  revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
+  return { success: true };
+}
+
+function resolveRejectFailureMessage(reason: "not_open" | "unavailable"): string {
+  switch (reason) {
+    case "not_open":
+      return "That reject is already resolved — refresh the list.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
+}
+
+/* ══════════════════════════════════════════════ Unit 5b — anonymize ══ */
+
+const anonymizeSchema = z.object({
+  cohortId: z.uuid(),
+  studentId: z.uuid(),
+  /** The typed confirm — the child's own name. Verified in the core against the
+   *  stored name, not trusted from here. */
+  confirmName: z.string().min(1).max(200),
+});
+
+/**
+ * Anonymize-in-place: the FW deletion action (Decision 10, G8).
+ *
+ * IRREVERSIBLE, so the surface makes staff TYPE the child's name and this action
+ * re-verifies it server-side (`fwAnonymizeConfirmMatches`, in the core) — a typed
+ * confirm only the browser checks is not a confirm. Writes the second of the two
+ * liability audit rows. `audited: false` means the anonymization happened but its
+ * record did not save, surfaced rather than swallowed; `openRejects` carries the
+ * warning that unresolved rejects still point at the now-removed student.
+ */
+export async function anonymizeStudentAction(
+  input: unknown
+): Promise<AnonymizeStudentActionResult> {
+  const parsed = anonymizeSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+
+  const result = await anonymizeFwStudent(supabaseAdmin(), {
+    studentId: parsed.data.studentId,
+    cohortId: parsed.data.cohortId,
+    actorUserId: gate.actorUserId,
+    confirmName: parsed.data.confirmName,
+  });
+  if (!result.ok) return { success: false, error: anonymizeFailureMessage(result.reason) };
+
+  revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
+  return {
+    success: true,
+    alreadyAnonymized: result.alreadyAnonymized,
+    audited: result.audited,
+    openRejects: result.openRejects,
+  };
+}
+
+function anonymizeFailureMessage(
+  reason:
+    | "student_not_found"
+    | "not_in_cohort"
+    | "not_fw_profile"
+    | "account_missing"
+    | "confirm_mismatch"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "confirm_mismatch":
+      return "The typed name doesn't match this student — nothing was changed.";
+    case "not_in_cohort":
+      return "That student isn't in this weekend — refresh the roster.";
+    case "student_not_found":
+      return "That student no longer exists.";
+    case "not_fw_profile":
+      return "That isn't a Founders Weekend student record.";
+    case "account_missing":
+      return "This student's account could not be found — tell an engineer.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
+}
+
+/* ═══════════════════════════════════ Unit 5b — PROPOSED-1 match resolution ══ */
+
+const matchLookupSchema = z.object({
+  cohortId: z.uuid(),
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+});
+
+/**
+ * The full cross-cohort match detail staff see and the guide's minimal signal
+ * withheld (PROPOSED-1, accepted). A READ, but a Server Action so the free-text
+ * name never renders a candidate list to a session that is not staff.
+ */
+export async function lookupMatchAction(input: unknown): Promise<MatchLookupActionResult> {
+  const parsed = matchLookupSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+
+  const resolution = await loadFwMatchResolution(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    firstName: parsed.data.firstName,
+    lastName: parsed.data.lastName,
+  });
+  if (!resolution.ok) return { success: false, error: GENERIC_ERROR };
+  if (resolution.kind === "invalid_name") return { success: true, kind: "invalid_name" };
+  return { success: true, kind: "matches", entries: resolution.entries };
+}
+
+const linkStudentSchema = z.object({ cohortId: z.uuid(), studentId: z.uuid() });
+
+/**
+ * Link an existing FW student into this weekend — the "link membership" half of
+ * the match resolution. Adds a membership only (progress is per-student and
+ * already exists for a returner); not an audit action.
+ */
+export async function linkStudentAction(input: unknown): Promise<LinkStudentActionResult> {
+  const parsed = linkStudentSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+
+  const linked = await linkFwStudentToCohort(supabaseAdmin(), {
+    studentId: parsed.data.studentId,
+    cohortId: parsed.data.cohortId,
+  });
+  if (!linked.ok) return { success: false, error: linkFailureMessage(linked.reason) };
+
+  revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
+  return { success: true, alreadyMember: linked.alreadyMember };
+}
+
+function linkFailureMessage(
+  reason: "student_not_found" | "not_fw_profile" | "student_anonymized" | "cohort_not_fw" | "unavailable"
+): string {
+  switch (reason) {
+    case "student_not_found":
+      return "That student no longer exists — search again.";
+    case "not_fw_profile":
+      return "That isn't a Founders Weekend student record.";
+    case "student_anonymized":
+      return "That student's record was removed and can't be added to a weekend. Search again.";
+    case "cohort_not_fw":
+      return "Students can only be linked into Founders Weekend cohorts.";
     case "unavailable":
       return GENERIC_ERROR;
   }

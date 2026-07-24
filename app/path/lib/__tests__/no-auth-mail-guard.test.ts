@@ -53,6 +53,34 @@ const REVIEWED_CALL_SITES: readonly { file: string; why: string }[] = [
   },
 ];
 
+/**
+ * A SECOND enforcement lane (security review, Unit 5b): admin email CHANGES.
+ *
+ * `admin.updateUserById(id, { email })` does not SEND mail the way the
+ * `MAIL_CAPABLE` calls above do (GoTrue's admin API writes the field directly),
+ * so it is deliberately NOT in that set — routing it through
+ * `assertNoAuthMailToFwStudent` is impossible anyway, because that guard THROWS
+ * on an FW address by design and the anonymize rename's target is exactly such
+ * an address (`removed-<id>.fw@`). But an email change is still the one admin
+ * operation that COULD reach a minor's namespace if GoTrue's behaviour ever
+ * changes or a refactor swaps in the self-service `updateUser()`. This lane
+ * forces every such call onto a reviewed allowlist — a deliberate security
+ * decision per call site, not an accident nobody sees.
+ */
+const ADMIN_EMAIL_CHANGE = /updateUserById\s*\([^)]*\bemail\b/;
+
+const REVIEWED_EMAIL_CHANGE_SITES: readonly { file: string; why: string }[] = [
+  {
+    file: "app/path/lib/fw-ops-core.ts",
+    why:
+      "anonymize rename (Decision 10): admin updateUserById sets the email directly " +
+      "to the tombstone removed-<id>.fw@ address with email_confirm:true, so no " +
+      "confirmation/change mail is enqueued; the target stays inside the guarded " +
+      "namespace. Cannot route through assertNoAuthMailToFwStudent — that guard " +
+      "throws on FW addresses by design.",
+  },
+];
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === ".next") continue;
@@ -92,6 +120,33 @@ describe("no-auth-mail invariant — enforcement, not intention", () => {
         `Route the recipient through the guard, or add the file to REVIEWED_CALL_SITES with a reason. ` +
         `FW addresses are guessable and belong to children.`
     ).toEqual([]);
+  });
+
+  it("every admin email CHANGE (updateUserById with email) is on the reviewed allowlist", () => {
+    const reviewed = new Set(REVIEWED_EMAIL_CHANGE_SITES.map((s) => s.file));
+    const unreviewed: string[] = [];
+    for (const full of files) {
+      const source = readFileSync(full, "utf8");
+      if (!ADMIN_EMAIL_CHANGE.test(source)) continue;
+      const rel = relative(full);
+      if (!reviewed.has(rel)) unreviewed.push(rel);
+    }
+    expect(
+      unreviewed,
+      `These files change an auth account's email via admin.updateUserById. That is ` +
+        `the one admin op that could reach a minor's FW namespace. Add each to ` +
+        `REVIEWED_EMAIL_CHANGE_SITES with the reason it is safe (e.g. email_confirm:true, ` +
+        `target inside the .fw@ namespace, no self-service updateUser()).`
+    ).toEqual([]);
+  });
+
+  it("the reviewed anonymize rename still passes email_confirm: true (no confirmation mail)", () => {
+    // The specific safeguard the review lane exists to protect: if a refactor
+    // ever drops email_confirm, GoTrue could enqueue a change-confirmation to the
+    // FW namespace. Pin it to the actual call.
+    const source = readFileSync(path.resolve(process.cwd(), "app/path/lib/fw-ops-core.ts"), "utf8");
+    expect(ADMIN_EMAIL_CHANGE.test(source), "fw-ops-core no longer changes an email").toBe(true);
+    expect(source).toMatch(/updateUserById\([^)]*email:[^)]*email_confirm:\s*true/);
   });
 
   it("the reviewed call sites still exist and still look the way the review assumed", () => {

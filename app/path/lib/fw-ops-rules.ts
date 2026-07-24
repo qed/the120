@@ -19,7 +19,19 @@
  *
  * No date library. `Intl.DateTimeFormat` with an explicit `timeZone` is the
  * whole mechanism, exactly as `app/crm/lib/week.ts` does its Toronto math.
+ *
+ * ── Unit 5b adds two more pure decisions here
+ *
+ * The staff-ops COMPLETENESS surfaces (replay-reject resolution, anonymization,
+ * cross-cohort match resolution) accrue exactly two decisions worth a tested
+ * home: the anonymize confirm/tombstone rule (a destructive, irreversible action
+ * whose typed-confirm must be verified server-side, not just in a form), and the
+ * reject-reason → copy mapping (an open machine-string vocabulary the ops surface
+ * renders sentences from). Both live below, alongside the audit vocabulary the
+ * anonymize action extends.
  */
+
+import { buildNormalizedFwName } from "./fw-provision-rules";
 
 /* ═══════════════════════════════════════════════════════════════ event zones ══ */
 
@@ -312,8 +324,130 @@ export function normalizeFwCohortSlug(raw: string): string | null {
  * array — so adding one without the other is a red test rather than a missing
  * liability record discovered later.
  *
- * Unit 5b's anonymize action extends both halves together.
+ * Unit 5b's anonymize action extends both halves together: `student_anonymized`
+ * is added HERE and to the DB CHECK in `20260801150000_fw_anonymize_action.sql`
+ * (a drop-and-re-add as a strict superset, so existing rows validate), and the
+ * parity test's set-equality assertion reddens if either side moves without the
+ * other. Deletion/anonymize is the second of the two liability actions the plan's
+ * Scope Boundaries name (guide-grant changes being the first, shipped in Unit 5).
  */
-export const FW_OPS_AUDIT_ACTIONS = ["guide_grant_added", "guide_grant_revoked"] as const;
+export const FW_OPS_AUDIT_ACTIONS = [
+  "guide_grant_added",
+  "guide_grant_revoked",
+  "student_anonymized",
+] as const;
 
 export type FwOpsAuditAction = (typeof FW_OPS_AUDIT_ACTIONS)[number];
+
+/* ═══════════════════════════════════════════════════════════ anonymization ══ */
+
+/**
+ * The placeholder name an anonymized FW profile carries (Decision 10).
+ *
+ * The identity CHECK (`child_id IS NOT NULL OR (first_name AND last_name AND
+ * band)`) still has to be satisfied for an FW row, so the name columns cannot be
+ * NULLed — they are OVERWRITTEN with a fixed, non-identifying pair. `band` is
+ * kept (it is not PII: a grade band names no child), and `normalized_name` is
+ * NULLed by the core so an anonymized student can never surface in a PROPOSED-1
+ * name lookup again — the record stays, the person is unfindable by name.
+ *
+ * A fixed sentinel rather than a per-student value on purpose: it is what
+ * `isFwTombstoneName` recognises to mark a row anonymized on the ops roster
+ * without an Admin API read per student, and what makes the anonymize sequence
+ * resumable — a run that tombstoned the name but died before renaming the email
+ * is detectable and finishes without re-asking for the typed confirm.
+ */
+export const FW_TOMBSTONE_FIRST_NAME = "Removed";
+export const FW_TOMBSTONE_LAST_NAME = "student";
+
+/** Whether a profile's name columns are the anonymize tombstone — the ops
+ *  roster's "already removed" marker, and the anonymize sequence's resume probe.
+ *  Exact match, not a fold: the sentinel is written verbatim and read verbatim. */
+export function isFwTombstoneName(firstName: unknown, lastName: unknown): boolean {
+  return firstName === FW_TOMBSTONE_FIRST_NAME && lastName === FW_TOMBSTONE_LAST_NAME;
+}
+
+/**
+ * Whether the typed confirmation matches the student about to be anonymized.
+ *
+ * The house rule (CLAUDE.md): a destructive UI action confirms before acting and
+ * the copy says exactly what will happen — and for an IRREVERSIBLE one the confirm
+ * is a TYPED confirm. Typing the child's own name is the strongest such gate: it
+ * makes anonymizing the wrong student require typing the wrong student's name,
+ * which is exactly the mistake the confirm exists to catch. Verified server-side
+ * here (the action layer calls it), not only in the browser, because a typed
+ * confirm that only the client checks is not a confirm.
+ *
+ * Compared through `buildNormalizedFwName` so case, spacing, and accent variance
+ * ("maya chen", "Maya  Chen", "Chén") all match — the same fold both the address
+ * builder and the matcher use, so "the name on the record" means one thing. A
+ * typed string that will not normalize (empty, homoglyph, control character)
+ * throws inside the fold and is treated as NO MATCH, never as a wildcard.
+ */
+export function fwAnonymizeConfirmMatches(
+  typed: string,
+  storedFirstName: string,
+  storedLastName: string
+): boolean {
+  let storedKey: string;
+  try {
+    storedKey = buildNormalizedFwName(storedFirstName, storedLastName);
+  } catch {
+    // The stored name cannot be keyed — an already-tombstoned or malformed row.
+    // Nothing a caller types should match it; the resume path skips the confirm
+    // for a tombstoned row rather than trying to match it.
+    return false;
+  }
+  if (storedKey.length === 0) return false;
+  try {
+    const [first, last] = splitConfirmName(typed);
+    return buildNormalizedFwName(first, last) === storedKey;
+  } catch {
+    return false;
+  }
+}
+
+/** Split a single typed "First Last" string into the two parts the fold takes.
+ *  The last whitespace run separates them, so multi-word first names survive
+ *  ("Mary Jane Watson" → first "Mary Jane", last "Watson"). A single token has
+ *  no last name and will not match a two-part stored key — which is the intended
+ *  refusal, not a bug. */
+function splitConfirmName(typed: string): [string, string] {
+  const trimmed = typed.trim().replace(/\s+/g, " ");
+  const cut = trimmed.lastIndexOf(" ");
+  if (cut < 0) return [trimmed, ""];
+  return [trimmed.slice(0, cut), trimmed.slice(cut + 1)];
+}
+
+/* ═══════════════════════════════════════════════════════ replay-reject copy ══ */
+
+/**
+ * Human copy for a `path_fw_replay_rejects.reason` machine string.
+ *
+ * The reason column is deliberately open (the migration: "a short machine reason
+ * … the ops surface renders copy from it"), because Unit 8's drain — which
+ * WRITES these rows — is not built yet and its exact vocabulary is not frozen. So
+ * this is a KNOWN-REASON table plus a truthful fallback, never a `default`-less
+ * switch that a new drain reason would turn into a runtime hole. The known set
+ * are the three the plan's Decision 9 names by mechanism; anything else renders
+ * the raw reason so a staff member still sees SOMETHING actionable rather than a
+ * blank, and an unmapped-but-frequent reason surfaces as "add copy for this",
+ * not as a crash.
+ */
+export function fwReplayRejectReasonCopy(reason: string): string {
+  switch (reason) {
+    case "cross_actor_undo":
+      return "An offline undo of another guide's check-in — the same-actor guard held it for review.";
+    case "reauth_failed":
+      return "The capturing guide's session could not be re-authenticated at sync.";
+    case "cohort_unresolved":
+      return "The check-in's cohort could not be resolved at sync.";
+    case "guard_refused":
+      return "The replay was refused by the write path (the state had already moved).";
+    case "cas_lost":
+      return "A concurrent change won the row before this replay landed.";
+    default:
+      // Truthful, not a guess: an unmapped reason still names itself.
+      return `Could not be applied at sync (${reason}).`;
+  }
+}

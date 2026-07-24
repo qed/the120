@@ -15,10 +15,12 @@
 -- supabase_migrations.schema_migrations. A committed migration is not an applied
 -- migration.
 --
--- ⚠️ TIMING HOLD (plan Operational Notes): this file is AUTHORED before the
--- ~Jul 28 Chicago-rehearsal checkpoint and APPLIED after it. The rehearsal is
--- the origin brief's revision gate — a schema revision made after the apply is a
--- new production migration, not an edit to this one.
+-- APPLY IMMEDIATELY. An earlier revision of this header held the apply for a
+-- ~Jul 28 Chicago-rehearsal checkpoint; that rehearsal was cancelled
+-- (2026-07-23) and the hold is retired. Applied to production 2026-07-23. Any
+-- schema revision from here is a NEW migration file, never an edit to this one —
+-- which is the posture an applied migration always had; the hold only ever
+-- deferred the moment that became true.
 --
 -- Rollout phase: SCHEMA ONLY. Creates empty tables, widens existing ones; seeds
 -- nothing and backfills nothing (docs/solutions/workflow-issues/split-phase-

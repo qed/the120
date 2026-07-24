@@ -34,7 +34,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { fwRead, fwWrite } from "./fw-call";
+import { fwRead, fwWrite, isUniqueViolation } from "./fw-call";
 import { runFwCheckIn } from "./fw-checkin-core";
 import { fwReplayRejectReasonCopy } from "./fw-ops-rules";
 import { narrowTaskState } from "./progress-core";
@@ -160,15 +160,19 @@ export async function loadFwProgressRow(
  * Record one reject in `path_fw_replay_rejects` — server-side, staff-visible, never
  * only on the possibly-revoked guide's device (Decision 9 / gap G11).
  *
- * IDEMPOTENT by the entry's `client_id`: a drain that wrote the reject but never
- * heard back (so the client never tombstoned the entry, and re-ships it) must not
- * stack a second row. Probe-then-insert, tolerating the race exactly as Unit 5b's
- * anonymize audit does — a duplicate is possible only under a lost response, and
- * the probe closes the common case. Reuses the SAME reject shape and cohort/actor
- * columns Unit 5b's list reads.
+ * IDEMPOTENT by (client_id, student_id, task_id): a drain that wrote the reject but
+ * never heard back (so the client never tombstoned the entry, and re-ships it) must
+ * not stack a second row. Probe-then-insert, tolerating the race exactly as Unit 5b's
+ * anonymize audit does — the probe closes the common (sequential re-drain) case, and
+ * the DB UNIQUE index (`path_fw_replay_rejects_client_scope_key`, Unit 9) closes the
+ * genuinely-concurrent one (a device auto-drain racing a CLI `fw drain` of an
+ * exported file): its 23505 is treated as success, because the row it collided with
+ * IS the reject. Reuses the SAME reject shape and cohort/actor columns Unit 5b reads.
  *
- * `ok:false` means the write itself failed; the caller then RETRIES the entry
- * rather than tombstoning it, so a reject is never dropped on the floor.
+ * `ok:false` means the write itself failed AND no row is present; the caller then
+ * RETRIES the entry rather than tombstoning it, so a reject is never dropped on the
+ * floor. A timed-out write (which may have landed) re-probes rather than reporting
+ * failure blindly — the same self-healing posture as the anonymize audit.
  */
 export async function writeFwReject(
   db: SupabaseClient,
@@ -176,22 +180,25 @@ export async function writeFwReject(
 ): Promise<{ ok: boolean }> {
   const { entry, reason } = input;
 
-  const probe = await fwRead(
-    () =>
-      db
-        .from("path_fw_replay_rejects")
-        .select("id")
-        .eq("client_id", entry.clientId)
-        .eq("student_id", entry.studentId)
-        .eq("task_id", entry.taskId)
-        .limit(1),
-    `reject probe (${entry.clientId})`
-  );
-  if (probe.error) {
-    console.error(`[fw/drain] reject probe failed for ${entry.clientId}: ${probe.error.message}`);
+  const probe = () =>
+    fwRead(
+      () =>
+        db
+          .from("path_fw_replay_rejects")
+          .select("id")
+          .eq("client_id", entry.clientId)
+          .eq("student_id", entry.studentId)
+          .eq("task_id", entry.taskId)
+          .limit(1),
+      `reject probe (${entry.clientId})`
+    );
+
+  const existing = await probe();
+  if (existing.error) {
+    console.error(`[fw/drain] reject probe failed for ${entry.clientId}: ${existing.error.message}`);
     return { ok: false };
   }
-  if (Array.isArray(probe.data) && probe.data.length > 0) return { ok: true }; // already recorded
+  if (Array.isArray(existing.data) && existing.data.length > 0) return { ok: true }; // already recorded
 
   const res = await fwWrite(
     () =>
@@ -209,22 +216,34 @@ export async function writeFwReject(
       }),
     `reject insert (${entry.clientId})`
   );
-  if (res.error) {
-    console.error(`[fw/drain] reject insert failed for ${entry.clientId}: ${res.error.message}`);
-    return { ok: false };
-  }
-  return { ok: true };
+  if (!res.error) return { ok: true };
+  // A unique violation means a concurrent drain already recorded this exact reject —
+  // the row exists, so the record is present: success (the ON CONFLICT DO NOTHING the
+  // partial unique index gives us, surfaced through the code rather than the SQL).
+  if (isUniqueViolation(res.error)) return { ok: true };
+  // Any other error (incl. a timed-out write that MAY have landed): re-probe rather
+  // than blindly reporting failure, so a reject that actually committed is not re-run.
+  console.error(`[fw/drain] reject insert failed for ${entry.clientId}: ${res.error.message}`);
+  const after = await probe();
+  return { ok: !after.error && Array.isArray(after.data) && after.data.length > 0 };
 }
 
 /* ══════════════════════════════════════════════════════════════ the drain ══ */
 
 /** Replay ONE op through the sole write choke point. Returns the disposition and
- *  whether it settled (so the caller can halt the rest of an ordered group). */
+ *  whether it settled (so the caller can halt the rest of an ordered group).
+ *
+ *  `expectedVerifiedBy` is the offline-only undo CAS author (Unit 9): non-null ONLY
+ *  for a leading undo the same-actor guard already checked, so the RPC applies it
+ *  atomically — only while `verified_by` still matches. A concurrent cross-actor
+ *  decision landing between the guard read and this replay then echoes
+ *  `cross_actor_undo` (a terminal reject) instead of reverting the new decision. */
 async function replayFwOp(
   db: SupabaseClient,
   op: FwQueueEntry,
   sessionUserId: string,
-  now: number
+  now: number,
+  expectedVerifiedBy: string | null
 ): Promise<{ disposition: "settled" | "retry"; reject: FwRejectReason | null }> {
   const res = await runFwCheckIn(db, {
     actorUserId: sessionUserId,
@@ -239,6 +258,7 @@ async function replayFwOp(
     // The batch's shared id, so an offline three-student tap still groups into one
     // board celebration on drain instead of three.
     actionId: op.actionId,
+    expectedVerifiedBy,
     now,
   });
 
@@ -313,7 +333,8 @@ export async function runFwDrain(db: SupabaseClient, input: FwDrainInput): Promi
 
     // 4/5 ── replay in order, halting the group on the first non-settle.
     let halt: { disposition: "retry"; reject: FwRejectReason | null } | null = null;
-    for (const op of plan.replay) {
+    for (let i = 0; i < plan.replay.length; i += 1) {
+      const op = plan.replay[i];
       if (halt) {
         // A prior op did not land: the follow-on cannot legally apply. If the prior
         // was a terminal reject, this is rejected with the same reason; otherwise it
@@ -321,7 +342,14 @@ export async function runFwDrain(db: SupabaseClient, input: FwDrainInput): Promi
         outcomes.push(halt.reject ? await recordReject(db, op, halt.reject) : retry(op));
         continue;
       }
-      const step = await replayFwOp(db, op, input.sessionUserId, input.now);
+      // The offline-only undo CAS (Unit 9): ONLY the LEADING undo carries the author
+      // the same-actor guard just checked (`server.verifiedBy`), so the RPC applies it
+      // atomically. Every following op — always a fresh decision after a surviving undo
+      // — passes null, and the online path never reaches here. `server` was read above
+      // exactly when `reduced[0]` is an undo, so it is populated for i === 0.
+      const expectedVerifiedBy =
+        i === 0 && op.action === "undo" ? (server?.verifiedBy ?? null) : null;
+      const step = await replayFwOp(db, op, input.sessionUserId, input.now, expectedVerifiedBy);
       if (step.disposition === "settled") {
         outcomes.push(settled(op));
         continue;

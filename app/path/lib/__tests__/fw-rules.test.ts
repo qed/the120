@@ -310,7 +310,7 @@ describe("named race scenario — checkmark × undo on one `verified` row", () =
 describe("narrowFwOutcome — fail-closed narrowing at the service-role boundary", () => {
   it("accepts exactly the outcomes the RPC can return", () => {
     expect([...FW_OUTCOMES].sort()).toEqual(
-      ["already_done", "applied", "cohort_invalid", "missing", "re_attempt", "refused", "replayed"].sort()
+      ["already_done", "applied", "cohort_invalid", "cross_actor_undo", "missing", "re_attempt", "refused", "replayed"].sort()
     );
     for (const o of FW_OUTCOMES) expect(narrowFwOutcome(o)).toBe(o);
   });

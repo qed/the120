@@ -71,6 +71,15 @@ export type FwMoveTaskParams = {
   actionId: string;
   /** The exactly-once key for this (student, task, tap); null when online. */
   clientId: string | null;
+  /**
+   * The offline-only undo CAS (Unit 9 / Decision 9). null on every online tap — no
+   * CAS, so any guide may undo any decision live. Non-null ONLY on an offline undo
+   * REPLAY, carrying the author the drain's same-actor guard checked; the RPC then
+   * applies the undo only while `verified_by` still matches, and echoes
+   * `cross_actor_undo` if a concurrent cross-actor decision won the row first. The
+   * RPC ignores it for checkmark/not_yet.
+   */
+  expectedVerifiedBy: string | null;
 };
 
 /**
@@ -123,6 +132,7 @@ export async function fwMoveTask(
         p_captured_at: p.capturedAt,
         p_action_id: p.actionId,
         p_client_id: p.clientId,
+        p_expected_verified_by: p.expectedVerifiedBy,
       }),
       `fw_move_task(${where})`
     );
@@ -286,6 +296,14 @@ export type RunFwCheckInInput = {
    * ONE bell on drain instead of three. Every live tap mints its own.
    */
   actionId?: string;
+  /**
+   * The offline-only undo CAS author (Unit 9 / Decision 9), passed ONLY by the
+   * drain when it replays a leading undo the same-actor guard already checked. null
+   * on every online tap — no CAS, so a live cross-actor undo still applies. The RPC
+   * consults it only for `undo`, so a batch replay (always single-student here) is
+   * safe. See `fw_move_task`'s `p_expected_verified_by`.
+   */
+  expectedVerifiedBy?: string | null;
   now: number;
 };
 
@@ -410,6 +428,9 @@ export async function runFwCheckIn(
         capturedAt: captured.value,
         actionId,
         clientId: target.clientId,
+        // null on every online tap (no CAS); the drain sets it only when replaying a
+        // guard-checked leading undo, and the RPC consults it only for `undo`.
+        expectedVerifiedBy: input.expectedVerifiedBy ?? null,
       })
     )
   );

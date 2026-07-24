@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runFwDrain, type FwDrainInput } from "../fw-sync-engine";
+import { runFwCheckIn } from "../fw-checkin-core";
 import { decideFwAction, type FwAction } from "../fw-rules";
 import {
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
@@ -45,6 +46,17 @@ type Seed = {
   progressReadError?: boolean;
   /** Force the reject insert to error. */
   rejectInsertError?: boolean;
+  /** Force the reject insert to return a 23505 unique violation — models a genuinely
+   *  concurrent drain having already recorded the same reject (the new DB backstop). */
+  rejectInsertUniqueViolation?: boolean;
+  /**
+   * Model a concurrent cross-actor decision that lands AFTER the drain's same-actor
+   * guard read but BEFORE the replay — the exact race the offline-only CAS closes.
+   * The guard `maybeSingle` returns the PRE-swap author (so the guard applies); the
+   * progress row is then rewritten to `verifiedBy`, so the replay's RPC sees the new
+   * author and the CAS refuses it.
+   */
+  concurrentSwap?: { student: string; task: string; verifiedBy: string | null };
 };
 
 function makeFakeDb(seed: Seed) {
@@ -55,6 +67,7 @@ function makeFakeDb(seed: Seed) {
   const rejects: RejectRow[] = [];
   const events: EventRow[] = [];
   const rpcCalls: string[] = [];
+  const rpcParams: Record<string, unknown>[] = [];
 
   const pkey = (s: string, t: string) => `${s}|${t}`;
   const cidKey = (s: string, t: string, c: string) => `${s}|${t}|${c}`;
@@ -65,7 +78,9 @@ function makeFakeDb(seed: Seed) {
     const action = p.p_action as FwAction;
     const actor = p.p_actor as string;
     const clientId = (p.p_client_id as string | null) ?? null;
+    const expected = (p.p_expected_verified_by as string | null) ?? null;
     rpcCalls.push(`${action}:${student}`);
+    rpcParams.push(p);
 
     if (!members.has(student)) return { outcome: "cohort_invalid", state: null, verified_by: null };
     const cur = progress.get(pkey(student, task));
@@ -75,6 +90,17 @@ function makeFakeDb(seed: Seed) {
     }
 
     const decision = decideFwAction({ action, from: cur.state });
+    // The offline-only CAS (Unit 9): an undo whose UPDATE would apply, but whose
+    // guarded author no longer matches, matches zero rows and is classified
+    // `cross_actor_undo`. Mirrors the SQL's WHERE-clause CAS + classification arm.
+    if (
+      decision.kind === "apply" &&
+      action === "undo" &&
+      expected !== null &&
+      cur.verified_by !== expected
+    ) {
+      return { outcome: "cross_actor_undo", state: cur.state, verified_by: cur.verified_by };
+    }
     if (decision.kind === "apply") {
       const verifiedBy = action === "undo" ? null : actor;
       progress.set(pkey(student, task), { state: decision.to, verified_by: verifiedBy });
@@ -136,10 +162,17 @@ function makeFakeDb(seed: Seed) {
           const student = eqs.find(([c]) => c === "student_id")?.[1] as string;
           const task = eqs.find(([c]) => c === "task_id")?.[1] as string;
           const row = progress.get(pkey(student, task));
-          return Promise.resolve({ data: row ? { ...row } : null, error: null });
+          const snapshot = row ? { ...row } : null;
+          // The guard read returns the PRE-swap author; a concurrent cross-actor
+          // decision then rewrites the row, so the replay's RPC sees the new author.
+          const swap = seed.concurrentSwap;
+          if (swap && swap.student === student && swap.task === task && row) {
+            progress.set(pkey(student, task), { ...row, verified_by: swap.verifiedBy });
+          }
+          return Promise.resolve({ data: snapshot, error: null });
         },
         then(resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) {
-          let out: { data: unknown; error: { message: string } | null };
+          let out: { data: unknown; error: { message: string; code?: string } | null };
           if (table === "path_cohort_members") {
             const ids = (inFilter?.[1] ?? []) as string[];
             out = {
@@ -158,6 +191,8 @@ function makeFakeDb(seed: Seed) {
             };
           } else if (table === "path_fw_replay_rejects" && insertRow) {
             if (seed.rejectInsertError) out = { data: null, error: { message: "insert blip" } };
+            else if (seed.rejectInsertUniqueViolation)
+              out = { data: null, error: { code: "23505", message: "duplicate reject" } };
             else {
               rejects.push(insertRow);
               out = { data: [{ id: `rej-${rejects.length}` }], error: null };
@@ -183,7 +218,7 @@ function makeFakeDb(seed: Seed) {
     },
   };
 
-  return { db: db as never, progress, rejects, events, rpcCalls, pkey };
+  return { db: db as never, progress, rejects, events, rpcCalls, rpcParams, pkey };
 }
 
 let seq = 0;
@@ -537,5 +572,138 @@ describe("runFwDrain — only authorized cohorts replay", () => {
     expect(progress.get(pkey("s1", TASK))).toEqual({ state: "verified", verified_by: GUIDE });
     expect(progress.get(pkey("s2", TASK))).toEqual({ state: "locked", verified_by: null });
     expect(rejects.map((r) => r.reason)).toEqual(["reauth_failed"]);
+  });
+});
+
+/* ═══════════════════════════════ the offline-only undo CAS (Unit 9 / Decision 9) ══ */
+
+describe("the offline-only undo CAS — online preserved, offline replay made atomic", () => {
+  it("ONLINE cross-actor undo still APPLIES — no expectedVerifiedBy, no CAS", async () => {
+    // Decision 9: any guide may undo any decision LIVE. The online write path passes
+    // no expectedVerifiedBy, so the CAS never engages — a guide undoes another guide's
+    // checkmark exactly as before.
+    const { db, progress, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: OTHER_GUIDE } },
+    });
+    const r = await runFwCheckIn(db as never, {
+      actorUserId: GUIDE,
+      cohortId: COHORT,
+      taskId: TASK,
+      action: "undo",
+      studentIds: ["s1"],
+      now: NOW,
+    });
+    expect(r.ok && r.outcomes[0].kind).toBe("applied");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "locked", verified_by: null });
+  });
+
+  it("OFFLINE undo replay is REFUSED when the guarded author no longer matches", async () => {
+    // The same call WITH the guard-checked author (GUIDE) against a row now authored by
+    // OTHER_GUIDE: the CAS refuses, the result is failed:cross_actor_undo, and the
+    // concurrent decision stands untouched.
+    const { db, progress, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: OTHER_GUIDE } },
+    });
+    const r = await runFwCheckIn(db as never, {
+      actorUserId: GUIDE,
+      cohortId: COHORT,
+      taskId: TASK,
+      action: "undo",
+      studentIds: ["s1"],
+      expectedVerifiedBy: GUIDE,
+      now: NOW,
+    });
+    expect(r.ok && r.outcomes[0]).toEqual({
+      studentId: "s1",
+      kind: "failed",
+      reason: "cross_actor_undo",
+    });
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "verified", verified_by: OTHER_GUIDE });
+  });
+
+  it("END-TO-END: a decision landing between the guard read and the replay → cross_actor_undo reject", async () => {
+    // The race the CAS exists for. The client-side same-actor guard PASSES (the row is
+    // GUIDE's own at read time); a concurrent cross-actor decision then wins the row
+    // before the replay. Without the CAS the stale undo would revert it UNGUARDED.
+    const { db, progress, rejects, rpcCalls, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: GUIDE } },
+      concurrentSwap: { student: "s1", task: TASK, verifiedBy: OTHER_GUIDE },
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+
+    // The guard let it through (its read saw GUIDE), so the replay DID fire…
+    expect(rpcCalls).toEqual(["undo:s1"]);
+    // …and the RPC's CAS caught it.
+    expect(outcomes[0].disposition).toBe("rejected");
+    expect(rejects[0].reason).toBe("cross_actor_undo");
+    // The concurrent cross-actor decision is intact — never reverted.
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "verified", verified_by: OTHER_GUIDE });
+  });
+
+  it("a same-actor offline undo replay still APPLIES when nobody raced (the CAS passes)", async () => {
+    const { db, progress, rejects, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: GUIDE } },
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+    expect(outcomes[0].disposition).toBe("settled");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "locked", verified_by: null });
+    expect(rejects).toHaveLength(0);
+  });
+
+  it("END-TO-END on a NOT_YET row: a decision landing between guard read and replay → cross_actor_undo", async () => {
+    // The SQL's CAS classification arm gates on `v_from in ('verified', 'not_yet')`; the
+    // behavioral matrix above only seeded `verified`. This drives the race on a not_yet row
+    // (the undo-of-not_yet path) so the CAS is exercised behaviorally, not just at the text
+    // level, for both decision states.
+    const { db, progress, rejects, rpcCalls, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "not_yet", verified_by: GUIDE } },
+      concurrentSwap: { student: "s1", task: TASK, verifiedBy: OTHER_GUIDE },
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+
+    expect(rpcCalls).toEqual(["undo:s1"]); // the guard let it through (read saw GUIDE)…
+    expect(outcomes[0].disposition).toBe("rejected"); // …and the CAS caught it.
+    expect(rejects[0].reason).toBe("cross_actor_undo");
+    // The concurrent cross-actor not_yet is intact — never reverted.
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "not_yet", verified_by: OTHER_GUIDE });
+  });
+
+  it("a concurrent reject insert's UNIQUE VIOLATION is treated as recorded, not retried (the new DB backstop)", async () => {
+    // Two genuinely concurrent drains recording the same reject: the loser's insert hits the
+    // path_fw_replay_rejects_client_scope_key unique index (23505). writeFwReject treats that
+    // as "already recorded" (the row IS the reject), so the entry tombstones as `rejected`,
+    // never spins on a retry.
+    const { db, rejects } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: OTHER_GUIDE } },
+      rejectInsertUniqueViolation: true,
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+
+    expect(outcomes[0].disposition).toBe("rejected"); // recorded (by the concurrent drain), not retried
+    expect(rejects).toHaveLength(0); // our own insert collided — the row is the other drain's
+  });
+
+  it("the drain carries expectedVerifiedBy ONLY for the leading undo, null for a following decision", async () => {
+    // undo + not_yet correction (same actor): the undo carries the guarded author; the
+    // not_yet that follows it is a FRESH decision and must pass null — the CAS gates undo
+    // only, and a decision has no author to compare against.
+    const { db, rpcParams } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: GUIDE } },
+    });
+    const u = entry("undo", { studentId: "s1", enqueuedAt: "2026-08-22T14:01:00.000Z" });
+    const n = entry("not_yet", { studentId: "s1", enqueuedAt: "2026-08-22T14:02:00.000Z" });
+    await drain(db, [u, n]);
+
+    expect(rpcParams.map((p) => [p.p_action, p.p_expected_verified_by])).toEqual([
+      ["undo", GUIDE],
+      ["not_yet", null],
+    ]);
   });
 });

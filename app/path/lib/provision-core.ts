@@ -51,6 +51,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import type { Band } from "@/app/path/content/types";
+import { fwRead, fwWrite, isUniqueViolation } from "./fw-call";
 import {
   bandForGrade,
   buildInitialProgressRows,
@@ -640,11 +641,19 @@ export async function ensureFwStudentProgress(
   | { ok: true; created: number }
   | { ok: false; reason: "profile_not_found" | "no_band" | "no_content" | "unavailable" }
 > {
-  const profile = await db
-    .from("path_student_profiles")
-    .select("id, program_version_id, band")
-    .eq("id", input.profileId)
-    .maybeSingle();
+  // Routed through fwRead/fwWrite (Unit 9): this is the materialization leg of the FW
+  // mint chain, so a stalled call here hangs a ~90-account import exactly like the legs
+  // above it — the timeout guard converts that into a typed `unavailable` the caller
+  // already handles, rather than leaving a hung request with no compensation reached.
+  const profile = await fwRead(
+    () =>
+      db
+        .from("path_student_profiles")
+        .select("id, program_version_id, band")
+        .eq("id", input.profileId)
+        .maybeSingle(),
+    `fw progress-seed profile load (${input.profileId})`
+  );
   if (profile.error) {
     console.error(`[fw/progress-seed] profile load failed for ${input.profileId}: ${profile.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -657,10 +666,10 @@ export async function ensureFwStudentProgress(
   // with no first-phase promotion there is nothing to look phases or criteria up
   // for. (The three-column FK on path_task_progress still pins each row's
   // criterion to the task's true criterion.)
-  const tasks = await db
-    .from("path_unit_tasks")
-    .select("task_id, criterion_id, seq")
-    .eq("program_version_id", versionId);
+  const tasks = await fwRead(
+    () => db.from("path_unit_tasks").select("task_id, criterion_id, seq").eq("program_version_id", versionId),
+    `fw progress-seed content load (${versionId})`
+  );
   if (tasks.error) {
     console.error(`[fw/progress-seed] content load failed for ${versionId}: ${tasks.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -679,10 +688,14 @@ export async function ensureFwStudentProgress(
     return { ok: false, reason: "unavailable" };
   }
 
-  const inserted = await db
-    .from("path_task_progress")
-    .upsert(rows, { onConflict: "student_id,task_id", ignoreDuplicates: true })
-    .select("task_id");
+  const inserted = await fwWrite(
+    () =>
+      db
+        .from("path_task_progress")
+        .upsert(rows, { onConflict: "student_id,task_id", ignoreDuplicates: true })
+        .select("task_id"),
+    `fw progress-seed upsert (${input.profileId})`
+  );
   if (inserted.error) {
     console.error(`[fw/progress-seed] progress upsert failed for ${input.profileId}: ${inserted.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -742,7 +755,22 @@ export type ProvisionFwStudentFailure =
   | "unavailable";
 
 export type ProvisionFwStudentResult =
-  | { ok: true; profileId: string; userId: string; email: string; adopted: boolean }
+  | {
+      ok: true;
+      profileId: string;
+      userId: string;
+      email: string;
+      /**
+       * True when this call COMPLETED an already-existing account rather than minting a
+       * fresh one — set by the explicit resume path (`existingProfileId`), by adopting a
+       * stranded account, AND by the post-write-verify adopting our own timed-out-but-
+       * landed profile. It is an "existing, not freshly minted" signal, not a specific
+       * provenance — nothing branches on WHICH of those it was, so no consumer may infer
+       * "explicit resume" from it. If a future surface needs that distinction, add a
+       * separate discriminant rather than overloading this flag.
+       */
+      adopted: boolean;
+    }
   | {
       ok: false;
       reason: ProvisionFwStudentFailure;
@@ -759,13 +787,22 @@ export type ProvisionFwStudentResult =
  * compensation-post-write-verify-cas-scoped-claim-2026-07-22.md — there is no
  * transaction spanning the Auth API and PostgREST, so a failure between them is
  * cleaned up explicitly:
- *   - profile insert fails → the just-created auth user and family row are
- *     best-effort deleted, leaving nothing half-minted for the next run to trip
- *     over (and no orphan account holding a name-derived address hostage);
+ *   - profile insert REPORTS failure → POST-WRITE VERIFY first (Unit 9): a timed-out
+ *     write may still have landed, so probe for a profile on this user_id before
+ *     compensating; adopt it if it landed, and only best-effort delete the just-
+ *     created auth user and family row when it truly did not — leaving nothing
+ *     half-minted for the next run to trip over (and no orphan account holding a
+ *     name-derived address hostage), and never destroying a profile that committed;
  *   - membership or materialization fails → the profile is KEPT and its id is
  *     returned with the failure, because those legs are idempotent and a
  *     retry-in-place completes them (Decision 13). Deleting here would throw away
  *     a good account in front of a kid standing at the table.
+ *
+ * Every PostgREST read and write in the chain is routed through `fwRead`/`fwWrite`
+ * (Unit 9): the mint chain predated that timeout guard, so on venue wifi a stalled
+ * call left a ~90-account import hanging with none of the compensation branches
+ * reached. A bounded timeout converts the stall into a typed failure the caller
+ * already handles (the Auth admin calls keep their own error handling).
  *
  * Address collisions resolve in two layers: the released-alias ledger is probed
  * up front (Decision 10 — a freed address is never re-minted), and `email_exists`
@@ -784,11 +821,10 @@ export async function provisionFwStudent(
   // The cohort must exist AND be an FW cohort. Minting an FW-shaped student into
   // a Path cohort would put a child-less profile in front of Path reads that
   // assume a roster row.
-  const cohort = await db
-    .from("path_cohorts")
-    .select("id, kind")
-    .eq("id", cohortId)
-    .maybeSingle();
+  const cohort = await fwRead(
+    () => db.from("path_cohorts").select("id, kind").eq("id", cohortId).maybeSingle(),
+    `fw cohort load (${cohortId})`
+  );
   if (cohort.error) {
     console.error(`[fw/provision] cohort load failed for ${cohortId}: ${cohort.error.message}`);
     return { ok: false, reason: "unavailable" };
@@ -811,11 +847,15 @@ export async function provisionFwStudent(
     // writes a cohort membership — and a membership written for the wrong
     // profile enrolls a real child in a weekend they are not at, with nothing
     // downstream that would notice.
-    const existing = await db
-      .from("path_student_profiles")
-      .select("id, user_id, child_id, first_name, last_name, band")
-      .eq("id", input.existingProfileId)
-      .maybeSingle();
+    const existing = await fwRead(
+      () =>
+        db
+          .from("path_student_profiles")
+          .select("id, user_id, child_id, first_name, last_name, band")
+          .eq("id", input.existingProfileId)
+          .maybeSingle(),
+      `fw resume profile load (${input.existingProfileId})`
+    );
     if (existing.error) {
       console.error(
         `[fw/provision] resume profile load failed for ${input.existingProfileId}: ${existing.error.message}`
@@ -897,11 +937,10 @@ export async function provisionFwStudent(
 
     // The D27 pin, resolved now and immutable after — no fallback, exactly as the
     // Path path: a silent fallback would pin a weekend's students to nothing.
-    const version = await db
-      .from("path_program_versions")
-      .select("id")
-      .eq("is_current", true)
-      .maybeSingle();
+    const version = await fwRead(
+      () => db.from("path_program_versions").select("id").eq("is_current", true).maybeSingle(),
+      "fw current program version"
+    );
     if (version.error) {
       console.error(`[fw/provision] version load failed: ${version.error.message}`);
       return { ok: false, reason: "unavailable" };
@@ -915,10 +954,10 @@ export async function provisionFwStudent(
     // released by an anonymization is off the table permanently. `like base%`
     // over-matches (it also catches unrelated longer names), which is harmless —
     // the only candidates ever generated are base, base2, base3…
-    const released = await db
-      .from("path_fw_released_aliases")
-      .select("local_part")
-      .like("local_part", `${localBase}%`);
+    const released = await fwRead(
+      () => db.from("path_fw_released_aliases").select("local_part").like("local_part", `${localBase}%`),
+      `fw released-alias probe (${localBase})`
+    );
     if (released.error) {
       console.error(`[fw/provision] released-alias probe failed for ${localBase}: ${released.error.message}`);
       return { ok: false, reason: "unavailable" };
@@ -996,53 +1035,123 @@ export async function provisionFwStudent(
     // NOT NULL (see the migration's group-1 note): an FW student has no family
     // YET, and a synthetic invisible one beats loosening a column ~12 Path reads
     // assume. No parent grant ever points here, so nothing can read across it.
-    const family = await db.from("path_families").insert({}).select("id").single();
+    const family = await fwWrite(
+      () => db.from("path_families").insert({}).select("id").single(),
+      `fw family insert (${email})`
+    );
     if (family.error || typeof family.data?.id !== "string") {
       // Identify the row: during a 90-student import this line firing on row 47
       // is otherwise byte-identical to it firing on row 1.
       console.error(
         `[fw/provision] family insert failed for ${email} (cohort ${cohortId}): ${family.error?.message ?? "no id"}`
       );
+      // ACCEPTED, DOCUMENTED LEAK (reliability review): a family insert that TIMED OUT but
+      // actually committed cannot be cleaned up here — `family.data` is null, so we have no
+      // id to delete, and an empty `path_families` row carries no lookup key of its own. We
+      // pass `familyId: null` (compensation deletes only the auth user). The orphan is one
+      // empty, unreferenced family row: nothing FKs to it, nothing renders it, so it is inert
+      // — a resource-hygiene leak, not corruption. Adding a post-write verify here would need
+      // a marker column on the payload (a schema change out of Unit 9's scope); the leak is
+      // accepted instead.
       await compensateFwMint(db, { userId, familyId: null });
       return { ok: false, reason: "unavailable" };
     }
     createdFamilyId = family.data.id;
 
-    const inserted = await db
-      .from("path_student_profiles")
-      .insert({
-        user_id: userId,
-        child_id: null,
-        program_version_id: programVersionId,
-        family_id: createdFamilyId,
-        cohort_id: null, // FW membership lives in path_cohort_members, not here
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        band,
-        normalized_name: normalizedName,
-        notice_attested_at: attestedBy ? new Date().toISOString() : null,
-        notice_attested_by: attestedBy,
-      })
-      .select("id")
-      .single();
+    const inserted = await fwWrite(
+      () =>
+        db
+          .from("path_student_profiles")
+          .insert({
+            user_id: userId,
+            child_id: null,
+            program_version_id: programVersionId,
+            family_id: createdFamilyId,
+            cohort_id: null, // FW membership lives in path_cohort_members, not here
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            band,
+            normalized_name: normalizedName,
+            notice_attested_at: attestedBy ? new Date().toISOString() : null,
+            notice_attested_by: attestedBy,
+          })
+          .select("id")
+          .single(),
+      `fw profile insert (${email})`
+    );
     if (inserted.error || typeof inserted.data?.id !== "string") {
-      console.error(
-        `[fw/provision] profile insert failed for ${email}: ${inserted.error?.message ?? "no id"}`
+      // A UNIQUE VIOLATION (23505) is NOT our own timed-out write — it means a DIFFERENT
+      // profile already holds this user_id: a concurrent same-name mint that adopted this
+      // account as "stranded" (adversarial review AR-1), or a stranded account's original
+      // owner committing its profile between our adopt and our insert. Adopting a stranger's
+      // profile there would silently MERGE two identities and report a false success, so a
+      // 23505 must NEVER take the post-write-verify adopt path — it compensates our own
+      // just-created family (the shared account's delete is correctly RESTRICT-blocked) and
+      // returns unavailable, letting the caller's PROPOSED-1 match / retry flow resolve the
+      // identity. Only our own AMBIGUOUS write (a timeout/throw, which carries no 23505 code)
+      // may have landed and is worth verifying.
+      if (isUniqueViolation(inserted.error)) {
+        console.error(
+          `[fw/provision] profile insert hit a unique violation for ${email} — a concurrent mint holds this user_id; NOT adopting a possibly-different child's profile`
+        );
+        await compensateFwMint(db, { userId, familyId: createdFamilyId });
+        return { ok: false, reason: "unavailable" };
+      }
+
+      // POST-WRITE VERIFY before compensating (Unit 9 hardening). A timed-out write MAY have
+      // landed — `fwWrite`'s stated contract — and compensating (deleting the auth user +
+      // family) UNDER a profile row that actually committed would either orphan it or
+      // cascade-destroy a real student. THREE-WAY on the verify read, because a read that
+      // itself timed out is "we don't know", NOT "confirmed absent": adopt a definitely-
+      // present row, compensate a definitely-absent one, and on an AMBIGUOUS verify leave the
+      // account intact for a retry/match to resolve rather than deleting a possibly-live
+      // profile. Same posture as docs/solutions/best-practices/no-transaction-multi-step-
+      // write-compensation-post-write-verify-cas-scoped-claim-2026-07-22.md.
+      const landed = await fwRead(
+        () => db.from("path_student_profiles").select("id").eq("user_id", userId).maybeSingle(),
+        `fw profile post-write verify (${email})`
       );
-      await compensateFwMint(db, { userId, familyId: createdFamilyId });
-      return { ok: false, reason: "unavailable" };
+      if (!landed.error && typeof landed.data?.id === "string") {
+        // Definitely landed → adopt our own committed write.
+        console.warn(
+          `[fw/provision] profile insert for ${email} reported failure but a row landed — adopting it rather than compensating`
+        );
+        profileId = landed.data.id;
+        adopted = true;
+      } else if (landed.error) {
+        // AMBIGUOUS — the verify read itself failed/timed out. Do NOT compensate: the profile
+        // may have landed, and deleting a possibly-live account is the wrong disposition (the
+        // RESTRICT FKs would block it, but the false report would still stand). Leave the
+        // account + family; a retry adopts the stranded account (if truly absent) or the
+        // match/link path finds the landed profile by normalized_name (if present).
+        console.error(
+          `[fw/provision] profile insert AND its post-write verify both failed for ${email}: ${inserted.error?.message ?? "no id"} / ${landed.error.message} — leaving the account for a retry to resolve`
+        );
+        return { ok: false, reason: "unavailable" };
+      } else {
+        // Definitely absent — the verify read succeeded and found no row: the insert truly
+        // failed. Compensate.
+        console.error(
+          `[fw/provision] profile insert failed for ${email}: ${inserted.error?.message ?? "no id"}`
+        );
+        await compensateFwMint(db, { userId, familyId: createdFamilyId });
+        return { ok: false, reason: "unavailable" };
+      }
+    } else {
+      profileId = inserted.data.id;
     }
-    profileId = inserted.data.id;
   }
 
   // Membership — the row Decision 3's cohort-stamp verification reads as
   // authoritative. Upsert so a resume run is a no-op rather than a duplicate.
-  const membership = await db
-    .from("path_cohort_members")
-    .upsert({ student_id: profileId, cohort_id: cohortId }, {
-      onConflict: "student_id,cohort_id",
-      ignoreDuplicates: true,
-    });
+  const membership = await fwWrite(
+    () =>
+      db.from("path_cohort_members").upsert({ student_id: profileId, cohort_id: cohortId }, {
+        onConflict: "student_id,cohort_id",
+        ignoreDuplicates: true,
+      }),
+    `fw membership upsert (${profileId}/${cohortId})`
+  );
   if (membership.error) {
     console.error(
       `[fw/provision] membership upsert failed for ${profileId}/${cohortId}: ${membership.error.message}`
@@ -1091,11 +1200,10 @@ async function classifyFwAddress(db: SupabaseClient, email: string): Promise<FwA
     return { kind: "claimed" };
   }
 
-  const profile = await db
-    .from("path_student_profiles")
-    .select("id")
-    .eq("user_id", found.id)
-    .maybeSingle();
+  const profile = await fwRead(
+    () => db.from("path_student_profiles").select("id").eq("user_id", found.id).maybeSingle(),
+    `fw claim probe (${email})`
+  );
   if (profile.error) {
     console.error(`[fw/provision] claim probe failed for ${email}: ${profile.error.message}`);
     return { kind: "unknown" };
@@ -1119,11 +1227,18 @@ async function compensateFwMint(
   if (deleted.error) {
     console.error(`[fw/provision] compensation deleteUser failed for ${input.userId}: ${deleted.error.message}`);
   }
-  if (input.familyId) {
-    const fam = await db.from("path_families").delete().eq("id", input.familyId);
+  // Bind to a local so the closure passed to fwWrite narrows to `string` without a
+  // non-null assertion (the repo's typeof-not-`as` posture — TS drops property-access
+  // narrowing across the function boundary).
+  const familyId = input.familyId;
+  if (familyId) {
+    const fam = await fwWrite(
+      () => db.from("path_families").delete().eq("id", familyId),
+      `fw compensation family delete (${familyId})`
+    );
     if (fam.error) {
       console.error(
-        `[fw/provision] compensation family delete failed for ${input.familyId}: ${fam.error.message}`
+        `[fw/provision] compensation family delete failed for ${familyId}: ${fam.error.message}`
       );
     }
   }

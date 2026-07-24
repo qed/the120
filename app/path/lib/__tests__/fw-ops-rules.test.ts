@@ -410,8 +410,9 @@ describe("fwReplayRejectReasonCopy", () => {
     // The five values of FwRejectReason (fw-sync-rules.ts) — the drain now WRITES
     // these rows, so each must render a sentence, not the raw machine string. A drain
     // reason with no copy would show blank on the staff reject list. `missing_progress`
-    // was the api-contract review's gap. `cas_lost` is a sixth, speculative-copy reason
-    // no drain currently emits but the surface renders if a future unit does.
+    // was the api-contract review's gap. (A previously-speculative sixth reason,
+    // `cas_lost`, was removed in Unit 9: the CAS-refused replay it anticipated ships
+    // under `cross_actor_undo`, so nothing produces `cas_lost` and its dead copy is gone.)
     const drainReasons: FwRejectReason[] = [
       "cross_actor_undo",
       "reauth_failed",
@@ -419,7 +420,7 @@ describe("fwReplayRejectReasonCopy", () => {
       "guard_refused",
       "missing_progress",
     ];
-    for (const reason of [...drainReasons, "cas_lost"]) {
+    for (const reason of drainReasons) {
       const copy = fwReplayRejectReasonCopy(reason);
       expect(copy.length).toBeGreaterThan(0);
       // Known reasons render prose, not the raw machine string.

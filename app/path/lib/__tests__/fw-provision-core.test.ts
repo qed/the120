@@ -48,7 +48,17 @@ type Seed = {
   authUsers?: Row[];
   /** Consumed in order, one per createUser call; absent entries mean success. */
   createUserOutcomes?: CreateUserOutcome[];
-  failTable?: { table: string; op: "insert" | "upsert"; message: string } | null;
+  failTable?: {
+    table: string;
+    op: "insert" | "upsert";
+    message: string;
+    landsAnyway?: boolean;
+    /** SQLSTATE on the insert error — `"23505"` models a concurrent unique-violation. */
+    code?: string;
+  } | null;
+  /** Force path_student_profiles.maybeSingle() to error — exercises the post-write-
+   *  verify's AMBIGUOUS branch (a verify read that itself times out). */
+  profileReadError?: string | null;
   deleteUserError?: string | null;
 };
 
@@ -98,6 +108,9 @@ function makeFakeDb(seed: Seed) {
         return builder;
       },
       async maybeSingle() {
+        if (table === "path_student_profiles" && seed.profileReadError) {
+          return { data: null, error: { message: seed.profileReadError } };
+        }
         const hit = rows()[0];
         return { data: hit ? { ...hit } : null, error: null };
       },
@@ -110,7 +123,18 @@ function makeFakeDb(seed: Seed) {
           select() {
             return {
               async single() {
-                if (fail) return { data: null, error: { code: "500", message: seed.failTable!.message } };
+                if (fail) {
+                  // `landsAnyway: true` models the timed-out-but-committed write: the
+                  // API reports failure, yet the row is actually present. The Unit 9
+                  // post-write-verify must find it and adopt rather than compensate.
+                  if (seed.failTable!.landsAnyway) {
+                    tables[table].push({ id: `${table}-${idSeq++}`, ...payload });
+                  }
+                  return {
+                    data: null,
+                    error: { code: seed.failTable!.code ?? "500", message: seed.failTable!.message },
+                  };
+                }
                 const row = { id: `${table}-${idSeq++}`, ...payload };
                 tables[table].push(row);
                 return { data: { id: row.id }, error: null };
@@ -421,6 +445,68 @@ describe("provisionFwStudent — what each failure leaves behind", () => {
     expect(res).toEqual({ ok: false, reason: "unavailable" });
     expect(authUsers).toHaveLength(0);
     expect(tables.path_families).toHaveLength(0);
+  });
+
+  it("profile-insert REPORTS failure but the row LANDED → adopts it, no compensation, completes the legs", async () => {
+    // Unit 9 hardening: a timed-out profile insert may still have committed. The
+    // POST-WRITE VERIFY must find the landed row and adopt it rather than deleting
+    // the account + family UNDER a real, committed student profile.
+    const { db, tables, authUsers, calls } = makeFakeDb({
+      failTable: { table: "path_student_profiles", op: "insert", message: "fetch failed: timeout", landsAnyway: true },
+    });
+    const res = await provisionFwStudent(db, MAYA);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.adopted).toBe(true);
+    // NOT compensated: the account and its private family survive.
+    expect(calls.deleteUser).toBe(0);
+    expect(authUsers).toHaveLength(1);
+    expect(tables.path_families).toHaveLength(1);
+    expect(tables.path_student_profiles).toHaveLength(1);
+    // …and the remaining legs completed on the adopted profile.
+    expect(tables.path_cohort_members).toHaveLength(1);
+    expect(tables.path_task_progress).toHaveLength(125);
+  });
+
+  it("does NOT adopt on a UNIQUE VIOLATION — a concurrent same-name mint is not our own write (AR-1)", async () => {
+    // Adversarial AR-1: two concurrent mints of the same name can have the loser's insert
+    // hit a 23505 because a DIFFERENT caller's profile already holds the (adopted) user_id.
+    // Adopting that stranger's profile would silently MERGE two identities and report a
+    // false success. A 23505 (unlike our own timed-out write, which carries no code) must
+    // compensate, never adopt.
+    const { db, authUsers, calls } = makeFakeDb({
+      failTable: {
+        table: "path_student_profiles",
+        op: "insert",
+        message: "duplicate key value violates unique constraint",
+        code: "23505",
+        landsAnyway: true, // a row IS present (the winner's) — but it is not ours to adopt
+      },
+    });
+    const res = await provisionFwStudent(db, MAYA);
+
+    expect(res).toEqual({ ok: false, reason: "unavailable" });
+    // Compensated (did NOT adopt the winner's profile): the family we created is gone and
+    // our own account was deleted — never a silent `ok:true, adopted:true` merge.
+    expect(calls.deleteUser).toBe(1);
+    expect(authUsers).toHaveLength(0);
+  });
+
+  it("does NOT compensate when the post-write VERIFY itself fails — ambiguous, not confirmed-absent", async () => {
+    // Reliability P1: a timed-out profile insert MAY have landed. If the post-write-verify
+    // read ALSO fails, that is "we don't know", NOT "confirmed absent" — compensating would
+    // delete a possibly-live account. The ambiguous branch leaves the account intact and
+    // reports unavailable, so a retry/match resolves the identity.
+    const { db, calls } = makeFakeDb({
+      failTable: { table: "path_student_profiles", op: "insert", message: "fetch failed: timeout" },
+      profileReadError: "verify read timed out",
+    });
+    const res = await provisionFwStudent(db, MAYA);
+
+    expect(res).toEqual({ ok: false, reason: "unavailable" });
+    // Critically: NO compensation — the possibly-landed profile's account is left alone.
+    expect(calls.deleteUser).toBe(0);
   });
 
   it("membership failure KEEPS the profile and returns its id for retry-in-place", async () => {

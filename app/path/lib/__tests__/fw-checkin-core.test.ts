@@ -161,6 +161,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
       capturedAt: "2026-08-22T14:40:00.000Z",
       actionId: "action-1",
       clientId: "client-1",
+      expectedVerifiedBy: null,
     });
     expect(rpcCalls[0]).toEqual({
       name: "fw_move_task",
@@ -172,7 +173,43 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
       p_captured_at: "2026-08-22T14:40:00.000Z",
       p_action_id: "action-1",
       p_client_id: "client-1",
+      // The offline-only CAS param — null on the online path (no CAS).
+      p_expected_verified_by: null,
     });
+  });
+
+  it("threads a non-null expectedVerifiedBy to p_expected_verified_by (the offline undo replay)", async () => {
+    const { db, rpcCalls } = makeFakeDb({ members: ["s1"] });
+    await fwMoveTask(db, {
+      studentId: "s1",
+      taskId: TASK,
+      action: "undo",
+      actor: GUIDE,
+      cohortId: COHORT,
+      capturedAt: "2026-08-22T14:40:00.000Z",
+      actionId: "action-1",
+      clientId: "client-1",
+      expectedVerifiedBy: GUIDE,
+    });
+    expect(rpcCalls[0].p_expected_verified_by).toBe(GUIDE);
+  });
+
+  it("narrows the cross_actor_undo outcome (Unit 9) rather than dropping it to null", async () => {
+    const { db } = makeFakeDb({
+      replies: { s1: [{ outcome: "cross_actor_undo", state: "verified" }] },
+    });
+    const echo = await fwMoveTask(db, {
+      studentId: "s1",
+      taskId: TASK,
+      action: "undo",
+      actor: GUIDE,
+      cohortId: COHORT,
+      capturedAt: "2026-08-22T15:00:00.000Z",
+      actionId: "a",
+      clientId: null,
+      expectedVerifiedBy: GUIDE,
+    });
+    expect(echo).toEqual({ outcome: "cross_actor_undo", state: "verified", verifiedBy: GUIDE });
   });
 
   it("returns null on an RPC error rather than a fabricated echo", async () => {
@@ -187,6 +224,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
         capturedAt: "2026-08-22T15:00:00.000Z",
         actionId: "a",
         clientId: null,
+        expectedVerifiedBy: null,
       })
     ).toBeNull();
   });
@@ -203,6 +241,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
         capturedAt: "2026-08-22T15:00:00.000Z",
         actionId: "a",
         clientId: null,
+        expectedVerifiedBy: null,
       })
     ).toBeNull();
   });
@@ -219,6 +258,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
         capturedAt: "2026-08-22T15:00:00.000Z",
         actionId: "a",
         clientId: null,
+        expectedVerifiedBy: null,
       })
     ).toBeNull();
   });
@@ -234,6 +274,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
       capturedAt: "2026-08-22T15:00:00.000Z",
       actionId: "a",
       clientId: null,
+      expectedVerifiedBy: null,
     });
     expect(echo).toEqual({ outcome: "missing", state: null, verifiedBy: GUIDE });
   });
@@ -249,6 +290,7 @@ describe("fwMoveTask — fail-closed narrowing at the service-role boundary", ()
       capturedAt: "2026-08-22T15:00:00.000Z",
       actionId: "a",
       clientId: null,
+      expectedVerifiedBy: null,
     });
     expect(echo!.state).toBeNull();
   });
@@ -681,6 +723,19 @@ describe("runFwCheckIn — the not-yet arms round-trip through the report", () =
       studentId: "s1",
       kind: "failed",
       reason: "missing_progress",
+    });
+  });
+
+  it("a CAS-refused undo (Unit 9) surfaces as failed:cross_actor_undo — terminal, not a retry", async () => {
+    const { result } = run(
+      { members: ["s1"], replies: { s1: [{ outcome: "cross_actor_undo", state: "verified" }] } },
+      { action: "undo", expectedVerifiedBy: GUIDE }
+    );
+    const r = await result;
+    expect(r.ok && r.outcomes[0]).toEqual({
+      studentId: "s1",
+      kind: "failed",
+      reason: "cross_actor_undo",
     });
   });
 });

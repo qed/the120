@@ -48,11 +48,22 @@ const MIGRATIONS = [
     label: "20260730120000 (original definition)",
     file: "supabase/migrations/20260730120000_fw_move_task.sql",
     scopedClientId: false,
+    swapsClientIdIndex: false,
+    casParam: false,
   },
   {
-    label: "20260731120000 (client_id re-scoped — the live definition)",
+    label: "20260731120000 (client_id re-scoped)",
     file: "supabase/migrations/20260731120000_fw_client_id_scoped.sql",
     scopedClientId: true,
+    swapsClientIdIndex: true,
+    casParam: false,
+  },
+  {
+    label: "20260804120000 (offline-only undo CAS — the live definition)",
+    file: "supabase/migrations/20260804120000_fw_offline_undo_cas.sql",
+    scopedClientId: true,
+    swapsClientIdIndex: false,
+    casParam: true,
   },
 ] as const;
 
@@ -175,7 +186,7 @@ where p.student_id = p_student_id`;
 
 /* ═══════════════════════════════════════ per-migration parity assertions ══ */
 
-describe.each(MIGRATIONS)("$label", ({ file, scopedClientId }) => {
+describe.each(MIGRATIONS)("$label", ({ file, scopedClientId, swapsClientIdIndex, casParam }) => {
   const raw = readFileSync(path.resolve(process.cwd(), file), "utf8");
   const source = stripSqlComments(raw);
   const body = functionBody(raw, "fw_move_task");
@@ -395,17 +406,21 @@ describe.each(MIGRATIONS)("$label", ({ file, scopedClientId }) => {
         expect(body).not.toMatch(/where e\.client_id = p_client_id\s*\n?\s*\)/);
       });
 
-      it("the migration swaps the index the ON CONFLICT infers, in the safe order", () => {
-        // Create the replacement before dropping the old one, so no window exists
-        // without a uniqueness guard.
-        const createAt = source.indexOf("create unique index if not exists path_task_events_student_task_client_id_key");
-        const dropAt = source.indexOf("drop index if exists public.path_task_events_client_id_key");
-        expect(createAt).toBeGreaterThan(-1);
-        expect(dropAt).toBeGreaterThan(createAt);
-        expect(source).toMatch(
-          /on public\.path_task_events \(student_id, task_id, client_id\)\s*\n?\s*where client_id is not null/
-        );
-      });
+      if (swapsClientIdIndex) {
+        it("the migration swaps the index the ON CONFLICT infers, in the safe order", () => {
+          // Create the replacement before dropping the old one, so no window exists
+          // without a uniqueness guard. Only the migration that PERFORMS the swap
+          // carries it; a later `create or replace` that merely reuses the scoped key
+          // (the CAS migration) does not re-swap the index.
+          const createAt = source.indexOf("create unique index if not exists path_task_events_student_task_client_id_key");
+          const dropAt = source.indexOf("drop index if exists public.path_task_events_client_id_key");
+          expect(createAt).toBeGreaterThan(-1);
+          expect(dropAt).toBeGreaterThan(createAt);
+          expect(source).toMatch(
+            /on public\.path_task_events \(student_id, task_id, client_id\)\s*\n?\s*where client_id is not null/
+          );
+        });
+      }
     } else {
       it("used the un-scoped key (superseded by the next migration)", () => {
         expect(body!.match(/on conflict \(client_id\) where client_id is not null do nothing/g)).toHaveLength(2);
@@ -436,7 +451,12 @@ describe.each(MIGRATIONS)("$label", ({ file, scopedClientId }) => {
   /* ── the grants ── */
 
   describe("service-role only", () => {
-    const SIG = "public.fw_move_task(uuid, text, text, uuid, uuid, timestamptz, uuid, text)";
+    // The CAS migration adds a 9th param (p_expected_verified_by uuid), so the
+    // revoked signature grows by one uuid. Every other migration is 8-arg.
+    const EXPECTED_TYPES = casParam
+      ? ["uuid", "text", "text", "uuid", "uuid", "timestamptz", "uuid", "text", "uuid"]
+      : ["uuid", "text", "text", "uuid", "uuid", "timestamptz", "uuid", "text"];
+    const SIG = `public.fw_move_task(${EXPECTED_TYPES.join(", ")})`;
 
     it("is SECURITY DEFINER with a pinned search_path", () => {
       // Asserted against COMMENT-STRIPPED source: an earlier revision read raw
@@ -460,10 +480,82 @@ describe.each(MIGRATIONS)("$label", ({ file, scopedClientId }) => {
       const types = [...declared.matchAll(/^\s*p_\w+\s+([a-z ]+?)(?:\s+default.*)?,?$/gm)].map((m) =>
         m[1].trim()
       );
-      expect(types).toEqual(["uuid", "text", "text", "uuid", "uuid", "timestamptz", "uuid", "text"]);
+      expect(types).toEqual(EXPECTED_TYPES);
       // A revoke against a signature the function does not have silently succeeds
       // only if some overload matches — leaving the real one public.
       expect(SIG).toContain(types.join(", "));
     });
   });
+
+  /* ── the offline-only undo CAS (Unit 9) ── */
+
+  if (casParam) {
+    describe("the offline-only undo CAS", () => {
+      const parts = splitUpdate(updateStatement(body!)!)!;
+
+      it("drops the old 8-arg overload BEFORE creating the 9-arg one (no PGRST203 ambiguity)", () => {
+        // The migration header spends a paragraph on why this drop exists: adding a param
+        // creates a distinct overload, and two fw_move_task functions would make an 8-named-
+        // arg PostgREST call ambiguous. Pin the drop (of the exact 8-arg signature) and that
+        // it precedes the create — the analogue of the index-swap-order assertion above.
+        const dropAt = source.search(
+          /drop function if exists public\.fw_move_task\(\s*uuid, text, text, uuid, uuid, timestamptz, uuid, text\s*\)/
+        );
+        const createAt = source.indexOf("create or replace function public.fw_move_task");
+        expect(dropAt).toBeGreaterThan(-1);
+        expect(createAt).toBeGreaterThan(dropAt);
+      });
+
+      it("declares the optional p_expected_verified_by uuid param", () => {
+        // The param must exist AND default to null, so every existing 8-arg caller
+        // (the whole online write path) keeps working unchanged. Asserted against
+        // `source` — the param list lives in the signature, before `as $$`, so it is
+        // NOT inside `body` (which starts at the function body).
+        expect(source).toMatch(/p_expected_verified_by uuid default null/);
+      });
+
+      it("puts the CAS in the WHERE predicate, ANDed alongside the state guard", () => {
+        // The CAS is a term of the UPDATE's WHERE, not a preceding `if` — same
+        // reason the state guard is: a check-then-act reintroduces the lost update.
+        // Extract the CAS clause specifically and assert its exact shape.
+        expect(parts.where).toMatch(/p\.verified_by = p_expected_verified_by/);
+        // …and it is genuinely in the WHERE, not the SET (where it would be inert).
+        expect(parts.set).not.toMatch(/p_expected_verified_by/);
+      });
+
+      it("is CONDITIONAL — both escape clauses present, so online cross-actor undo survives", () => {
+        // THE mutation this test exists for. Dropping either escape clause makes the
+        // CAS unconditional and breaks the INTENDED online cross-actor undo (any guide
+        // may undo any decision live). Both `p_expected_verified_by is null` (the online
+        // path) and `p_action <> 'undo'` (checkmark/not_yet) must gate it.
+        expect(parts.where).toMatch(/p_expected_verified_by is null\s*\n?\s*or p_action <> 'undo'\s*\n?\s*or p\.verified_by = p_expected_verified_by/);
+      });
+
+      it("classifies a CAS-refused undo as `cross_actor_undo`, gated on a non-null expectation", () => {
+        // The new distinguishable outcome the drain maps to the cross_actor_undo reject.
+        // Gated on p_expected_verified_by IS NOT NULL and the two decision states, so it
+        // can never fire on an online undo or on a plain refusal.
+        expect(body).toMatch(
+          /elsif p_action = 'undo' and p_expected_verified_by is not null\s*\n?\s*and v_from in \('verified', 'not_yet'\)\s*\n?\s*and v_author is distinct from p_expected_verified_by then/
+        );
+        expect(body).toMatch(/v_outcome := 'cross_actor_undo';/);
+      });
+
+      it("the CAS-refused arm writes NO event — it is between already_done and refused, both no-ops", () => {
+        // A cross_actor_undo must not append an event; the concurrent decision stands.
+        // Assert the arm sits AFTER the two event-writing arms (applied, re_attempt) so
+        // it can only be reached on a zero-row UPDATE.
+        const appliedAt = body!.indexOf("v_outcome := 'applied';");
+        const crossAt = body!.indexOf("v_outcome := 'cross_actor_undo';");
+        const refusedAt = body!.indexOf("v_outcome := 'refused';");
+        expect(appliedAt).toBeGreaterThan(-1);
+        expect(crossAt).toBeGreaterThan(appliedAt);
+        expect(refusedAt).toBeGreaterThan(crossAt);
+      });
+    });
+  } else {
+    it("has no CAS param — the pre-CAS definitions take exactly 8 args", () => {
+      expect(body).not.toMatch(/p_expected_verified_by/);
+    });
+  }
 });

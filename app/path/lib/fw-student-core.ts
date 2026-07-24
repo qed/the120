@@ -37,7 +37,11 @@ import type { Band } from "@/app/path/content/types";
 import { fwRead } from "./fw-call";
 import { loadFwMatchCandidates } from "./fw-loader";
 import { fwMatchKey, matchFwStudent, type FwMatchVerdict } from "./fw-match-rules";
-import { provisionFwStudent, type ProvisionFwStudentFailure } from "./provision-core";
+import {
+  provisionFwStudent,
+  type ProvisionFwStudentFailure,
+  type ProvisionFwStudentResult,
+} from "./provision-core";
 
 /* ════════════════════════════════════ PROPOSED-1: lookup before you create ══ */
 
@@ -293,14 +297,30 @@ export async function runFwQuickCreate(
     }
   }
 
-  const provisioned = await provisionFwStudent(db, {
-    firstName: input.firstName,
-    lastName: input.lastName,
-    band: input.band,
-    cohortId: input.cohortId,
-    noticeAttestedBy: input.actorUserId,
-    existingProfileId: input.existingProfileId ?? null,
-  });
+  // try/catch because `provisionFwStudent`'s Auth admin calls (createUser/getUserById)
+  // are NOT timeout/throw-guarded the way its PostgREST calls are — a network abort there
+  // throws, and the LIVE walk-in path (quick-create) has no other guard, so an uncaught
+  // throw would escape the typed `FwQuickCreateResult` and surface a raw Server Action
+  // error to a guide mid-tap (reliability review). The bulk importer already wraps this
+  // call; quick-create now matches. A thrown provision → a typed `unavailable` with a
+  // resume handle absent (nothing verified as landed), which the guide can simply retry.
+  let provisioned: ProvisionFwStudentResult;
+  try {
+    provisioned = await provisionFwStudent(db, {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      band: input.band,
+      cohortId: input.cohortId,
+      noticeAttestedBy: input.actorUserId,
+      existingProfileId: input.existingProfileId ?? null,
+    });
+  } catch (e) {
+    console.error(
+      `[fw/quick-create] provisioning threw for ${input.firstName} ${input.lastName}:`,
+      e
+    );
+    return { ok: false, reason: "unavailable" };
+  }
   if (!provisioned.ok) {
     return {
       ok: false,

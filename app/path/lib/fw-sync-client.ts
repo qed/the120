@@ -475,13 +475,23 @@ export async function clearFwResidue(): Promise<{ cleared: boolean }> {
   let cleared = true;
   if (isFwQueueSupported()) {
     try {
-      const res = await clearFwQueueIfEmpty();
-      cleared = res.cleared;
-      await clearFwRoster();
-      notify();
+      cleared = (await clearFwQueueIfEmpty()).cleared;
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
       cleared = false;
+    }
+  }
+  // ABORT-SAFE: if a tap raced in (queue not cleared), the sign-out aborts — so the
+  // roster cache and shell cache must be KEPT too, or the guide is left with a
+  // degraded offline shell on the flaky connectivity that caused the race. Clear all
+  // three residues together, or none (adversarial re-review regression).
+  if (!cleared) return { cleared };
+  if (isFwQueueSupported()) {
+    try {
+      await clearFwRoster();
+      notify();
+    } catch (e) {
+      console.error("[fw/sync] roster clear failed:", e);
     }
   }
   if (typeof caches !== "undefined") {

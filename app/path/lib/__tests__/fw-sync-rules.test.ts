@@ -296,8 +296,12 @@ describe("projectFwPendingState — a revisit reflects the guide's own queued ta
     expect(projectFwPendingState("locked", [entry("checkmark"), entry("undo")])).toBe("locked");
   });
 
-  it("a pending undo+not_yet correction on a pre-outage `verified` projects `not_yet`", () => {
-    expect(projectFwPendingState("verified", [entry("undo"), entry("not_yet")])).toBe("not_yet");
+  it("a leading undo is NOT projected (author-blind — a cross-actor undo would mislead)", () => {
+    // Conservative: a reduced sequence starting with an undo shows the server state
+    // unchanged, so the guide can't layer a fresh decision onto a wrongly-reverted
+    // display and lose it to the same-actor guard's reject (adversarial re-review).
+    expect(projectFwPendingState("verified", [entry("undo")])).toBe("verified");
+    expect(projectFwPendingState("verified", [entry("undo"), entry("not_yet")])).toBe("verified");
   });
 
   it("an illegal pending op leaves the state where the decision table would (no second machine)", () => {

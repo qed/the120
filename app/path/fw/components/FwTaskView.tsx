@@ -202,6 +202,11 @@ export default function FwTaskView({
     };
   }, []);
 
+  // Whether the guide has interacted (submitted/queued) since mount. Once they have,
+  // the local `state` is authoritative and the async mount-reconciliation below must
+  // NOT overwrite it with a value derived from the pre-tap queue snapshot.
+  const interacted = useRef(false);
+
   // Reconcile the server-supplied initial state with this guide's OWN pending offline
   // captures (correctness review): mid-outage the page renders from a stale SW-cached
   // shell that predates the guide's queued taps, so a revisit would show the task as
@@ -211,7 +216,7 @@ export default function FwTaskView({
     let cancelled = false;
     void readPendingFwOpsFor({ cohortId, studentId: student.studentId, taskId, actorUserId }).then(
       (ops) => {
-        if (cancelled || ops.length === 0 || !mounted.current) return;
+        if (cancelled || ops.length === 0 || !mounted.current || interacted.current) return;
         setState(projectFwPendingState(initialState, ops));
       }
     );
@@ -258,7 +263,11 @@ export default function FwTaskView({
    * if the write had in fact partly landed. Returns false when the device cannot
    * queue at all (private mode), so the caller falls through to the visible error.
    */
-  const queueBackstop = async (action: FwAction, studentIds: readonly string[]): Promise<boolean> => {
+  const queueBackstop = async (
+    action: FwAction,
+    studentIds: readonly string[],
+    opts: { silent?: boolean } = {}
+  ): Promise<boolean> => {
     const enq = await enqueueFwCheckIns({
       cohortId,
       taskId,
@@ -270,7 +279,10 @@ export default function FwTaskView({
       clientIds: ledger.idsFor({ taskId, action, studentIds }),
     });
     if (!enq.ok) return false;
-    if (mounted.current) {
+    // Silent mode durably captures ambiguous PER-STUDENT outcomes inside an otherwise
+    // successful batch without disturbing the surface (which already shows each
+    // student's real result); the global indicator carries the queued count.
+    if (!opts.silent && mounted.current) {
       setState(fwActionTarget(action));
       setExtras([]);
       setPickerNote(null);
@@ -285,6 +297,8 @@ export default function FwTaskView({
 
   const submit = async (action: FwAction, studentIds: readonly string[]) => {
     if (busy || studentIds.length === 0) return;
+    // From here the local state is user-driven; the mount reconcile must stand down.
+    interacted.current = true;
     setBusy(true);
     setError(null);
     setRetryable(false);
@@ -414,14 +428,24 @@ export default function FwTaskView({
       // Keeps the tree's counts and the roster's resume chips honest when the
       // guide navigates back.
       router.refresh();
+
+      // Durably capture any PER-STUDENT ambiguous outcome (a batch where the request
+      // succeeded but one student's write timed out) so a "Next student" tap can't
+      // discard it with the in-memory ledger (adversarial re-review P1). Idempotent by
+      // the same client ids still held for those students.
+      const unsettled = fwRetryStudentIds(res.outcomes);
+      if (unsettled.length > 0) void queueBackstop(action, unsettled, { silent: true });
     } catch {
       // A Server Action can REJECT rather than return — on venue wifi that is
       // the likely shape (docs/solutions/ui-bugs/server-action-rejection-no-try-
-      // finally-freezes-capture-modal-2026-07-20.md). The tap threw before any
-      // outcome came back: capture it durably rather than leave an ephemeral
-      // "Retry" a navigate-away would discard (P0).
-      if (!mounted.current) return;
+      // finally-freezes-capture-modal-2026-07-20.md). Capture the tap durably
+      // FIRST — even if the guide already navigated away (unmounting this view),
+      // the enqueue must still run, because a navigate-away-before-throw is exactly
+      // the loss this backstop exists to prevent (queueBackstop guards only its OWN
+      // setState on mounted, so calling it while unmounted is safe). The mount check
+      // gates only the visible error UI below.
       if (await queueBackstop(action, studentIds)) return;
+      if (!mounted.current) return;
       setRetryable(true);
       setError("That didn't go through, and this device can't save it offline. Keep a signal, or use paper as backup.");
       setSurface((prev) =>

@@ -254,10 +254,21 @@ export function reduceFwOps(ops: readonly FwQueueEntry[]): FwQueueEntry[] {
  * staff reject. Folding the pending ops (reduced, then applied through the canonical
  * decision table — never a second state machine) onto the server state shows the true
  * pending position, so the guide sees Undo instead of a conflicting fresh decision.
+ *
+ * AUTHOR-BLIND, so it is CONSERVATIVE about a leading surviving undo: this runs
+ * client-side with no `verified_by`, and a queued undo that actually reverts ANOTHER
+ * guide's decision will be held by the same-actor guard at drain (cross_actor_undo).
+ * Optimistically showing it as reverted would invite the guide to layer a fresh
+ * decision on top, which then rejects WITH the undo as one sequence — silently losing
+ * a valid decision (adversarial re-review). So a reduced sequence that STARTS with an
+ * undo projects the server state unchanged; the common case this exists for — a
+ * pending checkmark on a stale-`locked` shell — is decision-led and unaffected.
  */
 export function projectFwPendingState(server: TaskState, ops: readonly FwQueueEntry[]): TaskState {
+  const reduced = reduceFwOps(ops);
+  if (reduced[0]?.action === "undo") return server;
   let state = server;
-  for (const op of reduceFwOps(ops)) {
+  for (const op of reduced) {
     const decision = decideFwAction({ action: op.action, from: state });
     if (decision.kind === "apply") state = decision.to;
     // re_attempt / already_done / refused leave the state where it is.

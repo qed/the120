@@ -975,8 +975,10 @@ fresh link emailed to ${issued.email}`);
     const authorizedCohortIds = [...new Set(scoped.map((e) => e.cohortId))];
 
     if (process.argv.includes("--dry-run")) {
-      // Mirror runFwDrain's own front-of-fold filters so the preview matches reality:
-      // blocked entries are skipped, and an unauthorized cohort shows as reauth_failed.
+      // Mirror runFwDrain's front-of-fold blocked filter so the preview matches the
+      // real run. (Authorization is not modelled here: the CLI holds the service-role
+      // key and authorizes every in-scope cohort, so there is no reauth_failed to
+      // preview — a scoping choice already filtered other cohorts' entries out above.)
       const drainable = scoped.filter((e) => e.blocked === null);
       const serverByKey = new Map<string, FwServerRow | null>();
       for (const [key, ops] of groupFwEntriesByStudentTask(drainable)) {
@@ -986,15 +988,7 @@ fresh link emailed to ${issued.email}`);
           serverByKey.set(key, read.ok ? read.row : null);
         }
       }
-      const authorized = new Set(authorizedCohortIds);
-      const plan = planFwDrain(drainable, serverByKey).map((group) => {
-        // key is "cohort student task" — reflect the authorization gate in the plan.
-        const cohortId = group.key.split(" ")[0];
-        if (!authorized.has(cohortId)) {
-          return { key: group.key, replay: [], reject: group.replay.concat(group.reject.map((r) => r.clientId)).map((c) => ({ clientId: c, reason: "reauth_failed" as const })) };
-        }
-        return group;
-      });
+      const plan = planFwDrain(drainable, serverByKey);
       emit(plan, () => {
         for (const group of plan) {
           console.log(`\n${group.key}`);

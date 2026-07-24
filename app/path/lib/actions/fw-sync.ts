@@ -117,11 +117,13 @@ export async function drainFwQueue(input: unknown): Promise<FwSyncActionResult> 
     }
     if (verdict.reason === "no_session") return { ok: false, reason: "no_session" };
     // A refusal collapses "genuinely unauthorized" and "the auth read failed" into
-    // one verdict. Probe DB reachability: if the probe ALSO fails, the refusal was a
-    // blip → UNKNOWN (retry). If the probe succeeds, the refusal was genuine → a
-    // revoke that rejects (reliability review's data-loss P1 — on venue wifi a blip
-    // must never discard a guide's real captures to a staff-only reject).
-    if (!(await probeCohortReadable(db, cohortId))) unknownCohortIds.push(cohortId);
+    // one verdict, and the verdict rests on THREE independent reads — grants, the
+    // cohort, and (for staff) the staff row — each of which fails closed to "no" on
+    // its OWN read error. Probe ALL of them: if ANY was unreadable, the refusal was a
+    // blip → UNKNOWN (retry). Only when every read is reachable is the refusal genuine
+    // → a revoke that rejects (reliability review's data-loss P1 — on venue wifi a
+    // blip must never discard a guide's real captures to a staff-only reject).
+    if (!(await probeAuthReadable(db, session.userId, cohortId))) unknownCohortIds.push(cohortId);
   }
 
   const { outcomes } = await runFwDrain(db, {
@@ -135,14 +137,35 @@ export async function drainFwQueue(input: unknown): Promise<FwSyncActionResult> 
   return { ok: true, outcomes };
 }
 
-/** Whether the cohort row can be READ right now — a proxy for "was the earlier
- *  authorization refusal genuine, or a transient blip?" A successful read (row or
- *  not) means the DB was reachable, so the refusal stands; a read error means the
- *  auth reads likely blipped too, and the cohort's entries should retry. */
-async function probeCohortReadable(db: SupabaseClient, cohortId: string): Promise<boolean> {
-  const res = await fwRead(
-    () => db.from("path_cohorts").select("id").eq("id", cohortId).maybeSingle(),
-    `fw drain authz probe (${cohortId})`
-  );
-  return !res.error;
+/**
+ * Whether the reads the authorization verdict depends on are ALL reachable right
+ * now — the test for "was that refusal genuine, or a transient blip?"
+ *
+ * The verdict rests on three independent reads (grants, cohort, staff row), and a
+ * blip in ANY of them collapses to the same fail-closed refusal. Re-resolving is not
+ * an option — `loadFwSession` is request-memoized, so a retry in this request returns
+ * the same blipped result — so we probe the tables directly with fresh reads. Any
+ * unreadable table means the refusal could be a blip → treat the cohort as UNKNOWN
+ * (retry). Only when all three read cleanly is the refusal trusted as a revoke.
+ */
+async function probeAuthReadable(
+  db: SupabaseClient,
+  userId: string,
+  cohortId: string
+): Promise<boolean> {
+  const [grants, cohort, staff] = await Promise.all([
+    fwRead(
+      () => db.from("path_role_grants").select("role").eq("user_id", userId).limit(1),
+      `fw drain authz probe grants (${userId})`
+    ),
+    fwRead(
+      () => db.from("path_cohorts").select("id").eq("id", cohortId).maybeSingle(),
+      `fw drain authz probe cohort (${cohortId})`
+    ),
+    fwRead(
+      () => db.from("staff").select("id").eq("id", userId).limit(1),
+      `fw drain authz probe staff (${userId})`
+    ),
+  ]);
+  return !grants.error && !cohort.error && !staff.error;
 }

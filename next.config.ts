@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
       // The feed route ALSO sets these on its own Response — belt and suspenders,
       // and so the header is provably on the payload, not only the page.
       {
-        source: "/path/fw/board/:path*",
+        source: "/fp/fw/board/:path*",
         headers: [
           { key: "Cache-Control", value: "private, no-store, must-revalidate" },
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
@@ -31,6 +31,15 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
+      // FW Unit 10 — the whole-app /path → /fp rename (FW-D7/FW-R30). The app
+      // moved from app/path to app/fp; every old /path URL 308s to its /fp twin,
+      // preserving sub-path AND query (`:path*` carries both). Permanent (308,
+      // method-preserving) because the move is one-way and cacheable; the ONLY
+      // /path route literal that survives the straggler grep lives right here.
+      // A 308 (not the proxy) owns this so a session-less old sign-in URL lands
+      // on its /fp twin cleanly rather than being gated first — the proxy matcher
+      // no longer covers the old prefix at all (see proxy.ts).
+      { source: "/path/:path*", destination: "/fp/:path*", permanent: true },
       // The game was briefly live as /raiders before the Gauntlet rename.
       { source: "/raiders", destination: "/gauntlet", permanent: false },
       // The old GT sub-site was retired in the 2026-07 rebrand; the Scholars

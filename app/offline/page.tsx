@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 
 /**
  * The offline fallback page (T1 Unit 11) — the ONE route the service worker
- * precaches and serves when a /path navigation fails without a network.
+ * precaches and serves when a /fp navigation fails without a network.
  *
- * Lives OUTSIDE /path deliberately: the proxy gates /path/*, and a gated
+ * Lives OUTSIDE /fp deliberately: the proxy gates /fp/*, and a gated
  * fallback would cache a sign-in redirect at SW install time instead of this
  * page. Static, no auth, no Supabase, no client JS — it must render from the
  * SW cache on a cold offline start, and it must never break the env-less
@@ -17,7 +17,7 @@ import type { Metadata } from "next";
  */
 
 export const metadata: Metadata = {
-  title: "Offline — The Path",
+  title: "Offline — First Profit",
   robots: { index: false },
 };
 
@@ -38,7 +38,7 @@ export default function OfflinePage() {
         this device, and it will send itself the moment you&rsquo;re back online.
       </p>
       <a
-        href="/path"
+        href="/fp"
         className="mt-6 rounded-xl bg-phase-sell px-5 py-2.5 font-path-body text-sm font-semibold text-white"
       >
         Try again

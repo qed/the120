@@ -4,7 +4,7 @@
  *   npx tsx scripts/build-path-content.ts
  *
  * Parses the curriculum brief, asserts it against the version's manifest, and
- * writes `app/path/content/generated/program-<version>.ts`.
+ * writes `app/fp/content/generated/program-<version>.ts`.
  *
  * Why a committed generated module rather than parsing at runtime, or seeding
  * prose into Postgres:
@@ -23,8 +23,8 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { parseCurriculum } from "../app/path/content/parse-curriculum";
-import { assertMatchesManifest, manifestFor } from "../app/path/content/manifest";
+import { parseCurriculum } from "../app/fp/content/parse-curriculum";
+import { assertMatchesManifest, manifestFor } from "../app/fp/content/manifest";
 
 const VERSION_ID = process.argv[2] ?? "2026-27";
 
@@ -33,7 +33,7 @@ const SOURCE_PATH = path.resolve(
   "artifacts/The Path/the-path-home-study-curriculum-brief.md"
 );
 
-const OUT_DIR = path.resolve(process.cwd(), "app/path/content/generated");
+const OUT_DIR = path.resolve(process.cwd(), "app/fp/content/generated");
 const OUT_PATH = path.join(OUT_DIR, `program-${VERSION_ID}.ts`);
 
 function main() {

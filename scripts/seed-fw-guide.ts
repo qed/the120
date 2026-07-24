@@ -26,7 +26,7 @@ import {
   claimFwGuideInvite,
   issueFwGuideInvite,
   provisionFwGuide,
-} from "../app/path/lib/fw-guide-core";
+} from "../app/fp/lib/fw-guide-core";
 
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);

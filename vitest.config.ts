@@ -15,7 +15,7 @@ export default defineConfig({
       // a directory outside this allowlist silently never runs while
       // `npm run test` stays green (docs/solutions/test-failures/
       // vitest-include-allowlist-new-test-dirs-silently-never-run-2026-07-18.md).
-      "app/path/**/__tests__/**/*.test.{ts,tsx}",
+      "app/fp/**/__tests__/**/*.test.{ts,tsx}",
     ],
   },
   resolve: {

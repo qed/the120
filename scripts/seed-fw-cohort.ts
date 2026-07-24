@@ -44,10 +44,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { loadSupabaseEnv } from "./load-env";
-import type { Band } from "../app/path/content/types";
-import { loadFwMatchCandidates } from "../app/path/lib/fw-loader";
-import { fwMatchKey, matchFwStudent } from "../app/path/lib/fw-match-rules";
-import { runFwQuickCreate } from "../app/path/lib/fw-student-core";
+import type { Band } from "../app/fp/content/types";
+import { loadFwMatchCandidates } from "../app/fp/lib/fw-loader";
+import { fwMatchKey, matchFwStudent } from "../app/fp/lib/fw-match-rules";
+import { runFwQuickCreate } from "../app/fp/lib/fw-student-core";
 
 type SeedStudent = { firstName: string; lastName: string; band: Band };
 
@@ -323,7 +323,7 @@ async function main() {
     process.exitCode = 1;
   }
   if (!dryRun) {
-    console.log(`\n[seed-fw] open: /path/fw/cohort/${cohortId}`);
+    console.log(`\n[seed-fw] open: /fp/fw/cohort/${cohortId}`);
   }
 }
 

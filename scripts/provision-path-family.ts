@@ -5,7 +5,7 @@
  *
  * Machine-bound like scripts/seed-staff.ts (.env.local carries the service-role
  * key; env-less machines and worktree agents cannot run it). This is how the
- * consenting test families the T1 exit check names actually get into /path
+ * consenting test families the T1 exit check names actually get into /fp
  * until Unit 15 builds the parent-facing onboarding — and it is the manual
  * verification harness for this unit (two students → the R3 two-browser test).
  *
@@ -38,7 +38,7 @@ import {
   ensureStudentProgress,
   findAuthUserByEmail,
   provisionStudent,
-} from "@/app/path/lib/provision-core";
+} from "@/app/fp/lib/provision-core";
 import { loadSupabaseEnv } from "./load-env";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";
@@ -182,7 +182,7 @@ async function main() {
   }
 
   console.log(
-    `Done. Path family ${familyId} ready — sign in at /path/sign-in with a student first name + the password from scripts/.path-passwords.local.txt.`
+    `Done. Path family ${familyId} ready — sign in at /fp/sign-in with a student first name + the password from scripts/.path-passwords.local.txt.`
   );
 }
 

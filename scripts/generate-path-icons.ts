@@ -12,10 +12,10 @@
  * apple-touch-icons, so no baked-in rounding.
  *
  * Outputs (committed):
- *   app/path/apple-icon.png   — apple-touch-icon (iOS wants exactly 180×180).
- *     The FILE CONVENTION in the /path segment, so it replaces the root
- *     "120"-badge apple-icon.tsx for /path pages only; its URL
- *     (/path/apple-icon.png) is allowlisted in proxy-rules so an
+ *   app/fp/apple-icon.png   — apple-touch-icon (iOS wants exactly 180×180).
+ *     The FILE CONVENTION in the /fp segment, so it replaces the root
+ *     "120"-badge apple-icon.tsx for /fp pages only; its URL
+ *     (/fp/apple-icon.png) is allowlisted in proxy-rules so an
  *     unauthenticated Add-to-Home-Screen can fetch it.
  *   public/path-icon-192.png  — manifest icon
  *   public/path-icon-512.png  — manifest icon
@@ -132,7 +132,7 @@ function drawIcon(size: number): Uint8Array {
 }
 
 const OUTPUTS: [number, string][] = [
-  [180, "../app/path/apple-icon.png"],
+  [180, "../app/fp/apple-icon.png"],
   [192, "../public/path-icon-192.png"],
   [512, "../public/path-icon-512.png"],
 ];

@@ -20,10 +20,15 @@ import { describe, expect, it } from "vitest";
  */
 
 const MIGRATION = "supabase/migrations/20260803120000_fw_import_exceptions.sql";
+const BAND_MIGRATION = "supabase/migrations/20260803130000_fw_import_exceptions_band.sql";
 const raw = readFileSync(path.resolve(process.cwd(), MIGRATION), "utf8");
 /** Strip `--` line comments so structural assertions test the DDL, never the
  *  prose — which discusses "restrict", "unique", "pending" in English at length. */
 const sql = raw.replace(/--[^\n]*/g, "");
+const bandSql = readFileSync(path.resolve(process.cwd(), BAND_MIGRATION), "utf8").replace(
+  /--[^\n]*/g,
+  ""
+);
 
 /** The balanced-paren body of `create table … public.<name> ( … )`. */
 function createTableBody(name: string): string {
@@ -117,9 +122,11 @@ describe("path_fw_import_exceptions — indexes and RLS", () => {
     );
   });
 
-  it("enforces ONE pending exception per (cohort, name) — the idempotent-park backstop", () => {
-    // Without the WHERE, a resolved-then-re-flagged name would collide; without
-    // UNIQUE, a re-import stacks duplicate exceptions. Both halves are asserted.
+  it("shipped the one-pending-per-name index (the ORIGINAL 2-column form, a frozen fact)", () => {
+    // This file's text never changes, so it is pinned to the 2-column index it
+    // created. The LIVE index is widened to include band by 20260803130000 (the
+    // review fix), asserted separately below — the parity split mirrors how the
+    // ops audit action-CHECK widening is pinned across two migrations.
     expect(sql).toMatch(
       /create unique index if not exists path_fw_import_exceptions_one_pending_per_name_idx\s+on public\.path_fw_import_exceptions \(cohort_id, normalized_name\)\s+where state = 'pending'/i
     );
@@ -136,5 +143,33 @@ describe("path_fw_import_exceptions — indexes and RLS", () => {
     expect(sql).not.toMatch(/\binsert\s+into\b/i);
     expect(sql).not.toMatch(/\bupdate\s+public\./i);
     expect(sql).not.toMatch(/concurrently/i);
+  });
+});
+
+describe("the band-widening migration (20260803130000, review fix)", () => {
+  it("DROPS the old index then recreates it UNIQUE on (cohort_id, normalized_name, band)", () => {
+    // Both halves matter: the drop is what lets the recreate take the same name
+    // with a different column list; the 3-column UNIQUE is what lets two
+    // same-name-different-band children each hold their own pending exception.
+    expect(bandSql).toMatch(
+      /drop index if exists public\.path_fw_import_exceptions_one_pending_per_name_idx/i
+    );
+    expect(bandSql).toMatch(
+      /create unique index if not exists path_fw_import_exceptions_one_pending_per_name_idx\s+on public\.path_fw_import_exceptions \(cohort_id, normalized_name, band\)\s+where state = 'pending'/i
+    );
+  });
+
+  it("orders the drop BEFORE the recreate (a recreate-first order would no-op via `if not exists`)", () => {
+    const dropAt = bandSql.search(/drop index if exists/i);
+    const createAt = bandSql.search(/create unique index/i);
+    expect(dropAt).toBeGreaterThanOrEqual(0);
+    expect(createAt).toBeGreaterThan(dropAt);
+  });
+
+  it("is schema-only and not built CONCURRENTLY", () => {
+    expect(bandSql).not.toMatch(/\binsert\s+into\b/i);
+    expect(bandSql).not.toMatch(/\bupdate\s+public\./i);
+    expect(bandSql).not.toMatch(/create table/i);
+    expect(bandSql).not.toMatch(/concurrently/i);
   });
 });

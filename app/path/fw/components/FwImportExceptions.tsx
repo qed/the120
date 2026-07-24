@@ -8,6 +8,20 @@ import type { FwOpsImportException } from "@/app/path/lib/fw-import-core";
 import { FW_BAND_LABEL } from "@/app/path/lib/fw-nav-rules";
 import { narrowFwBand } from "@/app/path/lib/fw-provision-rules";
 
+/** Copy per machine reason (the migration's own comment: "the ops surface renders
+ *  copy"). One reason today; the fallback keeps an unmapped future reason visible
+ *  rather than blank — the `fwReplayRejectReasonCopy` pattern. */
+const REASON_COPY: Record<string, string> = {
+  ambiguous_match:
+    "This name matches more than one existing student, or one at a different band. Look them up above, then link or add them — and close this out.",
+};
+function reasonCopy(reason: string): string {
+  return (
+    REASON_COPY[reason] ??
+    "This row needs a staff decision. Look the name up above, then link or add them — and close this out."
+  );
+}
+
 /**
  * Pending import exceptions (FW Unit 7; gap G7) — the roster rows the importer
  * could not resolve on its own because the name matched more than one existing
@@ -74,8 +88,7 @@ export default function FwImportExceptions({
                 </span>
               </div>
               <p className="mt-1.5 font-path-body text-sm leading-5 text-hq-ink-soft">
-                This name matches more than one existing student, or one at a different band. Look
-                them up above, then link or add them — and close this out.
+                {reasonCopy(exc.reason)}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button

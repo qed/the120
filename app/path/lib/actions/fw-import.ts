@@ -38,7 +38,6 @@ import {
   type ImportChunkActionResult,
   type ResolveImportExceptionActionResult,
 } from "@/app/path/lib/fw-import-core";
-import { buildNormalizedFwName } from "@/app/path/lib/fw-provision-rules";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
 /** ONE message for every refusal shape — not staff, deactivated, Path cohort,
@@ -97,16 +96,15 @@ export async function importFwStudentsChunk(input: unknown): Promise<ImportChunk
   const gate = await requireCohortStaff(parsed.data.cohortId);
   if (!gate.ok) return { success: false, error: STAFF_ONLY };
 
+  // The rows go straight through — no `normalizedName` is computed here. The core
+  // recomputes the match key itself (never trusting a client-supplied one), so
+  // pre-deriving it with the THROWING `buildNormalizedFwName` would let a single
+  // unfoldable name in a hand-crafted request reject the whole chunk instead of
+  // failing one row (kieran-typescript review).
   const { outcomes } = await runFwImportChunk(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
     actorUserId: gate.actorUserId,
-    rows: parsed.data.rows.map((r) => ({
-      rowNumber: r.rowNumber,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      band: r.band,
-      normalizedName: buildNormalizedFwName(r.firstName, r.lastName),
-    })),
+    rows: parsed.data.rows,
   });
 
   revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);

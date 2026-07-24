@@ -95,7 +95,16 @@ function tokenizeCsv(text: string): string[][] {
       }
       continue;
     }
-    if (ch === '"') {
+    if (ch === '"' && field.length === 0) {
+      // A quote OPENS a quoted field only at the field's START (RFC 4180). A
+      // stray `"` in the MIDDLE of a value is a literal character, NOT a
+      // quote-mode entry — so one unbalanced quote in a hand-typed name
+      // (`Robert "Bob`) can no longer flip the parser into quote mode and
+      // swallow every subsequent comma and newline to EOF, collapsing the rest
+      // of the roster into one rejected record (adversarial review, P1). The
+      // remaining unterminated-open-quote case (a lone `"` that DOES start a
+      // field and never closes) is caught by the source-line reconciliation the
+      // parse result exposes.
       inQuotes = true;
     } else if (ch === ",") {
       pushField();
@@ -158,6 +167,17 @@ export type FwImportParseError =
   | "missing_last_name"
   | "missing_band_source"
   | "duplicate_column";
+
+/** Human copy for each file-level refusal — one source of truth for the ops
+ *  surface and the CLI (agent-native review; a raw enum tag is not guidance). */
+export const FW_IMPORT_PARSE_ERROR_COPY: Record<FwImportParseError, string> = {
+  empty_file: "The file is empty.",
+  no_data_rows: "The file has a header but no student rows.",
+  missing_first_name: "No first-name column found — add a “First Name” column.",
+  missing_last_name: "No last-name column found — add a “Last Name” column.",
+  missing_band_source: "No grade (or band) column found — add a “Grade” column.",
+  duplicate_column: "Two columns map to the same field — remove the duplicate.",
+};
 
 /**
  * Resolve the header record to a column map, or a file-level refusal reason.
@@ -243,7 +263,28 @@ export type FwImportParseResult =
       rejected: FwImportRejectedRow[];
       /** rows.length + rejected.length — the reconciliation base for the report. */
       dataRowCount: number;
+      /**
+       * Non-blank PHYSICAL lines in the source, minus the header. A roster field
+       * never legitimately contains a newline, so in a clean file this EQUALS
+       * `dataRowCount`. When it is larger, records collapsed — an unterminated
+       * quoted field swallowed one or more lines — and the surface warns rather
+       * than silently under-reporting the roster (adversarial review, P1 tail).
+       */
+      sourceDataLineCount: number;
     };
+
+/**
+ * What the importer CORE actually needs per row — the leaner input the Server
+ * Action and the CLI pass to `runFwImportChunk`. Deliberately OMITS
+ * `normalizedName`: the core recomputes the match key itself from the name (never
+ * trusting a client-supplied one), so the boundary must not pre-derive it — doing
+ * so with the throwing `buildNormalizedFwName` is how a single unfoldable name in
+ * a hand-crafted request could reject a whole chunk (kieran-typescript review).
+ */
+export type FwImportRowInput = Pick<
+  FwImportParsedRow,
+  "rowNumber" | "firstName" | "lastName" | "band"
+>;
 
 /** Resolve the band from a grade cell (digits extracted, e.g. "6th" → 6) or an
  *  explicit band token, returning the reason a bad value is rejected for. */
@@ -252,9 +293,18 @@ function resolveBand(
   source: FwImportColumnMap["bandSource"]
 ): { ok: true; band: Band } | { ok: false; reason: FwImportRejectReason } {
   if (source.kind === "grade") {
-    const digits = cell.match(/\d+/);
-    if (!digits) return { ok: false, reason: "invalid_grade" };
-    const band = bandForGrade(Number(digits[0]));
+    // Accept a bare grade number with an optional ordinal suffix and/or the word
+    // "grade" ("7", "6th", "grade 6", "6th grade") — but REJECT a decimal or any
+    // trailing garbage ("12.5", "5.9", "-5", "Grade 6 (transfer)"). A lenient
+    // first-digit-run extraction would silently truncate "12.5" to band g9_12 and
+    // "5.9" to g3_5, and band is part of the (name, band) identity tuple that
+    // decides mint/link/dedupe — a misread band is a wrong match, not just a
+    // wrong curriculum line (adversarial review).
+    const m = /^(?:grade\s+)?(\d{1,2})(?:st|nd|rd|th)?(?:\s+grade)?$/.exec(
+      cell.trim().toLowerCase()
+    );
+    if (!m) return { ok: false, reason: "invalid_grade" };
+    const band = bandForGrade(Number(m[1]));
     if (!band) return { ok: false, reason: "grade_out_of_range" };
     return { ok: true, band };
   }
@@ -317,7 +367,14 @@ export function parseFwImportCsv(text: string): FwImportParseResult {
     rows.push({ rowNumber, firstName, lastName, band: band.band, normalizedName: key });
   });
 
-  return { ok: true, columns, rows, rejected, dataRowCount: data.length };
+  // Non-blank physical lines minus the header. Compared against `dataRowCount`
+  // by the surface: a shortfall means a quoted field swallowed line breaks.
+  const sourceDataLineCount = Math.max(
+    0,
+    text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0).length - 1
+  );
+
+  return { ok: true, columns, rows, rejected, dataRowCount: data.length, sourceDataLineCount };
 }
 
 /* ═════════════════════════════════════════════════════════════════ dedupe ══ */
@@ -335,7 +392,7 @@ export type FwImportDedupeResult = {
 /** The identity tuple — `(normalizedName, band)`. Two "Alex Kim"s at different
  *  bands are two children; two at the same band are one row typed twice. */
 function identityKey(row: FwImportParsedRow): string {
-  return `${row.normalizedName} ${row.band}`;
+  return `${row.normalizedName} ${row.band}`;
 }
 
 /**
@@ -422,10 +479,19 @@ export function decideFwImportRowMatch(input: {
   const { candidates, cohortId, band } = input;
   if (candidates.length === 0) return { action: "mint" };
 
-  // A pending exception for this name, already parked on THIS cohort, means staff
-  // are already resolving it — do not park a second one. An exception scoped to a
-  // DIFFERENT cohort has no bearing on this import.
-  if (candidates.some((c) => c.source === "import_exception" && c.cohortIds.includes(cohortId))) {
+  // A pending exception for this (name, BAND), already parked on THIS cohort,
+  // means staff are already resolving it — do not park a second one. The band is
+  // load-bearing: without it, a pending "Alex Kim" g3_5 exception would swallow a
+  // genuinely distinct "Alex Kim" g9_12 row of the same name, which would then be
+  // neither minted, linked, nor parked — silently never provisioned, and never
+  // surfaced by the G7 gate (correctness + data-migration + adversarial reviews,
+  // P1). Match the same (name, band) identity tuple every other branch uses. An
+  // exception scoped to a DIFFERENT cohort has no bearing on this import.
+  if (
+    candidates.some(
+      (c) => c.source === "import_exception" && c.cohortIds.includes(cohortId) && c.band === band
+    )
+  ) {
     return { action: "skip_pending_exception" };
   }
 

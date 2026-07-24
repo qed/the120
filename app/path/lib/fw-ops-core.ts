@@ -39,7 +39,7 @@ import {
   pickFwCurrentBoardToken,
 } from "./fw-board-rules";
 import { recordFwOpsAudit } from "./fw-audit-core";
-import { fetchAllRows, fwRead, fwWrite } from "./fw-call";
+import { fetchAllRows, fwRead, fwWrite, isUniqueViolation } from "./fw-call";
 import { fwMatchKey } from "./fw-match-rules";
 import {
   FW_TOMBSTONE_FIRST_NAME,
@@ -63,21 +63,14 @@ import {
  *  sequence below and every existing caller keep one import site. */
 export { hashFwBoardToken };
 
-/** Postgres unique-violation. Checked by CODE, not by matching an error
- *  message — the message is localized-ish, unstable, and varies by constraint. */
-const UNIQUE_VIOLATION = "23505";
-
 /**
- * Takes the WIDER error union deliberately. Since the writes went through
- * `fwWrite` (reliability review), a failure can be either a PostgrestError the
- * database returned — which carries `code` — or the synthetic `{message}` a
- * timeout/throw produces, which does not. A timed-out insert is emphatically NOT
- * a unique violation, and this returns false for it, which is the answer that
- * routes it to "unavailable" rather than to "that slug is taken".
+ * `isUniqueViolation` moved to `fw-call.ts` in Unit 7's review (one definition,
+ * beside `fwRead`/`fwWrite`). Its contract is unchanged: it takes the WIDER error
+ * union because an `fwWrite` failure can be a PostgrestError that carries `code`
+ * OR the synthetic `{ message }` a timeout/throw produces, which does not — a
+ * timed-out insert is emphatically NOT a unique violation, so this returns false
+ * for it, routing it to "unavailable" rather than "that slug is taken".
  */
-function isUniqueViolation(error: { code?: string } | { message: string } | null): boolean {
-  return error !== null && "code" in error && error.code === UNIQUE_VIOLATION;
-}
 
 /** Re-exported so the ops surface and its tests have one import site for the
  *  whole ops core. The definition lives in `fw-audit-core.ts` — see the

@@ -334,19 +334,32 @@ function FwMatchNotice({
           Open them instead of creating a second record.
         </p>
         <ul className="mt-2 space-y-2">
-          {verdict.matches.map((m) => (
-            <li key={m.profileId}>
-              <a
-                href={`/path/fw/cohort/${cohortId}/student/${m.profileId}`}
-                onClick={onOpen}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-hq-border bg-hq-surface px-3 font-path-body text-sm font-medium text-hq-ink"
+          {verdict.matches.map((m) =>
+            m.source === "import_exception" ? (
+              // A pending IMPORT EXCEPTION, not a real student yet — its id is the
+              // exception row, not a profile, so there is nothing to "Open" (that
+              // link would 404). Staff resolve it on the ops page; the guide's job
+              // is just to NOT mint a duplicate (security review).
+              <li
+                key={m.profileId}
+                className="rounded-lg border border-hq-border bg-hq-surface px-3 py-2 font-path-body text-sm leading-5 text-hq-ink"
               >
-                <Icon name="arrow-right" size={16} />
-                Open — {FW_BAND_LABEL[m.band]}
-                {m.source === "import_exception" && " · pending import"}
-              </a>
-            </li>
-          ))}
+                Pending staff review — {FW_BAND_LABEL[m.band]}. Check with The 120 staff before
+                adding them.
+              </li>
+            ) : (
+              <li key={m.profileId}>
+                <a
+                  href={`/path/fw/cohort/${cohortId}/student/${m.profileId}`}
+                  onClick={onOpen}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-hq-border bg-hq-surface px-3 font-path-body text-sm font-medium text-hq-ink"
+                >
+                  <Icon name="arrow-right" size={16} />
+                  Open — {FW_BAND_LABEL[m.band]}
+                </a>
+              </li>
+            )
+          )}
         </ul>
       </div>
     );

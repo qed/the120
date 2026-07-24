@@ -6,6 +6,7 @@ import { Button } from "@/app/path/components/system/Button";
 import { importFwStudentsChunk } from "@/app/path/lib/actions/fw-import";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
+  FW_IMPORT_PARSE_ERROR_COPY,
   dedupeFwImportRows,
   parseFwImportCsv,
   planFwImportChunks,
@@ -45,30 +46,21 @@ const REJECT_COPY: Record<FwImportRejectReason, string> = {
   invalid_band: "band isn't one of g3_5 / g6_8 / g9_12",
 };
 
-const PARSE_ERROR_COPY: Record<
-  Extract<FwImportParseResult, { ok: false }>["reason"],
-  string
-> = {
-  empty_file: "The file is empty.",
-  no_data_rows: "The file has a header but no student rows.",
-  missing_first_name: "No first-name column found. Add a “First Name” column.",
-  missing_last_name: "No last-name column found. Add a “Last Name” column.",
-  missing_band_source: "No grade (or band) column found. Add a “Grade” column.",
-  duplicate_column: "Two columns map to the same field — remove the duplicate.",
-};
-
 const OUTCOME_COPY: Record<FwImportOutcomeKind, string> = {
   minted: "Added",
   linked: "Linked (returning student)",
   skipped_existing: "Already on the roster",
+  resumed: "Finished (from an earlier run)",
   exception: "Needs review",
   skipped_pending_exception: "Already flagged for review",
   failed: "Failed",
 };
 
 /** The kinds worth listing row-by-row after an import — the ones a human must act
- *  on. Successes are shown as a count only. */
-const NOTABLE: FwImportOutcomeKind[] = ["exception", "failed"];
+ *  on or at least see by name. `skipped_pending_exception` is here so two rows
+ *  that collapsed into "already flagged" are distinguishable from a re-run
+ *  duplicate rather than an invisible aggregate (data-migration review). */
+const NOTABLE: FwImportOutcomeKind[] = ["exception", "failed", "skipped_pending_exception"];
 
 export default function FwImport({ cohortId }: { cohortId: string }) {
   const router = useRouter();
@@ -171,7 +163,7 @@ export default function FwImport({ cohortId }: { cohortId: string }) {
           role="alert"
           className="mt-4 rounded-lg border border-not-yet/40 bg-not-yet/10 p-3 font-path-body text-sm leading-5 text-hq-ink"
         >
-          {PARSE_ERROR_COPY[parse.reason]}
+          {FW_IMPORT_PARSE_ERROR_COPY[parse.reason]}
         </p>
       )}
 
@@ -190,6 +182,15 @@ export default function FwImport({ cohortId }: { cohortId: string }) {
             )}
             {parse.rejected.length > 0 && <> · {parse.rejected.length} row(s) skipped</>}
           </p>
+          {parse.dataRowCount < parse.sourceDataLineCount && (
+            <p
+              role="alert"
+              className="mt-2 rounded-lg border border-not-yet/40 bg-not-yet/10 p-2 font-path-body text-xs leading-5 text-hq-ink"
+            >
+              The file has {parse.sourceDataLineCount} lines but only {parse.dataRowCount} could be
+              read as rows — likely a stray or unclosed quote. Check the file before importing.
+            </p>
+          )}
           {parse.rejected.length > 0 && (
             <ul className="mt-2 space-y-1 font-path-body text-xs leading-5 text-hq-ink-soft">
               {parse.rejected.map((r) => (

@@ -116,6 +116,69 @@ describe("parseFwImportCsv — the column contract", () => {
     expect(res.rows[0]).toMatchObject({ firstName: "Bob", lastName: "Smith, Jr.", band: "g6_8" });
   });
 
+  it("does NOT let a stray mid-field quote swallow the rest of the roster (P1)", () => {
+    // `Robert "Bob` is a stray unbalanced quote MID-field. Before the fix it
+    // flipped the tokenizer into quote mode and ate every following comma and
+    // newline to EOF, collapsing three clean children into one rejected record.
+    const res = parseFwImportCsv(
+      ['first,last,grade', 'Robert "Bob,Smith,6', 'Maya,Chen,7', 'Jose,Garcia,8'].join("\n")
+    );
+    if (!res.ok) throw new Error("unreachable");
+    // The stray-quote row still parses as a single 3-field row (the quote stays a
+    // literal in the name); crucially, the rows AFTER it are untouched.
+    expect(res.dataRowCount).toBe(3);
+    expect(res.rows).toHaveLength(3);
+    expect(res.rows.find((r) => r.firstName === "Maya")).toMatchObject({ lastName: "Chen", band: "g6_8" });
+    expect(res.rows.find((r) => r.firstName === "Jose")).toMatchObject({ lastName: "Garcia", band: "g6_8" });
+  });
+
+  it("flags a shortfall (source lines vs parsed rows) when an unterminated quote eats lines", () => {
+    // A field that DOES open a quote at its start and never closes swallows to
+    // EOF. It can't be parsed correctly, but the source-line reconciliation makes
+    // the loss visible rather than silent.
+    const res = parseFwImportCsv('first,last,grade\nMaya,"Chen,7\nJose,Garcia,8\nSean,OBrien,5');
+    if (!res.ok) throw new Error("unreachable");
+    // Three physical data lines; far fewer parsed records — the shortfall is the
+    // signal the surface warns on.
+    expect(res.sourceDataLineCount).toBe(3);
+    expect(res.dataRowCount).toBeLessThan(res.sourceDataLineCount);
+  });
+
+  it("reconciles source lines with parsed rows on a clean file", () => {
+    const res = parseFwImportCsv("first,last,grade\nMaya,Chen,7\nRae,Kim,10");
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.sourceDataLineCount).toBe(2);
+    expect(res.dataRowCount).toBe(2);
+  });
+
+  it("parses CRLF line endings the same as LF (Excel-on-Windows exports)", () => {
+    const res = parseFwImportCsv("first,last,grade\r\nMaya,Chen,7\r\nSean,O'Brien,5\r\n");
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.rows).toHaveLength(2);
+    expect(res.rows.map((r) => r.firstName).sort()).toEqual(["Maya", "Sean"]);
+  });
+
+  it("unescapes a doubled quote inside a quoted field", () => {
+    const res = parseFwImportCsv('first,last,grade\nBob,"Smith ""Bobby"" Jr.",8');
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.rows[0]).toMatchObject({ lastName: 'Smith "Bobby" Jr.', band: "g6_8" });
+  });
+
+  it("rejects a decimal grade rather than silently truncating it to a band", () => {
+    // "12.5" must not read as g9_12 and "5.9" must not read as g3_5 — band is
+    // part of the identity tuple, so a truncated grade is a wrong match.
+    const res = parseFwImportCsv("first,last,grade\nAva,Reed,12.5\nBen,Cole,5.9");
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.rows).toHaveLength(0);
+    expect(res.rejected.map((r) => r.reason)).toEqual(["invalid_grade", "invalid_grade"]);
+  });
+
+  it("still accepts ordinal and 'grade'-worded grade cells", () => {
+    const res = parseFwImportCsv("first,last,grade\nA,B,6th\nC,D,grade 10\nE,F,8th grade");
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.rows.map((r) => r.band)).toEqual(["g6_8", "g9_12", "g6_8"]);
+  });
+
   it("accepts an explicit band column when there is no grade column", () => {
     const res = parseFwImportCsv("First Name,Last Name,Band\nMaya,Chen,g6_8\nRae,Kim,nope");
     if (!res.ok) throw new Error("unreachable");
@@ -312,12 +375,40 @@ describe("decideFwImportRowMatch", () => {
     ).toEqual({ action: "exception", reason: "ambiguous_match" });
   });
 
-  it("skips when a PENDING exception for this name already sits on this cohort", () => {
+  it("skips when a PENDING exception for this (name, band) already sits on this cohort", () => {
     expect(
-      decide([
-        candidate({ profileId: "x1", source: "import_exception", cohortIds: [BOSTON] }),
-      ])
+      decide(
+        [candidate({ profileId: "x1", source: "import_exception", cohortIds: [BOSTON], band: "g6_8" })],
+        "g6_8"
+      )
     ).toEqual({ action: "skip_pending_exception" });
+  });
+
+  it("does NOT let a pending exception at a DIFFERENT band swallow a distinct same-name child (P1)", () => {
+    // A g3_5 'Maya Chen' exception is pending; a genuinely different g9_12 'Maya
+    // Chen' row must not be absorbed by it. With no other candidate at g9_12 it
+    // is a fresh mint — never a silent skip that vanishes the child.
+    expect(
+      decide(
+        [candidate({ profileId: "x1", source: "import_exception", cohortIds: [BOSTON], band: "g3_5" })],
+        "g9_12"
+      )
+    ).toEqual({ action: "mint" });
+  });
+
+  it("parks its OWN exception when a different-band pending exception coexists and the row is itself ambiguous", () => {
+    // g3_5 exception pending; a g9_12 row that is independently ambiguous (two
+    // g9_12 candidates elsewhere) must raise its OWN g9_12 exception, not skip.
+    expect(
+      decide(
+        [
+          candidate({ profileId: "x1", source: "import_exception", cohortIds: [BOSTON], band: "g3_5" }),
+          candidate({ profileId: "p1", cohortIds: [HAMPTONS], band: "g9_12" }),
+          candidate({ profileId: "p2", cohortIds: ["cohort-chicago"], band: "g9_12" }),
+        ],
+        "g9_12"
+      )
+    ).toEqual({ action: "exception", reason: "ambiguous_match" });
   });
 
   it("mints past a pending exception that belongs to a DIFFERENT cohort", () => {

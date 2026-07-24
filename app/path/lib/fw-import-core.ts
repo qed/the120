@@ -44,10 +44,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Band } from "@/app/path/content/types";
-import { fetchAllRows, fwRead, fwWrite } from "./fw-call";
+import { fetchAllRows, fwRead, fwWrite, isUniqueViolation } from "./fw-call";
 import {
   decideFwImportRowMatch,
-  type FwImportParsedRow,
+  type FwImportRowInput,
 } from "./fw-import-rules";
 import { loadFwMatchCandidates } from "./fw-loader";
 import { fwMatchKey } from "./fw-match-rules";
@@ -55,28 +55,22 @@ import { linkFwStudentToCohort } from "./fw-ops-core";
 import { verifyFwStudentLegs, type FwStudentLeg } from "./fw-student-core";
 import { provisionFwStudent } from "./provision-core";
 
-/** Postgres unique-violation, checked by CODE not message (fw-ops-core's rule):
- *  the message is unstable, and a timed-out write's synthetic error has no code —
- *  which returns false here, routing it to a post-write verify rather than to
- *  "already parked". */
-const PG_UNIQUE_VIOLATION = "23505";
-function isUniqueViolation(error: { code?: string } | { message: string } | null): boolean {
-  return error !== null && "code" in error && error.code === PG_UNIQUE_VIOLATION;
-}
-
 /* ═══════════════════════════════════════════════════════════ per-row outcome ══ */
 
 export type FwImportOutcomeKind =
-  /** A new dormant account + membership + 125 locked rows (or a stranded prior
-   *  run's legs finished in place — either way the student is now fully provisioned). */
+  /** A new dormant account + membership + 125 locked rows. */
   | "minted"
   /** A returner: a second membership on their one existing account. */
   | "linked"
   /** A (name, band) already enrolled here and fully provisioned — idempotent re-run. */
   | "skipped_existing"
+  /** A stranded prior run's legs (membership landed, progress didn't) FINISHED in
+   *  place on a re-run — no new account, but work happened, so it is reported
+   *  distinctly from a fresh mint and from a no-op skip (maintainability review). */
+  | "resumed"
   /** Parked for staff (an ambiguous match); nothing minted (G7). */
   | "exception"
-  /** A pending exception for this name already sits on this cohort. */
+  /** A pending exception for this (name, band) already sits on this cohort. */
   | "skipped_pending_exception"
   /** A per-row error; the file continued past it (G19). */
   | "failed";
@@ -87,10 +81,12 @@ export type FwImportOutcome = {
   lastName: string;
   band: Band;
   kind: FwImportOutcomeKind;
-  /** The student the row resolved to (minted / linked / skipped_existing). */
+  /** The student the row resolved to (minted / linked / skipped_existing / resumed). */
   profileId?: string;
-  /** `failed` only — the machine reason, and a leg + retry handle when resumable. */
+  /** The machine reason — the failure on `failed`, or the park reason
+   *  (`ambiguous_match`) on `exception` so the report explains the parking. */
   reason?: string;
+  /** `failed` only — the leg that could not be verified, and a retry handle. */
   leg?: FwStudentLeg;
   retryProfileId?: string;
 };
@@ -99,22 +95,26 @@ type RowBase = Pick<FwImportOutcome, "rowNumber" | "firstName" | "lastName" | "b
 
 /* ═══════════════════════════════════════════════════════════ the exception park ══ */
 
-export type ParkFwImportExceptionResult =
-  | { ok: true; alreadyParked: boolean }
-  | { ok: false };
+type ParkFwImportExceptionResult = { ok: true; alreadyParked: boolean } | { ok: false };
 
 /**
  * Park one ambiguous row as a pending exception — idempotent by the partial
- * unique index on `(cohort_id, normalized_name) where state='pending'`.
+ * unique index on `(cohort_id, normalized_name, band) where state='pending'`.
  *
- * A re-import of the same ambiguous row must not stack a second exception, so a
- * unique violation is SUCCESS (already parked). And because `fwWrite` may report a
- * timeout on a write that actually landed, the error branch POST-WRITE VERIFIES:
- * a pending row now present means the park is done.
+ * A re-import of the same ambiguous (name, band) must not stack a second
+ * exception, so a unique violation is SUCCESS (already parked). And because
+ * `fwWrite` may report a timeout on a write that actually landed, the error branch
+ * POST-WRITE VERIFIES: a pending row for this (cohort, name, band) now present
+ * means the park is done.
+ *
+ * NOT exported: its only caller is `exceptionRow` below (maintainability review —
+ * "an export whose only caller is its own test is not doing its job"). The park
+ * path, including this post-write-verify branch, is tested through
+ * `runFwImportChunk`'s exception outcome.
  */
-export async function parkFwImportException(
+async function parkFwImportException(
   db: SupabaseClient,
-  input: { cohortId: string; row: FwImportParsedRow; reason: string; createdBy: string }
+  input: { cohortId: string; row: FwImportRowInput; reason: string; createdBy: string }
 ): Promise<ParkFwImportExceptionResult> {
   const key = fwMatchKey(input.row.firstName, input.row.lastName);
   if (key === null) return { ok: false };
@@ -146,13 +146,14 @@ export async function parkFwImportException(
           .select("id")
           .eq("cohort_id", input.cohortId)
           .eq("normalized_name", key)
+          .eq("band", input.row.band)
           .eq("state", "pending")
           .maybeSingle(),
       `import exception verify (${input.cohortId})`
     );
     if (present.error || !present.data) {
       console.error(
-        `[fw/import] failed to park exception for ${key} in ${input.cohortId}: ${inserted.error.message}`
+        `[fw/import] failed to park exception for ${key} (${input.row.band}) in ${input.cohortId}: ${inserted.error.message}`
       );
       return { ok: false };
     }
@@ -173,7 +174,7 @@ export async function parkFwImportException(
  */
 export async function runFwImportRow(
   db: SupabaseClient,
-  input: { cohortId: string; actorUserId: string; row: FwImportParsedRow }
+  input: { cohortId: string; actorUserId: string; row: FwImportRowInput }
 ): Promise<FwImportOutcome> {
   const { cohortId, actorUserId, row } = input;
   const base: RowBase = {
@@ -207,15 +208,47 @@ export async function runFwImportRow(
     case "link":
       return linkRow(db, { cohortId, profileId: decision.profileId, base });
     case "skip_existing":
-      return finishExistingRow(db, { cohortId, profileId: decision.profileId, row, base });
+      return finishExistingRow(db, { cohortId, profileId: decision.profileId, base });
     case "exception":
       return exceptionRow(db, { cohortId, row, reason: decision.reason, actorUserId, base });
   }
 }
 
+/**
+ * Observe the three legs (account, membership, 125 rows) and, if a prior run left
+ * them PARTIAL, finish them in place via `provisionFwStudent`'s idempotent resume
+ * — which NEVER mints a new account, so "zero new accounts on a re-run" holds.
+ *
+ * Returning `resumed` lets the caller converge a crash-window (membership landed,
+ * progress did not) in ONE pass instead of the two the plain verify-then-fail path
+ * needed — and report it honestly rather than as a bare `legs_unverified` failure
+ * for a row that actually made progress (adversarial review).
+ */
+async function completeStudentLegs(
+  db: SupabaseClient,
+  input: { cohortId: string; profileId: string; base: RowBase }
+): Promise<{ ok: true; resumed: boolean } | { ok: false; reason: string; leg?: FwStudentLeg }> {
+  const { cohortId, profileId, base } = input;
+  const legs = await verifyFwStudentLegs(db, { profileId, cohortId });
+  if (legs.ok) return { ok: true, resumed: false };
+
+  const prov = await provisionFwStudent(db, {
+    firstName: base.firstName,
+    lastName: base.lastName,
+    band: base.band,
+    cohortId,
+    existingProfileId: profileId,
+    noticeAttestedBy: null,
+  });
+  if (!prov.ok) return { ok: false, reason: prov.reason };
+  const legs2 = await verifyFwStudentLegs(db, { profileId, cohortId });
+  if (!legs2.ok) return { ok: false, reason: "legs_unverified", ...(legs2.leg ? { leg: legs2.leg } : {}) };
+  return { ok: true, resumed: true };
+}
+
 async function mintRow(
   db: SupabaseClient,
-  input: { cohortId: string; row: FwImportParsedRow; base: RowBase }
+  input: { cohortId: string; row: FwImportRowInput; base: RowBase }
 ): Promise<FwImportOutcome> {
   const { cohortId, row, base } = input;
   const prov = await provisionFwStudent(db, {
@@ -234,12 +267,12 @@ async function mintRow(
       ...(prov.profileId ? { retryProfileId: prov.profileId } : {}),
     };
   }
-  const legs = await verifyFwStudentLegs(db, { profileId: prov.profileId, cohortId });
+  const legs = await completeStudentLegs(db, { cohortId, profileId: prov.profileId, base });
   if (!legs.ok) {
     return {
       ...base,
       kind: "failed",
-      reason: "legs_unverified",
+      reason: legs.reason,
       ...(legs.leg ? { leg: legs.leg } : {}),
       retryProfileId: prov.profileId,
     };
@@ -259,14 +292,15 @@ async function linkRow(
   if (!linked.ok) {
     return { ...base, kind: "failed", reason: linked.reason, retryProfileId: profileId };
   }
-  // Verify the returner is fully materialized under their pinned version — cheap
-  // insurance against linking a profile whose original mint was itself partial.
-  const legs = await verifyFwStudentLegs(db, { profileId, cohortId });
+  // Then ensure the legs — normally a no-op for a real returner, but this path also
+  // catches a stranded mint (profile existed, membership didn't) that decided as a
+  // "link"; completing progress here converges it in ONE pass (adversarial review).
+  const legs = await completeStudentLegs(db, { cohortId, profileId, base });
   if (!legs.ok) {
     return {
       ...base,
       kind: "failed",
-      reason: "legs_unverified",
+      reason: legs.reason,
       ...(legs.leg ? { leg: legs.leg } : {}),
       retryProfileId: profileId,
     };
@@ -276,46 +310,32 @@ async function linkRow(
 
 async function finishExistingRow(
   db: SupabaseClient,
-  input: { cohortId: string; profileId: string; row: FwImportParsedRow; base: RowBase }
+  input: { cohortId: string; profileId: string; base: RowBase }
 ): Promise<FwImportOutcome> {
-  const { cohortId, profileId, row, base } = input;
+  const { cohortId, profileId, base } = input;
   // A (name, band) already a member here. Usually a completed row on a re-run —
   // but a mint that crashed AFTER the membership landed and BEFORE the 125 rows
-  // did leaves exactly this shape with partial progress, so VERIFY before
-  // declaring it done rather than hand the event a tap-dead tree.
-  const legs = await verifyFwStudentLegs(db, { profileId, cohortId });
-  if (legs.ok) return { ...base, kind: "skipped_existing", profileId };
-
-  // Finish the stranded legs via provisionFwStudent's idempotent resume — which
-  // NEVER mints a new account (so "zero new accounts on a re-run" still holds) and
-  // upserts the missing membership/progress.
-  const prov = await provisionFwStudent(db, {
-    firstName: row.firstName,
-    lastName: row.lastName,
-    band: row.band,
-    cohortId,
-    existingProfileId: profileId,
-    noticeAttestedBy: null,
-  });
-  if (!prov.ok) return { ...base, kind: "failed", reason: prov.reason, retryProfileId: profileId };
-  const legs2 = await verifyFwStudentLegs(db, { profileId, cohortId });
-  if (!legs2.ok) {
+  // did leaves exactly this shape with partial progress, so complete-and-verify
+  // rather than hand the event a tap-dead tree.
+  const legs = await completeStudentLegs(db, { cohortId, profileId, base });
+  if (!legs.ok) {
     return {
       ...base,
       kind: "failed",
-      reason: "legs_unverified",
-      ...(legs2.leg ? { leg: legs2.leg } : {}),
+      reason: legs.reason,
+      ...(legs.leg ? { leg: legs.leg } : {}),
       retryProfileId: profileId,
     };
   }
-  return { ...base, kind: "minted", profileId };
+  // resumed → a partial was finished this run; else nothing needed doing.
+  return { ...base, kind: legs.resumed ? "resumed" : "skipped_existing", profileId };
 }
 
 async function exceptionRow(
   db: SupabaseClient,
   input: {
     cohortId: string;
-    row: FwImportParsedRow;
+    row: FwImportRowInput;
     reason: string;
     actorUserId: string;
     base: RowBase;
@@ -328,7 +348,9 @@ async function exceptionRow(
     createdBy: input.actorUserId,
   });
   if (!parked.ok) return { ...input.base, kind: "failed", reason: "exception_park_failed" };
-  return { ...input.base, kind: "exception" };
+  // Carry the reason (`ambiguous_match`) onto the outcome so the report explains
+  // WHY the row was parked, not merely that it was (agent-native review).
+  return { ...input.base, kind: "exception", reason: input.reason };
 }
 
 /* ═══════════════════════════════════════════════════════════════ the chunk ══ */
@@ -346,7 +368,7 @@ export type RunFwImportChunkResult = { outcomes: FwImportOutcome[] };
  */
 export async function runFwImportChunk(
   db: SupabaseClient,
-  input: { cohortId: string; actorUserId: string; rows: readonly FwImportParsedRow[] }
+  input: { cohortId: string; actorUserId: string; rows: readonly FwImportRowInput[] }
 ): Promise<RunFwImportChunkResult> {
   const outcomes: FwImportOutcome[] = [];
   for (const row of input.rows) {

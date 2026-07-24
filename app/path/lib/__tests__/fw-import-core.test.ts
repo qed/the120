@@ -5,13 +5,15 @@ import { getProgram } from "@/app/path/content/manifest";
 import { buildProgramRows } from "@/app/path/content/seed-rows";
 import {
   listFwImportExceptions,
-  parkFwImportException,
   resolveFwImportException,
   runFwImportChunk,
   type FwImportOutcome,
 } from "../fw-import-core";
 import type { FwImportParsedRow } from "../fw-import-rules";
 import { buildNormalizedFwName } from "../fw-provision-rules";
+
+/** PostgREST's server-side row cap, enforced by the fake on unranged reads. */
+const SERVER_MAX_ROWS = 1000;
 
 /**
  * The importer's composition, driven end-to-end through a fake Supabase client
@@ -44,8 +46,18 @@ type Seed = {
   progress?: Row[];
   authUsers?: Row[];
   exceptions?: Row[];
-  /** Insert into this table fails (a mid-row provisioning failure). */
-  failTable?: { table: string; op: "insert" | "upsert"; message: string } | null;
+  /**
+   * A write to this table fails. `applyAnyway` models the "reported failed but
+   * actually LANDED" ambiguity `fwWrite` warns about — the row IS written, then
+   * the error is returned — which is exactly what the post-write-verify branches
+   * exist to recover (learnings + testing reviews).
+   */
+  failTable?: { table: string; op: "insert" | "upsert"; message: string; applyAnyway?: boolean } | null;
+  /** Tables whose READ returns `{data:null,error}` — a read outage. */
+  errors?: Record<string, string>;
+  /** Tables whose read THROWS rather than returning `{data,error}` — a network
+   *  abort. The chunk's per-row catch must turn this into one `failed` outcome. */
+  throws?: string[];
 };
 
 let idSeq = 1;
@@ -81,6 +93,13 @@ function makeFakeDb(seed: Seed) {
     const eqs: [string, unknown][] = [];
     const ins: [string, unknown[]][] = [];
     const likes: [string, string][] = [];
+    /** A read outage: throws for a `throws` table (a network abort the chunk's
+     *  per-row catch must contain), or an error marker for an `errors` table. */
+    const readErr = (): { message: string } | null => {
+      if (seed.throws?.includes(table)) throw new TypeError(`fetch failed: ${table}`);
+      const msg = seed.errors?.[table];
+      return msg ? { message: msg } : null;
+    };
     const filtered = () =>
       tables[table].filter(
         (r) =>
@@ -93,16 +112,18 @@ function makeFakeDb(seed: Seed) {
 
     const insertThenable = (payload: Row | Row[]) => {
       const fail = seed.failTable?.table === table && seed.failTable.op === "insert";
+      const applyAnyway = fail && seed.failTable?.applyAnyway === true;
       const list = Array.isArray(payload) ? payload : [payload];
-      const apply = () => {
-        if (fail) return { data: null, error: { code: "500", message: seed.failTable!.message } };
-        // Model the one-pending-per-(cohort,name) unique index the migration adds.
+      const write = () => {
+        // Model the one-pending-per-(cohort,name,BAND) unique index the migration
+        // enforces — same-name-different-band exceptions both park.
         if (table === "path_fw_import_exceptions") {
           for (const r of list) {
             const dup = tables[table].some(
               (x) =>
                 x.cohort_id === r.cohort_id &&
                 x.normalized_name === r.normalized_name &&
+                x.band === r.band &&
                 x.state === "pending"
             );
             if (dup) return { data: null, error: { code: "23505", message: "duplicate" } };
@@ -111,6 +132,14 @@ function makeFakeDb(seed: Seed) {
         const inserted = list.map((r) => ({ id: `${table}-${idSeq++}`, state: "pending", ...r }));
         tables[table].push(...inserted.map((r) => ({ ...r })));
         return { data: inserted.map((r) => ({ ...r })), error: null };
+      };
+      const apply = () => {
+        if (fail) {
+          // reported-failed-but-actually-landed: write the row, THEN return the error.
+          if (applyAnyway) write();
+          return { data: null, error: { code: "500", message: seed.failTable!.message } };
+        }
+        return write();
       };
       return {
         select() {
@@ -148,17 +177,38 @@ function makeFakeDb(seed: Seed) {
       },
       order: () => builder,
       range(from: number, to: number) {
+        const err = readErr();
+        if (err) return Promise.resolve({ data: null, error: err });
         const rows = filtered()
           .slice(from, to + 1)
           .map((r) => ({ ...r }));
         return Promise.resolve({ data: rows, error: null });
       },
       async maybeSingle() {
+        const err = readErr();
+        if (err) return { data: null, error: err };
         const hit = filtered()[0];
         return { data: hit ? { ...hit } : null, error: null };
       },
-      then: (resolve: (v: { data: Row[]; error: null }) => unknown, reject?: (e: unknown) => unknown) =>
-        Promise.resolve({ data: filtered().map((r) => ({ ...r })), error: null }).then(resolve, reject),
+      then: (
+        resolve: (v: { data: Row[] | null; error: { message: string } | null }) => unknown,
+        reject?: (e: unknown) => unknown
+      ) => {
+        let res: { data: Row[] | null; error: { message: string } | null };
+        try {
+          const err = readErr();
+          // An UNRANGED read is capped at the PostgREST server max, exactly like
+          // production — so a regression that drops `fetchAllRows`/`.range()` and
+          // reads unranged silently truncates at 1000 and the pagination test
+          // reddens (mirrors the fw-loader fake).
+          res = err
+            ? { data: null, error: err }
+            : { data: filtered().slice(0, SERVER_MAX_ROWS).map((r) => ({ ...r })), error: null };
+        } catch (e) {
+          return Promise.reject(e).then(resolve, reject);
+        }
+        return Promise.resolve(res).then(resolve, reject);
+      },
       insert: (payload: Row | Row[]) => insertThenable(payload),
       upsert(payload: Row | Row[]) {
         const list = Array.isArray(payload) ? payload : [payload];
@@ -483,101 +533,240 @@ describe("runFwImportChunk — a re-run after a mid-file failure completes the r
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8")],
     });
-    expect(outcomes[0].kind).toBe("minted"); // completed, not falsely skipped
+    // Completed in place — reported as `resumed` (work happened), distinct from a
+    // fresh mint and from a no-op skip.
+    expect(outcomes[0].kind).toBe("resumed");
     expect(tables.path_task_progress.filter((r) => r.student_id === "p-maya")).toHaveLength(125);
+  });
+
+  it("converges a crash between membership and materialization in ONE pass (link path)", async () => {
+    // A prior mint's profile landed but NEITHER its membership NOR its progress
+    // did. The row decides as `link` (a profile exists, not a member here); the
+    // link adds the membership and the same pass finishes the 125 rows — one pass,
+    // not two, and reported cleanly rather than as a bare legs_unverified failure.
+    const maya = seedStudent("p-maya", "u-maya", "Maya", "Chen", "g6_8", []); // no membership
+    const { db, tables } = makeFakeDb({
+      profiles: [maya.profile],
+      members: [],
+      progress: [], // no progress either
+      authUsers: [maya.authUser],
+    });
+    const { outcomes } = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(2, "Maya", "Chen", "g6_8")],
+    });
+    expect(outcomes[0].kind).toBe("linked");
+    expect(tables.path_cohort_members.filter((m) => m.cohort_id === BOSTON)).toHaveLength(1);
+    expect(tables.path_task_progress.filter((r) => r.student_id === "p-maya")).toHaveLength(125);
+  });
+});
+
+/* ═══════════════════════════════════ reject-the-file guards: throw / read outage ══ */
+
+describe("runFwImportChunk — read failures are contained, never crash the chunk", () => {
+  it("turns a match-lookup read OUTAGE into a per-row match_unavailable, not a mint", async () => {
+    // If the match lookup fails, minting anyway would create a duplicate for a
+    // child whose record simply failed to load (the FW-D2 risk).
+    const { db, authUsers } = makeFakeDb({ errors: { path_student_profiles: "boom" } });
+    const { outcomes } = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
+    });
+    expect(kinds(outcomes)).toEqual(["failed", "failed"]);
+    expect(outcomes.every((o) => o.reason === "match_unavailable")).toBe(true);
+    expect(authUsers).toHaveLength(0); // nothing minted on a failed check
+  });
+
+  it("CATCHES a thrown provisioning read and reports unexpected_error without crashing the chunk", async () => {
+    // A network abort deep in provisioning THROWS (provision-core uses bare db
+    // calls). The chunk's per-row catch must contain it — every row accounted for,
+    // nothing minted, the chunk returns normally.
+    const { db, authUsers } = makeFakeDb({ throws: ["path_program_versions"] });
+    const { outcomes } = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
+    });
+    expect(kinds(outcomes)).toEqual(["failed", "failed"]);
+    expect(outcomes.every((o) => o.reason === "unexpected_error")).toBe(true);
+    expect(authUsers).toHaveLength(0);
+  });
+
+  it("surfaces a link failure as a per-row failure with a retry handle, file continues", async () => {
+    // A returner whose membership insert fails: the row fails (with a retry
+    // handle), and a clean mint in the same chunk still lands.
+    const rae = seedStudent("p-rae", "u-rae", "Rae", "Kim", "g9_12", [HAMPTONS]);
+    const { db, authUsers } = makeFakeDb({
+      profiles: [rae.profile],
+      members: rae.members,
+      progress: rae.progress,
+      authUsers: [rae.authUser],
+      failTable: { table: "path_cohort_members", op: "insert", message: "boom" },
+    });
+    const { outcomes } = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(2, "Rae", "Kim", "g9_12"), row(3, "Ada", "Fresh", "g3_5")],
+    });
+    expect(outcomes[0].kind).toBe("failed");
+    expect(outcomes[0].retryProfileId).toBe("p-rae");
+    expect(outcomes[1].kind).toBe("minted"); // the clean mint (upsert) still lands
+    expect(authUsers).toHaveLength(2);
   });
 });
 
 /* ═══════════════════════════════════ the exception list + resolve (ops, G7) ══ */
 
-describe("parkFwImportException / listFwImportExceptions / resolveFwImportException", () => {
-  it("parks a row and lists it as pending", async () => {
-    const { db } = makeFakeDb({});
-    const parked = await parkFwImportException(db, {
-      cohortId: BOSTON,
-      row: row(2, "Alex", "Kim", "g6_8"),
-      reason: "ambiguous_match",
-      createdBy: GUIDE,
-    });
-    expect(parked).toEqual({ ok: true, alreadyParked: false });
+// Every park below goes through the PUBLIC entry (`runFwImportChunk` on an
+// ambiguous row), never a direct `parkFwImportException` call — the park path is
+// not exported, and testing it through the fold is the point (maintainability +
+// testing reviews).
+
+/** A fake db where importing "Alex Kim" g6_8 into BOSTON parks an exception (two
+ *  same-band candidates elsewhere → ambiguous, nothing minted). */
+function ambiguousDb(extra: Partial<Seed> = {}) {
+  const a = seedStudent("p-a", "u-a", "Alex", "Kim", "g6_8", [HAMPTONS]);
+  const b = seedStudent("p-b", "u-b", "Alex", "Kim", "g6_8", ["cohort-chicago"]);
+  return makeFakeDb({
+    profiles: [a.profile, b.profile],
+    members: [...a.members, ...b.members],
+    progress: [...a.progress, ...b.progress],
+    authUsers: [a.authUser, b.authUser],
+    ...extra,
+  });
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const parkAlex = (db: any) =>
+  runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows: [row(2, "Alex", "Kim", "g6_8")] });
+
+describe("listFwImportExceptions / resolveFwImportException (via the fold)", () => {
+  it("parks a row through the fold and lists it as pending", async () => {
+    const { db } = ambiguousDb();
+    const { outcomes } = await parkAlex(db);
+    expect(outcomes[0].kind).toBe("exception");
 
     const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
-    expect(listed.ok).toBe(true);
     if (!listed.ok) throw new Error("unreachable");
     expect(listed.exceptions).toEqual([
-      expect.objectContaining({ firstName: "Alex", lastName: "Kim", band: "g6_8", state: "pending" }),
+      expect.objectContaining({ firstName: "Alex", lastName: "Kim", band: "g6_8", state: "pending", reason: "ambiguous_match" }),
     ]);
   });
 
-  it("treats a second park of the same (cohort, name) as alreadyParked, not a new row", async () => {
-    const { db, tables } = makeFakeDb({});
-    const r = row(2, "Alex", "Kim", "g6_8");
-    await parkFwImportException(db, { cohortId: BOSTON, row: r, reason: "ambiguous_match", createdBy: GUIDE });
-    const again = await parkFwImportException(db, { cohortId: BOSTON, row: r, reason: "ambiguous_match", createdBy: GUIDE });
-    expect(again).toEqual({ ok: true, alreadyParked: true });
-    expect(tables.path_fw_import_exceptions).toHaveLength(1);
+  it("recovers the exception park from a reported-failed-but-LANDED write (post-write verify)", async () => {
+    // `fwWrite` may report a timeout on a write that actually committed. The park's
+    // error branch re-reads; a pending row now present means the park is done.
+    const { db, tables } = ambiguousDb({
+      failTable: { table: "path_fw_import_exceptions", op: "insert", message: "timeout", applyAnyway: true },
+    });
+    const { outcomes } = await parkAlex(db);
+    expect(outcomes[0].kind).toBe("exception"); // recovered, not reported failed
+    expect(tables.path_fw_import_exceptions.filter((e) => e.state === "pending")).toHaveLength(1);
+  });
+
+  it("reports exception_park_failed when the park genuinely did not land", async () => {
+    const { db, tables, authUsers } = ambiguousDb({
+      failTable: { table: "path_fw_import_exceptions", op: "insert", message: "boom" },
+    });
+    const { outcomes } = await parkAlex(db);
+    expect(outcomes[0].kind).toBe("failed");
+    expect(outcomes[0].reason).toBe("exception_park_failed");
+    expect(tables.path_fw_import_exceptions).toHaveLength(0);
+    expect(authUsers).toHaveLength(2); // nothing minted
   });
 
   it("resolves a pending exception and removes it from the open list", async () => {
-    const { db } = makeFakeDb({});
-    await parkFwImportException(db, {
-      cohortId: BOSTON,
-      row: row(2, "Alex", "Kim", "g6_8"),
-      reason: "ambiguous_match",
-      createdBy: GUIDE,
-    });
+    const { db } = ambiguousDb();
+    await parkAlex(db);
     const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
     if (!listed.ok) throw new Error("unreachable");
     const id = listed.exceptions[0].id;
 
-    const resolved = await resolveFwImportException(db, {
-      exceptionId: id,
-      cohortId: BOSTON,
-      actorUserId: GUIDE,
-      disposition: "resolved",
-      now: 1_000,
-    });
-    expect(resolved).toEqual({ ok: true });
+    expect(
+      await resolveFwImportException(db, { exceptionId: id, cohortId: BOSTON, actorUserId: GUIDE, disposition: "resolved", now: 1_000 })
+    ).toEqual({ ok: true });
 
     const openAfter = await listFwImportExceptions(db, { cohortId: BOSTON });
     if (!openAfter.ok) throw new Error("unreachable");
     expect(openAfter.exceptions).toHaveLength(0);
   });
 
-  it("refuses to resolve an exception scoped to a DIFFERENT cohort", async () => {
-    const { db } = makeFakeDb({});
-    await parkFwImportException(db, {
-      cohortId: BOSTON,
-      row: row(2, "Alex", "Kim", "g6_8"),
-      reason: "ambiguous_match",
-      createdBy: GUIDE,
-    });
+  it("dismisses a pending exception (the second disposition) and records the state", async () => {
+    const { db } = ambiguousDb();
+    await parkAlex(db);
     const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
     if (!listed.ok) throw new Error("unreachable");
+    const id = listed.exceptions[0].id;
 
-    const res = await resolveFwImportException(db, {
+    expect(
+      await resolveFwImportException(db, { exceptionId: id, cohortId: BOSTON, actorUserId: GUIDE, disposition: "dismissed", now: 5 })
+    ).toEqual({ ok: true });
+
+    const all = await listFwImportExceptions(db, { cohortId: BOSTON, includeResolved: true });
+    if (!all.ok) throw new Error("unreachable");
+    expect(all.exceptions).toEqual([expect.objectContaining({ id, state: "dismissed" })]);
+  });
+
+  it("includeResolved returns closed rows alongside pending; the default hides them", async () => {
+    const { db } = ambiguousDb();
+    await parkAlex(db);
+    const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
+    if (!listed.ok) throw new Error("unreachable");
+    await resolveFwImportException(db, {
       exceptionId: listed.exceptions[0].id,
-      cohortId: HAMPTONS, // wrong cohort — the predicate is the guard, not the UI
+      cohortId: BOSTON,
       actorUserId: GUIDE,
-      disposition: "dismissed",
-      now: 1_000,
+      disposition: "resolved",
+      now: 1,
     });
-    expect(res).toEqual({ ok: false, reason: "not_open" });
+    const openOnly = await listFwImportExceptions(db, { cohortId: BOSTON });
+    const withHistory = await listFwImportExceptions(db, { cohortId: BOSTON, includeResolved: true });
+    if (!openOnly.ok || !withHistory.ok) throw new Error("unreachable");
+    expect(openOnly.exceptions).toHaveLength(0);
+    expect(withHistory.exceptions).toHaveLength(1);
+  });
+
+  it("refuses to resolve an exception scoped to a DIFFERENT cohort (predicate is the guard)", async () => {
+    const { db } = ambiguousDb();
+    await parkAlex(db);
+    const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(
+      await resolveFwImportException(db, { exceptionId: listed.exceptions[0].id, cohortId: HAMPTONS, actorUserId: GUIDE, disposition: "dismissed", now: 1 })
+    ).toEqual({ ok: false, reason: "not_open" });
   });
 
   it("reports not_open on a double-resolve", async () => {
-    const { db } = makeFakeDb({});
-    await parkFwImportException(db, {
-      cohortId: BOSTON,
-      row: row(2, "Alex", "Kim", "g6_8"),
-      reason: "ambiguous_match",
-      createdBy: GUIDE,
-    });
+    const { db } = ambiguousDb();
+    await parkAlex(db);
     const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
     if (!listed.ok) throw new Error("unreachable");
     const id = listed.exceptions[0].id;
     await resolveFwImportException(db, { exceptionId: id, cohortId: BOSTON, actorUserId: GUIDE, disposition: "resolved", now: 1 });
-    const twice = await resolveFwImportException(db, { exceptionId: id, cohortId: BOSTON, actorUserId: GUIDE, disposition: "resolved", now: 2 });
-    expect(twice).toEqual({ ok: false, reason: "not_open" });
+    expect(
+      await resolveFwImportException(db, { exceptionId: id, cohortId: BOSTON, actorUserId: GUIDE, disposition: "resolved", now: 2 })
+    ).toEqual({ ok: false, reason: "not_open" });
+  });
+
+  it("pages PAST the 1000-row server cap — never silently truncates the open list", async () => {
+    // A season's worth of exceptions across a large event can clear the cliff; the
+    // pre-event gate must see all of them. Seeded straight into the table (the
+    // fold is not the subject here).
+    const many = Array.from({ length: 1500 }, (_, i) => ({
+      id: `exc-${i}`,
+      cohort_id: BOSTON,
+      first_name: `Kid${i}`,
+      last_name: "Many",
+      band: "g6_8",
+      normalized_name: buildNormalizedFwName(`Kid${i}`, "Many"),
+      reason: "ambiguous_match",
+      state: "pending",
+      created_at: `2026-08-0${(i % 9) + 1}`,
+    }));
+    const { db } = makeFakeDb({ exceptions: many });
+    const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(listed.exceptions).toHaveLength(1500);
   });
 });

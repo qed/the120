@@ -427,14 +427,22 @@ export function fwBoardDisplayNames(
         result.set(m.studentId, withBand);
         return;
       }
+      // Even name + band collide (two "Maya Chen" in the same grade band). Append
+      // a STABLE ORDINAL within the identical subgroup, ordered by studentId, so
+      // the rows are ALWAYS distinct and never reorder between polls. A 4-char id
+      // slice was NOT guaranteed unique — two UUIDs can share a prefix, and a board
+      // that shows one child's cells under another's name is the exact failure this
+      // tiebreaker exists to prevent (testing review).
       const full = `${m.firstName} ${m.lastName}`.trim();
-      const sameName = group.filter(
-        (o) => `${o.firstName} ${o.lastName}`.trim() === full && o.band === m.band
-      );
-      result.set(
-        m.studentId,
-        sameName.length === 1 ? full : `${full} (#${m.studentId.slice(0, 4)})`
-      );
+      const identical = group
+        .filter((o) => `${o.firstName} ${o.lastName}`.trim() === full && o.band === m.band)
+        .sort((a, b) => a.studentId.localeCompare(b.studentId));
+      if (identical.length === 1) {
+        result.set(m.studentId, full);
+        return;
+      }
+      const ordinal = identical.findIndex((o) => o.studentId === m.studentId) + 1;
+      result.set(m.studentId, `${full} (${ordinal})`);
     });
   }
   return result;
@@ -471,7 +479,7 @@ function foldWeekendCells(
     // (`fw_move_task` verifies membership before it writes), but a student
     // removed from a cohort after the fact must not skew the room's numbers.
     if (!memberIds.has(e.studentId)) continue;
-    const key = `${e.studentId} ${e.taskId}`;
+    const key = `${e.studentId} ${e.taskId}`;
     const bucket = byPair.get(key);
     if (bucket) bucket.push(e);
     else byPair.set(key, [e]);
@@ -479,10 +487,17 @@ function foldWeekendCells(
 
   const cells = new Map<string, FwWeekendCell>();
   for (const [key, group] of byPair) {
-    // (atMs, id) — the deterministic order the whole repo uses so two events
-    // sharing a millisecond never reorder between polls (the pickFwCurrentBoardToken
-    // lesson). The last is the current state.
-    group.sort((a, b) => a.atMs - b.atMs || a.id.localeCompare(b.id));
+    // Order by INSERT time, then capture time, then id. `atMs` (the server clock)
+    // is authoritative, but it is millisecond-truncated, and `id` is a RANDOM uuid
+    // that does not correlate with write order — so a same-millisecond
+    // checkmark/undo pair (Unit 8's offline drain replays a captured pair back to
+    // back with no human delay) would otherwise resolve by coin-flip and could
+    // STABLY report the wrong current state (adversarial review). `capturedAtMs` —
+    // the guide's tap time, which a single actor's drain queue preserves in order
+    // — breaks that tie in true tap order; `id` is only the last-resort determinism
+    // backstop for a genuine full tie (human-impossible online). The last element
+    // is the current weekend state.
+    group.sort((a, b) => a.atMs - b.atMs || a.capturedAtMs - b.capturedAtMs || a.id.localeCompare(b.id));
     const last = group[group.length - 1];
     cells.set(key, {
       studentId: last.studentId,
@@ -600,8 +615,20 @@ export function shapeFwBoardModel(input: {
   for (const cell of weekend.values()) {
     if (cell.state !== "verified" || !isFirstDollarTask(cell.taskId)) continue;
     if (!nameBearingIds.has(cell.studentId)) continue;
-    if (cell.last.atMs - cell.last.capturedAtMs > FW_FIRST_DOLLAR_FRESHNESS_MS) continue;
-    const key = cell.last.actionId ?? `student:${cell.studentId}`;
+    // Fresh iff the capture sits within the window AND at/after the insert. The
+    // RPC clamps captured_at ≤ at, so a real event's gap is always in [0, ∞); a
+    // NEGATIVE gap (captured after insert) can only come from a future direct-SQL
+    // writer and must not ring a bell (adversarial residual) — fail closed to
+    // stale rather than treating an anomaly as a live tap.
+    const gap = cell.last.atMs - cell.last.capturedAtMs;
+    if (gap < 0 || gap > FW_FIRST_DOLLAR_FRESHNESS_MS) continue;
+    // Group by action id so a batched team rings ONE bell (Decision 6 / FW-R22).
+    // The fallback is the verifying event's own id, NOT a per-student key: an app
+    // event always carries an action id (runFwCheckIn mints one), but if one were
+    // ever null, keying on the student would suppress a genuine re-celebration
+    // after an undo+re-check; the event id is unique per occasion and stable across
+    // polls, so it rings exactly once and re-rings a real re-check.
+    const key = cell.last.actionId ?? cell.last.id;
     const entry = groups.get(key) ?? { students: [], atMs: cell.lastAtMs };
     entry.students.push({
       studentId: cell.studentId,

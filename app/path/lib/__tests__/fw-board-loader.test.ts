@@ -184,8 +184,10 @@ describe("loadFwBoard — happy path", () => {
     expect(res.data.model.weekendXp).toBe(2);
     expect(res.data.model.firstDollarCount).toBe(1);
     expect(res.data.model.ticker).toHaveLength(2);
-    // The phase word came from the real program, not a bare task id.
-    expect(res.data.model.ticker.some((l) => l.label.startsWith("Sell "))).toBe(true);
+    // BOTH seeded lines (1.1.1 and 1.2.4 — both phase 1) resolve their phase word
+    // from the real program; `.every` (not `.some`) so a break on one task id
+    // cannot hide behind the other (testing review).
+    expect(res.data.model.ticker.every((l) => l.label.startsWith("Sell "))).toBe(true);
     // Grid columns are built from the pinned program: 5 phases, 125 tasks.
     expect(res.data.columns).toHaveLength(5);
     expect(res.data.columns[0].name).toBe("Sell");
@@ -295,6 +297,47 @@ describe("loadFwBoard — degradation & defenses", () => {
     if (!res.ok) return;
     expect(res.data.model.grid.map((r) => r.studentId)).toEqual(["a"]);
   });
+
+  it("drops a malformed progress row and a malformed event row, keeping the good ones", async () => {
+    // Mutation-confirmed gap (testing review): the narrowing/drop branches for
+    // progress and event rows had no coverage.
+    const db = makeFakeDb({
+      members: [{ student_id: "a", cohort_id: BOSTON }],
+      profiles: [profile("a", "Maya", "Chen")],
+      progress: [
+        { student_id: "a", task_id: "1.1.1", state: "verified" },
+        { student_id: "a", task_id: null, state: "verified" }, // malformed → dropped
+        { student_id: "a", task_id: "1.1.2", state: "banana" }, // unnarrowable state → dropped
+      ],
+      events: [
+        event("e1", "a", "1.1.1", "checkmark"),
+        { id: "bad", student_id: "a", task_id: "1.2.1", cohort_id: BOSTON, transition: "checkmark", from_state: "locked", to_state: "banana", at: SAT }, // bad to_state → dropped
+      ],
+    });
+    const res = await loadFwBoard(db, { cohortId: BOSTON });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Only the good progress cell renders; only the good event counts.
+    expect(res.data.model.grid[0].cells).toEqual({ "1.1.1": "verified" });
+    expect(res.data.model.rollups.checkmarks).toBe(1);
+  });
+
+  it("falls back to insert time when an event's captured_at is missing (fresh, not silenced)", async () => {
+    // A missing captured_at must read as == insert (a live tap), so a genuine first
+    // dollar still rings rather than being treated as an anomaly.
+    const db = makeFakeDb({
+      members: [{ student_id: "a", cohort_id: BOSTON }],
+      profiles: [profile("a", "Maya", "Chen")],
+      events: [
+        { id: "e1", student_id: "a", task_id: "1.2.4", cohort_id: BOSTON, transition: "checkmark", from_state: "locked", to_state: "verified", at: SAT, action_id: "x" }, // no captured_at
+      ],
+    });
+    const res = await loadFwBoard(db, { cohortId: BOSTON });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.model.firstDollarCount).toBe(1);
+    expect(res.data.model.celebrations).toHaveLength(1); // fresh (gap 0)
+  });
 });
 
 describe("loadFwBoardShell — the PII-free server shell", () => {
@@ -317,6 +360,19 @@ describe("loadFwBoardShell — the PII-free server shell", () => {
     const shell = await loadFwBoardShell(db, { cohortId: BOSTON });
     expect(shell.cohortSlug).toBe("boston-2026-08");
     expect(shell.columns).toEqual([]);
+  });
+
+  it("degrades (never throws / never {ok:false}) when a shell read errors", async () => {
+    // The token is already validated, so a transient blip must still paint a shell
+    // (cohortId as the title, empty columns) rather than throwing — the client's
+    // feed poll then fills it (testing review). Verified by failing the cohort read.
+    const db = makeFakeDb({
+      members: [{ student_id: "a", cohort_id: BOSTON }],
+      profiles: [profile("a", "Maya", "Chen")],
+      failTable: "path_cohorts",
+    });
+    const shell = await loadFwBoardShell(db, { cohortId: BOSTON });
+    expect(shell.cohortSlug).toBe(BOSTON); // fell back to the id, did not throw
   });
 });
 
@@ -362,5 +418,18 @@ describe("resolveFwBoardToken — per-request validation, one 404 for all refusa
       failTable: "path_fw_board_tokens",
     });
     expect(await resolveFwBoardToken(db, { token: "good", nowMs: NOW })).toEqual({ ok: false });
+  });
+
+  it("refuses an existing-but-malformed token row (no cohort_id / expires_at) — one 404", async () => {
+    // A genuine data-shape fault must collapse to the same {ok:false}, never a
+    // cohort (testing review).
+    const noCohort = tokenSeed([
+      { token_hash: hashFwBoardToken("m1"), cohort_id: null, expires_at: LIVE, revoked_at: null },
+    ]);
+    const noExpiry = tokenSeed([
+      { token_hash: hashFwBoardToken("m2"), cohort_id: BOSTON, expires_at: null, revoked_at: null },
+    ]);
+    expect(await resolveFwBoardToken(noCohort, { token: "m1", nowMs: NOW })).toEqual({ ok: false });
+    expect(await resolveFwBoardToken(noExpiry, { token: "m2", nowMs: NOW })).toEqual({ ok: false });
   });
 });

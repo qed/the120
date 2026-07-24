@@ -53,8 +53,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     return new Response(JSON.stringify({ ok: false }), { status: 503, headers: JSON_HEADERS });
   }
 
+  // `columns` rides along on every frame so the client can RESYNC its grid layout
+  // — a board opened before check-in (empty cohort → empty columns) fills once the
+  // first member exists, instead of a permanently columnless grid (adversarial
+  // review). Static, non-PII program structure; cheap to resend.
   return new Response(
-    JSON.stringify({ ok: true, cohortSlug: board.data.cohortSlug, model: board.data.model }),
+    JSON.stringify({
+      ok: true,
+      cohortSlug: board.data.cohortSlug,
+      model: board.data.model,
+      columns: board.data.columns,
+    }),
     { status: 200, headers: JSON_HEADERS }
   );
 }

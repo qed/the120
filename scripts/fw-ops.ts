@@ -18,6 +18,7 @@
  *                               --tz    America/New_York [--json]
  *   npm run fw -- token-mint    --cohort <uuid> [--force] [--json]
  *   npm run fw -- token-revoke  --cohort <uuid> [--json]
+ *   npm run fw -- board         --cohort <uuid> [--json]
  *   npm run fw -- guides        --cohort <uuid> [--json]
  *   npm run fw -- guide-add     --cohort <uuid> --email guide@example.com [--json]
  *   npm run fw -- guide-reissue --guide <uuid> [--json]
@@ -71,6 +72,7 @@ import { runFwCheckIn } from "../app/path/lib/fw-checkin-core";
 import { issueFwGuideInvite, provisionFwGuide } from "../app/path/lib/fw-guide-core";
 import { buildFwGuideInviteEmail } from "../app/path/lib/fw-guide-invite-email";
 import { assertNoAuthMailToFwStudent } from "../app/path/lib/fw-provision-rules";
+import { loadFwBoard } from "../app/path/lib/fw-board-loader";
 import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/path/lib/fw-loader";
 import {
   anonymizeFwStudent,
@@ -104,6 +106,7 @@ const COMMANDS = [
   "cohort-create",
   "token-mint",
   "token-revoke",
+  "board",
   "guides",
   "guide-add",
   "guide-reissue",
@@ -140,6 +143,7 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   "cohort-create": ["--slug", "--start", "--start-time", "--end", "--end-time", "--tz"],
   "token-mint": ["--cohort", "--force"],
   "token-revoke": ["--cohort"],
+  board: ["--cohort"],
   guides: ["--cohort"],
   "guide-add": ["--cohort", "--email"],
   "guide-reissue": ["--guide"],
@@ -322,6 +326,32 @@ async function main() {
     });
     if (!res.ok) throw new Error(`token-revoke: ${res.reason}`);
     emit(res, () => console.log(`\nboard link revoked for ${cohortId}`));
+    return;
+  }
+
+  if (command === "board") {
+    // The board's READ MODEL to a terminal — the SAME `loadFwBoard` the projector
+    // feed serves, driven directly against the db (no token, no HTTP, works
+    // offline against `.env.local`). This is the read path the agent-native review
+    // found missing: every other FW read surface has a CLI, and re-inspecting board
+    // state otherwise meant `token-mint --force`, which KILLS the live projector.
+    const cohortId = required("cohort");
+    const res = await loadFwBoard(db, { cohortId });
+    if (!res.ok) throw new Error(`board read failed for ${cohortId}`);
+    const m = res.data.model;
+    emit(res.data, () => {
+      console.log(`\n${res.data.cohortSlug} — weekend board`);
+      console.log(`  weekend XP: ${m.weekendXp}    🔔 first dollars: ${m.firstDollarCount}`);
+      console.log(
+        `  students: ${m.rollups.students}   checkmarks: ${m.rollups.checkmarks}   not-yets: ${m.rollups.notYets}`
+      );
+      console.log(`  celebrations standing: ${m.celebrations.length}`);
+      console.log(`\n  ticker (${m.ticker.length}):`);
+      for (const line of m.ticker) {
+        const mark = line.firstDollar ? "🔔" : line.kind === "verified" ? "✓" : "…";
+        console.log(`    ${mark} ${line.displayName}  ${line.label}`);
+      }
+    });
     return;
   }
 

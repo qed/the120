@@ -354,12 +354,17 @@ describe("fwBoardDisplayNames — first name + last initial, band tiebreaker (FW
     expect(names.get("b")).toBe("Maya Carter");
   });
 
-  it("gives a truly identical pair distinct strings so no two rows are ever the same", () => {
+  it("gives a truly identical pair distinct strings even when their ids share a prefix", () => {
+    // Real UUIDs can share leading characters — a 4-char id slice was NOT unique
+    // (testing review). A stable per-group ordinal (by studentId) always is.
     const names = fwBoardDisplayNames([
+      member("aaaa2222", "Maya", "Chen", "g6_8"),
       member("aaaa1111", "Maya", "Chen", "g6_8"),
-      member("bbbb2222", "Maya", "Chen", "g6_8"),
     ]);
-    expect(names.get("aaaa1111")).not.toBe(names.get("bbbb2222"));
+    expect(names.get("aaaa1111")).not.toBe(names.get("aaaa2222"));
+    // Ordinal is assigned by studentId order, so it is stable across polls.
+    expect(names.get("aaaa1111")).toBe("Maya Chen (1)");
+    expect(names.get("aaaa2222")).toBe("Maya Chen (2)");
   });
 });
 
@@ -531,13 +536,14 @@ describe("shapeFwBoardModel — First Dollar celebrations & counter (Decision 5,
     expect(model.firstDollarCount).toBe(2);
   });
 
-  it("keys a celebration per student when the event carried no action id", () => {
-    const model = shape({
-      members: [member("a", "Maya", "Chen")],
-      events: [ev("a", "1.2.4", "checkmark", { actionId: null, atMs: SAT })],
-    });
+  it("keys a celebration by the verifying event id when it carried no action id", () => {
+    // The fallback is the event's OWN id (unique per occasion, stable across
+    // polls) — not a per-student key, which would suppress a genuine re-celebration
+    // after undo+re-check (adversarial residual).
+    const e = ev("a", "1.2.4", "checkmark", { actionId: null, atMs: SAT, id: "evt-xyz" });
+    const model = shape({ members: [member("a", "Maya", "Chen")], events: [e] });
     expect(model.celebrations).toHaveLength(1);
-    expect(model.celebrations[0].key).toBe("student:a");
+    expect(model.celebrations[0].key).toBe("evt-xyz");
   });
 });
 
@@ -586,28 +592,79 @@ describe("shapeFwBoardModel — retraction on undo (G17 / FW-D13)", () => {
     expect(model.celebrations[0].key).toBe("y");
   });
 
-  it("exposes NO per-student XP field anywhere on the model (FW-D13, structural)", () => {
-    // Mutation-resistant: this reads the RUNTIME keys, so adding row.xp (or
-    // score/points), or relocating the cohort total onto a row, reddens it.
+  it("exposes NO per-student score field anywhere on the model (FW-D13, structural)", () => {
+    // Mutation-resistant, and stronger than a synonym regex: it pins the EXACT key
+    // set of every grid row and ticker line, so ANY added per-student field —
+    // `xp`, `dollarsEarned`, `total`, anything — reddens it, not just three named
+    // synonyms (testing review). Reads RUNTIME keys, so a relocation of the cohort
+    // total onto a row fails it too.
     const model = shape({
       members: [member("a", "Maya", "Chen"), member("b", "Sam", "Diaz")],
       progress: [prog("a", "1.1.1", "verified"), prog("b", "2.2.2", "verified")],
       events: [ev("a", "1.1.1", "checkmark"), ev("b", "2.2.2", "checkmark")],
     });
-    const scoreLike = /xp|score|point/i;
     for (const row of model.grid) {
-      for (const key of Object.keys(row)) {
-        expect(key, `grid row exposes a score-like field: ${key}`).not.toMatch(scoreLike);
-      }
+      expect(Object.keys(row).sort()).toEqual(["cells", "displayName", "studentId"]);
     }
     for (const line of model.ticker) {
-      for (const key of Object.keys(line)) {
-        expect(key, `ticker line exposes a score-like field: ${key}`).not.toMatch(scoreLike);
-      }
+      expect(Object.keys(line).sort()).toEqual([
+        "atMs",
+        "displayName",
+        "firstDollar",
+        "kind",
+        "label",
+        "studentId",
+        "taskId",
+      ]);
     }
-    // The ONLY XP the model carries is the cohort total.
+    // The ONLY XP the model carries is the cohort total — never a per-student one.
     expect(typeof model.weekendXp).toBe("number");
     expect(model.grid.every((r) => !("weekendXp" in r))).toBe(true);
+  });
+
+  it("resolves a same-millisecond checkmark/undo pair by capture (tap) order, not by random id", () => {
+    // adv-fw6-01: `at` is ms-truncated and `id` is a random uuid, so a drain's
+    // back-to-back captured pair sharing an insert millisecond must fall to
+    // `capturedAtMs` (the true tap order the queue preserves) — NOT a coin flip
+    // that could stably report the wrong current state.
+    const at = SAT;
+    // The undo was TAPPED after the checkmark (captured later), but both were
+    // INSERTED (drained) in the same millisecond, and the undo's id sorts LOWER.
+    const undone = shape({
+      members: [member("a", "Maya", "Chen")],
+      events: [
+        ev("a", "1.2.4", "checkmark", { atMs: at, capturedAtMs: at - 5 * MIN, actionId: "x", id: "zzz" }),
+        ev("a", "1.2.4", "undo", { atMs: at, capturedAtMs: at - 1 * MIN, fromState: "verified", id: "aaa" }),
+      ],
+    });
+    // Capture order wins: the undo is last → retracted everywhere.
+    expect(undone.firstDollarCount).toBe(0);
+    expect(undone.weekendXp).toBe(0);
+    expect(undone.ticker).toEqual([]);
+
+    // And the reverse tap order (undo tapped first, then a genuine re-check) lands
+    // verified despite the same insert millisecond and an unfavourable id order.
+    const reverified = shape({
+      members: [member("a", "Maya", "Chen")],
+      events: [
+        ev("a", "1.2.4", "undo", { atMs: at, capturedAtMs: at - 5 * MIN, fromState: "verified", id: "zzz" }),
+        ev("a", "1.2.4", "checkmark", { atMs: at, capturedAtMs: at - 1 * MIN, actionId: "y", id: "aaa" }),
+      ],
+    });
+    expect(reverified.firstDollarCount).toBe(1);
+    expect(reverified.weekendXp).toBe(1);
+  });
+
+  it("does NOT ring a bell for an anomalous negative capture gap (captured after insert)", () => {
+    // adv-fw6 residual: a real event has captured_at ≤ at (RPC-clamped); a negative
+    // gap can only come from a future direct-SQL writer, and it must fail closed to
+    // stale rather than reading as an ultra-fresh live tap.
+    const model = shape({
+      members: [member("a", "Maya", "Chen")],
+      events: [ev("a", "1.2.4", "checkmark", { atMs: SAT, capturedAtMs: SAT + 5000 })],
+    });
+    expect(model.firstDollarCount).toBe(1); // still counts in the aggregate
+    expect(model.celebrations).toEqual([]); // but rings no bell
   });
 });
 

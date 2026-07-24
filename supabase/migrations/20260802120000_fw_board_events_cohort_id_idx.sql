@@ -1,0 +1,51 @@
+-- First Profit — Weekend Cohort Sprints, Unit 6: board events pagination index.
+--
+-- Surfaced by the Unit 6 performance review. The projected board's read model
+-- pages a cohort's events every 3–5 s with `.eq(cohort_id, …).order(id).range(…)`
+-- (app/path/lib/fw-board-loader.ts, via fetchAllRows). The existing
+-- `path_task_events_cohort_at_idx (cohort_id, at desc)` filters by cohort but is
+-- ordered by `at`, NOT `id`, so it cannot serve the id-ordered paging: Postgres
+-- materializes the cohort's full matching set and SORTS it by id in memory on
+-- every page of every poll. At a 90-student weekend's thousands of events that is
+-- a repeated, compounding sort of the whole per-cohort set. This index is ordered
+-- (cohort_id, id) so the paged read is served directly, with no in-memory sort.
+--
+-- Why the board pages by `id` and not `at`: `id` is unique, so range() paging over
+-- it is STABLE (no skipped/duplicated rows across pages); `at` has ties and would
+-- not be. The read model re-sorts events in memory by (at, captured_at, id) for
+-- correctness, so the SQL order here is only the pagination key.
+--
+-- Apply via the Management API — `supabase db push` is dead here (no DB password).
+-- See docs/solutions/integration-issues/supabase-cli-stale-db-password-management-
+-- api-workaround-2026-07-13.md.
+--
+-- APPLY IMMEDIATELY. Chicago cancelled (2026-07-23), no migration holds. A schema
+-- revision after apply is a NEW migration, not an edit to this file.
+--
+-- Rollout phase: SCHEMA ONLY (one CREATE INDEX). Seeds/backfills nothing.
+-- Idempotent (`if not exists`). Built WITHOUT `CONCURRENTLY` — incompatible with
+-- this repo's apply path (the Management API submits the file as one implicit
+-- transaction, and CREATE INDEX CONCURRENTLY cannot run inside a transaction
+-- block). The table holds only the rehearsal cohorts' few thousand rows today, so
+-- the brief ACCESS EXCLUSIVE lock the non-concurrent build takes is instant.
+--
+-- Partial on `cohort_id is not null`, mirroring `path_task_events_cohort_at_idx`:
+-- Path events carry a null cohort_id and never reach this read, so they stay out
+-- of the index.
+--
+-- PRE-APPLY (run before submitting, same Management API session):
+--   1. select to_regclass('public.path_task_events');            -- non-null
+--   2. select indexname from pg_indexes
+--        where tablename='path_task_events'
+--          and indexname='path_task_events_cohort_id_idx';        -- 0 rows (new)
+-- POST-APPLY (verify BEFORE recording the version):
+--   3. select indexname from pg_indexes
+--        where tablename='path_task_events'
+--          and indexname='path_task_events_cohort_id_idx';        -- exactly 1 row
+--   4. Only then: insert the version into supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: drop index if exists public.path_task_events_cohort_id_idx;
+
+create index if not exists path_task_events_cohort_id_idx
+  on public.path_task_events (cohort_id, id)
+  where cohort_id is not null;

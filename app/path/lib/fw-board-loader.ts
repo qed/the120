@@ -127,34 +127,34 @@ export type FwBoardData = {
    *  2026"). The surface pairs it with fixed branding. */
   cohortSlug: string;
   model: FwBoardModel;
-  /** The grid's column structure, built once from the pinned program (the model
-   *  carries only the DECIDED cells, so the surface needs this to lay out the
-   *  never-attempted ones). Empty if the program will not resolve — the grid then
-   *  degrades to the decided cells alone rather than breaking. */
+  /** The grid's column skeleton (static program structure — phase names + task
+   *  ids, no PII). Sent on EVERY poll, deliberately: the client RESYNCS its grid
+   *  layout from each feed frame, so a projector opened before check-in — an empty
+   *  cohort whose shell froze `columns: []` — fills its grid the moment the first
+   *  member is checked in, rather than showing a permanently columnless grid for
+   *  the event (adversarial review). Non-PII, so it costs the feed nothing it
+   *  can't afford; and because the client uses it, it is no longer built-then-
+   *  discarded (the earlier maintainability concern). */
   columns: FwBoardColumnPhase[];
 };
 
 type ProgramShape = { phaseNames: string[]; columns: FwBoardColumnPhase[] };
 
-/** Phase words and grid columns for the pinned program, or a safe degradation.
- *  A version that will not resolve must never take the whole board down — the
- *  ticker label and the empty-cell layout are the least important things on the
- *  screen, so they fall back rather than throw. */
+/** The pinned program's phase words (index 0 = phase 1, "Sell") and grid column
+ *  skeleton, or a safe degradation. A version that will not resolve must never
+ *  take the whole board down — the ticker label and the empty-cell layout are the
+ *  least important things on the screen, so they fall back rather than throw. */
 function programShapeFor(programVersionId: string | null): ProgramShape {
   if (!programVersionId) return { phaseNames: FALLBACK_PHASE_NAMES, columns: [] };
   try {
-    const program = getProgram(programVersionId);
-    const phases = [...program.phases].sort((a, b) => a.seq - b.seq);
+    const phases = [...getProgram(programVersionId).phases].sort((a, b) => a.seq - b.seq);
     const phaseNames = phases.map((p) => p.key.charAt(0) + p.key.slice(1).toLowerCase());
     const columns: FwBoardColumnPhase[] = phases.map((p, i) => ({
       phase: i + 1,
       name: phaseNames[i],
       taskIds: p.criteria.flatMap((c) => c.tasks.map((t) => t.id)),
     }));
-    return {
-      phaseNames: phaseNames.length > 0 ? phaseNames : FALLBACK_PHASE_NAMES,
-      columns,
-    };
+    return { phaseNames: phaseNames.length > 0 ? phaseNames : FALLBACK_PHASE_NAMES, columns };
   } catch (e) {
     console.error(`[fw/board] program ${programVersionId} did not resolve: ${String(e)}`);
     return { phaseNames: FALLBACK_PHASE_NAMES, columns: [] };
@@ -207,10 +207,10 @@ export async function loadFwBoard(
     ),
   ];
   if (studentIds.length === 0) {
-    return {
-      ok: true,
-      data: { cohortSlug, model: emptyModel(), columns: programShapeFor(null).columns },
-    };
+    // No members yet (a cohort minted before check-in opens). Columns are empty
+    // until a member resolves a program version — and the client RESYNCS columns
+    // from each poll, so the grid fills the moment the first student is added.
+    return { ok: true, data: { cohortSlug, model: emptyModel(), columns: [] } };
   }
 
   // Profiles (names, band, program version) and the two event-bearing reads run
@@ -340,8 +340,11 @@ export async function loadFwBoardShell(
   db: SupabaseClient,
   input: { cohortId: string }
 ): Promise<FwBoardShell> {
+  // `slug` only — the shell carries no student data, so it skips `loadFwBoard`'s
+  // defense-in-depth `kind` re-check: the token already validated the cohort, and
+  // a wrong-kind cohort would render nothing sensitive here regardless.
   const cohortRes = await fwRead(
-    () => db.from("path_cohorts").select("slug, kind").eq("id", input.cohortId).maybeSingle(),
+    () => db.from("path_cohorts").select("slug").eq("id", input.cohortId).maybeSingle(),
     `board shell cohort (${input.cohortId})`
   );
   const cohortRow = cohortRes.data as Record<string, unknown> | null;
@@ -350,7 +353,10 @@ export async function loadFwBoardShell(
 
   // One member → one profile → the pinned program version → the columns. Two
   // small reads keep the shell fast; the full member/progress/event scan is the
-  // feed's job, off the page's critical path.
+  // feed's job, off the page's critical path. The member read is id-ORDERED so it
+  // resolves the SAME representative member `loadFwBoard` does — deterministic, so
+  // the shell's columns and the feed's cells never key off different program
+  // versions once a second version ships (api-contract review).
   let programVersionId: string | null = null;
   const memberRes = await fwRead(
     () =>
@@ -358,6 +364,7 @@ export async function loadFwBoardShell(
         .from("path_cohort_members")
         .select("student_id")
         .eq("cohort_id", input.cohortId)
+        .order("student_id", { ascending: true })
         .limit(1)
         .maybeSingle(),
     `board shell member (${input.cohortId})`
@@ -382,14 +389,10 @@ export async function loadFwBoardShell(
 }
 
 /** The board of an empty cohort — a real, renderable answer (a cohort created but
- *  not yet imported), distinct from `{ok:false}`. */
+ *  not yet imported), distinct from `{ok:false}`. Derived from the SAME pure rule
+ *  the populated board uses (not a hand-written parallel literal), so an empty
+ *  board can never drift from a full one if the model grows a derived field
+ *  (maintainability review). */
 function emptyModel(): FwBoardModel {
-  return {
-    grid: [],
-    weekendXp: 0,
-    firstDollarCount: 0,
-    rollups: { students: 0, checkmarks: 0, notYets: 0, firstDollars: 0 },
-    ticker: [],
-    celebrations: [],
-  };
+  return shapeFwBoardModel({ members: [], progress: [], events: [], phaseNames: [] });
 }

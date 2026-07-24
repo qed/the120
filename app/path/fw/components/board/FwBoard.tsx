@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import type { FwBoardColumnPhase, FwBoardShell } from "@/app/path/lib/fw-board-loader";
 import type {
   FwBoardCellState,
   FwBoardGridRow,
   FwBoardModel,
+  FwBoardRollups,
   FwFirstDollarCelebration,
   FwTickerLine,
 } from "@/app/path/lib/fw-board-rules";
@@ -38,23 +39,63 @@ const POLL_MS = 4000;
 /** A poll older than this with no success flips the stale indicator even absent an
  *  outright failure — a throttled background tab stops polling silently. */
 const STALE_AFTER_MS = 12000;
+/** Abort a single poll fetch after this long. Venue wifi can go half-open
+ *  (packets black-holed, never resolving or rejecting), and `fetch` has no default
+ *  timeout — without an AbortController a poll could hang for the life of the
+ *  multi-day kiosk session and, with the in-flight guard, block all recovery
+ *  (reliability review). Longer than the server's own per-read budget so a merely
+ *  slow (not dead) load still lands. */
+const POLL_TIMEOUT_MS = 10000;
 /** How long one First Dollar celebration holds the screen before the next. */
 const CELEBRATION_MS = 6500;
 
 type FeedModel = { cohortSlug: string; model: FwBoardModel };
 
+/**
+ * Shallow structural guard for a feed payload before it is trusted and rendered.
+ *
+ * The read model is validated upstream and under test, and the feed is same-origin
+ * — but a malformed or PARTIAL payload (a route bug, or a rolling-deploy version
+ * skew where the client bundle briefly outpaces the server's response shape) must
+ * degrade to the stale indicator, NEVER throw inside the render. The renderer
+ * calls `.map`/`.length`/`.toLocaleString()` straight on these fields; a missing
+ * array or a non-number would crash the board — the exact opposite of its
+ * "never blank" guarantee (TypeScript review). This checks shape, not every field.
+ */
+function isRenderableModel(m: unknown): m is FwBoardModel {
+  if (typeof m !== "object" || m === null) return false;
+  const x = m as Record<string, unknown>;
+  return (
+    Array.isArray(x.grid) &&
+    Array.isArray(x.ticker) &&
+    Array.isArray(x.celebrations) &&
+    typeof x.weekendXp === "number" &&
+    typeof x.firstDollarCount === "number" &&
+    typeof x.rollups === "object" &&
+    x.rollups !== null
+  );
+}
+
 export default function FwBoard({ token, shell }: { token: string; shell: FwBoardShell }) {
   const [feed, setFeed] = useState<FeedModel | null>(null);
   // Stale until the first poll lands — the board carries no server data.
   const [stale, setStale] = useState<boolean>(true);
-  // Columns are static (the pinned program), so they come from the server shell
-  // and never from a poll — the feed stays lean and PII-only.
-  const columns = shell.columns;
+  // Columns seed from the server shell (instant first paint) but are RESYNCED from
+  // each feed frame: a board opened before check-in has an empty shell skeleton,
+  // and this is what lets its grid fill once the first member is checked in rather
+  // than staying columnless for the event (adversarial review).
+  const [columns, setColumns] = useState<FwBoardColumnPhase[]>(shell.columns);
 
   const lastOkRef = useRef<number>(0);
+  // One poll in flight at a time: skips a tick while a poll is pending, so slow
+  // polls cannot stack against the browser's per-origin connection cap AND a
+  // slow-then-fast pair cannot deliver responses out of order and regress the
+  // board to older numbers (reliability + correctness reviews).
+  const pollInFlightRef = useRef<boolean>(false);
   const rungKeysRef = useRef<Set<string>>(new Set());
   // The first successful poll is the BASELINE — its celebrations are adopted as
-  // already-rung rather than fired (the room already rang them).
+  // already-rung rather than fired (the room already rang them). With one poll in
+  // flight at a time, the first RESPONSE is deterministically the first REQUEST's.
   const seededRef = useRef<boolean>(false);
   const queueRef = useRef<FwFirstDollarCelebration[]>([]);
   const activeRef = useRef<FwFirstDollarCelebration | null>(null);
@@ -83,37 +124,72 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
     const feedUrl = `/path/fw/board/${encodeURIComponent(token)}/feed`;
 
     async function poll() {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS);
       try {
-        const res = await fetch(feedUrl, { cache: "no-store" });
-        if (!res.ok) {
-          if (!cancelled) setStale(true);
-          return;
-        }
-        const json = (await res.json()) as { ok: boolean; cohortSlug?: string; model?: FwBoardModel };
+        const res = await fetch(feedUrl, { cache: "no-store", signal: controller.signal });
         if (cancelled) return;
-        if (!json.ok || !json.model || typeof json.cohortSlug !== "string") {
+        if (res.status === 404) {
+          // The token is gone — revoked, expired, or never valid. Revocation is the
+          // ONLY incident-response control for a leaked projector URL, so it must
+          // actually REMOVE the children's names an open tab is showing, not merely
+          // mark them stale. Clear the frame (security review). Distinct from a 503.
+          setFeed(null);
           setStale(true);
           return;
         }
-        setFeed({ cohortSlug: json.cohortSlug, model: json.model });
+        if (!res.ok) {
+          // A 503 (good token, transient read failure) or other transient error:
+          // keep the last frame and show stale — never blank over a wifi blip.
+          setStale(true);
+          return;
+        }
+        const json = (await res.json()) as {
+          ok?: boolean;
+          cohortSlug?: unknown;
+          model?: unknown;
+          columns?: unknown;
+        };
+        if (cancelled) return;
+        if (json.ok !== true || typeof json.cohortSlug !== "string" || !isRenderableModel(json.model)) {
+          // Malformed / partial payload — degrade to stale, keep the last good
+          // frame, never throw in the render (TypeScript review).
+          setStale(true);
+          return;
+        }
+        const model = json.model;
+        setFeed({ cohortSlug: json.cohortSlug, model });
+        // Resync the grid skeleton from this frame. Only when NON-EMPTY, so a
+        // transient program-resolution blip (empty columns) never wipes a good
+        // layout the room is watching.
+        if (Array.isArray(json.columns) && json.columns.length > 0) {
+          setColumns(json.columns as FwBoardColumnPhase[]);
+        }
         setStale(false);
         lastOkRef.current = Date.now();
         if (!seededRef.current) {
           // Baseline frame: adopt everything standing as already-rung, ring none.
-          for (const c of json.model.celebrations) rungKeysRef.current.add(c.key);
+          for (const c of model.celebrations) rungKeysRef.current.add(c.key);
           seededRef.current = true;
           return;
         }
         // Ring only the celebration keys we have never seen — the fresh ones the
         // read model surfaced this poll.
-        const fresh = json.model.celebrations.filter((c) => !rungKeysRef.current.has(c.key));
+        const fresh = model.celebrations.filter((c) => !rungKeysRef.current.has(c.key));
         for (const c of fresh) rungKeysRef.current.add(c.key);
         if (fresh.length > 0) {
           queueRef.current.push(...fresh);
           pump();
         }
       } catch {
+        // A thrown fetch OR the AbortController firing at POLL_TIMEOUT_MS both land
+        // here: no answer arrived. Keep the last frame, flip stale.
         if (!cancelled) setStale(true);
+      } finally {
+        clearTimeout(abortTimer);
+        pollInFlightRef.current = false;
       }
     }
 
@@ -218,11 +294,7 @@ function Hero({ weekendXp, firstDollarCount }: { weekendXp: number; firstDollarC
 
 /* ── rollups ────────────────────────────────────────────────────────────── */
 
-function Rollups({
-  rollups,
-}: {
-  rollups: { students: number; checkmarks: number; notYets: number; firstDollars: number };
-}) {
+function Rollups({ rollups }: { rollups: FwBoardRollups }) {
   const items: [string, number][] = [
     ["Students", rollups.students],
     ["Checkmarks", rollups.checkmarks],
@@ -287,27 +359,56 @@ function Grid({ rows, columns }: { rows: FwBoardGridRow[]; columns: FwBoardColum
   );
 }
 
-function GridRow({ row, columns }: { row: FwBoardGridRow; columns: FwBoardColumnPhase[] }) {
-  return (
-    <tr className="border-b border-hq-border/50">
-      <td className="sticky left-0 whitespace-nowrap bg-hq-surface px-4 py-1.5 font-path-body text-base text-hq-ink">
-        {row.displayName}
-      </td>
-      {columns.map((phase) => (
-        <td key={phase.phase} className="px-2 py-1.5">
-          <div className="flex flex-wrap gap-0.5">
-            {phase.taskIds.map((taskId) => (
-              <span
-                key={taskId}
-                title={taskId}
-                className={`inline-block h-2.5 w-2.5 rounded-[2px] ${cellClass(row.cells[taskId])}`}
-              />
-            ))}
-          </div>
+/**
+ * One student's grid row — MEMOIZED with a value comparator.
+ *
+ * Every poll installs a freshly JSON-parsed model, so every row's props are new
+ * object references each ~4s even when that student's cells did not change. Bare
+ * `React.memo` (reference equality) would never skip a render; the value
+ * comparator below is what lets ~90 rows × ~125 cells stop reconciling ~11k leaf
+ * spans on the poll ticks where nothing actually moved — which is most of them on
+ * a projector (performance review). `columns` is a stable prop (the shell), so it
+ * is compared by reference.
+ */
+const GridRow = memo(
+  function GridRow({ row, columns }: { row: FwBoardGridRow; columns: FwBoardColumnPhase[] }) {
+    return (
+      <tr className="border-b border-hq-border/50">
+        <td className="sticky left-0 whitespace-nowrap bg-hq-surface px-4 py-1.5 font-path-body text-base text-hq-ink">
+          {row.displayName}
         </td>
-      ))}
-    </tr>
-  );
+        {columns.map((phase) => (
+          <td key={phase.phase} className="px-2 py-1.5">
+            <div className="flex flex-wrap gap-0.5">
+              {phase.taskIds.map((taskId) => (
+                <span
+                  key={taskId}
+                  title={taskId}
+                  className={`inline-block h-2.5 w-2.5 rounded-[2px] ${cellClass(row.cells[taskId])}`}
+                />
+              ))}
+            </div>
+          </td>
+        ))}
+      </tr>
+    );
+  },
+  (prev, next) =>
+    prev.columns === next.columns &&
+    prev.row.displayName === next.row.displayName &&
+    sameCells(prev.row.cells, next.row.cells)
+);
+
+/** Whether two decided-cell maps are value-equal — the memo comparator's core.
+ *  Cells hold only decided (verified/not_yet) tasks, so this is small per row. */
+function sameCells(
+  a: Record<string, FwBoardCellState>,
+  b: Record<string, FwBoardCellState>
+): boolean {
+  const ak = Object.keys(a);
+  if (ak.length !== Object.keys(b).length) return false;
+  for (const k of ak) if (a[k] !== b[k]) return false;
+  return true;
 }
 
 /* ── ticker ─────────────────────────────────────────────────────────────── */

@@ -92,3 +92,70 @@ export async function fwRead<R extends { data: unknown; error: { message: string
   }
   return raced.value;
 }
+
+/* ═══════════════════════════════════════════════ the 1000-row cliff ══ */
+
+/**
+ * PostgREST's default `max-rows` on this project, measured against production
+ * rather than assumed: a `select` with no `range` returns AT MOST this many rows
+ * and says nothing about the ones it dropped.
+ *
+ * This is not a theoretical concern. Seeding the 30-student rehearsal cohort put
+ * 3,750 progress rows in the table; an unranged read of them came back with
+ * exactly 1,000 and no error, and the resume chips built from that read would
+ * have been quietly wrong for two thirds of the roster — a bug that gets WORSE
+ * as a weekend goes on and that no fixture-sized test can see. See
+ * docs/solutions/integration-issues/postgrest-max-rows-1000-silently-truncates-
+ * unranged-select-paginate-and-refuse-2026-07-24.md.
+ */
+const FW_PAGE_SIZE = 1000;
+
+/**
+ * Enough pages for 90 students × 125 tasks, plus headroom. Reaching it is a
+ * loud error, never a truncated result — the plan's no-silent-caps posture, and
+ * the reason this is a bound rather than a `while (true)`.
+ */
+const FW_MAX_PAGES = 16;
+
+/**
+ * Read every row a query matches, in pages.
+ *
+ * The caller supplies a closure that applies `.range(from, to)` to its own
+ * builder, because PostgREST's builder is not reusable across calls. Returns
+ * `{ok:false}` on a read error OR on hitting the page bound — a partial list
+ * from a table this size is indistinguishable from a complete one downstream,
+ * and every consumer renders a truthful "couldn't load" for `{ok:false}`.
+ *
+ * LIVES HERE, not in `fw-loader.ts` where Unit 4 first wrote it, for the reason
+ * this file's header already records about `withFwTimeout`: Unit 5's ops reads
+ * need the same paging, and copying it would create a second definition of the
+ * bound — the drift this repo has already paid for once. The ops views are
+ * exactly where "these lists are small" stops being true.
+ */
+export async function fetchAllRows<T>(
+  label: string,
+  page: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<{ ok: true; rows: T[] } | { ok: false }> {
+  const rows: T[] = [];
+  for (let i = 0; i < FW_MAX_PAGES; i += 1) {
+    const from = i * FW_PAGE_SIZE;
+    // Through `fwRead`, so a stalled page cannot hang the loop and a thrown
+    // network abort becomes a typed error instead of escaping the Server
+    // Component past every "we couldn't load this" branch (reliability review).
+    const res = await fwRead(() => page(from, from + FW_PAGE_SIZE - 1), `${label} page ${i}`);
+    if (res.error) {
+      console.error(`[fw/call] ${label} page ${i} failed: ${res.error.message}`);
+      return { ok: false };
+    }
+    const got = res.data ?? [];
+    rows.push(...got);
+    if (got.length < FW_PAGE_SIZE) return { ok: true, rows };
+  }
+  console.error(
+    `[fw/call] ${label} exceeded ${FW_MAX_PAGES} pages (${FW_MAX_PAGES * FW_PAGE_SIZE} rows) — refusing to report a truncated result`
+  );
+  return { ok: false };
+}

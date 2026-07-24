@@ -1,0 +1,62 @@
+-- First Profit — Weekend Cohort Sprints, Unit 5: the cohort's event timezone.
+--
+-- Apply via the Management API — `supabase db push` is dead here (no DB
+-- password). See docs/solutions/integration-issues/supabase-cli-stale-db-
+-- password-management-api-workaround-2026-07-13.md.
+--
+-- APPLY IMMEDIATELY (no migration holds; Chicago cancelled 2026-07-23).
+--
+-- ⚠️ WHY THIS IS A SECOND FILE rather than an edit to 20260801120000, which was
+-- applied minutes earlier in the same unit: that version is already recorded in
+-- schema_migrations, and the repo's practice is that a schema revision AFTER
+-- apply is a new migration, never an edit to an applied file. An edited-and-
+-- recorded file is the exact drift docs/solutions/integration-issues/dormant-
+-- migration-not-applied-prerequisite-table-missing-2026-07-17.md is about: the
+-- file stops describing what production actually did at that version.
+--
+-- Rollout phase: SCHEMA ONLY. One nullable column; backfills nothing.
+-- Idempotent — re-applying is a no-op.
+--
+-- PRE-APPLY:
+--   1. select count(*) from information_schema.columns
+--        where table_schema='public' and table_name='path_cohorts'
+--          and column_name='time_zone';                       -- 0
+-- POST-APPLY (verify BEFORE recording the version):
+--   2. same query;                                            -- 1
+--   3. select data_type, is_nullable from information_schema.columns
+--        where table_schema='public' and table_name='path_cohorts'
+--          and column_name='time_zone';                       -- text, YES
+--   4. Only then: insert the version into
+--      supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: drops cleanly (nullable, no reader requires it — an absent value
+-- renders as UTC with an explicit label).
+--
+-- ── What this column is for ──────────────────────────────────────────────────
+--
+-- Decision 4 stores the event window as `timestamptz`, which is an INSTANT and
+-- carries no zone. That is right for every comparison the system makes (board
+-- expiry, freshness) and wrong for the one thing a human does with it: read it
+-- back and check it.
+--
+-- Founders Weekend runs five cities across three zones. Staff type "Sunday,
+-- 5:00 PM" meaning 5pm where the event is. Without this column the ops surface
+-- can only render the stored instant in UTC (correct, unreadable) or in the
+-- VIEWER's zone (readable, and wrong for anyone not sitting in the host city) —
+-- and `ends_at` is the single value the plan flags as able to silently expire a
+-- board mid-event. The zone staff entered is therefore recorded so the surface
+-- can show them back exactly what they typed, and so an edit form can round-trip
+-- without a lossy re-guess.
+--
+-- NO CHECK CONSTRAINT, deliberately. The legal set is an IANA zone allowlist
+-- that lives in `fw-ops-rules.ts` and is enforced on write; duplicating it here
+-- would create the second enforcement point that docs/solutions/best-practices/
+-- crm-audit-action-allowlist-db-check-constraint-drifts-from-ts-enum-2026-07-15
+-- .md is a whole write-up about. This value gates NOTHING — it is display
+-- provenance — so the read side narrows it against the same allowlist and falls
+-- back to a labelled UTC rendering rather than trusting it.
+alter table public.path_cohorts
+  add column if not exists time_zone text;
+
+comment on column public.path_cohorts.time_zone is
+  'IANA zone the staff-entered event window was typed in (display provenance for starts_at/ends_at). Never used for comparison; validated in fw-ops-rules.ts, not by a CHECK.';

@@ -72,6 +72,18 @@ export default async function FwCohortLayout({
         </div>
 
         <div className="flex shrink-0 items-center gap-4">
+          {/* Staff only, and the visibility is purely a way IN — the ops pages
+              and every ops action re-gate on `isFwStaffActor` server-side, so a
+              guide who types the URL gets a 404 whether or not this renders. */}
+          {isStaff && (
+            <Link
+              href={`/path/fw/ops/cohort/${cohortId}`}
+              className="inline-flex min-h-[44px] items-center gap-1.5 font-path-body text-sm text-hq-ink-soft hover:text-hq-ink"
+            >
+              <Icon name="shield-check" size={16} />
+              Ops
+            </Link>
+          )}
           {canSwitch && (
             <Link
               href="/path/fw"

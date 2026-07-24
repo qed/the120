@@ -41,7 +41,7 @@ type Seed = {
   authUsers?: Row[];
   createUserOutcomes?: CreateUserOutcome[];
   /** Force one table+op to error, to exercise the compensation branches. */
-  failTable?: { table: string; op: "upsert" | "update" | "select"; message: string } | null;
+  failTable?: { table: string; op: "upsert" | "update" | "select" | "insert"; message: string } | null;
   updateUserError?: string | null;
   /** Force getUserById to report an API FAILURE rather than a clean not-found —
    *  the distinction the reliability review found conflated. */
@@ -68,6 +68,7 @@ function makeFakeDb(seed: Seed) {
     staff: [...(seed.staff ?? [{ id: STAFF, is_active: true }])],
     path_role_grants: [...(seed.grants ?? [])],
     path_fw_guide_invites: [...(seed.invites ?? [])],
+    path_fw_ops_audit: [],
   };
   const authUsers: Row[] = [...(seed.authUsers ?? [])];
   const outcomes = [...(seed.createUserOutcomes ?? [])];
@@ -86,7 +87,7 @@ function makeFakeDb(seed: Seed) {
           isNulls.every((c) => (r[c] ?? null) === null) &&
           (!inFilter || inFilter[1].includes(r[inFilter[0]]))
       );
-    const failing = (op: "upsert" | "update" | "select") =>
+    const failing = (op: "upsert" | "update" | "select" | "insert") =>
       seed.failTable?.table === table && seed.failTable.op === op;
 
     const builder = {
@@ -120,14 +121,40 @@ function makeFakeDb(seed: Seed) {
         return Promise.resolve(result).then(resolve, reject);
       },
       upsert(payload: Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
+        // `data` is the rows RETURNING would yield. With ignoreDuplicates this is
+        // ON CONFLICT DO NOTHING, so only genuinely INSERTED rows come back —
+        // the signal provisionFwGuide reads to decide whether to write an audit
+        // row. Modelling it wrong here would make the audit tests vacuous.
         const apply = () => {
           if (failing("upsert")) return { data: null, error: { message: seed.failTable!.message } };
           const keys = (opts?.onConflict ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+          const inserted: Row[] = [];
           for (const r of payload) {
             const idx = tables[table].findIndex((x) => keys.every((k) => x[k] === r[k]));
-            if (idx === -1) tables[table].push({ id: `${table}-${idSeq++}`, ...r });
-            else if (!opts?.ignoreDuplicates) tables[table][idx] = { ...tables[table][idx], ...r };
+            if (idx === -1) {
+              const row = { id: `${table}-${idSeq++}`, ...r };
+              tables[table].push(row);
+              inserted.push(row);
+            } else if (!opts?.ignoreDuplicates) {
+              tables[table][idx] = { ...tables[table][idx], ...r };
+              inserted.push(tables[table][idx]);
+            }
           }
+          return { data: inserted.map((r) => ({ id: r.id })), error: null };
+        };
+        return {
+          select() {
+            return Promise.resolve(apply());
+          },
+          then(resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) {
+            return Promise.resolve(apply()).then(resolve, reject);
+          },
+        };
+      },
+      insert(payload: Row[]) {
+        const apply = () => {
+          if (failing("insert")) return { data: null, error: { message: seed.failTable!.message } };
+          for (const r of payload) tables[table].push({ id: `${table}-${idSeq++}`, ...r });
           return { data: null, error: null };
         };
         return {
@@ -337,7 +364,14 @@ describe("provisionFwGuide — the mint path", () => {
     const { db, tables, authUsers } = makeFakeDb({});
     const res = await provisionFwGuide(db, RAVI);
 
-    expect(res).toEqual({ ok: true, userId: authUsers[0].id, email: "ravi@example.com", created: true });
+    expect(res).toEqual({
+      ok: true,
+      userId: authUsers[0].id,
+      email: "ravi@example.com",
+      created: true,
+      grantAdded: true,
+      audited: true,
+    });
     expect(authUsers[0].app_metadata).toEqual({ role: "guide" });
     // FW-R5: never the admin claim, so /crm yields crm-staff-only at the proxy.
     expect((authUsers[0].app_metadata as Row).role).not.toBe("admin");
@@ -407,6 +441,8 @@ describe("provisionFwGuide — the mint path", () => {
       userId: "user-ravi",
       email: "ravi@example.com",
       created: false,
+      grantAdded: true,
+      audited: true,
     });
     expect(authUsers).toHaveLength(1);
   });
@@ -425,6 +461,8 @@ describe("provisionFwGuide — adoption and idempotency", () => {
       userId: authUsers[0].id,
       email: "ravi@example.com",
       created: false,
+      grantAdded: true,
+      audited: true,
     });
     expect(authUsers).toHaveLength(1);
     expect(tables.path_role_grants.map((g) => g.scope_id).sort()).toEqual(
@@ -437,6 +475,67 @@ describe("provisionFwGuide — adoption and idempotency", () => {
     await provisionFwGuide(db, RAVI);
     await provisionFwGuide(db, RAVI);
     expect(tables.path_role_grants).toHaveLength(1);
+  });
+});
+
+/* ══════════════════════════════════ the grant-add audit row (FW Unit 5) ══ */
+
+describe("provisionFwGuide — the audit row", () => {
+  it("records ONE liability row naming the actor, the guide, and the cohort", async () => {
+    const { db, tables, authUsers } = makeFakeDb({});
+    await provisionFwGuide(db, RAVI);
+
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_ops_audit[0]).toMatchObject({
+      actor: STAFF,
+      action: "guide_grant_added",
+      subject_user_id: authUsers[0].id,
+      cohort_id: BOSTON,
+    });
+  });
+
+  it("does NOT record a second row when the grant already existed", async () => {
+    // The idempotent re-run is the DOCUMENTED common case (staff double-submit,
+    // or a retry after a lost response). An audit log that invents an event for
+    // each of those is worse than no audit log — it reports access being granted
+    // at times nobody granted anything.
+    const { db, tables } = makeFakeDb({});
+    await provisionFwGuide(db, RAVI);
+    await provisionFwGuide(db, RAVI);
+    const second = await provisionFwGuide(db, RAVI);
+
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(second).toMatchObject({ ok: true, grantAdded: false, audited: true });
+  });
+
+  it("records a row per COHORT when one guide is added to a second weekend", async () => {
+    const { db, tables } = makeFakeDb({});
+    await provisionFwGuide(db, RAVI);
+    await provisionFwGuide(db, { ...RAVI, cohortId: HAMPTONS });
+
+    expect(tables.path_fw_ops_audit.map((r) => r.cohort_id).sort()).toEqual(
+      [BOSTON, HAMPTONS].sort()
+    );
+  });
+
+  it("reports audited:false — and still succeeds — when the audit write fails", async () => {
+    // The grant is already live by this point. Failing the whole call would
+    // tell staff the guide has no access when they do, which is the more
+    // dangerous lie; the honest answer is "added, but the record didn't save".
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_fw_ops_audit", op: "insert", message: "audit down" },
+    });
+    const res = await provisionFwGuide(db, RAVI);
+
+    expect(res).toMatchObject({ ok: true, grantAdded: true, audited: false });
+    expect(tables.path_role_grants).toHaveLength(1);
+    expect(tables.path_fw_ops_audit).toHaveLength(0);
+  });
+
+  it("writes NO audit row when provisioning fails before the grant", async () => {
+    const { db, tables } = makeFakeDb({});
+    await provisionFwGuide(db, { ...RAVI, cohortId: PATH_COHORT });
+    expect(tables.path_fw_ops_audit).toHaveLength(0);
   });
 
   it("REFUSES to adopt a staff account — the escalation guard", async () => {

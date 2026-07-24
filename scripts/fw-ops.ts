@@ -42,11 +42,34 @@ import { createClient } from "@supabase/supabase-js";
 import { loadSupabaseEnv } from "./load-env";
 import { narrowFwBand } from "../app/path/lib/fw-provision-rules";
 import { runFwCheckIn } from "../app/path/lib/fw-checkin-core";
+import { provisionFwGuide } from "../app/path/lib/fw-guide-core";
 import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/path/lib/fw-loader";
+import {
+  createFwCohort,
+  listFwCohortGuides,
+  listFwOpsCohorts,
+  loadFwOpsBoardToken,
+  mintFwBoardToken,
+  revokeFwBoardToken,
+  revokeFwGuideGrant,
+} from "../app/path/lib/fw-ops-core";
+import { fwCohortWindowFromLocal, normalizeFwCohortSlug } from "../app/path/lib/fw-ops-rules";
 import { isFwAction } from "../app/path/lib/fw-rules";
 import { runFwQuickCreate } from "../app/path/lib/fw-student-core";
 
-const COMMANDS = ["roster", "student", "checkin", "create"] as const;
+const COMMANDS = [
+  "roster",
+  "student",
+  "checkin",
+  "create",
+  "cohorts",
+  "cohort-create",
+  "token-mint",
+  "token-revoke",
+  "guides",
+  "guide-add",
+  "guide-revoke",
+] as const;
 type Command = (typeof COMMANDS)[number];
 
 const FLAGS = [
@@ -59,6 +82,15 @@ const FLAGS = [
   "--band",
   "--actor",
   "--json",
+  // FW Unit 5 (staff ops)
+  "--slug",
+  "--start",
+  "--start-time",
+  "--end",
+  "--end-time",
+  "--tz",
+  "--email",
+  "--guide",
 ];
 
 function arg(name: string): string | null {
@@ -116,6 +148,147 @@ async function main() {
     if (asJson) console.log(JSON.stringify(value, null, 2));
     else human();
   };
+
+  /* ───────────────────────────────────────────── staff ops (FW Unit 5) ── */
+  //
+  // These drive the SAME cores the ops surface calls — createFwCohort,
+  // mintFwBoardToken, provisionFwGuide, revokeFwGuideGrant — so an audit row
+  // written here is indistinguishable from one written in a browser, and the
+  // compensation on a failed mint is the same compensation. A second front door
+  // to one implementation, never a parallel one.
+  //
+  // Authorization is possession of the service-role key, exactly as above; the
+  // HTTP surface's `isFwStaffActor` gate has no session to resolve here.
+  // `--actor` still attributes every write to a real staff row.
+
+  if (command === "cohorts") {
+    const res = await listFwOpsCohorts(db, { now: Date.now() });
+    if (!res.ok) throw new Error("cohort list read failed");
+    emit(res.cohorts, () => {
+      console.log(`\n${res.cohorts.length} Founders Weekend cohort(s)\n`);
+      for (const c of res.cohorts) {
+        console.log(
+          `  ${c.id}  ${c.slug}\n` +
+            `      ${c.startsAt ?? "no start"} → ${c.endsAt ?? "no end"} (${c.timeZone ?? "no zone"})\n` +
+            `      ${c.studentCount} students · ${c.guideCount} guides · board ${c.boardTokenStatus}`
+        );
+      }
+    });
+    return;
+  }
+
+  if (command === "cohort-create") {
+    const slug = normalizeFwCohortSlug(required("slug"));
+    if (slug === null) throw new Error("--slug must normalize to 3–60 characters");
+    const window = fwCohortWindowFromLocal({
+      startDate: required("start"),
+      startTime: required("start-time"),
+      endDate: required("end"),
+      endTime: required("end-time"),
+      timeZone: required("tz"),
+    });
+    if (!window.ok) throw new Error(`window: ${window.reason}`);
+
+    const res = await createFwCohort(db, {
+      slug,
+      startsAt: window.startsAt,
+      endsAt: window.endsAt,
+      timeZone: required("tz"),
+      createdBy: await resolveActor(),
+    });
+    if (!res.ok) throw new Error(`cohort-create failed: ${res.reason}`);
+    emit({ ...res, startsAt: window.startsAt, endsAt: window.endsAt }, () =>
+      console.log(
+        `\ncreated ${res.slug} (${res.cohortId})\n  ${window.startsAt} → ${window.endsAt}`
+      )
+    );
+    return;
+  }
+
+  if (command === "token-mint") {
+    const cohortId = required("cohort");
+    const res = await mintFwBoardToken(db, {
+      cohortId,
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    if (!res.ok) throw new Error(`token-mint failed: ${res.reason}`);
+    // The raw token is printed ONCE and never stored; --json includes it because
+    // the whole point of the command is to hand a URL to whoever is projecting.
+    emit(res, () => {
+      if (res.revokedPrior) {
+        console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
+      }
+      console.log(`\n/path/fw/board/${res.token}\n  expires ${res.expiresAt}`);
+      console.log("  Only a hash is stored — this cannot be shown again.");
+    });
+    return;
+  }
+
+  if (command === "token-revoke") {
+    const cohortId = required("cohort");
+    const res = await revokeFwBoardToken(db, {
+      cohortId,
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    if (!res.ok) throw new Error(`token-revoke: ${res.reason}`);
+    emit(res, () => console.log(`\nboard link revoked for ${cohortId}`));
+    return;
+  }
+
+  if (command === "guides") {
+    const cohortId = required("cohort");
+    const [guides, token] = await Promise.all([
+      listFwCohortGuides(db, { cohortId, now: Date.now() }),
+      loadFwOpsBoardToken(db, { cohortId, now: Date.now() }),
+    ]);
+    if (!guides.ok) throw new Error(`guide list read failed for ${cohortId}`);
+    emit({ guides: guides.guides, board: token.ok ? token.token : null }, () => {
+      console.log(`\n${guides.guides.length} guide(s) on ${cohortId}`);
+      console.log(`board: ${token.ok ? token.token.status : "unreadable"}\n`);
+      for (const g of guides.guides) {
+        console.log(`  ${g.userId}  ${g.email ?? "(unnamed)"} — ${g.credential}`);
+      }
+    });
+    // The pre-event checklist's "all guides claimed" line, as an exit code.
+    if (guides.guides.some((g) => g.credential !== "claimed")) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "guide-add") {
+    const res = await provisionFwGuide(db, {
+      email: required("email"),
+      cohortId: required("cohort"),
+      createdBy: await resolveActor(),
+    });
+    if (!res.ok) throw new Error(`guide-add failed: ${res.reason}`);
+    emit(res, () => {
+      console.log(`\n${res.email} (${res.userId})`);
+      console.log(`  account ${res.created ? "created" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`);
+      if (!res.audited) console.log("  ⚠  the audit record did NOT save");
+      // Deliberately does NOT mail the invite: the invite email is the ACTION
+      // layer's step (provisionGuideAction), and a script that silently mailed a
+      // password-setting link would be a second, untested mail path. Use the ops
+      // surface, or `issueFwGuideInvite` directly, when a link is wanted.
+      console.log("  no invite emailed — use the ops surface to send their link");
+    });
+    return;
+  }
+
+  if (command === "guide-revoke") {
+    const res = await revokeFwGuideGrant(db, {
+      cohortId: required("cohort"),
+      userId: required("guide"),
+      actorUserId: await resolveActor(),
+    });
+    if (!res.ok) throw new Error(`guide-revoke failed: ${res.reason}`);
+    emit(res, () => {
+      console.log(`\naccess removed for ${required("guide")} on ${required("cohort")}`);
+      if (!res.audited) console.log("  ⚠  the audit record did NOT save");
+    });
+    return;
+  }
 
   if (command === "roster") {
     const cohortId = required("cohort");

@@ -1,0 +1,55 @@
+-- First Profit — Weekend Cohort Sprints, Unit 5: the grant-by-scope index.
+--
+-- Apply via the Management API — `supabase db push` is dead here (no DB
+-- password). See docs/solutions/integration-issues/supabase-cli-stale-db-
+-- password-management-api-workaround-2026-07-13.md.
+--
+-- APPLY IMMEDIATELY (no migration holds; Chicago cancelled 2026-07-23).
+--
+-- Rollout phase: SCHEMA ONLY (one index). Seeds and backfills nothing.
+-- Idempotent — re-applying is a no-op.
+--
+-- PRE-APPLY:
+--   1. select indexname from pg_indexes
+--       where tablename='path_role_grants';            -- no *_scope_idx yet
+-- POST-APPLY (verify BEFORE recording the version):
+--   2. same query;                                     -- path_role_grants_scope_idx present
+--   3. explain select 1 from public.path_role_grants
+--       where role='guide' and scope_type='cohort' and scope_id = '<some uuid>';
+--                                                      -- Index Scan, not Seq Scan
+--   4. Only then: insert the version into
+--      supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: `drop index public.path_role_grants_scope_idx;` — an index drop is
+-- always safe; the queries below simply get slow again.
+--
+-- ── Why (performance review, Unit 5) ────────────────────────────────────────
+--
+-- Unit 5 introduced the first queries in this repo that filter
+-- `path_role_grants` by SCOPE rather than by user:
+--
+--   listFwOpsCohorts   — .eq(role,'guide').eq(scope_type,'cohort').in(scope_id, ids)
+--   listFwCohortGuides — .eq(role,'guide').eq(scope_type,'cohort').eq(scope_id, id)
+--
+-- The only index on the table is `path_role_grants_user_id_idx (user_id)`, and
+-- the `unique (user_id, role, scope_type, scope_id)` constraint's implicit index
+-- also LEADS with user_id — so neither can seek without a user id bound, and
+-- both new queries sequentially scan the whole table.
+--
+-- That table is not FW-sized. It holds a `student` grant per Path student and a
+-- `parent` grant per family, so it grows with the entire tutoring program while
+-- these queries only ever want a handful of guide rows. The scan is paid on
+-- every load of the two ops pages — opened repeatedly, over venue wifi, during
+-- a live event.
+--
+-- Column order is (scope_type, scope_id, role): the two equality-filtered
+-- discriminators first so the index seeks straight to one cohort's rows, with
+-- `role` along for the ride so the guide filter is satisfied from the index
+-- rather than by re-visiting the heap. Mirrors `path_cohort_members_cohort_idx`
+-- from Unit 1's migration, which exists for the same read shape.
+--
+-- NOT partial (`where role = 'guide'`): the Path's own D25 reviewer grants use
+-- the same (role, scope_type, scope_id) shape, and a future "who can see this
+-- cohort" read should not have to add a second index to ask the same question.
+create index if not exists path_role_grants_scope_idx
+  on public.path_role_grants (scope_type, scope_id, role);

@@ -80,6 +80,61 @@ export async function fwRead<R extends { data: unknown; error: { message: string
   call: () => PromiseLike<R>,
   label: string
 ): Promise<R | { data: null; error: { message: string } }> {
+  return fwCall(call, label);
+}
+
+/**
+ * The WRITE-path twin of `fwRead` — same clock, same throw guard, different
+ * contract for the caller.
+ *
+ * Added after Unit 5's reliability review found every ops mutation (the audit
+ * insert, the cohort insert, the board-token revoke/insert/restore, the grant
+ * delete) issued as a bare `await db.from(...)`. Unit 3's write path already
+ * wrapped `fw_move_task` for exactly this reason and this file's header already
+ * claimed to cover writes; the ops core simply did not follow it. On venue wifi
+ * a stalled mint left staff watching "Minting…" forever, with none of the
+ * carefully-written compensation branches ever reached — the failure mode the
+ * timeout exists to convert into a typed refusal.
+ *
+ * ⚠️ THE CONTRACT A WRITE CALLER TAKES ON. Giving up on waiting is NOT
+ * cancelling the request: a timed-out write MAY still land server-side. So
+ * every caller must be safe under "reported failed, actually succeeded". In the
+ * ops core that holds by construction, and each case is recoverable by the same
+ * refresh staff would do anyway:
+ *
+ *   - grant add / revoke → POST-WRITE VERIFIED. This one is NOT merely
+ *                      "recoverable by a refresh", and an earlier version of
+ *                      this note wrongly said so. The audit row is a side-record
+ *                      nothing else can reconstruct, and the idempotent retry
+ *                      HIDES a landed-but-timed-out write (ON CONFLICT DO NOTHING
+ *                      reports "inserted nothing", `grant_not_found` reports the
+ *                      row is already gone) — so the loss would be permanent and
+ *                      invisible. `provisionFwGuide`/`revokeFwGuideGrant`
+ *                      therefore re-read on the error branch and audit what
+ *                      actually landed. See docs/solutions/logic-errors/audit-
+ *                      side-record-gated-on-primary-writes-reported-success-….
+ *   - cohort insert  → a retry meets `slug_taken`, which names the cohort that
+ *                      now exists rather than silently minting a second one.
+ *   - token insert   → the compensation's restore is refused by the partial
+ *                      unique index if the insert did land, so two live tokens
+ *                      cannot result.
+ *   - token revoke   → idempotent by predicate (`is null`, plus the
+ *                      `expectedTokenId` CAS); the second attempt reports
+ *                      `no_active_token`/`stale_view`, which is the truth.
+ */
+export async function fwWrite<R extends { data: unknown; error: { message: string } | null }>(
+  call: () => PromiseLike<R>,
+  label: string
+): Promise<R | { data: null; error: { message: string } }> {
+  return fwCall(call, label);
+}
+
+/** The shared body. One definition of the budget and the guard, so a read and a
+ *  write can never drift apart on either. */
+async function fwCall<R extends { data: unknown; error: { message: string } | null }>(
+  call: () => PromiseLike<R>,
+  label: string
+): Promise<R | { data: null; error: { message: string } }> {
   let raced;
   try {
     raced = await withFwTimeout(call(), label);
@@ -91,4 +146,71 @@ export async function fwRead<R extends { data: unknown; error: { message: string
     return { data: null, error: { message: `${label} timed out after ${FW_CALL_TIMEOUT_MS}ms` } };
   }
   return raced.value;
+}
+
+/* ═══════════════════════════════════════════════ the 1000-row cliff ══ */
+
+/**
+ * PostgREST's default `max-rows` on this project, measured against production
+ * rather than assumed: a `select` with no `range` returns AT MOST this many rows
+ * and says nothing about the ones it dropped.
+ *
+ * This is not a theoretical concern. Seeding the 30-student rehearsal cohort put
+ * 3,750 progress rows in the table; an unranged read of them came back with
+ * exactly 1,000 and no error, and the resume chips built from that read would
+ * have been quietly wrong for two thirds of the roster — a bug that gets WORSE
+ * as a weekend goes on and that no fixture-sized test can see. See
+ * docs/solutions/integration-issues/postgrest-max-rows-1000-silently-truncates-
+ * unranged-select-paginate-and-refuse-2026-07-24.md.
+ */
+const FW_PAGE_SIZE = 1000;
+
+/**
+ * Enough pages for 90 students × 125 tasks, plus headroom. Reaching it is a
+ * loud error, never a truncated result — the plan's no-silent-caps posture, and
+ * the reason this is a bound rather than a `while (true)`.
+ */
+const FW_MAX_PAGES = 16;
+
+/**
+ * Read every row a query matches, in pages.
+ *
+ * The caller supplies a closure that applies `.range(from, to)` to its own
+ * builder, because PostgREST's builder is not reusable across calls. Returns
+ * `{ok:false}` on a read error OR on hitting the page bound — a partial list
+ * from a table this size is indistinguishable from a complete one downstream,
+ * and every consumer renders a truthful "couldn't load" for `{ok:false}`.
+ *
+ * LIVES HERE, not in `fw-loader.ts` where Unit 4 first wrote it, for the reason
+ * this file's header already records about `withFwTimeout`: Unit 5's ops reads
+ * need the same paging, and copying it would create a second definition of the
+ * bound — the drift this repo has already paid for once. The ops views are
+ * exactly where "these lists are small" stops being true.
+ */
+export async function fetchAllRows<T>(
+  label: string,
+  page: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<{ ok: true; rows: T[] } | { ok: false }> {
+  const rows: T[] = [];
+  for (let i = 0; i < FW_MAX_PAGES; i += 1) {
+    const from = i * FW_PAGE_SIZE;
+    // Through `fwRead`, so a stalled page cannot hang the loop and a thrown
+    // network abort becomes a typed error instead of escaping the Server
+    // Component past every "we couldn't load this" branch (reliability review).
+    const res = await fwRead(() => page(from, from + FW_PAGE_SIZE - 1), `${label} page ${i}`);
+    if (res.error) {
+      console.error(`[fw/call] ${label} page ${i} failed: ${res.error.message}`);
+      return { ok: false };
+    }
+    const got = res.data ?? [];
+    rows.push(...got);
+    if (got.length < FW_PAGE_SIZE) return { ok: true, rows };
+  }
+  console.error(
+    `[fw/call] ${label} exceeded ${FW_MAX_PAGES} pages (${FW_MAX_PAGES * FW_PAGE_SIZE} rows) — refusing to report a truncated result`
+  );
+  return { ok: false };
 }

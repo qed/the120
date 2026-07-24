@@ -147,7 +147,16 @@ const provisionSchema = z.object({
 });
 
 export type ProvisionGuideActionResult =
-  | { success: true; email: string; created: boolean; invited: boolean }
+  | {
+      success: true;
+      email: string;
+      created: boolean;
+      invited: boolean;
+      /** False when the grant landed but its liability record did not — surfaced
+       *  rather than swallowed, so the ops copy can tell staff to raise it
+       *  instead of the record simply going missing (FW Unit 5). */
+      audited: boolean;
+    }
   | { success: false; error: string };
 
 /**
@@ -198,6 +207,7 @@ export async function provisionGuideAction(
       email: provisioned.email,
       created: provisioned.created,
       invited: false,
+      audited: provisioned.audited,
     };
   }
   if (!issued.issued) {
@@ -209,6 +219,7 @@ export async function provisionGuideAction(
       email: provisioned.email,
       created: provisioned.created,
       invited: true,
+      audited: provisioned.audited,
     };
   }
 
@@ -218,6 +229,7 @@ export async function provisionGuideAction(
     email: provisioned.email,
     created: provisioned.created,
     invited: sent.ok,
+    audited: provisioned.audited,
   };
 }
 

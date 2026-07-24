@@ -34,6 +34,8 @@ import {
   type FwCohortLike,
 } from "./fw-access-rules";
 import { normalizeEmail } from "./onboarding-rules";
+import { recordFwOpsAudit } from "./fw-audit-core";
+import { fwRead, fwWrite } from "./fw-call";
 import { validateStudentPassword } from "./provision-rules";
 import { findAuthUserByEmail } from "./provision-core";
 
@@ -166,7 +168,21 @@ export type ProvisionFwGuideFailure =
   | "unavailable";
 
 export type ProvisionFwGuideResult =
-  | { ok: true; userId: string; email: string; created: boolean }
+  | {
+      ok: true;
+      userId: string;
+      email: string;
+      created: boolean;
+      /** Whether THIS call actually inserted the grant row. False on a re-run
+       *  for a cohort the guide already holds — which is the common case, since
+       *  the whole function is idempotent by design. */
+      grantAdded: boolean;
+      /** Whether the liability record for that insert landed. Always true when
+       *  `grantAdded` is false (there was nothing to record). Reported so the
+       *  ops copy can say "added — but the audit record didn't save" rather
+       *  than losing it quietly. */
+      audited: boolean;
+    }
   | { ok: false; reason: ProvisionFwGuideFailure };
 
 /**
@@ -242,14 +258,71 @@ export async function provisionFwGuide(
     created = true;
   }
 
-  const grant = await db.from("path_role_grants").upsert(
-    [{ user_id: user.id, role: "guide", scope_type: "cohort", scope_id: cohort.id }],
-    { onConflict: "user_id,role,scope_type,scope_id", ignoreDuplicates: true }
+  // `.select("id")` is not cosmetic: with `ignoreDuplicates` this is
+  // `ON CONFLICT DO NOTHING`, so the RETURNING set is exactly the rows that were
+  // genuinely inserted — the only honest signal for "did a human just gain
+  // check-in power here?", which is what the audit row claims. Without it the
+  // idempotent re-run (adding a guide to a second weekend, or staff double-
+  // submitting) would write a `guide_grant_added` record for a grant that
+  // already existed, and an audit log with invented events is worse than none.
+  const grant = await fwWrite(
+    () =>
+      db
+        .from("path_role_grants")
+        .upsert([{ user_id: user.id, role: "guide", scope_type: "cohort", scope_id: cohort.id }], {
+          onConflict: "user_id,role,scope_type,scope_id",
+          ignoreDuplicates: true,
+        })
+        .select("id"),
+    `guide grant upsert (${user.id}/${cohort.id})`
   );
   if (grant.error) {
     console.error(
       `[fw/guide] grant upsert failed for ${user.id}/${cohort.id}: ${grant.error.message}`
     );
+
+    // POST-WRITE VERIFY BEFORE ANYTHING ELSE (adversarial review). A reported
+    // failure does not mean nothing happened — `fwWrite` says so explicitly, and
+    // over venue wifi a committed insert whose response was lost is the likely
+    // shape. Returning straight out would leave a guide holding REAL check-in
+    // power with no `guide_grant_added` row, and the retry makes that permanent
+    // AND invisible: the second attempt's ON CONFLICT DO NOTHING correctly
+    // reports "already there" (grantAdded=false, audited=true trivially) and the
+    // UI shows a completely ordinary success. The liability record would simply
+    // never exist for a grant nobody can now explain.
+    const landed = await fwRead(
+      () =>
+        db
+          .from("path_role_grants")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("role", "guide")
+          .eq("scope_type", "cohort")
+          .eq("scope_id", cohort.id)
+          .maybeSingle(),
+      `guide grant verify (${user.id}/${cohort.id})`
+    );
+    if (!landed.error && landed.data) {
+      console.warn(
+        `[fw/guide] grant upsert for ${user.id}/${cohort.id} reported an error but LANDED — auditing it`
+      );
+      const auditedAnyway = await recordFwOpsAudit(db, {
+        actor: input.createdBy,
+        action: "guide_grant_added",
+        subjectUserId: user.id,
+        cohortId: cohort.id,
+        metadata: { email, accountCreated: created, recoveredFromReportedFailure: true },
+      });
+      return {
+        ok: true,
+        userId: user.id,
+        email: user.email ?? email,
+        created,
+        grantAdded: true,
+        audited: auditedAnyway,
+      };
+    }
+
     if (created) {
       // `created` says THIS call minted the account, which is necessary but no
       // longer sufficient (adversarial review): two staff double-submitting the
@@ -294,7 +367,26 @@ export async function provisionFwGuide(
     return { ok: false, reason: "unavailable" };
   }
 
-  return { ok: true, userId: user.id, email: user.email ?? email, created };
+  // THE AUDIT WRITE LIVES HERE, INSIDE THE MUTATION, and that placement is the
+  // point. This function is the ONLY writer of `guide`/`cohort` grants in the
+  // repo (the other `path_role_grants` writers issue `parent`/`student` grants),
+  // and it already has three call sites: the staff provisioning action, the ops
+  // surface, and `scripts/seed-fw-guide.ts`. An audit written at any one of them
+  // is an audit the other two bypass — the exact family of bug documented three
+  // times this month in docs/solutions/logic-errors/confirmation-gate-in-one-
+  // entry-point-bypassed-by-retry-paths-….
+  const grantAdded = (grant.data ?? []).length > 0;
+  const audited = grantAdded
+    ? await recordFwOpsAudit(db, {
+        actor: input.createdBy,
+        action: "guide_grant_added",
+        subjectUserId: user.id,
+        cohortId: cohort.id,
+        metadata: { email, accountCreated: created },
+      })
+    : true;
+
+  return { ok: true, userId: user.id, email: user.email ?? email, created, grantAdded, audited };
 }
 
 /* ──────────────────────────────────────────────────── invite issue / re-issue ── */

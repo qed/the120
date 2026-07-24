@@ -189,7 +189,7 @@ function makeFakeDb(seed: Seed) {
 let seq = 0;
 function entry(action: FwAction, overrides: Partial<FwQueueEntry> = {}): FwQueueEntry {
   seq += 1;
-  const stamp = `2026-08-22T14:${String(seq).padStart(2, "0")}:00.000Z`;
+  const stamp = new Date(Date.UTC(2026, 7, 22, 14, 0, 0) + seq * 1000).toISOString();
   const clientId = overrides.clientId ?? `client-${seq}`;
   return {
     id: overrides.id ?? clientId,
@@ -312,6 +312,30 @@ describe("runFwDrain — undo + not_yet correction on a pre-outage verified", ()
   });
 });
 
+describe("runFwDrain — undo-of-not_yet (the named matrix row, end-to-end)", () => {
+  it("SAME actor → undoes the not_yet cleanly, lands locked, no reject", async () => {
+    const { db, progress, rejects, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "not_yet", verified_by: GUIDE } },
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+    expect(outcomes[0].disposition).toBe("settled");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "locked", verified_by: null });
+    expect(rejects).toHaveLength(0);
+  });
+
+  it("CROSS actor → the same-actor guard rejects, the not_yet row is untouched", async () => {
+    const { db, progress, rejects, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "not_yet", verified_by: OTHER_GUIDE } },
+    });
+    const { outcomes } = await drain(db, [entry("undo", { studentId: "s1" })]);
+    expect(outcomes[0].disposition).toBe("rejected");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "not_yet", verified_by: OTHER_GUIDE });
+    expect(rejects[0].reason).toBe("cross_actor_undo");
+  });
+});
+
 describe("runFwDrain — a bare undo of another guide's live checkmark (the original P1)", () => {
   it("the same-actor guard rejects it and the board stays intact", async () => {
     const { db, progress, rejects, pkey } = makeFakeDb({
@@ -408,6 +432,24 @@ describe("runFwDrain — a revoked guide's drain", () => {
     expect(progress.get(pkey("s1", TASK))).toEqual({ state: "locked", verified_by: null });
     expect(rejects).toHaveLength(2);
     expect(rejects.every((r) => r.reason === "reauth_failed")).toBe(true);
+  });
+
+  it("an UNKNOWN cohort (auth-read blip, not a revoke) → RETRY, never a permanent reject", async () => {
+    // reliability review's P1: on venue wifi a transient auth-read failure must not be
+    // treated as a revoke, or a guide's real captures are silently discarded to a
+    // staff-only reject. Unknown → retry (kept for the next drain), zero rejects.
+    const { db, progress, rejects, rpcCalls, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "locked", verified_by: null } },
+    });
+    const { outcomes } = await drain(db, [entry("checkmark", { studentId: "s1" })], {
+      authorizedCohortIds: [],
+      unknownCohortIds: [COHORT],
+    });
+    expect(outcomes[0].disposition).toBe("retry");
+    expect(rpcCalls).toHaveLength(0);
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "locked", verified_by: null });
+    expect(rejects).toHaveLength(0);
   });
 });
 

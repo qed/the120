@@ -25,16 +25,18 @@ import { isNextRedirect } from "@/app/path/lib/next-redirect";
 import { drainFwQueue } from "@/app/path/lib/actions/fw-sync";
 import {
   clearFwQueue,
+  clearFwQueueIfEmpty,
   clearFwRoster,
   deleteFwEntry,
-  getFwEntry,
   getFwRoster,
   isFwQueueSupported,
   listFwRawEntries,
+  listFwRawEntriesSerialized,
   putFwEntry,
   putFwRoster,
 } from "@/app/path/lib/fw-queue";
 import {
+  applyFwDrainOutcome,
   decideFwSignOut,
   FW_AUTO_RETRY_ATTEMPT_CEILING,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
@@ -51,6 +53,11 @@ import {
   type FwRosterCache,
   type FwSignOutVerdict,
 } from "@/app/path/lib/fw-sync-rules";
+
+/** A note for a record this app version cannot drain (future schema / corrupt) —
+ *  surfaced, dismissible, never silently dropped. */
+const FW_QUARANTINE_NOTE =
+  "This saved check-in is from a different app version and can't be sent. Dismiss it, or update the app and sign in again.";
 
 /* ══════════════════════════════════════════════════════════ subscription ══ */
 
@@ -91,11 +98,14 @@ export type FwEnqueueResult =
   | { ok: false; reason: "storage_failed"; ids: string[] };
 
 /**
- * Queue one tap's per-student captures. Each gets a FRESH `clientId` (the entry id
- * IS that key), so two offline not_yet taps on one task are two distinct
- * re-attempt captures — never one collapsed by the online ledger's reuse
- * semantics, which exist for ambiguous ONLINE retries and do not apply here. The
- * batch shares one `actionId`, so the board still groups the celebration on drain.
+ * Queue one tap's per-student captures.
+ *
+ * With no `clientIds`, each student gets a FRESH `clientId` (the entry id IS that
+ * key), so two offline not_yet taps on one task are two distinct re-attempt captures.
+ * The BACKSTOP path (an online tap that failed to reach the server) passes the
+ * `clientIds` the failed call already used, so the drain's replay lands on the RPC's
+ * idempotency key and cannot double-apply if the online write had in fact partly
+ * landed. The batch shares one `actionId`, so the board still groups the celebration.
  */
 export async function enqueueFwCheckIns(p: {
   cohortId: string;
@@ -105,11 +115,13 @@ export async function enqueueFwCheckIns(p: {
   studentIds: readonly string[];
   actionId: string;
   capturedAt: string;
+  /** Explicit per-student keys for the backstop path; minted fresh when absent. */
+  clientIds?: Readonly<Record<string, string>>;
 }): Promise<FwEnqueueResult> {
   if (!isFwQueueSupported()) return { ok: false, reason: "unsupported" };
   const ids: string[] = [];
   for (const studentId of p.studentIds) {
-    const clientId = crypto.randomUUID();
+    const clientId = p.clientIds?.[studentId] ?? crypto.randomUUID();
     const input: FwQueueEntryInput = {
       clientId,
       actionId: p.actionId,
@@ -141,6 +153,31 @@ export async function enqueueFwCheckIns(p: {
   return { ok: true, ids };
 }
 
+/** This guide's own pending (non-blocked) captures for one (student, task) — the
+ *  task view folds them onto the server state so a revisit mid-outage reflects the
+ *  guide's own queued taps, not the stale cached shell (correctness review). */
+export async function readPendingFwOpsFor(input: {
+  cohortId: string;
+  studentId: string;
+  taskId: string;
+  actorUserId: string;
+}): Promise<FwQueueEntry[]> {
+  if (!isFwQueueSupported()) return [];
+  try {
+    const { recognized } = await scanFwQueue();
+    return recognized.filter(
+      (e) =>
+        !e.blocked &&
+        e.actorUserId === input.actorUserId &&
+        e.cohortId === input.cohortId &&
+        e.studentId === input.studentId &&
+        e.taskId === input.taskId
+    );
+  } catch {
+    return [];
+  }
+}
+
 /** Dismiss a tombstoned (rejected) entry the guide has read — the reject is already
  *  recorded server-side, so this only clears the local note. */
 export async function dismissFwEntry(id: string): Promise<void> {
@@ -150,51 +187,66 @@ export async function dismissFwEntry(id: string): Promise<void> {
 
 /* ══════════════════════════════════════════════════════════ queue reading ══ */
 
+/** One quarantined record — a shape this app version cannot drain, surfaced by id
+ *  and note so it can be shown and dismissed. */
+type FwQuarantined = { id: string; note: string };
+
 /**
- * Read the queue, quarantining any record this app version cannot drain (a future
- * schema or a corrupt row) as a surfaced, dismissible tombstone — never fed raw
- * into the drain, never silently dropped (the queue is a cross-deploy contract).
+ * Partition a raw IndexedDB read into drainable entries and quarantined records.
+ *
+ * A record that fails `isRecognizedFwEntry` (a future schema, a corrupt shape) is
+ * NOT cast into a `FwQueueEntry` it does not satisfy — the previous version wrote
+ * `{...record, blocked} as FwQueueEntry`, but adding `blocked` never fixed what made
+ * it unrecognized, so it failed recognition again on every later read and vanished
+ * from every view (kieran-typescript / reliability / api-contract review: it could
+ * then be silently destroyed by sign-out). Instead it is surfaced directly from the
+ * raw record by its id, with its own note, on every scan — no write, no lying cast,
+ * never a silent drop of a child's captured check-in.
  */
-async function listRecognizedFwEntries(): Promise<FwQueueEntry[]> {
-  const raw = await listFwRawEntries();
+function partitionFwQueue(raw: readonly unknown[]): {
+  recognized: FwQueueEntry[];
+  quarantined: FwQuarantined[];
+} {
   const recognized: FwQueueEntry[] = [];
+  const quarantined: FwQuarantined[] = [];
   for (const record of raw) {
     if (isRecognizedFwEntry(record)) {
       recognized.push(record);
       continue;
     }
     const shell = record as { id?: unknown; blocked?: unknown };
-    if (typeof shell.id === "string" && !shell.blocked) {
-      try {
-        await putFwEntry({
-          ...(record as object),
-          blocked: {
-            reason: "reauth_failed",
-            note: "This saved check-in is from a different app version and can't be sent. Dismiss it, or update the app and sign in again.",
-          },
-        } as FwQueueEntry);
-        notify();
-      } catch (e) {
-        console.error("[fw/sync] could not quarantine unrecognized entry:", e);
-      }
+    if (typeof shell.id === "string") {
+      const note =
+        typeof shell.blocked === "object" &&
+        shell.blocked !== null &&
+        typeof (shell.blocked as { note?: unknown }).note === "string"
+          ? (shell.blocked as { note: string }).note
+          : FW_QUARANTINE_NOTE;
+      quarantined.push({ id: shell.id, note });
     }
   }
-  return recognized;
+  return { recognized, quarantined };
 }
 
-/** This session's own, non-blocked captures — the drain's scope and the sign-out
- *  count both read it. */
+async function scanFwQueue(): Promise<{ recognized: FwQueueEntry[]; quarantined: FwQuarantined[] }> {
+  return partitionFwQueue(await listFwRawEntries());
+}
+
+/** This session's own, non-blocked captures — the drain's scope. */
 async function readDrainableFwEntries(actorUserId: string): Promise<FwQueueEntry[]> {
-  const all = await listRecognizedFwEntries();
-  return selectFwDrainable(all, actorUserId).filter((e) => !e.blocked);
+  const { recognized } = await scanFwQueue();
+  return selectFwDrainable(recognized, actorUserId).filter((e) => !e.blocked);
 }
 
 /** The queued-indicator's counts, scoped to this session (a shared device could
- *  hold a prior guide's residue, but block-until-drained clears it on sign-out). */
+ *  hold a prior guide's residue, but block-until-drained clears it on sign-out).
+ *  Quarantined records surface in `attention` so a check-in this build can't drain
+ *  is visible and dismissible rather than invisible. */
 export async function readFwQueueSummary(actorUserId: string): Promise<FwQueueSummary> {
   try {
-    const all = await listRecognizedFwEntries();
-    return summarizeFwQueue(selectFwDrainable(all, actorUserId));
+    const { recognized, quarantined } = await scanFwQueue();
+    const base = summarizeFwQueue(selectFwDrainable(recognized, actorUserId));
+    return { queuedCount: base.queuedCount, attention: [...base.attention, ...quarantined] };
   } catch {
     return { queuedCount: 0, attention: [] };
   }
@@ -248,24 +300,32 @@ export async function runFwClientDrain(ctx: FwDrainCtx, opts: FwDrainOptions = {
       if (res.reason === "no_session") {
         authRequired = true;
         notify();
+        return;
       }
+      // invalid_input: the WHOLE batch failed server-side validation. With the
+      // stricter isRecognizedFwEntry this should be unreachable for client-recognized
+      // entries, but if it ever happens, ADVANCE attempts so the batch reaches the
+      // auto-retry ceiling and surfaces as "still trying" — never a silent no-op that
+      // re-ships the identical failing batch forever with no guide-visible signal
+      // (api-contract review).
+      for (const entry of runnable) {
+        await putFwEntry({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
+      }
+      notify();
       return;
     }
 
+    // Look outcomes up in the batch we already hold, rather than re-reading each
+    // entry from IndexedDB (performance review), and apply the mutation the pure,
+    // exhaustive `applyFwDrainOutcome` decides — so a future disposition is a compile
+    // error, not a silent retry.
+    const byId = new Map(runnable.map((e) => [e.id, e]));
     for (const outcome of res.outcomes) {
-      if (outcome.disposition === "settled") {
-        await deleteFwEntry(outcome.entryId);
-        continue;
-      }
-      const entry = await getFwEntry(outcome.entryId);
+      const entry = byId.get(outcome.entryId);
       if (!entry) continue;
-      if (outcome.disposition === "rejected") {
-        // A LOCAL tombstone with the staff-visible note — the authoritative record
-        // is the path_fw_replay_rejects row the drain already wrote.
-        await putFwEntry({ ...entry, blocked: { reason: outcome.reason, note: outcome.note } });
-      } else {
-        await putFwEntry({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
-      }
+      const mutation = applyFwDrainOutcome(entry, outcome, nowIso());
+      if (mutation.op === "delete") await deleteFwEntry(outcome.entryId);
+      else await putFwEntry(mutation.entry);
     }
     notify();
   };
@@ -343,9 +403,20 @@ export async function cacheFwRoster(p: {
   }
 }
 
-/** The cached roster for a cohort, or null if there is none or its shape predates
- *  this app version (Decision 15's version gate — a deploy that did not change the
- *  shape leaves it usable). */
+/**
+ * The cached roster for a cohort, or null if there is none or its shape predates
+ * this app version (Decision 15's version gate — a deploy that did not change the
+ * shape leaves it usable).
+ *
+ * SCOPE NOTE (review): the offline-roster RENDER is currently served by the SW's
+ * cached app-shell HTML (which already contains the last online roster), so this
+ * versioned IndexedDB read is the Decision-15 store's accessor — load-bearing for a
+ * CLIENT-RENDERED offline fallback (offline navigation to a not-yet-visited page,
+ * the batch picker over the cached ≤90 names) that the Aug 17 on-device dry run will
+ * shape. Unvisited-page offline navigation is a documented Unit-9 limitation, not a
+ * silent one. The WRITE (`cacheFwRoster`), the version policy, and the sign-out clear
+ * are all consumed today.
+ */
 export async function readUsableFwRoster(cohortId: string): Promise<FwRosterCache | null> {
   if (!isFwQueueSupported()) return null;
   try {
@@ -363,35 +434,54 @@ export async function readUsableFwRoster(cohortId: string): Promise<FwRosterCach
 
 /* ══════════════════════════════════════════════════ block-until-drained sign-out ══ */
 
-/** The sign-out verdict for this device's queue (Decision 8). Reads the drainable
- *  count and connectivity; the caller drains (online) or shows the count (offline). */
+/**
+ * The sign-out verdict for this device's queue (Decision 8).
+ *
+ * Reads through the SERIALIZED path so an in-flight enqueue is observed (not raced
+ * past — the adversarial P0). A read FAILURE returns `unreadable` and BLOCKS sign-out
+ * rather than failing open: a queue we cannot read must never be destroyed on the
+ * strength of not being able to see it (correctness / adversarial review — the old
+ * fail-open path let a transient IndexedDB error wipe undrained captures). Quarantined
+ * records block with `needs_attention` — un-landed captures a blind clear would lose.
+ */
 export async function fwSignOutVerdict(actorUserId: string): Promise<FwSignOutVerdict> {
   if (!isFwQueueSupported()) return { ok: true };
   try {
-    const drainable = await readDrainableFwEntries(actorUserId);
+    const { recognized, quarantined } = partitionFwQueue(await listFwRawEntriesSerialized());
+    const drainable = selectFwDrainable(recognized, actorUserId).filter((e) => !e.blocked);
     return decideFwSignOut({
       queuedCount: drainable.length,
+      quarantinedCount: quarantined.length,
       online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
     });
-  } catch {
-    // A queue we cannot read must not trap a guide on the device forever.
-    return { ok: true };
+  } catch (e) {
+    console.error("[fw/sync] sign-out queue read failed:", e);
+    return { ok: false, reason: "unreadable", queuedCount: 0 };
   }
 }
 
-/** Clear ALL residue — the queue, the roster cache, AND the cached app shell —
- *  after an allowed sign-out (Decision 8). Never an auto-purge: only the sign-out
- *  flow calls this, and only once `fwSignOutVerdict` returned ok. Clearing the SW
- *  shell cache too means a shared iPad keeps no authed roster HTML for the next
- *  guide (the IndexedDB stores and the SW cache are cleared together). */
-export async function clearFwResidue(): Promise<void> {
+/**
+ * Clear ALL residue — the queue, the roster cache, AND the cached app shell — after
+ * an allowed sign-out (Decision 8). Never an auto-purge: only the sign-out flow and
+ * the identity reconcile call this.
+ *
+ * The queue clear is ATOMIC-if-empty: even after the verdict passed, a check-in can
+ * be enqueued before the clear runs, and a blind wipe would lose it (adversarial P0).
+ * `clearFwQueueIfEmpty` no-ops if a tap raced in; this returns `{ cleared }` so the
+ * caller can ABORT sign-out rather than proceed having lost a tap. Clearing the SW
+ * shell cache means a shared iPad keeps no authed roster HTML for the next guide.
+ */
+export async function clearFwResidue(): Promise<{ cleared: boolean }> {
+  let cleared = true;
   if (isFwQueueSupported()) {
     try {
-      await clearFwQueue();
+      const res = await clearFwQueueIfEmpty();
+      cleared = res.cleared;
       await clearFwRoster();
       notify();
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
+      cleared = false;
     }
   }
   if (typeof caches !== "undefined") {
@@ -400,6 +490,65 @@ export async function clearFwResidue(): Promise<void> {
     } catch (e) {
       console.error("[fw/sync] shell cache clear failed:", e);
     }
+  }
+  return { cleared };
+}
+
+/**
+ * Force-clear ALL residue unconditionally — for the identity-change case, where the
+ * data belongs to a DIFFERENT guide and must not survive. Unlike `clearFwResidue`,
+ * this does NOT gate on emptiness (a prior guide's un-drained taps are theirs to lose
+ * on a device that changed hands, and block-until-drained already prevented an
+ * offline handoff). Used only by `reconcileFwCacheOwner`.
+ */
+async function purgeFwResidue(): Promise<void> {
+  if (isFwQueueSupported()) {
+    try {
+      await clearFwQueue();
+      await clearFwRoster();
+      notify();
+    } catch (e) {
+      console.error("[fw/sync] residue purge failed:", e);
+    }
+  }
+  if (typeof caches !== "undefined") {
+    try {
+      await caches.delete(FW_SHELL_CACHE_NAME);
+    } catch (e) {
+      console.error("[fw/sync] shell cache purge failed:", e);
+    }
+  }
+}
+
+/** localStorage key naming the guide whose residue (queue, roster cache, SW shell)
+ *  is currently on this device. */
+const FW_CACHE_OWNER_KEY = "fw.cacheOwner";
+
+/**
+ * Ensure the device's cached residue belongs to the CURRENT guide (security review).
+ *
+ * The SW app-shell cache holds authenticated roster HTML, and the roster/queue caches
+ * hold names — none of it session-scoped. Sign-out clears it, but a session that ends
+ * WITHOUT the sign-out button (app killed, grant revoked, forgotten) leaves it for
+ * whoever authenticates next. On every FW mount this compares the current guide to the
+ * stored owner; on a mismatch it PURGES all residue before the new guide can be served
+ * a prior guide's cached authed page offline. Called from `FwPwa` on mount.
+ */
+export async function reconcileFwCacheOwner(actorUserId: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  let prior: string | null = null;
+  try {
+    prior = window.localStorage.getItem(FW_CACHE_OWNER_KEY);
+  } catch {
+    /* private mode — no persisted owner; treat as a fresh device */
+  }
+  if (prior !== null && prior !== actorUserId) {
+    await purgeFwResidue();
+  }
+  try {
+    window.localStorage.setItem(FW_CACHE_OWNER_KEY, actorUserId);
+  } catch {
+    /* private mode — the reconcile still purged; nothing more to persist */
   }
 }
 

@@ -26,9 +26,17 @@ export function FwSignOutButton({ actorUserId }: { actorUserId: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const signOut = async () => {
-    await clearFwResidue();
-    await signOutFwGuide();
+  const messageFor = (reason: "queued_offline" | "drain_first" | "needs_attention" | "unreadable", count: number) => {
+    switch (reason) {
+      case "queued_offline":
+        return `${count} check-in${count === 1 ? "" : "s"} haven't sent yet. Stay signed in until you're back online — they'll send automatically.`;
+      case "drain_first":
+        return `${count} check-in${count === 1 ? "" : "s"} are still sending. Try again in a moment.`;
+      case "needs_attention":
+        return `${count} saved check-in${count === 1 ? "" : "s"} couldn't be read by this app version. Dismiss ${count === 1 ? "it" : "them"} in the banner, then sign out.`;
+      case "unreadable":
+        return "Couldn't check your saved check-ins just now. Try again in a moment.";
+    }
   };
 
   const onClick = async () => {
@@ -43,14 +51,17 @@ export function FwSignOutButton({ actorUserId }: { actorUserId: string }) {
         verdict = await fwSignOutVerdict(actorUserId);
       }
       if (verdict.ok) {
-        await signOut();
-        return; // signOutFwGuide redirects
+        // The clear is ATOMIC-if-empty: if a check-in raced in after the verdict, it
+        // no-ops and reports cleared:false — abort rather than sign out having lost it.
+        const { cleared } = await clearFwResidue();
+        if (!cleared) {
+          setMessage("A check-in just came in — try signing out again in a moment.");
+          return;
+        }
+        await signOutFwGuide(); // redirects
+        return;
       }
-      setMessage(
-        verdict.reason === "queued_offline"
-          ? `${verdict.queuedCount} check-in${verdict.queuedCount === 1 ? "" : "s"} haven't sent yet. Stay signed in until you're back online — they'll send automatically.`
-          : `${verdict.queuedCount} check-in${verdict.queuedCount === 1 ? "" : "s"} are still sending. Try again in a moment.`
-      );
+      setMessage(messageFor(verdict.reason, verdict.queuedCount));
     } catch (e) {
       console.error("[fw/pwa] sign-out flow failed:", e);
       setMessage("Couldn't sign out just now. Try again.");

@@ -119,6 +119,24 @@ export async function listFwRawEntries(): Promise<unknown[]> {
   return result ?? [];
 }
 
+/**
+ * The same raw read, but SERIALIZED through the write chain — so it observes every
+ * enqueue that was issued before it, even one still mid-persist.
+ *
+ * The unserialized `listFwRawEntries` is fine for the indicator (a stale count
+ * self-corrects on the next notify). The SIGN-OUT emptiness check is NOT: an
+ * unserialized read can miss an in-flight `putFwEntry` from a just-tapped check-in,
+ * report the queue empty, and let the destructive clear run — wiping the tap that
+ * was about to commit (adversarial review's sign-out race). Reading through the
+ * chain places this after any pending write.
+ */
+export function listFwRawEntriesSerialized(): Promise<unknown[]> {
+  return enqueueWrite(async () => {
+    const result = await withStore<unknown[]>(FW_QUEUE_STORE, "readonly", (store) => store.getAll());
+    return result ?? [];
+  });
+}
+
 export function deleteFwEntry(id: string): Promise<void> {
   return enqueueWrite(async () => {
     await withStore(FW_QUEUE_STORE, "readwrite", (store) => store.delete(id));
@@ -130,6 +148,39 @@ export function deleteFwEntry(id: string): Promise<void> {
 export function clearFwQueue(): Promise<void> {
   return enqueueWrite(async () => {
     await withStore(FW_QUEUE_STORE, "readwrite", (store) => store.clear());
+  });
+}
+
+/**
+ * ATOMIC check-and-clear: clears the queue ONLY if it is empty, in ONE transaction,
+ * serialized on the write chain.
+ *
+ * The sign-out flow's safety backstop (adversarial review's P0): even after the
+ * verdict says the queue is empty, a check-in can be enqueued in the window before
+ * the clear runs. A blind `clearFwQueue()` would then wipe that just-committed tap.
+ * By counting and clearing inside one transaction that runs AFTER every pending
+ * enqueue (the chain) and observes a consistent snapshot (the transaction), a tap
+ * that raced in makes the count non-zero and the clear a no-op — the caller sees
+ * `cleared:false` and aborts sign-out rather than losing the tap.
+ */
+export function clearFwQueueIfEmpty(): Promise<{ cleared: boolean; count: number }> {
+  return enqueueWrite(async () => {
+    const db = await openFwDb();
+    try {
+      return await new Promise<{ cleared: boolean; count: number }>((resolve, reject) => {
+        const tx = db.transaction(FW_QUEUE_STORE, "readwrite");
+        const store = tx.objectStore(FW_QUEUE_STORE);
+        const countReq = store.count();
+        countReq.onsuccess = () => {
+          if (countReq.result === 0) store.clear();
+        };
+        tx.oncomplete = () => resolve({ cleared: countReq.result === 0, count: countReq.result });
+        tx.onerror = () => reject(tx.error ?? new Error("clearIfEmpty failed"));
+        tx.onabort = () => reject(tx.error ?? new Error("clearIfEmpty aborted"));
+      });
+    } finally {
+      db.close();
+    }
   });
 }
 

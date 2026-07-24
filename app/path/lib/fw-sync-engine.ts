@@ -40,11 +40,11 @@ import { fwReplayRejectReasonCopy } from "./fw-ops-rules";
 import { narrowTaskState } from "./progress-core";
 import {
   clampFwReplayCapturedAt,
-  fwStudentTaskKey,
   groupFwEntriesByStudentTask,
   interpretFwReplayResult,
   planFwStudentTask,
   reduceFwOps,
+  type FwDrainOutcome,
   type FwQueueEntry,
   type FwRejectReason,
   type FwServerRow,
@@ -52,14 +52,7 @@ import {
 
 /* ══════════════════════════════════════════════════════════ the per-entry outcome ══ */
 
-export type FwDrainOutcome =
-  /** The effect landed (or the pair cancelled) — the client deletes the entry. */
-  | { entryId: string; clientId: string; disposition: "settled" }
-  /** A server-side reject was recorded — the client tombstones the entry with the
-   *  human copy so the capturing guide is not left guessing. */
-  | { entryId: string; clientId: string; disposition: "rejected"; reason: FwRejectReason; note: string }
-  /** No answer arrived — the client keeps the entry and the next signal retries. */
-  | { entryId: string; clientId: string; disposition: "retry" };
+export type { FwDrainOutcome };
 
 export type FwDrainInput = {
   /** The recognized, in-scope entries to drain — the client has already narrowed
@@ -69,9 +62,15 @@ export type FwDrainInput = {
    *  stamped with (Decision 14 re-auth is the SAME guide, so this equals the
    *  entries' `actorUserId`; the action verifies that before it ever gets here). */
   sessionUserId: string;
-  /** Cohort ids the session may currently act in. A cohort absent here rejects its
-   *  entries `reauth_failed` — the revoked-guide case, recorded server-side. */
+  /** Cohort ids the session may currently act in — their entries replay. */
   authorizedCohortIds: readonly string[];
+  /** Cohorts whose authorization could NOT be resolved because an auth READ failed
+   *  (a venue-wifi blip), as distinct from a genuine revoke. Their entries RETRY —
+   *  they must never be permanently rejected on a transient read error, which on the
+   *  exact operating condition this feature exists for would silently discard a
+   *  guide's real captures to a staff-only reject (reliability review). A cohort that
+   *  is in NEITHER set is a genuine revoke and rejects `reauth_failed`. */
+  unknownCohortIds?: readonly string[];
   now: number;
 };
 
@@ -267,17 +266,25 @@ async function replayFwOp(
  */
 export async function runFwDrain(db: SupabaseClient, input: FwDrainInput): Promise<FwDrainResult> {
   const authorized = new Set(input.authorizedCohortIds);
+  const unknown = new Set(input.unknownCohortIds ?? []);
   const groups = groupFwEntriesByStudentTask(selectDrainableGroups(input.entries));
   const outcomes: FwDrainOutcome[] = [];
 
   for (const [, ops] of groups) {
     const cohortId = ops[0].cohortId;
 
-    // 1 ── authorization. The session may no longer act in this cohort (a revoked
-    // guide): reject every op server-side, none applied. The reject WRITE still runs
-    // under the service-role db, so the record lands even though the guide's own
-    // grant is gone — the whole point of not leaving it on their device.
+    // 1 ── authorization, TRI-STATE.
     if (!authorized.has(cohortId)) {
+      // A cohort whose authorization could not be RESOLVED (an auth-read blip) must
+      // RETRY, never permanently reject — on venue wifi a transient error would
+      // otherwise silently discard a guide's real captures to a staff-only reject.
+      if (unknown.has(cohortId)) {
+        for (const op of ops) outcomes.push(retry(op));
+        continue;
+      }
+      // A genuine revoke: reject every op server-side, none applied. The reject WRITE
+      // still runs under the service-role db, so the record lands even though the
+      // guide's own grant is gone — the whole point of not leaving it on their device.
       for (const op of ops) outcomes.push(await recordReject(db, op, "reauth_failed"));
       continue;
     }
@@ -372,5 +379,3 @@ export function planFwDrain(
   }
   return out;
 }
-
-export { fwStudentTaskKey };

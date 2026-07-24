@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyFwDrainOutcome,
   decideFwSignOut,
   evaluateFwSameActorGuard,
+  projectFwPendingState,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   FW_ROSTER_CACHE_SCHEMA_VERSION,
   fwStudentTaskKey,
@@ -47,7 +49,9 @@ function entry(
   overrides: Partial<FwQueueEntry> = {}
 ): FwQueueEntry {
   seq += 1;
-  const stamp = `2026-08-21T14:${String(seq).padStart(2, "0")}:00.000Z`;
+  // A monotonic, always-valid stamp: base time + seq seconds. (Encoding seq as
+  // minutes overflowed to an invalid time once the suite grew past 59 entries.)
+  const stamp = new Date(Date.UTC(2026, 7, 21, 14, 0, 0) + seq * 1000).toISOString();
   const clientId = overrides.clientId ?? `client-${seq}`;
   return {
     id: overrides.id ?? clientId,
@@ -132,6 +136,20 @@ describe("reduceFwOps — minimal legal op-sequence (Decision 9)", () => {
   it("a cancelled pair followed by a trailing undo leaves the trailing undo (check,undo,undo)", () => {
     expect(actions(reduceFwOps([entry("checkmark"), entry("undo"), entry("undo")]))).toEqual([
       "undo",
+    ]);
+  });
+
+  it("CONSECUTIVE surviving undos COLLAPSE to one (idempotent — no unguarded trailing undo)", () => {
+    // MUTATION GUARD (the adversarial residual): two raw back-to-back undos must not
+    // both survive — only the leading undo is guarded by planFwStudentTask, so a
+    // surviving trailing undo could revert a concurrent cross-actor decision with no
+    // author check. At most one surviving undo reaches the pre-outage state.
+    expect(actions(reduceFwOps([entry("undo"), entry("undo")]))).toEqual(["undo"]);
+    expect(actions(reduceFwOps([entry("undo"), entry("undo"), entry("undo")]))).toEqual(["undo"]);
+    // A decision after the collapsed undos still survives in order.
+    expect(actions(reduceFwOps([entry("undo"), entry("undo"), entry("checkmark")]))).toEqual([
+      "undo",
+      "checkmark",
     ]);
   });
 
@@ -263,6 +281,31 @@ describe("planFwStudentTask — reduce × guard × reject composition", () => {
   });
 });
 
+/* ══════════════════════════════════ pending-state projection (stale shell) ══ */
+
+describe("projectFwPendingState — a revisit reflects the guide's own queued taps", () => {
+  it("no pending ops → the server state, unchanged", () => {
+    expect(projectFwPendingState("locked", [])).toBe("locked");
+  });
+
+  it("a pending checkmark on a stale-`locked` server state projects `verified` (so Undo shows)", () => {
+    expect(projectFwPendingState("locked", [entry("checkmark")])).toBe("verified");
+  });
+
+  it("a pending checkmark+undo pair projects back to the server state (they cancel)", () => {
+    expect(projectFwPendingState("locked", [entry("checkmark"), entry("undo")])).toBe("locked");
+  });
+
+  it("a pending undo+not_yet correction on a pre-outage `verified` projects `not_yet`", () => {
+    expect(projectFwPendingState("verified", [entry("undo"), entry("not_yet")])).toBe("not_yet");
+  });
+
+  it("an illegal pending op leaves the state where the decision table would (no second machine)", () => {
+    // not_yet onto verified is refused by the table → no projection change.
+    expect(projectFwPendingState("verified", [entry("not_yet")])).toBe("verified");
+  });
+});
+
 /* ═══════════════════════════════════════════ replay-outcome interpretation ══ */
 
 describe("interpretFwReplayResult — settled vs reject vs retry", () => {
@@ -361,6 +404,24 @@ describe("decideFwSignOut — block-until-drained (Decision 8 / gap G1)", () => 
       queuedCount: 3,
     });
   });
+
+  it("sign-out with only QUARANTINED entries is refused needs_attention (never silently wiped)", () => {
+    // kieran-typescript / reliability review: a shape this build can't drain is an
+    // un-landed capture; sign-out must surface it for dismissal, not destroy it.
+    expect(decideFwSignOut({ queuedCount: 0, quarantinedCount: 2, online: true })).toEqual({
+      ok: false,
+      reason: "needs_attention",
+      queuedCount: 2,
+    });
+  });
+
+  it("drainable entries take precedence over quarantined in the verdict", () => {
+    expect(decideFwSignOut({ queuedCount: 1, quarantinedCount: 1, online: false })).toEqual({
+      ok: false,
+      reason: "queued_offline",
+      queuedCount: 1,
+    });
+  });
 });
 
 /* ═══════════════════════════════════════════ roster cache policy (Decision 15) ══ */
@@ -445,6 +506,50 @@ describe("isRecognizedFwEntry — never feed an unknown shape into the typed dra
       isRecognizedFwEntry({ ...entry("checkmark"), schemaVersion: FW_QUEUE_ENTRY_SCHEMA_VERSION + 1 })
     ).toBe(false);
   });
+
+  it("a malformed lastAttemptAt is not recognized (the predicate guards EVERY field)", () => {
+    // api-contract review: the predicate claims `x is FwQueueEntry`, and the server's
+    // zod requires lastAttemptAt — a client-recognized entry that skipped it would
+    // stall the whole drain batch. undefined (not string|null) must fail.
+    expect(isRecognizedFwEntry({ ...entry("checkmark"), lastAttemptAt: undefined })).toBe(false);
+    expect(isRecognizedFwEntry({ ...entry("checkmark"), lastAttemptAt: 123 })).toBe(false);
+    expect(isRecognizedFwEntry({ ...entry("checkmark"), lastAttemptAt: null })).toBe(true);
+  });
+
+  it("a malformed blocked field is not recognized (a blank staff note otherwise)", () => {
+    expect(isRecognizedFwEntry({ ...entry("checkmark"), blocked: {} })).toBe(false);
+    expect(isRecognizedFwEntry({ ...entry("checkmark"), blocked: { reason: "x" } })).toBe(false);
+    expect(
+      isRecognizedFwEntry({ ...entry("checkmark"), blocked: { reason: "guard_refused", note: "n" } })
+    ).toBe(true);
+  });
+});
+
+/* ═══════════════════════════════════════════ the client apply-outcome mutation ══ */
+
+describe("applyFwDrainOutcome — the outcome → IndexedDB mutation (exhaustive)", () => {
+  const NOW_ISO = "2026-08-22T15:00:00.000Z";
+  const e = entry("checkmark", { attempts: 2 });
+
+  it("a settled outcome deletes the entry", () => {
+    expect(
+      applyFwDrainOutcome(e, { entryId: e.id, clientId: e.clientId, disposition: "settled" }, NOW_ISO)
+    ).toEqual({ op: "delete" });
+  });
+
+  it("a rejected outcome tombstones the entry with the note", () => {
+    const m = applyFwDrainOutcome(
+      e,
+      { entryId: e.id, clientId: e.clientId, disposition: "rejected", reason: "cross_actor_undo", note: "held" },
+      NOW_ISO
+    );
+    expect(m).toEqual({ op: "put", entry: { ...e, blocked: { reason: "cross_actor_undo", note: "held" } } });
+  });
+
+  it("a retry outcome advances attempts and stamps the time", () => {
+    const m = applyFwDrainOutcome(e, { entryId: e.id, clientId: e.clientId, disposition: "retry" }, NOW_ISO);
+    expect(m).toEqual({ op: "put", entry: { ...e, attempts: 3, lastAttemptAt: NOW_ISO } });
+  });
 });
 
 /* ═══════════════════════════════════════════════ grouping, ordering, scope ══ */
@@ -490,7 +595,7 @@ describe("isFwAppShellPath — the never-cache-navigations exception is scoped",
     expect(isFwAppShellPath("/path/fw")).toBe(true);
     expect(isFwAppShellPath("/path/fw/cohort/abc")).toBe(true);
     expect(isFwAppShellPath("/path/fw/cohort/abc/student/xyz/task/1.2.4")).toBe(true);
-    expect(isFwAppShellPath("/path/fw/ops")).toBe(true);
+    expect(isFwAppShellPath("/path/fw/sign-in")).toBe(true);
   });
 
   it("the board token subtree is EXCLUDED (a live no-store poll surface)", () => {
@@ -499,6 +604,13 @@ describe("isFwAppShellPath — the never-cache-navigations exception is scoped",
     expect(isFwAppShellPath("/path/fw/board")).toBe(false);
     expect(isFwAppShellPath("/path/fw/board/some-token")).toBe(false);
     expect(isFwAppShellPath("/path/fw/board/some-token/feed")).toBe(false);
+  });
+
+  it("the staff ops subtree is EXCLUDED (cross-cohort authed HTML, never the offline target)", () => {
+    // Security review: staff ops pages must not be cached on a shared iPad.
+    expect(isFwAppShellPath("/path/fw/ops")).toBe(false);
+    expect(isFwAppShellPath("/path/fw/ops/cohort/abc")).toBe(false);
+    expect(isFwAppShellPath("/path/fw/ops/cohort/abc/import")).toBe(false);
   });
 
   it("a PATH navigation is never cacheable (the pin holds outside /path/fw)", () => {

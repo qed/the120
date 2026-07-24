@@ -32,7 +32,7 @@
  */
 
 import { clampToNow } from "./sync-rules";
-import { type FwAction, FW_ACTIONS } from "./fw-rules";
+import { decideFwAction, type FwAction, FW_ACTIONS, FW_ACTION_LEGAL_FROM } from "./fw-rules";
 import type { FwStudentResult } from "./fw-rules";
 import type { TaskState } from "./transition-table";
 
@@ -79,6 +79,10 @@ export const FW_SW_SCOPE = "/path/fw";
  */
 export const FW_APP_SHELL_PREFIX = "/path/fw";
 export const FW_BOARD_PREFIX = "/path/fw/board";
+/** Staff ops — cross-cohort, admin-privileged pages that were NEVER the offline
+ *  target (staff run ops online). EXCLUDED from the app-shell caching exception so
+ *  their authed HTML is never left in a shared iPad's SW cache (security review). */
+export const FW_OPS_PREFIX = "/path/fw/ops";
 
 /** The SW cache holding the FW app-shell navigations — the single cache the
  *  never-cache-navigations exception writes to, swept on activate and cleared with
@@ -103,6 +107,7 @@ export function isFwAppShellPath(pathname: string): boolean {
     return false;
   }
   if (pathname === FW_BOARD_PREFIX || pathname.startsWith(FW_BOARD_PREFIX + "/")) return false;
+  if (pathname === FW_OPS_PREFIX || pathname.startsWith(FW_OPS_PREFIX + "/")) return false;
   return true;
 }
 
@@ -223,6 +228,13 @@ export function reduceFwOps(ops: readonly FwQueueEntry[]): FwQueueEntry[] {
         stack.pop(); // a decision and its undo cancel to nothing
         continue;
       }
+      // Consecutive surviving undos COLLAPSE to one: undo is idempotent (a second
+      // undo lands on the row the first already returned to `locked`), and keeping
+      // both would leave a trailing undo unguarded — `planFwStudentTask` only checks
+      // the LEADING undo's author, so a second surviving undo could revert a
+      // concurrent cross-actor decision with no guard (adversarial review). At most
+      // one surviving undo reaches the pre-outage state, and it is the one guarded.
+      if (top && top.action === "undo") continue;
       stack.push(op); // a surviving undo — reverts a pre-outage decision
     } else {
       stack.push(op);
@@ -231,14 +243,43 @@ export function reduceFwOps(ops: readonly FwQueueEntry[]): FwQueueEntry[] {
   return stack;
 }
 
+/**
+ * Project the state a task view should SHOW, given the server's state and this
+ * guide's own pending offline captures for that (student, task) (correctness review).
+ *
+ * The task page's server state comes from the last online render — which, mid-outage,
+ * the SW serves from a STALE cached shell that predates the guide's own queued taps.
+ * Without this, a guide who checkmarks offline, navigates away, and revisits sees the
+ * task as untouched, and a raw not-yet then swallows their real correction into a
+ * staff reject. Folding the pending ops (reduced, then applied through the canonical
+ * decision table — never a second state machine) onto the server state shows the true
+ * pending position, so the guide sees Undo instead of a conflicting fresh decision.
+ */
+export function projectFwPendingState(server: TaskState, ops: readonly FwQueueEntry[]): TaskState {
+  let state = server;
+  for (const op of reduceFwOps(ops)) {
+    const decision = decideFwAction({ action: op.action, from: state });
+    if (decision.kind === "apply") state = decision.to;
+    // re_attempt / already_done / refused leave the state where it is.
+  }
+  return state;
+}
+
 /* ═══════════════════════════════════════════════════ the same-actor undo guard ══ */
 
 /** The server row a surviving undo is evaluated against — the two fields the guard
  *  reads, no more. */
 export type FwServerRow = { state: TaskState; verifiedBy: string | null };
 
-/** The two states that carry a stamped author — the only ones the guard gates. */
-const FW_DECISION_STATES: readonly TaskState[] = ["verified", "not_yet"];
+/**
+ * The states that carry a stamped author — the only ones the guard gates. DERIVED
+ * from `undo`'s legal-from set (the RPC-parity-pinned canonical fact), never a
+ * second hand-typed copy: `fw_move_task`'s UPDATE guards undo with exactly this set,
+ * and a future change to it must be felt here automatically or the guard would gate
+ * the wrong states (maintainability review — the "second legality model" trap this
+ * module's own header warns against).
+ */
+const FW_DECISION_STATES: readonly TaskState[] = FW_ACTION_LEGAL_FROM.undo;
 
 /**
  * May this surviving undo apply? (Decision 9's author check.)
@@ -346,11 +387,63 @@ export function interpretFwReplayResult(result: FwStudentResult): FwReplayDispos
   }
 }
 
+/* ═══════════════════════════════════════════ the drain's per-entry outcome ══ */
+
+/**
+ * What `runFwDrain` reports for ONE entry — the wire shape the drain action returns
+ * to the client. Lives HERE (pure) rather than in `fw-sync-engine.ts` so the
+ * client's apply step can be a thin driver over `applyFwDrainOutcome` without
+ * importing the db-taking core, and so both sides share one definition.
+ */
+export type FwDrainOutcome =
+  /** The effect landed (or the pair cancelled) — the client deletes the entry. */
+  | { entryId: string; clientId: string; disposition: "settled" }
+  /** A server-side reject was recorded — the client tombstones the entry with the
+   *  human copy so the capturing guide is not left guessing. */
+  | { entryId: string; clientId: string; disposition: "rejected"; reason: FwRejectReason; note: string }
+  /** No answer arrived — the client keeps the entry and the next signal retries. */
+  | { entryId: string; clientId: string; disposition: "retry" };
+
+/** The IndexedDB mutation one outcome implies, decided purely so the client loop is
+ *  a thin driver and the branch set is COMPILER-ENFORCED exhaustive (a new
+ *  disposition trips the `never` default, rather than silently degrading to a
+ *  retry — api-contract + kieran-typescript review). */
+export type FwOutcomeMutation =
+  | { op: "delete" }
+  | { op: "put"; entry: FwQueueEntry };
+
+export function applyFwDrainOutcome(
+  entry: FwQueueEntry,
+  outcome: FwDrainOutcome,
+  nowIso: string
+): FwOutcomeMutation {
+  switch (outcome.disposition) {
+    case "settled":
+      return { op: "delete" };
+    case "rejected":
+      // A LOCAL tombstone with the staff-visible note — the authoritative record is
+      // the path_fw_replay_rejects row the drain already wrote.
+      return { op: "put", entry: { ...entry, blocked: { reason: outcome.reason, note: outcome.note } } };
+    case "retry":
+      return { op: "put", entry: { ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso } };
+    default: {
+      const _exhaustive: never = outcome;
+      return _exhaustive;
+    }
+  }
+}
+
 /* ══════════════════════════════════════════ block-until-drained sign-out ══ */
 
 export type FwSignOutVerdict =
   | { ok: true }
-  | { ok: false; reason: "queued_offline" | "drain_first"; queuedCount: number };
+  | {
+      ok: false;
+      /** `unreadable` is minted by the client wrapper on a queue-read failure, not
+       *  here — sign-out must never fail OPEN on an unread queue and then destroy it. */
+      reason: "queued_offline" | "drain_first" | "needs_attention" | "unreadable";
+      queuedCount: number;
+    };
 
 /**
  * The sign-out verdict (Decision 8 / gap G1).
@@ -360,14 +453,26 @@ export type FwSignOutVerdict =
  * possible, and no new sign-in is possible either — the accepted, stated
  * consequence is that the device stays with its guide until reconnect). ONLINE,
  * the queue CAN drain, so sign-out asks to drain first; the caller runs a drain
- * and re-checks. Only an empty queue allows sign-out — at which point the caller
- * clears the queue AND the roster cache residue.
+ * and re-checks. QUARANTINED entries (a shape this app version can't drain) block
+ * with `needs_attention` — they are un-landed captures that a blind clear would
+ * destroy, so the guide must dismiss them first (never a silent drop). Only a queue
+ * with nothing drainable AND nothing quarantined allows sign-out — at which point
+ * the caller clears the queue, the roster cache, and the shell cache.
  */
-export function decideFwSignOut(input: { queuedCount: number; online: boolean }): FwSignOutVerdict {
-  if (input.queuedCount === 0) return { ok: true };
-  return input.online
-    ? { ok: false, reason: "drain_first", queuedCount: input.queuedCount }
-    : { ok: false, reason: "queued_offline", queuedCount: input.queuedCount };
+export function decideFwSignOut(input: {
+  queuedCount: number;
+  quarantinedCount?: number;
+  online: boolean;
+}): FwSignOutVerdict {
+  const quarantined = input.quarantinedCount ?? 0;
+  if (input.queuedCount === 0 && quarantined === 0) return { ok: true };
+  if (input.queuedCount > 0) {
+    return input.online
+      ? { ok: false, reason: "drain_first", queuedCount: input.queuedCount }
+      : { ok: false, reason: "queued_offline", queuedCount: input.queuedCount };
+  }
+  // Only quarantined entries remain — dismissible, but never silently wiped.
+  return { ok: false, reason: "needs_attention", queuedCount: quarantined };
 }
 
 /* ═══════════════════════════════════════════════════ roster cache (Decision 15) ══ */
@@ -439,8 +544,25 @@ export function isRecognizedFwEntry(x: unknown): x is FwQueueEntry {
     typeof e.actorUserId === "string" &&
     typeof e.enqueuedAt === "string" &&
     typeof e.attempts === "number" &&
+    // The predicate claims `x is FwQueueEntry`, so it must verify EVERY field the
+    // 14-field shape declares — not just the identity ones. `lastAttemptAt` is
+    // required `string | null` (the server's zod schema enforces it too, so a
+    // client-recognized entry that skipped this check would fail the batch parse and
+    // stall the whole queue), and a malformed `blocked` would render a blank
+    // staff-visible note (api-contract review).
+    (e.lastAttemptAt === null || typeof e.lastAttemptAt === "string") &&
+    isRecognizedFwBlocked(e.blocked) &&
     (e.schemaVersion === undefined || e.schemaVersion === FW_QUEUE_ENTRY_SCHEMA_VERSION)
   );
+}
+
+/** A `blocked` field is either null or a `{reason, note}` pair with string values —
+ *  the shape `summarizeFwQueue` and the indicator read unguarded. */
+function isRecognizedFwBlocked(b: unknown): boolean {
+  if (b === null || b === undefined) return true;
+  if (typeof b !== "object") return false;
+  const rec = b as Record<string, unknown>;
+  return typeof rec.reason === "string" && typeof rec.note === "string";
 }
 
 /* ═══════════════════════════════════════════════ grouping, ordering, scope ══ */

@@ -7,7 +7,8 @@ import { Button } from "@/app/path/components/system/Button";
 import { Icon } from "@/app/path/components/system/Icon";
 import { applyFwCheckIn } from "@/app/path/lib/actions/fw-checkin";
 import type { FwCheckInActionResult } from "@/app/path/lib/fw-checkin-core";
-import { enqueueFwCheckIns } from "@/app/path/lib/fw-sync-client";
+import { enqueueFwCheckIns, readPendingFwOpsFor } from "@/app/path/lib/fw-sync-client";
+import { projectFwPendingState } from "@/app/path/lib/fw-sync-rules";
 import {
   fwBatchStudentIds,
   searchFwRoster,
@@ -201,6 +202,24 @@ export default function FwTaskView({
     };
   }, []);
 
+  // Reconcile the server-supplied initial state with this guide's OWN pending offline
+  // captures (correctness review): mid-outage the page renders from a stale SW-cached
+  // shell that predates the guide's queued taps, so a revisit would show the task as
+  // untouched. Folding the pending ops through the canonical decision table shows the
+  // true pending position — the guide sees Undo, not a conflicting fresh decision.
+  useEffect(() => {
+    let cancelled = false;
+    void readPendingFwOpsFor({ cohortId, studentId: student.studentId, taskId, actorUserId }).then(
+      (ops) => {
+        if (cancelled || ops.length === 0 || !mounted.current) return;
+        setState(projectFwPendingState(initialState, ops));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [cohortId, student.studentId, taskId, actorUserId, initialState]);
+
   // One ledger per mounted task view, created ONCE. `useRef`'s argument is
   // evaluated on every render, so calling the factory inline allocated a fresh
   // Map per keystroke in the picker and threw it away (julik review).
@@ -227,6 +246,42 @@ export default function FwTaskView({
     () => searchFwRoster(roster.filter((r) => r.studentId !== student.studentId), pickerQuery),
     [roster, student.studentId, pickerQuery]
   );
+
+  /**
+   * The durable backstop for an ONLINE tap that couldn't reach the server (Unit 8
+   * P0). `navigator.onLine` reports link-layer only, so an iPad associated with a
+   * venue AP whose uplink is dead reads `online: true` and takes the online branch —
+   * the single most common venue-wifi failure. When that branch fails (a throw, or an
+   * `unavailable` result), the tap must NOT be left in ephemeral React state a "Next
+   * student" tap would discard; it is captured to the queue instead, keyed by the
+   * SAME client ids the failed online call used, so the drain's replay is idempotent
+   * if the write had in fact partly landed. Returns false when the device cannot
+   * queue at all (private mode), so the caller falls through to the visible error.
+   */
+  const queueBackstop = async (action: FwAction, studentIds: readonly string[]): Promise<boolean> => {
+    const enq = await enqueueFwCheckIns({
+      cohortId,
+      taskId,
+      action,
+      actorUserId,
+      studentIds: [...studentIds],
+      actionId: crypto.randomUUID(),
+      capturedAt: new Date().toISOString(),
+      clientIds: ledger.idsFor({ taskId, action, studentIds }),
+    });
+    if (!enq.ok) return false;
+    if (mounted.current) {
+      setState(fwActionTarget(action));
+      setExtras([]);
+      setPickerNote(null);
+      setQueuedNote(
+        studentIds.length === 1
+          ? "Couldn't reach the server — saved. It'll send when you're back online."
+          : `Couldn't reach the server — saved for ${studentIds.length} students. They'll send when you're back online.`
+      );
+    }
+    return true;
+  };
 
   const submit = async (action: FwAction, studentIds: readonly string[]) => {
     if (busy || studentIds.length === 0) return;
@@ -294,6 +349,10 @@ export default function FwTaskView({
       });
 
       if (!res.ok) {
+        // `unavailable` = the server was unreachable or a server-side read failed
+        // (the associated-but-dead venue-wifi case navigator.onLine can't detect).
+        // Capture the tap durably rather than leave it in ephemeral state (P0).
+        if (res.reason === "unavailable" && (await queueBackstop(action, studentIds))) return;
         setRetryable(res.reason === "unavailable" || res.reason === "invalid_input");
         setError(
           res.reason === "no_session"
@@ -302,7 +361,7 @@ export default function FwTaskView({
               ? "You can't record check-ins for this weekend. Find The 120 staff."
               : res.reason === "invalid_input"
                 ? "Something about that tap didn't look right. Try again."
-                : "That didn't go through. Tap Retry."
+                : "That didn't go through, and this device can't save it offline. Keep a signal, or use paper as backup."
         );
         // The action failed OUTRIGHT — no per-student outcomes came back. Report
         // every submitted student as unavailable rather than leaving the PREVIOUS
@@ -358,10 +417,13 @@ export default function FwTaskView({
     } catch {
       // A Server Action can REJECT rather than return — on venue wifi that is
       // the likely shape (docs/solutions/ui-bugs/server-action-rejection-no-try-
-      // finally-freezes-capture-modal-2026-07-20.md).
+      // finally-freezes-capture-modal-2026-07-20.md). The tap threw before any
+      // outcome came back: capture it durably rather than leave an ephemeral
+      // "Retry" a navigate-away would discard (P0).
       if (!mounted.current) return;
+      if (await queueBackstop(action, studentIds)) return;
       setRetryable(true);
-      setError("That didn't go through. Tap Retry.");
+      setError("That didn't go through, and this device can't save it offline. Keep a signal, or use paper as backup.");
       setSurface((prev) =>
         foldFwSurfaceOutcome(
           prev,

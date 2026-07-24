@@ -49,28 +49,43 @@ const STATIC_PREFIX = "/_next/static/";
 const FW_APP_SHELL_PREFIX = "/path/fw";
 /** The board token subtree — EXCLUDED from the exception (live, no-store). */
 const FW_BOARD_PREFIX = "/path/fw/board";
+/** Staff ops — EXCLUDED (cross-cohort admin HTML was never the offline target). */
+const FW_OPS_PREFIX = "/path/fw/ops";
 /** Cap on runtime-cached static assets — oldest-inserted trimmed on insert. */
 const STATIC_CACHE_MAX_ENTRIES = 80;
+/** Cap on cached FW app-shell navigations — bounded like the static runtime cache,
+ *  so a multi-day event's hundreds of visited student/task URLs can't accumulate
+ *  unboundedly (performance review). Oldest-inserted trimmed on insert. */
+const FW_SHELL_CACHE_MAX_ENTRIES = 24;
 
 /** Whether a navigation URL is a cacheable FW app-shell route: under /path/fw,
- *  but NOT the board token subtree. The single predicate the exception rests on. */
+ *  but NOT the board token subtree and NOT staff ops. The single predicate the
+ *  exception rests on — mirrors isFwAppShellPath in fw-sync-rules.ts. */
 function isFwAppShell(url) {
   const p = url.pathname;
   if (p !== FW_APP_SHELL_PREFIX && !p.startsWith(FW_APP_SHELL_PREFIX + "/")) return false;
   if (p === FW_BOARD_PREFIX || p.startsWith(FW_BOARD_PREFIX + "/")) return false;
+  if (p === FW_OPS_PREFIX || p.startsWith(FW_OPS_PREFIX + "/")) return false;
   return true;
 }
 
 /** Network-first for the FW app shell: keep the freshest shell, but fall back to
  *  the last cached one so a mid-loop outage lands on the roster the guide last saw
- *  rather than the generic /offline page. */
+ *  rather than the generic /offline page. Bounded — see FW_SHELL_CACHE_MAX_ENTRIES. */
 async function fwAppShell(request) {
   try {
     const response = await fetch(request);
     const cache = await caches.open(FW_SHELL_CACHE_NAME);
-    cache.put(request, response.clone()).catch(() => {
+    await cache.put(request, response.clone()).catch(() => {
       /* a shell we could not cache costs an offline nav, never the online one */
     });
+    // Trim oldest-inserted entries past the cap (the STATIC cache's discipline).
+    const keys = await cache.keys();
+    if (keys.length > FW_SHELL_CACHE_MAX_ENTRIES) {
+      await Promise.all(
+        keys.slice(0, keys.length - FW_SHELL_CACHE_MAX_ENTRIES).map((k) => cache.delete(k))
+      );
+    }
     return response;
   } catch {
     const cached = await caches.match(request, { cacheName: FW_SHELL_CACHE_NAME });

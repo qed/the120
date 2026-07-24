@@ -442,6 +442,8 @@ export function fwReplayRejectReasonCopy(reason: string): string {
       return "The capturing guide's session could not be re-authenticated at sync.";
     case "cohort_unresolved":
       return "The check-in's cohort could not be resolved at sync.";
+    case "missing_progress":
+      return "No task record existed for this student when the check-in was replayed — their task list may not have finished provisioning.";
     case "guard_refused":
       return "The replay was refused by the write path (the state had already moved).";
     case "cas_lost":

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { FwRejectReason } from "../fw-sync-rules";
 import {
   FW_EVENT_TIME_ZONES,
   FW_OPS_AUDIT_ACTIONS,
@@ -405,14 +406,20 @@ describe("fwAnonymizeConfirmMatches — the typed confirm, verified server-side"
 });
 
 describe("fwReplayRejectReasonCopy", () => {
-  it("renders a sentence for each known drain reason", () => {
-    for (const reason of [
+  it("renders prose for EVERY FwRejectReason the Unit-8 drain produces", () => {
+    // The five values of FwRejectReason (fw-sync-rules.ts) — the drain now WRITES
+    // these rows, so each must render a sentence, not the raw machine string. A drain
+    // reason with no copy would show blank on the staff reject list. `missing_progress`
+    // was the api-contract review's gap. `cas_lost` is a sixth, speculative-copy reason
+    // no drain currently emits but the surface renders if a future unit does.
+    const drainReasons: FwRejectReason[] = [
       "cross_actor_undo",
       "reauth_failed",
       "cohort_unresolved",
       "guard_refused",
-      "cas_lost",
-    ]) {
+      "missing_progress",
+    ];
+    for (const reason of [...drainReasons, "cas_lost"]) {
       const copy = fwReplayRejectReasonCopy(reason);
       expect(copy.length).toBeGreaterThan(0);
       // Known reasons render prose, not the raw machine string.
@@ -420,10 +427,9 @@ describe("fwReplayRejectReasonCopy", () => {
     }
   });
 
-  it("names an unmapped reason rather than dropping it — Unit 8's vocabulary is not frozen", () => {
-    // A reason this table has no copy for still has to be legible: the drain that
-    // writes these rows is not built, so a new machine string must surface as
-    // itself, never as a blank or a crash.
+  it("names an unmapped reason rather than dropping it — the vocabulary is not frozen", () => {
+    // A reason this table has no copy for still has to be legible: a future machine
+    // string must surface as itself, never as a blank or a crash.
     expect(fwReplayRejectReasonCopy("some_future_reason")).toContain("some_future_reason");
   });
 });

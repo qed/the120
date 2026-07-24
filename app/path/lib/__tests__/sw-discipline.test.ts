@@ -10,6 +10,7 @@ import {
 import {
   FW_APP_SHELL_PREFIX,
   FW_BOARD_PREFIX,
+  FW_OPS_PREFIX,
   FW_SHELL_CACHE_NAME,
 } from "../fw-sync-rules";
 import nextConfig from "@/next.config";
@@ -85,21 +86,24 @@ describe("the FW app-shell caching exception (Unit 8, Decision 15) — deliberat
     expect(swSource).toContain(`const FW_SHELL_CACHE_NAME = "${FW_SHELL_CACHE_NAME}"`);
     expect(swSource).toContain(`const FW_APP_SHELL_PREFIX = "${FW_APP_SHELL_PREFIX}"`);
     expect(swSource).toContain(`const FW_BOARD_PREFIX = "${FW_BOARD_PREFIX}"`);
+    expect(swSource).toContain(`const FW_OPS_PREFIX = "${FW_OPS_PREFIX}"`);
   });
 
-  it("the exception is SCOPED — isFwAppShell requires /path/fw and EXCLUDES the board subtree", () => {
+  it("the exception is SCOPED — isFwAppShell requires /path/fw and EXCLUDES the board AND ops subtrees", () => {
     const predicate = swSource.slice(
       swSource.indexOf("function isFwAppShell("),
-      swSource.indexOf("function fwAppShell(")
+      swSource.indexOf("async function fwAppShell(")
     );
     // Requires the app-shell prefix…
     expect(predicate).toContain("FW_APP_SHELL_PREFIX");
-    // …and MUTATION GUARD (delete class): removing the board exclusion reddens.
+    // …and MUTATION GUARD (delete class): removing either exclusion reddens. The ops
+    // exclusion keeps cross-cohort staff HTML out of a shared iPad's cache (security).
     expect(predicate).toContain("FW_BOARD_PREFIX");
+    expect(predicate).toContain("FW_OPS_PREFIX");
     expect(predicate).toContain("return false");
   });
 
-  it("the FW navigation cache writes ONLY to the FW shell cache, never the runtime/precache", () => {
+  it("the FW navigation cache writes ONLY to the FW shell cache, never the runtime/precache, and is BOUNDED", () => {
     const fwShell = swSource.slice(
       swSource.indexOf("async function fwAppShell("),
       swSource.indexOf("async function precacheOffline(")
@@ -109,6 +113,10 @@ describe("the FW app-shell caching exception (Unit 8, Decision 15) — deliberat
     // …never the precache or the static runtime cache (relocate-class mutation).
     expect(fwShell).not.toContain("PRECACHE_NAME");
     expect(fwShell).not.toContain("RUNTIME_CACHE_NAME");
+    // Bounded like the static runtime cache — an unbounded authed-shell cache over a
+    // multi-day event is the performance-review finding.
+    expect(fwShell).toContain("FW_SHELL_CACHE_MAX_ENTRIES");
+    expect(fwShell).toContain("cache.delete");
   });
 
   it("the navigate handler routes the FW app shell through the exception, everything else through the pin", () => {

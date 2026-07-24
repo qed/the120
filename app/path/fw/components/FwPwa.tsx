@@ -29,6 +29,7 @@ import {
   isFwAuthRequired,
   isFwQueueSupported,
   readFwQueueSummary,
+  reconcileFwCacheOwner,
   runFwClientDrain,
   startFwSyncEngine,
   subscribeFwQueue,
@@ -63,6 +64,15 @@ export function FwPwa({ actorUserId }: { actorUserId: string }) {
     () => isFwQueueSupported(),
     () => true
   );
+
+  // ── identity reconcile (security): purge a prior guide's cached residue ─────
+  // Runs BEFORE the first drain so a device that changed hands without a sign-out
+  // never serves the previous guide's authed shell / roster / queue to this one.
+  useEffect(() => {
+    void reconcileFwCacheOwner(actorUserId).catch((e) =>
+      console.error("[fw/pwa] cache-owner reconcile failed:", e)
+    );
+  }, [actorUserId]);
 
   // ── sync engine lifecycle + queue summary ──────────────────────────────────
   useEffect(() => {

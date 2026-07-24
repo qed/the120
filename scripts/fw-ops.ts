@@ -924,16 +924,37 @@ fresh link emailed to ${issued.email}`);
     // SAME fold the Server Action calls — against a JSON queue file, or `--dry-run`
     // the reduce × same-actor-guard plan without writing a thing.
     const file = required("file");
+    // A missing/unreadable file (ENOENT/EACCES) is NOT a JSON error — let the real fs
+    // error surface, so an agent debugging "not valid JSON" isn't sent to inspect a
+    // file that doesn't exist (cli-readiness review).
+    const raw = readFileSync(file, "utf8");
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(file, "utf8"));
+      parsed = JSON.parse(raw);
     } catch {
       throw new Error(`--file is not valid JSON: ${file}`);
     }
-    if (!Array.isArray(parsed) || !parsed.every(isRecognizedFwEntry)) {
+    if (!Array.isArray(parsed)) {
       throw new Error("--file must be a JSON array of FW queue entries (see FwQueueEntry)");
     }
+    // Report WHICH entry failed the shape check, not a blanket refusal (cli-readiness).
+    const badIndex = parsed.findIndex((e) => !isRecognizedFwEntry(e));
+    if (badIndex >= 0) {
+      throw new Error(
+        `--file entry #${badIndex} is not a recognized FW queue entry (check its fields against FwQueueEntry)`
+      );
+    }
     const entries = parsed as FwQueueEntry[];
+    // Mirror the Server Action's bound: a payload far past a guide's realistic outage
+    // is a malformed file, refused before it drives thousands of production writes.
+    if (entries.length > 500) {
+      throw new Error(`--file has ${entries.length} entries (max 500) — refusing a likely-malformed drain`);
+    }
+    // An empty queue is a valid no-op (e.g. after a prior drain), not an error.
+    if (entries.length === 0) {
+      emit({ outcomes: [] }, () => console.log("queue file is empty — nothing to drain"));
+      return;
+    }
 
     // Mirror the action's scoping: one draining session, its own captures. `--actor`
     // overrides; otherwise the file must carry a single capturing guide.
@@ -942,26 +963,38 @@ fresh link emailed to ${issued.email}`);
     if (!sessionUserId) {
       throw new Error("entries have mixed actorUserId; pass --actor to name the draining session");
     }
-    const scoped = entries.filter((e) => e.actorUserId === sessionUserId);
-
-    // The CLI holds the service-role key, so it authorizes the cohorts present
-    // (optionally narrowed with --cohort), standing in for the per-cohort grant the
-    // HTTP action resolves.
+    // Scope by actor AND (if given) by --cohort, so narrowing to one cohort LEAVES
+    // other cohorts' entries alone rather than rejecting them reauth_failed — a
+    // scoping choice must never write a false reject row (correctness review).
     const restrict = arg("cohort");
-    const authorizedCohortIds = [...new Set(scoped.map((e) => e.cohortId))].filter(
-      (c) => restrict === null || c === restrict
+    const scoped = entries.filter(
+      (e) => e.actorUserId === sessionUserId && (restrict === null || e.cohortId === restrict)
     );
+    // The CLI holds the service-role key, so it authorizes the cohorts present in
+    // scope, standing in for the per-cohort grant the HTTP action resolves.
+    const authorizedCohortIds = [...new Set(scoped.map((e) => e.cohortId))];
 
     if (process.argv.includes("--dry-run")) {
+      // Mirror runFwDrain's own front-of-fold filters so the preview matches reality:
+      // blocked entries are skipped, and an unauthorized cohort shows as reauth_failed.
+      const drainable = scoped.filter((e) => e.blocked === null);
       const serverByKey = new Map<string, FwServerRow | null>();
-      for (const [key, ops] of groupFwEntriesByStudentTask(scoped)) {
+      for (const [key, ops] of groupFwEntriesByStudentTask(drainable)) {
         const reduced = reduceFwOps(ops);
         if (reduced[0]?.action === "undo") {
           const read = await loadFwProgressRow(db, reduced[0].studentId, reduced[0].taskId);
           serverByKey.set(key, read.ok ? read.row : null);
         }
       }
-      const plan = planFwDrain(scoped, serverByKey);
+      const authorized = new Set(authorizedCohortIds);
+      const plan = planFwDrain(drainable, serverByKey).map((group) => {
+        // key is "cohort student task" — reflect the authorization gate in the plan.
+        const cohortId = group.key.split(" ")[0];
+        if (!authorized.has(cohortId)) {
+          return { key: group.key, replay: [], reject: group.replay.concat(group.reject.map((r) => r.clientId)).map((c) => ({ clientId: c, reason: "reauth_failed" as const })) };
+        }
+        return group;
+      });
       emit(plan, () => {
         for (const group of plan) {
           console.log(`\n${group.key}`);
@@ -984,7 +1017,13 @@ fresh link emailed to ${issued.email}`);
         console.log(`  ${o.clientId}  ${o.disposition}${detail}`);
       }
     });
-    if (outcomes.some((o) => o.disposition === "rejected")) process.exitCode = 1;
+    const rejected = outcomes.filter((o) => o.disposition === "rejected").length;
+    if (rejected > 0) {
+      // A stderr breadcrumb before the non-zero exit — a bare exit code is
+      // indistinguishable from a crash to a pipeline (cli-readiness review).
+      console.error(`[fw] drain: ${rejected} of ${outcomes.length} entries rejected (exit 1)`);
+      process.exitCode = 1;
+    }
     return;
   }
 

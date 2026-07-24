@@ -9,6 +9,20 @@
  *                           --student <uuid> [--student <uuid> …] [--json]
  *   npm run fw -- create    --cohort <uuid> --first Maya --last Chen --band g6_8 [--json]
  *
+ * Staff ops (FW Unit 5) — the same affordances as /path/fw/ops:
+ *
+ *   npm run fw -- cohorts       [--json]
+ *   npm run fw -- cohort-create --slug boston-2026-08 \
+ *                               --start 2026-08-21 --start-time 09:00 \
+ *                               --end   2026-08-23 --end-time   17:00 \
+ *                               --tz    America/New_York [--json]
+ *   npm run fw -- token-mint    --cohort <uuid> [--force] [--json]
+ *   npm run fw -- token-revoke  --cohort <uuid> [--json]
+ *   npm run fw -- guides        --cohort <uuid> [--json]
+ *   npm run fw -- guide-add     --cohort <uuid> --email guide@example.com [--json]
+ *   npm run fw -- guide-reissue --guide <uuid> [--json]
+ *   npm run fw -- guide-revoke  --cohort <uuid> --guide <uuid> [--json]
+ *
  * ── Why this exists
  *
  * The whole read and write path is deliberately built as plain, `db`-first
@@ -40,9 +54,13 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { loadSupabaseEnv } from "./load-env";
+import { sendEmail } from "../app/lib/email";
+import { SITE_URL } from "../app/lib/site";
 import { narrowFwBand } from "../app/path/lib/fw-provision-rules";
 import { runFwCheckIn } from "../app/path/lib/fw-checkin-core";
-import { provisionFwGuide } from "../app/path/lib/fw-guide-core";
+import { issueFwGuideInvite, provisionFwGuide } from "../app/path/lib/fw-guide-core";
+import { buildFwGuideInviteEmail } from "../app/path/lib/fw-guide-invite-email";
+import { assertNoAuthMailToFwStudent } from "../app/path/lib/fw-provision-rules";
 import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/path/lib/fw-loader";
 import {
   createFwCohort,
@@ -68,30 +86,39 @@ const COMMANDS = [
   "token-revoke",
   "guides",
   "guide-add",
+  "guide-reissue",
   "guide-revoke",
 ] as const;
 type Command = (typeof COMMANDS)[number];
 
-const FLAGS = [
-  "--cohort",
-  "--student",
-  "--task",
-  "--action",
-  "--first",
-  "--last",
-  "--band",
-  "--actor",
-  "--json",
-  // FW Unit 5 (staff ops)
-  "--slug",
-  "--start",
-  "--start-time",
-  "--end",
-  "--end-time",
-  "--tz",
-  "--email",
-  "--guide",
-];
+/**
+ * Flags scoped PER COMMAND, not one global list (cli-readiness review).
+ *
+ * A single flat allowlist made `roster --cohort X --email foo@bar` legal: it
+ * passed validation, nothing read `--email`, and the command quietly did less
+ * than the operator asked. With seventeen flags across eleven commands and no
+ * per-command help, mis-targeting one is the likely mistake, and a silent no-op
+ * is the worst possible response to it.
+ *
+ * `--actor` and `--json` are genuinely global: every write attributes itself,
+ * and every command can emit JSON.
+ */
+const GLOBAL_FLAGS = ["--actor", "--json"];
+
+const COMMAND_FLAGS: Record<Command, string[]> = {
+  roster: ["--cohort"],
+  student: ["--cohort", "--student"],
+  checkin: ["--cohort", "--student", "--task", "--action"],
+  create: ["--cohort", "--first", "--last", "--band"],
+  cohorts: [],
+  "cohort-create": ["--slug", "--start", "--start-time", "--end", "--end-time", "--tz"],
+  "token-mint": ["--cohort", "--force"],
+  "token-revoke": ["--cohort"],
+  guides: ["--cohort"],
+  "guide-add": ["--cohort", "--email"],
+  "guide-reissue": ["--guide"],
+  "guide-revoke": ["--cohort", "--guide"],
+};
 
 function arg(name: string): string | null {
   const i = process.argv.indexOf(`--${name}`);
@@ -114,19 +141,32 @@ function required(name: string): string {
   return v;
 }
 
-function assertKnownFlags(): void {
-  const unknown = process.argv.slice(3).filter((a) => a.startsWith("--") && !FLAGS.includes(a));
+function assertKnownFlags(command: Command): void {
+  const allowed = [...GLOBAL_FLAGS, ...COMMAND_FLAGS[command]];
+  const unknown = process.argv.slice(3).filter((a) => a.startsWith("--") && !allowed.includes(a));
   if (unknown.length > 0) {
-    throw new Error(`unrecognized flag(s): ${unknown.join(", ")}. Known: ${FLAGS.join(", ")}`);
+    throw new Error(
+      `unrecognized flag(s) for "${command}": ${unknown.join(", ")}. ` +
+        `${command} accepts: ${allowed.join(", ")}`
+    );
   }
 }
 
 async function main() {
   const command = process.argv[2] as Command | undefined;
   if (!command || !COMMANDS.includes(command)) {
-    throw new Error(`usage: npm run fw -- <${COMMANDS.join("|")}> [flags]`);
+    // Names each command WITH its flags: the header comment is this script's
+    // only prose documentation, and an operator (or an agent) who got the
+    // command wrong should not have to open the source to learn the shape.
+    const usage = COMMANDS.map(
+      (c) => `  ${c}${COMMAND_FLAGS[c].length > 0 ? " " + COMMAND_FLAGS[c].join(" ") : ""}`
+    ).join("\n");
+    throw new Error(
+      `usage: npm run fw -- <command> [flags]\n\n${usage}\n\n` +
+        `every command also accepts ${GLOBAL_FLAGS.join(" ")}`
+    );
   }
-  assertKnownFlags();
+  assertKnownFlags(command);
   const asJson = process.argv.includes("--json");
 
   const { url, serviceRoleKey } = loadSupabaseEnv();
@@ -207,19 +247,35 @@ async function main() {
 
   if (command === "token-mint") {
     const cohortId = required("cohort");
+    // The ops surface makes staff confirm before replacing a LIVE link, because
+    // the projector goes blank until the new URL is entered. The CLI had no
+    // equivalent: one command, and a room's board was dark. `--force` is that
+    // confirm. It also gives an agent a safe retry story — a re-run after an
+    // ambiguous failure refuses instead of silently killing a token nobody
+    // captured (the raw value is shown once and never again).
+    const current = await loadFwOpsBoardToken(db, { cohortId, now: Date.now() });
+    if (current.ok && current.token.status === "live" && !process.argv.includes("--force")) {
+      throw new Error(
+        `${cohortId} already has a LIVE board link (expires ${current.token.expiresAt}). ` +
+          `Minting a new one kills it and blanks any projector showing it. ` +
+          `Re-run with --force if that is what you want.`
+      );
+    }
     const res = await mintFwBoardToken(db, {
       cohortId,
       actorUserId: await resolveActor(),
       now: Date.now(),
     });
     if (!res.ok) throw new Error(`token-mint failed: ${res.reason}`);
-    // The raw token is printed ONCE and never stored; --json includes it because
-    // the whole point of the command is to hand a URL to whoever is projecting.
-    emit(res, () => {
+    // The raw token is printed ONCE and never stored. `--json` carries the
+    // ASSEMBLED URL as well as the bare token, so an agent does not have to know
+    // the route shape to hand somebody something they can paste.
+    const boardUrl = `${SITE_URL}/path/fw/board/${res.token}`;
+    emit({ ...res, url: boardUrl }, () => {
       if (res.revokedPrior) {
         console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
       }
-      console.log(`\n/path/fw/board/${res.token}\n  expires ${res.expiresAt}`);
+      console.log(`\n${boardUrl}\n  expires ${res.expiresAt}`);
       console.log("  Only a hash is stored — this cannot be shown again.");
     });
     return;
@@ -251,8 +307,16 @@ async function main() {
         console.log(`  ${g.userId}  ${g.email ?? "(unnamed)"} — ${g.credential}`);
       }
     });
-    // The pre-event checklist's "all guides claimed" line, as an exit code.
-    if (guides.guides.some((g) => g.credential !== "claimed")) process.exitCode = 1;
+    // The pre-event checklist's "all guides claimed" line, as an exit code —
+    // and a stderr line saying so, because a bare exit 1 is indistinguishable
+    // from a genuine failure to anything scripting this.
+    const unclaimed = guides.guides.filter((g) => g.credential !== "claimed");
+    if (unclaimed.length > 0) {
+      console.error(
+        `[fw] ${unclaimed.length} of ${guides.guides.length} guide(s) have not claimed their link (exit 1)`
+      );
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -263,7 +327,10 @@ async function main() {
       createdBy: await resolveActor(),
     });
     if (!res.ok) throw new Error(`guide-add failed: ${res.reason}`);
-    emit(res, () => {
+    // `inviteEmailed` is in the JSON, not only in the human line: an agent
+    // reading structured output would otherwise report a guide as onboarded
+    // when they still cannot sign in.
+    emit({ ...res, inviteEmailed: false }, () => {
       console.log(`\n${res.email} (${res.userId})`);
       console.log(`  account ${res.created ? "created" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`);
       if (!res.audited) console.log("  ⚠  the audit record did NOT save");
@@ -273,6 +340,55 @@ async function main() {
       // surface, or `issueFwGuideInvite` directly, when a link is wanted.
       console.log("  no invite emailed — use the ops surface to send their link");
     });
+    return;
+  }
+
+  if (command === "guide-reissue") {
+    // Decision 12's Friday-morning recovery, and the ONE ops affordance the CLI
+    // was missing (agent-native review): an operator or agent driving this tool
+    // could create weekends, mint boards and revoke access, but could not get a
+    // working credential into a guide's hands — the exact thing a dead link on
+    // an event morning needs. `guide-add` deliberately does not mail (a first
+    // provision should not silently send a password-setting link); THIS is the
+    // deliberate, explicit send, mirroring reissueGuideInviteAction.
+    const userId = required("guide");
+    const issued = await issueFwGuideInvite(db, {
+      userId,
+      createdBy: await resolveActor(),
+      now: Date.now(),
+      // Rotates unconditionally and re-opens the claim — that IS the recovery.
+      mode: "reissue",
+    });
+    if (!issued.ok) throw new Error(`guide-reissue failed: ${issued.reason}`);
+    if (!issued.issued) throw new Error("guide-reissue did not mint a token");
+
+    // The same no-auth-mail choke-point the action passes through. A guide
+    // address is one typo from the dormant minors' namespace.
+    assertNoAuthMailToFwStudent(issued.email, "fw guide invite (cli)");
+    const built = buildFwGuideInviteEmail({ token: issued.token });
+    const sent = await sendEmail({
+      to: issued.email,
+      subject: built.subject,
+      html: built.html,
+      text: built.text,
+    });
+    // A send failure IS a failure here, unlike provisioning: the whole point of
+    // the command is putting a working link in the guide's inbox, and their old
+    // link is already dead by now.
+    if (!sent.ok) {
+      throw new Error(
+        `the link was minted but the email did NOT send to ${issued.email}: ${sent.error ?? "unknown"} — their previous link is already dead, so re-run this`
+      );
+    }
+    emit(
+      { ok: true, userId, email: issued.email, expiresAt: issued.expiresAt, emailed: true },
+      () => {
+        console.log(`
+fresh link emailed to ${issued.email}`);
+        console.log(`  expires ${issued.expiresAt}`);
+        console.log("  their previous link is now dead");
+      }
+    );
     return;
   }
 

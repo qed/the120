@@ -28,7 +28,23 @@ import type { FwGuideCredentialStatus, FwOpsGuide } from "@/app/path/lib/fw-ops-
  * alternative reading ("this deletes the guide") is the one that stops someone
  * revoking a person who genuinely should not be checking children in.
  *
- * try/catch/FINALLY on every submitting flag.
+ * ── ONE busy state, and one notice, across the whole panel
+ *
+ * The add form and the per-row buttons used to have INDEPENDENT busy flags, so
+ * an add and a row action could run concurrently — and they share one `notice`
+ * and one `error` region, so whichever finished last overwrote the other's
+ * message. A re-send that succeeded while a slow add was in flight left "a fresh
+ * link is on its way" sitting above the add's unrelated failure. That is the
+ * same stale-notice bug Unit 4's live walkthrough found, with two different
+ * actions racing instead of two identical lookups (frontend-races review).
+ *
+ * So there is ONE `busy` value naming what is running, every control is disabled
+ * while anything is, and every handler clears the shared message region on entry
+ * and owns it on exit. A per-row confirm is likewise cleared whenever any action
+ * starts, so a destructive "remove access" prompt cannot reappear after an
+ * unrelated success.
+ *
+ * try/catch/FINALLY on every transition.
  */
 
 const CREDENTIAL: Record<FwGuideCredentialStatus, { label: string; cls: string }> = {
@@ -59,20 +75,29 @@ export default function FwGuideRoster({
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [adding, setAdding] = useState(false);
+  /** What (if anything) is in flight. `null` = idle; `"add"` = the add form;
+   *  otherwise the user id of the row whose action is running. */
+  const [busy, setBusy] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  /** The user id of whichever row is mid-action — one at a time, so a slow
-   *  response cannot leave two rows both claiming to be working. */
-  const [busyRow, setBusyRow] = useState<string | null>(null);
   const [confirmingRevoke, setConfirmingRevoke] = useState<string | null>(null);
+
+  const anyBusy = busy !== null;
+  const adding = busy === "add";
+
+  /** Every handler starts here: one owner of the shared message region, and no
+   *  confirm left standing behind an action the staffer has moved on from. */
+  const beginAction = (which: string) => {
+    setBusy(which);
+    setAddError(null);
+    setNotice(null);
+    setConfirmingRevoke(null);
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email.trim().length === 0 || adding) return;
-    setAdding(true);
-    setAddError(null);
-    setNotice(null);
+    if (email.trim().length === 0 || anyBusy) return;
+    beginAction("add");
     try {
       const res = await provisionGuideAction({ email: email.trim(), cohortId });
       if (res.success) {
@@ -95,14 +120,13 @@ export default function FwGuideRoster({
     } catch {
       setAddError("That didn't go through. Try again.");
     } finally {
-      setAdding(false);
+      setBusy(null);
     }
   };
 
   const handleReissue = async (userId: string) => {
-    setBusyRow(userId);
-    setAddError(null);
-    setNotice(null);
+    if (anyBusy) return;
+    beginAction(userId);
     try {
       const res = await reissueGuideInviteAction({ userId });
       if (res.success) {
@@ -114,15 +138,13 @@ export default function FwGuideRoster({
     } catch {
       setAddError("That didn't go through. Try again.");
     } finally {
-      setBusyRow(null);
+      setBusy(null);
     }
   };
 
   const handleRevoke = async (userId: string) => {
-    setBusyRow(userId);
-    setAddError(null);
-    setNotice(null);
-    setConfirmingRevoke(null);
+    if (anyBusy) return;
+    beginAction(userId);
     try {
       const res = await revokeGuideGrantAction({ cohortId, userId });
       if (res.success) {
@@ -138,7 +160,7 @@ export default function FwGuideRoster({
     } catch {
       setAddError("That didn't go through. Try again.");
     } finally {
-      setBusyRow(null);
+      setBusy(null);
     }
   };
 
@@ -153,7 +175,7 @@ export default function FwGuideRoster({
         <ul className="space-y-3">
           {guides.map((guide) => {
             const chip = CREDENTIAL[guide.credential];
-            const rowBusy = busyRow === guide.userId;
+            const rowBusy = busy === guide.userId;
             return (
               <li
                 key={guide.userId}
@@ -191,7 +213,7 @@ export default function FwGuideRoster({
                     variant="secondary"
                     size="md"
                     onClick={() => handleReissue(guide.userId)}
-                    disabled={rowBusy || busyRow !== null}
+                    disabled={anyBusy}
                   >
                     {rowBusy ? "Working…" : "Re-send link"}
                   </Button>
@@ -204,7 +226,7 @@ export default function FwGuideRoster({
                         variant="secondary"
                         size="md"
                         onClick={() => handleRevoke(guide.userId)}
-                        disabled={rowBusy || busyRow !== null}
+                        disabled={anyBusy}
                       >
                         Yes — remove access
                       </Button>
@@ -214,7 +236,7 @@ export default function FwGuideRoster({
                         variant="secondary"
                         size="md"
                         onClick={() => setConfirmingRevoke(null)}
-                        disabled={busyRow !== null}
+                        disabled={anyBusy}
                       >
                         Cancel
                       </Button>
@@ -226,7 +248,7 @@ export default function FwGuideRoster({
                       variant="secondary"
                       size="md"
                       onClick={() => setConfirmingRevoke(guide.userId)}
-                      disabled={busyRow !== null}
+                      disabled={anyBusy}
                     >
                       Remove access
                     </Button>
@@ -284,7 +306,7 @@ export default function FwGuideRoster({
             type="submit"
             skin="hq"
             size="lg"
-            disabled={adding || email.trim().length === 0}
+            disabled={anyBusy || email.trim().length === 0}
           >
             {adding ? "Adding…" : "Add guide"}
           </Button>

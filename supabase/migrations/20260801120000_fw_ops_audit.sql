@@ -32,13 +32,34 @@
 --          and (table_name, column_name) in
 --              (('path_fw_board_tokens','revoked_by'),
 --               ('path_cohorts','created_by'));                  -- 2 rows
---   9. Only then: insert the version into
+--   9. select conname, pg_get_constraintdef(oid) from pg_constraint
+--        where conrelid = 'public.path_fw_ops_audit'::regclass
+--          and contype = 'c';
+--      -- the action allowlist must read exactly ('guide_grant_added',
+--      -- 'guide_grant_revoked'), matching FW_OPS_AUDIT_ACTIONS in
+--      -- fw-ops-rules.ts. The parity test pins the FILE against the TS array;
+--      -- only this query pins the LIVE DATABASE against either, which is what
+--      -- catches a hand-run fix or a partially-applied earlier attempt.
+--  10. Only then: insert the version into
 --      supabase_migrations.schema_migrations.
 --
--- ROLLBACK: drops cleanly. The table is empty until the first guide grant
--- changes, and both added columns are nullable with no reader that requires
--- them. Note the immutability triggers must be dropped with the table (they
--- reference it), which `drop table ... cascade` handles.
+-- ⚠️ ROLLBACK — READ THIS BEFORE DROPPING ANYTHING. The window in which this
+-- "drops cleanly" CLOSED THE MOMENT UNIT 5's CODE DEPLOYED. `recordFwOpsAudit`
+-- writes a row on every guide-grant add and revoke, and that code shipped in the
+-- same commit as this file, so by the time anyone reads this the table almost
+-- certainly holds REAL LIABILITY RECORDS and the two added columns hold real
+-- staff attribution. `drop table public.path_fw_ops_audit cascade` would destroy
+-- exactly the evidence this table exists to guarantee.
+--
+-- The honest rollback for this unit is to roll back the DEPLOY, not the schema:
+-- the table and both columns are additive and nullable, no pre-Unit-5 code reads
+-- them, so leaving the schema exactly as it is costs nothing and preserves the
+-- record. (Compare 20260728120000's `child_id DROP NOT NULL` note, which names
+-- its own closing window explicitly — this is the same kind of one-way door.)
+--
+-- Also note the immutability triggers make individual correction impossible by
+-- design: a wrong row cannot be UPDATEd or DELETEd through any path, including
+-- the service role. The sanctioned correction is a new, truthful row.
 --
 -- ── Why an audit table exists at all, and why it is this small ───────────────
 --

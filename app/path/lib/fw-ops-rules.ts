@@ -36,8 +36,16 @@
  */
 export const FW_EVENT_TIME_ZONES = [
   { id: "America/New_York", short: "Eastern", label: "Eastern — Boston, Hamptons, New York" },
-  { id: "America/Chicago", short: "Central", label: "Central — Chicago" },
-  { id: "America/Los_Angeles", short: "Pacific", label: "Pacific — San Francisco" },
+  { id: "America/Chicago", short: "Central", label: "Central — Chicago, Austin" },
+  {
+    id: "America/Los_Angeles",
+    short: "Pacific",
+    // BOTH Pacific cities named. The IANA id covers them either way, but staff
+    // creating an LA weekend need to see LA on screen to be sure they picked
+    // right — a zone label that names only one of two cities is a label people
+    // hesitate over (project-standards review).
+    label: "Pacific — San Francisco, Los Angeles",
+  },
 ] as const;
 
 export type FwEventTimeZone = (typeof FW_EVENT_TIME_ZONES)[number]["id"];

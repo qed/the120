@@ -80,6 +80,52 @@ export async function fwRead<R extends { data: unknown; error: { message: string
   call: () => PromiseLike<R>,
   label: string
 ): Promise<R | { data: null; error: { message: string } }> {
+  return fwCall(call, label);
+}
+
+/**
+ * The WRITE-path twin of `fwRead` — same clock, same throw guard, different
+ * contract for the caller.
+ *
+ * Added after Unit 5's reliability review found every ops mutation (the audit
+ * insert, the cohort insert, the board-token revoke/insert/restore, the grant
+ * delete) issued as a bare `await db.from(...)`. Unit 3's write path already
+ * wrapped `fw_move_task` for exactly this reason and this file's header already
+ * claimed to cover writes; the ops core simply did not follow it. On venue wifi
+ * a stalled mint left staff watching "Minting…" forever, with none of the
+ * carefully-written compensation branches ever reached — the failure mode the
+ * timeout exists to convert into a typed refusal.
+ *
+ * ⚠️ THE CONTRACT A WRITE CALLER TAKES ON. Giving up on waiting is NOT
+ * cancelling the request: a timed-out write MAY still land server-side. So
+ * every caller must be safe under "reported failed, actually succeeded". In the
+ * ops core that holds by construction, and each case is recoverable by the same
+ * refresh staff would do anyway:
+ *
+ *   - audit insert   → reported `audited: false`; a row that lands anyway is a
+ *                      truthful record we merely under-claimed.
+ *   - cohort insert  → a retry meets `slug_taken`, which names the cohort that
+ *                      now exists rather than silently minting a second one.
+ *   - token insert   → the compensation's restore is refused by the partial
+ *                      unique index if the insert did land, so two live tokens
+ *                      cannot result.
+ *   - revoke / delete → idempotent by predicate (`is null` / four `eq`s); the
+ *                      second attempt reports `no_active_token` /
+ *                      `grant_not_found`, which is the truth.
+ */
+export async function fwWrite<R extends { data: unknown; error: { message: string } | null }>(
+  call: () => PromiseLike<R>,
+  label: string
+): Promise<R | { data: null; error: { message: string } }> {
+  return fwCall(call, label);
+}
+
+/** The shared body. One definition of the budget and the guard, so a read and a
+ *  write can never drift apart on either. */
+async function fwCall<R extends { data: unknown; error: { message: string } | null }>(
+  call: () => PromiseLike<R>,
+  label: string
+): Promise<R | { data: null; error: { message: string } }> {
   let raced;
   try {
     raced = await withFwTimeout(call(), label);

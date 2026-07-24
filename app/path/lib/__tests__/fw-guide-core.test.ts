@@ -41,7 +41,15 @@ type Seed = {
   authUsers?: Row[];
   createUserOutcomes?: CreateUserOutcome[];
   /** Force one table+op to error, to exercise the compensation branches. */
-  failTable?: { table: string; op: "upsert" | "update" | "select" | "insert"; message: string } | null;
+  failTable?: {
+    table: string;
+    op: "upsert" | "update" | "select" | "insert";
+    message: string;
+    /** Apply the write, THEN report an error — a committed mutation whose
+     *  response was lost, which is `fwWrite`'s documented "a timed-out write MAY
+     *  still land" case and the only way to reach the post-write verification. */
+    applyAnyway?: boolean;
+  } | null;
   updateUserError?: string | null;
   /** Force getUserById to report an API FAILURE rather than a clean not-found —
    *  the distinction the reliability review found conflated. */
@@ -88,7 +96,14 @@ function makeFakeDb(seed: Seed) {
           (!inFilter || inFilter[1].includes(r[inFilter[0]]))
       );
     const failing = (op: "upsert" | "update" | "select" | "insert") =>
-      seed.failTable?.table === table && seed.failTable.op === op;
+      seed.failTable?.table === table &&
+      seed.failTable.op === op &&
+      !seed.failTable.applyAnyway;
+    /** Checked AFTER the operation has mutated the tables. */
+    const failingAfter = (op: "upsert" | "update" | "select" | "insert") =>
+      seed.failTable?.table === table &&
+      seed.failTable.op === op &&
+      seed.failTable.applyAnyway === true;
 
     const builder = {
       select() {
@@ -139,6 +154,9 @@ function makeFakeDb(seed: Seed) {
               tables[table][idx] = { ...tables[table][idx], ...r };
               inserted.push(tables[table][idx]);
             }
+          }
+          if (failingAfter("upsert")) {
+            return { data: null, error: { message: seed.failTable!.message } };
           }
           return { data: inserted.map((r) => ({ id: r.id })), error: null };
         };
@@ -1025,5 +1043,48 @@ describe("claimFwGuideInvite", () => {
     expect(
       await claimFwGuideInvite(db, { token: "anything-at-all", password: PASSWORD, now: NOW })
     ).toEqual({ ok: false, reason: "unavailable" });
+  });
+});
+
+/* ═════════════════════ landed-but-reported-failed (the audit invariant) ══ */
+
+describe("provisionFwGuide — a grant upsert that LANDED but reported an error", () => {
+  it("audits it and reports success, instead of losing the record forever", async () => {
+    // The failure mode this closes (adversarial review): return `unavailable`
+    // here and the guide holds REAL check-in power with no `guide_grant_added`
+    // row. The retry then makes it permanent AND invisible — ON CONFLICT DO
+    // NOTHING correctly reports "already there" (grantAdded:false,
+    // audited:true trivially) and the UI shows an ordinary success. Nobody
+    // would ever be able to answer "who gave that person check-in power?".
+    const { db, tables, authUsers } = makeFakeDb({
+      failTable: {
+        table: "path_role_grants",
+        op: "upsert",
+        message: "connection reset",
+        applyAnyway: true,
+      },
+    });
+
+    const res = await provisionFwGuide(db, RAVI);
+
+    expect(res).toMatchObject({ ok: true, grantAdded: true, audited: true });
+    expect(tables.path_role_grants).toHaveLength(1);
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_ops_audit[0]).toMatchObject({
+      action: "guide_grant_added",
+      subject_user_id: authUsers[0].id,
+      cohort_id: BOSTON,
+    });
+    expect(
+      (tables.path_fw_ops_audit[0].metadata as Row).recoveredFromReportedFailure
+    ).toBe(true);
+  });
+
+  it("still fails — and audits nothing — when the grant genuinely did not land", async () => {
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_role_grants", op: "upsert", message: "boom" },
+    });
+    expect(await provisionFwGuide(db, RAVI)).toEqual({ ok: false, reason: "unavailable" });
+    expect(tables.path_fw_ops_audit).toHaveLength(0);
   });
 });

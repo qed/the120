@@ -109,17 +109,14 @@ export default async function FwOpsCohortPage({
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
           Projected board
         </h2>
-        {token.ok ? (
-          <FwBoardToken cohortId={cohort.id} status={token.token} />
-        ) : (
-          <p
-            role="alert"
-            className="mt-3 rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
-          >
-            We couldn&apos;t read this weekend&apos;s board link just now. Reload before minting
-            — minting on top of a link that is actually live would take the projector down.
-          </p>
-        )}
+        {/* UNCONDITIONAL, and that is a fix rather than a simplification
+            (frontend-races review). This used to render the panel only on
+            `token.ok`, so a transient read failure on the `router.refresh()`
+            fired right after a successful mint swapped the subtree for an error
+            paragraph — unmounting the component that held the just-minted,
+            never-recoverable URL before staff had copied it. The component
+            renders the read-failure state itself now, keeping the token safe. */}
+        <FwBoardToken cohortId={cohort.id} status={token.ok ? token.token : null} />
       </section>
 
       <section className="mt-10">

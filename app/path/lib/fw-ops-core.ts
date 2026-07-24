@@ -19,12 +19,13 @@
  *
  * ── Dependency direction
  *
- * `fw-guide-core.ts` imports `recordFwOpsAudit` from HERE, not the reverse.
- * Provisioning a guide IS an ops action, and putting the audit write inside the
- * one function that mutates grants is what makes it un-bypassable — see that
- * function's note. Nothing here imports `fw-guide-core`, so there is no cycle:
- * the ops cohort read wants a wider column set than `loadFwCohort`'s
- * authorization read and is its own query.
+ * The audit writer lives in its own small module, `fw-audit-core.ts`, because
+ * `fw-guide-core.ts` needs it too — putting the audit write inside the one
+ * function that mutates grants is what makes it un-bypassable, but importing it
+ * from HERE dragged cohorts, board tokens and the ops roster reads into the
+ * guide door's module graph (maintainability review). Nothing here imports
+ * `fw-guide-core`: the ops cohort read wants a wider column set than
+ * `loadFwCohort`'s authorization read and is its own query.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -36,8 +37,9 @@ import {
   fwBoardTokenVerdict,
   pickFwCurrentBoardToken,
 } from "./fw-board-rules";
-import { fetchAllRows, fwRead } from "./fw-call";
-import { narrowFwEventTimeZone, type FwOpsAuditAction } from "./fw-ops-rules";
+import { recordFwOpsAudit } from "./fw-audit-core";
+import { fetchAllRows, fwRead, fwWrite } from "./fw-call";
+import { narrowFwEventTimeZone } from "./fw-ops-rules";
 
 /** SHA-256 hex — the ONLY form a board token is ever stored in, so a database
  *  read can never reconstruct a live projector URL. Sibling of
@@ -51,56 +53,23 @@ export function hashFwBoardToken(token: string): string {
  *  message — the message is localized-ish, unstable, and varies by constraint. */
 const UNIQUE_VIOLATION = "23505";
 
-function isUniqueViolation(error: { code?: string } | null): boolean {
-  return error?.code === UNIQUE_VIOLATION;
-}
-
-/* ══════════════════════════════════════════════════════════════════ the audit ══ */
-
-export type RecordFwOpsAuditInput = {
-  actor: string;
-  action: FwOpsAuditAction;
-  subjectUserId: string;
-  cohortId: string;
-  metadata?: Record<string, unknown>;
-};
-
 /**
- * Write one liability record.
- *
- * Returns a BOOLEAN rather than throwing or failing its caller, and the reason
- * is a genuine tension the plan does not get to dissolve: by the time this runs,
- * the grant has already been added or removed. Failing the caller would report
- * "the revoke didn't work" about a revoke that DID work, sending staff to do it
- * again; throwing would do the same, louder. So the mutation stands, the failure
- * is logged at error level, and the caller reports `audited: false` so the ops
- * copy can say "revoked — but the audit record didn't save; tell an engineer"
- * rather than quietly losing the record.
- *
- * The row itself is immutable at the database level (triggers, per the
- * migration), so nothing downstream can rewrite what does land.
+ * Takes the WIDER error union deliberately. Since the writes went through
+ * `fwWrite` (reliability review), a failure can be either a PostgrestError the
+ * database returned — which carries `code` — or the synthetic `{message}` a
+ * timeout/throw produces, which does not. A timed-out insert is emphatically NOT
+ * a unique violation, and this returns false for it, which is the answer that
+ * routes it to "unavailable" rather than to "that slug is taken".
  */
-export async function recordFwOpsAudit(
-  db: SupabaseClient,
-  input: RecordFwOpsAuditInput
-): Promise<boolean> {
-  const res = await db.from("path_fw_ops_audit").insert([
-    {
-      actor: input.actor,
-      action: input.action,
-      subject_user_id: input.subjectUserId,
-      cohort_id: input.cohortId,
-      metadata: input.metadata ?? null,
-    },
-  ]);
-  if (res.error) {
-    console.error(
-      `[fw/ops] AUDIT WRITE FAILED (${input.action} actor=${input.actor} subject=${input.subjectUserId} cohort=${input.cohortId}): ${res.error.message}`
-    );
-    return false;
-  }
-  return true;
+function isUniqueViolation(error: { code?: string } | { message: string } | null): boolean {
+  return error !== null && "code" in error && error.code === UNIQUE_VIOLATION;
 }
+
+/** Re-exported so the ops surface and its tests have one import site for the
+ *  whole ops core. The definition lives in `fw-audit-core.ts` — see the
+ *  dependency-direction note above. */
+export { recordFwOpsAudit };
+export type { RecordFwOpsAuditInput } from "./fw-audit-core";
 
 /* ═════════════════════════════════════════════════════════════════ the cohort ══ */
 
@@ -188,20 +157,24 @@ export async function createFwCohort(
   const timeZone = narrowFwEventTimeZone(input.timeZone);
   if (!timeZone) return { ok: false, reason: "invalid_time_zone" };
 
-  const res = await db
-    .from("path_cohorts")
-    .insert([
-      {
-        slug: input.slug,
-        kind: FW_COHORT_KIND,
-        starts_at: input.startsAt,
-        ends_at: input.endsAt,
-        time_zone: timeZone,
-        created_by: input.createdBy,
-      },
-    ])
-    .select("id, slug")
-    .maybeSingle();
+  const res = await fwWrite(
+    () =>
+      db
+        .from("path_cohorts")
+        .insert([
+          {
+            slug: input.slug,
+            kind: FW_COHORT_KIND,
+            starts_at: input.startsAt,
+            ends_at: input.endsAt,
+            time_zone: timeZone,
+            created_by: input.createdBy,
+          },
+        ])
+        .select("id, slug")
+        .maybeSingle(),
+    `cohort insert (${input.slug})`
+  );
 
   if (res.error) {
     if (isUniqueViolation(res.error)) return { ok: false, reason: "slug_taken" };
@@ -229,6 +202,10 @@ export type FwBoardTokenStatus = "never_minted" | "live" | "expired" | "revoked"
 
 export type FwOpsBoardToken = {
   status: FwBoardTokenStatus;
+  /** The row this status describes. Carried so a revoke can name the exact
+   *  token staff were looking at — see `revokeFwBoardToken`. Null only when the
+   *  cohort has never had one. */
+  tokenId: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
   createdAt: string | null;
@@ -250,9 +227,10 @@ function tokenStatus(
  *  is dropped rather than defaulted into either. */
 function narrowTokenRow(
   row: Record<string, unknown>
-): { expiresAt: string; revokedAt: string | null; createdAt: string | null } | null {
-  if (typeof row.expires_at !== "string") return null;
+): { id: string; expiresAt: string; revokedAt: string | null; createdAt: string | null } | null {
+  if (typeof row.id !== "string" || typeof row.expires_at !== "string") return null;
   return {
+    id: row.id,
     expiresAt: row.expires_at,
     revokedAt: typeof row.revoked_at === "string" ? row.revoked_at : null,
     createdAt: typeof row.created_at === "string" ? row.created_at : null,
@@ -279,6 +257,7 @@ export async function loadFwOpsBoardToken(
         .from("path_fw_board_tokens")
         .select(TOKEN_COLUMNS)
         .eq("cohort_id", input.cohortId)
+        .order("id", { ascending: true })
         .range(from, to)
   );
   if (!rows.ok) return { ok: false };
@@ -289,13 +268,20 @@ export async function loadFwOpsBoardToken(
   if (!current) {
     return {
       ok: true,
-      token: { status: "never_minted", expiresAt: null, revokedAt: null, createdAt: null },
+      token: {
+        status: "never_minted",
+        tokenId: null,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: null,
+      },
     };
   }
   return {
     ok: true,
     token: {
       status: tokenStatus(current, input.now),
+      tokenId: current.id,
       expiresAt: current.expiresAt,
       revokedAt: current.revokedAt,
       createdAt: current.createdAt,
@@ -355,12 +341,16 @@ export async function mintFwBoardToken(
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
 
   const revokedAt = new Date(input.now).toISOString();
-  const revoked = await db
-    .from("path_fw_board_tokens")
-    .update({ revoked_at: revokedAt, revoked_by: input.actorUserId })
-    .eq("cohort_id", input.cohortId)
-    .is("revoked_at", null)
-    .select("id");
+  const revoked = await fwWrite(
+    () =>
+      db
+        .from("path_fw_board_tokens")
+        .update({ revoked_at: revokedAt, revoked_by: input.actorUserId })
+        .eq("cohort_id", input.cohortId)
+        .is("revoked_at", null)
+        .select("id"),
+    `prior token revoke (${input.cohortId})`
+  );
   if (revoked.error) {
     console.error(
       `[fw/ops] prior token revoke failed for ${input.cohortId}: ${revoked.error.message}`
@@ -372,28 +362,51 @@ export async function mintFwBoardToken(
     .filter((id): id is string => typeof id === "string");
 
   const token = randomBytes(32).toString("base64url");
-  const inserted = await db.from("path_fw_board_tokens").insert([
-    {
-      cohort_id: input.cohortId,
-      token_hash: hashFwBoardToken(token),
-      expires_at: verdict.expiresAt,
-      created_by: input.actorUserId,
-    },
-  ]);
+  const inserted = await fwWrite(
+    () =>
+      db.from("path_fw_board_tokens").insert([
+        {
+          cohort_id: input.cohortId,
+          token_hash: hashFwBoardToken(token),
+          expires_at: verdict.expiresAt,
+          created_by: input.actorUserId,
+        },
+      ]),
+    `token insert (${input.cohortId})`
+  );
 
   if (inserted.error) {
     console.error(
       `[fw/ops] token insert failed for ${input.cohortId}: ${inserted.error.message}`
     );
     if (priorIds.length > 0) {
-      const restored = await db
-        .from("path_fw_board_tokens")
-        .update({ revoked_at: null, revoked_by: null })
-        .in("id", priorIds);
+      const restored = await fwWrite(
+        () =>
+          db
+            .from("path_fw_board_tokens")
+            .update({ revoked_at: null, revoked_by: null })
+            .in("id", priorIds),
+        `token restore (${input.cohortId})`
+      );
       if (restored.error) {
-        console.error(
-          `[fw/ops] COULD NOT RESTORE the prior board token for ${input.cohortId}: ${restored.error.message} — this cohort now has NO live token; staff must mint a new one and re-enter the URL on the projector`
-        );
+        // Do NOT assert the board is dark here (correctness review). A restore
+        // fails for two very different reasons, and the partial unique index is
+        // what tells them apart: either the write genuinely failed (dark board,
+        // staff must re-mint), or a CONCURRENT mint already put a live token in
+        // place and the index correctly refused to create a second one — in
+        // which case a projector somewhere is working fine and an operator
+        // acting on a "no live token" line would re-mint and kill it. So we
+        // re-read and log what is actually true.
+        const now = await loadFwOpsBoardToken(db, { cohortId: input.cohortId, now: input.now });
+        if (now.ok && now.token.status === "live") {
+          console.warn(
+            `[fw/ops] could not restore the prior board token for ${input.cohortId} (${restored.error.message}), but a live token EXISTS — a concurrent mint won. Do not re-mint; find whoever holds that URL.`
+          );
+        } else {
+          console.error(
+            `[fw/ops] COULD NOT RESTORE the prior board token for ${input.cohortId}: ${restored.error.message} — this cohort now has NO live token; staff must mint a new one and re-enter the URL on the projector`
+          );
+        }
       } else {
         console.warn(
           `[fw/ops] restored the prior board token for ${input.cohortId} after a failed mint — the projector URL in use is still valid`
@@ -408,36 +421,72 @@ export async function mintFwBoardToken(
 
 export type RevokeFwBoardTokenResult =
   | { ok: true }
-  | { ok: false; reason: "no_active_token" | "unavailable" };
+  | { ok: false; reason: "no_active_token" | "stale_view" | "unavailable" };
 
 /**
  * Kill the cohort's live board token with no replacement.
  *
- * Distinct from a re-mint, and the difference is the whole reason
- * `revoked_by` exists: a re-mint attributes itself through the replacement
- * row's `created_by`, while this leaves a board dark and previously named
- * nobody.
+ * Distinct from a re-mint, and the difference is the whole reason `revoked_by`
+ * exists: a re-mint attributes itself through the replacement row's
+ * `created_by`, while this leaves a board dark and previously named nobody.
  *
- * `no_active_token` is reported rather than swallowed as success. "Nothing to
- * revoke" and "revoked" look identical on a surface that reports both as done,
- * and the question staff are actually asking is whether the projector URL in
- * somebody's browser history still works.
+ * ── It revokes THE TOKEN STAFF SAW, not "whatever is live now"
+ *
+ * `expectedTokenId` is a compare-and-set, and it closes a race that kills a
+ * working projector (adversarial review). Without it the predicate is "the live
+ * row for this cohort" — which is a DIFFERENT row by the time a slow request
+ * lands. Staff B reads the page showing token T0 and clicks Revoke; staff A
+ * re-mints meanwhile, killing T0 and making TA live; B's request finally
+ * executes and kills TA — the token A minted seconds ago and may already have
+ * typed into the projector — while B's own confirm dialog described T0. Both
+ * get a success response and neither can tell.
+ *
+ * With the CAS, B's update matches zero rows and reports `stale_view`, which is
+ * the truth: the thing they were looking at is already gone, and the surface
+ * reloads rather than destroying somebody else's work.
+ *
+ * `no_active_token` and `stale_view` are kept apart because they need different
+ * copy — "there is nothing live to revoke" versus "this page is out of date".
  */
 export async function revokeFwBoardToken(
   db: SupabaseClient,
-  input: { cohortId: string; actorUserId: string; now: number }
+  input: {
+    cohortId: string;
+    actorUserId: string;
+    now: number;
+    /** The token id the caller believes is live. Omitted only by callers with
+     *  no view that could be stale — the CLI reads and acts in one breath. */
+    expectedTokenId?: string;
+  }
 ): Promise<RevokeFwBoardTokenResult> {
-  const res = await db
-    .from("path_fw_board_tokens")
-    .update({ revoked_at: new Date(input.now).toISOString(), revoked_by: input.actorUserId })
-    .eq("cohort_id", input.cohortId)
-    .is("revoked_at", null)
-    .select("id");
+  const res = await fwWrite(
+    () => {
+      const base = db
+        .from("path_fw_board_tokens")
+        .update({ revoked_at: new Date(input.now).toISOString(), revoked_by: input.actorUserId })
+        .eq("cohort_id", input.cohortId)
+        .is("revoked_at", null);
+      return (input.expectedTokenId ? base.eq("id", input.expectedTokenId) : base).select("id");
+    },
+    `token revoke (${input.cohortId})`
+  );
   if (res.error) {
     console.error(`[fw/ops] token revoke failed for ${input.cohortId}: ${res.error.message}`);
     return { ok: false, reason: "unavailable" };
   }
-  if ((res.data ?? []).length === 0) return { ok: false, reason: "no_active_token" };
+  if ((res.data ?? []).length === 0) {
+    // Zero rows means one of two things and only a second look tells them
+    // apart: nothing is live at all, or something ELSE is.
+    if (!input.expectedTokenId) return { ok: false, reason: "no_active_token" };
+    const current = await loadFwOpsBoardToken(db, { cohortId: input.cohortId, now: input.now });
+    if (current.ok && current.token.status === "live") {
+      console.warn(
+        `[fw/ops] refusing a stale revoke for ${input.cohortId}: caller expected ${input.expectedTokenId}, but a different token is live`
+      );
+      return { ok: false, reason: "stale_view" };
+    }
+    return { ok: false, reason: "no_active_token" };
+  }
   return { ok: true };
 }
 
@@ -491,7 +540,12 @@ export async function listFwOpsCohorts(
   const ids = cohorts.map((c) => c.id);
   const [members, grants, tokens] = await Promise.all([
     fetchAllRows<Record<string, unknown>>("ops member counts", (from, to) =>
-      db.from("path_cohort_members").select("cohort_id").in("cohort_id", ids).range(from, to)
+      db
+        .from("path_cohort_members")
+        .select("cohort_id")
+        .in("cohort_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to)
     ),
     fetchAllRows<Record<string, unknown>>("ops guide counts", (from, to) =>
       db
@@ -500,10 +554,16 @@ export async function listFwOpsCohorts(
         .eq("role", "guide")
         .eq("scope_type", "cohort")
         .in("scope_id", ids)
+        .order("id", { ascending: true })
         .range(from, to)
     ),
     fetchAllRows<Record<string, unknown>>("ops token statuses", (from, to) =>
-      db.from("path_fw_board_tokens").select(TOKEN_COLUMNS).in("cohort_id", ids).range(from, to)
+      db
+        .from("path_fw_board_tokens")
+        .select(TOKEN_COLUMNS)
+        .in("cohort_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to)
     ),
   ]);
   if (!members.ok || !grants.ok || !tokens.ok) return { ok: false };
@@ -599,7 +659,7 @@ export async function listFwCohortGuides(
         .eq("role", "guide")
         .eq("scope_type", "cohort")
         .eq("scope_id", input.cohortId)
-        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
         .range(from, to)
   );
   if (!grants.ok) return { ok: false };
@@ -619,6 +679,7 @@ export async function listFwCohortGuides(
         .from("path_fw_guide_invites")
         .select("user_id, email, expires_at, claimed_at, issued_at")
         .in("user_id", userIds)
+        .order("id", { ascending: true })
         .range(from, to)
   );
   if (!invites.ok) return { ok: false };
@@ -655,19 +716,31 @@ export async function listFwCohortGuides(
   // The rare tail: a grant with no invite row still has to be identifiable, or
   // staff cannot decide whether to revoke it. Bounded by the number of MISSING
   // rows (normally zero), so this is not an N+1 on the common path.
+  //
+  // Through `fwRead`, which is doing two jobs here (reliability review). The
+  // timeout is the obvious one. The THROW GUARD is the load-bearing one: this
+  // sits inside a `Promise.all` inside a function the ops page calls from
+  // another `Promise.all`, so an Admin API call that THROWS — a network abort,
+  // a malformed response — would reject all the way out of the render and take
+  // down the whole cohort page, including the header and the board-token panel
+  // that had already loaded fine. Naming a guide is the least important thing
+  // on that page; it must not be the thing that can break it.
   const unnamed = guides.filter((g) => g.email === null);
   if (unnamed.length > 0) {
     await Promise.all(
       unnamed.map(async (guide) => {
-        const account = await db.auth.admin.getUserById(guide.userId);
-        if (account.error || !account.data?.user) {
+        const account = await fwRead(
+          () => db.auth.admin.getUserById(guide.userId),
+          `guide account load (${guide.userId})`
+        );
+        const user = account.data?.user;
+        if (account.error || !user) {
           console.error(
             `[fw/ops] could not name guide ${guide.userId}: ${account.error?.message ?? "no user"}`
           );
           return;
         }
-        const email = account.data.user.email;
-        if (typeof email === "string") guide.email = email;
+        if (typeof user.email === "string") guide.email = user.email;
       })
     );
   }
@@ -699,19 +772,58 @@ export async function revokeFwGuideGrant(
   db: SupabaseClient,
   input: { cohortId: string; userId: string; actorUserId: string; metadata?: Record<string, unknown> }
 ): Promise<RevokeFwGuideGrantResult> {
-  const deleted = await db
-    .from("path_role_grants")
-    .delete()
-    .eq("user_id", input.userId)
-    .eq("role", "guide")
-    .eq("scope_type", "cohort")
-    .eq("scope_id", input.cohortId)
-    .select("id");
+  const deleted = await fwWrite(
+    () =>
+      db
+        .from("path_role_grants")
+        .delete()
+        .eq("user_id", input.userId)
+        .eq("role", "guide")
+        .eq("scope_type", "cohort")
+        .eq("scope_id", input.cohortId)
+        .select("id"),
+    `grant revoke (${input.userId}/${input.cohortId})`
+  );
   if (deleted.error) {
     console.error(
       `[fw/ops] grant revoke failed for ${input.userId}/${input.cohortId}: ${deleted.error.message}`
     );
-    return { ok: false, reason: "unavailable" };
+    // POST-WRITE VERIFY, not a bare return (adversarial review). `fwWrite`'s own
+    // contract is that a timed-out write MAY still have landed, and this call is
+    // load-bearing for a LIABILITY RECORD, not just for a mutation: returning
+    // here would leave a grant genuinely deleted with no `guide_grant_revoked`
+    // row, and the retry would then report `grant_not_found` — truthful about
+    // access, permanently silent about who removed it. That is exactly the
+    // invariant the audit table exists to hold, so we go and look.
+    const stillThere = await fwRead(
+      () =>
+        db
+          .from("path_role_grants")
+          .select("id")
+          .eq("user_id", input.userId)
+          .eq("role", "guide")
+          .eq("scope_type", "cohort")
+          .eq("scope_id", input.cohortId)
+          .maybeSingle(),
+      `grant revoke verify (${input.userId}/${input.cohortId})`
+    );
+    if (stillThere.error || stillThere.data) {
+      // Either we cannot tell, or the grant is genuinely still there. Both mean
+      // "report the failure"; only the second means nothing happened.
+      return { ok: false, reason: "unavailable" };
+    }
+    // The delete DID land. Record it and report the truth.
+    console.warn(
+      `[fw/ops] grant revoke for ${input.userId}/${input.cohortId} reported an error but LANDED — auditing it`
+    );
+    const auditedAnyway = await recordFwOpsAudit(db, {
+      actor: input.actorUserId,
+      action: "guide_grant_revoked",
+      subjectUserId: input.userId,
+      cohortId: input.cohortId,
+      metadata: { ...input.metadata, recoveredFromReportedFailure: true },
+    });
+    return { ok: true, audited: auditedAnyway };
   }
   if ((deleted.data ?? []).length === 0) return { ok: false, reason: "grant_not_found" };
 

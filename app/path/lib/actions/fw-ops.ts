@@ -138,26 +138,45 @@ export async function createFwCohortAction(
     createdBy: gate.userId,
   });
   if (!created.ok) {
-    switch (created.reason) {
-      case "slug_taken":
-        return { success: false, error: `"${slug}" is already taken — pick another name.` };
-      case "invalid_time_zone":
-        return { success: false, error: "Pick the city's timezone." };
-      case "unavailable":
-        return { success: false, error: GENERIC_ERROR };
-    }
+    return { success: false, error: createCohortFailureMessage(created.reason, slug) };
   }
 
   revalidatePath("/path/fw/ops");
   return { success: true, cohortId: created.cohortId, slug: created.slug };
 }
 
+/* ─────────────────────────────────────────────────────── failure copy ──── */
 /**
- * A `switch` with no `default` and a declared `string` return, mirroring
- * `provisionFailureMessage` in fw-guide.ts: TS2366 makes a newly added
- * conversion refusal a COMPILE error here rather than something that silently
- * lands on whatever copy the previous branch happened to hold.
+ * EVERY refusal-to-copy mapping in this file is an extracted function with a
+ * declared `string` return and a `default`-less `switch`, so TS2366 makes a
+ * newly added union member a COMPILE error rather than a silent fallthrough.
+ *
+ * That uniformity is the fix for a real hole (kieran-typescript review). Three
+ * of these switches used to sit inline inside their action, where they appeared
+ * to be protected — but only INCIDENTALLY, because the code after the `if
+ * (!x.ok)` block happened to dereference a success-only property, which is what
+ * actually made an incomplete switch a type error. `revokeBoardTokenAction`'s
+ * success arm is a bare `{ ok: true }` with no property to dereference, so its
+ * inline switch had NO tripwire at all: a reason added later (Unit 5b) and not
+ * handled here would have fallen through and reported a FAILED board-token
+ * revoke as `{ success: true }` — staff told the projector link was dead while
+ * it kept working. Extracted, the return type is the guarantee, and it does not
+ * depend on what the surrounding code happens to do next.
  */
+function createCohortFailureMessage(
+  reason: "slug_taken" | "invalid_time_zone" | "unavailable",
+  slug: string
+): string {
+  switch (reason) {
+    case "slug_taken":
+      return `"${slug}" is already taken — pick another name.`;
+    case "invalid_time_zone":
+      return "Pick the city's timezone.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
+}
+
 function windowFailureMessage(
   reason:
     | "invalid_time_zone"
@@ -186,6 +205,8 @@ function windowFailureMessage(
 /* ═════════════════════════════════════════════════════════════ board tokens ══ */
 
 const cohortSchema = z.object({ cohortId: z.uuid() });
+/** Revoke NAMES the token it means to kill — see revokeFwBoardToken's CAS. */
+const revokeTokenSchema = z.object({ cohortId: z.uuid(), expectedTokenId: z.uuid() });
 
 /**
  * Mint the projected board's URL token. The raw value is returned ONCE and never
@@ -209,29 +230,7 @@ export async function mintBoardTokenAction(
     actorUserId: gate.actorUserId,
     now: Date.now(),
   });
-  if (!minted.ok) {
-    switch (minted.reason) {
-      case "cohort_not_found":
-        return { success: false, error: "That cohort no longer exists." };
-      case "cohort_not_fw":
-        return {
-          success: false,
-          error: "Boards are only for Founders Weekend cohorts.",
-        };
-      case "no_event_window":
-        return {
-          success: false,
-          error: "This weekend has no end date yet — the board's expiry comes from it.",
-        };
-      case "window_passed":
-        return {
-          success: false,
-          error: "This weekend has already finished, so a new board link would be dead on arrival.",
-        };
-      case "unavailable":
-        return { success: false, error: GENERIC_ERROR };
-    }
-  }
+  if (!minted.ok) return { success: false, error: mintFailureMessage(minted.reason) };
 
   revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
   return {
@@ -246,7 +245,7 @@ export async function mintBoardTokenAction(
 export async function revokeBoardTokenAction(
   input: unknown
 ): Promise<RevokeBoardTokenActionResult> {
-  const parsed = cohortSchema.safeParse(input);
+  const parsed = revokeTokenSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
@@ -256,18 +255,49 @@ export async function revokeBoardTokenAction(
     cohortId: parsed.data.cohortId,
     actorUserId: gate.actorUserId,
     now: Date.now(),
+    expectedTokenId: parsed.data.expectedTokenId,
   });
   if (!revoked.ok) {
-    switch (revoked.reason) {
-      case "no_active_token":
-        return { success: false, error: "There's no live board link to revoke." };
-      case "unavailable":
-        return { success: false, error: GENERIC_ERROR };
-    }
+    return { success: false, error: revokeTokenFailureMessage(revoked.reason) };
   }
 
   revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
   return { success: true };
+}
+
+function mintFailureMessage(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "no_event_window"
+    | "window_passed"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+      return "That cohort no longer exists.";
+    case "cohort_not_fw":
+      return "Boards are only for Founders Weekend cohorts.";
+    case "no_event_window":
+      return "This weekend has no end date yet — the board's expiry comes from it.";
+    case "window_passed":
+      return "This weekend has already finished, so a new board link would be dead on arrival.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
+}
+
+function revokeTokenFailureMessage(
+  reason: "no_active_token" | "stale_view" | "unavailable"
+): string {
+  switch (reason) {
+    case "no_active_token":
+      return "There's no live board link to revoke.";
+    case "stale_view":
+      return "This page is out of date — a different board link is live now. Reload, then revoke.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════ grant revocation ══ */
@@ -302,17 +332,18 @@ export async function revokeGuideGrantAction(
     actorUserId: gate.actorUserId,
   });
   if (!revoked.ok) {
-    switch (revoked.reason) {
-      case "grant_not_found":
-        return {
-          success: false,
-          error: "That guide no longer has access to this weekend — refresh the list.",
-        };
-      case "unavailable":
-        return { success: false, error: GENERIC_ERROR };
-    }
+    return { success: false, error: revokeGrantFailureMessage(revoked.reason) };
   }
 
   revalidatePath(`/path/fw/ops/cohort/${parsed.data.cohortId}`);
   return { success: true, audited: revoked.audited };
+}
+
+function revokeGrantFailureMessage(reason: "grant_not_found" | "unavailable"): string {
+  switch (reason) {
+    case "grant_not_found":
+      return "That guide no longer has access to this weekend — refresh the list.";
+    case "unavailable":
+      return GENERIC_ERROR;
+  }
 }

@@ -47,6 +47,11 @@ type Failure = {
   op: "select" | "insert" | "update" | "delete";
   message: string;
   code?: string;
+  /** Apply the write, THEN report an error — a committed mutation whose
+   *  response was lost. This is exactly `fwWrite`'s documented "a timed-out
+   *  write MAY still land" case, and the only way to reach the post-write
+   *  verification paths. */
+  applyAnyway?: boolean;
   /** Fail only on the Nth matching call (1-based), so a sequence can fail
    *  midway rather than from the start. */
   onCall?: number;
@@ -118,13 +123,25 @@ function makeFakeDb(seed: Seed) {
     let limitTo: number | null = null;
     let rangeAt: [number, number] | null = null;
 
-    const failing = (op: "select" | "insert" | "update" | "delete") => {
+    /** Returns the injected error, or null. `applyAnyway` failures are reported
+     *  separately so the caller can commit first and fail after. */
+    const failureFor = (op: "select" | "insert" | "update" | "delete") => {
       const hit = failures.find((f) => f.table === table && f.op === op);
       if (!hit) return null;
       const key = `${table}:${op}`;
       failCounts[key] = (failCounts[key] ?? 0) + 1;
       if (hit.onCall && failCounts[key] !== hit.onCall) return null;
+      return hit;
+    };
+    const failing = (op: "select" | "insert" | "update" | "delete") => {
+      const hit = failureFor(op);
+      if (!hit || hit.applyAnyway) return null;
       return { message: hit.message, code: hit.code };
+    };
+    /** Checked AFTER the operation has mutated the tables. */
+    const failingAfter = (op: "select" | "insert" | "update" | "delete") => {
+      const hit = failures.find((f) => f.table === table && f.op === op && f.applyAnyway);
+      return hit ? { message: hit.message, code: hit.code } : null;
     };
 
     const rows = () => {
@@ -307,6 +324,8 @@ function makeFakeDb(seed: Seed) {
           if (fail) return { data: null, error: fail };
           const hits = tables[table].filter((r) => eqs3.every(([c, v]) => r[c] === v));
           tables[table] = tables[table].filter((r) => !hits.includes(r));
+          const after = failingAfter("delete");
+          if (after) return { data: null, error: after };
           return { data: hits.map((r) => ({ id: r.id })), error: null };
         };
         const chain = {
@@ -652,7 +671,13 @@ describe("loadFwOpsBoardToken", () => {
     const { db } = makeFakeDb({});
     expect(await loadFwOpsBoardToken(db, { cohortId: BOSTON, now: NOW })).toEqual({
       ok: true,
-      token: { status: "never_minted", expiresAt: null, revokedAt: null, createdAt: null },
+      token: {
+        status: "never_minted",
+        tokenId: null,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: null,
+      },
     });
   });
 
@@ -960,5 +985,205 @@ describe("recordFwOpsAudit", () => {
         cohortId: BOSTON,
       })
     ).toBe(false);
+  });
+});
+
+/* ══════════════════════════ landed-but-reported-failed (the audit invariant) ══ */
+
+describe("revokeFwGuideGrant — a delete that LANDED but reported an error", () => {
+  const GRANTS = [
+    { id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON },
+    { id: "g2", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: HAMPTONS },
+  ];
+
+  it("still writes the audit row, and reports success", async () => {
+    // `fwWrite`'s own contract: a timed-out write may already have committed.
+    // Returning `unavailable` here would leave the grant genuinely gone with NO
+    // `guide_grant_revoked` row — and the retry then reports `grant_not_found`,
+    // which is truthful about access and permanently silent about who removed
+    // it. That is the exact invariant the audit table exists to hold.
+    const { db, tables } = makeFakeDb({
+      grants: GRANTS,
+      failTables: [
+        { table: "path_role_grants", op: "delete", message: "connection reset", applyAnyway: true },
+      ],
+    });
+
+    const res = await revokeFwGuideGrant(db, {
+      cohortId: BOSTON,
+      userId: RAVI,
+      actorUserId: STAFF,
+    });
+
+    expect(res).toEqual({ ok: true, audited: true });
+    expect(tables.path_role_grants.map((g) => g.id)).toEqual(["g2"]);
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_ops_audit[0]).toMatchObject({
+      action: "guide_grant_revoked",
+      subject_user_id: RAVI,
+      cohort_id: BOSTON,
+    });
+    // Marked, so the row is legible as a recovery rather than a normal write.
+    expect(
+      (tables.path_fw_ops_audit[0].metadata as Record<string, unknown>).recoveredFromReportedFailure
+    ).toBe(true);
+  });
+
+  it("reports unavailable — and audits NOTHING — when the grant is genuinely still there", async () => {
+    const { db, tables } = makeFakeDb({
+      grants: GRANTS,
+      failTable: { table: "path_role_grants", op: "delete", message: "boom" },
+    });
+    expect(
+      await revokeFwGuideGrant(db, { cohortId: BOSTON, userId: RAVI, actorUserId: STAFF })
+    ).toEqual({ ok: false, reason: "unavailable" });
+    expect(tables.path_fw_ops_audit).toHaveLength(0);
+    expect(tables.path_role_grants).toHaveLength(2);
+  });
+});
+
+/* ═══════════════════════════════════ the branches the review found untested ══ */
+
+describe("mintFwBoardToken — the FIRST step failing", () => {
+  it("aborts before minting anything when the prior-token revoke fails", async () => {
+    const { db, tables } = makeFakeDb({
+      tokens: [
+        {
+          id: "tok-1",
+          cohort_id: BOSTON,
+          token_hash: "old",
+          expires_at: BOSTON_TOKEN_EXPIRY,
+          revoked_at: null,
+          created_at: "2026-08-21T10:00:00Z",
+        },
+      ],
+      failTable: { table: "path_fw_board_tokens", op: "update", message: "revoke down" },
+    });
+    expect(await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    // Untouched: no new token, and the prior one is still live.
+    expect(tables.path_fw_board_tokens).toHaveLength(1);
+    expect(tables.path_fw_board_tokens[0].revoked_at ?? null).toBeNull();
+  });
+});
+
+describe("revokeFwBoardToken — the write failing", () => {
+  it("reports unavailable rather than no_active_token", async () => {
+    // The two are different answers to "does the projector URL still work?".
+    const { db } = makeFakeDb({
+      tokens: [
+        {
+          id: "tok-1",
+          cohort_id: BOSTON,
+          token_hash: "h",
+          expires_at: BOSTON_TOKEN_EXPIRY,
+          revoked_at: null,
+          created_at: "2026-08-21T10:00:00Z",
+        },
+      ],
+      failTable: { table: "path_fw_board_tokens", op: "update", message: "boom" },
+    });
+    expect(
+      await revokeFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+});
+
+describe("revokeFwBoardToken — the stale-view CAS", () => {
+  it("refuses to kill a token the caller was not looking at", async () => {
+    // Staff B is looking at T0. Staff A re-mints, killing T0 and making TA live.
+    // B's revoke must NOT take down TA — the token A may already have typed
+    // into the projector.
+    const { db, tables } = makeFakeDb({});
+    const first = await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(first.ok).toBe(true);
+    const seen = await loadFwOpsBoardToken(db, { cohortId: BOSTON, now: NOW });
+    expect(seen.ok && seen.token.status).toBe("live");
+    const staleTokenId = seen.ok ? seen.token.tokenId : null;
+    expect(staleTokenId).not.toBeNull();
+
+    // A re-mints.
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW + 1000 });
+
+    // B's revoke, carrying the token id from their stale page.
+    expect(
+      await revokeFwBoardToken(db, {
+        cohortId: BOSTON,
+        actorUserId: STAFF,
+        now: NOW + 2000,
+        expectedTokenId: staleTokenId!,
+      })
+    ).toEqual({ ok: false, reason: "stale_view" });
+
+    // A's token survives — the whole point.
+    expect(
+      tables.path_fw_board_tokens.filter((t) => (t.revoked_at ?? null) === null)
+    ).toHaveLength(1);
+  });
+
+  it("still revokes when the caller's view is current", async () => {
+    const { db } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const seen = await loadFwOpsBoardToken(db, { cohortId: BOSTON, now: NOW });
+    const tokenId = seen.ok ? seen.token.tokenId : null;
+    expect(
+      await revokeFwBoardToken(db, {
+        cohortId: BOSTON,
+        actorUserId: STAFF,
+        now: NOW,
+        expectedTokenId: tokenId!,
+      })
+    ).toEqual({ ok: true });
+  });
+
+  it("reports no_active_token — not stale_view — when nothing is live at all", async () => {
+    const { db } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const seen = await loadFwOpsBoardToken(db, { cohortId: BOSTON, now: NOW });
+    const tokenId = seen.ok ? seen.token.tokenId : null;
+    await revokeFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await revokeFwBoardToken(db, {
+        cohortId: BOSTON,
+        actorUserId: STAFF,
+        now: NOW,
+        expectedTokenId: tokenId!,
+      })
+    ).toEqual({ ok: false, reason: "no_active_token" });
+  });
+});
+
+describe("listFwCohortGuides — the Admin fallback's other half", () => {
+  it("survives a clean not-found (no error, no user) without throwing", async () => {
+    // The `!account.data?.user` half of the guard. Dropping it would reach
+    // `.email` on null — an unhandled throw inside Promise.all, which the ops
+    // page has no branch for.
+    const { db } = makeFakeDb({
+      grants: [
+        {
+          id: "g1",
+          user_id: "user-ghost",
+          role: "guide",
+          scope_type: "cohort",
+          scope_id: BOSTON,
+        },
+      ],
+      invites: [],
+      authUsers: [],
+    });
+    const res = await listFwCohortGuides(db, { cohortId: BOSTON, now: NOW });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.guides).toEqual([
+      {
+        userId: "user-ghost",
+        email: null,
+        credential: "no_invite",
+        invitedAt: null,
+        claimedAt: null,
+      },
+    ]);
   });
 });

@@ -34,7 +34,8 @@ import {
   type FwCohortLike,
 } from "./fw-access-rules";
 import { normalizeEmail } from "./onboarding-rules";
-import { recordFwOpsAudit } from "./fw-ops-core";
+import { recordFwOpsAudit } from "./fw-audit-core";
+import { fwRead, fwWrite } from "./fw-call";
 import { validateStudentPassword } from "./provision-rules";
 import { findAuthUserByEmail } from "./provision-core";
 
@@ -264,17 +265,64 @@ export async function provisionFwGuide(
   // idempotent re-run (adding a guide to a second weekend, or staff double-
   // submitting) would write a `guide_grant_added` record for a grant that
   // already existed, and an audit log with invented events is worse than none.
-  const grant = await db
-    .from("path_role_grants")
-    .upsert([{ user_id: user.id, role: "guide", scope_type: "cohort", scope_id: cohort.id }], {
-      onConflict: "user_id,role,scope_type,scope_id",
-      ignoreDuplicates: true,
-    })
-    .select("id");
+  const grant = await fwWrite(
+    () =>
+      db
+        .from("path_role_grants")
+        .upsert([{ user_id: user.id, role: "guide", scope_type: "cohort", scope_id: cohort.id }], {
+          onConflict: "user_id,role,scope_type,scope_id",
+          ignoreDuplicates: true,
+        })
+        .select("id"),
+    `guide grant upsert (${user.id}/${cohort.id})`
+  );
   if (grant.error) {
     console.error(
       `[fw/guide] grant upsert failed for ${user.id}/${cohort.id}: ${grant.error.message}`
     );
+
+    // POST-WRITE VERIFY BEFORE ANYTHING ELSE (adversarial review). A reported
+    // failure does not mean nothing happened — `fwWrite` says so explicitly, and
+    // over venue wifi a committed insert whose response was lost is the likely
+    // shape. Returning straight out would leave a guide holding REAL check-in
+    // power with no `guide_grant_added` row, and the retry makes that permanent
+    // AND invisible: the second attempt's ON CONFLICT DO NOTHING correctly
+    // reports "already there" (grantAdded=false, audited=true trivially) and the
+    // UI shows a completely ordinary success. The liability record would simply
+    // never exist for a grant nobody can now explain.
+    const landed = await fwRead(
+      () =>
+        db
+          .from("path_role_grants")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("role", "guide")
+          .eq("scope_type", "cohort")
+          .eq("scope_id", cohort.id)
+          .maybeSingle(),
+      `guide grant verify (${user.id}/${cohort.id})`
+    );
+    if (!landed.error && landed.data) {
+      console.warn(
+        `[fw/guide] grant upsert for ${user.id}/${cohort.id} reported an error but LANDED — auditing it`
+      );
+      const auditedAnyway = await recordFwOpsAudit(db, {
+        actor: input.createdBy,
+        action: "guide_grant_added",
+        subjectUserId: user.id,
+        cohortId: cohort.id,
+        metadata: { email, accountCreated: created, recoveredFromReportedFailure: true },
+      });
+      return {
+        ok: true,
+        userId: user.id,
+        email: user.email ?? email,
+        created,
+        grantAdded: true,
+        audited: auditedAnyway,
+      };
+    }
+
     if (created) {
       // `created` says THIS call minted the account, which is necessary but no
       // longer sufficient (adversarial review): two staff double-submitting the

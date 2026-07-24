@@ -35,8 +35,13 @@ describe("FW_EVENT_TIME_ZONES", () => {
       expect(zone.label.length).toBeGreaterThan(zone.short.length);
       expect(zone.label).toContain(zone.short);
     }
-    expect(FW_EVENT_TIME_ZONES[0].label).toMatch(/Boston/);
-    expect(FW_EVENT_TIME_ZONES[0].label).toMatch(/Hamptons/);
+    // Every event city the plan names has to appear SOMEWHERE in the list, or
+    // staff creating that city's weekend have no on-screen confirmation they
+    // picked the right zone. Asserted per city, not per zone.
+    const labels = FW_EVENT_TIME_ZONES.map((z) => z.label).join(" | ");
+    for (const city of ["Boston", "Hamptons", "New York", "Chicago", "San Francisco", "Los Angeles"]) {
+      expect(labels, city).toContain(city);
+    }
   });
 });
 

@@ -20,7 +20,7 @@ Founders Weekend today runs on paper. The product is deliberately tiny — a gui
 
 **Settled by the user (2026-07-23, binding):** Boston full-v1 debut; no per-child XP on the board; offline check-in queue + offline-navigable surface in v1; batch multi-select check-in in v1.
 
-**PROPOSED, pending accept/reject — now with hard decision dates (Decision 17):** PROPOSED-1 and PROPOSED-3 by **~Aug 1** (their seams thread Phase B/C builds, and PROPOSED-3's consent chain needs calendar room); PROPOSED-2 by **~Aug 8** (before Unit 6 builds the board). Unit 9 verifies seam states; it never hosts the decisions.
+**PROPOSED — DECIDED 2026-07-23 (user, binding):** **PROPOSED-1 ACCEPTED** (the cross-cohort matching module ships; its first seam is Unit 4 quick-create, then Units 5b and 7). **PROPOSED-3 REJECTED** (no paper-weekend backfill: no retroactive consent notice, no transcription owner, no opt-out handling — Unit 7 ships the Boston roster import only, and every `*(PROPOSED-3)*` sub-item is struck). **PROPOSED-2 remains open, due ~Aug 8** (Unit 6 board counter). Historical note: these were originally gated by **~Aug 1** (their seams thread Phase B/C builds, and PROPOSED-3's consent chain needs calendar room); PROPOSED-2 by **~Aug 8** (before Unit 6 builds the board). Unit 9 verifies seam states; it never hosts the decisions.
 
 ## Requirements Trace
 

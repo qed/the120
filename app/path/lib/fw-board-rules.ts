@@ -48,6 +48,15 @@ export type FwBoardCohortLike = { kind: string; endsAt: string | null } | null;
 /** Mirrors `FW_COHORT_KIND` in fw-access-rules.ts. Imported rather than
  *  redeclared so a renamed value cannot pass one module and fail the other. */
 import { FW_COHORT_KIND } from "./fw-access-rules";
+// The board READ MODEL (below) reuses the predicates the write path already
+// owns rather than re-deriving them: the first-dollar task id and its test
+// (`fw-rules.ts`), the one band-label map three surfaces already share
+// (`fw-nav-rules.ts`), and the task-state union (`transition-table.ts`). An
+// export whose only caller is its own test is not doing its job.
+import { isFirstDollarTask } from "./fw-rules";
+import { FW_BAND_LABEL } from "./fw-nav-rules";
+import type { Band } from "@/app/path/content/types";
+import type { TaskState } from "./transition-table";
 
 /**
  * The instant a board token minted for this cohort should stop working.
@@ -199,4 +208,428 @@ export function fwBoardTokenVerdict({
   if (token.revokedAt !== null) return { ok: false, reason: "revoked" };
   if (!(Date.parse(token.expiresAt) > now)) return { ok: false, reason: "expired" };
   return { ok: true };
+}
+
+/* ═══════════════════════════════════════════════════ the board READ MODEL ══ */
+/*
+ * FW Unit 6 (FW-R25–R29, FW-D6/D11/D13, Decisions 5/16, gaps G5/G17/G18, and
+ * PROPOSED-2). The pure shaping of what a room's projector shows: the grid, the
+ * weekend XP hero, the First Dollar counter, the rollups, the ticker, and the
+ * First Dollar celebrations. Everything here is a pure function of values the
+ * loader (`fw-board-loader.ts`) hands over already narrowed, so the one place a
+ * wrong value misleads a room full of families is a decision table under test.
+ *
+ * ── The two clocks the model lives on (Decision 16)
+ *
+ * The GRID is record-to-date: a student's cells come from their LIFETIME progress
+ * rows, so a returner's cells arrive filled from an earlier weekend — the record
+ * lives on the student, and that is the resume affordance working. The HERO XP,
+ * the TICKER, the ROLLUPS, and the PROPOSED-2 COUNTER are weekend-scoped: they are
+ * derived only from events COHORT-STAMPED TO THIS COHORT, so the room's number
+ * opens at zero on Friday and climbs on the room's own work.
+ *
+ * ── Honest when stale (Decision 5) is the load-bearing property
+ *
+ * A replayed (outage-era) event has a `captured_at` far behind its insert `at`.
+ * It updates EVERY recomputed aggregate silently — grid, XP, the counter — because
+ * a first dollar earned during an outage is still a first dollar. The ONE thing
+ * freshness gates is the celebration BELL: it fires only for a checkmark whose
+ * capture was within `FW_FIRST_DOLLAR_FRESHNESS_MS` of its insert, since the room
+ * already rang the physical bell when the tap happened.
+ *
+ * ── No per-student XP, structurally (FW-D13)
+ *
+ * `FwBoardGridRow` carries states, never a score. The type has no per-student XP
+ * field and the test asserts the runtime rows have none either — the no-cross-
+ * student-comparison boundary the parent brief drew, enforced in the shape rather
+ * than trusted to the renderer.
+ */
+
+/**
+ * Decision 5: a First Dollar celebration fires only for a checkmark whose capture
+ * time is within this window of its server insert time — a LIVE tap, not a
+ * replayed one. A stale event still updates every aggregate; only the bell stays
+ * quiet, because the room already rang the physical one.
+ */
+export const FW_FIRST_DOLLAR_FRESHNESS_MS = 60_000;
+
+/** How many ticker lines the board shows. A projector is read at a glance and
+ *  from across a room; more than a dozen scrolls past faster than a family can
+ *  find their child's name. Tunable at the dry run against a real screen. */
+export const FW_BOARD_TICKER_LIMIT = 12;
+
+/** A cohort member as the board reads them. `anonymized` is the tombstone marker
+ *  (`isFwTombstoneName`): an anonymized student's RETAINED events still count in
+ *  every weekend aggregate (Decision 10 — task ids are not PII), but they carry no
+ *  name, so they never appear on the grid or in the ticker. */
+export type FwBoardMember = {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  band: Band;
+  anonymized: boolean;
+};
+
+/** One lifetime progress row (record-to-date), for the grid. */
+export type FwBoardProgressRow = { studentId: string; taskId: string; state: TaskState };
+
+/** One cohort-stamped event, for the weekend-scoped surfaces. Times are ms so
+ *  the freshness subtraction is a comparison, not a parse, inside the loop.
+ *  `atMs` is the server INSERT time; `capturedAtMs` is the capture time, which the
+ *  RPC clamps to `≤ at`, so `atMs - capturedAtMs` is never negative. */
+export type FwBoardEvent = {
+  id: string;
+  studentId: string;
+  taskId: string;
+  /** The FW verb (`checkmark` | `not_yet` | `undo`) the RPC stamped — but the
+   *  model reads `toState`, not this, to decide current state. */
+  transition: string;
+  fromState: TaskState;
+  toState: TaskState;
+  atMs: number;
+  capturedAtMs: number;
+  actionId: string | null;
+};
+
+/** A grid cell's state — the three the board shows. `never_attempted` is the
+ *  ABSENCE of a decided cell (the grid omits it), so a 90×125 payload carries
+ *  only decided cells. */
+export type FwBoardCellState = "verified" | "not_yet";
+
+/** One student's grid row. Deliberately NO xp/score/points field (FW-D13) — the
+ *  structural assertion in the test pins that the runtime rows carry none. */
+export type FwBoardGridRow = {
+  studentId: string;
+  displayName: string;
+  /** task id → cell state, DECIDED tasks only (record-to-date). */
+  cells: Record<string, FwBoardCellState>;
+};
+
+export type FwTickerLine = {
+  studentId: string;
+  displayName: string;
+  taskId: string;
+  /** "Sell 1.2" — phase word + criterion. */
+  label: string;
+  kind: FwBoardCellState;
+  firstDollar: boolean;
+  atMs: number;
+};
+
+export type FwFirstDollarCelebration = {
+  /** The key the polling client dedupes on so a bell rings once per team: the
+   *  batch's shared `action_id`, or a per-student synthetic key for an event that
+   *  carried none. */
+  key: string;
+  /** Whom to name — one bell per team (Decision 6 / FW-R22). */
+  students: { studentId: string; displayName: string }[];
+  atMs: number;
+};
+
+export type FwBoardRollups = {
+  /** Name-bearing members shown on the grid. */
+  students: number;
+  /** Distinct (student, task) currently verified THIS weekend. */
+  checkmarks: number;
+  /** Distinct (student, task) currently not-yet THIS weekend. */
+  notYets: number;
+  /** Mirrors `firstDollarCount`. */
+  firstDollars: number;
+};
+
+export type FwBoardModel = {
+  grid: FwBoardGridRow[];
+  /** Phase-weighted cohort total over non-undone verify events cohort-stamped
+   *  here (Decision 16). A COHORT total — never per student (FW-D13). */
+  weekendXp: number;
+  /** PROPOSED-2 (accepted 2026-07-24): distinct students with a non-undone,
+   *  cohort-stamped 1.2.4 verify. NO freshness term (counts stale too), weekend-
+   *  scoped, recomputed each poll so an undo drops it. */
+  firstDollarCount: number;
+  rollups: FwBoardRollups;
+  ticker: FwTickerLine[];
+  celebrations: FwFirstDollarCelebration[];
+};
+
+/**
+ * `"1.2.4"` → `{ phase: 1, criterion: "1.2" }`, or null for a non-task-id.
+ *
+ * Its OWN parse, deliberately not `fw-nav-rules`' private `parseFwTaskId`: the
+ * board reads a task id for its PHASE WEIGHT and its criterion LABEL, where nav
+ * reads it for curriculum ORDER. Same string, different questions — coupling them
+ * would make a board weight change ride on a nav-ordering edit, the same
+ * tolerance asymmetry the repo already draws between `normalizeFwSearchTerm` and
+ * `buildNormalizedFwName`.
+ */
+export function fwParseBoardTaskId(taskId: string): { phase: number; criterion: string } | null {
+  const parts = taskId.split(".");
+  if (parts.length !== 3 || !parts.every((p) => /^\d+$/.test(p))) return null;
+  const phase = Number(parts[0]);
+  if (!Number.isInteger(phase) || phase < 1) return null;
+  return { phase, criterion: `${parts[0]}.${parts[1]}` };
+}
+
+/**
+ * A verified task's XP weight: its phase number (SELL=1 … SCALE=5), the durable
+ * product-wide definition FW-R27 rests on. Fails CLOSED to 0 for a task id that
+ * will not parse — an unplaceable row must never inflate the room's number, and a
+ * garbage weight is worse than a missing one.
+ */
+export function fwTaskPhaseWeight(taskId: string): number {
+  return fwParseBoardTaskId(taskId)?.phase ?? 0;
+}
+
+/** first name + last initial — "Maya C." (FW-D11). A last name that is empty or
+ *  whitespace yields just the first name rather than a bare "Maya .". */
+function baseDisplayName(firstName: string, lastName: string): string {
+  const initial = lastName.trim().charAt(0).toUpperCase();
+  return initial ? `${firstName} ${initial}.` : firstName;
+}
+
+/**
+ * Display names for a cohort's name-bearing members, with the board-side
+ * duplicate tiebreaker (FW-D11 / G22).
+ *
+ * The base is "Maya C." When two students would BOTH render that — "Maya Chen"
+ * and "Maya Carter" collide on the initial even though their full names differ —
+ * the colliding ones carry their band, the one thing a guide already uses to tell
+ * two children apart (`FW_BAND_LABEL`, the same map the roster chip reads). A
+ * residual collision (same first, same initial, SAME band) falls back to the full
+ * name, and a truly identical pair gets a short id suffix so no two rows are ever
+ * indistinguishable — a projected board that shows one child's cell as another's
+ * is the failure the tiebreaker exists to prevent.
+ */
+export function fwBoardDisplayNames(
+  members: readonly { studentId: string; firstName: string; lastName: string; band: Band }[]
+): Map<string, string> {
+  const byBase = new Map<string, typeof members[number][]>();
+  for (const m of members) {
+    const base = baseDisplayName(m.firstName, m.lastName);
+    const bucket = byBase.get(base);
+    if (bucket) bucket.push(m);
+    else byBase.set(base, [m]);
+  }
+
+  const result = new Map<string, string>();
+  for (const [base, group] of byBase) {
+    if (group.length === 1) {
+      result.set(group[0].studentId, base);
+      continue;
+    }
+    // Collision on the initial. First try the band; where the band still
+    // collides, the full name; where THAT still collides (identical name + band),
+    // a short id suffix so the two rows are never the same string.
+    const banded = group.map((m) => `${base} · ${FW_BAND_LABEL[m.band]}`);
+    const bandCounts = tally(banded);
+    group.forEach((m, i) => {
+      const withBand = banded[i];
+      if ((bandCounts.get(withBand) ?? 0) === 1) {
+        result.set(m.studentId, withBand);
+        return;
+      }
+      const full = `${m.firstName} ${m.lastName}`.trim();
+      const sameName = group.filter(
+        (o) => `${o.firstName} ${o.lastName}`.trim() === full && o.band === m.band
+      );
+      result.set(
+        m.studentId,
+        sameName.length === 1 ? full : `${full} (#${m.studentId.slice(0, 4)})`
+      );
+    });
+  }
+  return result;
+}
+
+function tally(values: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return counts;
+}
+
+/** The current WEEKEND state of one (student, task): the `to_state` of the last
+ *  cohort-stamped event, by (`atMs`, `id`). A re-attempt leaves `to_state`
+ *  `not_yet` (a refresh, not a change); an undo leaves it `locked` (a retraction).
+ *  So the last event's `to_state` IS the weekend state, no special cases. */
+type FwWeekendCell = {
+  studentId: string;
+  taskId: string;
+  state: TaskState;
+  lastAtMs: number;
+  /** The event that set the current state — its freshness and action id drive the
+   *  celebration when the current state is `verified`. */
+  last: FwBoardEvent;
+};
+
+/** Fold a cohort's events into one current cell per (student, task). */
+function foldWeekendCells(
+  events: readonly FwBoardEvent[],
+  memberIds: ReadonlySet<string>
+): Map<string, FwWeekendCell> {
+  const byPair = new Map<string, FwBoardEvent[]>();
+  for (const e of events) {
+    // Only members count. Cohort-stamped events are members by construction
+    // (`fw_move_task` verifies membership before it writes), but a student
+    // removed from a cohort after the fact must not skew the room's numbers.
+    if (!memberIds.has(e.studentId)) continue;
+    const key = `${e.studentId} ${e.taskId}`;
+    const bucket = byPair.get(key);
+    if (bucket) bucket.push(e);
+    else byPair.set(key, [e]);
+  }
+
+  const cells = new Map<string, FwWeekendCell>();
+  for (const [key, group] of byPair) {
+    // (atMs, id) — the deterministic order the whole repo uses so two events
+    // sharing a millisecond never reorder between polls (the pickFwCurrentBoardToken
+    // lesson). The last is the current state.
+    group.sort((a, b) => a.atMs - b.atMs || a.id.localeCompare(b.id));
+    const last = group[group.length - 1];
+    cells.set(key, {
+      studentId: last.studentId,
+      taskId: last.taskId,
+      state: last.toState,
+      lastAtMs: last.atMs,
+      last,
+    });
+  }
+  return cells;
+}
+
+/**
+ * Shape the whole board read model from a cohort's members, their lifetime
+ * progress, and this cohort's stamped events.
+ *
+ * The one function the route serializes and the polling client renders. Pure: no
+ * clock read, no db, no now — freshness is a fixed property of each event
+ * (`at - captured_at`), not a distance from the present, so a celebration that is
+ * fresh stays fresh across polls and the client dedupes it by key.
+ */
+export function shapeFwBoardModel(input: {
+  members: readonly FwBoardMember[];
+  progress: readonly FwBoardProgressRow[];
+  events: readonly FwBoardEvent[];
+  /** Phase words in order, index 0 = phase 1 ("Sell"). The loader builds this
+   *  from the pinned program; a short fallback keeps the ticker legible if it is
+   *  ever empty. */
+  phaseNames: readonly string[];
+  tickerLimit?: number;
+}): FwBoardModel {
+  const memberIds = new Set(input.members.map((m) => m.studentId));
+  const nameBearing = input.members.filter((m) => !m.anonymized);
+  const nameBearingIds = new Set(nameBearing.map((m) => m.studentId));
+  const displayNames = fwBoardDisplayNames(nameBearing);
+
+  // ── Grid: record-to-date, from lifetime progress rows, name-bearing only.
+  const cellsByStudent = new Map<string, Record<string, FwBoardCellState>>();
+  for (const row of input.progress) {
+    if (!nameBearingIds.has(row.studentId)) continue;
+    if (row.state !== "verified" && row.state !== "not_yet") continue;
+    const cells = cellsByStudent.get(row.studentId) ?? {};
+    cells[row.taskId] = row.state;
+    cellsByStudent.set(row.studentId, cells);
+  }
+  const grid: FwBoardGridRow[] = nameBearing
+    .map((m) => ({
+      studentId: m.studentId,
+      displayName: displayNames.get(m.studentId) ?? baseDisplayName(m.firstName, m.lastName),
+      cells: cellsByStudent.get(m.studentId) ?? {},
+      // sort keys, stripped before return
+      _last: m.lastName,
+      _first: m.firstName,
+    }))
+    // Row order fixed by NAME (FW-D13: never by progress), stable on id.
+    .sort(
+      (a, b) =>
+        a._last.localeCompare(b._last) ||
+        a._first.localeCompare(b._first) ||
+        a.studentId.localeCompare(b.studentId)
+    )
+    .map(({ studentId, displayName, cells }) => ({ studentId, displayName, cells }));
+
+  // ── Weekend surfaces: one current cell per (student, task) from stamped events.
+  const weekend = foldWeekendCells(input.events, memberIds);
+
+  let weekendXp = 0;
+  let checkmarks = 0;
+  let notYets = 0;
+  const firstDollarStudents = new Set<string>();
+  const tickerCandidates: FwWeekendCell[] = [];
+
+  for (const cell of weekend.values()) {
+    if (cell.state === "verified") {
+      checkmarks += 1;
+      weekendXp += fwTaskPhaseWeight(cell.taskId);
+      if (isFirstDollarTask(cell.taskId)) firstDollarStudents.add(cell.studentId);
+    } else if (cell.state === "not_yet") {
+      notYets += 1;
+    }
+    // A retracted (undone → locked) cell is silent everywhere: no XP, no ticker,
+    // no counter — the whole of G17's "ticker lines for undone events retract".
+    if (
+      (cell.state === "verified" || cell.state === "not_yet") &&
+      nameBearingIds.has(cell.studentId)
+    ) {
+      tickerCandidates.push(cell);
+    }
+  }
+
+  // ── Ticker: most recent standing decisions, name-bearing, retraction already
+  //    applied (an undone pair never entered `tickerCandidates`).
+  const ticker: FwTickerLine[] = tickerCandidates
+    .sort((a, b) => b.lastAtMs - a.lastAtMs || b.last.id.localeCompare(a.last.id))
+    .slice(0, input.tickerLimit ?? FW_BOARD_TICKER_LIMIT)
+    .map((cell) => {
+      const parsed = fwParseBoardTaskId(cell.taskId);
+      const phaseWord = parsed ? (input.phaseNames[parsed.phase - 1] ?? `Phase ${parsed.phase}`) : null;
+      const kind: FwBoardCellState = cell.state === "verified" ? "verified" : "not_yet";
+      return {
+        studentId: cell.studentId,
+        displayName: displayNames.get(cell.studentId) ?? cell.studentId,
+        taskId: cell.taskId,
+        label: parsed && phaseWord ? `${phaseWord} ${parsed.criterion}` : cell.taskId,
+        kind,
+        firstDollar: kind === "verified" && isFirstDollarTask(cell.taskId),
+        atMs: cell.lastAtMs,
+      };
+    });
+
+  // ── First Dollar celebrations: name-bearing students whose 1.2.4 is CURRENTLY
+  //    verified AND whose verifying checkmark was FRESH, grouped by action id so a
+  //    batched team rings once. Undo already dropped a retracted cell above.
+  const groups = new Map<string, { students: { studentId: string; displayName: string }[]; atMs: number }>();
+  for (const cell of weekend.values()) {
+    if (cell.state !== "verified" || !isFirstDollarTask(cell.taskId)) continue;
+    if (!nameBearingIds.has(cell.studentId)) continue;
+    if (cell.last.atMs - cell.last.capturedAtMs > FW_FIRST_DOLLAR_FRESHNESS_MS) continue;
+    const key = cell.last.actionId ?? `student:${cell.studentId}`;
+    const entry = groups.get(key) ?? { students: [], atMs: cell.lastAtMs };
+    entry.students.push({
+      studentId: cell.studentId,
+      displayName: displayNames.get(cell.studentId) ?? cell.studentId,
+    });
+    entry.atMs = Math.max(entry.atMs, cell.lastAtMs);
+    groups.set(key, entry);
+  }
+  const celebrations: FwFirstDollarCelebration[] = [...groups.entries()]
+    .map(([key, g]) => ({
+      key,
+      students: g.students.sort((a, b) => a.displayName.localeCompare(b.displayName)),
+      atMs: g.atMs,
+    }))
+    // Oldest first: the queue rings them in the order the room earned them.
+    .sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
+
+  return {
+    grid,
+    weekendXp,
+    firstDollarCount: firstDollarStudents.size,
+    rollups: {
+      students: nameBearing.length,
+      checkmarks,
+      notYets,
+      firstDollars: firstDollarStudents.size,
+    },
+    ticker,
+    celebrations,
+  };
 }

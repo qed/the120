@@ -13,6 +13,20 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
         ],
       },
+      // The Founders Weekend projected board (FW Unit 6) — the repo's only
+      // UNAUTHENTICATED read surface, hash-validated per request. Both the page
+      // and its poll feed must never be cached (a CDN edge holding one poll's
+      // grid would show a stale room its own numbers) and must never be indexed
+      // (a search engine must never surface a minor's first-name-plus-initial).
+      // The feed route ALSO sets these on its own Response — belt and suspenders,
+      // and so the header is provably on the payload, not only the page.
+      {
+        source: "/path/fw/board/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, must-revalidate" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
     ];
   },
   async redirects() {

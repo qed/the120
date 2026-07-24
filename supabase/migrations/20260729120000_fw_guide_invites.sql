@@ -13,9 +13,10 @@
 -- password). See docs/solutions/integration-issues/supabase-cli-stale-db-
 -- password-management-api-workaround-2026-07-13.md.
 --
--- ⚠️ TIMING: applies with (or after) Unit 1's migration, which is itself HELD
--- until after the ~Jul 28 Chicago-rehearsal checkpoint. Nothing here is urgent
--- ahead of that — no guide can be provisioned before the FW cohorts exist.
+-- APPLY IMMEDIATELY, after Unit 1's migration (see DEPLOY ORDER below — the
+-- dependency is Unit 2's CODE, not this DDL). An earlier revision held this
+-- behind a ~Jul 28 Chicago-rehearsal checkpoint; that rehearsal was cancelled
+-- (2026-07-23) and the hold is retired. Applied to production 2026-07-23.
 --
 -- ⚠️ DEPLOY ORDER (data-migrations review). This file has NO SQL dependency on
 -- Unit 1's migration — it references auth.users and nothing else, so it can be

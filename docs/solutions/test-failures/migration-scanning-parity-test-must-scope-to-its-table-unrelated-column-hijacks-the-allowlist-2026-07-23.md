@@ -147,6 +147,12 @@ removed. A fixture keeps the guard alive independent of the repo's file list.
 - `docs/solutions/best-practices/crm-audit-action-allowlist-db-check-constraint-drifts-from-ts-enum-2026-07-15.md`
   — the original drift this test was written to prevent (still valid; only the
   scan was wrong).
+- `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-clause-scope-and-comment-stripping-2026-07-23.md`
+  — the same failure family one axis over. This doc is about scanning the wrong
+  TABLE; that one is about scanning the right function but the wrong CLAUSE (and
+  about assertions satisfied by a commented-out line). Scoping a parity test has
+  two dimensions, and getting one right does not imply the other.
 - Sibling scanners to check when adding a migration:
   `app/path/lib/__tests__/progress-core.test.ts`,
-  `evidence-migration-parity.test.ts`, `fw-migration-parity.test.ts`.
+  `evidence-migration-parity.test.ts`, `fw-migration-parity.test.ts`,
+  `fw-move-task-parity.test.ts`.

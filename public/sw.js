@@ -2,13 +2,13 @@
  * The Path service worker (T1 Unit 11) — THIN by design; hand-rolled because
  * Serwist's Next plugin is webpack-only and Next 16 builds with Turbopack.
  *
- * Served from the ORIGIN ROOT (outside the /path proxy matcher, so an expired
- * session can never break an update fetch) but registered with scope "/path" —
+ * Served from the ORIGIN ROOT (outside the /fp proxy matcher, so an expired
+ * session can never break an update fetch) but registered with scope "/fp" —
  * narrowing needs no Service-Worker-Allowed header, and a Path SW bug can
  * never intercept a marketing route. Registration is guarded by hostname
  * (sync-rules.shouldRegisterServiceWorker) so preview deployments never
  * register a worker; parity with the app's constants is pinned by
- * app/path/lib/__tests__/sw-discipline.test.ts.
+ * app/fp/lib/__tests__/sw-discipline.test.ts.
  *
  * DISCIPLINE (each line is a plan requirement):
  *   - Never cache navigations or RSC payloads (?_rsc= flight requests are
@@ -32,25 +32,29 @@
  *
  * FW APP-SHELL EXCEPTION (Unit 8, Decision 15). A guide iPad must NAVIGATE while
  * offline mid-loop, so this worker may cache navigations — but ONLY under
- * /path/fw, and NEVER the /path/fw/board token subtree (a live no-store poll
+ * /fp/fw, and NEVER the /fp/fw/board token subtree (a live no-store poll
  * surface whose token URL must not be cached). Every Path navigation, and the
  * board, keep the original never-cache posture. The roster itself is IndexedDB,
  * not cached here — this is the smallest possible touch on the pinned invariant,
- * and app/path/lib/__tests__/sw-discipline.test.ts pins BOTH halves (the FW
+ * and app/fp/lib/__tests__/sw-discipline.test.ts pins BOTH halves (the FW
  * exception is scoped; the Path pin still reddens for a Path navigation).
  */
 
+// KEPT STABLE across the /fp rename (Unit 10): these cache names — and the
+// "path-skip-waiting" / "path-drain" message strings below — are internal SW
+// keys, NOT routes. Renaming them orphans every installed device's caches for
+// zero user value. The route-bearing constants (FW_*_PREFIX) DID move to /fp.
 const PRECACHE_NAME = "path-sw-precache-v1";
 const RUNTIME_CACHE_NAME = "path-sw-runtime-v1";
 const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v1";
 const OFFLINE_URL = "/offline";
 const STATIC_PREFIX = "/_next/static/";
 /** The FW guide shell — cacheable navigations (Unit 8). */
-const FW_APP_SHELL_PREFIX = "/path/fw";
+const FW_APP_SHELL_PREFIX = "/fp/fw";
 /** The board token subtree — EXCLUDED from the exception (live, no-store). */
-const FW_BOARD_PREFIX = "/path/fw/board";
+const FW_BOARD_PREFIX = "/fp/fw/board";
 /** Staff ops — EXCLUDED (cross-cohort admin HTML was never the offline target). */
-const FW_OPS_PREFIX = "/path/fw/ops";
+const FW_OPS_PREFIX = "/fp/fw/ops";
 /** Cap on runtime-cached static assets — oldest-inserted trimmed on insert. */
 const STATIC_CACHE_MAX_ENTRIES = 80;
 /** Cap on cached FW app-shell navigations — bounded like the static runtime cache,
@@ -58,7 +62,7 @@ const STATIC_CACHE_MAX_ENTRIES = 80;
  *  unboundedly (performance review). Oldest-inserted trimmed on insert. */
 const FW_SHELL_CACHE_MAX_ENTRIES = 24;
 
-/** Whether a navigation URL is a cacheable FW app-shell route: under /path/fw,
+/** Whether a navigation URL is a cacheable FW app-shell route: under /fp/fw,
  *  but NOT the board token subtree and NOT staff ops. The single predicate the
  *  exception rests on — mirrors isFwAppShellPath in fw-sync-rules.ts. */
 function isFwAppShell(url) {
@@ -161,7 +165,7 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     // FW app-shell EXCEPTION (Unit 8): the ONLY navigations this worker caches,
     // and only the guide shell — never the board token subtree, never anything
-    // outside /path/fw. Network-first with a cached-shell fallback.
+    // outside /fp/fw. Network-first with a cached-shell fallback.
     if (isFwAppShell(url)) {
       event.respondWith(fwAppShell(request));
       return;

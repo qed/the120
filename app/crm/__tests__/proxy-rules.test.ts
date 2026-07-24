@@ -8,6 +8,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, it } from "vitest";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { config } from "@/proxy";
+import nextConfig from "@/next.config";
 import {
   carryOverAuthState,
   isUnguarded,
@@ -45,59 +46,59 @@ describe("isUnguarded", () => {
     expect(isUnguarded("/crm/login")).toBe(true);
     expect(isUnguarded("/crm/staff-only")).toBe(true);
     expect(isUnguarded("/crm/reset")).toBe(true);
-    expect(isUnguarded("/path/sign-in")).toBe(true);
-    expect(isUnguarded("/path/fw/sign-in")).toBe(true);
+    expect(isUnguarded("/fp/sign-in")).toBe(true);
+    expect(isUnguarded("/fp/fw/sign-in")).toBe(true);
   });
 
   it("does not leak past an exact match", () => {
     // A prefix match here would expose /crm/login-as-someone-else style paths.
     expect(isUnguarded("/crm/login/extra")).toBe(false);
     expect(isUnguarded("/crm/logins")).toBe(false);
-    expect(isUnguarded("/path/sign-in/oops")).toBe(false);
+    expect(isUnguarded("/fp/sign-in/oops")).toBe(false);
     expect(isUnguarded("/crm")).toBe(false);
-    expect(isUnguarded("/path")).toBe(false);
-    expect(isUnguarded("/path/fw")).toBe(false);
-    expect(isUnguarded("/path/fw/sign-in/oops")).toBe(false);
+    expect(isUnguarded("/fp")).toBe(false);
+    expect(isUnguarded("/fp/fw")).toBe(false);
+    expect(isUnguarded("/fp/fw/sign-in/oops")).toBe(false);
   });
 
   it("the FW invite and board subtrees are prefix-unguarded (FW Unit 2)", () => {
     // Both arrive session-less BY DESIGN: the guide's credential link carries
     // its token in the path, and a venue projector has no session and never
     // will. Both are READ-ONLY landings — the claim is a POSTed action.
-    expect(isUnguarded("/path/fw/invite/some-256-bit-token")).toBe(true);
-    expect(isUnguarded("/path/fw/board/some-256-bit-token")).toBe(true);
+    expect(isUnguarded("/fp/fw/invite/some-256-bit-token")).toBe(true);
+    expect(isUnguarded("/fp/fw/board/some-256-bit-token")).toBe(true);
     // The bare segments carry no token and stay behind the gate.
-    expect(isUnguarded("/path/fw/invite")).toBe(false);
-    expect(isUnguarded("/path/fw/board")).toBe(false);
+    expect(isUnguarded("/fp/fw/invite")).toBe(false);
+    expect(isUnguarded("/fp/fw/board")).toBe(false);
     // Near-miss prefixes never leak (the delimiter is required).
-    expect(isUnguarded("/path/fw/invites/x")).toBe(false);
-    expect(isUnguarded("/path/fw/invite-x")).toBe(false);
-    expect(isUnguarded("/path/fw/boards/x")).toBe(false);
-    expect(isUnguarded("/path/fw/board-x")).toBe(false);
+    expect(isUnguarded("/fp/fw/invites/x")).toBe(false);
+    expect(isUnguarded("/fp/fw/invite-x")).toBe(false);
+    expect(isUnguarded("/fp/fw/boards/x")).toBe(false);
+    expect(isUnguarded("/fp/fw/board-x")).toBe(false);
     // And the Path's own invite prefix does not cover the FW one, or vice versa.
-    expect(isUnguarded("/path/invite/tok")).toBe(true);
-    expect(isUnguarded("/path/fwinvite/tok")).toBe(false);
+    expect(isUnguarded("/fp/invite/tok")).toBe(true);
+    expect(isUnguarded("/fp/fwinvite/tok")).toBe(false);
   });
 
   it("the invite landing is prefix-unguarded — the emailed token arrives session-less (Unit 15)", () => {
-    expect(isUnguarded("/path/invite/some-256-bit-token")).toBe(true);
+    expect(isUnguarded("/fp/invite/some-256-bit-token")).toBe(true);
     // The bare segment carries no token and stays behind the gate.
-    expect(isUnguarded("/path/invite")).toBe(false);
+    expect(isUnguarded("/fp/invite")).toBe(false);
     // Near-miss prefixes never leak.
-    expect(isUnguarded("/path/invites/x")).toBe(false);
-    expect(isUnguarded("/path/invite-x")).toBe(false);
+    expect(isUnguarded("/fp/invites/x")).toBe(false);
+    expect(isUnguarded("/fp/invite-x")).toBe(false);
   });
 
   it("the apple-touch-icon is unguarded — iOS fetches it session-less during Add to Home Screen (Unit 11)", () => {
-    expect(isUnguarded("/path/apple-icon.png")).toBe(true);
+    expect(isUnguarded("/fp/apple-icon.png")).toBe(true);
     // Next may append a content-hash query/suffix to file-convention icons.
-    expect(isUnguarded("/path/apple-icon-abc123.png")).toBe(true);
+    expect(isUnguarded("/fp/apple-icon-abc123.png")).toBe(true);
     // The gate itself is unchanged for everything nearby — a route that merely
     // SHARES the prefix must never inherit the bypass (delimiter required).
-    expect(isUnguarded("/path/apple")).toBe(false);
-    expect(isUnguarded("/path/apple-icon")).toBe(false);
-    expect(isUnguarded("/path/apple-iconography")).toBe(false);
-    expect(isUnguarded("/path/apple-icon2/secret")).toBe(false);
+    expect(isUnguarded("/fp/apple")).toBe(false);
+    expect(isUnguarded("/fp/apple-icon")).toBe(false);
+    expect(isUnguarded("/fp/apple-iconography")).toBe(false);
+    expect(isUnguarded("/fp/apple-icon2/secret")).toBe(false);
   });
 });
 
@@ -136,12 +137,12 @@ describe("resolveProxyOutcome — /crm (unchanged behaviour)", () => {
     expect(outcome("/crm/login", null)).toBe("pass");
     expect(outcome("/crm/staff-only", null)).toBe("pass");
     expect(outcome("/crm/reset", null)).toBe("pass");
-    expect(outcome("/path/sign-in", null)).toBe("pass");
-    expect(outcome("/path/fw/sign-in", null)).toBe("pass");
+    expect(outcome("/fp/sign-in", null)).toBe("pass");
+    expect(outcome("/fp/fw/sign-in", null)).toBe("pass");
   });
 });
 
-describe("resolveProxyOutcome — /path/fw (the guide door, FW Unit 2)", () => {
+describe("resolveProxyOutcome — /fp/fw (the guide door, FW Unit 2)", () => {
   const guideSession: ProxySessionLike = { user: { app_metadata: { role: "guide" } } };
 
   it("no session → fw-login, NOT path-login", () => {
@@ -149,33 +150,33 @@ describe("resolveProxyOutcome — /path/fw (the guide door, FW Unit 2)", () => {
     // 9:05 on a Saturday must land on the door that takes an email and a
     // password — not the child's door, which asks for a first name, fails, and
     // tells them a parent can reset it.
-    expect(outcome("/path/fw", null)).toBe("fw-login");
-    expect(outcome("/path/fw/", null)).toBe("fw-login");
-    expect(outcome("/path/fw/cohort/abc", null)).toBe("fw-login");
-    expect(outcome("/path/fw/ops", null)).toBe("fw-login");
+    expect(outcome("/fp/fw", null)).toBe("fw-login");
+    expect(outcome("/fp/fw/", null)).toBe("fw-login");
+    expect(outcome("/fp/fw/cohort/abc", null)).toBe("fw-login");
+    expect(outcome("/fp/fw/ops", null)).toBe("fw-login");
   });
 
-  it("the FW branch is evaluated BEFORE the /path branch", () => {
-    // /path/fw/* also matches /path/*; whichever branch runs first decides the
+  it("the FW branch is evaluated BEFORE the /fp branch", () => {
+    // /fp/fw/* also matches /fp/*; whichever branch runs first decides the
     // door. Asserted directly so a reordering cannot pass silently.
-    expect(outcome("/path/fw/anything", null)).not.toBe("path-login");
-    expect(outcome("/path/anything", null)).toBe("path-login");
+    expect(outcome("/fp/fw/anything", null)).not.toBe("path-login");
+    expect(outcome("/fp/anything", null)).toBe("path-login");
   });
 
   it("any session passes — FW roles are grants + the bridge, not a JWT claim", () => {
     // resolveFwActor() inside every page and action is the authoritative check.
     // A signed-in student PASSES here and is refused by the surface itself,
     // which is the correct division of labour.
-    expect(outcome("/path/fw", guideSession)).toBe("pass");
-    expect(outcome("/path/fw/cohort/abc", claimlessSession)).toBe("pass");
-    expect(outcome("/path/fw", adminSession)).toBe("pass");
+    expect(outcome("/fp/fw", guideSession)).toBe("pass");
+    expect(outcome("/fp/fw/cohort/abc", claimlessSession)).toBe("pass");
+    expect(outcome("/fp/fw", adminSession)).toBe("pass");
   });
 
   it("the tokened subtrees pass session-less; their bare parents do not", () => {
-    expect(outcome("/path/fw/invite/tok", null)).toBe("pass");
-    expect(outcome("/path/fw/board/tok", null)).toBe("pass");
-    expect(outcome("/path/fw/invite", null)).toBe("fw-login");
-    expect(outcome("/path/fw/board", null)).toBe("fw-login");
+    expect(outcome("/fp/fw/invite/tok", null)).toBe("pass");
+    expect(outcome("/fp/fw/board/tok", null)).toBe("pass");
+    expect(outcome("/fp/fw/invite", null)).toBe("fw-login");
+    expect(outcome("/fp/fw/board", null)).toBe("fw-login");
   });
 
   it("a GUIDE session still earns crm-staff-only at /crm (FW-R5)", () => {
@@ -185,33 +186,34 @@ describe("resolveProxyOutcome — /path/fw (the guide door, FW Unit 2)", () => {
     expect(outcome("/crm/families", guideSession)).toBe("crm-staff-only");
   });
 
-  it("routes that merely share the /path/fw prefix are NOT the guide subtree", () => {
-    // A future /path/fwiw must not inherit the guide door's redirect — the same
-    // trap /pathology sets for the /path branch.
-    expect(outcome("/path/fwiw", null)).toBe("path-login");
-    expect(outcome("/path/fw-archive", null)).toBe("path-login");
+  it("routes that merely share the /fp/fw prefix are NOT the guide subtree", () => {
+    // A future /fp/fwiw must not inherit the guide door's redirect — the same
+    // trap /fpology sets for the /fp branch.
+    expect(outcome("/fp/fwiw", null)).toBe("path-login");
+    expect(outcome("/fp/fw-archive", null)).toBe("path-login");
   });
 });
 
-describe("resolveProxyOutcome — /path (new in Unit 1)", () => {
+describe("resolveProxyOutcome — /fp (renamed from /path in Unit 10)", () => {
   it("no session → path-login, never the CRM sign-in", () => {
     // Sending a child to /crm/login would be both confusing and a hint that
     // /crm exists at all.
-    expect(outcome("/path", null)).toBe("path-login");
-    expect(outcome("/path/task/1.2.4", null)).toBe("path-login");
+    expect(outcome("/fp", null)).toBe("path-login");
+    expect(outcome("/fp/task/1.2.4", null)).toBe("path-login");
   });
 
   it("any session passes — Path roles are grants, not a JWT claim", () => {
     // requirePathUser() inside each Server Function is the authoritative
     // check; the proxy only answers signed-in-or-not for /path.
-    expect(outcome("/path", parentSession)).toBe("pass");
-    expect(outcome("/path/task/1.2.4", claimlessSession)).toBe("pass");
-    expect(outcome("/path", adminSession)).toBe("pass");
+    expect(outcome("/fp", parentSession)).toBe("pass");
+    expect(outcome("/fp/task/1.2.4", claimlessSession)).toBe("pass");
+    expect(outcome("/fp", adminSession)).toBe("pass");
   });
 
-  it("/pathological prefixes are not treated as Path routes", () => {
-    // Guards against a naive startsWith("/path") check.
-    expect(outcome("/pathology", null)).toBe("crm-login");
+  it("/fpology-style prefixes are not treated as /fp routes", () => {
+    // Guards against a naive startsWith("/fp") check: /fpology shares the "/fp"
+    // prefix but is NOT under /fp/, so it must fall through to the CRM branch.
+    expect(outcome("/fpology", null)).toBe("crm-login");
   });
 });
 
@@ -219,8 +221,8 @@ describe("outcomeDestination", () => {
   it("maps each gated outcome to its route", () => {
     expect(outcomeDestination("crm-login")).toBe("/crm/login");
     expect(outcomeDestination("crm-staff-only")).toBe("/crm/staff-only");
-    expect(outcomeDestination("path-login")).toBe("/path/sign-in");
-    expect(outcomeDestination("fw-login")).toBe("/path/fw/sign-in");
+    expect(outcomeDestination("path-login")).toBe("/fp/sign-in");
+    expect(outcomeDestination("fw-login")).toBe("/fp/fw/sign-in");
   });
 
   it("every destination is itself unguarded, or the gate self-locks", () => {
@@ -350,29 +352,50 @@ describe("config.matcher — asserted against Next's real router", () => {
     expect(matches("/crm")).toBe(true);
     expect(matches("/crm/")).toBe(true);
     expect(matches("/crm/families")).toBe(true);
-    expect(matches("/path")).toBe(true);
-    expect(matches("/path/task/1.2.4")).toBe(true);
-    // The FW subtree rides the existing /path matcher — no new matcher entry,
-    // so nothing under /path/fw can miss the gate.
-    expect(matches("/path/fw")).toBe(true);
-    expect(matches("/path/fw/cohort/abc")).toBe(true);
+    expect(matches("/fp")).toBe(true);
+    expect(matches("/fp/task/1.2.4")).toBe(true);
+    // The FW subtree rides the existing /fp matcher — no new matcher entry,
+    // so nothing under /fp/fw can miss the gate.
+    expect(matches("/fp/fw")).toBe(true);
+    expect(matches("/fp/fw/cohort/abc")).toBe(true);
   });
 
   it("routes the unguarded routes in too — the proxy decides, not the matcher", () => {
     // isUnguarded() must do the exempting, or a matcher tweak silently
     // changes who is exempt.
     expect(matches("/crm/login")).toBe(true);
-    expect(matches("/path/sign-in")).toBe(true);
-    expect(matches("/path/fw/sign-in")).toBe(true);
-    expect(matches("/path/fw/board/tok")).toBe(true);
+    expect(matches("/fp/sign-in")).toBe(true);
+    expect(matches("/fp/fw/sign-in")).toBe(true);
+    expect(matches("/fp/fw/board/tok")).toBe(true);
   });
 
-  it("leaves everything else alone", () => {
-    // /pathology is the prefix trap resolveProxyOutcome also guards against;
+  it("leaves everything else — and, since Unit 10, the OLD /path tree — alone", () => {
+    // The /path → /fp rename moved the app; the 308 redirect in next.config, NOT
+    // the proxy, now owns every old URL. The matcher must NOT cover the old
+    // prefix — if it did, a session-less old sign-in URL would be gated before
+    // the redirect could 308 it cleanly, preserving the sub-path.
+    expect(matches("/path")).toBe(false);
+    expect(matches("/path/task/1.2.4")).toBe(false);
+    expect(matches("/path/fw/board/tok")).toBe(false);
+    // /fpology is the prefix trap resolveProxyOutcome also guards against;
     // here it is confirmed at the routing layer.
-    expect(matches("/pathology")).toBe(false);
+    expect(matches("/fpology")).toBe(false);
     expect(matches("/dashboard")).toBe(false);
     expect(matches("/")).toBe(false);
     expect(matches("/gauntlet")).toBe(false);
+  });
+});
+
+describe("next.config redirects — the /path → /fp 308 (Unit 10, FW-D7/FW-R30)", () => {
+  it("308-redirects every old /path URL to its /fp twin, preserving sub-path and query", async () => {
+    const redirects = (await nextConfig.redirects?.()) ?? [];
+    const rule = redirects.find((r) => r.source === "/path/:path*");
+    // The ONE /path route literal that survives the rename lives in this map.
+    expect(rule).toBeDefined();
+    // `:path*` carries BOTH the trailing sub-path AND the query string onto the
+    // destination (Next redirect semantics); `permanent` = 308, which preserves
+    // the request method and is cacheable — the move is one-way.
+    expect(rule?.destination).toBe("/fp/:path*");
+    expect(rule?.permanent).toBe(true);
   });
 });

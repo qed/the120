@@ -9,7 +9,7 @@
  *                           --student <uuid> [--student <uuid> …] [--json]
  *   npm run fw -- create    --cohort <uuid> --first Maya --last Chen --band g6_8 [--json]
  *
- * Staff ops (FW Unit 5) — the same affordances as /path/fw/ops:
+ * Staff ops (FW Unit 5) — the same affordances as /fp/fw/ops:
  *
  *   npm run fw -- cohorts       [--json]
  *   npm run fw -- cohort-create --slug boston-2026-08 \
@@ -82,13 +82,13 @@ import { createClient } from "@supabase/supabase-js";
 import { loadSupabaseEnv } from "./load-env";
 import { sendEmail } from "../app/lib/email";
 import { SITE_URL } from "../app/lib/site";
-import { narrowFwBand } from "../app/path/lib/fw-provision-rules";
-import { runFwCheckIn } from "../app/path/lib/fw-checkin-core";
-import { issueFwGuideInvite, provisionFwGuide } from "../app/path/lib/fw-guide-core";
-import { buildFwGuideInviteEmail } from "../app/path/lib/fw-guide-invite-email";
-import { assertNoAuthMailToFwStudent } from "../app/path/lib/fw-provision-rules";
-import { loadFwBoard } from "../app/path/lib/fw-board-loader";
-import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/path/lib/fw-loader";
+import { narrowFwBand } from "../app/fp/lib/fw-provision-rules";
+import { runFwCheckIn } from "../app/fp/lib/fw-checkin-core";
+import { issueFwGuideInvite, provisionFwGuide } from "../app/fp/lib/fw-guide-core";
+import { buildFwGuideInviteEmail } from "../app/fp/lib/fw-guide-invite-email";
+import { assertNoAuthMailToFwStudent } from "../app/fp/lib/fw-provision-rules";
+import { loadFwBoard } from "../app/fp/lib/fw-board-loader";
+import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/fp/lib/fw-loader";
 import {
   anonymizeFwStudent,
   createFwCohort,
@@ -103,12 +103,12 @@ import {
   resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
-} from "../app/path/lib/fw-ops-core";
+} from "../app/fp/lib/fw-ops-core";
 import {
   fwCohortWindowFromLocal,
   fwReplayRejectReasonCopy,
   normalizeFwCohortSlug,
-} from "../app/path/lib/fw-ops-rules";
+} from "../app/fp/lib/fw-ops-rules";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
   FW_IMPORT_PARSE_ERROR_COPY,
@@ -116,25 +116,25 @@ import {
   dedupeFwImportRows,
   parseFwImportCsv,
   planFwImportChunks,
-} from "../app/path/lib/fw-import-rules";
+} from "../app/fp/lib/fw-import-rules";
 import {
   listFwImportExceptions,
   resolveFwImportException,
   runFwImportChunk,
   type FwImportOutcome,
-} from "../app/path/lib/fw-import-core";
-import { loadFwMatchCandidates } from "../app/path/lib/fw-loader";
-import { fwMatchKey } from "../app/path/lib/fw-match-rules";
-import { isFwAction } from "../app/path/lib/fw-rules";
-import { runFwQuickCreate } from "../app/path/lib/fw-student-core";
-import { loadFwProgressRow, planFwDrain, runFwDrain } from "../app/path/lib/fw-sync-engine";
+} from "../app/fp/lib/fw-import-core";
+import { loadFwMatchCandidates } from "../app/fp/lib/fw-loader";
+import { fwMatchKey } from "../app/fp/lib/fw-match-rules";
+import { isFwAction } from "../app/fp/lib/fw-rules";
+import { runFwQuickCreate } from "../app/fp/lib/fw-student-core";
+import { loadFwProgressRow, planFwDrain, runFwDrain } from "../app/fp/lib/fw-sync-engine";
 import {
   groupFwEntriesByStudentTask,
   isRecognizedFwEntry,
   reduceFwOps,
   type FwQueueEntry,
   type FwServerRow,
-} from "../app/path/lib/fw-sync-rules";
+} from "../app/fp/lib/fw-sync-rules";
 
 const COMMANDS = [
   "roster",
@@ -355,7 +355,7 @@ async function main() {
     // The raw token is printed ONCE and never stored. `--json` carries the
     // ASSEMBLED URL as well as the bare token, so an agent does not have to know
     // the route shape to hand somebody something they can paste.
-    const boardUrl = `${SITE_URL}/path/fw/board/${res.token}`;
+    const boardUrl = `${SITE_URL}/fp/fw/board/${res.token}`;
     emit({ ...res, url: boardUrl }, () => {
       if (res.revokedPrior) {
         console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");

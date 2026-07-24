@@ -55,8 +55,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // Side effect: registers PROGRAM_2026_27 with the manifest registry. The seed
 // enumerates every registered version, so a future version's generated module
 // added to this import list is seeded with no other change.
-import "../app/path/content/generated/program-2026-27";
-import { getProgram, registeredVersions } from "../app/path/content/manifest";
+import "../app/fp/content/generated/program-2026-27";
+import { getProgram, registeredVersions } from "../app/fp/content/manifest";
 import {
   buildProgramRows,
   buildUpsertSteps,
@@ -66,7 +66,7 @@ import {
   expectationFromRows,
   type ProgramRows,
   type TableProbe,
-} from "../app/path/content/seed-rows";
+} from "../app/fp/content/seed-rows";
 
 /** The version new students pin to. Its row carries is_current = true. */
 const CURRENT_VERSION = "2026-27";
@@ -114,7 +114,7 @@ function loadEnv(): { url: string; serviceRoleKey: string } {
  * PGRST205 when the relation is absent, and no error when it exists.
  *
  * The retry-vs-fail-fast decision is the pure, unit-tested `classifyProbe`
- * (app/path/content/seed-rows.ts): PGRST205 or a code-less transient error →
+ * (app/fp/content/seed-rows.ts): PGRST205 or a code-less transient error →
  * retry; an auth/permission code → fail fast so a stale key is never misreported
  * as "apply the migration".
  */

@@ -5,13 +5,13 @@
  *
  * Creates (idempotently) the path_families row and the parent/family role grant
  * for the CRM parent whose email is given — after which that parent signs in at
- * /path with their EXISTING account (email + password from their 2026-27
+ * /fp with their EXISTING account (email + password from their 2026-27
  * application) and links founders from the roster without re-entering any data.
  * The children themselves are provisioned by the parent in the onboarding
  * surface, never here.
  *
  * DELIBERATELY per-family, never a blanket migration (decision 2026-07-22,
- * Unit 15): granting every deposit_paid/member family at once would open /path
+ * Unit 15): granting every deposit_paid/member family at once would open /fp
  * to real families before the TP-1 children's-data compliance review clears
  * (roadmap: test users only until ~2026-10-21). Staff run this for each
  * consenting family, explicitly. A blanket mode can be added after TP-1.
@@ -23,7 +23,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-import { ensurePathFamilyForParent } from "@/app/path/lib/provision-core";
+import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
 import { loadSupabaseEnv } from "./load-env";
 
 async function main() {
@@ -74,7 +74,7 @@ async function main() {
   console.log(
     `${result.created ? "Linked" : "Already linked"}: ${parent.first_name} ${parent.last_name} <${parent.email}> → path family ${result.familyId}.\n` +
       `Roster children visible to onboarding:\n${roster || "  (none — the create path will render)"}\n` +
-      `Next: the parent signs in at /path/sign-in (parent tab) with their existing account.`
+      `Next: the parent signs in at /fp/sign-in (parent tab) with their existing account.`
   );
 }
 

@@ -12,8 +12,8 @@ import vitestConfig from "@/vitest.config";
  * Two design constraints, both learned the hard way:
  *
  *  1. This file lives under `app/lib/**`, granted by a different entry, so it
- *     keeps running if the `app/path` glob is dropped. A guard inside
- *     `app/path/**` could not catch its own removal — it would go silent
+ *     keeps running if the `app/fp` glob is dropped. A guard inside
+ *     `app/fp/**` could not catch its own removal — it would go silent
  *     alongside the tests it was meant to protect.
  *
  *  2. It asserts against the RESOLVED `test.include` array, not the raw file
@@ -32,7 +32,7 @@ const REQUIRED_GLOBS = [
   "app/lib/**/__tests__/**/*.test.{ts,tsx}",
   "app/gauntlet/**/__tests__/**/*.test.{ts,tsx}",
   "app/api/**/__tests__/**/*.test.{ts,tsx}",
-  "app/path/**/__tests__/**/*.test.{ts,tsx}",
+  "app/fp/**/__tests__/**/*.test.{ts,tsx}",
 ];
 
 describe("vitest include allowlist", () => {
@@ -50,6 +50,6 @@ describe("vitest include allowlist", () => {
     // Called out separately because The Path's pure rule modules (the state
     // machine, access verdicts, sync reconciliation) are the only parts of that
     // feature this repo can defend at all — no jsdom, no component tests.
-    expect(include).toContain("app/path/**/__tests__/**/*.test.{ts,tsx}");
+    expect(include).toContain("app/fp/**/__tests__/**/*.test.{ts,tsx}");
   });
 });

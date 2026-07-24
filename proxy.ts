@@ -9,7 +9,7 @@ import {
 } from "@/app/lib/supabase/proxy-rules";
 
 /**
- * Gate for /crm (staff) and /path (The Path) — Next 16's `proxy.ts` convention
+ * Gate for /crm (staff) and /fp (First Profit) — Next 16's `proxy.ts` convention
  * (the renamed middleware file; Node.js runtime, not configurable).
  *
  * Deliberately cheap: a JWT-only check from the session cookie. The
@@ -27,7 +27,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Unguarded routes short-circuit before any Supabase work — matching them
-  // would loop the redirect (/crm/login, /path/sign-in), defeat the 404 rewrite
+  // would loop the redirect (/crm/login, /fp/sign-in), defeat the 404 rewrite
   // (/crm/staff-only), or strand the recovery flow (/crm/reset arrives without
   // a session; the emailed link's code becomes one client-side).
   if (isUnguarded(pathname)) {
@@ -92,5 +92,5 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Must be statically analyzable — a literal array, never a computed value.
-  matcher: ["/crm/:path*", "/path/:path*"],
+  matcher: ["/crm/:path*", "/fp/:path*"],
 };

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { MAX_SEND_ATTEMPTS, RECONCILE_WINDOW_MS } from "@/app/path/lib/notify/notify-rules";
-import { drainPendingSends, reconcileNotifications } from "@/app/path/lib/notify/send";
+import { MAX_SEND_ATTEMPTS, RECONCILE_WINDOW_MS } from "@/app/fp/lib/notify/notify-rules";
+import { drainPendingSends, reconcileNotifications } from "@/app/fp/lib/notify/send";
 
 /**
  * The Path notification cron (T1 Unit 12, Decision 8) — vercel.json schedules

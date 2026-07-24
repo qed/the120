@@ -24,7 +24,7 @@ import {
   loadStudentProfileForAuth,
   resetFailureMessage,
   resetStudentPassword,
-} from "@/app/path/lib/provision-core";
+} from "@/app/fp/lib/provision-core";
 
 const recoverySchema = z.object({
   profileId: z.uuid(),

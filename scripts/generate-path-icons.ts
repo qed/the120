@@ -1,5 +1,5 @@
 /**
- * Generate The Path's PWA icons (T1 Unit 11) — `npx tsx scripts/generate-path-icons.ts`.
+ * Generate First Profit's PWA icons (T1 Unit 11) — `npx tsx scripts/generate-path-icons.ts`.
  *
  * Dependency-free on purpose: a raw PNG encoder over Node's built-in zlib (no
  * sharp/canvas — neither is a dependency here and neither is worth adding for

@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * The Path evidence Server Actions (T1 Unit 10; first mounted by Unit 14's
+ * First Profit evidence Server Actions (T1 Unit 10; first mounted by Unit 14's
  * task surface). The CONFIRM step Unit 9's uploader hands its stored object up
  * to (`onUploaded` → an EvidenceItem row), plus the log-table, link-overflow,
  * caption-edit, delete, and redaction actions. Same canon as every other Path

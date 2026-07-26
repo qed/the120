@@ -47,7 +47,7 @@ describe("vitest include allowlist", () => {
   });
 
   it("grants the Path tree — removing it would silence the engine's whole suite", () => {
-    // Called out separately because The Path's pure rule modules (the state
+    // Called out separately because First Profit's pure rule modules (the state
     // machine, access verdicts, sync reconciliation) are the only parts of that
     // feature this repo can defend at all — no jsdom, no component tests.
     expect(include).toContain("app/fp/**/__tests__/**/*.test.{ts,tsx}");

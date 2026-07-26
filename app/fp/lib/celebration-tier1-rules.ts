@@ -1,5 +1,5 @@
 /**
- * The Path — Tier 1 celebration & notification-surface rules (T1 Unit 16).
+ * First Profit — Tier 1 celebration & notification-surface rules (T1 Unit 16).
  *
  * PURE module: no React, no Next, no Supabase (the Unit 7/9/12 posture —
  * this is the only layer the repo's test setup can defend, so every decision

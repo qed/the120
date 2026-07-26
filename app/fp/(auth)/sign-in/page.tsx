@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import SignInForm from "./SignInForm";
 
 /**
- * The Path sign-in (T1 Unit 6) — the first rendered /path surface, and the one
+ * First Profit sign-in (T1 Unit 6) — the first rendered /path surface, and the one
  * route the proxy leaves unguarded (the door to the door). PRE-skin-selection
  * by definition: no student is known yet, so it renders in the grounded HQ
  * neutral treatment on the Path fonts (Unit 13's foundation), not in either

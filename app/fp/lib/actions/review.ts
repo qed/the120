@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * The Path criterion-review ceremony action (T1 Unit 12, §9.3): a reviewing
+ * First Profit criterion-review ceremony action (T1 Unit 12, §9.3): a reviewing
  * adult RETURNS an in-review criterion, naming the tasks to redo and why. Same
  * canon as `applyTransition`: gate → zod → authorize → decide with the pure
  * engine → mutate via the service-role RPC → interpret the echo → typed result.

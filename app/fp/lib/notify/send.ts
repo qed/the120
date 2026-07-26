@@ -1,5 +1,5 @@
 /**
- * The Path notifications — the I/O executor (T1 Unit 12). PLAIN module — no
+ * First Profit notifications — the I/O executor (T1 Unit 12). PLAIN module — no
  * `server-only`, no `"use server"` — so the transition action, the cron route,
  * and any tsx script drive the exact same machinery against a caller-supplied
  * service-role client (the `sendWelcome` posture). Every DECISION here is a

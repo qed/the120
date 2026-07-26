@@ -46,7 +46,7 @@ export type BandVerdict =
 /**
  * The provisioning-facing band decision for a roster grade. Distinguishes a
  * MISSING grade (a CRM draft — the parent should finish the roster row) from an
- * OUT-OF-RANGE one (a real grade The Path has no band for), because the two
+ * OUT-OF-RANGE one (a real grade First Profit has no band for), because the two
  * refusals need different copy. Never defaults: the decided Unit 15 UX is
  * refuse-with-a-specific-message, not a silently-recorded fallback band.
  */
@@ -116,7 +116,7 @@ export type LinkableFounder =
   /** Visible but not linkable: the roster row needs a (usable) grade first.
    *  Shown with a specific message — never silently hidden, never defaulted. */
   | { kind: "needs_grade"; childId: string; firstName: string }
-  /** Already on The Path — listed so the family view is complete. */
+  /** Already on First Profit — listed so the family view is complete. */
   | { kind: "provisioned"; childId: string; firstName: string };
 
 /**
@@ -195,7 +195,7 @@ export function childFamilyVerdict({
 
 /* ─────────────────────────────────────────── second-parent invites (R4) ──── */
 
-/** R4 permits more than one parent; The Path caps a family at two. */
+/** R4 permits more than one parent; First Profit caps a family at two. */
 export const MAX_PARENTS_PER_FAMILY = 2;
 
 /** Invites live seven days — long enough for a busy co-parent, short enough

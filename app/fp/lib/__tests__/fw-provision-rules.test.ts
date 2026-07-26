@@ -287,7 +287,7 @@ describe("buildFwProgressRows — the all-locked FW materialization", () => {
       programVersionId: "2026-27",
       tasks: rows.tasks,
     });
-    // The Path's builder opens the first task of each first-phase criterion; if
+    // First Profit's builder opens the first task of each first-phase criterion; if
     // this ever starts doing the same, a guide's drill-down would imply a gate
     // that does not exist and the board would open non-zero.
     expect(built.filter((r) => r.state !== "locked")).toEqual([]);

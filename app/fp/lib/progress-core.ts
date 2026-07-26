@@ -1,5 +1,5 @@
 /**
- * The Path progress engine — the atomic-transition CORE (T1 Unit 8), plain and
+ * First Profit progress engine — the atomic-transition CORE (T1 Unit 8), plain and
  * testable. This is the pure decision logic that sits between the Unit 7 state
  * machine and the `move_path_task` security-definer RPC: the hardcoded target
  * map the RPC's SQL CASE mirrors, the three-way interpretation of the RPC's

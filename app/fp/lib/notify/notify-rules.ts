@@ -1,5 +1,5 @@
 /**
- * The Path notifications — the PURE decision core (T1 Unit 12, Decision 8).
+ * First Profit notifications — the PURE decision core (T1 Unit 12, Decision 8).
  *
  * Everything here is a decision, never I/O, in the Unit 7/9/10 posture: no
  * next/supabase/react imports, exhaustively tested in `__tests__/notify-rules

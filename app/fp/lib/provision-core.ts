@@ -181,7 +181,7 @@ export async function provisionStudent(
   }
   if (existing.data) return { ok: false, reason: "already_provisioned" };
 
-  // 5. The band gate (Unit 15's decided UX): a grade The Path has no band for
+  // 5. The band gate (Unit 15's decided UX): a grade First Profit has no band for
   // refuses NOW, with a specific reason, before any account exists — never a
   // silently-recorded default. Runs after the dup probe so a provisioned child
   // whose grade was later nulled still reads already_provisioned.
@@ -701,7 +701,7 @@ export async function ensureFwStudentProgress(
     return { ok: false, reason: "unavailable" };
   }
 
-  // Deliberately NO events. The Path's materializer records `unlock` events for
+  // Deliberately NO events. First Profit's materializer records `unlock` events for
   // the rows it promoted; FW promotes nothing, so the event log stays empty until
   // a guide's first tap — which is what makes the board's "opens at zero on
   // Friday" honest (Decision 16).

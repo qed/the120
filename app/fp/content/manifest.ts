@@ -36,7 +36,7 @@ export function isStageMoment(criterionId: string): boolean {
 
 export const MANIFEST_2026_27: ProgramManifest = {
   versionId: "2026-27",
-  label: "The Path 1.0 — 2026-27",
+  label: "First Profit 1.0 — 2026-27",
   phases: 5,
   criteria: 25,
   tasks: 125,

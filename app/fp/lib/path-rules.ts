@@ -1,5 +1,5 @@
 /**
- * The Path progress engine (T1 Unit 7) — pure decision logic over the
+ * First Profit progress engine (T1 Unit 7) — pure decision logic over the
  * transition table. This is the heart of the product and the only part this
  * repo's node-only test setup can genuinely defend, so every reachable branch is
  * tested. Two things are deliberately NOT reachable in T1 and are documented

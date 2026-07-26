@@ -22,7 +22,7 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
-// The Path fonts (T1 Unit 13, plan Decision 3). `preload: false` is the whole
+// First Profit fonts (T1 Unit 13, plan Decision 3). `preload: false` is the whole
 // point: these are declared on the root layout so /path never triggers a full
 // page reload from a route-group split, but marketing pages — which use none of
 // the font-path-* utilities — declare the @font-face without ever FETCHING the

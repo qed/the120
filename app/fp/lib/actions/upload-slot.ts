@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * The Path upload-slot Server Action (T1 Unit 9, Decision 4). Bytes NEVER
+ * First Profit upload-slot Server Action (T1 Unit 9, Decision 4). Bytes NEVER
  * traverse our origin: this returns METADATA ONLY (a signed token + the strategy),
  * and the client uploads DIRECT to Supabase Storage. Same canon as the other Path
  * actions: gate → zod → authorize/decide (pure) → mint via service role → typed

@@ -1,5 +1,5 @@
 /**
- * The Path service worker (T1 Unit 11) — THIN by design; hand-rolled because
+ * First Profit service worker (T1 Unit 11) — THIN by design; hand-rolled because
  * Serwist's Next plugin is webpack-only and Next 16 builds with Turbopack.
  *
  * Served from the ORIGIN ROOT (outside the /fp proxy matcher, so an expired

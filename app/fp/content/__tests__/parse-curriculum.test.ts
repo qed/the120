@@ -9,7 +9,7 @@ import { BANDS, type Band } from "@/app/fp/content/types";
 
 /**
  * The parser is the only thing standing between 785 lines of prose and every
- * surface in The Path. Its failure mode is a SILENT under-parse — a task
+ * surface in First Profit. Its failure mode is a SILENT under-parse — a task
  * quietly missing, a band variant quietly empty — which is invisible at runtime
  * and only shows up as a child seeing the wrong instruction. So this suite
  * asserts against the real curriculum file, not a fixture.
@@ -235,7 +235,7 @@ describe("completesCriterion", () => {
 
   it("marks EXACTLY ONE task per criterion — 25 in total", () => {
     // The aggregate, not a hand-picked fixture. Spot-checking 1.1.5 and 2.3.6
-    // passed while 5.5.5 — the task that completes The Path itself — was
+    // passed while 5.5.5 — the task that completes First Profit itself — was
     // silently false, because its closing marker is worded differently.
     for (const phase of program.phases) {
       for (const criterion of phase.criteria) {
@@ -247,7 +247,7 @@ describe("completesCriterion", () => {
   });
 
   it("marks 5.5.5 — the last task of the whole program", () => {
-    // Its source line reads "**This completes the criterion — and The Path.**",
+    // Its source line reads "**This completes the criterion — and First Profit.**",
     // not the period-terminated wording the other 24 use.
     expect(taskById("5.5.5").completesCriterion).toBe(true);
   });

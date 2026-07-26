@@ -1,5 +1,5 @@
 /**
- * The Path progress engine — the transition table AS DATA (T1 Unit 7).
+ * First Profit progress engine — the transition table AS DATA (T1 Unit 7).
  *
  * This file is the specification. Brief §9.1 (task state machine), §9.2
  * (concurrency), §9.5 (verification integrity) and the plan's state diagram are

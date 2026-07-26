@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { reapOrphans } from "@/app/fp/lib/evidence-loader";
 
 /**
- * The Path T1 Unit 10 orphan reaper — SCHEDULED by Unit 12 (vercel.json, daily
+ * First Profit T1 Unit 10 orphan reaper — SCHEDULED by Unit 12 (vercel.json, daily
  * at 13:35 UTC; the tier question resolved: the project is on Vercel Pro).
  * An evidence object whose CONFIRM never arrived (upload-then-die) is
  * invisible to the quota byte-sum (it has size metadata but no confirmed row,

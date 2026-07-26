@@ -4,7 +4,7 @@ import { MAX_SEND_ATTEMPTS, RECONCILE_WINDOW_MS } from "@/app/fp/lib/notify/noti
 import { drainPendingSends, reconcileNotifications } from "@/app/fp/lib/notify/send";
 
 /**
- * The Path notification cron (T1 Unit 12, Decision 8) — vercel.json schedules
+ * First Profit notification cron (T1 Unit 12, Decision 8) — vercel.json schedules
  * this every 10 minutes (Vercel Pro; pinned by the notify-rules parity test).
  * Two passes, both idempotent:
  *

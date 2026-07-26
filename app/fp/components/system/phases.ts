@@ -1,5 +1,5 @@
 /**
- * The Path — phase display metadata for the design system (T1 Unit 13).
+ * First Profit — phase display metadata for the design system (T1 Unit 13).
  *
  * The five phases are the spine of the whole product; mechanics are constant and
  * only Trail-vs-HQ rendering differs. `PhaseKey` is the canonical domain type

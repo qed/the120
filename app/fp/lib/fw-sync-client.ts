@@ -2,7 +2,7 @@
  * The FW offline client orchestration (FW Unit 8) — the page-context half of the
  * drain, and the ONLY code that touches IndexedDB.
  *
- * The Path splits its client engine (`sync-engine.ts`) from its PWA shell
+ * First Profit splits its client engine (`sync-engine.ts`) from its PWA shell
  * (`PathPwa`); FW mirrors that split. `fw-sync-engine.ts` is the db-taking drain
  * CORE (harness-tested, runs server-side via the action or in the CLI); THIS module
  * is the client loop that reads the IndexedDB queue, ships it through the

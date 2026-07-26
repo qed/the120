@@ -1,7 +1,7 @@
 type ClassValue = string | false | null | undefined;
 
 /**
- * Minimal class-name joiner for The Path's design system.
+ * Minimal class-name joiner for First Profit's design system.
  *
  * The design prototype used `tailwind-merge` for last-wins conflict resolution,
  * but this repo carries no `clsx`/`tailwind-merge` dependency and the plan adds

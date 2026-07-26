@@ -1,5 +1,5 @@
 /**
- * The Path notification email templates (T1 Unit 12). PLAIN module — no
+ * First Profit notification email templates (T1 Unit 12). PLAIN module — no
  * `server-only`, no `"use server"` — so the cron route, the inline send path,
  * and any tsx script render the exact same email.
  *

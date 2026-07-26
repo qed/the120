@@ -1,5 +1,5 @@
 /**
- * The Path — skin token resolver (T1 Unit 13, plan Decision 9).
+ * First Profit — skin token resolver (T1 Unit 13, plan Decision 9).
  *
  * Pure module. No React, no Next, no Supabase — the ONLY unit-testable part of
  * the design foundation (there is no jsdom here, so the components are covered
@@ -7,7 +7,7 @@
  *
  * ## Why this exists
  *
- * The Path renders through two skins, HQ and Trail, from one token set. Decision
+ * First Profit renders through two skins, HQ and Trail, from one token set. Decision
  * 9 settled the mechanism in code *before* any component was written: Tailwind
  * v4's `@theme` cannot be scoped (every block merges into one `:root`), and
  * `@theme inline` compiles utilities to LITERAL values — so a runtime CSS-variable

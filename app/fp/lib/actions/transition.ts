@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * The Path task-transition Server Action (T1 Unit 8). Same canon as the CRM
+ * First Profit task-transition Server Action (T1 Unit 8). Same canon as the CRM
  * actions: gate → zod → authorize → decide → mutate via the service-role RPC →
  * interpret → typed result.
  *

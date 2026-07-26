@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   async headers() {
     return [
-      // The Path service worker (T1 Unit 11). A CDN-cached service worker is a
+      // First Profit service worker (T1 Unit 11). A CDN-cached service worker is a
       // multi-hour outage of the update path — the file must revalidate on
       // every check (plus updateViaCache:'none' at registration).
       {

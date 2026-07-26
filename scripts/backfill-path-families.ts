@@ -1,5 +1,5 @@
 /**
- * R31 linkage backfill — link ONE enrolled CRM family into The Path (T1 Unit 15).
+ * R31 linkage backfill — link ONE enrolled CRM family into First Profit (T1 Unit 15).
  *
  *   npx tsx scripts/backfill-path-families.ts <parent-email>
  *

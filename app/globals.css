@@ -109,7 +109,7 @@
   --shadow-hq-lg: 0 4px 12px rgb(30 24 16 / 0.06), 0 12px 32px rgb(30 24 16 / 0.08);
   --shadow-trail: 0 2px 0 rgb(120 80 40 / 0.12), 0 8px 24px rgb(120 80 40 / 0.14);
 
-  /* The Path fonts — declared on the root layout with preload:false,
+  /* First Profit fonts — declared on the root layout with preload:false,
      so marketing pages declare but never fetch them (Decision 3).
      next/font sets --font-fraunces/--font-inter/--font-spline-mono on
      <html>; these role tokens reference them, mirroring the marketing

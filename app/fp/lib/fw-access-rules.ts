@@ -10,7 +10,7 @@
  *
  * ── Why FW authorization is its own module, not a widening of resolvePathAccess
  *
- * The Path's resolvers answer "may this caller READ this student's file" and
+ * First Profit's resolvers answer "may this caller READ this student's file" and
  * "is this caller a verifying adult for this transition". FW asks a different
  * question with a different blast radius: a guide's tap writes a check-in for a
  * child they met ninety seconds ago, with no gating and no verify cascade. FW-D9

@@ -381,7 +381,7 @@ export function buildFwStudentCreateUserPayload({
  * `unlock` events.
  *
  * The sibling of `buildInitialProgressRows`, not a mode of it, and the
- * difference is the whole feature. The Path opens the first task of each
+ * difference is the whole feature. First Profit opens the first task of each
  * first-phase criterion and snapshots a band there, because a Path student
  * works a gated journey. FW has NO GATING (FW-D5): a guide reaches any task in
  * the catalog by drill-down and taps it, so a promoted `available` row would be

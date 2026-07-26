@@ -1,5 +1,5 @@
 /**
- * The Path — the student surface's pure decision layer (T1 Unit 14).
+ * First Profit — the student surface's pure decision layer (T1 Unit 14).
  *
  * Pure module: no React, no Next, no Supabase. This is the testable heart of
  * the app shell (the plan's "only defensible layer" — there is no jsdom here,

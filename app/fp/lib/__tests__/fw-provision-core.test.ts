@@ -694,7 +694,7 @@ describe("ensureFwStudentProgress", () => {
     expect(tables.path_task_progress).toHaveLength(125);
     expect(tables.path_task_progress.every((r) => r.state === "locked")).toBe(true);
     expect(tables.path_task_progress.every((r) => r.snapshot_band === null)).toBe(true);
-    // The Path materializer writes ~25 `unlock` events here. FW promotes
+    // First Profit materializer writes ~25 `unlock` events here. FW promotes
     // nothing, so the log the projected board reads stays empty until the first
     // guide tap.
     expect(tables.path_task_events).toHaveLength(0);

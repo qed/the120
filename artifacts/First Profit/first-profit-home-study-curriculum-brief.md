@@ -5,17 +5,17 @@ status: draft for review
 source-of-truth: artifacts/Design & Marketing/2026-27 Page Handoff/design_handoff_2026-27_program_page/program-data.js (pathSteps — the 25 pass criteria)
 ---
 
-# The Path — Home Study Edition: Curriculum Brief
+# First Profit — Home Study Edition: Curriculum Brief
 
 **Five phases. Twenty-five criteria. 125 unit tasks. All assessable at home, yes or no.**
 
-This brief turns The Path (Sell → Build → Validate → Grow → Scale) into a home-study curriculum a parent-and-child team can run without the Saturday cohort. Every one of the 25 pass criteria from the 2026-27 program is broken into a step-by-step process of 4–6 unit tasks. Each task is binary — complete or not complete — with an evidence standard a parent can check without judgment calls.
+This brief turns First Profit (Sell → Build → Validate → Grow → Scale) into a home-study curriculum a parent-and-child team can run without the Saturday cohort. Every one of the 25 pass criteria from the 2026-27 program is broken into a step-by-step process of 4–6 unit tasks. Each task is binary — complete or not complete — with an evidence standard a parent can check without judgment calls.
 
 ## How to Use This Brief
 
 **Roles.** The child is the founder. The parent is the coach and the verifier — never the doer. The parent's job on any task is to (a) keep it safe, (b) hold the evidence standard, and (c) resist fixing things. Where a task says "parent verifies," the parent checks the evidence against the *Done when* line and marks yes or no. There is no partial credit.
 
-**Pacing.** Like the full program, the home edition is paced **by mastery, not calendar**. Tasks inside a criterion are sequential — complete them in order. Criteria inside a phase can run in parallel where life allows, but a phase is only passed when all five of its criteria are passed, and phases are completed in order. A fast 14-year-old might finish a phase in three weeks; an 8-year-old might take a term. Both are on The Path.
+**Pacing.** Like the full program, the home edition is paced **by mastery, not calendar**. Tasks inside a criterion are sequential — complete them in order. Criteria inside a phase can run in parallel where life allows, but a phase is only passed when all five of its criteria are passed, and phases are completed in order. A fast 14-year-old might finish a phase in three weeks; an 8-year-old might take a term. Both are on First Profit.
 
 **The Evidence Folder.** On Day 1, create one folder (physical binder, shared drive, or both) called the child's **Founder File**. Every task's evidence — logs, one-pagers, photos, videos, screenshots, signed checklists — goes in it, labeled with the task ID. By the end of Phase 05 the Founder File *is* the completion portfolio. If evidence isn't in the file, the task isn't done.
 
@@ -39,7 +39,7 @@ Five criteria in the original Path reference the cohort, the Saturday workshops,
 
 Every task carries three band variants, matching the program's book tracks: **Grades 3–5**, **Grades 6–8**, and **Grades 9–12**.
 
-**What does not change across bands: the pass bars.** 25 outreach attempts, 40 customer contacts, 10 sales, four weeks of P&L — these numbers are the credential. A Grade 3 completion of The Path means the same thing as a Grade 12 completion.
+**What does not change across bands: the pass bars.** 25 outreach attempts, 40 customer contacts, 10 sales, four weeks of P&L — these numbers are the credential. A Grade 3 completion of First Profit means the same thing as a Grade 12 completion.
 
 **What changes across bands: autonomy, format, and depth.**
 
@@ -734,7 +734,7 @@ Tasks are numbered `phase.criterion.task` — e.g., **2.3.4** is Phase 02 (Build
 
 ## Criterion 5.5 — Pitch what the business becomes next year, on stage
 
-*Home-study note: "on stage, at an intensive" becomes the Capstone Showcase — a real staged moment at home or a booked space: an audience of at least five, including at least two non-family adults, a designated stage area, and a printed program if the family wants to go full theatre. This is the finale of The Path; make it feel like one.*
+*Home-study note: "on stage, at an intensive" becomes the Capstone Showcase — a real staged moment at home or a booked space: an audience of at least five, including at least two non-family adults, a designated stage area, and a printed program if the family wants to go full theatre. This is the finale of First Profit; make it feel like one.*
 
 **5.5.1 — Draft the vision pitch.** Build the pitch: this year's real numbers (from the Founder File), what the business becomes next year, and what it will take to get there. Three slides or one poster, 3–5 minutes.
 *Done when:* the draft pitch exists and every backward-looking number in it is real and traceable.
@@ -757,14 +757,14 @@ Tasks are numbered `phase.criterion.task` — e.g., **2.3.4** is Phase 02 (Build
 - All bands: as written.
 
 **5.5.5 — Seal the Founder File.** File the Showcase video, then complete the portfolio: every criterion's evidence checked present, the full checklist signed by parent and child, and one final page written by the child — "What I can do now that I couldn't do a year ago."
-*Done when:* the signed checklist and final page are in the Founder File. **This completes the criterion — and The Path.**
+*Done when:* the signed checklist and final page are in the Founder File. **This completes the criterion — and First Profit.**
 - All bands: as written. The final page is the child's alone, every band.
 
 ---
 
 # Completion Tracking
 
-**The math of done.** 125 tasks → 25 criteria → 5 phases → The Path, complete. A criterion is passed when every one of its tasks is verified. A phase is passed when all five criteria are passed. Print one checklist per phase; the parent initials each task's *Done when* line with the date.
+**The math of done.** 125 tasks → 25 criteria → 5 phases → First Profit, complete. A criterion is passed when every one of its tasks is verified. A phase is passed when all five criteria are passed. Print one checklist per phase; the parent initials each task's *Done when* line with the date.
 
 | Phase | Criteria | Tasks |
 |---|---|---|
@@ -773,9 +773,9 @@ Tasks are numbered `phase.criterion.task` — e.g., **2.3.4** is Phase 02 (Build
 | 03 · Validate | 5 | 24 |
 | 04 · Grow | 5 | 25 |
 | 05 · Scale | 5 | 25 |
-| **The Path** | **25** | **125** |
+| **First Profit** | **25** | **125** |
 
-**A note for parents on the hard parts.** The tasks most tempting to soften are the ones doing the most work: the no's in 1.3, the hands-off clause in 3.4, the no-rescue board questions in 4.5, the untouched week in 5.3. The Path's claim — observable milestones, a real sale, a real product, real numbers — only holds if the yes/no lines stay honest. When in doubt, the answer is no, and that's fine: the task just isn't done *yet*.
+**A note for parents on the hard parts.** The tasks most tempting to soften are the ones doing the most work: the no's in 1.3, the hands-off clause in 3.4, the no-rescue board questions in 4.5, the untouched week in 5.3. First Profit's claim — observable milestones, a real sale, a real product, real numbers — only holds if the yes/no lines stay honest. When in doubt, the answer is no, and that's fine: the task just isn't done *yet*.
 
 **Open items for Peter (v2 of this brief):**
 - Whether the home edition adopts the reading tracks formally (one book per phase per band is a natural pairing — the tracks already exist in `program-data.js`).

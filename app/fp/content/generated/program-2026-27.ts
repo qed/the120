@@ -3,7 +3,7 @@
  *
  * Source: artifacts/First Profit/first-profit-home-study-curriculum-brief.md
  * Built by: scripts/build-path-content.ts
- * Version: 2026-27 (The Path 1.0 — 2026-27)
+ * Version: 2026-27 (First Profit 1.0 — 2026-27)
  * Totals: 5 phases, 25 criteria, 125 tasks (25/26/24/25/25)
  *
  * This module is PERMANENT once a student is pinned to this version (D27).

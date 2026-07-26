@@ -1,0 +1,46 @@
+/* THE PATH — TYPOGRAPHY TOKENS
+   Three families, each with a clear job:
+     Fraunces          — the ceremonial display serif. Celebration, Trail warmth,
+                         headlines, crest & seal numerals. Optical sizing on.
+     Inter             — the workhorse. All UI, body, labels. Plain and confident.
+     Spline Sans Mono  — numbers treated with respect: task IDs, tallies, dates,
+                         the n/125 meter. The "founder's ledger" voice.
+   Font files load from Google Fonts (see styles.css) — same source as the app. */
+
+:root {
+  --tp-font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --tp-font-sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --tp-font-mono: 'Spline Sans Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* type scale (px, 1.20-ish minor-third with display steps) */
+  --tp-text-2xs: 0.6875rem;  /* 11px — mono labels, crest dates */
+  --tp-text-xs: 0.75rem;     /* 12px — captions, chips */
+  --tp-text-sm: 0.875rem;    /* 14px — body-small, UI default */
+  --tp-text-base: 1rem;      /* 16px — body */
+  --tp-text-lg: 1.125rem;    /* 18px — lead, wisdom quotes */
+  --tp-text-xl: 1.25rem;     /* 20px */
+  --tp-text-2xl: 1.5rem;     /* 24px — section titles */
+  --tp-text-3xl: 1.875rem;   /* 30px */
+  --tp-text-4xl: 2.25rem;    /* 36px — hero */
+  --tp-text-5xl: 3rem;       /* 48px — celebration */
+
+  /* weights */
+  --tp-weight-regular: 400;
+  --tp-weight-medium: 500;
+  --tp-weight-semibold: 600;
+  --tp-weight-bold: 700;
+
+  /* line heights */
+  --tp-leading-none: 1;
+  --tp-leading-tight: 1.15;
+  --tp-leading-snug: 1.3;
+  --tp-leading-normal: 1.5;
+  --tp-leading-relaxed: 1.65;
+
+  /* tracking */
+  --tp-tracking-tight: -0.02em;
+  --tp-tracking-normal: 0;
+  --tp-tracking-wide: 0.02em;
+  --tp-tracking-wider: 0.08em;   /* uppercase eyebrows */
+  --tp-tracking-widest: 0.14em;  /* celebration eyebrows */
+}

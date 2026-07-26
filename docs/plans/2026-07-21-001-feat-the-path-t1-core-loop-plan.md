@@ -26,7 +26,7 @@ Three capabilities here have **zero precedent in this repo**: student identity, 
 
 ## Problem Frame
 
-The curriculum exists as prose (`artifacts/The Path/the-path-home-study-curriculum-brief.md`) and as a marketing section (`app/2026-27/sections/ThePath.tsx`). A family running it has nowhere to file evidence, no verification trail, and no way to see where their child is. See origin: `docs/brainstorms/2026-07-21-the-path-app-requirements.md`.
+The curriculum exists as prose (`artifacts/First Profit/first-profit-home-study-curriculum-brief.md`) and as a marketing section (`app/2026-27/sections/ThePath.tsx`). A family running it has nowhere to file evidence, no verification trail, and no way to see where their child is. See origin: `docs/brainstorms/2026-07-21-the-path-app-requirements.md`.
 
 Per **D22** this build deliberately does not target the 19 Sept 2026 cohort start; families run Phase 01 on paper this autumn and a paper-to-app migration is a separate deliverable.
 
@@ -67,8 +67,8 @@ Decisions carried in: **D15–D27** (origin document; D27 — per-student progra
 | Cron auth shape | `app/api/cron/nurture/route.ts` |
 | Proxy gate (matcher is currently the single string `"/crm/:path*"`) | `proxy.ts` |
 | Content to reconcile against | `app/2026-27/data.ts`, `app/2026-27/path-criteria.ts` |
-| Design prototype (Vite + Tailwind v3 — port, do not copy) | `artifacts/The Path/v1 Path Design/src/components/**` |
-| Visual contract, verbatim copy, tokens | `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/` |
+| Design prototype (Vite + Tailwind v3 — port, do not copy) | `artifacts/First Profit/v1 First Profit Design/src/components/**` |
+| Visual contract, verbatim copy, tokens | `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/` |
 | Next 16 PWA guide (bundled locally) | `node_modules/next/dist/docs/01-app/02-guides/progressive-web-apps.md` |
 
 ### Institutional learnings that change this plan
@@ -351,7 +351,7 @@ browser                    Server Action            Supabase Storage
 - **[T2] Criterion-level home-study notes are not yet captured.** Criteria 3.4, 4.5, 5.1, 5.5 open with an italic framing paragraph (3.4's is the "hands-off by design" statement). The parser drops these — they sit between a criterion header and its first task, where `draft` is undefined. `Criterion` has no field for them. Add an optional `note?` and capture it, or a small sidecar, when these surfaces are built.
 - **[build] `scripts/build-path-content.ts` is not wired into `package.json`.** A stale or hand-edited generated module can currently drift from the parser without a gate. Add a `pretest`/`prebuild` hook, or a test that diffs a fresh `parseCurriculum()` against the committed module, before real families are on it.
 
-**Prerequisite:** `artifacts/The Path/` is **untracked in git today** (`?? "artifacts/The Path/"`), and the previously tracked copy at `artifacts/the-path-home-study-curriculum-brief.md` is staged for deletion. The single source of 125 tasks, 125 Done-when lines and 179 band variants exists on one machine. **Commit it before this unit starts** — the parser's input must be a tracked file or no other developer, agent, or verification pass can run these tests.
+**Prerequisite:** `artifacts/First Profit/` is **untracked in git today** (`?? "artifacts/First Profit/"`), and the previously tracked copy at `artifacts/the-path-home-study-curriculum-brief.md` is staged for deletion. The single source of 125 tasks, 125 Done-when lines and 179 band variants exists on one machine. **Commit it before this unit starts** — the parser's input must be a tracked file or no other developer, agent, or verification pass can run these tests.
 - `app/2026-27/__tests__/data.test.ts` hard-asserts `toHaveLength(5)` on criteria arrays. Still correct for the 25 criteria; do not let that invariant leak into task-level code.
 
 **Execution note:** Implement test-first. The contract is fully knowable from the source, and the failure mode — silent under-parse — is invisible at runtime.
@@ -715,7 +715,7 @@ browser                    Server Action            Supabase Storage
 - **[Unit 12]** (pre-existing carries restated) review queue + reaper cron schedule + the DB-level parent-cap backstop ride-along; the review surface derives "arrived after the review opened" from `created_at` vs `review_opened_at`, and now also renders the `added_after_verification` flag the offline rebase repairs.
 - **[Unit 16]** celebration/Not-Yet moment — including replaying verification events that landed while the student was offline (the queue side is done; the event surface is Unit 16's); richer superseded/diverged copy; twin same-name confirm UX (Unit 15 carry).
 - **[T2 / before real cohorts]** split the IndexedDB entry into an immutable Blob record + a small mutable progress record (~5 full-entry puts per capture remain — fine at T1, not at cohort scale); add a queue byte/count ceiling with a student-facing "queue full" state; sign-out at-rest residue policy (drained-only purge / at-rest encryption) belongs in the TP-1 compliance scope; bump the sw.js cache version literals whenever cache-relevant SW logic changes (manual discipline, noted in the file); a parent's drain scope (`actableStudentIds`) is a mount-time snapshot — a child provisioned mid-session drains after the next full load.
-- **[env — for Peter]** `artifacts/The Path/` was renamed on disk to `artifacts/Foundry/` mid-session (uncommitted): `app/path/content/__tests__/parse-curriculum.test.ts`, `__tests__/generated-drift.test.ts`, and `scripts/build-path-content.ts` read the tracked old path and ENOENT until the rename is committed with those paths updated (2 suites load-fail; zero failing assertions).
+- **[env — for Peter]** `artifacts/First Profit/` was renamed on disk to `artifacts/Foundry/` mid-session (uncommitted): `app/path/content/__tests__/parse-curriculum.test.ts`, `__tests__/generated-drift.test.ts`, and `scripts/build-path-content.ts` read the tracked old path and ENOENT until the rename is committed with those paths updated (2 suites load-fail; zero failing assertions).
 
 ---
 
@@ -961,10 +961,10 @@ Do not start T2 before T1's core loop is verified end to end with a real family.
 ## Sources & References
 
 - **Origin document:** `docs/brainstorms/2026-07-21-the-path-app-requirements.md`
-- Product behaviour and tone: `artifacts/The Path/the-path-app-design-brief.md`
-- Curriculum content: `artifacts/The Path/the-path-home-study-curriculum-brief.md`
-- Visual contract: `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/README.md`
-- Design prototype (port, do not copy): `artifacts/The Path/v1 Path Design/src/components/`
+- Product behaviour and tone: `artifacts/First Profit/first-profit-app-design-brief.md`
+- Curriculum content: `artifacts/First Profit/first-profit-home-study-curriculum-brief.md`
+- Visual contract: `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/README.md`
+- Design prototype (port, do not copy): `artifacts/First Profit/v1 First Profit Design/src/components/`
 - Next 16 docs: `node_modules/next/dist/docs/01-app/` — authoritative for this version per `AGENTS.md`
 - Institutional learnings: `docs/solutions/` — specific docs cited in Context & Research
 - **Next plan:** `docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md`

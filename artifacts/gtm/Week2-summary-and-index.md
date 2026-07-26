@@ -49,4 +49,4 @@ Pulled from the plan's "Do This Monday (Jul 20)":
 ## Open decisions to watch
 - **Ethan** as head ambassador (gates the 12–15 push vs. slip to W3).
 - **X inbound** — small but free; worth a deliberate test.
-- **Two cohorts (8–13 / 14–17) + The Path** — now on the one-pager and in the welcome email; propagate to the site/other assets when you touch them.
+- **Two cohorts (8–13 / 14–17) + First Profit** — now on the one-pager and in the welcome email; propagate to the site/other assets when you touch them.

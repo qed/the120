@@ -1,0 +1,24 @@
+/* ============================================================
+   THE PATH — DESIGN SYSTEM · GLOBAL ENTRY
+   Consumers link this one file. It is an @import manifest only.
+   "The game is the real business. The app keeps score."
+   ------------------------------------------------------------
+   One engine, two skins (HQ + Trail) sharing five phase accents
+   and one crest/seal artwork lineage.
+   ============================================================ */
+
+/* Webfonts — Fraunces (display), Inter (UI), Spline Sans Mono (numerals).
+   Loaded from Google Fonts, matching the source application. */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap');
+
+/* Foundations — tokens */
+@import url('./tokens/colors.css');
+@import url('./tokens/typography.css');
+@import url('./tokens/layout.css');
+@import url('./tokens/motion.css');
+
+/* Base document defaults + type utilities */
+@import url('./base.css');
+
+/* Component styles */
+@import url('./components.css');

@@ -1,7 +1,7 @@
 /**
  * GENERATED — do not edit by hand.
  *
- * Source: artifacts/The Path/the-path-home-study-curriculum-brief.md
+ * Source: artifacts/First Profit/first-profit-home-study-curriculum-brief.md
  * Built by: scripts/build-path-content.ts
  * Version: 2026-27 (The Path 1.0 — 2026-27)
  * Totals: 5 phases, 25 criteria, 125 tasks (25/26/24/25/25)

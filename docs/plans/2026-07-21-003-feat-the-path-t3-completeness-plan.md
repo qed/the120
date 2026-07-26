@@ -315,6 +315,6 @@ What remains after that is not in any plan, and should not be started as enginee
 - **Origin document:** `docs/brainstorms/2026-07-21-the-path-app-requirements.md`
 - **Previous plan:** `docs/plans/2026-07-21-002-feat-the-path-t2-the-year-plan.md`
 - **Chain start:** `docs/plans/2026-07-21-001-feat-the-path-t1-core-loop-plan.md`
-- Product behaviour: `artifacts/The Path/the-path-app-design-brief.md` §5.1, §10, §12, §15
-- Visual contract: `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/README.md`
+- Product behaviour: `artifacts/First Profit/first-profit-app-design-brief.md` §5.1, §10, §12, §15
+- Visual contract: `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/README.md`
 - Book lists: `bookTracks` in `artifacts/Design & Marketing/2026-27 Page Handoff/design_handoff_2026-27_program_page/program-data.js`

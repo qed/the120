@@ -1,0 +1,400 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/awards/**",
+              "components/celebration/**",
+              "components/ledger/**",
+              "components/lib/**",
+              "components/primitives/**",
+              "components/review/**",
+              "components/status/**",
+              "components/tasks/**",
+              "components/wisdom/**",
+              "ui_kits/hq/**",
+              "ui_kits/parent/**",
+              "ui_kits/trail/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Fraunces|Inter|Spline Sans Mono))/i]",
+        "message": "Font not provided by the design system. Available: Fraunces, Inter, Spline Sans Mono."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute > JSXIdentifier[name!=/^(?:skin|variant|size|phase|icon|key|ref|className|style|children)$/]",
+        "message": "<Button> doesn't accept that prop. Declared props: skin, variant, size, phase, icon."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:primary|secondary|ghost|accent)$/]",
+        "message": "<Button> variant must be one of 'primary' | 'secondary' | 'ghost' | 'accent'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='size'] > Literal[value!=/^(?:sm|md|lg)$/]",
+        "message": "<Button> size must be one of 'sm' | 'md' | 'lg'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Crest'] > JSXAttribute > JSXIdentifier[name!=/^(?:phase|criterion|skin|size|locked|className|key|ref|className|style|children)$/]",
+        "message": "<Crest> doesn't accept that prop. Declared props: phase, criterion, skin, size, locked, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TaskCardData'] > JSXAttribute > JSXIdentifier[name!=/^(?:id|title|body|doneWhen|bandVariant|state|phase|liveMoment|reviewNote|verifierComment|key|ref|className|style|children)$/]",
+        "message": "<TaskCardData> doesn't accept that prop. Declared props: id, title, body, doneWhen, bandVariant, state, phase, liveMoment, reviewNote, verifierComment."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Icon'] > JSXAttribute > JSXIdentifier[name!=/^(?:name|size|strokeWidth|title|key|ref|className|style|children)$/]",
+        "message": "<Icon> doesn't accept that prop. Declared props: name, size, strokeWidth, title."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MarginNote'] > JSXAttribute > JSXIdentifier[name!=/^(?:entry|className|key|ref|className|style|children)$/]",
+        "message": "<MarginNote> doesn't accept that prop. Declared props: entry, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='PhaseRow'] > JSXAttribute > JSXIdentifier[name!=/^(?:phase|criteriaCleared|tasksVerified|tasksTotal|status|sealedDate|reviewer|className|key|ref|className|style|children)$/]",
+        "message": "<PhaseRow> doesn't accept that prop. Declared props: phase, criteriaCleared, tasksVerified, tasksTotal, status, sealedDate, reviewer, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='PhaseRow'] > JSXAttribute[name.name='status'] > Literal[value!=/^(?:locked|active|review|sealed)$/]",
+        "message": "<PhaseRow> status must be one of 'locked' | 'active' | 'review' | 'sealed'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='CelebrationStat'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|label|key|ref|className|style|children)$/]",
+        "message": "<CelebrationStat> doesn't accept that prop. Declared props: value, label."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='ProgressMeter'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|total|perPhase|label|className|key|ref|className|style|children)$/]",
+        "message": "<ProgressMeter> doesn't accept that prop. Declared props: value, total, perPhase, label, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='EvidenceItem'] > JSXAttribute > JSXIdentifier[name!=/^(?:kind|label|key|ref|className|style|children)$/]",
+        "message": "<EvidenceItem> doesn't accept that prop. Declared props: kind, label."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Seal'] > JSXAttribute > JSXIdentifier[name!=/^(?:phase|skin|size|sealed|date|animate|className|key|ref|className|style|children)$/]",
+        "message": "<Seal> doesn't accept that prop. Declared props: phase, skin, size, sealed, date, animate, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='SkinToggle'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|onChange|className|key|ref|className|style|children)$/]",
+        "message": "<SkinToggle> doesn't accept that prop. Declared props: value, onChange, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusChip'] > JSXAttribute > JSXIdentifier[name!=/^(?:state|label|className|key|ref|className|style|children)$/]",
+        "message": "<StatusChip> doesn't accept that prop. Declared props: state, label, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TrailStep'] > JSXAttribute > JSXIdentifier[name!=/^(?:index|state|phase|label|onClick|className|key|ref|className|style|children)$/]",
+        "message": "<TrailStep> doesn't accept that prop. Declared props: index, state, phase, label, onClick, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='WisdomEntry'] > JSXAttribute > JSXIdentifier[name!=/^(?:text|attribution|original|key|ref|className|style|children)$/]",
+        "message": "<WisdomEntry> doesn't accept that prop. Declared props: text, attribution, original."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Button": {
+        "replaces": []
+      },
+      "Crest": {
+        "replaces": []
+      },
+      "TaskCardData": {
+        "replaces": []
+      },
+      "Icon": {
+        "replaces": []
+      },
+      "MarginNote": {
+        "replaces": []
+      },
+      "PhaseRow": {
+        "replaces": []
+      },
+      "CelebrationStat": {
+        "replaces": []
+      },
+      "ProgressMeter": {
+        "replaces": []
+      },
+      "EvidenceItem": {
+        "replaces": []
+      },
+      "Seal": {
+        "replaces": []
+      },
+      "SkinToggle": {
+        "replaces": []
+      },
+      "StatusChip": {
+        "replaces": []
+      },
+      "TrailStep": {
+        "replaces": []
+      },
+      "WisdomEntry": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--awaiting",
+      "--gold-leaf",
+      "--hq-border",
+      "--hq-border-strong",
+      "--hq-canvas",
+      "--hq-ink",
+      "--hq-ink-muted",
+      "--hq-ink-soft",
+      "--hq-surface",
+      "--hq-surface-sunken",
+      "--not-yet",
+      "--phase-build",
+      "--phase-grow",
+      "--phase-scale",
+      "--phase-sell",
+      "--phase-validate",
+      "--radius",
+      "--tp-accent",
+      "--tp-awaiting",
+      "--tp-border",
+      "--tp-border-strong",
+      "--tp-border-width",
+      "--tp-border-width-strong",
+      "--tp-canvas",
+      "--tp-dur-base",
+      "--tp-dur-ceremony",
+      "--tp-dur-fast",
+      "--tp-dur-slow",
+      "--tp-ease-in-out",
+      "--tp-ease-out",
+      "--tp-ease-spring",
+      "--tp-font-display",
+      "--tp-font-mono",
+      "--tp-font-sans",
+      "--tp-gold-leaf",
+      "--tp-ink",
+      "--tp-leading-none",
+      "--tp-leading-normal",
+      "--tp-leading-relaxed",
+      "--tp-leading-snug",
+      "--tp-leading-tight",
+      "--tp-not-yet",
+      "--tp-phase-build",
+      "--tp-phase-grow",
+      "--tp-phase-scale",
+      "--tp-phase-sell",
+      "--tp-phase-validate",
+      "--tp-radius-2xl",
+      "--tp-radius-3xl",
+      "--tp-radius-full",
+      "--tp-radius-lg",
+      "--tp-radius-md",
+      "--tp-radius-sm",
+      "--tp-radius-xl",
+      "--tp-ring",
+      "--tp-shadow-hq",
+      "--tp-shadow-hq-lg",
+      "--tp-shadow-trail",
+      "--tp-space-0",
+      "--tp-space-1",
+      "--tp-space-10",
+      "--tp-space-12",
+      "--tp-space-16",
+      "--tp-space-2",
+      "--tp-space-3",
+      "--tp-space-4",
+      "--tp-space-5",
+      "--tp-space-6",
+      "--tp-space-8",
+      "--tp-surface",
+      "--tp-surface-sunken",
+      "--tp-text",
+      "--tp-text-2xl",
+      "--tp-text-2xs",
+      "--tp-text-3xl",
+      "--tp-text-4xl",
+      "--tp-text-5xl",
+      "--tp-text-base",
+      "--tp-text-lg",
+      "--tp-text-muted",
+      "--tp-text-sm",
+      "--tp-text-soft",
+      "--tp-text-xl",
+      "--tp-text-xs",
+      "--tp-tracking-normal",
+      "--tp-tracking-tight",
+      "--tp-tracking-wide",
+      "--tp-tracking-wider",
+      "--tp-tracking-widest",
+      "--tp-trail-canvas",
+      "--tp-trail-mist",
+      "--tp-trail-surface",
+      "--tp-trail-text",
+      "--tp-trail-text-soft",
+      "--tp-verified",
+      "--tp-wax",
+      "--tp-weight-bold",
+      "--tp-weight-medium",
+      "--tp-weight-regular",
+      "--tp-weight-semibold",
+      "--trail-canvas",
+      "--trail-ink",
+      "--trail-ink-soft",
+      "--trail-mist",
+      "--trail-surface",
+      "--verified",
+      "--wax"
+    ],
+    "tokenKinds": {
+      "--hq-canvas": "color",
+      "--hq-surface": "color",
+      "--hq-surface-sunken": "color",
+      "--hq-border": "color",
+      "--hq-border-strong": "color",
+      "--hq-ink": "color",
+      "--hq-ink-soft": "color",
+      "--hq-ink-muted": "color",
+      "--trail-canvas": "color",
+      "--trail-surface": "color",
+      "--trail-ink": "color",
+      "--trail-ink-soft": "color",
+      "--trail-mist": "color",
+      "--phase-sell": "color",
+      "--phase-build": "color",
+      "--phase-validate": "color",
+      "--phase-grow": "color",
+      "--phase-scale": "color",
+      "--verified": "color",
+      "--awaiting": "color",
+      "--not-yet": "color",
+      "--wax": "color",
+      "--gold-leaf": "color",
+      "--tp-canvas": "color",
+      "--tp-surface": "color",
+      "--tp-surface-sunken": "color",
+      "--tp-border": "color",
+      "--tp-border-strong": "color",
+      "--tp-text": "font",
+      "--tp-text-soft": "font",
+      "--tp-text-muted": "font",
+      "--tp-ink": "color",
+      "--tp-trail-canvas": "color",
+      "--tp-trail-surface": "color",
+      "--tp-trail-text": "font",
+      "--tp-trail-text-soft": "font",
+      "--tp-trail-mist": "color",
+      "--tp-phase-sell": "color",
+      "--tp-phase-build": "color",
+      "--tp-phase-validate": "color",
+      "--tp-phase-grow": "color",
+      "--tp-phase-scale": "color",
+      "--tp-verified": "color",
+      "--tp-awaiting": "color",
+      "--tp-not-yet": "color",
+      "--tp-wax": "color",
+      "--tp-gold-leaf": "color",
+      "--tp-accent": "color",
+      "--tp-font-display": "font",
+      "--tp-font-sans": "font",
+      "--tp-font-mono": "font",
+      "--tp-text-2xs": "font",
+      "--tp-text-xs": "font",
+      "--tp-text-sm": "font",
+      "--tp-text-base": "font",
+      "--tp-text-lg": "font",
+      "--tp-text-xl": "font",
+      "--tp-text-2xl": "font",
+      "--tp-text-3xl": "font",
+      "--tp-text-4xl": "font",
+      "--tp-text-5xl": "font",
+      "--tp-weight-regular": "font",
+      "--tp-weight-medium": "font",
+      "--tp-weight-semibold": "font",
+      "--tp-weight-bold": "font",
+      "--tp-leading-none": "font",
+      "--tp-leading-tight": "font",
+      "--tp-leading-snug": "font",
+      "--tp-leading-normal": "font",
+      "--tp-leading-relaxed": "font",
+      "--tp-tracking-tight": "font",
+      "--tp-tracking-normal": "font",
+      "--tp-tracking-wide": "font",
+      "--tp-tracking-wider": "font",
+      "--tp-tracking-widest": "font",
+      "--tp-space-0": "spacing",
+      "--tp-space-1": "spacing",
+      "--tp-space-2": "spacing",
+      "--tp-space-3": "spacing",
+      "--tp-space-4": "spacing",
+      "--tp-space-5": "spacing",
+      "--tp-space-6": "spacing",
+      "--tp-space-8": "spacing",
+      "--tp-space-10": "spacing",
+      "--tp-space-12": "spacing",
+      "--tp-space-16": "spacing",
+      "--tp-radius-sm": "radius",
+      "--tp-radius-md": "radius",
+      "--radius": "radius",
+      "--tp-radius-lg": "radius",
+      "--tp-radius-xl": "radius",
+      "--tp-radius-2xl": "radius",
+      "--tp-radius-3xl": "radius",
+      "--tp-radius-full": "radius",
+      "--tp-border-width": "other",
+      "--tp-border-width-strong": "other",
+      "--tp-shadow-hq": "shadow",
+      "--tp-shadow-hq-lg": "shadow",
+      "--tp-shadow-trail": "shadow",
+      "--tp-ring": "color",
+      "--tp-dur-fast": "other",
+      "--tp-dur-base": "other",
+      "--tp-dur-slow": "other",
+      "--tp-dur-ceremony": "other",
+      "--tp-ease-out": "other",
+      "--tp-ease-in-out": "other",
+      "--tp-ease-spring": "other"
+    },
+    "fontFamilies": [
+      "Fraunces",
+      "Inter",
+      "Spline Sans Mono"
+    ]
+  }
+}

@@ -490,6 +490,6 @@ Implement this plan with `/ce:work docs/plans/2026-07-21-002-feat-the-path-t2-th
 - **Origin document:** `docs/brainstorms/2026-07-21-the-path-app-requirements.md`
 - **Previous plan:** `docs/plans/2026-07-21-001-feat-the-path-t1-core-loop-plan.md`
 - **Next plan:** `docs/plans/2026-07-21-003-feat-the-path-t3-completeness-plan.md`
-- Product behaviour: `artifacts/The Path/the-path-app-design-brief.md` §5, §6, §9.4, §12, §13
-- Visual contract: `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/README.md`
+- Product behaviour: `artifacts/First Profit/first-profit-app-design-brief.md` §5, §6, §9.4, §12, §13
+- Visual contract: `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/README.md`
 - Next 16 PWA guide: `node_modules/next/dist/docs/01-app/02-guides/progressive-web-apps.md` — note the `sub` angle-bracket error in its sample

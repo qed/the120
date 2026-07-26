@@ -58,7 +58,7 @@ The 120 gives you what you don't get in school:
 
 The ability to build something cool and learn how to do it.
 
-The Path:
+First Profit:
 Sell -> Build -> Validate -> Grow -> Scale
 
 5 criteria to pass each phase, and 5 sub-criteria to work on at home for each.
@@ -122,7 +122,7 @@ Your business:
 
 The 120 gives you what you don't get in school: the ability to build something cool and learn how to do it.
 
-The Path: Sell -> Build -> Validate -> Grow -> Scale. Five criteria to pass each phase, and five sub-criteria to work on at home for each.
+First Profit: Sell -> Build -> Validate -> Grow -> Scale. Five criteria to pass each phase, and five sub-criteria to work on at home for each.
 
 What you don't get in school is the muscle of creating, on your own, something that lives in the real world. Getting solid in math means you can run the numbers so your thing, whether it's an NIL presence or an art show, works and is healthy.
 
@@ -154,7 +154,7 @@ The year is 20 in-person workshops starting Saturday, September 19, 2026. Kids b
 ## Notes for Peter
 - **What I updated to match your edits:** rewrote the plain-text fallback to mirror your new body; changed the subject block to a single subject (dropped the old A/B/C); pointed the Setup "Links" row at the new **Join The 120** URL (`the120.school`); left your **preheader and body exactly as you saved them**.
 - **Your body still uses `[bullet]` markers** — say the word and I'll convert them to real bullets so it's drop-in HTML-ready. Left as-is for now since it's your copy.
-- **New facts you introduced here — worth reconciling across the other assets** so nothing contradicts: **two age cohorts (8–13 and 14–17)**, a **~5-minute application** (the one-pager/site still imply one 8–17 range and a longer dossier), **2X–4X math** with the *Catch Up / Reach Ahead / Get Solid* framing, and **"The Path"** (Sell → Build → Validate → Grow → Scale). The one-pager doesn't mention the two cohorts or The Path — flag if you want those added there too.
+- **New facts you introduced here — worth reconciling across the other assets** so nothing contradicts: **two age cohorts (8–13 and 14–17)**, a **~5-minute application** (the one-pager/site still imply one 8–17 range and a longer dossier), **2X–4X math** with the *Catch Up / Reach Ahead / Get Solid* framing, and **"First Profit"** (Sell → Build → Validate → Grow → Scale). The one-pager doesn't mention the two cohorts or First Profit — flag if you want those added there too.
 - **Voice check (optional):** the email greets the parent (`{{parent_first}}`) but the "As a child, you:" section speaks to the kid. Intentional? Easy to switch to "Your child will:" for one consistent addressee if you'd rather.
 - **CASL:** fires only to parents who created an account themselves — express opt-in, compliant. Keep the unsubscribe/preferences footer Resend adds.
 - **Sender:** defaulting to `peter@` (higher trust for a founding cohort) vs. `admissions@` (scales later) — flag to switch.

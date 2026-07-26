@@ -20,7 +20,7 @@ describe("generated module tracks the parser", () => {
   const source = readFileSync(
     path.resolve(
       process.cwd(),
-      "artifacts/The Path/the-path-home-study-curriculum-brief.md"
+      "artifacts/First Profit/first-profit-home-study-curriculum-brief.md"
     ),
     "utf8"
   );

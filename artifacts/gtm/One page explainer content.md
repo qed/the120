@@ -18,7 +18,7 @@ Toronto's most motivated and engaged kids — athletes, founders, makers, schola
 
 > **What you'll actually do this year:** 20 weekend workshops to build a real business, and get solid with math to be able to run the numbers.
 
-**The Path — the arc of the year:** Sell → Build → Validate → Grow → Scale. Five phases; five criteria to pass each.
+**First Profit — the arc of the year:** Sell → Build → Validate → Grow → Scale. Five phases; five criteria to pass each.
 
 ---
 
@@ -96,11 +96,11 @@ Three Toronto families on the learning platform behind The 120's academics, in t
 2. **Throughline:** now **business-building + math** (was: one year-long project + broad multi-subject acceleration).
 3. **Hero line** updated to "Build your network. Build what you love into a real business. Get solid with the math to run it." — plus a connector line naming each group's business (Athletes → NIL, Founders → company, Makers → studio, Scholars → research lab, Givers → cause) so it lands for every archetype, not just entrepreneurs. *(Revert to the old "Build a network. Top 1% academics. Super interesting projects." if you'd rather.)*
 4. **"Three things"** #2 and #3, the cost-table "Includes," and "How it works" #3 all reworded to the workshops + business + math frame.
-5. **Added** the two age cohorts (8–13 / 14–17) and **The Path** (Sell → Build → Validate → Grow → Scale), and named the Nov 7 Demo Day in the workshops section.
+5. **Added** the two age cohorts (8–13 / 14–17) and **First Profit** (Sell → Build → Validate → Grow → Scale), and named the Nov 7 Demo Day in the workshops section.
 
 **Reframe reconciliation — status (as of 2026-07-20):**
 - **Nov 7 anchor = the first Demo Day.** Confirmed from the live /2026-27 page: the Nov 7 weekend is a Demo Day Workshop where kids present their businesses on stage for the cohort and parents. This is what the ambassador badge / first-demo-slot now point at.
 - **Welcome email #1** — updated to the workshops + Demo Day framing. ✓
 - **Ambassador kit** — updated: "Fall Intensive" → "Nov 7 Demo Day." ✓
-- **This one-pager** — added the two age cohorts and The Path. ✓
+- **This one-pager** — added the two age cohorts and First Profit. ✓
 - **The 8-week GTM plan** — still to update with the workshops/Demo Day reframe + Week 2 adjustments (queued).

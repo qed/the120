@@ -30,7 +30,7 @@ const VERSION_ID = process.argv[2] ?? "2026-27";
 
 const SOURCE_PATH = path.resolve(
   process.cwd(),
-  "artifacts/The Path/the-path-home-study-curriculum-brief.md"
+  "artifacts/First Profit/first-profit-home-study-curriculum-brief.md"
 );
 
 const OUT_DIR = path.resolve(process.cwd(), "app/fp/content/generated");
@@ -61,7 +61,7 @@ function main() {
   const banner = `/**
  * GENERATED — do not edit by hand.
  *
- * Source: artifacts/The Path/the-path-home-study-curriculum-brief.md
+ * Source: artifacts/First Profit/first-profit-home-study-curriculum-brief.md
  * Built by: scripts/build-path-content.ts
  * Version: ${VERSION_ID} (${manifest.label})
  * Totals: ${manifest.phases} phases, ${manifest.criteria} criteria, ${manifest.tasks} tasks (${manifest.tasksPerPhase.join("/")})

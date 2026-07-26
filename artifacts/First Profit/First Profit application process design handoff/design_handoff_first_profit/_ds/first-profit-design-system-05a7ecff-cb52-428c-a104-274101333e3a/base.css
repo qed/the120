@@ -1,0 +1,50 @@
+/* THE PATH — BASE / FOUNDATIONS
+   A light reset plus the document defaults. Body is Inter on warm paper with
+   warm ink; headings are left to components (Fraunces is applied deliberately,
+   never globally). Links default to the ink, hover to terracotta (phase Sell). */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--tp-font-sans);
+  font-size: var(--tp-text-base);
+  line-height: var(--tp-leading-normal);
+  color: var(--tp-text);
+  background-color: var(--tp-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* On the Trail skin, the page sits on parchment */
+body.tp-skin-trail {
+  background-color: var(--tp-trail-canvas);
+  color: var(--tp-trail-text);
+}
+
+a { color: var(--tp-ink); text-decoration: none; text-underline-offset: 2px; transition: color var(--tp-dur-fast) var(--tp-ease-out); }
+a:hover { color: var(--tp-phase-sell); text-decoration: underline; }
+
+::selection { background: hsl(var(--phase-sell) / 0.18); color: hsl(var(--hq-ink)); }
+
+:where(h1, h2, h3, h4, h5, h6) { margin: 0; font-weight: var(--tp-weight-semibold); line-height: var(--tp-leading-tight); }
+:where(p) { margin: 0; text-wrap: pretty; }
+:where(img, svg) { display: block; max-width: 100%; }
+:where(button) { font: inherit; }
+
+/* ---- Type utilities ---- */
+.tp-display { font-family: var(--tp-font-display); font-optical-sizing: auto; }
+.tp-sans { font-family: var(--tp-font-sans); }
+.tp-mono { font-family: var(--tp-font-mono); font-variant-numeric: tabular-nums; }
+.tp-eyebrow {
+  font-family: var(--tp-font-sans);
+  font-size: var(--tp-text-xs);
+  font-weight: var(--tp-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tp-tracking-wider);
+  color: var(--tp-text-muted);
+}
+.tp-num { font-family: var(--tp-font-mono); font-variant-numeric: tabular-nums; }

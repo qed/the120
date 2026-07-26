@@ -7,19 +7,19 @@ topic: the-path-app
 
 ## Problem Frame
 
-The Path is The 120's entrepreneurship curriculum: 5 phases, 25 pass criteria, 125 unit tasks, every one of them done in the real world and verified by a real adult. Today that curriculum exists only as prose — `artifacts/The Path/the-path-home-study-curriculum-brief.md` — and as a marketing section on the program page (`app/2026-27/sections/ThePath.tsx`). A family running it has no way to see where their child is, no place to file the evidence that proves a task happened, no verification trail, and no moment of celebration when a criterion falls. The record of a year's work lives in a binder or a Drive folder, or nowhere.
+The Path is The 120's entrepreneurship curriculum: 5 phases, 25 pass criteria, 125 unit tasks, every one of them done in the real world and verified by a real adult. Today that curriculum exists only as prose — `artifacts/First Profit/first-profit-home-study-curriculum-brief.md` — and as a marketing section on the program page (`app/2026-27/sections/ThePath.tsx`). A family running it has no way to see where their child is, no place to file the evidence that proves a task happened, no verification trail, and no moment of celebration when a criterion falls. The record of a year's work lives in a binder or a Drive folder, or nowhere.
 
-This document specifies the app that fixes that, at `/path`. It does **not** restate the product design — `artifacts/The Path/the-path-app-design-brief.md` is the source of truth for behavior and tone, and `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/` is the visual contract. This document is the **delta layer**: the decisions made on 2026-07-21 that resolve the brief's open items, amend its platform posture, and draw the boundary of this build.
+This document specifies the app that fixes that, at `/path`. It does **not** restate the product design — `artifacts/First Profit/first-profit-app-design-brief.md` is the source of truth for behavior and tone, and `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/` is the visual contract. This document is the **delta layer**: the decisions made on 2026-07-21 that resolve the brief's open items, amend its platform posture, and draw the boundary of this build.
 
 ### Source-of-truth chain
 
 | Layer | Authority | Location |
 |---|---|---|
-| Content — 125 tasks, Done-when lines, band variants | Curriculum brief | `artifacts/The Path/the-path-home-study-curriculum-brief.md` |
+| Content — 125 tasks, Done-when lines, band variants | Curriculum brief | `artifacts/First Profit/first-profit-home-study-curriculum-brief.md` |
 | Content — 25 pass criteria, both copy registers | Typed and unit-tested in-repo | `app/2026-27/data.ts`, `app/2026-27/path-criteria.ts` |
-| Behavior — states, reviews, roles, AI rules | App design brief Part Two | `artifacts/The Path/the-path-app-design-brief.md` |
+| Behavior — states, reviews, roles, AI rules | App design brief Part Two | `artifacts/First Profit/first-profit-app-design-brief.md` |
 | Tone and register | App design brief Part One | same |
-| Visual system, component contracts, tokens, copy | Design handoff | `artifacts/The Path/The Path design handoff/design_handoff_the_path_app/` |
+| Visual system, component contracts, tokens, copy | Design handoff | `artifacts/First Profit/First Profit design handoff/design_handoff_first_profit_app/` |
 | Platform, identity, scope | **This document** | here |
 
 Where this document and the app design brief conflict, **this document wins** — it was written later and with the codebase in hand.

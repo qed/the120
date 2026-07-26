@@ -1,0 +1,42 @@
+/* THE PATH — LAYOUT TOKENS: spacing, radius, elevation, borders
+   Spacing is a 4px grid. Radius is generous and friendly (the base --radius
+   from the app is 0.75rem). Elevation is warm-tinted, never neutral-gray:
+   HQ shadows are soft and low; Trail shadows carry a warm "paper lift" plus a
+   hard 2px offset that reads like a printed sticker. */
+
+:root {
+  /* spacing — 4px grid */
+  --tp-space-0: 0;
+  --tp-space-1: 0.25rem;  /* 4 */
+  --tp-space-2: 0.5rem;   /* 8 */
+  --tp-space-3: 0.75rem;  /* 12 */
+  --tp-space-4: 1rem;     /* 16 */
+  --tp-space-5: 1.25rem;  /* 20 */
+  --tp-space-6: 1.5rem;   /* 24 */
+  --tp-space-8: 2rem;     /* 32 */
+  --tp-space-10: 2.5rem;  /* 40 */
+  --tp-space-12: 3rem;    /* 48 */
+  --tp-space-16: 4rem;    /* 64 */
+
+  /* radius */
+  --tp-radius-sm: 0.375rem;  /* 6 — chips, small marks */
+  --tp-radius-md: 0.5rem;    /* 8 — buttons, inputs */
+  --radius: 0.75rem;         /* 12 — the app base radius */
+  --tp-radius-lg: 0.75rem;   /* 12 — cards */
+  --tp-radius-xl: 1rem;      /* 16 — panels */
+  --tp-radius-2xl: 1.25rem;  /* 20 — Trail cards, celebration */
+  --tp-radius-3xl: 1.5rem;   /* 24 */
+  --tp-radius-full: 9999px;  /* pills, avatars, seals */
+
+  /* borders */
+  --tp-border-width: 1px;          /* @kind other */
+  --tp-border-width-strong: 2px;   /* @kind other */
+
+  /* elevation — HQ (cool-neutral warm-tinted, soft) */
+  --tp-shadow-hq: 0 1px 2px rgba(30, 24, 16, 0.04), 0 1px 3px rgba(30, 24, 16, 0.06);
+  --tp-shadow-hq-lg: 0 4px 12px rgba(30, 24, 16, 0.06), 0 12px 32px rgba(30, 24, 16, 0.08);
+  /* elevation — Trail (warm paper lift + hard offset) */
+  --tp-shadow-trail: 0 2px 0 rgba(120, 80, 40, 0.12), 0 8px 24px rgba(120, 80, 40, 0.14);
+  /* focus ring */
+  --tp-ring: 0 0 0 3px hsl(var(--hq-ink) / 0.18);
+}

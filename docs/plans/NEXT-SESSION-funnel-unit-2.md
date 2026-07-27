@@ -20,12 +20,12 @@ two lanes and it is short.
   `app/fp/lib/fw-access-rules.ts` (typed verdicts that never throw)
 
 ## State
-`main` is at `20079c8`. **Unit 1 is merged-or-pending as PR #66** (branch
-`feat/funnel-unit-1`) — if it is not yet merged, ask Peter before branching, and branch
-from it rather than main so you inherit the schema mirrors.
+**Unit 1 is merged: PR #66, squash-merged to `main`.** Run `git fetch origin` and branch
+`feat/funnel-unit-2` from `origin/main` — it carries the Unit 1 schema mirrors, the
+funnel rules module, and this prompt.
 
-- **106 files / 2871 tests**, `tsc` clean, `next build` clean, measured on
-  `feat/funnel-unit-1` at commit `2975656`.
+- **106 files / 2871 tests**, `tsc` clean, `next build` clean, measured on the Unit 1
+  branch at the commit PR #66 squashed.
 - The Unit 1 schema is LIVE in production: `children.applicant_state` (all 9 children
   NULL), `projects` (0 rows, RLS on, zero policies), the R2 and R52a partial unique
   indexes, and `families.entry_source` / `consent_text` / `consent_version` (all NULL).

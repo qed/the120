@@ -345,6 +345,41 @@ the default technique. (The inert-defensive-branch doc covers the third case:
 a branch whose output equals its fallback has no signature even behaviorally,
 and needs a wiring assertion instead.)
 
+## ROUND 6 (2026-07-27, First Profit funnel Unit 3) — cut the seam at the operation, not the client
+
+ROUND 5's advice ("retire the scan with an injection seam") is right and was
+immediately over-applied. U3's first cut typed the seam as **the Supabase
+client**: a ~65-line structural type mirroring PostgREST's chained builders
+(`.from().select().eq().eq().gte()`, `.update().eq().is().select()`, …). It
+type-checked, and it was worse than useless at the boundary it existed to
+guard — fitting the real client to it required `as unknown as` on both
+`realDeps` and the test fake, which turns the checker **off**. A supabase-js
+version bump could rename a method and nothing would fail to compile.
+
+The correction: **one narrow function per database operation** —
+`loadToken`, `claimToken`, `unclaimToken`, `recordRateEvent`,
+`findParentIdByEmail`, `mintSessionFor` — each taking and returning plain
+data. Production passes the real client with no cast (every call is checked);
+tests pass literal-returning stubs instead of a hand-built chainable object.
+The test file got shorter, the fake got obvious, and the casts vanished.
+
+The rule: **a seam should be typed in the vocabulary of your domain, not of
+your dependency.** If fitting the real implementation to your seam needs a
+cast, the seam is drawn at the wrong altitude — you have re-declared someone
+else's API surface and taken responsibility for keeping it accurate by hand.
+
+Two corollaries from the same unit:
+
+- **Extraction moves a guard.** Pulling `generateLink` into the new store
+  module left `assertNoAuthMailToFwStudent` behind in the caller;
+  `no-auth-mail-guard.test.ts` reddened on a pure refactor. It was right: the
+  guard now sits beside the call, with the caller's kept as defence in depth.
+  A structural enforcement test earns its keep precisely here — a behavioural
+  test would have stayed green, because the behaviour was still correct.
+- **Bracket notation, again.** ROUND 4's lesson applies to absence scans over
+  *any* member access: the page's read-only assertions now reject both
+  `.generateLink` and `["generateLink"]`.
+
 ## Related
 
 - `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-clause-scope-and-comment-stripping-2026-07-23.md` — prior art on comment-stripping, and the rule "apply it uniformly, or not at all". Cite it rather than re-deriving it.

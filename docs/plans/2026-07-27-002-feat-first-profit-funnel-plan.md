@@ -435,7 +435,38 @@ under the anon key with their own session — proving RLS is doing the work.
 
 ---
 
-- [ ] **Unit 3: Resume tokens and the return path**
+- [x] **Unit 3: Resume tokens and the return path** *(landed 2026-07-27)*
+
+  **What landed:** migration `20260805150000_funnel_resume_tokens.sql` (applied,
+  verified, re-run clean, constraints probed in a rolled-back DO block: duplicate
+  token_hash refused, CAS claim2=0) carrying BOTH `funnel_resume_tokens` and
+  `funnel_rate_events` — the DB-backed limiter R7d requires, authored here because
+  U6 reuses it and would otherwise need a second production migration. RLS on,
+  zero policies, both. `resume-rules.ts` (pure verdicts, insert-then-count math,
+  `isFunnelProvisioned`), `resume-store.ts` (**operation-level** persistence seam +
+  the exported `checkFunnelRateLimit` U6 reuses), `resume-core.ts` (sequencing),
+  thin `"use server"` wrappers, `/resume/[token]` read-only GET + POST-redeeming
+  form. Session minted by `admin.generateLink` (never mailed) + in-process
+  `verifyOtp` — NOT password rotation, which would destroy a password family's
+  known credential. `account.ts` now stamps `app_metadata.funnel` so the matrix's
+  `hasPassword` bit is read, not guessed.
+
+  **Review (8 agents) fixed:** the constant response leaked through **timing**
+  (awaited Resend round-trip only on the known-address path → now deferred) and
+  through **shape** (an unhandled throw is a different response → try/catch
+  shells); the per-IP backstop was **starved** (per-target denial returned before
+  the IP strike recorded → both buckets now record before either verdict); a
+  mint failure **burned the token** with no session (→ the claim is handed back);
+  infra failures now release strikes; the client-level DI seam needed
+  `as unknown as` on both sides (→ operation-level, casts gone); dead-end states
+  gained a real link out. `no-auth-mail-guard` reddened on the refactor because
+  extraction moved `generateLink` away from its guard — fixed at the call site.
+  Suite: **113 files / 3009 tests** after rebasing onto Lane A (own delta +4 files / +60 tests), `tsc` / build / lint clean.
+
+  **Carried forward:** `funnel_rate_events` prunes opportunistically on the
+  deferred path; if funnel volume outgrows that, U17's retention work owns a
+  scheduled sweep. A leaked *expired* token remains resendable to its own bound
+  address (rate-limited, never redirectable) — acceptable, documented.
 
 **Goal:** A family that leaves can come back, on any device, without a password — and the
 link is safe if forwarded, scanned, or leaked.

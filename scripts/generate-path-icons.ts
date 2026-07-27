@@ -14,7 +14,7 @@
  * Outputs (committed):
  *   app/fp/apple-icon.png   — apple-touch-icon (iOS wants exactly 180×180).
  *     The FILE CONVENTION in the /fp segment, so it replaces the root
- *     "120"-badge apple-icon.tsx for /fp pages only; its URL
+ *     "120"-badge apple-icon.png for /fp pages only; its URL
  *     (/fp/apple-icon.png) is allowlisted in proxy-rules so an
  *     unauthenticated Add-to-Home-Screen can fetch it.
  *   public/path-icon-192.png  — manifest icon

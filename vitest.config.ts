@@ -16,6 +16,11 @@ export default defineConfig({
       // `npm run test` stays green (docs/solutions/test-failures/
       // vitest-include-allowlist-new-test-dirs-silently-never-run-2026-07-18.md).
       "app/fp/**/__tests__/**/*.test.{ts,tsx}",
+      // The staff hub (Staff Front Door Unit 2). Same rule, same commit as the
+      // first test under it — and from this unit on, enforced rather than
+      // remembered: app/lib/__tests__/vitest-include-coverage.test.ts fails if
+      // any test file in the repo is left outside this list.
+      "app/staff/**/__tests__/**/*.test.{ts,tsx}",
     ],
   },
   resolve: {

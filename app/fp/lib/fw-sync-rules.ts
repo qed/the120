@@ -542,8 +542,15 @@ export function fwEntryBlocksSignOutClear(raw: unknown, actorUserId: string): bo
  *
  * Derived from the SAME classification the verdict and the clear fold over, so the
  * chip can never say "nothing queued" on a device whose sign-out is about to refuse.
- * `summarizeFwQueue` is a different thing and stays: it is the `/fp/fw` indicator's
- * own-captures count, already scoped by the caller.
+ *
+ * ⚠️ NOT INTERCHANGEABLE WITH `summarizeFwQueue`, despite the names. That one is the
+ * `/fp/fw` indicator's own-captures count over an ALREADY-SCOPED list, and its
+ * `attention` includes this account's own server-rejected (blocked) entries — things a
+ * guide should read and dismiss. This one takes the RAW queue, scopes it itself, and
+ * its `attentionCount` is quarantined records ONLY: entries whose shape this build
+ * cannot drain. Blocked entries are deliberately excluded here because they do not
+ * block a clear and the bar is not the surface that dismisses them. Two different
+ * questions; do not fold them together.
  */
 export type FwDeviceQueueState = {
   /** This account's own captures still to send. */
@@ -915,17 +922,31 @@ export function decideFwCacheOwnerAction(input: {
   actorUserId: string;
   /** True only where FW residue is actually created — the `/fp/fw` surfaces. */
   surfaceCreatesResidue: boolean;
+  /**
+   * Does this device hold FW residue REGARDLESS of what the owner key says?
+   * `null` where it could not be determined. See the unattributed-residue branch.
+   */
+  residuePresent: boolean | null;
 }): FwCacheOwnerAction {
   if (input.prior === input.actorUserId) return "none";
-  if (input.prior === null) return input.surfaceCreatesResidue ? "adopt" : "none";
-  return "reconcile";
+  if (input.prior !== null) return "reconcile";
+
+  // UNATTRIBUTED RESIDUE (B1's shape, one function over). A null owner key is NOT
+  // proof of a clean device: localStorage and IndexedDB evict independently, so
+  // "nobody has claimed this device" and "a prior guide's roster cache and authed
+  // shell are still here, but the key naming them was evicted" look identical. The
+  // old code adopted in both cases, which silently handed the incoming guide the
+  // previous one's cached authenticated HTML — the exact leak the reconcile exists to
+  // close. Anything other than a confident "no residue" reconciles.
+  if (input.residuePresent !== false) return "reconcile";
+  return input.surfaceCreatesResidue ? "adopt" : "none";
 }
 
 /** The browser seams the handover reconcile needs — same shape and same reasons as
  *  `FwSignOutPorts`, plus the owner key itself. */
 export type FwReconcilePorts = Pick<
   FwSignOutPorts,
-  "readQueue" | "isOnline" | "drain" | "clear" | "withDrainLock"
+  "readEvidence" | "readQueue" | "isOnline" | "drain" | "clear" | "withDrainLock"
 > & {
   /** The persisted owner, or `undefined` when the read itself threw. */
   readOwner: () => string | null | undefined;
@@ -983,13 +1004,14 @@ export async function runFwCacheOwnerReconcile(input: {
 }): Promise<FwReconcileOutcome> {
   const { actorUserId, ports } = input;
   const prior = ports.readOwner();
-  // A localStorage read that threw is treated as "no persisted owner", exactly as it
-  // was before: with no prior owner there is no other account's residue to attribute,
-  // and a device whose storage cannot be read cannot be reconciled against anything.
+  // A localStorage read that threw is carried as "no persisted owner" — but that is
+  // now only half the question, because unattributed residue reconciles too.
+  const evidence = await ports.readEvidence();
   const action = decideFwCacheOwnerAction({
     prior: prior === undefined ? null : prior,
     actorUserId,
     surfaceCreatesResidue: input.surfaceCreatesResidue,
+    residuePresent: evidence.kind === "unknown" ? null : evidence.queueDbExists,
   });
   if (action === "none") return { kind: "none" };
   if (action === "adopt") {
@@ -1026,11 +1048,34 @@ export async function runFwCacheOwnerReconcile(input: {
       (raw) => fwEntryBlocksSignOutClear(raw, actorUserId),
       "handover"
     );
-    // A THROWN clear outranks a deliberately preserved queue: both leave the key
-    // un-advanced, but only one of them is a fault, and collapsing them would put this
-    // right back where B2 started — a failure indistinguishable from a policy.
+    // A THROWN clear outranks a deliberately preserved queue: only one of them is a
+    // fault, and collapsing them would put this right back where B2 started — a
+    // failure indistinguishable from a policy. The FAULT does not advance the key, so
+    // the next mount retries it.
     if (!result.rosterCleared || !result.shellCleared) return { kind: "clear_failed" };
-    if (!result.queueCleared) return { kind: "queue_preserved", preservedCount };
+
+    // THE KEY DESCRIBES THE CACHES, NOT THE QUEUE — so it advances as soon as the
+    // caches are this actor's, even with a foreign queue preserved.
+    //
+    // The plan said to hold the key back here "so the next mount retries". That does
+    // not survive contact with what a retry could achieve: the preserved entries are
+    // `foreignUndrained`, the drain scopes to the signed-in actor, and no session but
+    // the departed guide's can ever ship them. So the retry accomplishes nothing —
+    // while an adversarial reviewer traced what it DOES do. A guide who leaves the
+    // event with one unsent tap pins the key mismatched permanently, and because a
+    // handover clears the caches unconditionally, every subsequent mount re-wipes the
+    // CURRENT guide's roster cache: on every reload, including the reloads a guide
+    // does to fight the flaky wifi that offline cache exists to survive.
+    //
+    // Nothing is lost by advancing. The queue is self-describing — every entry carries
+    // its own `actorUserId` — so `classifyFwSignOutQueue` still sees the foreign work
+    // and sign-out still refuses with `foreign_queue`, which is the surface that names
+    // the guide who has to come back for it. The key was only ever about the roster
+    // and shell caches, and those genuinely did go.
+    if (!result.queueCleared) {
+      ports.writeOwner(actorUserId);
+      return { kind: "queue_preserved", preservedCount };
+    }
     ports.writeOwner(actorUserId);
     return { kind: "reconciled" };
   });
@@ -1107,6 +1152,14 @@ export function fwSignOutOutcomeCopy(
       return "Your check-ins sent, but this device still holds Founders Weekend data and you're still signed in. Try again — if it keeps failing, don't hand this device over until someone clears the browser's site data.";
     case "refused":
       return fwSignOutRefusalCopy(outcome.verdict.reason, outcome.verdict.queuedCount, surface);
+    default: {
+      // An EXPLICIT never, not the `default`-less TS2366 tripwire this docblock used
+      // to credit. That tripwire is real but it is a property of `strictNullChecks`,
+      // so it evaporates under a flag change; this fails whatever the config says, and
+      // matches `applyFwDrainOutcome`'s existing shape in this same file.
+      const _exhaustive: never = outcome;
+      return _exhaustive;
+    }
   }
 }
 

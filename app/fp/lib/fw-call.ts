@@ -46,6 +46,21 @@ export const FW_CALL_TIMEOUT_MS = 8_000;
 export const FW_ACTION_TIMEOUT_MS = 30_000;
 
 /**
+ * The cap on a LOCAL browser-storage probe — `indexedDB.databases()`, and the raw
+ * queue read the sign-out sequence takes inside the drain lock.
+ *
+ * Two seconds, an order of magnitude below the network budgets, because nothing here
+ * crosses a network: these are same-process storage calls that either answer almost
+ * immediately or are wedged. Their hazard is not slowness, it is never settling —
+ * `databases()` is documented to hang rather than reject on some engines, and the
+ * queue read runs while `fw-offline-drain` is HELD, so an unbounded wait there blocks
+ * every later acquisition in every tab (see `FW_ACTION_TIMEOUT_MS` above for why that
+ * is the failure mode this app cannot afford). A timeout is carried out as "could not
+ * look", which every caller already fails closed on.
+ */
+export const FW_STORAGE_PROBE_TIMEOUT_MS = 2_000;
+
+/**
  * Race a Supabase call against the clock.
  *
  * Returns a DISCRIMINATED result rather than a fabricated error object: the

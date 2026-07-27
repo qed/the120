@@ -29,6 +29,7 @@
  * unserialized (they do not mutate).
  */
 
+import { FW_STORAGE_PROBE_TIMEOUT_MS, withFwTimeout } from "./fw-call";
 import {
   FW_QUEUE_DB_NAME,
   FW_QUEUE_DB_VERSION,
@@ -53,15 +54,17 @@ export function isFwQueueSupported(): boolean {
  * database — half of the sign-out evidence gate in `hasFwDeviceEvidence`.
  *
  * `indexedDB.open` creates the database as a side effect, so "is the queue empty?"
- * cannot be asked without first answering "was there ever a queue?". The signal used
- * is this in-document flag plus the persisted `fw.cacheOwner` key — a page that
- * captured, drained or cached a roster has necessarily set it.
+ * cannot be asked without first answering "was there ever a queue?". This flag plus
+ * the persisted `fw.cacheOwner` key were the original answer — a page that captured,
+ * drained or cached a roster has necessarily set one of them.
  *
- * NOT `indexedDB.databases()`. An earlier version of this comment justified that by
- * saying Safari does not implement it; that was true of pre-2024 Safari but is no
- * longer, so do not repeat it as fact. The reasons that still hold: it is async, and
- * it answers "does a database exist" rather than "did this actor ever use FW" — which
- * is the question the gate is actually asking.
+ * (An earlier version of this comment ended "NOT `indexedDB.databases()`", on the
+ * grounds that it is async and answers "does a database exist" rather than "did this
+ * actor ever use FW". Unit 3 established that "does a database exist" is in fact the
+ * better question — a database that does not exist holds no queue, and opening it is
+ * exactly the harm — so `fwQueueDbExists()` below now uses it. The comment is
+ * rewritten rather than deleted because it is the second false claim this docblock
+ * has carried about that API.)
  *
  * ⚠️ THIS FLAG IS NOT SOUND ON ITS OWN (B1). `queueDbOpened` is per-DOCUMENT and
  * false on every fresh load, so on its own the gate rested entirely on a localStorage
@@ -89,16 +92,31 @@ export function hasFwQueueDbOpened(): boolean {
  * what "I could not look" means in one tested place.
  *
  * Deliberately does NOT set `queueDbOpened`: it opens nothing.
+ *
+ * BOUNDED. `databases()` is documented to HANG rather than reject on some engines and
+ * storage states, and this is awaited by the sign-out flow before it even reaches the
+ * drain lock — an unbounded wait here is an indefinitely disabled "Checking…" button
+ * with a reload as the only escape, on a shared iPad at a live event. The heuristic
+ * this replaced was synchronous and could not hang, so bounding it is what keeps the
+ * swap a strict improvement. A timeout is disposed of exactly as a rejection is:
+ * `null`, meaning "could not look", which the pure gate then fails closed on.
+ *
+ * `lib.dom.d.ts` declares `databases()` as a REQUIRED method of `IDBFactory`, so no
+ * cast is needed to call it. The runtime `typeof` check stays anyway, because the
+ * ambient type is a claim about the standard rather than about the browser in front of
+ * us, and pre-2024 engines genuinely lack it.
  */
 export async function fwQueueDbExists(): Promise<boolean | null> {
   if (typeof indexedDB === "undefined") return null;
-  const factory = indexedDB as IDBFactory & {
-    databases?: () => Promise<{ name?: string }[]>;
-  };
-  if (typeof factory.databases !== "function") return null;
+  if (typeof indexedDB.databases !== "function") return null;
   try {
-    const dbs = await factory.databases();
-    return dbs.some((db) => db.name === FW_QUEUE_DB_NAME);
+    const raced = await withFwTimeout(
+      indexedDB.databases(),
+      "indexedDB.databases",
+      FW_STORAGE_PROBE_TIMEOUT_MS
+    );
+    if (raced.timedOut) return null;
+    return raced.value.some((db) => db.name === FW_QUEUE_DB_NAME);
   } catch {
     return null;
   }

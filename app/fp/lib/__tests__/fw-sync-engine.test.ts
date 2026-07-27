@@ -1157,7 +1157,12 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
   });
 
   it("an unclaimed key is ADOPTED on an FW surface — nothing is destroyed", async () => {
-    const dev = device({ owner: null, store: [entry("checkmark")] });
+    const dev = device({
+      owner: null,
+      store: [entry("checkmark")],
+      // A genuinely clean device: no FW database, so nothing unattributed can be here.
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
+    });
     expect(await reconcile(dev)).toEqual({ kind: "adopted" });
     expect(dev.owner).toBe(GUIDE);
     expect(dev.store).toHaveLength(1);
@@ -1166,7 +1171,10 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
   it("an unclaimed key is NOT claimed from /crm or /staff", async () => {
     // The key feeds `hasFwDeviceEvidence`'s legacy branch. A bar that wrote it on a
     // browser which has never run FW would manufacture the evidence it later trusts.
-    const dev = device({ owner: null });
+    const dev = device({
+      owner: null,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
+    });
     expect(await reconcile(dev, makeFakeLockManager(), { surfaceCreatesResidue: false })).toEqual({
       kind: "none",
     });
@@ -1191,10 +1199,32 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     // and preserving them protects nobody.
     expect(dev.rosterCached).toBe(false);
     expect(dev.shellCached).toBe(false);
-    // The key is NOT advanced, so the device stays visibly un-reconciled and the next
-    // mount tries again rather than treating the state as settled.
-    expect(dev.owner).toBe(OTHER_GUIDE);
-    expect(dev.ownerWrites).toBe(0);
+    // The key DOES advance, because the key describes the CACHES and those genuinely
+    // went. Holding it back would re-run this destructive clear on every later mount
+    // for as long as the departed guide's queue sits there — which is forever, since
+    // no session but theirs can drain it. See the regression test below.
+    expect(dev.owner).toBe(GUIDE);
+  });
+
+  it("B2: a preserved foreign queue does NOT re-wipe the current guide's caches on every mount", async () => {
+    // The adversarial finding. Guide B leaves the event with one unsent tap that can
+    // never drain (the drain scopes to the signed-in actor). Guide A takes the device.
+    // If the owner key stayed at B, every reload — including the reloads A does to
+    // fight the flaky wifi their offline roster cache exists to survive — would run a
+    // fresh handover clear and destroy A's OWN roster cache, forever, for no gain.
+    const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({ owner: OTHER_GUIDE, store: [theirs], online: false });
+    await reconcile(dev);
+
+    // A works, and rebuilds their own offline caches.
+    dev.rosterCached = true;
+    dev.shellCached = true;
+
+    // A reloads. Same still-stuck foreign entry, same device.
+    expect(await reconcile(dev)).toEqual({ kind: "none" });
+    expect(dev.rosterCached).toBe(true); // A's roster cache SURVIVES
+    expect(dev.shellCached).toBe(true);
+    expect(dev.store).toEqual([theirs]); // …and B's capture still survives too
   });
 
   it("B2: a handover WITH connectivity drains this session's own entries, then clears", async () => {
@@ -1220,6 +1250,8 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     // permanent and invisible.
     const dev = device({ owner: OTHER_GUIDE, rosterClearFails: true });
     expect(await reconcile(dev)).toEqual({ kind: "clear_failed" });
+    // A FAULT still holds the key back — that is the half of B2 that stops a failure
+    // being masked. Only a deliberately preserved queue advances it.
     expect(dev.owner).toBe(OTHER_GUIDE);
     expect(dev.ownerWrites).toBe(0);
 
@@ -1280,9 +1312,38 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     expect(dev.store).toEqual([theirs]);
   });
 
-  it("a localStorage read that THREW is treated as no prior owner — nothing is destroyed", async () => {
-    const dev = device({ owner: undefined, store: [entry("checkmark")] });
+  it("a localStorage read that THREW on a clean device is treated as no prior owner", async () => {
+    const dev = device({
+      owner: undefined,
+      store: [entry("checkmark")],
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
+    });
     expect(await reconcile(dev)).toEqual({ kind: "adopted" });
     expect(dev.store).toHaveLength(1);
+  });
+
+  it("UNATTRIBUTED residue reconciles instead of adopting — the prior guide's caches go", async () => {
+    // localStorage and IndexedDB evict independently, so a null owner key is not proof
+    // of a clean device. The old code adopted here, silently leaving the previous
+    // guide's cached roster (children's names) and authenticated shell for the next
+    // operator — the exact leak the reconcile exists to close.
+    const dev = device({
+      owner: null,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: true },
+    });
+    expect(await reconcile(dev)).toEqual({ kind: "reconciled" });
+    expect(dev.rosterCached).toBe(false);
+    expect(dev.shellCached).toBe(false);
+  });
+
+  it("…and reconciles on /crm and /staff too, where it may not otherwise claim the key", async () => {
+    const dev = device({
+      owner: null,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: true },
+    });
+    expect(await reconcile(dev, makeFakeLockManager(), { surfaceCreatesResidue: false })).toEqual({
+      kind: "reconciled",
+    });
+    expect(dev.rosterCached).toBe(false);
   });
 });

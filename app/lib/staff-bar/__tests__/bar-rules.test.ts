@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  narrowStaffBarApplication,
   parseStaffBarIdentity,
   selectStaffBarIdentity,
+  staffBarQueueProbe,
+  staffBarSignOutActorIsFwGuide,
+  staffBarSurfaceCreatesFwResidue,
   STAFF_BAR_APPLICATIONS,
   staffBarApplicationLabel,
   staffBarIdentityLabel,
@@ -171,6 +175,102 @@ describe("selectStaffBarIdentity — offline on a cached shell still names the a
   it("has nothing to show when neither is available", () => {
     expect(selectStaffBarIdentity({ live: null, persisted: null, actorUserId: STAFF.userId }))
       .toBeNull();
+  });
+});
+
+/* ══════════ what the bar tells the FW device layer (the five-reviewer finding) ══ */
+
+describe("staffBarSignOutActorIsFwGuide — B1's client half, fail-closed", () => {
+  it("an unresolved actor is treated as a guide, so the queue IS checked", () => {
+    // Not knowing must never read as "not a guide": the act being authorised destroys
+    // a queue. This is the value `hasFwDeviceEvidence` short-circuits on.
+    expect(staffBarSignOutActorIsFwGuide(null)).toBe(true);
+  });
+
+  it("a resolved guide is a guide; a resolved non-guide is not", () => {
+    expect(staffBarSignOutActorIsFwGuide(GUIDE)).toBe(true);
+    expect(staffBarSignOutActorIsFwGuide(STAFF)).toBe(false);
+  });
+
+  it("takes the LIVE read only — a stale cache must not answer this question", () => {
+    // A persisted identity can predate a mid-event guide grant. Passing it here would
+    // let a stale `isFwGuide:false` be trusted as fact and hand the evidence gate back
+    // to the storage heuristic B1 exists to stop relying on. The function's contract is
+    // that its argument is the live read; `null` (not yet resolved) fails closed.
+    expect(staffBarSignOutActorIsFwGuide(null)).toBe(true);
+    expect(staffBarSignOutActorIsFwGuide({ isStaff: true, isFwGuide: false })).toBe(false);
+  });
+});
+
+describe("staffBarQueueProbe — a badge may not create a database", () => {
+  it("does NOT probe before the live identity resolves", () => {
+    // THE FIVE-REVIEWER FINDING. Reusing sign-out's fail-closed `true` here made the
+    // chip open — and therefore CREATE — the FW queue database on an admissions
+    // staffer's browser, on the first render of a bar they will never use it from.
+    // And permanently: nothing ever deletes it, so `fwQueueDbExists()` answers true
+    // for that origin forever after.
+    expect(staffBarQueueProbe(null)).toEqual({ probe: false });
+  });
+
+  it("probes with the actor's REAL guide-ness once it is known", () => {
+    expect(staffBarQueueProbe(GUIDE)).toEqual({ probe: true, actorIsFwGuide: true });
+    expect(staffBarQueueProbe(STAFF)).toEqual({ probe: true, actorIsFwGuide: false });
+  });
+
+  it("never hands the fail-closed default to the probe path", () => {
+    // The asymmetry, asserted directly: sign-out fails closed on an unresolved actor,
+    // the chip declines to look. Under-checking a badge costs nothing; over-checking
+    // it costs a database that cannot be taken back.
+    const unresolved = staffBarQueueProbe(null);
+    expect(staffBarSignOutActorIsFwGuide(null)).toBe(true);
+    expect(unresolved.probe).toBe(false);
+  });
+});
+
+describe("staffBarSurfaceCreatesFwResidue — who may claim fw.cacheOwner", () => {
+  it("only Founders Weekend writes a roster cache or an authed shell", () => {
+    expect(staffBarSurfaceCreatesFwResidue("fw")).toBe(true);
+    expect(staffBarSurfaceCreatesFwResidue("crm")).toBe(false);
+    expect(staffBarSurfaceCreatesFwResidue("staff")).toBe(false);
+  });
+
+  it("exactly one application creates residue", () => {
+    expect(STAFF_BAR_APPLICATIONS.filter(staffBarSurfaceCreatesFwResidue)).toEqual(["fw"]);
+  });
+});
+
+describe("narrowStaffBarApplication — an untrusted Server Action argument", () => {
+  it("passes every legitimate value through unchanged", () => {
+    for (const application of STAFF_BAR_APPLICATIONS) {
+      expect(narrowStaffBarApplication(application)).toBe(application);
+    }
+  });
+
+  it("narrows anything else to the hub, which gates hardest on the way back in", () => {
+    for (const bad of [
+      undefined,
+      null,
+      "",
+      "STAFF",
+      "staffing",
+      "/fp/sign-in",
+      "https://evil.example.com",
+      42,
+      {},
+      ["fw"],
+      { toString: () => "fw" },
+    ]) {
+      expect(narrowStaffBarApplication(bad)).toBe("staff");
+    }
+  });
+
+  it("its output can only ever be one of the three known applications", () => {
+    // The property the open-redirect argument actually rests on: whatever comes in,
+    // what comes out is a member of the union `staffBarSignOutDestination` maps to
+    // hard-coded paths.
+    for (const value of [undefined, "fw", "nonsense", 7, {}]) {
+      expect(STAFF_BAR_APPLICATIONS).toContain(narrowStaffBarApplication(value));
+    }
   });
 });
 

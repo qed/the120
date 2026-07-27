@@ -869,34 +869,57 @@ describe("shouldClearFwCaches — the two callers want opposite things on a stuc
 });
 
 describe("decideFwCacheOwnerAction — who may claim the fw.cacheOwner key", () => {
+  const decide = (over: {
+    prior: string | null;
+    surfaceCreatesResidue?: boolean;
+    residuePresent?: boolean | null;
+  }) =>
+    decideFwCacheOwnerAction({
+      prior: over.prior,
+      actorUserId: GUIDE,
+      surfaceCreatesResidue: over.surfaceCreatesResidue ?? true,
+      // NOT `?? false` — `null` is a meaningful value here ("could not look") and the
+      // nullish default would swallow it, quietly turning the fail-closed test into a
+      // second copy of the clean-device one.
+      residuePresent: "residuePresent" in over ? (over.residuePresent as boolean | null) : false,
+    });
+
   it("the same account is a no-op", () => {
-    expect(
-      decideFwCacheOwnerAction({ prior: GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: true })
-    ).toBe("none");
+    expect(decide({ prior: GUIDE })).toBe("none");
   });
 
   it("a different account is a reconcile, on any surface", () => {
-    expect(
-      decideFwCacheOwnerAction({ prior: OTHER_GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: true })
-    ).toBe("reconcile");
-    expect(
-      decideFwCacheOwnerAction({ prior: OTHER_GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: false })
-    ).toBe("reconcile");
+    expect(decide({ prior: OTHER_GUIDE, surfaceCreatesResidue: true })).toBe("reconcile");
+    expect(decide({ prior: OTHER_GUIDE, surfaceCreatesResidue: false })).toBe("reconcile");
   });
 
-  it("an unclaimed key is adopted on an FW surface", () => {
-    expect(
-      decideFwCacheOwnerAction({ prior: null, actorUserId: GUIDE, surfaceCreatesResidue: true })
-    ).toBe("adopt");
+  it("an unclaimed key on a genuinely CLEAN device is adopted on an FW surface", () => {
+    expect(decide({ prior: null, residuePresent: false })).toBe("adopt");
   });
 
   it("…but NOT on /crm or /staff — the bar must not manufacture the evidence it reads", () => {
     // The key is an input to `hasFwDeviceEvidence`'s legacy branch. A bar that wrote
     // it on a browser which has never run Founders Weekend would mark that browser as
     // holding FW residue and then trust its own mark.
-    expect(
-      decideFwCacheOwnerAction({ prior: null, actorUserId: GUIDE, surfaceCreatesResidue: false })
-    ).toBe("none");
+    expect(decide({ prior: null, surfaceCreatesResidue: false, residuePresent: false })).toBe(
+      "none"
+    );
+  });
+
+  it("UNATTRIBUTED residue reconciles rather than adopting — B1's shape, one function over", () => {
+    // A null key is not proof of a clean device. localStorage and IndexedDB evict
+    // independently, so "nobody has claimed this device" and "a prior guide's roster
+    // cache and authed shell are still here, but the key naming them was evicted" look
+    // identical. Adopting in the second case silently hands the incoming guide the
+    // previous one's cached authenticated HTML.
+    expect(decide({ prior: null, residuePresent: true })).toBe("reconcile");
+    expect(decide({ prior: null, residuePresent: true, surfaceCreatesResidue: false })).toBe(
+      "reconcile"
+    );
+  });
+
+  it("residue that could not be determined reconciles too — fails CLOSED", () => {
+    expect(decide({ prior: null, residuePresent: null })).toBe("reconcile");
   });
 });
 

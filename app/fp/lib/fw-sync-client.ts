@@ -23,7 +23,11 @@
 
 import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 import { drainFwQueue } from "@/app/fp/lib/actions/fw-sync";
-import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
+import {
+  FW_ACTION_TIMEOUT_MS,
+  FW_STORAGE_PROBE_TIMEOUT_MS,
+  withFwTimeout,
+} from "@/app/fp/lib/fw-call";
 import {
   clearFwQueueIfEmpty,
   clearFwRoster,
@@ -590,7 +594,19 @@ export function fwClientPorts(actorUserId: string): FwSignOutPorts {
     readQueue: async () => {
       if (!isFwQueueSupported()) return [];
       try {
-        return await listFwRawEntriesSerialized();
+        // BOUNDED, because this runs while `fw-offline-drain` is HELD. The read is
+        // serialized behind the write chain, so one wedged IndexedDB transaction
+        // would otherwise hold the lock forever — and Web Locks are origin-scoped and
+        // cross-document, so that blocks every later drain and every future sign-out
+        // in every tab, with a reload the only escape. A timeout THROWS here, which
+        // the flow already disposes of as `unreadable`: fail closed, queue untouched.
+        const raced = await withFwTimeout(
+          listFwRawEntriesSerialized(),
+          "queue read",
+          FW_STORAGE_PROBE_TIMEOUT_MS
+        );
+        if (raced.timedOut) throw new Error("fw queue read timed out");
+        return raced.value;
       } catch (e) {
         console.error("[fw/sync] sign-out queue read failed:", e);
         throw e;

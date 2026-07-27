@@ -23,9 +23,10 @@
  *
  * R23 IS THE INVARIANT TO PROTECT WHEN EDITING THIS. The bar and its sign-out render
  * unconditionally. If identity fails, is slow, or the device is offline with nothing
- * persisted, the STRING degrades — the control does not. R16 removed the per-subtree
- * sign-outs that used to work independently of that read, so a silent failure here
- * strands a staff member on a page with no way out.
+ * persisted, the STRING degrades — the control does not. R16 RETIRES the per-subtree
+ * sign-outs that today work independently of that read (Unit 4 does the retiring;
+ * `FwSignOutButton` is still mounted as of this unit), so once they are gone a silent
+ * failure here would strand a staff member on a page with no way out.
  *
  * THE SIGN-OUT SEQUENCE IS UNIT 1'S, unchanged. `runFwSignOut` takes the lock exactly
  * once around verdict → drain → re-verdict → atomic clear. Nothing here may acquire
@@ -34,7 +35,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   readFwDeviceQueueState,
   reconcileFwCacheOwner,
@@ -47,6 +48,9 @@ import { loadStaffBarIdentity, signOutStaffBar } from "./actions";
 import {
   parseStaffBarIdentity,
   selectStaffBarIdentity,
+  staffBarQueueProbe,
+  staffBarSignOutActorIsFwGuide,
+  staffBarSurfaceCreatesFwResidue,
   STAFF_HUB_PATH,
   staffBarApplicationLabel,
   staffBarIdentityLabel,
@@ -80,11 +84,16 @@ let cachedIdentity: StaffBarIdentity | null = null;
 const identityListeners = new Set<() => void>();
 
 function readPersistedIdentity(): StaffBarIdentity | null {
-  let raw: string | null = null;
+  let raw: string | null;
   try {
     raw = window.localStorage.getItem(IDENTITY_KEY);
   } catch {
-    raw = null; // private mode, or a locked-down storage policy
+    // A THROW is not "no record", and conflating them breaks the one contract
+    // `useSyncExternalStore` imposes: `getSnapshot` must be referentially stable
+    // across calls. React calls it more than once per render pass to check for
+    // tearing, so under an intermittently-denying storage policy the alternating
+    // real-value/null answers would loop or thrash the bar. Keep what we last read.
+    return cachedIdentity;
   }
   if (raw !== cachedRaw) {
     cachedRaw = raw;
@@ -137,11 +146,24 @@ export function StaffBar({
 
   const identity = selectStaffBarIdentity({ live, persisted, actorUserId });
   const skin = staffBarSkin(application);
-  const chip = staffBarQueueChip({ application, state: queue });
-  // Fail CLOSED before identity resolves: an unresolved actor is treated as a guide,
-  // so the sign-out evidence gate CHECKS the queue rather than assuming there is
-  // none. Assuming the other way is B1, which cost three captures a shared iPad.
-  const actorIsFwGuide = identity?.isFwGuide ?? true;
+
+  // BOTH of these are pure, exported and tested in `bar-rules.ts`, and neither may
+  // move back inline. They were written here in this unit's first draft, and five
+  // reviewers independently found that flipping either one left the whole suite
+  // green — the previous unit's headline finding, recurring inside the unit meant to
+  // apply it. They also differ, deliberately: the sign-out gate fails CLOSED on an
+  // unresolved actor because under-checking destroys a queue, while the chip declines
+  // to look at all, because reading the queue CREATES the database and a badge is not
+  // worth that. Both take `live` — never the persisted copy, which can predate a
+  // mid-event guide grant.
+  const signOutActorIsFwGuide = staffBarSignOutActorIsFwGuide(live);
+  const probe = staffBarQueueProbe(live);
+  /** The probe's answer flattened to one scalar, so the effect below has a dependency
+   *  a linter can statically check. `null` = declined to look. */
+  const probeActorIsFwGuide = probe.probe ? probe.actorIsFwGuide : null;
+  // A chip is rendered only from a queue we actually looked at. Declining to look
+  // must read as "no chip", never as "the queue is empty".
+  const chip = staffBarQueueChip({ application, state: probe.probe ? queue : null });
 
   // ── identity: persisted first (offline), authoritative when it lands ─────────
   useEffect(() => {
@@ -177,17 +199,43 @@ export function StaffBar({
     // The bar's own persisted identity is residue too: it is an email address, and it
     // must not outlive the account it names on a device that changed hands.
     if (readPersistedIdentity()?.userId !== actorUserId) writePersistedIdentity(null);
+    let cancelled = false;
     void reconcileFwCacheOwner({
       actorUserId,
-      surfaceCreatesResidue: application === "fw",
-    }).catch((e) => console.error("[staff-bar] cache-owner reconcile failed:", e));
+      surfaceCreatesResidue: staffBarSurfaceCreatesFwResidue(application),
+    })
+      .then((outcome) => {
+        // THE RESOLVED VALUE IS THE POINT. `runFwCacheOwnerReconcile` returns a typed
+        // outcome precisely so a failed clear stops being invisible — that is half of
+        // B2. `clear_failed` and `queue_preserved` are RESOLVED values, not
+        // rejections, so a bare `.catch()` drops exactly the outcomes the unit exists
+        // to surface, and this is the automatic path that runs far more often than
+        // the sign-out button.
+        if (cancelled || outcome.kind !== "clear_failed") return;
+        console.error("[staff-bar] handover clear failed; residue may remain on this device");
+        setMessage(
+          "This device may still hold the previous account's Founders Weekend data. Reload before handing it over, and tell The 120 staff if this keeps showing."
+        );
+      })
+      .catch((e) => console.error("[staff-bar] cache-owner reconcile failed:", e));
+    return () => {
+      cancelled = true;
+    };
   }, [actorUserId, application]);
 
   // ── the queue chip ──────────────────────────────────────────────────────────
   useEffect(() => {
+    // `null` means the probe declined — no identity yet, so nothing may open the
+    // database. Reported by rendering no chip (see `chip` above), NOT by clearing
+    // state here: a setState in an effect body is a cascading render, and "not looked
+    // at" is already expressible without one.
+    if (probeActorIsFwGuide === null) return;
     let cancelled = false;
     const refresh = () => {
-      void readFwDeviceQueueState({ actorUserId, actorIsFwGuide }).then((next) => {
+      void readFwDeviceQueueState({
+        actorUserId,
+        actorIsFwGuide: probeActorIsFwGuide,
+      }).then((next) => {
         if (!cancelled) setQueue(next);
       });
     };
@@ -197,20 +245,39 @@ export function StaffBar({
       cancelled = true;
       unsubscribe();
     };
-  }, [actorUserId, actorIsFwGuide]);
+  }, [actorUserId, probeActorIsFwGuide]);
 
   // ── sign-out ────────────────────────────────────────────────────────────────
+  // A REF, not the `busy` state. State is only true after React commits, so two taps
+  // dispatched inside one frame — an ordinary double-tap on an iPad — can both read
+  // `busy === false` and start two overlapping sequences. The drain lock serializes
+  // them so nothing corrupts, but the second is a redundant round trip on venue wifi
+  // and its late `setMessage` can flash a stale string over the first one's result.
+  const inFlight = useRef(false);
+
   const onSignOut = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setMessage(null);
+    let cleared = false;
     try {
-      const outcome = await runFwSignOut({ actorUserId, actorIsFwGuide });
+      const outcome = await runFwSignOut({
+        actorUserId,
+        actorIsFwGuide: signOutActorIsFwGuide,
+      });
       if (outcome.kind !== "sign_out") {
         setMessage(fwSignOutOutcomeCopy(outcome, staffBarSignOutSurface(application)));
-        setQueue(await readFwDeviceQueueState({ actorUserId, actorIsFwGuide }));
+        if (probeActorIsFwGuide !== null) {
+          setQueue(
+            await readFwDeviceQueueState({ actorUserId, actorIsFwGuide: probeActorIsFwGuide })
+          );
+        }
         return;
       }
+      // Reaching here means the local residue is already GONE — clearing it is what
+      // earned the `sign_out` outcome, not a consequence of it.
+      cleared = true;
       // The account's own copy of its identity goes with the session, or the next
       // operator's bar opens showing the last one's address.
       writePersistedIdentity(null);
@@ -221,8 +288,17 @@ export function StaffBar({
       // the exact defect `FwSignOutButton` still carries and Unit 4 retires.
       if (isNextRedirect(e)) throw e;
       console.error("[staff-bar] sign-out failed:", e);
-      setMessage("Couldn't sign out just now. Try again.");
+      setMessage(
+        cleared
+          ? // The local clear already ran. Nothing is LOST — it only runs once the
+            // queue is verifiably drained — but the offline roster and shell caches
+            // are gone while the session is still alive, and saying "try again" alone
+            // would imply the device is unchanged.
+            "Your check-ins sent and this device was cleared, but ending the session failed — you're still signed in. Try again."
+          : "Couldn't sign out just now. Try again."
+      );
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };

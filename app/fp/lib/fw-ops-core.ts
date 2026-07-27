@@ -89,9 +89,18 @@ export type FwOpsCohort = {
   startsAt: string | null;
   endsAt: string | null;
   timeZone: string | null;
+  /**
+   * Archive state (Unit 7; columns from Unit 6's migration). The READ carries it
+   * and callers decide — the plan's settled decision, because the one cohort list
+   * feeds both the header's weekend name (which must render for an archived cohort
+   * a staff member opens) and `canSwitch` (which must count archived cohorts or a
+   * guide is stranded inside one with no way back).
+   */
+  archivedAt: string | null;
+  archivedBy: string | null;
 };
 
-const COHORT_COLUMNS = "id, slug, kind, starts_at, ends_at, time_zone";
+const COHORT_COLUMNS = "id, slug, kind, starts_at, ends_at, time_zone, archived_at, archived_by";
 
 /**
  * Fail-closed narrowing of a `path_cohorts` row at the service-role boundary.
@@ -111,6 +120,13 @@ function narrowOpsCohort(row: Record<string, unknown> | null): FwOpsCohort | nul
     startsAt: typeof row.starts_at === "string" ? row.starts_at : null,
     endsAt: typeof row.ends_at === "string" ? row.ends_at : null,
     timeZone: narrowFwEventTimeZone(row.time_zone),
+    // FAIL-CLOSED direction, chosen deliberately (plan, deferred item): a value
+    // that is not a string — including a row shape from before the Unit 6
+    // migration, or a null — reads as NOT archived. Fail-closed here means "the
+    // cohort stays VISIBLE": the harmful direction is a phantom archive hiding a
+    // live weekend from the ops list, not a stale row rendering one extra line.
+    archivedAt: typeof row.archived_at === "string" ? row.archived_at : null,
+    archivedBy: typeof row.archived_by === "string" ? row.archived_by : null,
   };
 }
 
@@ -313,6 +329,8 @@ export type MintFwBoardTokenResult =
       reason:
         | "cohort_not_found"
         | "cohort_not_fw"
+        /** Unit 7: minted-then-archived compensation, or the pre-flight refusal. */
+        | "cohort_archived"
         | "no_event_window"
         | "window_passed"
         | "unavailable";
@@ -342,7 +360,13 @@ export async function mintFwBoardToken(
 ): Promise<MintFwBoardTokenResult> {
   const cohort = await loadFwOpsCohort(db, input.cohortId);
   const verdict = fwBoardTokenMintVerdict({
-    cohort: cohort ? { kind: cohort.kind, endsAt: cohort.endsAt } : null,
+    // `archivedAt` FORWARDED (Unit 7 review — the verdict had the archived branch's
+    // slot planned for Unit 8, but the field silently dropped here would have let a
+    // bookmarked mint re-open a retired weekend's projector the moment Unit 7
+    // merged; the guard moved up rather than merging a known hole).
+    cohort: cohort
+      ? { kind: cohort.kind, endsAt: cohort.endsAt, archivedAt: cohort.archivedAt }
+      : null,
     now: input.now,
   });
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
@@ -423,6 +447,37 @@ export async function mintFwBoardToken(
     return { ok: false, reason: "unavailable" };
   }
 
+  // THE INSERT-TIME RE-CHECK (Unit 7 review, adversarial finding 2). The pre-flight
+  // verdict above is a read, and mint's own write is two steps — revoke-prior, then
+  // insert. A concurrent archive landing BETWEEN them passes cleanly (its revoke
+  // finds zero live rows and folds to success; its CAS archives), after which the
+  // insert above lands a live token on an archived cohort: the exact invisible-and-
+  // harmful state the archive's ordering exists to prevent, surviving the naive
+  // check-at-read-time fix. So the mint re-reads AFTER its insert and compensates —
+  // revoking the token it just made — when the cohort archived underneath it. The
+  // token was never returned to anyone, so nothing is lost; the archive's promise
+  // holds; the caller is told the truth.
+  const post = await loadFwOpsCohort(db, input.cohortId);
+  if (post !== null && post.archivedAt !== null) {
+    console.warn(
+      `[fw/ops] cohort ${input.cohortId} was archived while a mint was in flight — revoking the just-minted token`
+    );
+    const undo = await revokeFwBoardToken(db, {
+      cohortId: input.cohortId,
+      actorUserId: input.actorUserId,
+      now: input.now,
+    });
+    if (!undo.ok && undo.reason !== "no_active_token") {
+      // The compensation itself failed: an archived cohort MAY hold a live token
+      // until someone revokes it by hand. Loud, specific, and actionable — the
+      // one state this whole ordering discipline exists to keep impossible.
+      console.error(
+        `[fw/ops] URGENT: cohort ${input.cohortId} is ARCHIVED but its just-minted board token could not be revoked (${undo.reason}) — revoke it manually (npm run fw -- token-revoke --cohort ${input.cohortId})`
+      );
+    }
+    return { ok: false, reason: "cohort_archived" };
+  }
+
   return { ok: true, token, expiresAt: verdict.expiresAt, revokedPrior: priorIds.length > 0 };
 }
 
@@ -493,6 +548,152 @@ export async function revokeFwBoardToken(
       return { ok: false, reason: "stale_view" };
     }
     return { ok: false, reason: "no_active_token" };
+  }
+  return { ok: true };
+}
+
+/* ═══════════════════════════════════════════════════════ archive / unarchive ══ */
+
+export type ArchiveFwCohortResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "cohort_not_found"
+        | "cohort_not_fw"
+        | "already_archived"
+        /** The token revoke failed for a reason OTHER than "nothing was live".
+         *  The archive did NOT proceed — see the ordering note below. */
+        | "revoke_failed"
+        | "unavailable";
+    };
+
+/**
+ * Archive one FW cohort: revoke the live board token, THEN set archive state.
+ *
+ * ── The ordering is the decision (plan, Key Technical Decisions)
+ *
+ * Archive-then-revoke failing between the two leaves an ARCHIVED cohort with a
+ * LIVE board — hidden from the ops list (so nobody is looking at it) while an
+ * unauthenticated projector URL keeps serving children's names. Invisible and
+ * harmful. Revoke-then-archive failing between leaves an ACTIVE cohort with a
+ * dark board — visible on the list, mint again and move on. Visible and
+ * recoverable. So the revoke goes first, and a failed revoke STOPS the archive.
+ *
+ * `revokeFwBoardToken` is called with NO `expectedTokenId` — the CLI-shaped call:
+ * this sequence reads and acts in one breath, there is no stale view to protect.
+ * Its `no_active_token` is folded into success HERE, in the archive's own
+ * interpretation, not inside the revoke core (whose callers need the distinction).
+ * A cohort whose board was never minted archives cleanly.
+ *
+ * ── CAS, and what zero rows means
+ *
+ * The UPDATE carries `is("archived_at", null)` and returns the id it touched.
+ * Zero rows with the cohort known to exist means someone else archived it first:
+ * `already_archived`, and `archived_by` keeps naming the FIRST actor — attribution
+ * is who actually did it, not who clicked last.
+ *
+ * ── Guards live HERE, not in the action layer
+ *
+ * `scripts/fw-ops.ts` drives this core under service-role credentials with no
+ * action-layer gate, so the kind guard cannot live only in `requireCohortStaff`.
+ * A `kind='path'` id is refused by this function no matter who calls it.
+ */
+export async function archiveFwCohort(
+  db: SupabaseClient,
+  input: { cohortId: string; actorUserId: string; now: number }
+): Promise<ArchiveFwCohortResult> {
+  const cohort = await loadFwOpsCohort(db, input.cohortId);
+  if (!cohort) return { ok: false, reason: "cohort_not_found" };
+  if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  if (cohort.archivedAt !== null) return { ok: false, reason: "already_archived" };
+
+  const revoked = await revokeFwBoardToken(db, {
+    cohortId: input.cohortId,
+    actorUserId: input.actorUserId,
+    now: input.now,
+  });
+  if (!revoked.ok && revoked.reason !== "no_active_token") {
+    console.error(
+      `[fw/ops] archive of ${input.cohortId} stopped: token revoke reported ${revoked.reason}`
+    );
+    return { ok: false, reason: "revoke_failed" };
+  }
+
+  const res = await fwWrite(
+    () =>
+      db
+        .from("path_cohorts")
+        .update({
+          archived_at: new Date(input.now).toISOString(),
+          archived_by: input.actorUserId,
+        })
+        .eq("id", input.cohortId)
+        .is("archived_at", null)
+        .select("id"),
+    `cohort archive (${input.cohortId})`
+  );
+  if (res.error) {
+    console.error(`[fw/ops] archive write failed for ${input.cohortId}: ${res.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if ((res.data ?? []).length === 0) {
+    // The pre-read said active; the CAS found it archived. A concurrent archive
+    // won the race — report the truth rather than claiming this actor's work.
+    return { ok: false, reason: "already_archived" };
+  }
+  return { ok: true };
+}
+
+export type UnarchiveFwCohortResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "cohort_not_found" | "cohort_not_fw" | "already_active" | "unavailable";
+    };
+
+/**
+ * Reverse an archive: null BOTH columns.
+ *
+ * Attribution describes the CURRENT state, not a history — no audit row exists
+ * for cohort archives (the audit table's subject is `not null` and a cohort has
+ * no human subject), so unarchiving genuinely loses who archived it. Accepted in
+ * planning, recorded here so nobody "fixes" the nulled `archived_by` into a
+ * half-remembered history column.
+ *
+ * Deliberately does NOT touch the board: unarchive restores staff visibility,
+ * and minting a fresh token is its own decision on the ops surface — the old
+ * token stays revoked, so the old projector URL never resolves again (R25's
+ * "revocation is permanent" survives the round trip).
+ *
+ * The CAS direction is `not("archived_at", "is", null)`: zero rows on a cohort
+ * that exists means it was already active — `already_active`, not an error.
+ */
+export async function unarchiveFwCohort(
+  db: SupabaseClient,
+  input: { cohortId: string }
+): Promise<UnarchiveFwCohortResult> {
+  const cohort = await loadFwOpsCohort(db, input.cohortId);
+  if (!cohort) return { ok: false, reason: "cohort_not_found" };
+  if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  if (cohort.archivedAt === null) return { ok: false, reason: "already_active" };
+
+  const res = await fwWrite(
+    () =>
+      db
+        .from("path_cohorts")
+        .update({ archived_at: null, archived_by: null })
+        .eq("id", input.cohortId)
+        .not("archived_at", "is", null)
+        .select("id"),
+    `cohort unarchive (${input.cohortId})`
+  );
+  if (res.error) {
+    console.error(`[fw/ops] unarchive write failed for ${input.cohortId}: ${res.error.message}`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if ((res.data ?? []).length === 0) {
+    return { ok: false, reason: "already_active" };
   }
   return { ok: true };
 }

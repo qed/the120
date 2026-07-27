@@ -451,3 +451,58 @@ export function fwReplayRejectReasonCopy(reason: string): string {
       return `Could not be applied at sync (${reason}).`;
   }
 }
+
+/* ═══════════════════════════════════════════════ archive / unarchive copy ══ */
+
+/**
+ * The staff-facing sentence for a failed archive (Unit 7). Pure and exported for
+ * the node-only suite; the action renders it verbatim.
+ *
+ * `cohort_not_found` and `cohort_not_fw` COLLAPSE to the staff-only sentence, the
+ * same enumeration rule as `requireCohortStaff`: distinguishing them tells a
+ * probing caller which cohort ids are real. Staff never meet these in normal use —
+ * the button only renders on a loaded FW cohort's page.
+ *
+ * Explicit never-return, matching `fwStaffGateCopy`.
+ */
+export function archiveFwCohortFailureCopy(
+  reason: "cohort_not_found" | "cohort_not_fw" | "already_archived" | "revoke_failed" | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "already_archived":
+      return "Already archived — someone got there first. Refresh to see the current state.";
+    case "revoke_failed":
+      // The ordering's user-facing half: the board could not be confirmed dark, so
+      // nothing was archived. Naming the board is what makes the next action
+      // obvious (retry, or revoke from the board panel and archive again).
+      return "Couldn't shut off the projector board, so the weekend was NOT archived. Try again.";
+    case "unavailable":
+      return "Couldn't archive just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
+/** The unarchive twin. Same collapse, same never-return. */
+export function unarchiveFwCohortFailureCopy(
+  reason: "cohort_not_found" | "cohort_not_fw" | "already_active" | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "already_active":
+      return "This weekend is already active — nothing to restore.";
+    case "unavailable":
+      return "Couldn't restore just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}

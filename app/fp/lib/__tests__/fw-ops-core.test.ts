@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   anonymizeFwStudent,
+  archiveFwCohort,
   createFwCohort,
   hashFwBoardToken,
   linkFwStudentToCohort,
@@ -17,6 +18,7 @@ import {
   resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
+  unarchiveFwCohort,
 } from "../fw-ops-core";
 import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
 import { buildFwTombstoneEmail } from "../fw-provision-rules";
@@ -146,6 +148,7 @@ function makeFakeDb(seed: Seed) {
   function query(table: string) {
     const eqs: [string, unknown][] = [];
     const isNulls: string[] = [];
+    const notNulls: string[] = [];
     let inFilter: [string, unknown[]] | null = null;
     let orderBy: { col: string; ascending: boolean } | null = null;
     let limitTo: number | null = null;
@@ -177,6 +180,7 @@ function makeFakeDb(seed: Seed) {
         (r) =>
           eqs.every(([c, v]) => r[c] === v) &&
           isNulls.every((c) => (r[c] ?? null) === null) &&
+          notNulls.every((c) => (r[c] ?? null) !== null) &&
           (!inFilter || inFilter[1].includes(r[inFilter[0]]))
       );
       if (orderBy) {
@@ -203,6 +207,16 @@ function makeFakeDb(seed: Seed) {
       is(col: string, val: unknown) {
         if (val === null) isNulls.push(col);
         return builder;
+      },
+      /** `.not(col, "is", null)` — the unarchive CAS's direction (Unit 7). Any
+       *  other operator is a loud throw, not a silent no-op filter: a fake that
+       *  ignores a predicate turns a CAS test into theatre. */
+      not(col: string, op: string, val: unknown) {
+        if (op === "is" && val === null) {
+          notNulls.push(col);
+          return builder;
+        }
+        throw new Error(`fake db: unsupported .not(${col}, ${op}, ${String(val)})`);
       },
       in(col: string, vals: unknown[]) {
         inFilter = [col, vals];
@@ -326,6 +340,7 @@ function makeFakeDb(seed: Seed) {
       update(patch: Row) {
         const eqs2: [string, unknown][] = [];
         const isNulls2: string[] = [];
+        const notNulls2: string[] = [];
         let inFilter2: [string, unknown[]] | null = null;
         const run = () => {
           const fail = failing("update");
@@ -334,6 +349,7 @@ function makeFakeDb(seed: Seed) {
             (r) =>
               eqs2.every(([c, v]) => r[c] === v) &&
               isNulls2.every((c) => (r[c] ?? null) === null) &&
+              notNulls2.every((c) => (r[c] ?? null) !== null) &&
               (!inFilter2 || inFilter2[1].includes(r[inFilter2[0]]))
           );
           // The partial unique index again: un-revoking a token while another
@@ -361,6 +377,15 @@ function makeFakeDb(seed: Seed) {
           return { data: hits.map((r) => ({ id: r.id })), error: null };
         };
         const chain = {
+          /** Unit 7: the unarchive CAS's direction. Same contract as the query
+           *  builder's — an unsupported operator throws, never silently no-ops. */
+          not(col: string, op: string, val: unknown) {
+            if (op === "is" && val === null) {
+              notNulls2.push(col);
+              return chain;
+            }
+            throw new Error(`fake db: unsupported update .not(${col}, ${op}, ${String(val)})`);
+          },
           eq(col: string, val: unknown) {
             eqs2.push([col, val]);
             return chain;
@@ -527,6 +552,8 @@ describe("loadFwOpsCohort", () => {
       startsAt: BOSTON_START,
       endsAt: BOSTON_END,
       timeZone: "America/New_York",
+      archivedAt: null,
+      archivedBy: null,
     });
   });
 
@@ -2170,5 +2197,379 @@ describe("loadFwMatchResolution — the read-failure paths", () => {
     expect(await loadFwMatchResolution(db, { cohortId: BOSTON, firstName: "Maya", lastName: "Chen" })).toEqual({
       ok: false,
     });
+  });
+});
+
+/* ═══════════════════════════════════════════ archive / unarchive (Unit 7) ══ */
+
+describe("archiveFwCohort — revoke first, then archive, or neither", () => {
+  it("with a LIVE token: revokes THEN archives, and the order is observable", async () => {
+    const { db, tables } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW })
+    ).toEqual({ ok: true });
+    // Both halves landed…
+    const token = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
+    expect(token.revoked_at).not.toBeNull();
+    expect(token.revoked_by).toBe(DANA);
+    const cohort = tables.path_cohorts.find((c) => c.id === BOSTON)!;
+    expect(cohort.archived_at).not.toBeNull();
+    expect(cohort.archived_by).toBe(DANA);
+  });
+
+  it("with NO token ever minted: archives cleanly (no_active_token folds into success HERE)", async () => {
+    const { db, tables } = makeFakeDb({});
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: true });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(STAFF);
+  });
+
+  it("a FAILED revoke stops the archive — active cohort with a dark board beats the inverse", async () => {
+    // The ordering decision's test: archive-then-revoke failing between leaves an
+    // ARCHIVED cohort serving children's names through a live unauthenticated URL,
+    // invisibly. This sequence must leave the cohort ACTIVE when the revoke fails.
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_fw_board_tokens", op: "update", message: "network sneeze" },
+    });
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "revoke_failed" });
+    // …and NOTHING was archived.
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at ?? null).toBeNull();
+  });
+
+  it("two concurrent archives: one wins, the other is told already_archived, the FIRST actor is attributed", async () => {
+    // Modelled at the CAS: the second call's pre-read raced ahead of the first's
+    // write, so it reaches the UPDATE believing the cohort active — exactly the
+    // interleaving the `is("archived_at", null)` predicate exists for. The fake
+    // exposes it by archiving between the second call's read and write? Node has
+    // no scheduler seam for that, so the equivalent is asserted in two halves:
+    // (a) a sequential second archive reports already_archived and (b) the CAS
+    // predicate itself refuses a non-null row — which is the property the race
+    // reduces to.
+    const { db, tables } = makeFakeDb({});
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW })
+    ).toEqual({ ok: true });
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: RAVI, now: NOW })
+    ).toEqual({ ok: false, reason: "already_archived" });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(DANA);
+  });
+
+  it("a STALE pre-read cannot double-archive: the CAS refuses what the read believed", async () => {
+    // The race the `is("archived_at", null)` predicate exists for, made schedulable:
+    // the pre-read returns the ACTIVE row (a snapshot from before a concurrent
+    // archive landed), the UPDATE then meets the archived row. Without the CAS this
+    // would overwrite `archived_by` with the SECOND actor — attribution is who did
+    // it, not who clicked last. Node has no scheduler seam, so the stale read is
+    // injected by wrapping the fake's first cohort read.
+    const { db, tables } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    const activeSnapshot = { ...tables.path_cohorts.find((c) => c.id === BOSTON)!, archived_at: null, archived_by: null };
+    let cohortReads = 0;
+    const staleDb = {
+      from(table: string) {
+        const real = db.from(table);
+        if (table !== "path_cohorts") return real;
+        return new Proxy(real, {
+          get(target, prop, receiver) {
+            if (prop === "select") {
+              return (...selArgs: unknown[]) => {
+                const builder = (target as { select: (...a: unknown[]) => unknown }).select(...selArgs);
+                // STICKY proxy: chainable methods must return THIS proxy, not the
+                // real builder, or the interception silently detaches at the first
+                // `.eq()` and the test passes vacuously — which is exactly what the
+                // first draft did, and mutation M17 caught it doing (the CAS-deleted
+                // core sailed through a test that never injected its stale read).
+                const sticky: object = new Proxy(builder as object, {
+                  get(bTarget, bProp, bReceiver) {
+                    if (bProp === "maybeSingle") {
+                      return async () => {
+                        cohortReads += 1;
+                        if (cohortReads === 1) return { data: activeSnapshot, error: null };
+                        return (bTarget as { maybeSingle: () => Promise<unknown> }).maybeSingle();
+                      };
+                    }
+                    const v = Reflect.get(bTarget, bProp, bReceiver);
+                    if (typeof v !== "function") return v;
+                    return (...fnArgs: unknown[]) => {
+                      const out = (v as (...a: unknown[]) => unknown).apply(bTarget, fnArgs);
+                      return out === bTarget ? sticky : out;
+                    };
+                  },
+                });
+                return sticky;
+              };
+            }
+            const v = Reflect.get(target, prop, receiver);
+            return typeof v === "function" ? v.bind(target) : v;
+          },
+        });
+      },
+    };
+    expect(
+      await archiveFwCohort(staleDb as never, { cohortId: BOSTON, actorUserId: RAVI, now: NOW })
+    ).toEqual({ ok: false, reason: "already_archived" });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(DANA);
+  });
+
+  it("a kind='path' id is refused BY THE CORE — the CLI has no action-layer gate", async () => {
+    const { db, tables } = makeFakeDb({});
+    expect(
+      await archiveFwCohort(db, { cohortId: PATH_COHORT, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "cohort_not_fw" });
+    expect(tables.path_cohorts.find((c) => c.id === PATH_COHORT)!.archived_at ?? null).toBeNull();
+  });
+
+  it("an unknown id is cohort_not_found", async () => {
+    const { db } = makeFakeDb({});
+    expect(
+      await archiveFwCohort(db, { cohortId: "no-such", actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "cohort_not_found" });
+  });
+
+  it("the archive WRITE failing after a successful revoke leaves the recoverable state", async () => {
+    // The gap between the two halves, from the other side: the revoke landed, the
+    // archive update failed. Active cohort, dark board — the visible, recoverable
+    // state the ordering was chosen to produce.
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "update", message: "write sneeze" },
+    });
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "unavailable" });
+    const token = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
+    expect(token.revoked_at).not.toBeNull(); // board dark
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at ?? null).toBeNull(); // cohort visible
+  });
+});
+
+describe("unarchiveFwCohort — both columns null, board stays dark", () => {
+  it("restores an archived cohort: BOTH columns null", async () => {
+    const { db, tables } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    expect(await unarchiveFwCohort(db, { cohortId: BOSTON })).toEqual({ ok: true });
+    const cohort = tables.path_cohorts.find((c) => c.id === BOSTON)!;
+    // Attribution describes CURRENT state — reversal genuinely loses who archived
+    // (accepted in planning). Asserting both nulls is what stops a future edit
+    // keeping archived_by as a half-history.
+    expect(cohort.archived_at ?? null).toBeNull();
+    expect(cohort.archived_by ?? null).toBeNull();
+  });
+
+  it("an ACTIVE cohort reports already_active — not an error", async () => {
+    const { db } = makeFakeDb({});
+    expect(await unarchiveFwCohort(db, { cohortId: BOSTON })).toEqual({
+      ok: false,
+      reason: "already_active",
+    });
+  });
+
+  it("kind='path' refused by the core here too", async () => {
+    const { db } = makeFakeDb({});
+    expect(await unarchiveFwCohort(db, { cohortId: PATH_COHORT })).toEqual({
+      ok: false,
+      reason: "cohort_not_fw",
+    });
+  });
+
+  it("unarchive then mint: a NEW token; the old URL never resolves again", async () => {
+    // R25 across the round trip. The archive revoked T0; unarchive deliberately
+    // does not resurrect it; the re-mint issues T1. T0 stays revoked forever.
+    const { db, tables } = makeFakeDb({});
+    const minted0 = await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    if (!minted0.ok) throw new Error("seed mint failed");
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await unarchiveFwCohort(db, { cohortId: BOSTON });
+    // Between unarchive and re-mint the board is DARK by design.
+    const t0 = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
+    expect(t0.revoked_at).not.toBeNull();
+    const minted1 = await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(minted1.ok).toBe(true);
+    const live = tables.path_fw_board_tokens.filter(
+      (t) => t.cohort_id === BOSTON && (t.revoked_at ?? null) === null
+    );
+    expect(live).toHaveLength(1);
+    expect(live[0].id).not.toBe(t0.id); // the old URL's row is not the live one
+  });
+
+  it("the unarchive WRITE failing is unavailable, and the cohort stays archived", async () => {
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "update", message: "sneeze", onCall: 2 },
+    });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW }); // update #1
+    expect(await unarchiveFwCohort(db, { cohortId: BOSTON })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at).not.toBeNull();
+  });
+});
+
+describe("mint refuses an archived cohort — the guard pulled forward from Unit 8's list", () => {
+  // ⚠️ FIXTURE RULE (the plan's own): these use HAMPTONS, whose window is in the
+  // FUTURE relative to NOW. Every production cohort's window will be past by the
+  // time anyone tests, so `window_passed` would refuse incidentally and a DELETED
+  // archived-guard would look fine. The future window is what makes the refusal
+  // reason attributable to the archive alone.
+  it("pre-flight: an archived cohort with a future window is refused cohort_archived, and nothing is written", async () => {
+    const { db, tables } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW });
+    const before = tables.path_fw_board_tokens.length;
+    expect(
+      await mintFwBoardToken(db, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+    expect(tables.path_fw_board_tokens.length).toBe(before);
+  });
+
+  it("ordering: archived outranks the window reasons — a PAST-window archived cohort still says archived? No: not_fw and archived come first, window checks after", async () => {
+    // The ordered contract, pinned end to end: kind first, then archived, then the
+    // window pair. BOSTON's window is past at a later NOW; archived + past window
+    // must report cohort_archived (the actionable fact — restore before minting),
+    // not window_passed (which staff cannot act on for a retired weekend anyway).
+    const LATER = Date.parse("2026-09-15T12:00:00Z");
+    const { db } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: LATER })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+  });
+
+  it("TOCTOU: a cohort archived WHILE the mint is in flight gets its just-minted token revoked (compensation)", async () => {
+    // Adversarial finding 2: the pre-flight check is a read, and mint's write is two
+    // steps. A concurrent archive between them slips past both sides' guards. The
+    // insert-time re-check is what closes it — injected here by archiving from
+    // inside the fake's post-insert cohort read via a sticky proxy on from().
+    const { db, tables } = makeFakeDb({});
+    let cohortReads = 0;
+    const racingDb = {
+      from(table: string) {
+        const real = db.from(table);
+        if (table !== "path_cohorts") return real;
+        return new Proxy(real, {
+          get(target, prop, receiver) {
+            if (prop === "select") {
+              return (...selArgs: unknown[]) => {
+                const builder = (target as { select: (...a: unknown[]) => unknown }).select(...selArgs);
+                const sticky: object = new Proxy(builder as object, {
+                  get(bTarget, bProp, bReceiver) {
+                    if (bProp === "maybeSingle") {
+                      return async () => {
+                        cohortReads += 1;
+                        if (cohortReads === 2) {
+                          // Between mint's pre-flight (read #1) and its post-insert
+                          // re-check (read #2), the concurrent archive lands.
+                          const row = tables.path_cohorts.find((c) => c.id === HAMPTONS)!;
+                          row.archived_at = new Date(NOW).toISOString();
+                          row.archived_by = DANA;
+                        }
+                        return (bTarget as { maybeSingle: () => Promise<unknown> }).maybeSingle();
+                      };
+                    }
+                    const v = Reflect.get(bTarget, bProp, bReceiver);
+                    if (typeof v !== "function") return v;
+                    return (...fnArgs: unknown[]) => {
+                      const out = (v as (...a: unknown[]) => unknown).apply(bTarget, fnArgs);
+                      return out === bTarget ? sticky : out;
+                    };
+                  },
+                });
+                return sticky;
+              };
+            }
+            const v = Reflect.get(target, prop, receiver);
+            return typeof v === "function" ? v.bind(target) : v;
+          },
+        });
+      },
+    };
+    expect(
+      await mintFwBoardToken(racingDb as never, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+    // The archived cohort holds NO live token — the compensation revoked the one
+    // the in-flight mint created. This is the whole point.
+    const live = tables.path_fw_board_tokens.filter(
+      (t) => t.cohort_id === HAMPTONS && (t.revoked_at ?? null) === null
+    );
+    expect(live).toHaveLength(0);
+  });
+});
+
+describe("unarchiveFwCohort — the stale-read CAS, mirroring the archive's", () => {
+  it("a STALE pre-read cannot re-null a cohort that went active-and-re-archived underneath", async () => {
+    // The twin the testing review found missing: deleting `.not("archived_at","is",
+    // null)` from the unarchive UPDATE survived every existing test, because each
+    // either short-circuits at the pre-read or runs sequentially. The stale scenario
+    // it protects: this caller read "archived", a concurrent unarchive+RE-archive
+    // landed (new attribution), and an unguarded re-null would now wipe the
+    // re-archiver's state and attribution. The CAS refusing is only observable with
+    // an injected stale read — same sticky-proxy seam as the archive's test.
+    const { db, tables } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    const archivedSnapshot = { ...tables.path_cohorts.find((c) => c.id === BOSTON)! };
+    // Underneath the stale reader: unarchived (both null) — the state the CAS meets.
+    const row = tables.path_cohorts.find((c) => c.id === BOSTON)!;
+    row.archived_at = null;
+    row.archived_by = null;
+    let cohortReads = 0;
+    const staleDb = {
+      from(table: string) {
+        const real = db.from(table);
+        if (table !== "path_cohorts") return real;
+        return new Proxy(real, {
+          get(target, prop, receiver) {
+            if (prop === "select") {
+              return (...selArgs: unknown[]) => {
+                const builder = (target as { select: (...a: unknown[]) => unknown }).select(...selArgs);
+                const sticky: object = new Proxy(builder as object, {
+                  get(bTarget, bProp, bReceiver) {
+                    if (bProp === "maybeSingle") {
+                      return async () => {
+                        cohortReads += 1;
+                        if (cohortReads === 1) return { data: archivedSnapshot, error: null };
+                        return (bTarget as { maybeSingle: () => Promise<unknown> }).maybeSingle();
+                      };
+                    }
+                    const v = Reflect.get(bTarget, bProp, bReceiver);
+                    if (typeof v !== "function") return v;
+                    return (...fnArgs: unknown[]) => {
+                      const out = (v as (...a: unknown[]) => unknown).apply(bTarget, fnArgs);
+                      return out === bTarget ? sticky : out;
+                    };
+                  },
+                });
+                return sticky;
+              };
+            }
+            const v = Reflect.get(target, prop, receiver);
+            return typeof v === "function" ? v.bind(target) : v;
+          },
+        });
+      },
+    };
+    expect(await unarchiveFwCohort(staleDb as never, { cohortId: BOSTON })).toEqual({
+      ok: false,
+      reason: "already_active",
+    });
+  });
+});
+
+describe("the widened cohort read", () => {
+  it("loadFwOpsCohort carries archive state, fail-closed to visible", async () => {
+    const { db } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    const cohort = await loadFwOpsCohort(db, BOSTON);
+    expect(cohort?.archivedAt).not.toBeNull();
+    expect(cohort?.archivedBy).toBe(DANA);
+    // A row from before the migration (no archive keys at all) reads as ACTIVE —
+    // the harmful direction is a phantom archive hiding a live weekend.
+    const pre = await loadFwOpsCohort(db, HAMPTONS);
+    expect(pre?.archivedAt).toBeNull();
+    expect(pre?.archivedBy).toBeNull();
   });
 });

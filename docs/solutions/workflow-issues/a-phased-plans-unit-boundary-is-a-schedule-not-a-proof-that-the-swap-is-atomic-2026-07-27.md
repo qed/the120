@@ -150,3 +150,24 @@ orphaned in-flight reconcile from an unmounted bar can still complete and write 
 owner key out of order — a genuine race the count cannot express, since both writes come
 from the one legitimate owner. Carried to the reliability pass. **A structural tripwire
 bounds who may act; it does not bound when.**
+
+## SECOND OCCURRENCE (Staff Front Door Unit 7, 2026-07-27) — the boundary left a live hole, and the fix was to move the guard, not the boundary
+
+The plan put "archive cores" in Unit 7 and "minting refuses on an archived cohort"
+in Unit 8. Correct as a schedule; as a MERGE SEQUENCE it meant the archive's central
+promise — a retired weekend's projector URL goes dark and stays dark — shipped
+defeatable: between Unit 7's merge and Unit 8's, any staff member or CLI habit could
+mint a fresh live token on an archived cohort (adversarial review, 0.9, with the
+public board route also not yet checking archive state — no second fence).
+
+The resolution was not "note it and merge anyway" and not "block Unit 7 on Unit 8":
+the SMALLEST piece of the next unit that closes the hole — the mint verdict's
+archived branch plus an insert-time re-check for the two-step-write race — moved
+into Unit 7's review round, and the rest of Unit 8 (the read-side 404, the list
+filtering, the guard table) stayed where the plan put it.
+
+**The rule:** when unit N introduces a state and unit N+1 introduces the guards that
+make the state safe, ask what an adversary can do IN THE GAP — on the real merge
+timeline, not the plan's. If the answer defeats unit N's own stated promise, the
+minimal guard belongs to unit N, whatever the schedule says. The schedule is for
+work; invariants do not take turns.

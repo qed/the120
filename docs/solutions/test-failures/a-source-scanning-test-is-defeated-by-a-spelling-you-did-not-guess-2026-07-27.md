@@ -345,6 +345,19 @@ the default technique. (The inert-defensive-branch doc covers the third case:
 a branch whose output equals its fallback has no signature even behaviorally,
 and needs a wiring assertion instead.)
 
+**ROUND 4 second coda (Unit 7, same day) — a test double detaches like a scan
+mis-anchors.** A Proxy injecting a stale read into a fake Supabase builder forwarded
+chainable methods with `v.bind(target)` — which returns the REAL builder, so the
+interception detached at the first `.eq()` and the test passed while injecting
+nothing. Found the same way scans get found: a mutation (the CAS predicate deleted)
+that should have reddened it, didn't. The sticky form re-wraps every chainable
+return (`out === target ? proxy : out`). And the fake's own contract matters the
+same way: an unsupported filter operator on a fake must THROW, never silently
+no-op — a fake that ignores `.not("archived_at","is",null)` turns every CAS test
+into theatre with no mutation needed. Twin functions need twin tests: the archive's
+stale-read test existed, the unarchive's didn't, and only the covered twin's
+mutation reddened.
+
 ## ROUND 6 (2026-07-27, First Profit funnel Unit 3) — cut the seam at the operation, not the client
 
 ROUND 5's advice ("retire the scan with an injection seam") is right and was

@@ -43,7 +43,15 @@ export const FW_BOARD_TOKEN_GRACE_MS = 6 * 60 * 60 * 1000;
 /** Just the shape these decisions need from a `path_cohorts` row. `kind` is a
  *  bare string on purpose — it crosses the service-role boundary, and a value
  *  outside the union must be REFUSED here rather than cast into existence. */
-export type FwBoardCohortLike = { kind: string; endsAt: string | null } | null;
+export type FwBoardCohortLike = {
+  kind: string;
+  endsAt: string | null;
+  /** Unit 7 (pulled forward from Unit 8's list by its review): the mint gate's
+   *  third input. Optional so the BOARD-READ callers that predate the archive
+   *  columns keep compiling; `undefined` reads as not-archived, which is this
+   *  field's fail-closed-to-visible direction everywhere. */
+  archivedAt?: string | null;
+} | null;
 
 /** Mirrors `FW_COHORT_KIND` in fw-access-rules.ts. Imported rather than
  *  redeclared so a renamed value cannot pass one module and fail the other. */
@@ -82,6 +90,8 @@ export type FwBoardTokenMintVerdict =
         | "cohort_not_found"
         /** G18: tokens are mintable ONLY for `kind='fw'` cohorts. */
         | "cohort_not_fw"
+        /** Unit 7: a retired weekend's projector is not re-openable by mint. */
+        | "cohort_archived"
         /** An fw cohort whose `ends_at` is missing or unreadable. */
         | "no_event_window"
         /** The window (plus grace) is already behind us — the token would be
@@ -123,6 +133,14 @@ export function fwBoardTokenMintVerdict({
 }): FwBoardTokenMintVerdict {
   if (!cohort) return { ok: false, reason: "cohort_not_found" };
   if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  // ORDERED after `cohort_not_fw` and before `no_event_window` — the plan's settled
+  // decision, and the test fixture rule that travels with it: an archived-cohort
+  // test must use a FUTURE window, because every real cohort's window will be past
+  // by the time anyone tests and `window_passed` would refuse incidentally, making
+  // a deleted guard look fine. An archived cohort's projector must not be
+  // re-openable by mint: the archive's whole board promise dies otherwise
+  // (adversarial review, 0.9 — one bookmarked ops URL after an archive).
+  if ((cohort.archivedAt ?? null) !== null) return { ok: false, reason: "cohort_archived" };
 
   const expiresAt = fwBoardTokenExpiry(cohort.endsAt);
   if (expiresAt === null) return { ok: false, reason: "no_event_window" };

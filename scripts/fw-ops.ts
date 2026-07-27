@@ -103,6 +103,8 @@ import {
   resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
+  archiveFwCohort,
+  unarchiveFwCohort,
 } from "../app/fp/lib/fw-ops-core";
 import {
   fwCohortWindowFromLocal,
@@ -145,6 +147,8 @@ const COMMANDS = [
   "cohort-create",
   "token-mint",
   "token-revoke",
+  "archive",
+  "unarchive",
   "board",
   "guides",
   "guide-add",
@@ -203,6 +207,11 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   // Unit 8: drive/inspect the offline drain against a JSON queue file. `--dry-run`
   // shows the reduce × same-actor-guard plan WITHOUT writing; without it, replays.
   drain: ["--file", "--cohort", "--dry-run"],
+  // Unit 7: retire a weekend / bring it back. Same cores as the ops surface —
+  // the revoke-then-archive ordering and every guard live in archiveFwCohort,
+  // so this front door cannot skip them.
+  archive: ["--cohort", "--actor"],
+  unarchive: ["--cohort"],
 };
 
 function arg(name: string): string | null {
@@ -285,6 +294,50 @@ async function main() {
   // Authorization is possession of the service-role key, exactly as above; the
   // HTTP surface's `isFwStaffActor` gate has no session to resolve here.
   // `--actor` still attributes every write to a real staff row.
+
+  if (command === "archive") {
+    const cohortId = required("cohort");
+    // EXPLICIT --actor, no fallback (Unit 7 review). `archived_by` is durable,
+    // user-visible attribution; the resolveActor convenience would silently pin an
+    // arbitrary active staff row's NAME on an archive they never made. Wrong
+    // attribution is worse than the schema's own honest "unrecorded" state.
+    const res = await archiveFwCohort(db, {
+      cohortId,
+      actorUserId: required("actor"),
+      now: Date.now(),
+    });
+    emit(res, () => {
+      if (res.ok) console.log(`archived ${cohortId} (board revoked or already dark)`);
+      else if (res.reason === "unavailable")
+        // The sequence revokes BEFORE it archives, so an `unavailable` here can mean
+        // the archive write failed AFTER the board already went dark (e.g. a bogus
+        // --actor violating the archived_by FK). Say so — a silent projector outage
+        // with a CLI that said only "unavailable" is the operator trap the review
+        // walked into (adversarial, 0.85).
+        console.log(
+          `archive refused: unavailable — NOTE: the board token may ALREADY be revoked ` +
+            `(the revoke runs first). Check \`npm run fw -- cohorts\` and re-run with a ` +
+            `valid --actor; a clean retry archives without touching the board again.`
+        );
+      else console.log(`archive refused: ${res.reason}`);
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "unarchive") {
+    const cohortId = required("cohort");
+    const res = await unarchiveFwCohort(db, { cohortId });
+    emit(res, () => {
+      if (res.ok)
+        console.log(
+          `unarchived ${cohortId} — the board stays dark; mint a new token if it should be live`
+        );
+      else console.log(`unarchive refused: ${res.reason}`);
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
 
   if (command === "cohorts") {
     const res = await listFwOpsCohorts(db, { now: Date.now() });

@@ -105,8 +105,58 @@ function isFwPath(pathname: string): boolean {
   return pathname === "/fp/fw" || pathname.startsWith("/fp/fw/");
 }
 
+/**
+ * Whether a pathname is the staff hub — the bare /staff or anything below it
+ * (Staff Front Door Unit 2, R6).
+ *
+ * Exact-or-slash, never a bare `startsWith("/staff")`: a future /staffing or
+ * /staff-handbook must not silently inherit the hub's gate, the same trap
+ * /fpology sets for the /fp branch and /fp/fwiw for the FW one.
+ *
+ * EXPORTED, unlike `isFwPath`, for one reason: /staff and /crm resolve to the
+ * same three outcomes today (R6 holds the hub to the CRM's standard), so a
+ * prefix leak into the hub branch is invisible at the outcome level —
+ * /staffing earns `crm-login` either way. This predicate is the only thing
+ * that can witness it, and only while the two branches happen to agree.
+ */
+export function isStaffPath(pathname: string): boolean {
+  return pathname === "/staff" || pathname.startsWith("/staff/");
+}
+
 export function isUnguarded(pathname: string): boolean {
   return UNGUARDED.has(pathname) || UNGUARDED_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/**
+ * The admin-claim gate, shared by /crm and /staff.
+ *
+ * R6 asks for the hub to be "held to the same standard as /crm" — a SAMENESS
+ * requirement, so it is one function with two call sites rather than two
+ * copies that must be kept in step by hand. Unit 1 of this same plan shipped
+ * to fix precisely that shape: a check and an act that were supposed to agree,
+ * written twice, and drifted.
+ *
+ * The outcome names stay CRM-flavoured on purpose. The staff sign-in IS
+ * /crm/login (scope boundary: the hub does not get a door of its own) and the
+ * hub's 404 rewrite target IS /crm/staff-only — a rewrite, so the URL bar
+ * keeps reading /staff and the CRM-branded path is never visible.
+ *
+ * The return type is the three-member SUBSET this can actually produce, not
+ * the whole union. proxy.ts carries auth cookies across on every non-"pass"
+ * outcome, so a fourth value returned from here would be a new gated branch
+ * that skips that copy — and a dropped cookie ends a live session silently.
+ * Narrowing makes that a compile error rather than something a test has to
+ * notice.
+ */
+type AdminClaimOutcome = Extract<
+  ProxyOutcome,
+  "pass" | "crm-login" | "crm-staff-only"
+>;
+
+function resolveAdminClaimOutcome(session: ProxySessionLike): AdminClaimOutcome {
+  if (!session) return "crm-login";
+  if (session.user.app_metadata?.role !== "admin") return "crm-staff-only";
+  return "pass";
 }
 
 /**
@@ -116,6 +166,7 @@ export function isUnguarded(pathname: string): boolean {
  * - /fp/fw/* with any session          → "pass"
  * - /fp/*   without a session          → "path-login"
  * - /fp/*   with any session           → "pass"  (role checks are per-Server-Function)
+ * - /staff/*  → the admin-claim gate, identical to /crm (R6)
  * - /crm/*    without a session          → "crm-login"
  * - /crm/*    without the admin claim    → "crm-staff-only"
  * - /crm/*    with the admin claim       → "pass"
@@ -150,9 +201,19 @@ export function resolveProxyOutcome({
     return session ? "pass" : "path-login";
   }
 
-  if (!session) return "crm-login";
-  if (session.user.app_metadata?.role !== "admin") return "crm-staff-only";
-  return "pass";
+  // The staff hub (Staff Front Door Unit 2, R6). This branch and the catch-all
+  // below return the SAME thing today, deliberately — it is a tripwire, not a
+  // second policy. Left to the catch-all, /staff would be gated only by the
+  // accident of matching nothing above it; the day someone adds a prefix
+  // branch, or relaxes the catch-all for an unknown route, the front door to
+  // every staff tool would inherit that change silently. Naming it here means
+  // the hub keeps the gate R6 chose for it, and a reader adding a route can
+  // see that /staff is gated on purpose.
+  if (isStaffPath(pathname)) return resolveAdminClaimOutcome(session);
+
+  // /crm, plus anything else the matcher routes in without matching a branch
+  // above (/fpology — pinned in the tests, and gated rather than passed).
+  return resolveAdminClaimOutcome(session);
 }
 
 /** Where each non-pass outcome sends the request. */

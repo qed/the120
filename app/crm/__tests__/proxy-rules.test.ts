@@ -11,6 +11,7 @@ import { config } from "@/proxy";
 import nextConfig from "@/next.config";
 import {
   carryOverAuthState,
+  isStaffPath,
   isUnguarded,
   outcomeDestination,
   resolveProxyOutcome,
@@ -217,6 +218,138 @@ describe("resolveProxyOutcome — /fp (renamed from /path in Unit 10)", () => {
   });
 });
 
+describe("isStaffPath — the /staffing prefix trap (Staff Front Door Unit 2)", () => {
+  /**
+   * This predicate is exported for one reason: /staff and /crm resolve to the
+   * SAME three outcomes (R6 holds the hub to the CRM's standard), so a prefix
+   * leak into the hub branch is INVISIBLE at the outcome level — `/staffing`
+   * would earn `crm-login` either way. Only the predicate can witness it, and
+   * only while the two branches happen to agree. They are not required to agree
+   * forever, and the day they diverge a bare startsWith("/staff") silently
+   * hands the hub's gate to every /staff* route ever added.
+   */
+  it("covers the bare hub and everything below it", () => {
+    expect(isStaffPath("/staff")).toBe(true);
+    expect(isStaffPath("/staff/")).toBe(true);
+    expect(isStaffPath("/staff/settings")).toBe(true);
+    expect(isStaffPath("/staff/a/b/c")).toBe(true);
+  });
+
+  it("never leaks to routes that merely share the prefix", () => {
+    // The same trap /fpology sets for the /fp branch and /fp/fwiw for the FW one.
+    expect(isStaffPath("/staffing")).toBe(false);
+    expect(isStaffPath("/staff-handbook")).toBe(false);
+    expect(isStaffPath("/staffroom/x")).toBe(false);
+    // And it is anchored — a nested /staff segment is not the hub.
+    expect(isStaffPath("/crm/staff")).toBe(false);
+    expect(isStaffPath("/crm/staff-only")).toBe(false);
+  });
+});
+
+describe("resolveProxyOutcome — /staff (the hub, Staff Front Door Unit 2)", () => {
+  const guideSession: ProxySessionLike = {
+    user: { app_metadata: { role: "guide" } },
+  };
+
+  it("no session → crm-login, the staff sign-in (R6)", () => {
+    // The scope boundary keeps the staff door at /crm/login; the hub does not
+    // get one of its own. Signed-out staff land where they already sign in.
+    expect(outcome("/staff", null)).toBe("crm-login");
+    expect(outcome("/staff/", null)).toBe("crm-login");
+    expect(outcome("/staff/anything", null)).toBe("crm-login");
+  });
+
+  it("session without the admin claim → crm-staff-only (R6's 404 semantics)", () => {
+    // Asserted as the OUTCOME STRING, not via isRewrite: the rewrite-vs-redirect
+    // branch lives in proxy.ts, which this repo cannot test (no way to build a
+    // real NextRequest). `crm-staff-only` is the one outcome the wrapper renders
+    // as a rewrite, so the URL bar keeps reading /staff and the CRM-branded
+    // rewrite target is never visible — the reason the hub reuses it.
+    expect(outcome("/staff", guideSession)).toBe("crm-staff-only");
+    expect(outcome("/staff", parentSession)).toBe("crm-staff-only");
+    expect(outcome("/staff", claimlessSession)).toBe("crm-staff-only");
+    expect(outcome("/staff", { user: {} })).toBe("crm-staff-only");
+    expect(outcome("/staff", { user: { app_metadata: null } })).toBe(
+      "crm-staff-only"
+    );
+    expect(outcome("/staff/anything", guideSession)).toBe("crm-staff-only");
+  });
+
+  it("admin claim → pass", () => {
+    expect(outcome("/staff", adminSession)).toBe("pass");
+    expect(outcome("/staff/", adminSession)).toBe("pass");
+    expect(outcome("/staff/anything", adminSession)).toBe("pass");
+  });
+
+  it("holds the hub to exactly the CRM's standard, session for session (R6)", () => {
+    // R6 is a sameness requirement, not a similarity one. Pinning the pairs
+    // means a future change to either gate that forgets the other reddens here
+    // rather than opening the hub to an account /crm refuses.
+    for (const session of [
+      null,
+      adminSession,
+      parentSession,
+      claimlessSession,
+      guideSession,
+      { user: { app_metadata: { role: "Admin" } } },
+      { user: { app_metadata: { role: "administrator" } } },
+    ] as ProxySessionLike[]) {
+      expect(outcome("/staff", session)).toBe(outcome("/crm", session));
+    }
+  });
+
+  it("the hub is guarded — it has no session-less door of its own", () => {
+    // /crm and /fp each carry unguarded doors (sign-in, reset, invite, board).
+    // The hub carries none: every entrance to it is somebody else's door.
+    expect(isUnguarded("/staff")).toBe(false);
+    expect(isUnguarded("/staff/")).toBe(false);
+    expect(isUnguarded("/staff/anything")).toBe(false);
+  });
+
+  it("its rewrite destination still resolves to `pass` session-less", () => {
+    // The loop check, extended to the hub's own gated outcomes. If /crm/login
+    // or /crm/staff-only were ever gated, a non-staff visitor to /staff would
+    // be rewritten into a route that rewrites them again, forever.
+    for (const o of ["crm-login", "crm-staff-only"] as const) {
+      expect(
+        resolveProxyOutcome({ pathname: outcomeDestination(o), session: null })
+      ).toBe("pass");
+    }
+  });
+
+  it("introduces no new outcome, so it cannot bypass carryOverAuthState", () => {
+    // proxy.ts has exactly one gated path: any outcome other than "pass"
+    // builds a fresh response and then carries the refreshed auth cookies and
+    // no-store headers across. A NEW ProxyOutcome variant would be the one way
+    // to reach a gated response without that copy — and the cost of missing it
+    // is a live session silently ending mid-navigation, the bug carryOverAuthState
+    // exists to fix. The hub deliberately reuses the CRM's outcomes instead, so
+    // the property is structural rather than remembered.
+    const known = new Set(["pass", "crm-login", "crm-staff-only"]);
+    for (const session of [
+      null,
+      adminSession,
+      parentSession,
+      claimlessSession,
+    ] as ProxySessionLike[]) {
+      // Fixture URLs deliberately avoid the old route prefix Unit 10 renamed:
+      // `fp-rename-straggler` scans raw source lines for it, comments
+      // included, so even a fixture string reads as a survivor of the rename.
+      for (const url of ["/staff", "/staff/", "/staff/deep/route"]) {
+        expect(known.has(outcome(url, session))).toBe(true);
+      }
+    }
+  });
+
+  it("routes that merely share the /staff prefix are NOT the hub", () => {
+    // Today they fall through to the CRM branch and earn the same verdicts, so
+    // this asserts the reachable behaviour: a /staffing that is not the hub is
+    // still gated, and gated the CRM's way.
+    expect(outcome("/staffing", null)).toBe("crm-login");
+    expect(outcome("/staff-handbook", adminSession)).toBe("pass");
+  });
+});
+
 describe("outcomeDestination", () => {
   it("maps each gated outcome to its route", () => {
     expect(outcomeDestination("crm-login")).toBe("/crm/login");
@@ -358,6 +491,28 @@ describe("config.matcher — asserted against Next's real router", () => {
     // so nothing under /fp/fw can miss the gate.
     expect(matches("/fp/fw")).toBe(true);
     expect(matches("/fp/fw/cohort/abc")).toBe(true);
+  });
+
+  it("routes the staff hub in, bare and nested (Staff Front Door Unit 2)", () => {
+    // /staff bare is the hub itself — without it the front door would bypass
+    // the gate entirely, which is the whole surface R6 protects. `:path*` is
+    // zero-or-more, so one entry covers the bare route and everything under it.
+    expect(matches("/staff")).toBe(true);
+    expect(matches("/staff/")).toBe(true);
+    expect(matches("/staff/anything")).toBe(true);
+    expect(matches("/staff/a/b/c")).toBe(true);
+  });
+
+  it("does not route /staffing or any prefix neighbour into the hub's gate", () => {
+    // The matcher is the outer half of the /staffing trap; isStaffPath is the
+    // inner half. Both are asserted because either alone would let a future
+    // /staff-handbook inherit a gate nobody chose for it.
+    expect(matches("/staffing")).toBe(false);
+    expect(matches("/staff-handbook")).toBe(false);
+    expect(matches("/staffroom/x")).toBe(false);
+    // And the pre-existing exclusions are unchanged by the new entry.
+    expect(matches("/")).toBe(false);
+    expect(matches("/dashboard")).toBe(false);
   });
 
   it("routes the unguarded routes in too — the proxy decides, not the matcher", () => {

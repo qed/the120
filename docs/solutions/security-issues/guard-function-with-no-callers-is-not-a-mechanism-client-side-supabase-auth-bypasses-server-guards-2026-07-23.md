@@ -139,6 +139,11 @@ credential for a child's account.
 
 ## Related
 
+- `docs/solutions/security-issues/an-inert-defensive-branch-has-no-behavioural-signature-assert-the-wiring-2026-07-27.md`
+  — the sibling shape. There a guard has zero callers; here it has a caller but
+  returns what its fallback already returned, so deleting it leaves the suite
+  green. Both are mechanisms with no behavioural signature, and both are fixed
+  the same way: a static test written in the same commit as the guard.
 - `docs/solutions/integration-issues/supabase-admin-createuser-non-deliverable-email-requires-email-confirm-2026-07-21.md`
   — the server-side half of the same no-mail invariant (`email_confirm: true`),
   which *is* genuinely mechanism-enforced via a literal-`true` type.

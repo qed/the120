@@ -384,6 +384,7 @@ function mintFailureMessage(
   reason:
     | "cohort_not_found"
     | "cohort_not_fw"
+    | "cohort_archived"
     | "no_event_window"
     | "window_passed"
     | "unavailable"
@@ -393,6 +394,8 @@ function mintFailureMessage(
       return "That cohort no longer exists.";
     case "cohort_not_fw":
       return "Boards are only for Founders Weekend cohorts.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before minting a board.";
     case "no_event_window":
       return "This weekend has no end date yet — the board's expiry comes from it.";
     case "window_passed":

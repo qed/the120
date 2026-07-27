@@ -329,6 +329,8 @@ export type MintFwBoardTokenResult =
       reason:
         | "cohort_not_found"
         | "cohort_not_fw"
+        /** Unit 7: minted-then-archived compensation, or the pre-flight refusal. */
+        | "cohort_archived"
         | "no_event_window"
         | "window_passed"
         | "unavailable";
@@ -358,7 +360,13 @@ export async function mintFwBoardToken(
 ): Promise<MintFwBoardTokenResult> {
   const cohort = await loadFwOpsCohort(db, input.cohortId);
   const verdict = fwBoardTokenMintVerdict({
-    cohort: cohort ? { kind: cohort.kind, endsAt: cohort.endsAt } : null,
+    // `archivedAt` FORWARDED (Unit 7 review — the verdict had the archived branch's
+    // slot planned for Unit 8, but the field silently dropped here would have let a
+    // bookmarked mint re-open a retired weekend's projector the moment Unit 7
+    // merged; the guard moved up rather than merging a known hole).
+    cohort: cohort
+      ? { kind: cohort.kind, endsAt: cohort.endsAt, archivedAt: cohort.archivedAt }
+      : null,
     now: input.now,
   });
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
@@ -437,6 +445,37 @@ export async function mintFwBoardToken(
       }
     }
     return { ok: false, reason: "unavailable" };
+  }
+
+  // THE INSERT-TIME RE-CHECK (Unit 7 review, adversarial finding 2). The pre-flight
+  // verdict above is a read, and mint's own write is two steps — revoke-prior, then
+  // insert. A concurrent archive landing BETWEEN them passes cleanly (its revoke
+  // finds zero live rows and folds to success; its CAS archives), after which the
+  // insert above lands a live token on an archived cohort: the exact invisible-and-
+  // harmful state the archive's ordering exists to prevent, surviving the naive
+  // check-at-read-time fix. So the mint re-reads AFTER its insert and compensates —
+  // revoking the token it just made — when the cohort archived underneath it. The
+  // token was never returned to anyone, so nothing is lost; the archive's promise
+  // holds; the caller is told the truth.
+  const post = await loadFwOpsCohort(db, input.cohortId);
+  if (post !== null && post.archivedAt !== null) {
+    console.warn(
+      `[fw/ops] cohort ${input.cohortId} was archived while a mint was in flight — revoking the just-minted token`
+    );
+    const undo = await revokeFwBoardToken(db, {
+      cohortId: input.cohortId,
+      actorUserId: input.actorUserId,
+      now: input.now,
+    });
+    if (!undo.ok && undo.reason !== "no_active_token") {
+      // The compensation itself failed: an archived cohort MAY hold a live token
+      // until someone revokes it by hand. Loud, specific, and actionable — the
+      // one state this whole ordering discipline exists to keep impossible.
+      console.error(
+        `[fw/ops] URGENT: cohort ${input.cohortId} is ARCHIVED but its just-minted board token could not be revoked (${undo.reason}) — revoke it manually (npm run fw -- token-revoke --cohort ${input.cohortId})`
+      );
+    }
+    return { ok: false, reason: "cohort_archived" };
   }
 
   return { ok: true, token, expiresAt: verdict.expiresAt, revokedPrior: priorIds.length > 0 };

@@ -218,3 +218,38 @@ describe("every Server Action calling resolveFwActorForCohort guards its throw (
     expect(callers.length).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("every exported fw-ops action gates before its core (Unit 7 tripwire)", () => {
+  it("each exported async function in actions/fw-ops.ts calls a staff gate before any core call", async () => {
+    // The plan names "gate with requireCohortStaff" as load-bearing for the archive
+    // actions, and the actions are "use server" files node cannot invoke — so the
+    // property is pinned structurally, like this file's resolver-guard scan: in each
+    // exported action's body, a gate call (`requireCohortStaff(` or
+    // `resolveFwStaffGate(`) must appear BEFORE the first `supabaseAdmin()` (the
+    // only way a core gets a client). Position, not presence — a gate called after
+    // the write is the mutation this would otherwise miss.
+    const { readFileSync: rf } = await import("node:fs");
+    const src = rf(new URL("../actions/fw-ops.ts", import.meta.url), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const exports = [...code.matchAll(/export async function (\w+)/g)];
+    expect(exports.length).toBeGreaterThanOrEqual(8); // not vacuous
+    for (const m of exports) {
+      const name = m[1];
+      const start = m.index ?? 0;
+      const next = code.indexOf("export async function", start + 10);
+      const body = code.slice(start, next === -1 ? undefined : next);
+      const gateAt = (() => {
+        const a = body.indexOf("requireCohortStaff(");
+        const b = body.indexOf("resolveFwStaffGate(");
+        if (a === -1) return b;
+        if (b === -1) return a;
+        return Math.min(a, b);
+      })();
+      const adminAt = body.indexOf("supabaseAdmin()");
+      expect(gateAt, `${name}: no staff gate call`).toBeGreaterThan(-1);
+      if (adminAt !== -1) {
+        expect(gateAt, `${name}: gate must run before the core gets a client`).toBeLessThan(adminAt);
+      }
+    }
+  });
+});

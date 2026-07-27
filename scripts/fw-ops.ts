@@ -297,13 +297,28 @@ async function main() {
 
   if (command === "archive") {
     const cohortId = required("cohort");
+    // EXPLICIT --actor, no fallback (Unit 7 review). `archived_by` is durable,
+    // user-visible attribution; the resolveActor convenience would silently pin an
+    // arbitrary active staff row's NAME on an archive they never made. Wrong
+    // attribution is worse than the schema's own honest "unrecorded" state.
     const res = await archiveFwCohort(db, {
       cohortId,
-      actorUserId: await resolveActor(),
+      actorUserId: required("actor"),
       now: Date.now(),
     });
     emit(res, () => {
       if (res.ok) console.log(`archived ${cohortId} (board revoked or already dark)`);
+      else if (res.reason === "unavailable")
+        // The sequence revokes BEFORE it archives, so an `unavailable` here can mean
+        // the archive write failed AFTER the board already went dark (e.g. a bogus
+        // --actor violating the archived_by FK). Say so — a silent projector outage
+        // with a CLI that said only "unavailable" is the operator trap the review
+        // walked into (adversarial, 0.85).
+        console.log(
+          `archive refused: unavailable — NOTE: the board token may ALREADY be revoked ` +
+            `(the revoke runs first). Check \`npm run fw -- cohorts\` and re-run with a ` +
+            `valid --actor; a clean retry archives without touching the board again.`
+        );
       else console.log(`archive refused: ${res.reason}`);
     });
     if (!res.ok) process.exitCode = 1;

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isStaffPath, resolveProxyOutcome } from "@/app/lib/supabase/proxy-rules";
 import { config } from "@/proxy";
@@ -54,6 +55,40 @@ describe("/staff — one definition of the hub across every gate", () => {
     }
   });
 
+  it("resolveProxyOutcome still decides the hub through isStaffPath", () => {
+    /**
+     * A SOURCE assertion, deliberately, and the only kind that can work here.
+     *
+     * The `/staff` branch in `resolveProxyOutcome` returns exactly what the
+     * catch-all beneath it returns, so deleting the branch changes no outcome
+     * and reddens no behavioural test — verified by mutation during this
+     * unit's review, where the whole `/staff` suite stayed green with the
+     * branch removed. The branch is not there for today's verdict; it is
+     * there so that the day someone changes the catch-all, /staff keeps the
+     * gate R6 chose for it.
+     *
+     * That makes it precisely the shape
+     * docs/solutions/security-issues/guard-function-with-no-callers-is-not-a-\
+     * mechanism-2026-07-23.md warns about: a guard whose value is entirely in
+     * being wired up, where losing the wiring is invisible. A "remove
+     * duplicate code" pass would delete it and every test would pass.
+     *
+     * So the wiring itself is what gets asserted. The repo already scans
+     * source this way (sw-discipline, fp-rename-straggler).
+     */
+    const src = readFileSync("app/lib/supabase/proxy-rules.ts", "utf8");
+    const body = src.slice(src.indexOf("export function resolveProxyOutcome"));
+    expect(body).toContain("isStaffPath(pathname)");
+
+    // And the predicate is not merely referenced somewhere in the file — it is
+    // referenced ahead of the catch-all, or /staff would reach the catch-all
+    // first and the branch would be unreachable rather than merely inert.
+    const branch = body.indexOf("isStaffPath(pathname)");
+    const catchAll = body.lastIndexOf("return resolveAdminClaimOutcome(session)");
+    expect(branch).toBeGreaterThan(-1);
+    expect(branch).toBeLessThan(catchAll);
+  });
+
   it("no session reaches the hub — signed out or signed in without the claim", () => {
     // R6 end to end at the routing layer: a guide typing /staff gets the 404
     // rewrite outcome, never `pass`, so the surface never confirms it exists.
@@ -73,9 +108,10 @@ describe("/staff — route segment config (R5a)", () => {
   it("the page declares itself unindexable and dynamic", async () => {
     const page = await import("@/app/staff/page");
 
-    // Without its own declaration the hub inherits the PUBLIC marketing robots
-    // directive from the root layout — the one repo surface where forgetting
-    // this indexes a staff page rather than merely leaving it undeclared.
+    // Both are asserted because Next merges `metadata` shallowly from the root
+    // segment down, nearest wins: the page's own declaration is what survives
+    // if the layout's is ever removed, and the layout's is what covers any
+    // future page added under /staff that forgets its own.
     expect(page.metadata.robots).toEqual({ index: false, follow: false });
     // The gate reads the session and the service-role staff row per request;
     // the env-less build must never try to prerender it.

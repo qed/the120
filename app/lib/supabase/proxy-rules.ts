@@ -140,8 +140,20 @@ export function isUnguarded(pathname: string): boolean {
  * /crm/login (scope boundary: the hub does not get a door of its own) and the
  * hub's 404 rewrite target IS /crm/staff-only — a rewrite, so the URL bar
  * keeps reading /staff and the CRM-branded path is never visible.
+ *
+ * The return type is the three-member SUBSET this can actually produce, not
+ * the whole union. proxy.ts carries auth cookies across on every non-"pass"
+ * outcome, so a fourth value returned from here would be a new gated branch
+ * that skips that copy — and a dropped cookie ends a live session silently.
+ * Narrowing makes that a compile error rather than something a test has to
+ * notice.
  */
-function resolveAdminClaimOutcome(session: ProxySessionLike): ProxyOutcome {
+type AdminClaimOutcome = Extract<
+  ProxyOutcome,
+  "pass" | "crm-login" | "crm-staff-only"
+>;
+
+function resolveAdminClaimOutcome(session: ProxySessionLike): AdminClaimOutcome {
   if (!session) return "crm-login";
   if (session.user.app_metadata?.role !== "admin") return "crm-staff-only";
   return "pass";

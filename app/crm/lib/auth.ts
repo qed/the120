@@ -18,9 +18,19 @@ export type StaffSession = { staffId: string; email: string };
  * Non-staff / inactive → redirect to /crm/staff-only (renders as a 404 —
  * rewrite semantics aren't available inside a server component).
  *
- * REQUEST-MEMOIZED with React's `cache()`, following the precedent
- * `loadFamilyContextCached` set in `family-loader.ts` and `loadFwSession`
- * followed in `fw-auth.ts` ("one set of queries per request instead of two").
+ * REQUEST-MEMOIZED with React's `cache()`.
+ *
+ * NOTE the shape differs from this repo's two existing memoized loaders, and
+ * the difference is deliberate rather than an oversight. `loadFwSession`
+ * (`fw-auth.ts`) and `loadFamilyContextCached` (`family-loader.ts`) both
+ * memoize a NON-throwing loader and leave the redirecting wrapper
+ * (`requireFwSession`) uncached. This memoizes the throwing gate itself,
+ * matching the DAL example in Next's own authentication guide
+ * (`node_modules/next/dist/docs/01-app/02-guides/authentication.md`), because
+ * wrapping in place gives all ~40 existing call sites the benefit without
+ * touching any of them — where the split would need a new exported loader and
+ * a rewrite of every caller for identical savings.
+ *
  * Layouts and the pages inside them both gate — deliberately, because Next 16
  * layouts do not re-render on soft navigation, so a page leaning on its layout
  * alone would be gated only on the render that mounted it. That doubles a
@@ -42,15 +52,26 @@ export const requireStaff = cache(async function requireStaff(): Promise<StaffSe
   } = await supabase.auth.getUser();
 
   // One indexed PK lookup; skipped entirely when there's no session.
-  const staffRow = user
-    ? (
-        await supabaseAdmin()
-          .from("staff")
-          .select("id, email, is_active")
-          .eq("id", user.id)
-          .maybeSingle()
-      ).data
+  const staffQuery = user
+    ? await supabaseAdmin()
+        .from("staff")
+        .select("id, email, is_active")
+        .eq("id", user.id)
+        .maybeSingle()
     : null;
+
+  // A failed query and a genuinely absent row both arrive here as null, and
+  // both fail closed to `forbidden` → a 404. That is the right verdict, but
+  // it means an active staff member hitting a transient database fault is
+  // told "not found" with nothing to distinguish it after the fact. Log it,
+  // matching `loadFwSession`'s handling of its own grants query, so on-call
+  // can tell revocation apart from a blip (review: reliability).
+  if (staffQuery?.error) {
+    console.error(
+      `[crm/auth] staff row lookup failed for ${user!.id}: ${staffQuery.error.message}`
+    );
+  }
+  const staffRow = staffQuery?.data ?? null;
 
   const verdict = resolveStaffAccess({
     session: user ? { user: { app_metadata: user.app_metadata } } : null,

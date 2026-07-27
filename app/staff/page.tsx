@@ -4,16 +4,20 @@ import { requireStaff } from "@/app/crm/lib/auth";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row
- * per request, and the env-less build must never try to prerender it. Both
- * `/crm` and `/fp/fw/ops` carry the same directive for the same reason.
+ * per request, and the env-less build must never try to prerender it.
+ * `/fp/fw/ops` carries the same explicit directive. `/crm` does NOT — it goes
+ * dynamic implicitly, through the Dynamic APIs `requireStaff()` calls. Stated
+ * because the difference is easy to misread as redundancy and delete.
  */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Staff — The 120",
-  // R5a again, at the page: `metadata` does not merge up from a layout for
-  // fields the page declares, and a page that shipped without this would
-  // inherit the PUBLIC marketing robots directive from the root layout.
+  // R5a, declared at the page as well as the layout. Next merges `metadata`
+  // shallowly from the root segment DOWN, nearest wins — so an undeclared
+  // page would inherit the layout's noindex, not the root layout's public
+  // marketing directive. This is belt-and-braces against the layout's
+  // declaration being removed, not a defence against the root.
   robots: { index: false, follow: false },
 };
 

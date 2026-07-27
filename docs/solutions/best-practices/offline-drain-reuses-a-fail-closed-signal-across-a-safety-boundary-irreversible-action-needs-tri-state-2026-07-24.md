@@ -1,6 +1,7 @@
 ---
 title: "An offline-replay drain reuses signals across a SAFETY BOUNDARY: a read/verdict/type-guard that is safe to fail-closed (or fail-open) for authorization or display becomes PERMANENT DATA LOSS when the same collapsed signal drives an irreversible drain action (reject, clear, route-online). Make the disposition TRI-STATE — success / genuine-no / could-not-tell-→-retry — at the boundary where it turns a captured tap into an append-only fact"
 date: 2026-07-24
+last_updated: 2026-07-27
 category: best-practices
 module: path-fw-offline
 problem_type: best_practice
@@ -105,6 +106,26 @@ catch (e) { return { ok: false, reason: "unreadable", queuedCount: 0 }; }
 export function clearFwQueueIfEmpty(): Promise<{ cleared: boolean; count: number }> { … }
 ```
 
+> **⚠️ SUPERSEDED 2026-07-27 — this fix was incomplete, and the snippet above is the
+> bug.** Making the clear atomic *with itself* left the harder question unasked: is
+> "atomic" counting the same thing the verdict counted? It was not. The verdict counted
+> only own + un-blocked + recognized entries; this `store.count()` counted
+> **everything**. A device holding one blocked or one foreign entry therefore got `ok`
+> from the check and `cleared:false` from the act — permanently, with the UI showing
+> race-condition copy for a state that was not a race and would never resolve.
+>
+> The current signature takes the verdict's own predicate, so check and act cannot
+> drift:
+>
+> ```ts
+> export function clearFwQueueIfEmpty(
+>   blocksClear: (rawEntry: unknown) => boolean
+> ): Promise<{ cleared: boolean; blocking: number }>
+> ```
+>
+> `fwSignOutVerdict` no longer exists; the sequence is `runFwSignOutFlow`. See
+> `logic-errors/a-check-that-authorises-a-destructive-act-must-fold-over-the-same-classifier-derive-the-per-record-predicate-from-the-whole-set-counter-2026-07-27.md`.
+
 ### 3. A reused type-guard makes a quarantined record invisible, then destroyed
 
 `isRecognizedFwEntry` (`x is FwQueueEntry`) gated BOTH "is this drainable?" and,
@@ -179,9 +200,13 @@ the clear, the reject), never upstream where the collapse was legitimately made.
   of the same record — split the two, and validate every field the predicate claims.
 - Any "check emptiness, then destroy" sequence — make the check and the destroy observe
   one serialized, atomic snapshot, and fail CLOSED (preserve) when the check can't run.
+  **And make them observe the same PREDICATE, not just the same snapshot** — one atomic
+  count of the wrong set is still the wrong answer (added 2026-07-27; see below).
 
 ## Related
 
 - `best-practices/offline-sync-device-clock-is-untrusted-input-membership-holds-single-clock-freshness-clamp-and-record-2026-07-22.md` — the sibling "untrusted input at the offline seam" learning (device clock); this one is its authorization/verdict/type-guard analog.
 - `best-practices/no-transaction-multi-step-write-compensation-post-write-verify-cas-scoped-claim-2026-07-22.md` — the drain's per-replay posture (probe-then-insert rejects, post-write-verify).
 - `logic-errors/idempotency-key-unique-scope-wider-than-the-operation-it-names-silently-swallows-distinct-writes-2026-07-23.md` — the exactly-once key the drain's replays carry, whose scope this unit preserved rather than regressed.
+- `logic-errors/a-check-that-authorises-a-destructive-act-must-fold-over-the-same-classifier-derive-the-per-record-predicate-from-the-whole-set-counter-2026-07-27.md` — the completion of item #2 above. Three days after this doc shipped, the same function pair was found still broken: the clear was atomic but counted a different set than the verdict. Read that one for the rule this doc's item #2 stops one step short of.
+- `best-practices/web-locks-are-not-reentrant-re-entry-hangs-instead-of-throwing-so-hold-the-lock-at-exactly-one-level-2026-07-27.md` and `best-practices/a-server-side-timeout-does-not-bound-a-request-that-never-lands-bound-the-clients-own-await-2026-07-27.md` — the two ways the drain lock this doc's engine relies on can be held forever.

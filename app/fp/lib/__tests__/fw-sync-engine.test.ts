@@ -5,7 +5,12 @@ import { runFwCheckIn } from "../fw-checkin-core";
 import { decideFwAction, type FwAction } from "../fw-rules";
 import {
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
+  fwSignOutOutcomeCopy,
+  isRecognizedFwEntry,
+  runFwSignOutFlow,
+  type FwDeviceEvidence,
   type FwQueueEntry,
+  type FwSignOutPorts,
 } from "../fw-sync-rules";
 import type { TaskState } from "../transition-table";
 
@@ -705,5 +710,292 @@ describe("the offline-only undo CAS — online preserved, offline replay made at
       ["undo", GUIDE],
       ["not_yet", null],
     ]);
+  });
+});
+
+/* ══════════════════════════════ the sign-out SEQUENCE (verdict → drain → clear) ══ */
+
+/**
+ * The sign-out sequence driven end-to-end through a fake device.
+ *
+ * The sequence is the composition the live defect lived in: `fwSignOutVerdict` counted
+ * only DRAINABLE entries while `clearFwQueueIfEmpty` counted EVERYTHING, so one blocked
+ * or one foreign entry produced `ok` from the check and `cleared:false` from the act —
+ * an unescapable "a check-in just came in" loop. `runFwSignOutFlow` is pure and
+ * port-injected precisely so that composition is testable here (this repo runs node-only
+ * tests; a sequence written inline in the button is invisible to CI), and so the SAME
+ * predicate the verdict classified with is the one handed to the clear.
+ *
+ * The lock is a PORT, not a `navigator.locks` call, for the same reason — and the fake
+ * below is a genuinely NON-REENTRANT mutex, so a sequence that took the lock twice (or
+ * whose drain port took it again) would deadlock the test rather than pass it.
+ */
+
+/** One origin's `fw-offline-drain` lock, shared by every "document" in a test. */
+function makeFakeLockManager() {
+  let tail: Promise<unknown> = Promise.resolve();
+  let held = 0;
+  let acquisitions = 0;
+  return {
+    get held() {
+      return held;
+    },
+    get acquisitions() {
+      return acquisitions;
+    },
+    request<T>(fn: () => Promise<T>): Promise<T> {
+      acquisitions += 1;
+      const turn = tail.then(async () => {
+        held += 1;
+        try {
+          return await fn();
+        } finally {
+          held -= 1;
+        }
+      });
+      tail = turn.catch(() => {});
+      return turn;
+    },
+  };
+}
+
+type FakeDevice = {
+  store: unknown[];
+  online: boolean;
+  authRequired: boolean;
+  evidence: FwDeviceEvidence;
+  /** Model an IndexedDB read that rejects (Safari storage policy, onblocked, …). */
+  readFails: boolean;
+  reads: number;
+  drains: number;
+  /** What one drain does to the store. Default: every own un-blocked tap lands. */
+  onDrain: (dev: FakeDevice) => void;
+  /** A tap that lands in the window between the verdict and the clear. */
+  beforeClear: ((dev: FakeDevice) => void) | null;
+};
+
+function device(over: Partial<FakeDevice> = {}): FakeDevice {
+  return {
+    store: [],
+    online: true,
+    authRequired: false,
+    evidence: { kind: "read", cacheOwner: GUIDE, queueDbOpened: true },
+    readFails: false,
+    reads: 0,
+    drains: 0,
+    onDrain: (dev) => {
+      dev.store = dev.store.filter(
+        (r) => !isRecognizedFwEntry(r) || r.actorUserId !== GUIDE || r.blocked !== null
+      );
+    },
+    beforeClear: null,
+    ...over,
+  };
+}
+
+function portsFor(
+  dev: FakeDevice,
+  lock: ReturnType<typeof makeFakeLockManager>
+): FwSignOutPorts {
+  return {
+    readEvidence: () => dev.evidence,
+    readQueue: async () => {
+      dev.reads += 1;
+      if (dev.readFails) throw new Error("fw queue db open blocked");
+      return [...dev.store];
+    },
+    isOnline: () => dev.online,
+    isAuthRequired: () => dev.authRequired,
+    withDrainLock: (fn) => lock.request(fn),
+    drain: async () => {
+      dev.drains += 1;
+      // The drain MUST run inside the sequence's own acquisition — a drain that
+      // re-acquired `fw-offline-drain` would hang here forever, not fail.
+      expect(lock.held).toBe(1);
+      dev.onDrain(dev);
+    },
+    clear: async (blocksClear) => {
+      dev.beforeClear?.(dev);
+      // Models `clearFwQueueIfEmpty`: count-then-clear in ONE transaction, under the
+      // predicate the flow supplied — never a second, hand-written emptiness test.
+      const blocking = dev.store.filter(blocksClear).length;
+      if (blocking === 0) dev.store = [];
+      return { cleared: blocking === 0 };
+    },
+  };
+}
+
+const signOut = (dev: FakeDevice, lock = makeFakeLockManager()) =>
+  runFwSignOutFlow({ actorUserId: GUIDE, ports: portsFor(dev, lock) });
+
+const rejected = { reason: "guard_refused" as const, note: "Staff will follow up." };
+
+describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
+  it("an empty queue signs out, and the clear runs", async () => {
+    const dev = device();
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.reads).toBe(1); // one verdict; no drain was needed
+    expect(dev.drains).toBe(0);
+  });
+
+  it("three own drainable entries online drain first, then sign out", async () => {
+    const dev = device({ store: [entry("checkmark"), entry("checkmark"), entry("not_yet")] });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.drains).toBe(1);
+    expect(dev.reads).toBe(2); // the verdict said drain_first, and the flow RE-CHECKED
+    expect(dev.store).toEqual([]);
+  });
+
+  it("exactly ONE BLOCKED entry signs out AND the clear SUCCEEDS", async () => {
+    // THE REGRESSION. Before this unit the verdict returned ok (blocked entries were
+    // filtered out of the count) and the clear returned cleared:false (a bare
+    // store.count() saw the blocked entry), so the button said "a check-in just came
+    // in — try again in a moment" on a device where nothing would ever change.
+    const dev = device({ store: [entry("checkmark", { blocked: rejected })] });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.drains).toBe(0); // a tombstoned entry is not drainable
+    expect(dev.store).toEqual([]); // …and it did not survive the clear
+  });
+
+  it("one FOREIGN UNDRAINED entry refuses, names the other account, and is NOT destroyed", async () => {
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({ store: [foreign] });
+    const outcome = await signOut(dev);
+
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
+    });
+    expect(fwSignOutOutcomeCopy(outcome)).toMatch(/another account/i);
+    expect(dev.store).toEqual([foreign]); // un-landed work of a guide who is not here
+    expect(dev.drains).toBe(0); // this session could never ship it anyway
+  });
+
+  it("one FOREIGN BLOCKED entry does not wedge — it clears with the rest", async () => {
+    // Its `path_fw_replay_rejects` row is the authoritative record; the local copy is
+    // a note for a guide who is no longer signed in on this device.
+    const dev = device({
+      store: [entry("undo", { actorUserId: OTHER_GUIDE, blocked: rejected })],
+    });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.store).toEqual([]);
+  });
+
+  it("one QUARANTINED record refuses with needs_attention and a count", async () => {
+    const dev = device({ store: [{ id: "q-1", schemaVersion: 99 }] });
+    const outcome = await signOut(dev);
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "needs_attention", queuedCount: 1 },
+    });
+    expect(dev.store).toHaveLength(1); // never silently wiped
+  });
+
+  it("a queue read that THROWS with FW evidence present fails CLOSED", async () => {
+    const dev = device({ readFails: true });
+    expect(await signOut(dev)).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "unreadable", queuedCount: 0 },
+    });
+  });
+
+  it("with NO FW evidence the queue is never opened at all and sign-out completes", async () => {
+    // A CRM-only staff member has never run Founders Weekend. `openFwDb()` would
+    // CREATE the queue database on their browser just to ask whether it is empty —
+    // and if that open rejects, they could never sign out again.
+    const lock = makeFakeLockManager();
+    const dev = device({
+      readFails: true,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false },
+    });
+    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
+    expect(dev.reads).toBe(0);
+    expect(lock.acquisitions).toBe(0); // no lock, no IndexedDB, no side effects
+  });
+
+  it("an evidence read that threw still checks the queue (unknown is not absence)", async () => {
+    const dev = device({ readFails: true, evidence: { kind: "unknown" } });
+    expect(await signOut(dev)).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "unreadable", queuedCount: 0 },
+    });
+    expect(dev.reads).toBe(1);
+  });
+
+  it("a drain that hits no_session refuses naming RE-AUTHENTICATION, not 'still sending'", async () => {
+    const dev = device({
+      store: [entry("checkmark")],
+      onDrain: (d) => {
+        d.authRequired = true; // what `drainFwQueue` → {ok:false, reason:"no_session"} sets
+      },
+    });
+    const outcome = await signOut(dev);
+
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "session_expired", queuedCount: 1 },
+    });
+    expect(fwSignOutOutcomeCopy(outcome)).toBe(
+      "Your session expired before 1 check-in could send. Sign in again to send it, then sign out."
+    );
+    expect(dev.store).toHaveLength(1);
+  });
+
+  it("a captive portal (onLine true, drain changes nothing) ESCALATES instead of looping", async () => {
+    const dev = device({ store: [entry("checkmark")], onDrain: () => {} });
+    const outcome = await signOut(dev);
+
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "drain_stalled", queuedCount: 1 },
+    });
+    expect(dev.drains).toBe(1); // exactly one attempt — not a spin
+    expect(fwSignOutOutcomeCopy(outcome)).not.toMatch(/try again in a moment/i);
+  });
+
+  it("a capture enqueued between the verdict and the clear aborts the sign-out", async () => {
+    const raced = entry("checkmark");
+    const dev = device({ beforeClear: (d) => d.store.push(raced) });
+    expect(await signOut(dev)).toEqual({ kind: "raced" });
+    expect(dev.store).toEqual([raced]); // the tap that raced in is intact
+  });
+
+  it("does not deadlock: the lock is acquired EXACTLY once and the drain runs inside it", async () => {
+    // Web Locks are not reentrant. If `runFwClientDrain`'s lock-acquiring wrapper were
+    // wired in as the flow's drain port, the `expect(lock.held).toBe(1)` inside the
+    // drain port would never be reached — the test would time out instead of failing.
+    const lock = makeFakeLockManager();
+    const dev = device({ store: [entry("checkmark"), entry("not_yet")] });
+    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
+    expect(lock.acquisitions).toBe(1);
+    expect(lock.held).toBe(0); // released
+    expect(dev.drains).toBe(1);
+  });
+
+  it("two documents — a drain in one, sign-out in the other — leave no entry behind", async () => {
+    const lock = makeFakeLockManager();
+    const dev = device({ store: [entry("checkmark"), entry("checkmark")] });
+
+    let releaseDocA!: () => void;
+    const docAWorking = new Promise<void>((r) => {
+      releaseDocA = r;
+    });
+    // Document A: a background drain, which goes through the SAME named lock.
+    const docA = lock.request(async () => {
+      await docAWorking;
+      dev.store = []; // its two taps landed
+    });
+    // Document B: the sign-out sequence, started while A still holds the lock.
+    const docB = signOut(dev, lock);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dev.reads).toBe(0); // B is genuinely BLOCKED on the lock, not racing A
+
+    releaseDocA();
+    await docA;
+    expect(await docB).toEqual({ kind: "sign_out" });
+    expect(dev.store).toEqual([]); // nothing survived, and nothing was lost
+    expect(dev.drains).toBe(0); // B found an empty queue — A had already sent it
+    expect(lock.acquisitions).toBe(2); // one per document, never twice in one
   });
 });

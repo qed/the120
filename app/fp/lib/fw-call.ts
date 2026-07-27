@@ -26,6 +26,26 @@
 export const FW_CALL_TIMEOUT_MS = 8_000;
 
 /**
+ * The cap on the CLIENT's wait for a whole Server Action round trip.
+ *
+ * Deliberately larger than `FW_CALL_TIMEOUT_MS`, and deliberately a separate
+ * number: that budget bounds ONE Supabase call, while a drain invocation wraps a
+ * session load, a per-cohort authorization resolve, the fold, and up to one reject
+ * write per entry. Reusing the 8 s cap out here would abort legitimate drains of a
+ * full weekend's backlog.
+ *
+ * It exists because `withFwTimeout` server-side bounds only what happens AFTER the
+ * request lands. A captive portal that silently drops the request — the venue
+ * failure this app is built around — produces a fetch that never settles at all, and
+ * the client awaits it while holding `fw-offline-drain`. Web Locks are origin-scoped
+ * and cross-document, so one hung drain in any tab blocks every later `wait:true`
+ * acquisition app-wide, including every future sign-out, with a full reload the only
+ * escape (reliability / adversarial / frontend-races review agreed on this
+ * independently).
+ */
+export const FW_ACTION_TIMEOUT_MS = 30_000;
+
+/**
  * Race a Supabase call against the clock.
  *
  * Returns a DISCRIMINATED result rather than a fabricated error object: the
@@ -42,7 +62,8 @@ export const FW_CALL_TIMEOUT_MS = 8_000;
  */
 export async function withFwTimeout<T>(
   promise: PromiseLike<T>,
-  label: string
+  label: string,
+  budgetMs: number = FW_CALL_TIMEOUT_MS
 ): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -50,9 +71,9 @@ export async function withFwTimeout<T>(
       Promise.resolve(promise).then((value) => ({ timedOut: false as const, value })),
       new Promise<{ timedOut: true }>((resolve) => {
         timer = setTimeout(() => {
-          console.error(`[fw] ${label} exceeded ${FW_CALL_TIMEOUT_MS}ms — giving up on the wait`);
+          console.error(`[fw] ${label} exceeded ${budgetMs}ms — giving up on the wait`);
           resolve({ timedOut: true });
-        }, FW_CALL_TIMEOUT_MS);
+        }, budgetMs);
       }),
     ]);
   } finally {

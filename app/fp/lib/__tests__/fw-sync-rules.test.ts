@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyFwDrainOutcome,
+  classifyFwSignOutQueue,
+  countFwSignOutBlockers,
   decideFwSignOut,
   evaluateFwSameActorGuard,
+  fwEntryBlocksSignOutClear,
+  fwSignOutOutcomeCopy,
+  fwSignOutRefusalCopy,
+  hasFwDeviceEvidence,
   projectFwPendingState,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   FW_ROSTER_CACHE_SCHEMA_VERSION,
@@ -384,17 +390,137 @@ describe("interpretFwReplayResult — settled vs reject vs retry", () => {
 
 /* ══════════════════════════════════ block-until-drained sign-out (Decision 8) ══ */
 
+/**
+ * ONE classifier, read by BOTH the verdict and the destructive clear.
+ *
+ * The regression this pins: the verdict counted only `drainable` while the clear
+ * counted EVERYTHING (a bare `store.count()`), so a device holding exactly one
+ * blocked or one foreign entry was told sign-out was allowed and then told a
+ * check-in had raced in — forever, with no surface to act on. Every assertion below
+ * that pairs `decideFwSignOut` with `fwEntryBlocksSignOutClear` is a check/act
+ * agreement test: if the two ever diverge again, the pair reddens.
+ */
+describe("classifyFwSignOutQueue — the single sign-out partition", () => {
+  const quarantineRecord = { id: "q-1", schemaVersion: 99, blocked: null };
+
+  it("partitions own/foreign × drainable/blocked, and surfaces unrecognized records", () => {
+    const ownDrainable = entry("checkmark");
+    const ownBlocked = entry("checkmark", { blocked: { reason: "guard_refused", note: "n" } });
+    const foreignDrainable = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const foreignBlocked = entry("not_yet", {
+      actorUserId: OTHER_GUIDE,
+      blocked: { reason: "cross_actor_undo", note: "n" },
+    });
+
+    const c = classifyFwSignOutQueue(
+      [ownDrainable, ownBlocked, foreignDrainable, foreignBlocked, quarantineRecord],
+      GUIDE
+    );
+
+    expect(c.drainable.map((e) => e.id)).toEqual([ownDrainable.id]);
+    expect(c.ownBlocked.map((e) => e.id)).toEqual([ownBlocked.id]);
+    expect(c.foreignUndrained.map((e) => e.id)).toEqual([foreignDrainable.id]);
+    expect(c.foreignBlocked.map((e) => e.id)).toEqual([foreignBlocked.id]);
+    expect(c.quarantined).toEqual([{ id: "q-1", note: expect.any(String) }]);
+  });
+
+  it("only drainable, quarantined and foreign-UNDRAINED records block the clear", () => {
+    // The check/act contract in one table. A blocked entry (own or foreign) already
+    // has an authoritative `path_fw_replay_rejects` row server-side, so destroying
+    // the local tombstone loses a note, not a child's check-in.
+    const rows: [unknown, boolean][] = [
+      [entry("checkmark"), true],
+      [entry("checkmark", { blocked: { reason: "guard_refused", note: "n" } }), false],
+      [entry("checkmark", { actorUserId: OTHER_GUIDE }), true],
+      [
+        entry("undo", {
+          actorUserId: OTHER_GUIDE,
+          blocked: { reason: "cross_actor_undo", note: "n" },
+        }),
+        false,
+      ],
+      [quarantineRecord, true],
+    ];
+    for (const [raw, blocks] of rows) {
+      expect(fwEntryBlocksSignOutClear(raw, GUIDE)).toBe(blocks);
+    }
+  });
+
+  it("the per-record predicate and the whole-queue blocker count are the SAME function", () => {
+    // BY CONSTRUCTION, not by coincidence: the count over a queue must equal the
+    // number of records the clear's predicate rejects, or check and act disagree
+    // again. This is the mutation guard for the whole unit.
+    const queue: unknown[] = [
+      entry("checkmark"),
+      entry("checkmark", { blocked: { reason: "guard_refused", note: "n" } }),
+      entry("not_yet", { actorUserId: OTHER_GUIDE }),
+      entry("undo", { actorUserId: OTHER_GUIDE, blocked: { reason: "guard_refused", note: "n" } }),
+      quarantineRecord,
+    ];
+    const perRecord = queue.filter((raw) => fwEntryBlocksSignOutClear(raw, GUIDE)).length;
+    expect(countFwSignOutBlockers(classifyFwSignOutQueue(queue, GUIDE))).toBe(perRecord);
+    expect(perRecord).toBe(3);
+  });
+
+  it("an unrecognized record with no usable id neither surfaces nor blocks (nothing to preserve)", () => {
+    expect(classifyFwSignOutQueue([{ nope: true }], GUIDE).quarantined).toEqual([]);
+    expect(fwEntryBlocksSignOutClear({ nope: true }, GUIDE)).toBe(false);
+  });
+});
+
 describe("decideFwSignOut — block-until-drained (Decision 8 / gap G1)", () => {
+  const classify = (raw: unknown[]) => classifyFwSignOutQueue(raw, GUIDE);
+  const blocked = (over: Partial<FwQueueEntry> = {}) =>
+    entry("checkmark", { blocked: { reason: "guard_refused", note: "n" }, ...over });
+
   it("an empty queue allows sign-out (clear the residue)", () => {
-    expect(decideFwSignOut({ queuedCount: 0, online: false })).toEqual({ ok: true });
-    expect(decideFwSignOut({ queuedCount: 0, online: true })).toEqual({ ok: true });
+    expect(decideFwSignOut({ queue: classify([]), online: false })).toEqual({ ok: true });
+    expect(decideFwSignOut({ queue: classify([]), online: true })).toEqual({ ok: true });
+  });
+
+  it("a queue of ONLY blocked entries allows sign-out — and the clear agrees", () => {
+    // THE PRIMARY REGRESSION. One blocked entry used to produce ok:true from the
+    // verdict and cleared:false from the clear, wedging the device forever.
+    const only = blocked();
+    expect(decideFwSignOut({ queue: classify([only]), online: true })).toEqual({ ok: true });
+    expect(fwEntryBlocksSignOutClear(only, GUIDE)).toBe(false);
+  });
+
+  it("a FOREIGN blocked entry allows sign-out — and the clear agrees", () => {
+    const foreign = blocked({ actorUserId: OTHER_GUIDE });
+    expect(decideFwSignOut({ queue: classify([foreign]), online: true })).toEqual({ ok: true });
+    expect(fwEntryBlocksSignOutClear(foreign, GUIDE)).toBe(false);
+  });
+
+  it("a foreign UNDRAINED entry REFUSES — this session can never send another account's work", () => {
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    expect(decideFwSignOut({ queue: classify([foreign]), online: true })).toEqual({
+      ok: false,
+      reason: "foreign_queue",
+      queuedCount: 1,
+    });
+    // ...and it must survive the clear, or the refusal would be destroying the very
+    // captures it exists to protect.
+    expect(fwEntryBlocksSignOutClear(foreign, GUIDE)).toBe(true);
+  });
+
+  it("a foreign undrained entry outranks this guide's own drainable work", () => {
+    // No drain under THIS session can ship the other account's tap, so naming the
+    // drain first would send the guide round a loop that cannot close.
+    const queue = classify([entry("checkmark"), entry("not_yet", { actorUserId: OTHER_GUIDE })]);
+    expect(decideFwSignOut({ queue, online: true })).toEqual({
+      ok: false,
+      reason: "foreign_queue",
+      queuedCount: 1,
+    });
   });
 
   it("sign-out with 3 queued items OFFLINE is REFUSED with the count", () => {
     // MUTATION GUARD (the plan's named row): a verdict that returned ok:true here
     // would let a 20-minute outage's captures evaporate on sign-out — the exact
     // permanent-loss failure Decision 8 exists to prevent.
-    expect(decideFwSignOut({ queuedCount: 3, online: false })).toEqual({
+    const queue = classify([entry("checkmark"), entry("checkmark"), entry("not_yet")]);
+    expect(decideFwSignOut({ queue, online: false })).toEqual({
       ok: false,
       reason: "queued_offline",
       queuedCount: 3,
@@ -402,17 +528,59 @@ describe("decideFwSignOut — block-until-drained (Decision 8 / gap G1)", () => 
   });
 
   it("sign-out with queued items ONLINE says drain first (the drain can run)", () => {
-    expect(decideFwSignOut({ queuedCount: 3, online: true })).toEqual({
+    const queue = classify([entry("checkmark"), entry("checkmark"), entry("not_yet")]);
+    expect(decideFwSignOut({ queue, online: true })).toEqual({
       ok: false,
       reason: "drain_first",
       queuedCount: 3,
     });
   });
 
+  it("queued items that SURVIVED a waited drain escalate to drain_stalled (captive portal)", () => {
+    // `navigator.onLine` is true on a hotel/venue captive portal, so `drain_first`
+    // would repeat "still sending — try again in a moment" indefinitely against a
+    // network that will never answer. Once a drain has run and changed nothing, the
+    // verdict must say something DIFFERENT and actionable.
+    const queue = classify([entry("checkmark")]);
+    expect(decideFwSignOut({ queue, online: true, drainAttempted: true })).toEqual({
+      ok: false,
+      reason: "drain_stalled",
+      queuedCount: 1,
+    });
+  });
+
+  it("an expired session refuses with session_expired rather than looping on drain_first", () => {
+    // A drain that returned `no_session` sets the client's auth-required flag; without
+    // this branch the verdict returns drain_first forever while the copy claims the
+    // check-ins are "still sending."
+    const queue = classify([entry("checkmark")]);
+    expect(decideFwSignOut({ queue, online: true, authRequired: true })).toEqual({
+      ok: false,
+      reason: "session_expired",
+      queuedCount: 1,
+    });
+    expect(
+      decideFwSignOut({ queue, online: true, authRequired: true, drainAttempted: true })
+    ).toEqual({ ok: false, reason: "session_expired", queuedCount: 1 });
+  });
+
+  it("OFFLINE outranks an expired session (re-authenticating is impossible offline)", () => {
+    const queue = classify([entry("checkmark")]);
+    expect(decideFwSignOut({ queue, online: false, authRequired: true })).toEqual({
+      ok: false,
+      reason: "queued_offline",
+      queuedCount: 1,
+    });
+  });
+
   it("sign-out with only QUARANTINED entries is refused needs_attention (never silently wiped)", () => {
     // kieran-typescript / reliability review: a shape this build can't drain is an
     // un-landed capture; sign-out must surface it for dismissal, not destroy it.
-    expect(decideFwSignOut({ queuedCount: 0, quarantinedCount: 2, online: true })).toEqual({
+    const queue = classify([
+      { id: "q-1", schemaVersion: 99 },
+      { id: "q-2", schemaVersion: 99 },
+    ]);
+    expect(decideFwSignOut({ queue, online: true })).toEqual({
       ok: false,
       reason: "needs_attention",
       queuedCount: 2,
@@ -420,11 +588,114 @@ describe("decideFwSignOut — block-until-drained (Decision 8 / gap G1)", () => 
   });
 
   it("drainable entries take precedence over quarantined in the verdict", () => {
-    expect(decideFwSignOut({ queuedCount: 1, quarantinedCount: 1, online: false })).toEqual({
+    const queue = classify([entry("checkmark"), { id: "q-1", schemaVersion: 99 }]);
+    expect(decideFwSignOut({ queue, online: false })).toEqual({
       ok: false,
       reason: "queued_offline",
       queuedCount: 1,
     });
+  });
+
+  it("blocked entries never inflate a refusal's count", () => {
+    const queue = classify([entry("checkmark"), blocked(), blocked()]);
+    expect(decideFwSignOut({ queue, online: false })).toEqual({
+      ok: false,
+      reason: "queued_offline",
+      queuedCount: 1,
+    });
+  });
+});
+
+describe("fwSignOutRefusalCopy — every refusal names an action the guide can take", () => {
+  it("names re-authentication when the session expired", () => {
+    // The plan asks for the STRING: the old copy said "still sending", which is a
+    // lie the guide cannot act on.
+    const copy = fwSignOutRefusalCopy("session_expired", 1);
+    expect(copy).toMatch(/sign in again/i);
+    expect(copy).not.toMatch(/still sending/i);
+  });
+
+  it("names the other ACCOUNT when foreign work is on the device", () => {
+    const copy = fwSignOutRefusalCopy("foreign_queue", 2);
+    expect(copy).toMatch(/another account/i);
+    expect(copy).toContain("2");
+  });
+
+  it("escalates when a drain already ran and changed nothing", () => {
+    const first = fwSignOutRefusalCopy("drain_first", 1);
+    const stalled = fwSignOutRefusalCopy("drain_stalled", 1);
+    expect(stalled).not.toEqual(first);
+    // "try again in a moment" is precisely the loop the captive portal never exits.
+    expect(stalled).not.toMatch(/try again in a moment/i);
+    expect(stalled).toMatch(/wi-?fi|network|connect/i);
+  });
+
+  it("names STAYING SIGNED IN when the device is offline with its own work", () => {
+    // The action is "keep the device"; a copy edit that drops it leaves a guide
+    // who has been refused with no idea what to do next.
+    const copy = fwSignOutRefusalCopy("queued_offline", 1);
+    expect(copy).toMatch(/stay signed in/i);
+    expect(copy).toMatch(/automatically/i);
+  });
+
+  it("names WAITING while its own work is still sending", () => {
+    const copy = fwSignOutRefusalCopy("drain_first", 2);
+    expect(copy).toMatch(/still sending/i);
+    expect(copy).toMatch(/try again/i);
+  });
+
+  it("names the DISMISS control for quarantined records", () => {
+    // The one refusal whose action lives on another surface: the banner is
+    // rendered by FwPwa across the /fp/fw (app) group. Mounting the sign-out
+    // control outside that group makes this sentence unactionable, so pin the
+    // wording that ties it to the banner.
+    const copy = fwSignOutRefusalCopy("needs_attention", 1);
+    expect(copy).toMatch(/dismiss/i);
+    expect(copy).toMatch(/banner/i);
+  });
+
+  it("agrees with itself on singular/plural for every reason", () => {
+    const reasons = [
+      "queued_offline",
+      "drain_first",
+      "drain_stalled",
+      "needs_attention",
+      "foreign_queue",
+      "session_expired",
+      "unreadable",
+    ] as const;
+    for (const reason of reasons) {
+      expect(fwSignOutRefusalCopy(reason, 1)).not.toMatch(/\b1 check-ins\b/);
+      expect(fwSignOutRefusalCopy(reason, 2)).not.toMatch(/\b2 check-in\b/);
+    }
+  });
+
+  it("maps every outcome the flow can return to copy (or to silence on success)", () => {
+    expect(fwSignOutOutcomeCopy({ kind: "sign_out" })).toBeNull();
+    expect(fwSignOutOutcomeCopy({ kind: "raced" })).toMatch(/just came in/i);
+    expect(
+      fwSignOutOutcomeCopy({
+        kind: "refused",
+        verdict: { ok: false, reason: "unreadable", queuedCount: 0 },
+      })
+    ).toMatch(/try again/i);
+  });
+});
+
+describe("hasFwDeviceEvidence — never CREATE a queue db on a browser that never ran FW", () => {
+  it("no cache owner and no opened db means this device has no FW residue", () => {
+    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: null, queueDbOpened: false })).toBe(false);
+  });
+
+  it("either signal alone is evidence", () => {
+    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: GUIDE, queueDbOpened: false })).toBe(true);
+    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: null, queueDbOpened: true })).toBe(true);
+  });
+
+  it("an evidence read that THREW fails CLOSED — unknown is not proof of absence", () => {
+    // Safari's storage policy can throw on localStorage. "I could not look" must
+    // never be treated as "there is nothing here" — that is how a queue gets wiped.
+    expect(hasFwDeviceEvidence({ kind: "unknown" })).toBe(true);
   });
 });
 

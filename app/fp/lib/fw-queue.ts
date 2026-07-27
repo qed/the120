@@ -47,7 +47,39 @@ export function isFwQueueSupported(): boolean {
   return typeof indexedDB !== "undefined";
 }
 
+/**
+ * Whether THIS document has ever opened (and therefore possibly CREATED) the queue
+ * database — half of the sign-out evidence gate in `hasFwDeviceEvidence`.
+ *
+ * `indexedDB.open` creates the database as a side effect, so "is the queue empty?"
+ * cannot be asked without first answering "was there ever a queue?". The signal used
+ * is this in-document flag plus the persisted `fw.cacheOwner` key — a page that
+ * captured, drained or cached a roster has necessarily set it.
+ *
+ * NOT `indexedDB.databases()`. An earlier version of this comment justified that by
+ * saying Safari does not implement it; that was true of pre-2024 Safari but is no
+ * longer, so do not repeat it as fact. The reasons that still hold: it is async, and
+ * it answers "does a database exist" rather than "did this actor ever use FW" — which
+ * is the question the gate is actually asking.
+ *
+ * ⚠️ THIS GATE IS NOT SOUND ON ITS OWN, and the plan's staff nav bar is where that
+ * starts to matter. `queueDbOpened` is per-DOCUMENT and false on every fresh load, so
+ * the gate rests entirely on a localStorage key surviving independently of IndexedDB
+ * — two storage subsystems with independent eviction. Evict the key while the queue
+ * survives and sign-out skips the check completely. It is safe TODAY only because
+ * `FwPwa` opens this database on every mount of the layout that renders the sign-out
+ * button, which is incidental coupling, not a guarantee. Mounting that button outside
+ * the `/fp/fw` (app) group requires replacing this heuristic with the server-known
+ * fact of whether the actor is an FW guide (Staff Front Door Unit 3).
+ */
+let queueDbOpened = false;
+
+export function hasFwQueueDbOpened(): boolean {
+  return queueDbOpened;
+}
+
 function openFwDb(): Promise<IDBDatabase> {
+  queueDbOpened = true;
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(FW_QUEUE_DB_NAME, FW_QUEUE_DB_VERSION);
     req.onupgradeneeded = () => {
@@ -152,29 +184,46 @@ export function clearFwQueue(): Promise<void> {
 }
 
 /**
- * ATOMIC check-and-clear: clears the queue ONLY if it is empty, in ONE transaction,
- * serialized on the write chain.
+ * ATOMIC check-and-clear: clears the queue ONLY if no record BLOCKS the clear, in ONE
+ * transaction, serialized on the write chain.
  *
  * The sign-out flow's safety backstop (adversarial review's P0): even after the
- * verdict says the queue is empty, a check-in can be enqueued in the window before
- * the clear runs. A blind `clearFwQueue()` would then wipe that just-committed tap.
- * By counting and clearing inside one transaction that runs AFTER every pending
- * enqueue (the chain) and observes a consistent snapshot (the transaction), a tap
- * that raced in makes the count non-zero and the clear a no-op — the caller sees
- * `cleared:false` and aborts sign-out rather than losing the tap.
+ * verdict says the queue may be wiped, a check-in can be enqueued in the window
+ * before the clear runs. A blind `clearFwQueue()` would then wipe that
+ * just-committed tap. By counting and clearing inside one transaction that runs AFTER
+ * every pending enqueue (the chain) and observes a consistent snapshot (the
+ * transaction), a tap that raced in makes the count non-zero and the clear a no-op —
+ * the caller sees `cleared:false` and aborts sign-out rather than losing the tap.
+ *
+ * `blocksClear` IS THE POINT OF THE SIGNATURE. This used to be a bare `store.count()`,
+ * which counted EVERY record — including the blocked tombstones and foreign entries
+ * the verdict deliberately excluded from its own count. One blocked entry therefore
+ * produced `ok` from the check and `cleared:false` from the act, and the guide got
+ * "a check-in just came in — try again in a moment" forever, on a device where
+ * nothing would ever change. The caller now passes the SAME predicate its verdict
+ * classified with (`fwEntryBlocksSignOutClear`), so check and act cannot drift again;
+ * this driver keeps no emptiness opinion of its own, exactly as the header demands.
+ *
+ * A predicate that THROWS aborts the transaction, which rejects — and a rejected
+ * clear is `cleared:false` at the caller. Failing closed is the correct direction:
+ * the queue survives.
  */
-export function clearFwQueueIfEmpty(): Promise<{ cleared: boolean; count: number }> {
+export function clearFwQueueIfEmpty(
+  blocksClear: (rawEntry: unknown) => boolean
+): Promise<{ cleared: boolean; blocking: number }> {
   return enqueueWrite(async () => {
     const db = await openFwDb();
     try {
-      return await new Promise<{ cleared: boolean; count: number }>((resolve, reject) => {
+      return await new Promise<{ cleared: boolean; blocking: number }>((resolve, reject) => {
         const tx = db.transaction(FW_QUEUE_STORE, "readwrite");
         const store = tx.objectStore(FW_QUEUE_STORE);
-        const countReq = store.count();
-        countReq.onsuccess = () => {
-          if (countReq.result === 0) store.clear();
+        const allReq = store.getAll();
+        let blocking = 0;
+        allReq.onsuccess = () => {
+          blocking = ((allReq.result ?? []) as unknown[]).filter(blocksClear).length;
+          if (blocking === 0) store.clear();
         };
-        tx.oncomplete = () => resolve({ cleared: countReq.result === 0, count: countReq.result });
+        tx.oncomplete = () => resolve({ cleared: blocking === 0, blocking });
         tx.onerror = () => reject(tx.error ?? new Error("clearIfEmpty failed"));
         tx.onabort = () => reject(tx.error ?? new Error("clearIfEmpty aborted"));
       });

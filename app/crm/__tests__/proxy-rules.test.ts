@@ -332,8 +332,11 @@ describe("resolveProxyOutcome — /staff (the hub, Staff Front Door Unit 2)", ()
       parentSession,
       claimlessSession,
     ] as ProxySessionLike[]) {
-      for (const path of ["/staff", "/staff/", "/staff/deep/path"]) {
-        expect(known.has(outcome(path, session))).toBe(true);
+      // Fixture URLs deliberately avoid the old route prefix Unit 10 renamed:
+      // `fp-rename-straggler` scans raw source lines for it, comments
+      // included, so even a fixture string reads as a survivor of the rename.
+      for (const url of ["/staff", "/staff/", "/staff/deep/route"]) {
+        expect(known.has(outcome(url, session))).toBe(true);
       }
     }
   });

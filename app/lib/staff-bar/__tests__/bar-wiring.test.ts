@@ -443,4 +443,33 @@ describe("R16 — one sign-out control, and the other two are GONE not merely un
     // gate, landing on /crm/login regardless of account) is gone with it.
     expect(await scanFor("supabaseBrowser")).not.toContain("app/crm/components/CrmTabs.tsx");
   });
+
+  it("all six CRM sections are still reachable — the row lost a control, not a tab", () => {
+    // Counted and named. "Only identity and sign-out move up" is easy to say and easy
+    // to overshoot by one `<Link>`, and a dropped section strands a whole CRM surface
+    // behind URL-typing with nothing else in the app linking to it.
+    const tabs = stripComments(read("../../../crm/components/CrmTabs.tsx"));
+    const hrefs = [...tabs.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(hrefs).toEqual(
+      [
+        "/crm",
+        "/crm/ambassadors",
+        "/crm/dossiers",
+        "/crm/library",
+        "/crm/pipeline",
+        "/crm/sprint",
+      ].sort()
+    );
+  });
+
+  it("both rows of chrome keep the mechanism that survives 375px", () => {
+    // The contract cannot be measured here (no jsdom, no browser), so what is pinned
+    // is the MECHANISM each row uses to meet it — which is the part a refactor
+    // removes. The tab row scrolls horizontally rather than wrapping; the bar wraps
+    // rather than scrolling, because its own last element is the sign-out control and
+    // a control that has scrolled off the right edge of a shared iPad is R23 broken in
+    // practice while true in source.
+    expect(stripComments(read("../../../crm/components/CrmTabs.tsx"))).toMatch(/overflow-x-auto/);
+    expect(CODE).toMatch(/flex-wrap/);
+  });
 });

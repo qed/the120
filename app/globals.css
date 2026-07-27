@@ -78,6 +78,13 @@
   --color-phase-grow: hsl(var(--phase-grow));
   --color-phase-scale: hsl(var(--phase-scale));
 
+  /* Text-safe variants (R16) — the label colours. See the --phase-*-ink block. */
+  --color-phase-sell-ink: hsl(var(--phase-sell-ink));
+  --color-phase-build-ink: hsl(var(--phase-build-ink));
+  --color-phase-validate-ink: hsl(var(--phase-validate-ink));
+  --color-phase-grow-ink: hsl(var(--phase-grow-ink));
+  --color-phase-scale-ink: hsl(var(--phase-scale-ink));
+
   /* Verification semantics — Not Yet is amber, never red */
   --color-verified: hsl(var(--verified));
   --color-awaiting: hsl(var(--awaiting));
@@ -314,6 +321,20 @@ html:has(.gauntlet-root) body {
   --phase-validate: 265 52% 58%;
   --phase-grow: 150 52% 42%;
   --phase-scale: 41 88% 52%;
+  /* TEXT-SAFE variants of the same five hues (funnel U4, R16). The raw tokens
+     above are accent colours and every one of them fails WCAG AA (4.5:1) as
+     small text on `#f7f6f3` paper — scale/gold worst at 1.83:1, and even
+     validate, the best of them, only reaches 4.32:1. The brief predicted gold
+     and coral would fail; measurement found all five do.
+     Same hue and saturation, lightness lowered to the first whole percent
+     that clears 4.5:1. Labels use these; chips and underlines keep the raw
+     tokens above. Pinned numerically in app/lib/__tests__/door-colors.test.ts,
+     which recomputes the ratios rather than trusting this comment. */
+  --phase-sell-ink: 14 78% 44%;
+  --phase-build-ink: 217 74% 51%;
+  --phase-validate-ink: 265 52% 57%;
+  --phase-grow-ink: 150 52% 33%;
+  --phase-scale-ink: 41 88% 31%;
   /* Verification semantics — Not Yet is amber, never red */
   --verified: 150 52% 40%;
   --awaiting: 217 60% 56%;

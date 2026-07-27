@@ -476,10 +476,14 @@ export function applyFwDrainOutcome(
  *                        clearing it destroys nothing that is not already recorded.
  *   - `quarantined`      a shape this build cannot drain. An UN-LANDED capture that a
  *                        blind clear would lose — must be dismissed by a human first.
- *   - `foreignUndrained` another account's un-landed work. REFUSES: no drain under
- *                        this session can ship it (the drain scopes to the signed-in
- *                        actor by design), so clearing it would silently destroy a
- *                        different guide's captures.
+ *   - `foreignUndrained` another account's un-landed work. PRESERVED, never cleared:
+ *                        no drain under this session can ship it (the drain scopes to
+ *                        the signed-in actor by design), so destroying it would lose a
+ *                        different guide's captures outright. It does NOT refuse this
+ *                        account's sign-out — it did until Unit 4, and that was the
+ *                        part that was wrong: R16 scopes the interlock to the
+ *                        signing-out account, and nothing this session can do would
+ *                        resolve it anyway. The bar's queue chip names it instead.
  *   - `foreignBlocked`   another account's already-rejected work — clearable for the
  *                        same reason `ownBlocked` is, and it is not this guide's note
  *                        to read anyway.
@@ -515,25 +519,58 @@ export function classifyFwSignOutQueue(
 
 /**
  * How many records stand between this device and an allowed, destructive clear —
- * the ONE definition of "the queue is not empty enough to wipe."
+ * the ONE definition of "there is work here this account must not lose."
+ *
+ * ⚠️ FOREIGN UNDRAINED WORK IS DELIBERATELY NOT COUNTED (Staff Front Door Unit 4).
+ * It used to be, and that single addition answered two different questions with one
+ * number. It is still true that another account's captures must never be DESTROYED —
+ * that is now `fwEntryClearDisposition`'s `preserve` — but it was never true that they
+ * should REFUSE this account's sign-out. R16 scopes the constraint to "undrained
+ * captures for the signing-out account", and the excess had teeth: a guide who walked
+ * away without signing out left a shared iPad that nobody else could ever sign out of,
+ * with the only remedy ("that guide has to come back and sign in here") outside the
+ * refused person's control.
+ *
+ * The original justification was that reconciliation would destroy the survivors, so
+ * refusing was what kept them. Unit 3's B2 fix removed that premise: the handover
+ * reconcile now PRESERVES what it cannot ship. Nothing but the refusal was left.
  */
 export function countFwSignOutBlockers(queue: FwSignOutQueueClassification): number {
-  return queue.drainable.length + queue.quarantined.length + queue.foreignUndrained.length;
+  return queue.drainable.length + queue.quarantined.length;
 }
 
 /**
- * Whether ONE raw record forbids the queue being cleared — the predicate
- * `clearFwQueueIfEmpty` counts with, inside its own transaction.
+ * What a destructive clear must do with ONE raw record — the three-way disposition
+ * `clearFwQueueUnlessBlocked` applies inside its own transaction.
  *
- * Deliberately expressed as `countFwSignOutBlockers(classifyFwSignOutQueue([raw]))`
- * rather than as a hand-written test of the same conditions: the check and the act
- * then agree BY CONSTRUCTION, because they are literally the same two functions. The
- * clear may not simply re-use the verdict's count — a tap can be enqueued in the
- * window between them, which is why the count is re-taken inside the transaction —
- * but it must re-take it with the same rule.
+ *   - `abort`    this account's own un-landed work, or a record whose shape this build
+ *                cannot even read. Its presence stops the clear entirely, because a tap
+ *                may have been enqueued since the verdict and a partial wipe would
+ *                lose it.
+ *   - `preserve` another account's un-landed work. Survives the clear untouched, and
+ *                (Unit 4) does not stop it: no drain, reconnect or re-auth under THIS
+ *                session can ever ship it, so the only thing refusing achieved was
+ *                stranding whoever is holding the device.
+ *   - `remove`   an already-rejected tombstone, own or foreign, and anything
+ *                unrecognized with no usable id. The authoritative record is the
+ *                server's `path_fw_replay_rejects` row; the local copy is a note.
+ *
+ * Deliberately expressed by re-running `classifyFwSignOutQueue` over the singleton
+ * rather than as a hand-written test of the same conditions: the check and the act then
+ * agree BY CONSTRUCTION, because they are literally the same function. The clear may
+ * not simply re-use the verdict's answer — a tap can be enqueued in the window between
+ * them, which is why the classification is re-taken inside the transaction — but it
+ * must re-take it with the same rule.
  */
-export function fwEntryBlocksSignOutClear(raw: unknown, actorUserId: string): boolean {
-  return countFwSignOutBlockers(classifyFwSignOutQueue([raw], actorUserId)) > 0;
+export type FwClearDisposition = "abort" | "preserve" | "remove";
+
+export function fwEntryClearDisposition(
+  raw: unknown,
+  actorUserId: string
+): FwClearDisposition {
+  const queue = classifyFwSignOutQueue([raw], actorUserId);
+  if (countFwSignOutBlockers(queue) > 0) return "abort";
+  return queue.foreignUndrained.length > 0 ? "preserve" : "remove";
 }
 
 /**
@@ -591,8 +628,11 @@ export type FwSignOutRefusal = {
     | "drain_stalled"
     /** The session expired before the queue could be sent — re-auth, don't retry. */
     | "session_expired"
-    /** Another account's un-landed work is on this device. */
-    | "foreign_queue"
+    /* NOTE: there is no `foreign_queue`. Another account's un-landed captures are
+     * preserved by the clear (`fwEntryClearDisposition`) and reported by the bar's
+     * queue chip — they are not a refusal. Removed in Staff Front Door Unit 4; see
+     * `countFwSignOutBlockers`. Re-adding the member without copy is TS2366 in
+     * `fwSignOutRefusalCopy`, which is the tripwire, not this comment. */
     /** Quarantined records a human must dismiss. */
     | "needs_attention"
     /** Minted by the caller on a queue-read failure — sign-out must never fail OPEN
@@ -619,15 +659,18 @@ export type FwSignOutVerdict = { ok: true } | FwSignOutRefusal;
  *
  * REFUSAL PRECEDENCE — every refusal must name something the guide can actually do
  * from the surface they are standing on, so the order is "what is true first":
- *   1. foreign undrained — no drain, no reconnect and no re-auth by THIS guide can
- *      resolve it, so naming anything else sends them round a loop that cannot close.
- *   2. offline — dominates an expired session, because re-authenticating is itself
+ *   1. offline — dominates an expired session, because re-authenticating is itself
  *      impossible offline.
- *   3. expired session — a drain returning `no_session` used to leave the verdict at
+ *   2. expired session — a drain returning `no_session` used to leave the verdict at
  *      `drain_first` forever while the copy claimed the captures were "still sending."
- *   4. drained-and-unchanged — `navigator.onLine` is TRUE behind a venue captive
+ *   3. drained-and-unchanged — `navigator.onLine` is TRUE behind a venue captive
  *      portal, so repeating `drain_first` is an infinite "try again in a moment."
- *   5. quarantined-only — last, because a drain clears the drainable ones first.
+ *   4. quarantined-only — last, because a drain clears the drainable ones first.
+ *
+ * A foreign undrained entry used to top that list. It no longer refuses at all
+ * (Unit 4) — precisely BECAUSE it named nothing this guide could do. See
+ * `countFwSignOutBlockers`; `queue.foreignUndrained` is still read, by the clear's
+ * disposition and by the bar's chip.
  */
 export function decideFwSignOut(input: {
   queue: FwSignOutQueueClassification;
@@ -639,10 +682,6 @@ export function decideFwSignOut(input: {
 }): FwSignOutVerdict {
   const { queue } = input;
   if (countFwSignOutBlockers(queue) === 0) return { ok: true };
-
-  if (queue.foreignUndrained.length > 0) {
-    return { ok: false, reason: "foreign_queue", queuedCount: queue.foreignUndrained.length };
-  }
 
   const queuedCount = queue.drainable.length;
   if (queuedCount > 0) {
@@ -703,21 +742,39 @@ export type FwDeviceEvidence =
  * outside that group.
  *
  * The fix is NOT a harder client-storage heuristic. It is two signals the heuristic
- * never had, checked before it:
+ * never had:
  *
- *   1. `actorIsFwGuide` — SERVER-KNOWN at the layout that mounts the bar (the actor
- *      holds at least one `guide` grant). Storage-independent by construction, so no
- *      eviction of anything can hide it. A guide's queue is always checked, full
- *      stop. Staff hold no grants by design (`fw-auth.ts`), so this stays FALSE for
- *      the CRM-only staff member the gate exists to protect — it is a real branch,
- *      not a constant.
- *   2. `queueDbExists` — `indexedDB.databases()`, which asks the question directly.
- *      If the database does not exist there is definitionally no queue AND opening it
- *      would create it, so skipping is both safe and the whole point. If it DOES
- *      exist, opening it creates nothing, so checking is free. (An older comment
- *      dismissed `databases()` because "Safari lacks it" — true of pre-2024 Safari
- *      only. It is Baseline since May 2024. Where it is genuinely absent the value is
- *      `null` and the legacy heuristic still answers, for non-guides only.)
+ *   1. `queueDbExists` — `indexedDB.databases()`, which asks the question directly
+ *      and creates nothing. If the database does not exist there is definitionally no
+ *      queue AND opening it would create it, so skipping is both safe and the whole
+ *      point. If it DOES exist, opening it creates nothing, so checking is free. (An
+ *      older comment dismissed `databases()` because "Safari lacks it" — true of
+ *      pre-2024 Safari only. It is Baseline since May 2024.)
+ *   2. `actorIsFwGuide` — the actor holds at least one `guide` grant.
+ *      Storage-independent by construction, so no eviction can hide it. This is what
+ *      answers when `databases()` is genuinely unavailable and the legacy heuristic
+ *      would otherwise fail open.
+ *
+ * ── THE ORDER, AND WHY UNIT 4 CHANGED IT ──────────────────────────────────────
+ * Unit 3 checked `actorIsFwGuide` FIRST. That was safe only while the value arrived
+ * as a SERVER-RENDERED PROP: `FwCohortLayout` computed it synchronously from the
+ * session, so it was correct from first paint. Unit 4 retires that component. The
+ * only sign-out left is the staff bar's, where the value comes from
+ * `staffBarSignOutActorIsFwGuide(live)` — which fails CLOSED to `true` while the
+ * identity round trip is still in flight, and R23 requires the button to be live the
+ * whole time. Checking the guess first therefore meant a CRM-only admissions staffer
+ * who tapped sign-out before identity resolved short-circuited straight past the
+ * probe into `openFwDb()`, CREATING the FW queue database on a browser that had never
+ * run Founders Weekend — permanently, because nothing deletes it and `queueDbExists`
+ * then answers `true` for that origin forever, retiring the zero-cost path this gate
+ * exists to take. That is Unit 3's own P0 recurring by the exact mechanism its
+ * solution doc predicted ("unreachable today only because of incidental coupling —
+ * which stops holding the moment the control is mounted elsewhere").
+ *
+ * So the FACT is consulted before either GUESS. B1 is unaffected: a guide whose
+ * localStorage was evicted still has a database, so `queueDbExists` is `true` and
+ * their queue is still checked. What changed is only that a definite "no database"
+ * now beats an unresolved "maybe a guide".
  *
  * Fails CLOSED on `unknown`: "I could not look" must never be read as "there is
  * nothing here," because the act it authorises is destructive.
@@ -727,10 +784,13 @@ export function hasFwDeviceEvidence(input: {
   /** SERVER-KNOWN: this actor holds an FW guide grant. See (1) above. */
   actorIsFwGuide: boolean;
 }): boolean {
-  if (input.actorIsFwGuide) return true;
   const { evidence } = input;
+  // "I could not look at all" is not "there is nothing here". First, and absolute.
   if (evidence.kind === "unknown") return true;
+  // THE DIRECT ANSWER OUTRANKS BOTH GUESSES — see the ORDER section above.
   if (evidence.queueDbExists !== null) return evidence.queueDbExists;
+  // No direct answer available: the server-known signal, then the legacy heuristic.
+  if (input.actorIsFwGuide) return true;
   return evidence.cacheOwner !== null || evidence.queueDbOpened;
 }
 
@@ -749,17 +809,43 @@ export function hasFwDeviceEvidence(input: {
  * sign-out had worked.
  */
 export type FwResidueClearResult = {
-  /** The tap queue was emptied (or held nothing that blocks a clear). */
+  /**
+   * Nothing ABORTED the clear, so everything this caller was entitled to remove was
+   * removed. NOT "the queue is now empty" — another account's un-landed captures are
+   * deliberately left behind and reported by `queueRemaining` (Unit 4).
+   */
   queueCleared: boolean;
+  /**
+   * How many records are still in the queue afterwards: the preserved foreign
+   * captures, or — when the clear aborted — everything, since nothing was touched.
+   * The handover reconcile reads this to tell "kept something on purpose" apart from
+   * "wiped the device clean", which is a distinction B2 exists to keep visible.
+   *
+   * `null` means COULD NOT DETERMINE — the clear threw rather than answering. Carried
+   * as its own value rather than reported as a number, because every number here is a
+   * claim about the device that a failed transaction is in no position to make. The
+   * first draft of this field used `1` as a stand-in on the throw path; two reviewers
+   * traced that a genuine IndexedDB fault then arrived at the reconcile looking
+   * exactly like a legitimate "one foreign capture preserved" — advancing the owner
+   * key and masking the failure forever, which is precisely the B2 defect one layer
+   * down.
+   */
+  queueRemaining: number | null;
   /** The IndexedDB roster cache was cleared, or was deliberately not attempted. */
   rosterCleared: boolean;
   /** The service-worker app-shell cache was deleted, or was not attempted. */
   shellCleared: boolean;
 };
 
-/** Every residue is gone. The ONE definition — `runFwSignOutFlow` and the cache-owner
- *  reconcile both gate on it, so neither can drift back to reading the queue step
- *  alone. */
+/**
+ * Every residue this caller was entitled to destroy is gone. The ONE definition —
+ * `runFwSignOutFlow` and the cache-owner reconcile both gate on it, so neither can
+ * drift back to reading the queue step alone.
+ *
+ * Says nothing about `queueRemaining`, deliberately: preserved foreign captures are
+ * the correct outcome, not an incomplete one, and a session must not be held open on
+ * account of work no session but their owner's can ever finish.
+ */
 export function fwResidueFullyCleared(result: FwResidueClearResult): boolean {
   return result.queueCleared && result.rosterCleared && result.shellCleared;
 }
@@ -802,12 +888,12 @@ export type FwSignOutPorts = {
    */
   drain: () => Promise<void>;
   /**
-   * Atomic check-and-clear under the predicate this sequence supplies. Re-counts
+   * Atomic check-and-clear under the disposition this sequence supplies. Re-classifies
    * inside its own transaction (a tap can land in the gap) but with the SAME rule the
    * verdict used. Reports all three residues separately — see `FwResidueClearResult`.
    */
   clear: (
-    blocksClear: (raw: unknown) => boolean,
+    disposition: (raw: unknown) => FwClearDisposition,
     policy: FwResiduePolicy
   ) => Promise<FwResidueClearResult>;
   /**
@@ -888,7 +974,7 @@ export async function runFwSignOutFlow(input: {
     if (!verdict.ok) return { kind: "refused", verdict };
 
     const result = await ports.clear(
-      (raw) => fwEntryBlocksSignOutClear(raw, actorUserId),
+      (raw) => fwEntryClearDisposition(raw, actorUserId),
       "sign_out"
     );
     if (!result.queueCleared) return { kind: "raced" };
@@ -962,10 +1048,16 @@ export type FwReconcileOutcome =
   /** A handover: every residue went and the key now names this actor. */
   | { kind: "reconciled" }
   /**
-   * A handover where undrained captures were found and DELIBERATELY preserved. The
-   * key is NOT advanced, so the device stays visibly un-reconciled and the next mount
-   * tries again. Sign-out refuses on these via `foreign_queue` — which is the surface
-   * that actually names the other guide.
+   * A handover where un-landed captures were found and DELIBERATELY preserved — the
+   * departed guide's, or this actor's own if a tap raced the clear.
+   *
+   * The owner key IS advanced: it describes the roster and shell caches, which did go,
+   * and holding it back would re-wipe the CURRENT guide's roster cache on every
+   * subsequent mount for a queue no retry could ever ship. Nothing is lost by
+   * advancing — every entry carries its own `actorUserId`, so the queue stays
+   * self-describing and the bar's queue chip is what names the account the survivors
+   * belong to. Sign-out does NOT refuse over them (Unit 4; see
+   * `countFwSignOutBlockers`).
    */
   | { kind: "queue_preserved"; preservedCount: number }
   /** A clear THREW. The key is not advanced, so this is retried rather than masked. */
@@ -986,16 +1078,18 @@ export type FwReconcileOutcome =
  * now matched and the mismatch never recurred.
  *
  * Both are fixed here, and the second is what makes the first stick: the key advances
- * ONLY on a fully successful clear, so a preserved queue or a throwing clear leaves
- * the device visibly un-reconciled.
+ * only once the CACHES are genuinely this actor's, so a throwing clear leaves the
+ * device visibly un-reconciled and the next mount retries it.
  *
  * ── Why the drain is attempted but cannot save the prior guide ─────────────────
  * The drain scopes to the SIGNED-IN actor by design (`selectFwDrainable`), and the
  * server action re-authes as that session — so the prior owner's captures are
  * `foreignUndrained` and no drain under this session can ever ship them. The drain
- * here is for the entries that ARE this actor's; the prior owner's are preserved and
- * surfaced by sign-out's `foreign_queue` refusal, which names the account that has to
- * come back. Destroying them is the one thing this function must never do.
+ * here is for the entries that ARE this actor's; the prior owner's are preserved by
+ * the clear's `preserve` disposition and reported to whoever is holding the device by
+ * the staff bar's queue chip. Destroying them is the one thing this function must
+ * never do — and, since Unit 4, REFUSING SIGN-OUT OVER THEM is the one thing it must
+ * not cause either. The chip states the fact; nothing is blocked on it.
  */
 export async function runFwCacheOwnerReconcile(input: {
   actorUserId: string;
@@ -1033,26 +1127,29 @@ export async function runFwCacheOwnerReconcile(input: {
       if (drainable > 0) await ports.drain();
     }
 
-    let preservedCount = 0;
-    try {
-      preservedCount = countFwSignOutBlockers(
-        classifyFwSignOutQueue(await ports.readQueue(), actorUserId)
-      );
-    } catch {
-      // Unknown, and the clear's own predicate is what actually decides. Reported as
-      // 0 rather than guessed at; the queue is still protected by the atomic clear.
-      preservedCount = 0;
-    }
-
+    // NO PRE-READ OF THE QUEUE HERE. There used to be one, purely to count what was
+    // about to be preserved — a second unbounded IndexedDB read taken while the
+    // cross-document drain lock is HELD, whose answer the clear then re-derived inside
+    // its own transaction anyway. The clear reports `queueRemaining` itself, from the
+    // snapshot that actually decided, so the count can no longer disagree with the act
+    // it describes.
     const result = await ports.clear(
-      (raw) => fwEntryBlocksSignOutClear(raw, actorUserId),
+      (raw) => fwEntryClearDisposition(raw, actorUserId),
       "handover"
     );
     // A THROWN clear outranks a deliberately preserved queue: only one of them is a
     // fault, and collapsing them would put this right back where B2 started — a
     // failure indistinguishable from a policy. The FAULT does not advance the key, so
     // the next mount retries it.
-    if (!result.rosterCleared || !result.shellCleared) return { kind: "clear_failed" };
+    //
+    // `queueRemaining === null` is the QUEUE step's version of that fault: the clear
+    // threw instead of answering, so nothing is known about what survived. Reading it
+    // here is what stops a real IndexedDB failure being reported as `queue_preserved`
+    // with a fabricated count while the owner key advances and hides it for good
+    // (correctness + reliability review, two reporters).
+    if (!result.rosterCleared || !result.shellCleared || result.queueRemaining === null) {
+      return { kind: "clear_failed" };
+    }
 
     // THE KEY DESCRIBES THE CACHES, NOT THE QUEUE — so it advances as soon as the
     // caches are this actor's, even with a foreign queue preserved.
@@ -1068,16 +1165,18 @@ export async function runFwCacheOwnerReconcile(input: {
     // does to fight the flaky wifi that offline cache exists to survive.
     //
     // Nothing is lost by advancing. The queue is self-describing — every entry carries
-    // its own `actorUserId` — so `classifyFwSignOutQueue` still sees the foreign work
-    // and sign-out still refuses with `foreign_queue`, which is the surface that names
-    // the guide who has to come back for it. The key was only ever about the roster
-    // and shell caches, and those genuinely did go.
-    if (!result.queueCleared) {
-      ports.writeOwner(actorUserId);
-      return { kind: "queue_preserved", preservedCount };
-    }
+    // its own `actorUserId` — so `classifyFwSignOutQueue` still sees the foreign work,
+    // the clear still refuses to destroy it, and the bar's queue chip still names the
+    // account it belongs to. The key was only ever about the roster and shell caches,
+    // and those genuinely did go.
     ports.writeOwner(actorUserId);
-    return { kind: "reconciled" };
+    // "Did anything survive?", not "did the clear abort?". Both are preservation from
+    // the device's point of view — an aborted clear kept this actor's own racing tap,
+    // a completed one kept the departed guide's — and the outcome exists to say that
+    // captures are still here, whichever it was.
+    return result.queueRemaining > 0
+      ? { kind: "queue_preserved", preservedCount: result.queueRemaining }
+      : { kind: "reconciled" };
   });
 }
 
@@ -1121,8 +1220,6 @@ export function fwSignOutRefusalCopy(
       return `${count} check-in${s} couldn't be sent. This device looks connected but can't reach The 120 — open the wi-fi sign-in page, or stay signed in until the network is back.`;
     case "session_expired":
       return `Your session expired before ${count} check-in${s} could send. Sign in again to send ${them}, then sign out.`;
-    case "foreign_queue":
-      return `${count} check-in${s} on this device belong to another account and haven't sent. That guide needs to sign in here and let ${them} send before this device can be signed out.`;
     case "needs_attention":
       return `${count} saved check-in${s} couldn't be read by this app version. Dismiss ${them} in the banner, then sign out.`;
     case "unreadable":

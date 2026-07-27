@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { Icon } from "@/app/fp/components/system/Icon";
 import FwCohortMemory from "@/app/fp/fw/components/FwCohortMemory";
-import { FwSignOutButton } from "@/app/fp/fw/components/FwSignOutButton";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { grantedCohortIds, resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { listFwCohortsForActor } from "@/app/fp/lib/fw-guide-core";
@@ -29,6 +28,16 @@ import { listFwCohortsForActor } from "@/app/fp/lib/fw-guide-core";
  * plain link back to `/fp/fw`, which resets the drill-down by construction —
  * the roster, the tree, and the task view are all URL state under the cohort, so
  * there is no stale selection left to carry into the wrong weekend.
+ *
+ * SIGN-OUT MOVED UP (Staff Front Door Unit 4, R16). `FwSignOutButton` rendered here
+ * and is retired: R16 makes the drain gate a property of the DEVICE AND SESSION
+ * rather than of a URL subtree, and two controls for one act is how the ops header's
+ * ungated form went unnoticed. What this header keeps is the context only it can
+ * resolve — which weekend is active, the way into ops, the way back to the switcher.
+ * The staff bar (`../../layout.tsx`) carries identity and sign-out above it.
+ *
+ * STICKY OFFSET: `--staff-bar-h`, published by the bar — see the ops layout for why
+ * two headers at `top: 0` do not stack.
  */
 export default async function FwCohortLayout({
   children,
@@ -61,7 +70,7 @@ export default async function FwCohortLayout({
     <>
       {active && <FwCohortMemory id={active.id} slug={active.slug} />}
 
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
+      <header className="sticky top-[var(--staff-bar-h,0px)] z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
         <div className="min-w-0">
           <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
             {isStaff ? "Founders Weekend · Staff" : "Founders Weekend"}
@@ -93,14 +102,6 @@ export default async function FwCohortLayout({
               Switch
             </Link>
           )}
-          {/* Block-until-drained (Decision 8): a shared iPad's queue must never be
-              abandoned, so sign-out is gated client-side on the drain verdict.
-              `actorIsFwGuide` is the SERVER-known half of that gate (B1) — a device
-              whose localStorage was evicted must still have its queue checked. */}
-          <FwSignOutButton
-            actorUserId={session.userId}
-            actorIsFwGuide={grantedCohortIds(session.grants).length > 0}
-          />
         </div>
       </header>
 

@@ -1,6 +1,7 @@
 ---
 title: "A phased plan's unit boundary is a SCHEDULE, not a proof that a swap is atomic: when unit N is told to remove something unit N+1 replaces, executing it literally leaves `main` with neither — verify the replacement is reachable, and encode the invariant as a count that reddens at zero AND at two"
 date: 2026-07-27
+last_updated: 2026-07-27
 category: workflow-issues
 module: "Staff Front Door plan Units 3–4 — the FW cache-owner reconcile (app/fp/fw/components/FwPwa.tsx, app/lib/staff-bar/StaffBar.tsx)"
 problem_type: workflow_issue
@@ -91,7 +92,7 @@ Counting **owners** reddens in both directions, and both directions are real fai
 | Owners | Meaning | How it happens |
 |---|---|---|
 | **0** | No reconcile anywhere | Someone executes the plan's literal instruction early |
-| **1** | Correct | Today (FwPwa), and after Unit 4 (StaffBar) |
+| **1** | Correct | Before Unit 4 (FwPwa); since Unit 4 (StaffBar) |
 | **2** | Two reconciles racing one localStorage key | Unit 4 mounts the bar and forgets the deletion |
 
 Both failure modes are silent at runtime. Neither produces an error, a failing request,
@@ -118,3 +119,34 @@ mounts the replacement. The prose being right does not help if the checklist is 
 - `docs/solutions/security-issues/an-inert-defensive-branch-has-no-behavioural-signature-assert-the-wiring-2026-07-27.md` — why the invariant is asserted as a count rather than left to behaviour; same instinct, different subject.
 - `docs/solutions/best-practices/route-rename-boundary-sweep-and-count-bounded-straggler-catcher-2026-07-24.md` — the other place this repo proves a multi-file change complete with a scanning test, and its Aftermath section on cross-unit fragility.
 - `docs/solutions/best-practices/service-worker-never-cache-navigations-invariant-scoped-app-shell-exception-2026-07-24.md` — documents what `reconcileFwCacheOwner` is protecting.
+
+---
+
+## ✅ RESOLVED 2026-07-27 — the swap landed atomically, and the tripwire was not what caught it
+
+Staff Front Door Unit 4 performed both halves in one change: `FwPwa`'s
+`reconcileFwCacheOwner` effect was deleted in the same commit that mounted `<StaffBar>`
+in `app/fp/fw/(app)/layout.tsx`. The owner count never left 1, so `main` was never in
+either failure state. The tripwire's second assertion (which named FwPwa as the owner)
+was flipped to name StaffBar, and the count assertion above it was left untouched —
+which is the point of having written it as a count rather than as a direction.
+
+**Worth recording honestly: the tripwire never actually fired.** The unit's hand-off
+prompt carried the hazard in prose, so the swap was done atomically because the
+implementer had read about it, not because a test stopped them. That is not an argument
+against the tripwire — the prose will be forgotten long before the test is deleted, and
+the test is what protects the *next* editor, who will have read neither. But it does
+mean this doc's claim is still unproven by experiment: the mechanism is sound, and the
+evidence for it remains one averted hazard rather than one caught one.
+
+**The reverse case did occur, and the tripwire caught it.** During the review round a
+mutation restoring FwPwa's effect (2 owners) and a mutation removing the bar's mount
+(0 owners) were both applied deliberately; both reddened. So the count is verified in
+both directions even though production never entered either state.
+
+**One thing the tripwire could not see, and a later reviewer did.** Counting owners in
+*source* proves exactly one module calls the reconcile. It says nothing about whether an
+orphaned in-flight reconcile from an unmounted bar can still complete and write the
+owner key out of order — a genuine race the count cannot express, since both writes come
+from the one legitimate owner. Carried to the reliability pass. **A structural tripwire
+bounds who may act; it does not bound when.**

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
+import { StaffBar } from "@/app/lib/staff-bar/StaffBar";
 
 export const metadata: Metadata = {
   title: "Staff — The 120",
@@ -26,15 +27,21 @@ export const metadata: Metadata = {
  * its layout alone would be gated only on the render that mounted it.
  * `requireStaff()` is request-memoized, so the second call costs nothing.
  *
- * Unit 4 mounts the persistent staff bar here.
+ * THE BAR MOUNTS HERE, and only here for this application (Unit 4, R15). `/staff`
+ * has no nested guarded group, so this is trivially the outermost — but the rule it
+ * follows is the same one that keeps a single bar on `/fp/fw/ops`: one mount per
+ * application, in the outermost guarded layout. It takes the application and an
+ * opaque actor id, and nothing else; identity and every role-derived branch resolve
+ * client-side. `bar-wiring.test.ts` pins both the set of mounts and the props.
  */
 export default async function StaffLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  await requireStaff();
+  const staff = await requireStaff();
 
   return (
     <div className="min-h-screen bg-hq-canvas font-path-body text-hq-ink">
+      <StaffBar application="staff" actorUserId={staff.staffId} />
       {children}
     </div>
   );

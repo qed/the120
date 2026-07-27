@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { runFwDrain, type FwDrainInput } from "../fw-sync-engine";
@@ -775,6 +777,9 @@ type FakeDevice = {
   onDrain: (dev: FakeDevice) => void;
   /** A tap that lands in the window between the verdict and the clear. */
   beforeClear: ((dev: FakeDevice) => void) | null;
+  /** Models the QUEUE clear transaction itself throwing (openFwDb reject, tx.onabort)
+   *  -- distinct from a disposition-driven abort, which resolves normally. */
+  queueClearThrows: boolean;
   /** The roster cache, and whether clearing it throws (B3). */
   rosterCached: boolean;
   rosterClearFails: boolean;
@@ -793,6 +798,7 @@ function device(over: Partial<FakeDevice> = {}): FakeDevice {
     authRequired: false,
     evidence: { kind: "read", cacheOwner: GUIDE, queueDbOpened: true, queueDbExists: true },
     readFails: false,
+    queueClearThrows: false,
     reads: 0,
     drains: 0,
     rosterCached: true,
@@ -832,23 +838,39 @@ function portsFor(
       expect(lock.held).toBe(1);
       dev.onDrain(dev);
     },
-    clear: async (blocksClear, policy) => {
+    clear: async (disposition, policy) => {
       dev.beforeClear?.(dev);
-      // Models `clearFwQueueIfEmpty`: count-then-clear in ONE transaction, under the
-      // predicate the flow supplied — never a second, hand-written emptiness test.
-      const blocking = dev.store.filter(blocksClear).length;
-      const queueCleared = blocking === 0;
-      if (queueCleared) dev.store = [];
+      // A THROWN queue clear reports `queueRemaining: null` -- "could not determine" --
+      // exactly as `clearFwResidue`'s catch does. Never a number: a fabricated count
+      // is what let a real IndexedDB fault reach the reconcile disguised as a
+      // legitimate preserve.
+      if (dev.queueClearThrows) {
+        const rosterCleared = !dev.rosterClearFails;
+        if (rosterCleared) dev.rosterCached = false;
+        const shellCleared = !dev.shellClearFails;
+        if (shellCleared) dev.shellCached = false;
+        return { queueCleared: false, queueRemaining: null, rosterCleared, shellCleared };
+      }
+      // Models `clearFwQueueUnlessBlocked`: classify-then-delete in ONE transaction,
+      // under the disposition the flow supplied — never a second, hand-written
+      // emptiness test. `abort` stops the whole clear (a tap raced in since the
+      // verdict); `preserve` survives it; everything else goes.
+      const dispositions = dev.store.map(disposition);
+      const queueCleared = !dispositions.includes("abort");
+      if (queueCleared) {
+        dev.store = dev.store.filter((_, i) => dispositions[i] === "preserve");
+      }
+      const queueRemaining = dev.store.length;
       // …and `clearFwResidue`'s cache policy: all three together on sign-out, caches
       // unconditionally on a handover (they are the PRIOR account's names).
       if (!shouldClearFwCaches(policy, queueCleared)) {
-        return { queueCleared, rosterCleared: true, shellCleared: true };
+        return { queueCleared, queueRemaining, rosterCleared: true, shellCleared: true };
       }
       const rosterCleared = !dev.rosterClearFails;
       if (rosterCleared) dev.rosterCached = false;
       const shellCleared = !dev.shellClearFails;
       if (shellCleared) dev.shellCached = false;
-      return { queueCleared, rosterCleared, shellCleared };
+      return { queueCleared, queueRemaining, rosterCleared, shellCleared };
     },
   };
 }
@@ -919,18 +941,52 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(dev.store).toEqual([]); // …and it did not survive the clear
   });
 
-  it("one FOREIGN UNDRAINED entry refuses, names the other account, and is NOT destroyed", async () => {
+  it("R16: one FOREIGN UNDRAINED entry SIGNS OUT and is preserved, not destroyed", async () => {
+    // Staff Front Door Unit 4. This used to refuse, which exceeded R16 ("undrained
+    // captures FOR THE SIGNING-OUT ACCOUNT") and stranded whoever was holding a shared
+    // iPad after a guide walked off without signing out. Both halves are asserted
+    // together on purpose: the session ends AND the departed guide's tap is still
+    // there. Asserting only the first is how the fix becomes a data-loss bug.
     const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
     const dev = device({ store: [foreign] });
-    const outcome = await signOut(dev);
 
-    expect(outcome).toEqual({
-      kind: "refused",
-      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
-    });
-    expect(fwSignOutOutcomeCopy(outcome)).toMatch(/another account/i);
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
     expect(dev.store).toEqual([foreign]); // un-landed work of a guide who is not here
     expect(dev.drains).toBe(0); // this session could never ship it anyway
+    // The caches DID go — they hold this account's names and authed HTML.
+    expect(dev.rosterCached).toBe(false);
+    expect(dev.shellCached).toBe(false);
+  });
+
+  it("…and the departed guide's tap survives alongside this account's own clear", async () => {
+    // The mixed queue is where a fix that "filters foreign out" instead of preserving
+    // it goes wrong: this account's own entries and tombstones must go, the other
+    // account's must not, in ONE clear.
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({
+      store: [entry("checkmark"), entry("not_yet", { blocked: rejected }), foreign],
+    });
+
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.drains).toBe(1); // its own drainable tap shipped first
+    expect(dev.store).toEqual([foreign]);
+  });
+
+  it("a tap racing in from THIS account still aborts the clear, foreign entries or not", async () => {
+    // The adversarial-review P0 that the three-way split must not weaken: `preserve`
+    // means "leave it and carry on", `abort` still means "stop". A queue holding both
+    // must stop.
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const raced = entry("checkmark");
+    const dev = device({
+      store: [foreign],
+      beforeClear: (d) => {
+        d.store = [...d.store, raced];
+      },
+    });
+
+    expect(await signOut(dev)).toEqual({ kind: "raced" });
+    expect(dev.store).toEqual([foreign, raced]); // nothing destroyed
   });
 
   it("one FOREIGN BLOCKED entry does not wedge — it clears with the rest", async () => {
@@ -973,6 +1029,28 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
     expect(dev.reads).toBe(0);
     expect(lock.acquisitions).toBe(0); // no lock, no IndexedDB, no side effects
+  });
+
+  it("a CRM-only staffer signing out BEFORE identity resolves still never opens the queue db", async () => {
+    // THE UNIT 4 REGRESSION, end to end. The bar's sign-out is live from first paint
+    // (R23), but its `actorIsFwGuide` is `staffBarSignOutActorIsFwGuide(live)`, which
+    // fails CLOSED to `true` until the identity Server Action answers. Before the
+    // evidence gate was reordered, that fail-closed guess short-circuited the whole
+    // gate, and a tap on `/crm` in that window reached `openFwDb()` — creating the FW
+    // queue database on an admissions staffer's browser, permanently, because nothing
+    // deletes it and `fwQueueDbExists()` answers `true` for that origin ever after.
+    //
+    // `actorIsFwGuide: true` here is NOT "this person is a guide" — it is the
+    // unresolved default, which is exactly the point.
+    const lock = makeFakeLockManager();
+    const dev = device({
+      readFails: true,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
+    });
+
+    expect(await signOut(dev, lock, { actorIsFwGuide: true })).toEqual({ kind: "sign_out" });
+    expect(dev.reads).toBe(0); // never read, therefore never opened, therefore never created
+    expect(lock.acquisitions).toBe(0);
   });
 
   it("an evidence read that threw still checks the queue (unknown is not absence)", async () => {
@@ -1273,6 +1351,22 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     expect(dev.store).toEqual([theirs]);
   });
 
+  it("B2: a THROWN queue clear is clear_failed, not a preserve with an invented count", async () => {
+    // Two reviewers traced this independently. The queue clear throwing (openFwDb
+    // rejecting, tx.onabort) is a FAULT; a preserved foreign capture is a POLICY. The
+    // first draft reported the fault as `queue_preserved` with a stand-in count of 1
+    // and then advanced the owner key over it -- which is the B2 defect exactly, one
+    // layer down: the failure becomes invisible and is never retried, because the key
+    // now matches and the mismatch never recurs.
+    const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({ owner: OTHER_GUIDE, store: [theirs], queueClearThrows: true });
+
+    expect(await reconcile(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.owner).toBe(OTHER_GUIDE); // NOT advanced -- the next mount retries
+    expect(dev.ownerWrites).toBe(0);
+    expect(dev.store).toEqual([theirs]);
+  });
+
   it("B2: the prior guide's BLOCKED entries are clearable — their reject row is authoritative", async () => {
     const dev = device({
       owner: OTHER_GUIDE,
@@ -1297,17 +1391,21 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     expect(lock.held).toBe(0);
   });
 
-  it("B2 + R16 end to end: after a handover, the new guide's sign-out REFUSES on the survivors", async () => {
-    // The whole point of preserving them. The reconcile keeps the captures; sign-out
-    // is the surface that names the account which has to come back for them.
+  it("B2 + R16 end to end: after a handover the new guide signs out, and the survivors survive", async () => {
+    // The scenario the whole preserve/refuse design exists for, run as one sequence:
+    // guide A leaves undrained captures on a shared iPad, B picks it up, works, and
+    // signs out. B's session must END (Unit 4 — refusing here was outside R16's scope
+    // and outside B's control to fix) and A's captures must still BE THERE.
+    //
+    // Both assertions in one test on purpose. They are the two ways this can be got
+    // wrong, and each is the other's guard: pass the first alone and you have a
+    // data-loss bug, pass the second alone and you have the wedge B had before.
     const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
     const dev = device({ owner: OTHER_GUIDE, store: [theirs], online: false });
-    await reconcile(dev);
+    expect(await reconcile(dev)).toEqual({ kind: "queue_preserved", preservedCount: 1 });
 
-    const outcome = await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true });
-    expect(outcome).toEqual({
-      kind: "refused",
-      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
+    expect(await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true })).toEqual({
+      kind: "sign_out",
     });
     expect(dev.store).toEqual([theirs]);
   });
@@ -1345,5 +1443,38 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
       kind: "reconciled",
     });
     expect(dev.rosterCached).toBe(false);
+  });
+});
+
+/* ═══════════════ what only a source scan can reach in fw-sync-client.ts ══ */
+
+/**
+ * `app/fp/lib/fw-sync-client.ts` binds browser seams — IndexedDB, `navigator.locks`,
+ * `caches` — so node-only CI can import it but can never execute the branches that
+ * matter. Everything decidable was pushed into `fw-sync-rules.ts` for exactly that
+ * reason, and the harness above drives the sequence through fake ports.
+ *
+ * ONE thing is left that no fake can reach: how the real `clearFwResidue` disposes of
+ * its own thrown clear. Two reviewers traced that reporting a NUMBER there makes a
+ * genuine IndexedDB fault arrive at the handover reconcile looking exactly like a
+ * legitimate "one foreign capture preserved" — the owner key advances, the failure is
+ * masked forever, and that is the B2 defect one layer down. The fix is one word, and
+ * a future "simplify" pass would undo it with nothing going red. So it is pinned here,
+ * in the file that owns this stack, over comment-stripped source.
+ */
+describe("clearFwResidue reports a thrown queue clear as UNKNOWN, never as a count", () => {
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const source = readFileSync(new URL("../fw-sync-client.ts", `file://${dir}`), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("assigns null in the catch, and never a numeric stand-in", () => {
+    const start = source.indexOf("export async function clearFwResidue");
+    expect(start).toBeGreaterThan(0);
+    const body = source.slice(start, source.indexOf("\n}", start));
+    const catchBlock = body.slice(body.indexOf("} catch"));
+
+    expect(catchBlock).toMatch(/queueRemaining\s*=\s*null/);
+    expect(catchBlock).not.toMatch(/queueRemaining\s*=\s*\d/);
   });
 });

@@ -163,6 +163,78 @@ check whether the thing is genuinely untestable or merely untested. `fwQueueDbEx
 touches exactly one browser API on a global, so a stub made it fully testable —
 including the never-settles case a rejection test would have missed.
 
+## ⚠️ ROUND 2 (2026-07-27, Staff Front Door Unit 4): widening the operator list does not work either
+
+The fix above replaced two guessed spellings with a slightly wider guess —
+`/identity[\s\S]{0,40}(&&|\?)/`. One unit later a testing reviewer attacked the same
+file again and defeated **three** scans, each with a live mutation that left the whole
+suite green:
+
+| Mutation written by the reviewer | Scan it walked past |
+|---|---|
+| `{identity === null \|\| (<button …>)}` | R23's `&&`/`?` check — a genuine R23 regression: sign-out vanishes whenever identity has not resolved |
+| `staffBarSurfaceCreatesFwResidue(application) \|\| application == "fw"` | "never re-derives those gates inline", pinned to `===` |
+| `isStaff === true ? "Weekends you can run" : "Your weekends"` | the picker's `/isStaff\s*\?/` |
+
+Note what all three have in common: the **real rule call is still there**, so every
+"delegates to the tested rule" assertion stays green. The bug is added *beside* it.
+
+**The lesson ROUND 1 got half-right.** "Anchor on semantics, not spelling" was correct;
+enumerating `&&|?` was still a spelling — just a longer one. There is no operator list
+that ends this game, because the next reviewer writes the operator you left out.
+
+**What actually works: assert on operator ADJACENCY, and let the identifier be the
+anchor.** A decision is an identifier sitting next to a comparison or a conditional,
+whichever one:
+
+```ts
+const COMPARISON  = String.raw`(===|!==|==|!=|\?\?)`;
+const CONDITIONAL = String.raw`(===|!==|==|!=|\?\?|\?|&&|\|\|)`;
+
+/** Is `identifier` compared against anything, in either direction? */
+const isCompared = (code: string, identifier: string) =>
+  new RegExp(`\\b${identifier}\\b\\s*${COMPARISON}`).test(code) ||
+  new RegExp(`${COMPARISON}[\\s\\S]{0,24}?\\b${identifier}\\b`).test(code);
+```
+
+`application` and `isStaff` may be **passed** to a rule function; they may never be
+**compared**. That property survives rephrasing, because rephrasing a comparison still
+leaves a comparison.
+
+**And where nothing legitimately decides, assert the absence of ALL operators.** The
+strongest form in the file is the R23 slice — between the identity string and the
+sign-out button, no conditional operator of any kind is legitimate, so:
+
+```ts
+expect(beforeButton).not.toMatch(new RegExp(CONDITIONAL));
+```
+
+That one is unmutable rather than merely harder to mutate.
+
+**Two further holes the same review found in the same file**, both worth copying as
+checks in their own right:
+
+- **A scan that reads RAW source when its siblings strip comments.** Commenting the
+  mount out (`{/* <StaffBar … /> */}`) passed that specific assertion. It was masked by
+  sibling assertions that did strip — i.e. one "this is redundant" refactor away from
+  being live. *Apply comment-stripping uniformly, or not at all* (the rule this doc's
+  own Related section already cites) applies **within a file**, not just across one.
+- **The comment-stripper itself.** `.replace(/(^|[^:])\/\/.*$/gm, "$1")` treats any
+  `//` not preceded by `:` as a comment — so a string or template literal containing one
+  silently truncates the rest of that line. Harmless while it scanned a single known
+  file; this unit promoted it to a repo-wide scan over every `app/**/*.ts(x)`, where a
+  URL fragment in a literal could produce a false "it's gone". Fixed not by writing a
+  tokenizer but by **asserting the assumption**: a test now fails if any scanned file
+  contains a `//` inside a string literal, turning a latent hazard into a red test the
+  day someone writes one.
+
+**Scoreboard after ROUND 2:** all six reviewer-authored mutations killed, plus the
+mount-commented-out and wrong-session-field mutations. Two guards remain deliberately
+un-mutation-covered and are labelled as such in the source (a defence-in-depth `===
+"remove"` whose sibling switch makes it unreachable, and a DOM ownership check node has
+no DOM to exercise) — see the honesty rule in the sibling doc on inert defensive
+branches.
+
 ## Related
 
 - `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-clause-scope-and-comment-stripping-2026-07-23.md` — prior art on comment-stripping, and the rule "apply it uniformly, or not at all". Cite it rather than re-deriving it.

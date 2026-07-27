@@ -29,7 +29,7 @@ import {
   withFwTimeout,
 } from "@/app/fp/lib/fw-call";
 import {
-  clearFwQueueIfEmpty,
+  clearFwQueueUnlessBlocked,
   clearFwRoster,
   deleteFwEntry,
   fwQueueDbExists,
@@ -65,6 +65,7 @@ import {
   type FwQueueEntryInput,
   type FwQueueSummary,
   type FwReconcileOutcome,
+  type FwClearDisposition,
   type FwResidueClearResult,
   type FwResiduePolicy,
   type FwRosterCache,
@@ -491,28 +492,40 @@ async function readFwDeviceEvidence(): Promise<FwDeviceEvidence> {
  * an allowed sign-out (Decision 8). Never an auto-purge: only the sign-out flow calls
  * this.
  *
- * The queue clear is ATOMIC under `blocksClear`: even after the verdict passed, a
+ * The queue clear is ATOMIC under `disposition`: even after the verdict passed, a
  * check-in can be enqueued before the clear runs, and a blind wipe would lose it
- * (adversarial P0). `clearFwQueueIfEmpty` no-ops if a blocking record raced in; this
- * returns `{ cleared }` so the caller can ABORT sign-out rather than proceed having
- * lost a tap. Clearing the SW shell cache means a shared iPad keeps no authed roster
- * HTML for the next guide.
+ * (adversarial P0). `clearFwQueueUnlessBlocked` no-ops if an aborting record raced in;
+ * this returns `{ queueCleared }` so the caller can ABORT sign-out rather than proceed
+ * having lost a tap, and `{ queueRemaining }` for the captures it deliberately kept.
+ * Clearing the SW shell cache means a shared iPad keeps no authed roster HTML for the
+ * next guide.
  *
- * `blocksClear` comes from the sequence that already took the verdict — see
- * `clearFwQueueIfEmpty`'s docblock for why passing it in, rather than counting here,
- * is the whole point.
+ * `disposition` comes from the sequence that already took the verdict — see
+ * `clearFwQueueUnlessBlocked`'s docblock for why passing it in, rather than deciding
+ * here, is the whole point.
  */
 export async function clearFwResidue(
-  blocksClear: (rawEntry: unknown) => boolean,
+  disposition: (rawEntry: unknown) => FwClearDisposition,
   policy: FwResiduePolicy
 ): Promise<FwResidueClearResult> {
   let queueCleared = true;
+  let queueRemaining: number | null = 0;
   if (isFwQueueSupported()) {
     try {
-      queueCleared = (await clearFwQueueIfEmpty(blocksClear)).cleared;
+      const cleared = await clearFwQueueUnlessBlocked(disposition);
+      queueCleared = cleared.cleared;
+      queueRemaining = cleared.remaining;
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
+      // NOT a number. The clear threw instead of answering, so nothing is known about
+      // what is still on this device — and every number here is a claim a failed
+      // transaction is in no position to make. `0` would read as "clean"; a stand-in
+      // like `1` reads as "one foreign capture preserved", which is how a genuine
+      // IndexedDB fault reached the handover reconcile disguised as a policy outcome
+      // and advanced the owner key over it. `null` is the honest answer and the
+      // reconcile treats it as `clear_failed`.
       queueCleared = false;
+      queueRemaining = null;
     }
   }
   // ABORT-SAFE under `sign_out`: if a tap raced in, the sign-out aborts — so the
@@ -521,7 +534,7 @@ export async function clearFwResidue(
   // they go regardless: they are the PRIOR account's children's names and authed
   // HTML, and keeping them protects nobody (Unit 3, B2).
   if (!shouldClearFwCaches(policy, queueCleared)) {
-    return { queueCleared, rosterCleared: true, shellCleared: true };
+    return { queueCleared, queueRemaining, rosterCleared: true, shellCleared: true };
   }
 
   // B3: each clear reports what it actually did. These used to be logged and
@@ -545,7 +558,7 @@ export async function clearFwResidue(
       shellCleared = false;
     }
   }
-  return { queueCleared, rosterCleared, shellCleared };
+  return { queueCleared, queueRemaining, rosterCleared, shellCleared };
 }
 
 /**

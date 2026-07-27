@@ -22,7 +22,6 @@
  */
 
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { sendEmail } from "@/app/lib/email";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -123,21 +122,21 @@ export async function signInGuide(input: unknown): Promise<SignInGuideResult> {
 }
 
 /**
- * Guide sign-out — the FW sibling of `signOutPath`, and a separate action for
- * exactly one reason: it lands on `/fp/fw/sign-in`, not `/fp/sign-in`. A
- * guide handing an iPad back at the end of a shift must not be dropped on the
- * child's door. Driven by a plain <form action={…}>, so the redirect() throw is
- * handled by Next's form-action plumbing rather than a caller's try/catch.
+ * ⚠️ GUIDE SIGN-OUT IS NOT HERE ANY MORE, AND MUST NOT COME BACK.
  *
- * Unit 8 will make this REFUSE while offline check-ins are queued (Decision 8);
- * until the queue exists there is nothing to protect, and adding a stub guard
- * now would be a check with no data behind it.
+ * `signOutFwGuide` ended the session and redirected to `/fp/fw/sign-in` with no
+ * verdict, no drain, no device-evidence gate and no atomic clear. Staff Front Door
+ * Unit 4 (R16) replaced it with `signOutStaffBar` in `app/lib/staff-bar/actions.ts`,
+ * which runs the block-until-drained sequence first and resolves its destination from
+ * the ACCOUNT rather than hard-coding the guide door.
+ *
+ * DELETED rather than left unexported-but-present: a `"use server"` function is
+ * POST-addressable independently of whatever renders a form for it, so an unrendered
+ * sign-out action is still a live ungated endpoint. Re-adding one here would put a
+ * second, disagreeing sign-out back inside the same `(app)` layout as the gated one —
+ * which is precisely how the ops header's version survived unnoticed through a whole
+ * unit of review. `bar-wiring.test.ts` scans the repo for the symbol.
  */
-export async function signOutFwGuide(): Promise<void> {
-  const supabase = await supabaseServer();
-  await supabase.auth.signOut();
-  redirect("/fp/fw/sign-in");
-}
 
 /* ─────────────────────────────────────────────── provisioning + invitation ── */
 

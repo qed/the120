@@ -14,6 +14,7 @@ applies_when:
   - "You are about to add a 'has this device ever used X?' heuristic built from client-side storage"
   - "A control is being mounted on a new surface where the component that previously initialised the resource is no longer co-mounted"
   - "A fail-closed default written for a DESTRUCTIVE consumer is about to be reused by a second, READ-ONLY consumer of the same gate"
+  - "A gate checks several inputs in a fixed ORDER, and one of them used to arrive synchronously (a server-rendered prop) but now resolves later (a client fetch) — see ROUND 3"
   - "A probe's own side effect would change the answer that probe gives on every future call"
 related_components:
   - app/fp/lib/fw-queue.ts (openFwDb, hasFwQueueDbOpened)
@@ -124,12 +125,13 @@ stops holding the moment the control is mounted elsewhere.
 server-side — here, "is this actor an FW guide?", known at the layout — gate on that
 instead. It is unambiguous, needs no storage archaeology, and cannot be evicted.
 
-### RESOLVED 2026-07-27 (Staff Front Door Unit 3)
+### RESOLVED 2026-07-27 (Staff Front Door Unit 3) — ⚠️ SUPERSEDED, see ROUND 3 below
 
-It stopped being incidental. The gate now takes the server-known signal first, then a
+It stopped being incidental. The gate took the server-known signal first, then a
 direct existence probe, and only then the old heuristic:
 
 ```ts
+// ⚠️ THE ORDER BELOW IS NO LONGER THE SHIPPED ONE. See ROUND 3.
 export function hasFwDeviceEvidence(input: {
   evidence: FwDeviceEvidence;
   actorIsFwGuide: boolean;   // SERVER-known at the layout. Cannot be evicted.
@@ -146,6 +148,10 @@ Note both new branches carry real signal: staff hold no guide grants by design, 
 `actorIsFwGuide` is genuinely `false` for the CRM-only user this gate protects. A
 same-evidence/opposite-answer test pair pins it, because a branch that returns what its
 fallback returns has no behavioural signature.
+
+The comment on that first line — *"SERVER-known at the layout. Cannot be evicted."* —
+is the sentence that expired. It was true of how the value was **produced at the time**,
+and nothing said so.
 
 ## ⚠️ THE SEQUEL: the same fail-closed default, reused on a READ, inverted it
 
@@ -187,10 +193,68 @@ on the unresolved case. Collapsing them back is what recreates the bug.
 The general trigger: **when a safety default is about to be shared, ask what each
 consumer does with it.** A default is only "safe" relative to an action.
 
+## ⚠️ ROUND 3 (Staff Front Door Unit 4): the ORDER of the gate's inputs was itself an assumption
+
+The SEQUEL above ends with *"the sharpest trigger: you are mounting an existing control
+on a new surface. Ask what the old surface was initialising that the new one is not."*
+That prediction came true one unit later, in the one place nobody re-read — the **order
+of the checks**, not the checks themselves.
+
+`if (input.actorIsFwGuide) return true;` sat first because it was the trustworthy
+signal: *server-known, storage-independent, correct at first paint*. All three were
+properties of **how it was produced**, not of the parameter. It arrived as a
+server-rendered prop on `FwSignOutButton`, computed synchronously from the session in
+the cohort layout.
+
+Unit 4 deleted that component. The only sign-out left is the staff bar's, where the
+same parameter is fed by `staffBarSignOutActorIsFwGuide(live)` — which, per the SEQUEL,
+**fails closed to `true` while identity is in flight**. And R23 requires the sign-out
+button to be live and enabled that entire time.
+
+So the fail-closed guess now short-circuits the gate, and a CRM-only admissions staffer
+who taps sign-out before the identity round trip lands goes straight past the existence
+probe into `openFwDb()` — creating the database on the exact browser this document
+exists to protect. Permanently, for the self-perpetuating reason already stated above.
+
+**The rule this adds: a gate's input order encodes a claim about which input is
+trustworthy first, and that claim is about how each input is PRODUCED. When a control
+moves surfaces, a synchronous input can silently become asynchronous — and a
+fail-closed default in first position stops being a safety net and becomes a
+short-circuit around the check it was ordered ahead of.**
+
+The fix is to let the **fact** outrank both **guesses**:
+
+```ts
+export function hasFwDeviceEvidence(input: {
+  evidence: FwDeviceEvidence;
+  actorIsFwGuide: boolean;
+}): boolean {
+  const { evidence } = input;
+  if (evidence.kind === "unknown") return true;                       // could not look at all
+  if (evidence.queueDbExists !== null) return evidence.queueDbExists; // THE DIRECT ANSWER
+  if (input.actorIsFwGuide) return true;                              // server-known, when the probe could not
+  return evidence.cacheOwner !== null || evidence.queueDbOpened;      // legacy heuristic
+}
+```
+
+Nothing is weakened. `queueDbExists === false` means there is no database, therefore no
+queue, therefore nothing any guide could lose — and opening it is precisely the harm.
+The original B1 protection is intact, because a guide whose localStorage was evicted
+still *has* a database, so the probe answers `true` and their queue is still checked.
+`actorIsFwGuide` keeps a real job: it answers where `indexedDB.databases()` is
+genuinely unavailable (pre-2024 Safari) and the legacy heuristic would otherwise fail
+open.
+
+**Generalised: order a gate's inputs by how directly each one answers the question, not
+by how much you trust its source.** A direct, side-effect-free probe beats a
+conservative default, because the default's conservatism is only as good as the timing
+of whatever produces it — and timing is exactly what a refactor changes.
+
 ## When to apply
 
 See `applies_when`. The sharpest trigger: **you are mounting an existing control on a
-new surface.** Ask what the old surface was initialising that the new one is not.
+new surface.** Ask what the old surface was initialising that the new one is not — and,
+per ROUND 3, what it was providing *synchronously* that the new one provides *later*.
 
 ## A note on `indexedDB.databases()` — SUPERSEDED 2026-07-27
 

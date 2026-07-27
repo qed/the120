@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Icon } from "@/app/fp/components/system/Icon";
-import { signOutFwGuide } from "@/app/fp/lib/actions/fw-guide";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 
 /**
@@ -25,6 +24,20 @@ import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
  * `notFound()` rather than a message, matching the cohort layout: telling a
  * signed-in guide "this is staff-only" confirms the surface exists and is worth
  * probing. To a guide, /fp/fw/ops simply is not a page.
+ *
+ * NO SIGN-OUT HERE ANY MORE (Staff Front Door Unit 4, R16). This header used to
+ * carry a bare `<form action={signOutFwGuide}>` — no verdict, no drain, no evidence
+ * gate, no atomic clear — sitting inside the same `(app)` layout, for the same
+ * actor, as the drain-gated control one level down. A guide who is also staff could
+ * capture check-ins in the cohort view and then abandon the queue from here. The
+ * persistent staff bar in `../layout.tsx` is the single control now, and the action
+ * itself is deleted rather than merely unlinked: a `"use server"` export stays
+ * POST-addressable whether or not anything renders a form for it.
+ *
+ * STICKY OFFSET: `--staff-bar-h`, published by the bar. Two sticky headers both
+ * claiming `top: 0` do not stack — the one with the higher z-index simply covers the
+ * other. The fallback of `0px` keeps this header behaving exactly as it does today
+ * if the bar is ever unmounted (the plan's named rollback for this slice).
  */
 export default async function FwOpsLayout({ children }: { children: ReactNode }) {
   const gate = await resolveFwStaffGate();
@@ -32,7 +45,7 @@ export default async function FwOpsLayout({ children }: { children: ReactNode })
 
   return (
     <>
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
+      <header className="sticky top-[var(--staff-bar-h,0px)] z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
         <div className="min-w-0">
           <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
             Founders Weekend · Staff ops
@@ -53,14 +66,6 @@ export default async function FwOpsLayout({ children }: { children: ReactNode })
             <Icon name="arrow-right" size={16} />
             Guide view
           </Link>
-          <form action={signOutFwGuide}>
-            <button
-              type="submit"
-              className="min-h-[44px] font-path-body text-sm text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
-            >
-              Sign out
-            </button>
-          </form>
         </div>
       </header>
 

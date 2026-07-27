@@ -86,15 +86,28 @@ function makeFakeDb(seed: Seed) {
 
   function query(table: string) {
     const eqs: [string, unknown][] = [];
+    let orderBy: { col: string; ascending: boolean } | null = null;
+    let rangeAt: [number, number] | null = null;
     const isNulls: string[] = [];
     let inFilter: [string, unknown[]] | null = null;
-    const rows = () =>
-      tables[table].filter(
+    const rows = () => {
+      let out = tables[table].filter(
         (r) =>
           eqs.every(([c, v]) => r[c] === v) &&
           isNulls.every((c) => (r[c] ?? null) === null) &&
           (!inFilter || inFilter[1].includes(r[inFilter[0]]))
       );
+      if (orderBy) {
+        const { col, ascending } = orderBy;
+        out = [...out].sort((a, b) => {
+          const av = String(a[col] ?? "");
+          const bv = String(b[col] ?? "");
+          return ascending ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
+      }
+      if (rangeAt) out = out.slice(rangeAt[0], rangeAt[1] + 1);
+      return out;
+    };
     const failing = (op: "upsert" | "update" | "select" | "insert") =>
       seed.failTable?.table === table &&
       seed.failTable.op === op &&
@@ -122,6 +135,17 @@ function makeFakeDb(seed: Seed) {
         return builder;
       },
       limit() {
+        return builder;
+      },
+      /** Unit 9: the paginated actor list. Order is modelled (fetchAllRows' page
+       *  walk needs determinism) and range slices — an unmodelled range would
+       *  return every row on every page and loop fetchAllRows to its page cap. */
+      order(col: string, opts?: { ascending?: boolean }) {
+        orderBy = { col, ascending: opts?.ascending !== false };
+        return builder;
+      },
+      range(from: number, to: number) {
+        rangeAt = [from, to];
         return builder;
       },
       async maybeSingle() {
@@ -332,7 +356,7 @@ describe("loadStaffRowActive — the bridge's revocable half", () => {
 describe("listFwCohortsForActor", () => {
   it("staff see every fw cohort and no path cohort", async () => {
     const { db } = makeFakeDb({});
-    const list = await listFwCohortsForActor(db, { grantedCohortIds: [], isStaff: true });
+    const list = await listFwCohortsForActor(db, { includeArchived: true, grantedCohortIds: [], isStaff: true });
     expect(list.ok).toBe(true);
     if (!list.ok) return;
     expect(list.cohorts.map((c) => c.id).sort()).toEqual([BOSTON, HAMPTONS]);
@@ -340,20 +364,20 @@ describe("listFwCohortsForActor", () => {
 
   it("a guide sees only their granted fw cohorts", async () => {
     const { db } = makeFakeDb({});
-    const list = await listFwCohortsForActor(db, { grantedCohortIds: [BOSTON], isStaff: false });
-    expect(list).toEqual({ ok: true, cohorts: [{ id: BOSTON, slug: "boston-2026-08" }] });
+    const list = await listFwCohortsForActor(db, { includeArchived: true, grantedCohortIds: [BOSTON], isStaff: false });
+    expect(list).toEqual({ ok: true, cohorts: [{ id: BOSTON, slug: "boston-2026-08", archivedAt: null }] });
   });
 
   it("a guide grant naming a PATH cohort surfaces nothing — kind is re-read, not trusted", async () => {
     const { db } = makeFakeDb({});
     expect(
-      await listFwCohortsForActor(db, { grantedCohortIds: [PATH_COHORT], isStaff: false })
+      await listFwCohortsForActor(db, { includeArchived: true, grantedCohortIds: [PATH_COHORT], isStaff: false })
     ).toEqual({ ok: true, cohorts: [] });
   });
 
   it("a grant-less non-staff session short-circuits to empty without a query", async () => {
     const { db } = makeFakeDb({});
-    expect(await listFwCohortsForActor(db, { grantedCohortIds: [], isStaff: false })).toEqual({
+    expect(await listFwCohortsForActor(db, { includeArchived: true, grantedCohortIds: [], isStaff: false })).toEqual({
       ok: true,
       cohorts: [],
     });
@@ -368,7 +392,7 @@ describe("listFwCohortsForActor", () => {
       failTable: { table: "path_cohorts", op: "select", message: "boom" },
     });
     expect(
-      await listFwCohortsForActor(failing.db, { grantedCohortIds: [], isStaff: true })
+      await listFwCohortsForActor(failing.db, { includeArchived: true, grantedCohortIds: [], isStaff: true })
     ).toEqual({ ok: false });
   });
 });
@@ -1104,3 +1128,59 @@ describe("Unit 8 — new check-in power refuses on archived; existing power stay
   });
 });
 
+describe("Unit 9 — listFwCohortsForActor and archive state (callers decide)", () => {
+  const archivedBoston = [
+    { id: BOSTON, slug: "boston-2026-08", kind: "fw", archived_at: "2026-08-24T00:00:00Z" },
+    { id: HAMPTONS, slug: "hamptons-2026-08", kind: "fw" },
+  ];
+
+  it("a guide's ARCHIVED cohort is returned when included — theirs to open, badge data carried", async () => {
+    const { db } = makeFakeDb({ cohorts: archivedBoston });
+    const list = await listFwCohortsForActor(db, {
+      includeArchived: true,
+      grantedCohortIds: [BOSTON, HAMPTONS],
+      isStaff: false,
+    });
+    if (!list.ok) throw new Error("unreachable");
+    expect(list.cohorts.map((c) => [c.id, c.archivedAt !== null])).toEqual([
+      [BOSTON, true],
+      [HAMPTONS, false],
+    ]);
+  });
+
+  it("excludeArchived filters — the STAFF picker's view", async () => {
+    const { db } = makeFakeDb({ cohorts: archivedBoston });
+    const list = await listFwCohortsForActor(db, {
+      includeArchived: false,
+      grantedCohortIds: [],
+      isStaff: true,
+    });
+    if (!list.ok) throw new Error("unreachable");
+    expect(list.cohorts.map((c) => c.id)).toEqual([HAMPTONS]);
+  });
+
+  it("a guide holding ONLY an archived cohort still gets it back — the redirect input, never 'no grants'", async () => {
+    const { db } = makeFakeDb({ cohorts: archivedBoston });
+    const list = await listFwCohortsForActor(db, {
+      includeArchived: true,
+      grantedCohortIds: [BOSTON],
+      isStaff: false,
+    });
+    if (!list.ok) throw new Error("unreachable");
+    expect(list.cohorts).toHaveLength(1);
+    expect(list.cohorts[0].id).toBe(BOSTON);
+  });
+
+  it("the typed failure stays distinct from an empty list, through the paginated read", async () => {
+    const failing = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "select", message: "boom" },
+    });
+    expect(
+      await listFwCohortsForActor(failing.db, {
+        includeArchived: true,
+        grantedCohortIds: [BOSTON],
+        isStaff: false,
+      })
+    ).toEqual({ ok: false });
+  });
+});

@@ -63,6 +63,11 @@ export default async function FwHomePage() {
   const listed = await listFwCohortsForActor(db, {
     grantedCohortIds: grantedCohortIds(session.grants),
     isStaff,
+    // GUIDES see their archived weekends too — a guide holding only an archived
+    // cohort is redirected INTO it below, never told they hold no grants. STAFF see
+    // the active set: hiding archived from the default staff view is the point of
+    // archiving, and their zero-state carries the create path.
+    includeArchived: !isStaff,
   });
 
   // A read failure is NOT "you hold no grants" — saying so would send a

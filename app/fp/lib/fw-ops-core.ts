@@ -552,6 +552,53 @@ export async function revokeFwBoardToken(
   return { ok: true };
 }
 
+/**
+ * The hub's weekend figure (Unit 9, for Unit 11) — ONE paginated query.
+ *
+ * The plan's decision verbatim: the existing dated read fans out to three further
+ * paginated scans for one integer, so the hub gets its own narrow read. Returns the
+ * active (non-archived) fw cohorts with their windows; the hub derives its count and
+ * its "next weekend" from this, and a failure is a typed `{ok:false}` the card
+ * degrades on (R4's asymmetry) — never a fabricated zero.
+ */
+export type FwActiveWeekend = {
+  id: string;
+  slug: string;
+  startsAt: string | null;
+  endsAt: string | null;
+};
+
+export async function listFwActiveWeekends(
+  db: SupabaseClient
+): Promise<{ ok: true; weekends: FwActiveWeekend[] } | { ok: false }> {
+  const rows = await fetchAllRows<Record<string, unknown>>("active weekends", (from, to) =>
+    db
+      .from("path_cohorts")
+      .select("id, slug, kind, starts_at, ends_at, archived_at")
+      .eq("kind", FW_COHORT_KIND)
+      .is("archived_at", null)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
+  if (!rows.ok) return { ok: false };
+  return {
+    ok: true,
+    weekends: rows.rows
+      .filter(
+        (r): r is Record<string, unknown> & { id: string; slug: string } =>
+          typeof r.id === "string" && typeof r.slug === "string" && r.kind === FW_COHORT_KIND &&
+          // Belt over the SQL predicate, same both-layers posture as the list above.
+          typeof r.archived_at !== "string"
+      )
+      .map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        startsAt: typeof r.starts_at === "string" ? r.starts_at : null,
+        endsAt: typeof r.ends_at === "string" ? r.ends_at : null,
+      })),
+  };
+}
+
 /* ═══════════════════════════════════════════════════════ archive / unarchive ══ */
 
 export type ArchiveFwCohortResult =
@@ -723,7 +770,13 @@ export type FwOpsCohortSummary = FwOpsCohort & {
  */
 export async function listFwOpsCohorts(
   db: SupabaseClient,
-  input: { now: number }
+  input: {
+    now: number;
+    /** Unit 9: the ops list hides archived by default — staff visibility is the
+     *  point of archiving. `true` is the "show archived" view, whose counts must
+     *  describe the same widened set (R3's count contract). */
+    includeArchived?: boolean;
+  }
 ): Promise<{ ok: true; cohorts: FwOpsCohortSummary[] } | { ok: false }> {
   const cohortRows = await fetchAllRows<Record<string, unknown>>("ops cohort list", (from, to) =>
     db
@@ -741,7 +794,12 @@ export async function listFwOpsCohorts(
     // The SQL filter already restricts to fw, but the narrowing re-checks: this
     // list is the entry point to every ops action below, and "the query said so"
     // is a safety property of one query's shape rather than of this code.
-    if (narrowed && narrowed.kind === FW_COHORT_KIND) cohorts.push(narrowed);
+    if (!narrowed || narrowed.kind !== FW_COHORT_KIND) continue;
+    // Excluded BEFORE the three-way count fan-out (the plan's line): the member,
+    // guide and token reads below are scoped to `ids`, so a filtered cohort costs
+    // nothing downstream and the counts describe exactly the returned set.
+    if (!input.includeArchived && narrowed.archivedAt !== null) continue;
+    cohorts.push(narrowed);
   }
   if (cohorts.length === 0) return { ok: true, cohorts: [] };
 

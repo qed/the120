@@ -32,7 +32,7 @@ import {
 export default function FwCohortPicker({
   cohorts,
 }: {
-  cohorts: readonly { id: string; slug: string }[];
+  cohorts: readonly { id: string; slug: string; archivedAt: string | null }[];
 }) {
   const stored = useSyncExternalStore(
     subscribeFwPrefs,
@@ -53,6 +53,9 @@ export default function FwCohortPicker({
             <span>
               <span className="block font-path-display text-lg font-semibold text-hq-ink">
                 {cohort.slug}
+              {cohort.archivedAt !== null && (
+                <span className="ml-2 inline-flex items-center rounded-full border border-hq-border bg-hq-sunken px-2 py-0.5 font-path-mono text-[10px] uppercase tracking-[0.1em] text-hq-ink-soft">Archived</span>
+              )}
               </span>
               {lastUsed === cohort.id && (
                 <span className="mt-0.5 block font-path-mono text-[11px] uppercase tracking-[0.12em] text-hq-ink-muted">

@@ -506,3 +506,80 @@ export function unarchiveFwCohortFailureCopy(
     }
   }
 }
+
+/* ═════════════════════════════════════════════════ the archived-mode surface ══ */
+
+/**
+ * The archived banner's two lines (Unit 9). Pure, because there is no jsdom and
+ * this copy carries a launch-day edge the plan names: all four backfilled cohorts
+ * ship with `archived_at` set and `archived_by` NULL — the ONLY attribution state
+ * present at launch — and the banner must state the actor is unrecorded, never
+ * render blank or "undefined".
+ *
+ * Takes an EMAIL (or null), not a uuid: a uuid in a banner is noise wearing a
+ * monospace font; the page resolves the email where the id exists.
+ */
+export function fwArchivedBanner(input: {
+  archivedAt: string;
+  archivedByEmail: string | null;
+}): { title: string; detail: string } {
+  const date = input.archivedAt.slice(0, 10);
+  return {
+    title: "This weekend is archived",
+    detail:
+      input.archivedByEmail === null
+        ? `Archived ${date} — archived by: unrecorded.`
+        : `Archived ${date} by ${input.archivedByEmail}.`,
+  };
+}
+
+/**
+ * Which affordances an ops cohort page shows, by archive state (Unit 9). ONE
+ * decision table rather than scattered conditionals in the .tsx, so the plan's
+ * split — "de-escalating and obligation controls kept; roster-building removed" —
+ * is a tested object, and the server-side guard table (Unit 8) has a rendering
+ * twin it can be compared against.
+ *
+ * NOT a security boundary: every hidden affordance is ALSO refused server-side
+ * (Unit 8's fences). Hiding is honesty — a control that can only fail is worse
+ * than no control.
+ */
+export function fwOpsCohortAffordances(input: { archived: boolean }): {
+  /** The board-token panel renders UNCONDITIONALLY in both states — a prior
+   *  frontend-races review found a conditional render unmounting a just-minted,
+   *  unrecoverable URL. The MINT inside it refuses server-side when archived. */
+  boardTokenPanel: true;
+  /** Roster-building — removed when archived, refused server-side regardless. */
+  csvImportLink: boolean;
+  matchResolver: boolean;
+  guideProvisionForm: boolean;
+  /** Obligations and de-escalation — never removed. */
+  guideRevoke: true;
+  studentAnonymize: true;
+  replayRejects: true;
+  importExceptions: true;
+  /** The reverse door, archived mode only. */
+  unarchiveControl: boolean;
+} {
+  return {
+    boardTokenPanel: true,
+    csvImportLink: !input.archived,
+    matchResolver: !input.archived,
+    guideProvisionForm: !input.archived,
+    guideRevoke: true,
+    studentAnonymize: true,
+    replayRejects: true,
+    importExceptions: true,
+    unarchiveControl: input.archived,
+  };
+}
+
+/**
+ * The archive confirm gate (Unit 9) — typed-slug confirmation, same shape as the
+ * anonymize confirm: archiving darkens a public URL and hides a weekend from the
+ * default list, so a mis-tap must not do it. Pure so the match rule is tested;
+ * the component only compares through this.
+ */
+export function fwArchiveConfirmMatches(typed: string, slug: string): boolean {
+  return typed.trim() === slug;
+}

@@ -69,9 +69,14 @@ const CREDENTIAL: Record<FwGuideCredentialStatus, { label: string; cls: string }
 export default function FwGuideRoster({
   cohortId,
   guides,
+  /** Unit 9: the archived ops page hides the add form (roster-building) while the
+   *  per-row revoke stays (de-escalation is never blocked). Hiding is honesty, not
+   *  security — provisionFwGuide refuses archived cohorts server-side regardless. */
+  allowProvision = true,
 }: {
   cohortId: string;
   guides: FwOpsGuide[];
+  allowProvision?: boolean;
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -277,6 +282,7 @@ export default function FwGuideRoster({
         </p>
       )}
 
+      {allowProvision && (
       <form
         onSubmit={handleAdd}
         className="mt-5 rounded-xl border border-hq-border bg-hq-surface p-4 shadow-hq"
@@ -312,6 +318,7 @@ export default function FwGuideRoster({
           </Button>
         </div>
       </form>
+      )}
     </div>
   );
 }

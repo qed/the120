@@ -35,7 +35,7 @@ import {
 } from "./fw-access-rules";
 import { normalizeEmail } from "./onboarding-rules";
 import { recordFwOpsAudit } from "./fw-audit-core";
-import { fwRead, fwWrite } from "./fw-call";
+import { fetchAllRows, fwRead, fwWrite } from "./fw-call";
 import { validateStudentPassword } from "./provision-rules";
 import { findAuthUserByEmail } from "./provision-core";
 
@@ -101,7 +101,12 @@ export async function loadStaffRowActive(
   return res.data?.is_active === true;
 }
 
-export type FwCohortSummary = { id: string; slug: string };
+export type FwCohortSummary = {
+  id: string;
+  slug: string;
+  /** Unit 9: carried, never filtered here — callers decide (see the list's docblock). */
+  archivedAt: string | null;
+};
 
 /**
  * Every `kind='fw'` cohort this actor may act in — the roster behind the cohort
@@ -124,28 +129,56 @@ export type FwCohortSummary = { id: string; slug: string };
  */
 export async function listFwCohortsForActor(
   db: SupabaseClient,
-  input: { grantedCohortIds: readonly string[]; isStaff: boolean }
+  input: {
+    grantedCohortIds: readonly string[];
+    isStaff: boolean;
+    /**
+     * Unit 9. The CALLERS decide (the plan's settled read-carries-callers-decide
+     * rule): the cohort LAYOUT takes everything (its one list feeds the header name
+     * AND `canSwitch`, and filtering would strand a guide inside an archived cohort
+     * with no Switch link); the GUIDE picker takes everything (a guide's archived
+     * weekend is still theirs to open); the STAFF picker excludes archived (staff
+     * default visibility is the point of archiving).
+     */
+    includeArchived: boolean;
+  }
 ): Promise<{ ok: true; cohorts: FwCohortSummary[] } | { ok: false }> {
   if (!input.isStaff && input.grantedCohortIds.length === 0) return { ok: true, cohorts: [] };
 
-  let query = db.from("path_cohorts").select("id, slug, kind").eq("kind", FW_COHORT_KIND);
-  if (!input.isStaff) {
-    query = query.in("id", [...input.grantedCohortIds]);
-  }
-  const res = await query;
-  if (res.error) {
-    console.error(`[fw/guide] cohort list failed: ${res.error.message}`);
+  // PAGINATED in this unit, deliberately (the plan names it): the staff result set
+  // now includes rows that accumulate permanently and can never be deleted, so the
+  // unpaginated read's 1000-row cliff stops being theoretical the year this ships.
+  // `fetchAllRows` refuses a truncated result rather than reporting it (the
+  // no-silent-caps posture); ordered by id for a deterministic page walk.
+  const rows = await fetchAllRows<Record<string, unknown>>("actor cohort list", (from, to) => {
+    let query = db
+      .from("path_cohorts")
+      .select("id, slug, kind, archived_at")
+      .eq("kind", FW_COHORT_KIND)
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (!input.isStaff) {
+      query = query.in("id", [...input.grantedCohortIds]);
+    }
+    return query;
+  });
+  if (!rows.ok) {
+    console.error("[fw/guide] cohort list failed");
     return { ok: false };
   }
-  return {
-    ok: true,
-    cohorts: (res.data ?? [])
-      .filter(
-        (r): r is { id: string; slug: string; kind: string } =>
-          typeof r.id === "string" && typeof r.slug === "string" && r.kind === FW_COHORT_KIND
-      )
-      .map((r) => ({ id: r.id, slug: r.slug })),
-  };
+  const cohorts = rows.rows
+    .filter(
+      (r): r is { id: string; slug: string; kind: string; archived_at: unknown } =>
+        typeof r.id === "string" && typeof r.slug === "string" && r.kind === FW_COHORT_KIND
+    )
+    .map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      // Fail-closed to VISIBLE-as-active, matching narrowOpsCohort's direction.
+      archivedAt: typeof r.archived_at === "string" ? r.archived_at : null,
+    }))
+    .filter((c) => input.includeArchived || c.archivedAt === null);
+  return { ok: true, cohorts };
 }
 
 /* ───────────────────────────────────────────────────── guide provisioning ──── */

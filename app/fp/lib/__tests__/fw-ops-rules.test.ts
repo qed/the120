@@ -15,6 +15,9 @@ import {
   normalizeFwCohortSlug,
   archiveFwCohortFailureCopy,
   unarchiveFwCohortFailureCopy,
+  fwArchivedBanner,
+  fwArchiveConfirmMatches,
+  fwOpsCohortAffordances,
 } from "../fw-ops-rules";
 
 /**
@@ -471,5 +474,69 @@ describe("archive/unarchive failure copy (Unit 7)", () => {
       expect(c).toMatch(/nothing was changed/i);
       expect(c).toMatch(/try again/i);
     }
+  });
+});
+
+describe("fwArchivedBanner (Unit 9)", () => {
+  it("the LAUNCH state — archived_at set, archived_by NULL — says unrecorded, never blank", () => {
+    // The plan's named edge: all four backfilled cohorts ship in exactly this
+    // state, and it is the ONLY attribution state present at launch.
+    const b = fwArchivedBanner({ archivedAt: "2026-08-24T00:00:00Z", archivedByEmail: null });
+    expect(b.title).toMatch(/archived/i);
+    expect(b.detail).toContain("2026-08-24");
+    expect(b.detail).toMatch(/unrecorded/i);
+    expect(b.detail).not.toMatch(/undefined|null/);
+  });
+
+  it("a recorded actor is named by EMAIL", () => {
+    const b = fwArchivedBanner({
+      archivedAt: "2026-08-24T00:00:00Z",
+      archivedByEmail: "staff@the120.school",
+    });
+    expect(b.detail).toContain("staff@the120.school");
+    expect(b.detail).not.toMatch(/unrecorded/i);
+  });
+});
+
+describe("fwOpsCohortAffordances — the rendering twin of Unit 8's guard table", () => {
+  it("ACTIVE: everything renders, no unarchive control", () => {
+    const a = fwOpsCohortAffordances({ archived: false });
+    expect(a).toEqual({
+      boardTokenPanel: true,
+      csvImportLink: true,
+      matchResolver: true,
+      guideProvisionForm: true,
+      guideRevoke: true,
+      studentAnonymize: true,
+      replayRejects: true,
+      importExceptions: true,
+      unarchiveControl: false,
+    });
+  });
+
+  it("ARCHIVED: roster-building hidden; obligations, de-escalation and the token panel stay", () => {
+    const a = fwOpsCohortAffordances({ archived: true });
+    // The three roster-builders go dark…
+    expect(a.csvImportLink).toBe(false);
+    expect(a.matchResolver).toBe(false);
+    expect(a.guideProvisionForm).toBe(false);
+    // …the never-removed set is TYPED `true` (a literal, not boolean — turning any
+    // of these off is a compile error, which is the point):
+    expect(a.boardTokenPanel).toBe(true);
+    expect(a.guideRevoke).toBe(true);
+    expect(a.studentAnonymize).toBe(true);
+    expect(a.replayRejects).toBe(true);
+    expect(a.importExceptions).toBe(true);
+    expect(a.unarchiveControl).toBe(true);
+  });
+});
+
+describe("fwArchiveConfirmMatches", () => {
+  it("exact slug (whitespace-trimmed) confirms; anything else does not", () => {
+    expect(fwArchiveConfirmMatches("boston-2026-08", "boston-2026-08")).toBe(true);
+    expect(fwArchiveConfirmMatches("  boston-2026-08  ", "boston-2026-08")).toBe(true);
+    expect(fwArchiveConfirmMatches("boston", "boston-2026-08")).toBe(false);
+    expect(fwArchiveConfirmMatches("BOSTON-2026-08", "boston-2026-08")).toBe(false);
+    expect(fwArchiveConfirmMatches("", "boston-2026-08")).toBe(false);
   });
 });

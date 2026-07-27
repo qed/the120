@@ -52,15 +52,24 @@ const TOKEN_CHIP: Record<FwBoardTokenStatus, { label: string; cls: string }> = {
  * calls `Date.now()` inline is a render whose output changes on a re-render
  * nobody asked for.
  */
-async function loadOpsCohorts() {
-  return listFwOpsCohorts(supabaseAdmin(), { now: Date.now() });
+async function loadOpsCohorts(includeArchived: boolean) {
+  return listFwOpsCohorts(supabaseAdmin(), { now: Date.now(), includeArchived });
 }
 
-export default async function FwOpsPage() {
+export default async function FwOpsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archived?: string }>;
+}) {
   const gate = await resolveFwStaffGate();
   if (!gate.ok) notFound();
 
-  const listed = await loadOpsCohorts();
+  // Unit 9: archived hidden by default — staff visibility is the point of
+  // archiving — with `?archived=1` as the explicit "show archived too" view. A
+  // query param, not state: the view is shareable and survives a reload.
+  const { archived } = await searchParams;
+  const includeArchived = archived === "1";
+  const listed = await loadOpsCohorts(includeArchived);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
@@ -80,8 +89,18 @@ export default async function FwOpsPage() {
         <>
           <p className="mt-2 font-path-body text-sm leading-6 text-hq-ink-soft">
             {listed.cohorts.length === 0
-              ? "No Founders Weekend cohorts yet. Create the first one below."
+              ? includeArchived
+                ? "No weekends at all yet. Create the first one below."
+                : "No active weekends. Create one below — or show the archived list."
               : "Open a weekend to manage its guides and its board link."}
+          </p>
+          <p className="mt-1 font-path-body text-sm leading-6">
+            <Link
+              href={includeArchived ? "/fp/fw/ops" : "/fp/fw/ops?archived=1"}
+              className="text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
+            >
+              {includeArchived ? "Hide archived weekends" : "Show archived weekends"}
+            </Link>
           </p>
 
           {listed.cohorts.length > 0 && (
@@ -98,10 +117,17 @@ export default async function FwOpsPage() {
                         <p className="font-path-display text-base font-semibold text-hq-ink">
                           {cohort.slug}
                         </p>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-path-mono text-[11px] uppercase tracking-[0.1em] ${chip.cls}`}
-                        >
-                          {chip.label}
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          {cohort.archivedAt !== null && (
+                            <span className="inline-flex items-center rounded-full border border-hq-border bg-hq-sunken px-2.5 py-0.5 font-path-mono text-[11px] uppercase tracking-[0.1em] text-hq-ink-soft">
+                              Archived
+                            </span>
+                          )}
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-path-mono text-[11px] uppercase tracking-[0.1em] ${chip.cls}`}
+                          >
+                            {chip.label}
+                          </span>
                         </span>
                       </div>
                       <p className="mt-1.5 font-path-body text-sm leading-5 text-hq-ink-soft">

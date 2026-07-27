@@ -23,6 +23,7 @@
 
 import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 import { drainFwQueue } from "@/app/fp/lib/actions/fw-sync";
+import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
 import {
   clearFwQueue,
   clearFwQueueIfEmpty,
@@ -269,9 +270,14 @@ async function drainFwQueueOnce(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Pro
     : drainable.filter((e) => e.attempts < FW_AUTO_RETRY_ATTEMPT_CEILING);
   if (runnable.length === 0) return;
 
-  let res;
+  let raced;
   try {
-    res = await drainFwQueue(runnable);
+    // BOUNDED. `withFwTimeout` server-side bounds only what runs AFTER the request
+    // lands; a captive portal that silently drops it produces a fetch that never
+    // settles. This await happens while `fw-offline-drain` is held, and Web Locks are
+    // cross-document — so an unbounded wait here wedges every later drain AND every
+    // future sign-out in every tab, with a reload the only escape.
+    raced = await withFwTimeout(drainFwQueue(runnable), "drain action", FW_ACTION_TIMEOUT_MS);
   } catch (e) {
     if (isNextRedirect(e)) {
       authRequired = true;
@@ -281,6 +287,18 @@ async function drainFwQueueOnce(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Pro
     console.error("[fw/sync] drain action threw:", e);
     return;
   }
+
+  // A timeout is NOT a failed drain — the request may still land server-side, and
+  // every entry is idempotent by `clientId`. So dispose of it exactly as the throw
+  // branch above does: leave the queue untouched, do NOT advance attempts, do NOT
+  // claim the session expired. The sign-out sequence's re-verdict then observes an
+  // unchanged queue and returns `drain_stalled`, whose copy names the captive portal
+  // instead of looping on "try again in a moment" — the state this unit added.
+  if (raced.timedOut) {
+    notify();
+    return;
+  }
+  const res = raced.value;
 
   if (!res.ok) {
     if (res.reason === "no_session") {

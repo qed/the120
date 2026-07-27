@@ -3,6 +3,8 @@ import Link from "next/link";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { getSeatsRemaining } from "@/app/lib/seats";
+import { SEATS_REMAINING } from "@/app/lib/site";
+import { withFwTimeout } from "@/app/fp/lib/fw-call";
 import { listFwActiveWeekends } from "@/app/fp/lib/fw-ops-core";
 import { crmCardLine, fwCardLine, fwCardModel } from "@/app/staff/lib/hub-rules";
 
@@ -41,10 +43,24 @@ export const metadata: Metadata = {
  */
 async function loadHub() {
   const nowMs = Date.now();
-  const [seats, weekends] = await Promise.all([
-    getSeatsRemaining(),
+  // BOTH legs bounded (Unit 11 review, 0.68). The FW read is bounded internally
+  // (fwRead per page); getSeatsRemaining is NOT — it is the marketing site's
+  // function, whose bare fetch and constant-fallback contract this page inherits
+  // rather than forks. Its try/catch converts a REJECTED fetch to the constant but
+  // does nothing for one that never settles, and an unsettled seats leg would hold
+  // the whole hub — FW card included — behind an unrelated marketing RPC. So the
+  // BOUND lives here, at the one call site with a stricter need, and a timeout
+  // degrades to the same constant the function itself falls back to.
+  //
+  // (Also noted from the same review: this page is force-dynamic, which overrides
+  // the fetch's `revalidate: 60` — seats.ts's "ISR-cached" comment is true on the
+  // marketing pages, not here; every hub load pays the RPC, which the timeout
+  // caps.)
+  const [seatsRaced, weekends] = await Promise.all([
+    withFwTimeout(getSeatsRemaining(), "hub seats read"),
     listFwActiveWeekends(supabaseAdmin()),
   ]);
+  const seats = seatsRaced.timedOut ? SEATS_REMAINING : seatsRaced.value;
   return { seats, fw: fwCardModel(weekends, nowMs) };
 }
 

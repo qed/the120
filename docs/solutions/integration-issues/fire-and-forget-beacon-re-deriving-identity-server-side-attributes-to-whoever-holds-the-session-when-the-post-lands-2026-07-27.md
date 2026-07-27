@@ -10,6 +10,7 @@ symptoms:
 root_cause: "The Server Action attributed the event to the live session at processing time, but the event was observed on the client at an earlier time, and the session changed in between"
 resolution_type: schema_change
 tags: [server-actions, telemetry, attribution, race-condition, shared-device, audit]
+last_updated: 2026-07-27
 ---
 
 # A fire-and-forget beacon that re-derives identity server-side attributes to whoever holds the session when the POST lands
@@ -91,3 +92,33 @@ Any endpoint that (a) is called fire-and-forget from a client, (b) describes an 
 observed EARLIER on that client, and (c) attributes it to "the current user" has this
 race. Shared devices make it common instead of rare. The pattern: authenticated
 sender + validated claim, both logged, mismatch meaningful.
+
+## ROUND 2 (Unit 6, 2026-07-27) — the race has a second victim, and the open endpoint has a second problem
+
+The durable table landed (`path_fw_residue_reports`), and its review found two more
+lessons in the same mechanism:
+
+**1. Fire-and-forget against `auth.signOut()` does not misattribute — it DROPS.**
+The success-path report was dispatched fire-and-forget moments before the sign-out
+action ran. Two independent requests, no ordering: when the sign-out's
+`auth.signOut()` won, the beacon's own `getUser()` found a dead session and the
+report was dropped entirely — silently, on the single most common residue-leaving
+path, the one the feature was approved to cover. The Round-1 fix (log sender AND
+claim) cannot help here; there is no sender left to log.
+
+**The fix is structural: a report about a session is written by the request that
+still holds the session.** `signOutStaffBar` takes the residue payload as a second
+zod-validated argument and writes the row itself, before ending the session. Same
+request, same session context, no race, and authenticated by construction. The
+fire-and-forget action remains only for paths where the session outlives the report
+(the mount-time reconcile, the refused sign-out).
+
+**2. A table humans ACT on, fed by an open endpoint, needs a role gate — zod is not
+authorization.** The Server Action validated shape (uuids, enums, bounds) and
+required only "any authenticated session". Any parent or student account could
+therefore insert well-formed rows naming arbitrary claimed actors and devices —
+poisoning the exact "which iPads hold un-landed work?" query staff would physically
+act on. Every legitimate sender holds a role by construction (the bar mounts only on
+guarded layouts), so gating on `isStaff || isFwGuide` loses nothing; a per-user rate
+limit bounds a looping bundle. The test that pins it: a role-less session produces
+NO row, and the 21st report in a window is dropped.

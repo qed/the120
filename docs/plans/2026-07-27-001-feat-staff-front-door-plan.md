@@ -1,0 +1,582 @@
+---
+title: "feat: The Staff Front Door"
+type: feat
+status: active
+date: 2026-07-27
+origin: docs/brainstorms/2026-07-26-staff-front-door-requirements.md
+deepened: 2026-07-27
+---
+
+# feat: The Staff Front Door
+
+## Overview
+
+A new top-level `/staff` hub becomes the front door to The 120's staff tools, with hub-and-spoke return navigation to the admissions CRM and Founders Weekend ops. One persistent nav bar carries account identity and sign-out across every guarded staff surface. `/fp/fw` gains chrome it has never had. Founders Weekend cohorts gain an archive flag so the hub's weekend count reports real weekends rather than rehearsal residue.
+
+**Six things planning changed from the origin document**, each recorded in Key Technical Decisions:
+
+1. R16's gate already exists and is already portable — this is a mounting problem, not a new mechanism. But it sits on a **live defect in `main`** this work would weaponise, so that defect ships **first and standalone**.
+2. R25 becomes a property of the **board read**. The origin's assumption that this is free turned out to be wrong; the honest cost is stated.
+3. R19's "filter at the staff call sites" is the riskier of two options. The read carries `archivedAt` and each caller decides.
+4. The hub's weekend figure gets its **own narrow read** rather than the four-way paginated fan-out.
+5. **The guide-facing slice ships early, not last** — it is the only slice that can regress live check-in, and it needs calendar buffer before the Aug 17 dry run, not just dry-run minutes.
+6. **Archiving refuses three write paths the origin's scope boundary excluded** — bulk import, student-linking, and guide-grant-add. Declared here rather than smuggled in: the retire-in-place learning says guard the mutation choke point, and importing a roster into a weekend staff believe is retired is exactly that failure. Only the board-token mint refusal traces to an R-number (R25).
+
+## Problem Frame
+
+See origin: `docs/brainstorms/2026-07-26-staff-front-door-requirements.md`.
+
+`/fp/fw` is the guide's cohort switcher, not an admin surface — no chrome, no sign-out, and copy that tells staff to ask staff. `/fp/fw/ops` works but is linked only from the per-cohort guide header, reachable only from inside a cohort. `/crm` and `/fp` have no links between them despite sharing one session.
+
+**Confirmed during planning:** four `kind='fw'` cohorts exist in production — `rehearsal-unit9` (90 students), `unit5-verify` (0 students, sitting on Boston's own Aug 21–23 dates), `rehearsal-unit4-second` (4), `rehearsal-unit4` (30). All four windows are in the future, so "next weekend by start date" today names a rehearsal.
+
+**Closed during planning:** `rehearsal-unit4` carried a **live projected-board token** with three weeks to run — the repo's only unauthenticated read surface. Revoked 2026-07-27 via `npm run fw -- token-revoke`, verified by re-read; no live tokens remain on any cohort. The students were `-Rehearsal`-suffixed synthetic records, so no real child's name was exposed. Recorded because Unit 8's read-side enforcement is what stops the same state recurring invisibly.
+
+## Requirements Trace
+
+- **R1–R5a** — hub page, two cards, live numbers, degradation, chrome, noindex → Units 2, 3, 11
+- **R6, R7** — staff gate with rewrite-based 404 semantics; sign-in *and* reset land on `/staff` → Units 2, 12
+- **R8–R10** — hub-and-spoke return navigation → Units 3, 4
+- **R11–R14** — `/fp/fw` repairs → Unit 4
+- **R15–R18** — one nav bar; sign-out as a queue constraint; account identity; three exclusions → Units 3, 4
+- **R19–R21** — archive flag, attribution, retiring the four cohorts → Units 6, 7, 9, 10
+- **R22–R24** — sign-out destination by account; unconditional sign-out; the bar's contents → Unit 3
+- **R25, R26** — archiving closes the public board door; archived cohorts listable and reversible → Units 7, 8, 9
+
+## Scope Boundaries
+
+Carried from origin: no Path staff administration (`/fp` still 404s for staff); the family app does not adopt the bar and the projected board never will; no display names (the bar shows the account email); no cross-application dashboard; `/fp/fw/ops` does not move; the staff sign-in stays at `/crm/login`.
+
+Added during planning:
+
+- **Archiving does not disable a cohort.** It is staff visibility plus a closed public board door. Guide check-in and guide quick-create both continue to work — deliberately, and tested.
+- **Archiving refuses bulk import, student-linking, and guide-grant-add.** This *narrows* the origin's "no changes to roster management" boundary. See Overview item 6.
+- **An archived cohort can still mint new minors' auth accounts** via guide quick-create. Accepted consequence of the check-in decision, named here rather than left implicit, and covered by a test that says so.
+- **Unarchiving does not restore a board token.** Tokens are one-way.
+- **`claimGuideInviteAction` remains outside R16's interlock.** It deliberately signs a claiming guide in over whatever session a shared iPad held. This work does not close that path and must not claim to.
+
+## Context & Research
+
+### Relevant Code and Patterns
+
+**The layering canon** — a pure rules module with no `next`/`@supabase`/`react` imports, a `*-core.ts` taking `db` as a parameter, and a thin `"use server"` action holding no policy. Action shape: `gate → zod → authorize → decide (pure) → mutate via core → interpret → typed result`, with `input: unknown` + `safeParse`, one collapsed `STAFF_ONLY` refusal, an **extracted** failure-copy function with a `default`-less switch, and `revalidatePath` naming every changed surface.
+
+**There is no jsdom.** Every decision must be a pure exported function with its own test; components get rendering only.
+
+**`vitest.config.ts` `include` is an allowlist** and `app/staff` is not in it.
+
+**Sign-out today, three ways that disagree:** the CRM does a client-side `signOut()` with no gate landing on `/crm/login`; the FW ops header is a plain server-action form with **no** gate landing on `/fp/fw/sign-in`; only the per-cohort `FwSignOutButton` is drain-gated.
+
+**`path_cohorts` columns:** `id`, `slug`, `created_at`, `kind`, `starts_at`, `ends_at`, `created_by`, `time_zone`. `created_by` is nullable with `on delete restrict`, from `supabase/migrations/20260801120000_fw_ops_audit.sql:191`. Latest migration on disk is `20260804120000`.
+
+**`revokeFwBoardToken`** takes an **optional** `expectedTokenId` — *"omitted only by callers with no view that could be stale."*
+
+**Board reads, and why the archived check placement matters.** `resolveFwBoardToken` reads `path_fw_board_tokens` only and produces the collapsed **404**. `loadFwBoard` reads `path_cohorts` for `kind` and signals every fault as an untyped `{ok:false}`, which `feed/route.ts` maps to **503** — deliberately: *"the token is GOOD; the read just failed. 503 tells the poller to hold its last frame."* `FwBoard.tsx` honours that: it clears the frame only on 404 and **keeps the last frame on 503**. `loadFwBoardShell` reads `slug` only, skips even the `kind` re-check, and cannot fail.
+
+### Institutional Learnings
+
+| Learning | Bearing |
+|---|---|
+| `docs/solutions/best-practices/offline-drain-reuses-a-fail-closed-signal-across-a-safety-boundary-irreversible-action-needs-tri-state-2026-07-24.md` | The sign-out verdict was already burned once by this exact class of bug. Any check-then-destroy must observe one serialized snapshot and fail closed. |
+| `docs/solutions/logic-errors/retire-in-place-soft-delete-keeps-the-relationship-row-so-the-write-path-stays-reachable-guard-the-mutation-choke-point-2026-07-24.md` | Guarding list reads while leaving the mutation reachable shipped a P1 through full review. Unit 8's guard table exists because of this — **and so do its PROCEED rows**, whose tests stop a later reviewer "fixing" them. |
+| `docs/solutions/test-failures/middleware-proxy-is-testable-next-experimental-testing-server-2026-07-21.md` | `unstable_doesMiddlewareMatch` works under plain-node vitest with an `AsyncLocalStorage` bridge line. Extract the branch production calls, never a parallel helper. |
+| `docs/solutions/workflow-issues/split-phase-migrations-pre-deploy-schema-post-deploy-purge-separate-files-rerun-2026-07-14.md` | Schema and backfill are two files with two timestamps. |
+| `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md` | All production SQL goes through the Management API. PRE-APPLY probes; POST-APPLY verification **before** recording the version. |
+| `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-2026-07-23.md`, `…must-scope-to-its-table-2026-07-23.md` | Strip SQL comments before parsing; anchor scans on the table name. A new migration is exactly the kind of file that hijacks a sibling scanner. |
+| `docs/solutions/test-failures/vitest-include-allowlist-new-test-dirs-silently-never-run-2026-07-18.md` | Add the `app/staff` glob in the same commit as the first staff test. |
+| `docs/solutions/build-issues/env-less-build-hangs-render-time-supabase-clients-and-undefined-fetch-url-2026-07-17.md` | `ResetForm.tsx` carries a lazy `supabaseRef` pattern to survive env-less prerender. Do not regress it. |
+| `docs/solutions/security-issues/guard-function-with-no-callers-is-not-a-mechanism-2026-07-23.md` | `LoginForm.tsx` is on a reviewed-call-site allowlist pinned by `no-auth-mail-guard.test.ts`. |
+| `docs/solutions/integration-issues/postgrest-max-rows-1000-silently-truncates-unranged-select-paginate-and-refuse-2026-07-24.md` | `listFwCohortsForActor` is currently unpaginated. Unit 9 widens its staff result set, so Unit 9 paginates it. |
+| `docs/solutions/best-practices/tailwind-v4-theme-not-scopable-inline-literals-two-namespace-classname-swap-2026-07-22.md` | Two token sets share one utility namespace. A component serving both does a class-name swap keyed on a narrowed literal. Note `skinClass()` has no `crm` namespace — follow the pattern, do not call the function. |
+
+### External References
+
+None gathered; local patterns are dense and on point. **AGENTS.md's mandate stands as an execution-time obligation** — read `node_modules/next/dist/docs/` before touching `proxy.ts`, carried as an execution note on Unit 2.
+
+## Key Technical Decisions
+
+**Unit 1 ships first, standalone, on its own branch.** `decideFwSignOut` counts only *drainable* entries while `clearFwQueueIfEmpty` uses a bare `store.count()`. One blocked or foreign entry yields `ok:true` then `cleared:false`, forever, with copy claiming a fresh capture arrived. Today that is escapable on `/fp/fw` via the queued indicator's dismiss control; the moment sign-out exists on `/staff`, the only escape is clearing site data. It traces to no R-number, has no dependencies, and is independently shippable — so it is not bundled into this plan's branch.
+
+**The Web Lock is acquired at exactly one level.** `runFwClientDrain` already takes `navigator.locks.request("fw-offline-drain", …)`, and Web Locks are **not reentrant** — wrapping the sequence in the same named lock would deadlock (outer holds, inner requests, outer awaits inner) or, on the `ifAvailable` path, silently skip the drain and refuse in a loop. Extract a lock-free inner drain that both the background kick and the sign-out sequence call, and acquire the lock once, in the sequence.
+
+**Reconciliation drains before it purges.** `reconcileFwCacheOwner` calls `purgeFwResidue`, which does an **unconditional** `clearFwQueue()` — justified in its docblock by *"block-until-drained already prevented an offline handoff,"* an argument that holds only where a drain engine is mounted. Moving reconciliation to the bar without changing that would make the bar's mount the mechanism that destroys a prior guide's verified check-ins, on a surface with no engine. So the bar's mount attempts a waited drain under the lock first; **if the drain cannot complete, it does not purge the queue** (shell cache and roster still reconcile). This is the R7/R16 handover fix and the data-loss fix in one.
+
+**`FwPwa` is split; it is not mounted globally.** Its Background Sync effect awaits `navigator.serviceWorker.ready`, which off `/fp/fw` matches no registration and **never settles**. Broadening the scope to `/` would put the FW worker in control of the marketing site. Verdict, drain, clear, and reconcile travel with the session; SW registration and the queued indicator stay in `/fp/fw`. `FwPwa`'s own reconcile effect is **removed** when the bar takes it over — leaving both would race two reconciles on one localStorage key.
+
+**Identity and every role-derived branch render client-side.** `/fp/fw` navigations are cached into `path-sw-fw-shell-v1`, from which `/fp/fw/ops` is already excluded so authed HTML never sits in a shared iPad's cache. This covers more than the email: the staff-only hub link and the role-branched zero-cohort copy are equally role-revealing, and a cached shell that differs between a staff and non-staff visit leaks role to the next holder. **Offline behaviour is specified, not deferred:** identity persists client-side keyed to the reconcile owner, so a cached shell with no network still names the account — neither cached HTML nor a network call.
+
+**R25 is enforced in `resolveFwBoardToken`, and the cost is real.** Putting it in `loadFwBoard` — the "free" placement, since that read already fetches `kind` — produces a **503**, which tells the poller to *hold its last frame*. An archived cohort's projector would keep displaying children's names indefinitely under a "catching up" chip: the exact opposite of the requirement. Only 404 clears the frame, and 404 comes from token resolution, which reads only the token table. So this **adds a `path_cohorts` read to every four-second poll per live board**. The origin's "costs no round trip" claim was wrong. The requirement survives the correction; the justification changes.
+
+**Revoke first, then archive.** Archive-then-revoke failing between leaves an archived cohort with a live board — invisible (hidden from the ops list) and harmful. Revoke-then-archive failing between leaves an active cohort with a dark board — visible, recoverable, not an exposure.
+
+**Minting refuses on an archived cohort**, ordered after `cohort_not_fw` and before `no_event_window`. The test fixture must use a **future** window: the four production cohorts' windows will be past by the time anyone tests, so `window_passed` would refuse incidentally and a missing guard would look fine.
+
+**Archiving does not block guide check-in or quick-create.** Nothing on the check-in path can see `archived_at`, and blocking it would violate "no guide-facing behaviour changes." Quick-create proceeds because a guide who can check in must be able to add the child in front of them. The consequence — a new minor's auth account can be created inside a cohort hidden from staff's default list — is accepted and named in Scope Boundaries with a test that says so. Both defaults are structurally invisible, so both get **positive-invariant tests named for their reason**, or a reviewer applying the retire-in-place learning will file them as P1s and "fix" them.
+
+**Every archive guard lives in the core**, because `scripts/fw-ops.ts` drives the cores under service-role credentials with no action-layer gate.
+
+**The read carries `archivedAt`; callers decide.** The origin's "filter at the staff call sites" does not survive the call site it fails to enumerate: `app/fp/fw/(app)/cohort/[cohortId]/layout.tsx` uses one list for the header's weekend name *and* the switcher. Filtering there makes a staff member opening an archived cohort see the fallback `"This weekend"`. **And `canSwitch` counts every cohort the actor holds, archived or not** — filtering it would strand a guide inside an archived cohort with no Switch link back, which is precisely the guide-facing regression the criterion forbids.
+
+**The hub's weekend figure gets its own narrow read.** `listFwActiveWeekends` is one paginated query; the existing dated read fans out to three further paginated scans for one integer.
+
+**Unarchive nulls both columns.** Attribution describes the *current* state, not a history, and no audit row is written — so reversal genuinely loses who archived it. Accepted.
+
+**The archive action gates with `requireCohortStaff`** because the archive is cohort-scoped and only that helper loads the cohort and refuses a `kind='path'` id. It also hardens the actor id against `resolveFwActorForCohort`'s synthetic `userId: ""` session, which matters because `archived_by` is an FK. (`resolveFwStaffGate` returns a real id and is already used for `created_by` — it is not unsafe for attribution, merely not cohort-aware.)
+
+**`/staff`'s 404 rewrite target reuses `/crm/staff-only`.** A rewrite leaves the URL bar reading `/staff`, so the CRM-branded path is never visible.
+
+## Open Questions
+
+### Resolved During Planning
+
+- *Is the rehearsal board token live?* Yes — **revoked 2026-07-27**, verified.
+- *Does a display name exist?* No. The bar shows the account email.
+- *Which audit mechanism for archiving?* Cohort attribution columns; the audit table's subject column is `not null` and a cohort has no human subject.
+- *Sticky or floating?* **Sticky**, matching both FW headers and the family shell.
+- *Does the CRM tab row survive?* Yes, as its own row.
+- *Where does the archived board check go?* `resolveFwBoardToken`, for 404 semantics. The page shell is gated too — see Unit 8.
+- *What does the bar show offline?* Persisted client-side identity keyed to the reconcile owner.
+
+### Deferred to Implementation
+
+- *Exact helper and component names.*
+- *The evidence-predicate mechanism* for "could this device hold FW residue at all?" — candidates are the `fw.cacheOwner` localStorage key or an `indexedDB.databases()` probe. **Safari does not support `databases()`, and Safari is the shared-iPad browser**, so the localStorage key is the likely answer. Unit 1 names the requirement; the mechanism is a small implementation call.
+- *Whether the whole-chunk import refusal is a new result variant or N per-row `failed` outcomes* — `RunFwImportChunkResult` is currently `{ outcomes }` and the core's contract is "never rejects."
+- *Whether `narrowOpsCohort`'s stricter narrowing can null a pre-migration row* on the ops path.
+- *Exhaustive `revalidatePath` set for archive/unarchive.*
+
+## High-Level Technical Design
+
+> *This illustrates the intended approach and is directional guidance for review, not implementation specification. The implementing agent should treat it as context, not code to reproduce.*
+
+**The sign-out interlock (R16).** This is a client-side **interlock**, not an enforceable invariant — the queue is on the device and the session is a cookie, so a direct action call or a cleared cookie bypasses it. Review against the success criterion, not the phrase "must not complete."
+
+```mermaid
+stateDiagram-v2
+    [*] --> Evidence
+    Evidence --> Complete: no FW residue possible on this device
+    Evidence --> Verdict: FW evidence present
+    Verdict --> Complete: ok
+    Verdict --> Drain: drain_first
+    Drain --> Verdict: re-check after waited drain
+    Drain --> Reauth: session expired
+    Verdict --> Refuse: queued_offline / needs_attention / unreadable / foreign-undrained
+    Complete --> Destination: account-typed (R22)
+```
+
+The lock is acquired **once**, by this sequence, around a lock-free inner drain.
+
+**Reconciliation on a device that changed hands.**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Detect: bar mounts, owner != actor
+    Detect --> Drain: prior owner's queue non-empty
+    Drain --> Purge: drain completed
+    Drain --> KeepQueue: drain could not complete
+    Detect --> Purge: queue empty
+    Purge --> [*]: shell cache + roster + queue cleared
+    KeepQueue --> [*]: shell cache + roster cleared, queue PRESERVED
+```
+
+## Implementation Units
+
+### Phase 1 — Close the live defect (standalone; ships now, on its own branch)
+
+- [ ] **Unit 1: Make the sign-out check and act agree**
+
+**Goal:** The emptiness test that destroys the queue and the verdict authorising it observe the same predicate, so no device can be wedged into an unescapable sign-out loop.
+
+**Requirements:** None — a pre-existing defect. Prerequisite for R16.
+
+**Dependencies:** None. **Ships as its own change, not as part of this plan's branch.**
+
+**Files:**
+- Modify: `app/fp/lib/fw-sync-rules.ts`, `app/fp/lib/fw-queue.ts`, `app/fp/lib/fw-sync-client.ts`
+- Modify: `app/fp/fw/components/FwSignOutButton.tsx`
+- Test: `app/fp/lib/__tests__/fw-sync-rules.test.ts`, `app/fp/lib/__tests__/fw-sync-engine.test.ts`
+
+**Approach:**
+- Classify entries as drainable / blocked / quarantined / foreign, and make **both** the verdict and the clear read that classification. A blocked entry has an authoritative reject row server-side and must not block a clear. Quarantined entries block.
+- **Foreign entries: a single disposition, not an either/or.** A foreign *undrained* entry **refuses**, with copy naming the other account. Only foreign entries that are already *blocked* are eligible for reconciliation. Reconciliation destroys undrained work, so the choice is stated rather than left to the implementer.
+- Add a refusal state for **session expired** — today a drain returning `no_session` leaves the verdict at `drain_first` forever while the copy says "still sending."
+- Add an **evidence predicate** ahead of the fail-closed branch. `fwSignOutVerdict` currently calls `openFwDb()` unconditionally, *creating* the queue database on a CRM-only staff member's browser; if that open rejects, their sign-out blocks permanently.
+- **Extract a lock-free inner drain.** `runFwClientDrain` already holds `fw-offline-drain`; Web Locks are not reentrant. Both the background kick and the sign-out sequence call the inner function; the lock is acquired at exactly one level.
+
+**Execution note:** Test-first. Every state is expressible against the pure decision module before any client code moves.
+
+**Test scenarios:**
+- *Happy path:* empty queue → ok → clear succeeds → sign-out proceeds.
+- *Happy path:* three own drainable entries online → `drain_first`; after a waited drain, ok.
+- *Edge case:* exactly one **blocked** entry → verdict ok and the clear **succeeds**.
+- *Edge case:* one foreign **undrained** entry → **refuses**, copy names the other account.
+- *Edge case:* one foreign **blocked** entry → eligible for reconciliation, does not wedge.
+- *Edge case:* one quarantined entry → `needs_attention` with a count.
+- *Error path:* queue read throws with FW evidence present → fails closed.
+- *Error path:* queue read throws with **no** FW evidence → ok, sign-out completes.
+- *Error path:* drain returns `no_session` → copy names re-authentication. Assert the string.
+- *Error path:* captive portal, `onLine` true but drain fails → copy escalates rather than repeating indefinitely.
+- *Integration:* capture enqueued between verdict and clear → clear reports not-cleared, sign-out aborts.
+- *Integration:* **the sequence does not deadlock** — drain invoked from inside the sign-out sequence completes; assert the lock is acquired exactly once.
+- *Integration:* two documents, drain in one and sign-out in the other → no entry survives the clear.
+
+**Verification:** No queue state produces a refusal the user cannot act on from the surface they are standing on. Sign-out never hangs.
+
+### Phase 2 — Route scaffold
+
+- [ ] **Unit 2: `/staff` route, gate, and proxy**
+
+**Goal:** `/staff` exists, is staff-only, and refuses non-staff with in-place 404 semantics — giving the bar a mount target.
+
+**Requirements:** R1, R5a, R6
+
+**Dependencies:** None.
+
+**Files:**
+- Create: `app/staff/layout.tsx`, `app/staff/page.tsx` (placeholder body; Unit 11 fills it)
+- Modify: `proxy.ts`, `app/lib/supabase/proxy-rules.ts`, `vitest.config.ts`
+- Test: `app/crm/__tests__/proxy-rules.test.ts`
+
+**Approach:**
+- Matcher gains `"/staff/:path*"`, still a statically analyzable literal array.
+- An **explicit** `/staff` branch resolving to the existing `crm-staff-only` outcome (which the wrapper already renders as a rewrite to `/crm/staff-only`). Exact-or-slash matching so `/staffing` cannot inherit it.
+- The new branch routes through `carryOverAuthState`.
+- Page gate reuses `requireStaff()`; `force-dynamic`; own `metadata` with `robots: {index:false, follow:false}`.
+- **`requireStaff()` is not `cache()`-memoized** while `loadFwSession` is. Units 3 and 4 mount staff-dependent chrome across several layouts, so wrap it following `loadFamilyContextCached`'s precedent — otherwise every surface below pays an extra staff-row query per render over venue wifi. (Origin flagged this; it was missing from the first draft of this plan.)
+
+**Execution note:** Read `node_modules/next/dist/docs/` before editing `proxy.ts` — AGENTS.md mandate. Test-first: the matcher assertion is writable before the matcher changes.
+
+**Test scenarios:**
+- *Happy path:* `/staff` and `/staff/` match the middleware; a nested path matches.
+- *Edge case:* `/staffing` does **not** match; `/` and `/dashboard` still do not.
+- *Happy path:* session-less `/staff` → outcome routes to the staff sign-in.
+- *Happy path:* signed-in without the admin claim → outcome is `crm-staff-only`. **Assert the outcome string, not `isRewrite`** — the rewrite-vs-redirect branch lives in `proxy.ts`, which this repo documents as untestable (no way to construct real Next cookie/header objects). Inventing a parallel helper to test it is the precise trap the middleware learning warns about.
+- *Happy path:* signed-in with the claim → `pass`.
+- *Edge case:* the rewrite destination resolves to `pass` session-less — the existing loop check, extended.
+- *Edge case:* a test under `app/staff/**/__tests__/` appears by name in bare `npx vitest run`.
+
+**Verification:** A guide typing `/staff` sees a 404 at the `/staff` URL, and their session survives.
+
+### Phase 3 — The bar and `/fp/fw` (the guide-facing slice — earliest calendar, largest rehearsal)
+
+- [ ] **Unit 3: The persistent staff bar**
+
+**Goal:** One bar carrying account identity, sign-out, the hub link, an application label, and queue state — usable on any guarded staff surface.
+
+**Requirements:** R5, R15, R16, R17, R22, R23, R24
+
+**Dependencies:** Units 1, 2
+
+**Files:**
+- Create: `app/lib/staff-bar/StaffBar.tsx`, `app/lib/staff-bar/bar-rules.ts`, `app/lib/staff-bar/__tests__/bar-rules.test.ts`
+- Modify: `app/fp/lib/fw-sync-client.ts` (export the portable sequence)
+- Modify: `app/fp/fw/components/FwPwa.tsx` (**remove** the `reconcileFwCacheOwner` effect — it moves here)
+
+**Approach:**
+- **Every decision is a pure function** in `bar-rules.ts` — application label, whether the hub link renders, sign-out destination by account, queue-chip state and copy. No jsdom exists; a decision inside a `.tsx` is invisible to CI.
+- **Identity and every role-derived branch render client-side**, persisted keyed to the reconcile owner so an offline cached shell still names the account.
+- **The sign-out sequence is Unit 1's**, lock acquired once.
+- **Reconciliation drains before purging.** If the drain cannot complete, the queue is preserved and only the shell cache and roster reconcile.
+- **Sign-out renders unconditionally** (R23) — if identity fails, the string degrades, the control does not.
+- **Destination follows the account** (R22); an account holding both resolves staff-first.
+- Sticky, `top-0`. Two token sets by class-name swap keyed on a narrowed literal — follow `skinClass()`'s pattern; it has no `crm` namespace, so a new literal table is needed.
+- Note `app/lib/` currently holds no `.tsx`; this is a new convention, and the existing `app/lib/**/__tests__/**` glob already covers the rules test.
+
+**Execution note:** Test-first on `bar-rules.ts`.
+
+**Test scenarios:**
+- *Happy path:* no residue → sign-out completes, destination by account.
+- *Happy path:* staff → staff sign-in; guide → guide door; both → staff.
+- *Edge case:* hub link renders for staff, not for guides — and the decision is client-evaluated, so it is absent from cached HTML.
+- *Edge case:* application label differs between CRM and FW surfaces.
+- *Edge case:* queue chip states — drainable, offline, attention, foreign, expired-session — map to distinct copy.
+- *Edge case:* offline on a cached shell → identity still renders from persisted state.
+- *Error path:* identity read fails → sign-out still renders.
+- *Error path:* three queued captures, sign-out from `/staff` → refuses with a count. Same from `/crm`.
+- *Integration:* **device handover with an undrained foreign queue and no connectivity → the queue is preserved, not purged.** Assert the captures still exist.
+- *Integration:* device handover with connectivity → drain completes, then purge.
+- *Edge case:* copy never promises automatic sending where the sync engine is not running.
+
+**Verification:** The same device state produces the same verdict from every guarded staff surface, and no reconcile destroys undrained work.
+
+- [ ] **Unit 4: Mount the bar and repair `/fp/fw`**
+
+**Goal:** Every guarded staff surface carries the bar; the disagreeing sign-outs are retired; `/fp/fw` gets chrome and role-correct copy.
+
+**Requirements:** R8–R14, R15, R16, R18, R24
+
+**Dependencies:** Unit 3
+
+**Files:**
+- Modify: `app/staff/layout.tsx`, `app/crm/(app)/layout.tsx`, `app/fp/fw/(app)/layout.tsx`
+- Modify: `app/crm/components/CrmChrome.tsx`, `CrmTabs.tsx`
+- Modify: `app/fp/fw/(app)/ops/layout.tsx`, `app/fp/fw/(app)/cohort/[cohortId]/layout.tsx` (**remove** their sign-out controls only)
+- Modify: `app/fp/fw/components/FwSignOutButton.tsx` (retired from the cohort layout)
+- Modify: `app/fp/fw/(app)/page.tsx` (R12, R13, R14)
+- Test: `app/fp/lib/__tests__/fw-nav-rules.test.ts`
+
+**Approach:**
+- **Mount in the outermost guarded layout per application only** — `app/staff/layout.tsx`, `app/crm/(app)/layout.tsx`, `app/fp/fw/(app)/layout.tsx`. The ops and cohort layouts **nest inside** the FW one; mounting in all five would render the bar two or three levels deep. Those two layouts change only by dropping their own sign-out controls and keeping their surface-specific context.
+- Unauthenticated doors sharing the prefixes get nothing (R18) — which falls out of mounting in `(app)` groups rather than by URL prefix.
+- **The CRM's six section tabs survive as their own row**; only identity and sign-out move up.
+- **R14 lands here**, before any archiving exists — `isStaff` is already computed at `app/fp/fw/(app)/page.tsx:44`, before the redirect at line 72.
+- R13's zero-cohort copy branches on role.
+
+**Test scenarios:**
+- *Happy path:* staff with exactly one cohort at `/fp/fw` → picker renders, no redirect. Guide with one → redirected, unchanged.
+- *Happy path:* staff with zero cohorts → "none exist yet" plus a create path. Guide with zero grants → unchanged copy.
+- *Edge case:* the bar renders **once** on `/fp/fw/ops` and on `/fp/fw/cohort/X`, not twice or three times.
+- *Edge case:* a guide at `/fp/fw` sees no hub link; a signed-in student or parent sees neither hub link nor staff headline.
+- *Integration:* sign-out from `/fp/fw/ops` as staff → staff sign-in; from `/fp/fw/cohort/X` as a guide → guide door.
+- *Edge case:* all six CRM sections still reachable; the 375px contract holds with the bar above the tab row.
+
+**Verification:** No guarded staff surface lacks identity or sign-out; no unauthenticated door has either; the bar appears exactly once per page.
+
+- [ ] **Unit 5: Service-worker discipline and the dry-run checklist**
+
+**Goal:** The guardrails that would catch a broadened worker scope or a cached identity exist, and the Aug 17 dry run has a document that owns it.
+
+**Requirements:** R18, and the origin's dry-run obligation
+
+**Dependencies:** Unit 4
+
+**Files:**
+- Modify: `app/fp/lib/__tests__/sw-discipline.test.ts`
+- Create: `docs/plans/2026-08-17-fw-dry-run-checklist.md`
+
+**Approach:**
+- `sw-discipline.test.ts` pins `scope: SW_SCOPE` for `PathPwa` only. Add the equivalent for `FwPwa`, plus a repo-wide check that nothing outside `app/fp/fw/**` calls `serviceWorker.register`.
+- Assert the general navigate clause still caches nothing.
+- **The checklist is a standalone document**, not an edit to `docs/plans/2026-07-23-001-feat-fw-cohort-sprints-plan.md` — that plan is `status: completed` with every box checked and is the historical record of what shipped. It gets a pointer, nothing more. The checklist lands in Phase 3 so it exists well before the event it governs.
+
+**Test scenarios:**
+- *Edge case:* `FwPwa` registers with `FW_SW_SCOPE`; mutate to `"/"` and the test reddens.
+- *Edge case:* no component outside `app/fp/fw/**` calls `serviceWorker.register`.
+- *Edge case:* the general navigate clause caches nothing.
+- *Integration (dry run):* guide captures offline, navigates to `/staff`, signs out → refuses with a count.
+- *Integration (dry run):* guide A leaves an undrained queue and closes the tab; staff B signs in and lands on `/staff` → **B's sign-out works AND A's captures still exist or were drained.** Not merely "does not wedge."
+- *Integration (dry run):* CRM-only staff sign out normally with no FW residue.
+- *Integration (dry run):* guide A signs in, closes the tab, device offline, guide B opens the same URL → the cached shell shows no email **and no staff-only affordance**.
+- *Integration (dry run):* **guide-account rehearsal of Unit 1 and Unit 4** — the guide sign-out control and the guide picker page both changed, and neither is staff-only.
+
+**Verification:** The checklist names the behaviour this work introduces, on the accounts that will meet it.
+
+### Phase 4 — Archive (staff-only surfaces; guide reads unchanged)
+
+- [ ] **Unit 6: Archive schema migration**
+
+**Goal:** `path_cohorts` carries archive state and attribution.
+
+**Requirements:** R19, R20 — **Dependencies:** None.
+
+**Files:** Create `supabase/migrations/20260805120000_fw_cohort_archive.sql`; Test `app/fp/lib/__tests__/fw-archive-migration-parity.test.ts`
+
+**Approach:** `archived_at timestamptz` and `archived_by uuid references auth.users (id) on delete restrict`, both **nullable**, idempotent — direct siblings of `created_by`. **SCHEMA ONLY.** No new audit action and no widening of `FW_OPS_AUDIT_ACTIONS`. Timestamps run ahead of the calendar; `20260804120000` is current latest.
+
+**Execution note:** Apply via the Management API immediately. PRE-APPLY `to_regclass`; POST-APPLY column verification **before** recording the version.
+
+**Test scenarios:**
+- *Happy path:* both columns added idempotently; `archived_by` carries `on delete restrict` and no `cascade`.
+- *Edge case:* neither column is `not null` — isolate the statement and assert the absence.
+- *Edge case:* no `insert into`, no `update public.` — schema-only.
+- *Edge case:* the `FW_OPS_AUDIT_ACTIONS` set-equality assertion still passes untouched.
+- *Edge case:* the new file does not hijack a sibling scanner — run `fw-ops-migration-parity`, `fw-migration-parity`, `fw-move-task-parity`, `evidence-migration-parity`, `audit-actions-parity`.
+
+- [ ] **Unit 7: Archive and unarchive cores**
+
+**Goal:** Archiving revokes the live board token and then sets archive state, with no partial state invisible.
+
+**Requirements:** R19, R20, R25 — **Dependencies:** Unit 6
+
+**Files:** Modify `app/fp/lib/fw-ops-core.ts`, `app/fp/lib/fw-ops-rules.ts`, `app/fp/lib/actions/fw-ops.ts`, `scripts/fw-ops.ts`; Test `fw-ops-core.test.ts`, `fw-ops-rules.test.ts`
+
+**Approach:**
+- **Revoke first, then archive.** Call the core `revokeFwBoardToken` with **no** `expectedTokenId`; fold `no_active_token` into success in the archive's own failure-copy function, not in the core it calls.
+- **CAS both directions**, `.select("id")`, zero rows → typed `already_archived` / `already_active`.
+- Unarchive nulls **both** columns.
+- Gate with `requireCohortStaff` — the archive is cohort-scoped and only that helper loads the cohort and refuses a `kind='path'` id, and it hardens the actor id against the synthetic empty-id session.
+- Add the columns to `COHORT_COLUMNS` and a fail-closed line to `narrowOpsCohort`.
+
+**Test scenarios:**
+- *Happy path:* archive with a live token → token revoked **then** archive set; assert ordering.
+- *Happy path:* archive with no token ever minted → succeeds.
+- *Happy path:* unarchive → both columns null; cohort reappears.
+- *Edge case:* two concurrent archives → one succeeds, other reports `already_archived`; `archived_by` names the **first** actor.
+- *Edge case:* unarchive an active cohort → `already_active`, not an error.
+- *Error path:* a `kind='path'` id → refused by the gate's cohort read.
+- *Error path:* the revoke fails → archive does **not** proceed.
+- *Error path:* non-staff caller → the collapsed `STAFF_ONLY` message.
+- *Integration:* unarchive then mint → a new token; the old URL never resolves again.
+
+- [ ] **Unit 8: Read-side enforcement and the write-path guard table**
+
+**Goal:** An archived cohort's public board door is closed as a property of the read, and every reachable write path has an explicit tested verdict.
+
+**Requirements:** R19, R25 — **Dependencies:** Unit 6
+
+**Files:** Modify `app/fp/lib/fw-board-loader.ts` (`resolveFwBoardToken` **and** `loadFwBoardShell`), `app/fp/lib/fw-board-rules.ts`, `app/fp/lib/fw-import-core.ts`, `app/fp/lib/fw-ops-core.ts`, `app/fp/lib/fw-guide-core.ts`; Tests across the matching suites.
+
+**Approach:**
+
+| Write path | Core | Verdict |
+|---|---|---|
+| Guide check-in / task move | `fw-checkin-core.ts` | **proceed** ✓ audit-confirmation |
+| Offline drain replay | inherits check-in | **proceed** ✓ |
+| Guide quick-create | `fw-student-core.ts` | **proceed** ✓ (creates a new minor — see Scope Boundaries) |
+| Student anonymize | `fw-ops-core.ts` | **proceed** ✓ privacy obligation |
+| Revoke a guide grant | `fw-ops-core.ts` | **proceed** ✓ never block de-escalation |
+| Reject / exception resolution | `fw-ops-core.ts`, `fw-import-core.ts` | **proceed** ✓ |
+| Revoke board token | `fw-ops-core.ts` | **proceed** ✓ inert post-archive |
+| **Mint a new board token** | `fw-board-rules.ts` | **refuse** ← R25 |
+| **Board read (feed + page)** | `fw-board-loader.ts` | **refuse** ← R25 |
+| **Bulk CSV import** | `fw-import-core.ts` at `runFwImportChunk` | **refuse** ← added scope |
+| **Link an existing student** | `fw-ops-core.ts` | **refuse** ← added scope |
+| **Add a guide grant** | `fw-guide-core.ts` | **refuse** ← added scope |
+
+- ✓ rows are **audit confirmations** that no regression occurred; ← rows introduce new restrictions. The distinction is marked so a future scope reviewer need not reverse-engineer it.
+- **The archived check goes in `resolveFwBoardToken`**, not `loadFwBoard` — only 404 clears the projector's frame; 503 makes it hold. This adds a `path_cohorts` read per poll. `loadFwBoardShell` is gated too, so the page does not paint a titled shell for a retired weekend.
+- The import guard sits at `runFwImportChunk`, **not** `provisionFwStudent`, which is shared with quick-create.
+- The mint's archived branch goes after `cohort_not_fw`, before `no_event_window`.
+- Every guard in the core — `scripts/fw-ops.ts` bypasses the action layer.
+
+**Test scenarios:**
+- *Happy path (invariant):* a guide checks in to an archived cohort → the event **lands**. Named for its reason.
+- *Happy path (invariant):* guide quick-create on an archived cohort → **succeeds**, and the test names the consequence: a new minor's account inside a cohort hidden from staff's default list.
+- *Happy path:* offline drain replays into an archived cohort → lands, no reject.
+- *Error path:* mint on an archived cohort **with a future window** → refused with an archived reason. The future window is load-bearing.
+- *Error path:* the same mint via `scripts/fw-ops.ts` → also refused.
+- *Error path:* `archived_at` set directly in SQL **without** revoking, then poll the feed → **404**, and the client **clears the frame**. This is the test that distinguishes read-property from side-effect.
+- *Error path:* the board **page** for an archived cohort → does not paint a titled shell.
+- *Error path:* CSV import chunk POSTed directly → refused; zero accounts, zero memberships.
+- *Error path:* `provisionGuideAction`, `linkStudentAction` on archived → refused.
+- *Happy path:* `revokeGuideGrantAction`, `anonymizeStudentAction`, reject/exception resolution on archived → succeed.
+
+**Verification:** Every row has a test, including PROCEED rows.
+
+- [ ] **Unit 9: Archive-aware list reads and ops surfaces**
+
+**Goal:** Staff can archive, list archived, and unarchive — and no guide notices.
+
+**Requirements:** R19, R26, R3's count contract — **Dependencies:** Units 7, 8
+
+**Files:** Modify `app/fp/lib/fw-ops-core.ts`, `app/fp/lib/fw-guide-core.ts`, `app/fp/fw/(app)/ops/page.tsx`, `app/fp/fw/(app)/ops/cohort/[cohortId]/page.tsx`, `app/fp/fw/(app)/page.tsx`, `app/fp/fw/(app)/cohort/[cohortId]/layout.tsx`; Create `app/fp/fw/components/FwArchiveControl.tsx`
+
+**Approach:**
+- `listFwOpsCohorts` excludes archived ids **before** the three-way fan-out.
+- `listFwActiveWeekends` — one paginated query for the hub.
+- `listFwCohortsForActor` gains `includeArchived` and returns `archivedAt` per row — **and gains `fetchAllRows`/`.range()`**. It is currently unpaginated, and this unit widens its staff result set with rows that accumulate permanently and can never be deleted, so this is the unit that must paginate it.
+- The cohort layout takes everything: the header name resolves against the unfiltered list, and **`canSwitch` counts every cohort the actor holds** so a guide inside an archived cohort keeps the Switch link.
+- The archived ops detail page renders in **archived mode** — banner, Unarchive, and the de-escalating and obligation controls kept; roster-building affordances removed from the page *and* refused server-side. Not a 404: unlike a tombstoned student, an archived cohort has legitimate remaining actions.
+- The board-token panel stays unconditionally rendered — a prior frontend-races review found a conditional render unmounting a just-minted, unrecoverable URL.
+- `slug_taken` copy points at the archived list.
+
+**Test scenarios:**
+- *Happy path:* ops list omits archived by default; `includeArchived` includes them with correct counts and a "Board revoked" chip.
+- *Happy path:* `listFwActiveWeekends` returns only non-archived, with dates.
+- *Edge case:* **archived cohort with `archived_at` set and `archived_by` null** — the state all four backfilled cohorts ship in, and the only attribution state present at launch → the banner renders the date and states the actor is unrecorded, not blank or "undefined."
+- *Edge case:* guide holds X (active) and Y (archived) → `/fp/fw` shows both, Y's header shows Y's slug, **and standing inside Y the Switch link still renders**.
+- *Edge case:* guide holds only Y (archived) → redirected into Y, never told they hold no grants.
+- *Edge case:* staff with two cohorts, one archived → picker shows one, no redirect (R14 already landed in Unit 4), hub count 1.
+- *Edge case:* staff open an archived cohort's guide view directly → header shows its slug, not `"This weekend"`.
+- *Edge case:* all cohorts archived → zero-state copy with a create path.
+- *Edge case:* slug matching an archived cohort → `slug_taken`, message routes to the archived list.
+- *Integration:* `listFwCohortsForActor` still returns a typed failure distinct from an empty list.
+
+- [ ] **Unit 10: Retire the four production cohorts**
+
+**Goal:** The hub's first factual claim is true the day it ships.
+
+**Requirements:** R21 — **Dependencies:** Units 6, 7, 9
+
+**Files:** Create `supabase/migrations/20260805130000_fw_archive_rehearsal_cohorts.sql`
+
+**Approach:** A separate file from Unit 6 per the split-phase convention. All four in scope — none is a real weekend, and `unit5-verify` sits on Boston's own dates. Sets `archived_at` only, leaving `archived_by` **null** per `created_by`'s recorded rationale. `WHERE`-guarded on slug so it is a no-op on a fresh environment. Board tokens are already all revoked as of 2026-07-27, but the verification asserts it anyway — a column-only archive on a cohort with a live token is precisely the invisible state Unit 8 prevents.
+
+**Test expectation:** none — a data migration with no application code. Its correctness is the POST-APPLY verification query.
+
+**Verification:** All four have `archived_at is not null`; every token on all four has `revoked_at is not null`; `npm run fw -- cohorts` shows an empty active set.
+
+### Phase 5 — The hub
+
+- [ ] **Unit 11: The hub page**
+
+**Goal:** Two application cards with one live number each, neither of which can hide a door.
+
+**Requirements:** R1, R2, R3, R4 — **Dependencies:** Units 2, 9
+
+**Files:** Modify `app/staff/page.tsx`; Create `app/staff/lib/hub-rules.ts`, `app/staff/__tests__/hub-rules.test.ts`
+
+**Approach:** CRM number from `getSeatsRemaining()`, FW number from `listFwActiveWeekends`, read concurrently. **"Next weekend" is a pure function** — sort by `starts_at` ascending, exclude nulls, name the earliest still upcoming; a weekend in progress and an all-past set each get a defined outcome. **R4's asymmetry is stated in the code:** the FW read degrades to a number-less card; `getSeatsRemaining()` cannot report failure and may render a stale constant. Clock read outside the component body. CRM token set via class-name swap.
+
+**Test scenarios:**
+- *Happy path:* two upcoming → count 2, "next" names the earlier.
+- *Edge case:* a weekend in progress today → assert which one "next" names.
+- *Edge case:* all past → defined copy, no "next."
+- *Edge case:* null `starts_at` → neither crashes nor wins "next."
+- *Edge case:* zero non-archived → zero-state copy with a create path.
+- *Error path:* FW read typed failure → card renders, link works, number absent.
+- *Error path:* seats falls back → card renders; the code does not claim it is live.
+
+- [ ] **Unit 12: Post-authentication landing**
+
+**Goal:** Both authenticated entry points land on the hub.
+
+**Requirements:** R7 — **Dependencies:** Units 4, 11 (the hub must be real **and** carry sign-out before staff are sent there)
+
+**Files:** Modify `app/crm/login/LoginForm.tsx`, `app/crm/reset/ResetForm.tsx`
+
+**Approach:** Two hard-coded `router.push("/crm")` sites become `/staff`. The reset path matters more — it is a new staff member's first session. Note a non-staff account authenticating through this form lands on `/staff` and is rewritten to a 404, functionally identical to today's dead end at `/crm` — not a regression, but not an improvement either.
+
+**Execution note:** `ResetForm.tsx` carries a lazy `supabaseRef` pattern for env-less prerender; do not regress it. `LoginForm.tsx` is pinned by `no-auth-mail-guard.test.ts`; check its shape pin first.
+
+**Test scenarios:**
+- *Edge case:* `no-auth-mail-guard.test.ts` still passes.
+- *Edge case:* `rm -rf .next && npm run build` succeeds env-less — the lazy-ref regression is a 60-second timeout with no stack.
+
+## System-Wide Impact
+
+- **Interaction graph:** `proxy.ts` gates `/crm`, `/fp`, and now `/staff`. The bar mounts in three outermost guarded layouts. `listFwCohortsForActor` has two production call sites, one of which uses it for two unrelated purposes. `provisionFwStudent` is shared by import and quick-create, which now diverge.
+- **Error propagation:** actions return typed refusals; pages use `redirect()`/`notFound()`. The archive's revoke failure aborts the archive.
+- **State lifecycle risks:** archive/revoke is two non-transactional writes — ordering is the mitigation. The offline queue outlives navigation, sessions, and tabs. Reconciliation now runs on more surfaces and must drain before it destroys.
+- **API surface parity:** every archive guard exists in the core, because `scripts/fw-ops.ts` bypasses the action layer.
+- **Integration coverage:** the two-tab drain/sign-out race, the feed's per-poll re-validation, and the device-handover drain are not provable by unit tests over pure functions.
+- **Unchanged invariants:** guide check-in and quick-create, cohort switching, wrong-stamp prevention, the single-cohort redirect **for guides**, the board's token-hash validation, `claimGuideInviteAction`'s session replacement, and the family app's shell.
+
+## Rollback & Slip
+
+The origin asked for this twice and the first draft of this plan omitted it.
+
+- **Individually revertable after landing:** Unit 12 (two `router.push` lines), Unit 4's bar mounts (the old chromes are restorable), Unit 2's proxy branch (matcher entry plus branch).
+- **Not revertable:** Units 6 and 10 — migrations apply to production on authoring under repo policy, and there is no staging window. Unit 6's file must carry the standard `⚠️ ROLLBACK` note: the window closed when the code deployed; roll back the deploy, not the schema.
+- **First to slip:** Unit 11 and Unit 12. The hub page and the post-auth redirect are the least load-bearing — without them, `/staff` is a gated placeholder nobody is sent to, and everything else still works. Archive (Phase 4) is second to slip.
+- **If the Aug 17 dry run fails the bar:** the bar can be unmounted from `app/fp/fw/(app)/layout.tsx` alone while remaining on `/staff` and `/crm`. That restores the guide surfaces to today's behaviour, at the cost of R11's sign-out on `/fp/fw` — which is why Unit 1 ships standalone and stays regardless.
+
+## Risks & Dependencies
+
+| Risk | Mitigation |
+|---|---|
+| The bar's reconcile destroys a prior guide's captures | Drain before purge; preserve the queue when the drain cannot complete; the dry run asserts the captures survived, not merely that sign-out worked |
+| The sign-out sequence deadlocks on its own lock | Lock-free inner drain; lock acquired at exactly one level; an explicit no-deadlock test |
+| An archived cohort's projector holds children's names on screen | The check goes where 404 is produced, not where 503 is; the test asserts the client cleared the frame |
+| Someone broadens the service-worker scope so the bar "works everywhere" | Unit 5 makes it a red test |
+| The mint guard looks correct because fixtures' windows are past | The fixture uses a **future** window, stated in the scenario |
+| A reviewer "fixes" the deliberately unguarded check-in or quick-create paths | Positive-invariant tests named for their reasons |
+| The archive migration hijacks a sibling parity scanner | Anchor on the table name; run all sibling suites |
+| A new `app/staff` test never runs | The `vitest.config.ts` glob lands in the same commit |
+| The proxy change breaks `/crm` or `/fp` gating | Explicit branch, matcher assertions against Next's real router, `carryOverAuthState` |
+| Guide-facing changes land too close to Aug 17 | **Phase 3 is now second**, with Phases 4–5 after it; Unit 1 ships immediately and standalone |
+| Staff-row reads multiply across four layouts on venue wifi | `requireStaff()` memoized in Unit 2 |
+
+## Documentation / Operational Notes
+
+- Two migrations apply to production immediately on authoring — Management API, PRE-APPLY probes, POST-APPLY verification before recording the version.
+- **Already done:** the live board token on `rehearsal-unit4` was revoked 2026-07-27 and verified.
+- The Aug 17 dry-run checklist becomes its own document, `docs/plans/2026-08-17-fw-dry-run-checklist.md`. The completed FW plan gets a pointer, not an edit.
+- `npm run lint` is pre-existing red on `main` for unrelated files.
+
+## Sources & References
+
+- **Origin document:** `docs/brainstorms/2026-07-26-staff-front-door-requirements.md`
+- Prior FW plan and its dry-run history: `docs/plans/2026-07-23-001-feat-fw-cohort-sprints-plan.md`
+- FW requirements: `docs/brainstorms/2026-07-23-weekend-cohort-sprints-requirements.md`
+- Institutional learnings: see Context & Research for the eleven `docs/solutions/` documents this plan depends on

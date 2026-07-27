@@ -6,12 +6,21 @@
  * app/lib/site.ts — the single source of truth — never hardcoded here.
  */
 
-import { BOOKING_URL, intensives } from "@/app/lib/site";
+import { BOOKING_URL, DEPOSIT_REFUND_DEADLINE_LABEL, intensives } from "@/app/lib/site";
 import type { NurtureTemplate } from "./rules";
 
 export type NurtureEmail = { subject: string; html: string; text: string };
 
 type Params = { firstName: string; childFirstName?: string };
+
+/**
+ * The refund deadline with non-breaking spaces, for the HTML part only — the
+ * date must not wrap mid-phrase in an email client. DERIVED, not retyped: this
+ * `&nbsp;` spelling is precisely how the fourth copy of the literal hid from a
+ * plain-text search for "September 30, 2026" while U1 was collapsing the other
+ * three.
+ */
+const DEADLINE_NBSP = DEPOSIT_REFUND_DEADLINE_LABEL.replace(/ /g, "&nbsp;");
 
 const DASHBOARD_URL = "https://the120.school/dashboard";
 const SITE_URL = "https://the120.school";
@@ -117,7 +126,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
           "",
           "Your seat is reserved — your family is one of the founding 120. Thank you for the trust; it means a great deal.",
           "",
-          "What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until September 30, 2026.",
+          `What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
           "",
           `Your dashboard: ${DASHBOARD_URL}`,
         ].join("\n"),
@@ -127,7 +136,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
               "Your seat is reserved — <strong>your family is one of the founding 120.</strong> Thank you for the trust; it means a great deal."
             ) +
             p(
-              "What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until September&nbsp;30,&nbsp;2026."
+              `What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEADLINE_NBSP}.`
             ),
           { label: "Your dashboard", url: DASHBOARD_URL }
         ),

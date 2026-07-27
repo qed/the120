@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
+import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
 import { canReserveSeat, childName, completeness, hasPaidDeposit, statusMeta } from "./data";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
@@ -93,7 +93,7 @@ export default function DashboardApp({
               <p className="font-display font-bold text-ink">✓ Seat deposit received.</p>
               <p className="mt-1 text-sm leading-6 text-ink-soft">
                 Your $250 CAD deposit is in — the seat is held while the dossier goes through
-                review. Fully refundable until September 30, 2026. A Stripe receipt is on its way
+                review. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A Stripe receipt is on its way
                 to your email.
               </p>
             </div>
@@ -222,7 +222,7 @@ export default function DashboardApp({
                             {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
                           </button>
                           <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                            Fully refundable until Sept 30, 2026
+                            Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
                           </p>
                         </>
                       ) : c.status !== "draft" ? (

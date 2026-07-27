@@ -265,7 +265,34 @@ places:
 
 ### Phase 0 — Foundations
 
-- [ ] **Unit 1: Applicant state, projects, and the reserve-gate repair**
+- [x] **Unit 1: Applicant state, projects, and the reserve-gate repair** *(landed
+  2026-07-27, PR pending)*
+
+  **What landed:** migration `20260805120000_funnel_applicant_state.sql` applied to
+  production via the Management API, verified by SELECT, re-run once to prove
+  idempotency, constraints exercised live in a rolled-back probe (illegal state refused,
+  second active project refused, second live-paid deposit refused, refunded row does not
+  block). `app/lib/funnel/applicant-rules.ts` + four test files (all under the existing
+  `app/lib/**` allowlist — **no vitest.config change needed**). `canReserveSeatForChild`
+  (options-object signature) wired into `/api/checkout` — the server gate — with a
+  source-scan test pinning the wiring; dashboard CTA and CRM gates adopt it in the units
+  that load the column (documented at the predicate). Four (not three) September-30
+  literals collapsed: review found a fourth behind `&nbsp;` and three abbreviated
+  (`Sept`/`SEP`) copies; the two in Lane A's files (`app/crm/lib/engine.ts`,
+  `DepositThermometer.tsx`) are carved out by a self-expiring test until Lane A adopts
+  the constant. Suite: **106 files / 2871 tests** (from 102 / 2810), `tsc` and
+  `next build` clean.
+
+  **Carried forward:** (1) **U14 must catch 23505 on `deposits_one_live_paid_per_child`
+  in the webhook and return non-5xx** — the index is live and the current upsert's
+  `onConflict: "stripe_session_id"` cannot absorb it, so a double-tab double-payment
+  today = charged-but-unrecorded + ~3-day Stripe retry storm; interim signature is any
+  `[webhook] deposit insert failed` log line (reconcile against Stripe). Also fix
+  partial refunds unconditionally setting `refunded_at`, which drops the row out of the
+  index predicate. See `docs/solutions/database-issues/partial-unique-index-under-live-upsert-onconflict-names-different-key-23505-retry-storm-2026-07-27.md`.
+  (2) The unit that first writes `projects` must reconcile the `on delete cascade` from
+  `children` with the ungated "Remove this child" button before real project data
+  exists.
 
 **Goal:** The data model the rest of the funnel stands on, plus repair of the three existing
 mechanisms that would silently break under it.

@@ -235,6 +235,39 @@ un-mutation-covered and are labelled as such in the source (a defence-in-depth `
 no DOM to exercise) — see the honesty rule in the sibling doc on inert defensive
 branches.
 
+## ROUND 3 (2026-07-27, First Profit funnel Unit 1) — the literal-sweep variant
+
+Rounds 1–2 were operator sweeps (does a decision exist / is it gated). The same failure
+arrived the same day against a **literal sweep**: funnel U1 collapsed the duplicated
+seat-deposit deadline onto `DEPOSIT_REFUND_DEADLINE_LABEL` and wrote a repo-wide scan
+asserting no other spelling of the date survives in `app/`. The scan's anchor was the
+word **"September"** — and adversarial review found **three abbreviated copies** it
+greenlit: `"Fully refundable until Sept 30, 2026"` (`app/dashboard/DashboardApp.tsx` —
+**in the very file the unit had just edited**, twelve lines below the occurrence it
+converted), `"Refundable until Sept 30."` (`app/crm/lib/engine.ts`), and
+`"REFUNDABLE UNTIL SEP 30"` (`app/crm/components/dashboard/DepositThermometer.tsx`).
+A fourth copy had already been caught only because it was tripped over manually: the
+nurture HTML spelled the date `September&nbsp;30,&nbsp;2026` so the email client
+couldn't wrap it — and so a plain-text search couldn't find it.
+
+Two additions to the discipline:
+
+- **For a literal sweep, anchor on the stem and the shape, not the spellings you have
+  seen.** The fix was `/sept?(ember)?\s*\.?\s*(&nbsp;)?\s*30/i` — abbreviation, optional
+  period, and entity-whitespace variants in one pattern — instead of an alternation of
+  literals enumerated by hand. The enumeration IS the bug: it encodes exactly the
+  author's imagination, and the next copy is written by someone else.
+- **A carve-out must assert its own reason for existing.** Two of the stragglers live in
+  files another lane owns (`docs/LANES.md`), so they could not be fixed in this PR. The
+  carve-out list that excludes them is paired with a test asserting those files *still
+  carry the literal* — the moment the owning lane adopts the constant, the exclusion
+  goes red and gets deleted, instead of silently outliving the problem it excused.
+
+And a correction to ROUND 2's advice: "ask a reviewer to attack it, because the author's
+blind spot is exactly the set of spellings they did not think of" is necessary but not
+sufficient — one of ROUND 3's misses sat in the author's **own freshly-edited file**.
+Sweep your own diff's files first; the blind spot begins at home.
+
 ## Related
 
 - `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-clause-scope-and-comment-stripping-2026-07-23.md` — prior art on comment-stripping, and the rule "apply it uniformly, or not at all". Cite it rather than re-deriving it.

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { RESERVE_GATE_MESSAGE, canReserveSeat, hasPaidDeposit } from "@/app/dashboard/data";
+import { RESERVE_GATE_MESSAGE, canReserveSeatForChild, hasPaidDeposit } from "@/app/dashboard/data";
 
 /**
  * S3: create a Stripe Checkout session for a child's $250 refundable seat deposit.
@@ -10,10 +10,19 @@ import { RESERVE_GATE_MESSAGE, canReserveSeat, hasPaidDeposit } from "@/app/dash
  * RLS guarantees the child lookup only succeeds for the parent's own children.
  *
  * Approval gate (R11): checkout opens only at `offered` or later — the same
- * canReserveSeat predicate the dashboard CTA uses, enforced here so a direct
- * API call can't pay early. `children.status` is safe to gate on: only the
- * staff-side move_candidate RPC can advance it (parents are limited to
- * draft → submitted by the DB status guard).
+ * predicate family the dashboard CTA uses, enforced here so a direct API call
+ * can't pay early. `children.status` is safe to gate on: only the staff-side
+ * move_candidate RPC can advance it (parents are limited to draft → submitted
+ * by the DB status guard).
+ *
+ * Since funnel U1 the gate is `canReserveSeatForChild`, which also refuses a
+ * funnel child whose `applicant_state` sits before `offered` (or at
+ * `waitlisted` — F7 closes checkout at zero seats). For every pre-funnel
+ * child `applicant_state` is NULL and the verdict is bit-identical to the old
+ * `canReserveSeat` — pinned by a regression sweep in
+ * app/lib/__tests__/funnel-applicant-rules.test.ts. This is the SERVER gate;
+ * it must adopt funnel awareness first, because a UI-only check is a request
+ * away from being bypassed.
  */
 export async function POST(req: Request) {
   try {
@@ -38,7 +47,7 @@ export async function POST(req: Request) {
 
     const { data: child } = await supabase
       .from("children")
-      .select("id, first_name, status")
+      .select("id, first_name, status, applicant_state")
       .eq("id", childId)
       .maybeSingle();
     if (!child) return NextResponse.json({ error: "Child not found" }, { status: 404 });
@@ -53,7 +62,13 @@ export async function POST(req: Request) {
       .select("status")
       .eq("child_id", childId);
     const deposits = depositRows ?? [];
-    if (!canReserveSeat(child.status, deposits)) {
+    if (
+      !canReserveSeatForChild({
+        status: child.status,
+        applicantState: child.applicant_state,
+        deposits,
+      })
+    ) {
       if (hasPaidDeposit(deposits))
         return NextResponse.json(
           { error: "A deposit is already paid for this child." },

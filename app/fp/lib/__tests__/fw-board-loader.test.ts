@@ -364,15 +364,20 @@ describe("loadFwBoardShell — the PII-free server shell", () => {
     expect(shell.columns).toEqual([]);
   });
 
-  it("FAILS CLOSED (null) when the shell's cohort read errors — changed by Unit 8, deliberately", async () => {
-    // This test used to pin the opposite: a shell read error degraded to a
-    // slug-less shell so the page still painted. Unit 8's archived fence changes
-    // the failure semantics on purpose — the shell now refuses (null → the page's
-    // bare notFound) whenever the cohort row cannot be READ, because a retired
-    // weekend must not be able to hide behind a blip and paint a titled shell.
-    // Same fail-closed posture as the token resolve one function up.
+  it("a read ERROR degrades; only a read that ANSWERED refuses — the three-way contract Unit 8's review settled", async () => {
+    // The work-phase draft failed closed on any error; its review flipped it back:
+    // the page reaches the shell only after resolveFwBoardToken's read of this SAME
+    // row succeeded, so an error here is a blip on a cohort just proven active, and
+    // 404ing a healthy live board over it is over-closed. Degrade on error (the old
+    // contract), null on an archived row or no row (the fence).
     const db = makeFakeDb({ failTable: "path_cohorts" });
-    expect(await loadFwBoardShell(db, { cohortId: BOSTON })).toBeNull();
+    expect(await loadFwBoardShell(db, { cohortId: BOSTON })).toEqual({
+      cohortSlug: BOSTON,
+      columns: [],
+    });
+    // …and NO ROW is a refusal, not a degrade — absence answered.
+    const empty = makeFakeDb({ cohorts: [] });
+    expect(await loadFwBoardShell(empty, { cohortId: BOSTON })).toBeNull();
   });
 });
 

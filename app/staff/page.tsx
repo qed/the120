@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireStaff } from "@/app/crm/lib/auth";
+import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { getSeatsRemaining } from "@/app/lib/seats";
+import { listFwActiveWeekends } from "@/app/fp/lib/fw-ops-core";
+import { crmCardLine, fwCardLine, fwCardModel } from "@/app/staff/lib/hub-rules";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row
@@ -22,20 +26,31 @@ export const metadata: Metadata = {
 };
 
 /**
- * The staff hub — PLACEHOLDER BODY (Staff Front Door plan, Unit 2).
+ * The staff hub (Unit 11; R1–R4): two application cards, one live number each,
+ * neither of which can hide a door.
  *
- * Unit 11 fills this in: two application cards, each with a name, a one-line
- * description and one live number (R1–R4). What ships here is only what Unit 2
- * owes — a real, gated, noindex mount target at a real URL, with working links
- * so the route is not a dead end for whoever lands on it before Unit 11.
+ * EVERY decision is a call into `hub-rules.ts` (pure, tested) — no jsdom reaches
+ * this file. The two reads run CONCURRENTLY; the clock is read in the loader, not
+ * the component body. R4's asymmetry (the FW card degrades honestly, the seats
+ * number cannot admit it fell back) is documented where the numbers are shaped.
  *
  * The page gates as well as the layout, matching every other guarded surface
  * in the repo: Next 16 layouts do not re-render on soft navigation, so a page
  * leaning on its layout alone would be gated only on the render that mounted
  * it. `requireStaff()` is request-memoized, so this second call is free.
  */
+async function loadHub() {
+  const nowMs = Date.now();
+  const [seats, weekends] = await Promise.all([
+    getSeatsRemaining(),
+    listFwActiveWeekends(supabaseAdmin()),
+  ]);
+  return { seats, fw: fwCardModel(weekends, nowMs) };
+}
+
 export default async function StaffHubPage() {
   await requireStaff();
+  const { seats, fw } = await loadHub();
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-12">
@@ -55,6 +70,9 @@ export default async function StaffHubPage() {
           <span className="mt-1 block text-sm text-hq-ink-soft">
             Families, dossiers, and the admissions pipeline.
           </span>
+          <span className="mt-3 block font-path-mono text-[13px] text-crm-blue">
+            {crmCardLine(seats)}
+          </span>
         </Link>
 
         <Link
@@ -66,6 +84,9 @@ export default async function StaffHubPage() {
           </span>
           <span className="mt-1 block text-sm text-hq-ink-soft">
             Weekend cohorts, rosters, and guide access.
+          </span>
+          <span className="mt-3 block font-path-mono text-[13px] text-hq-ink-soft">
+            {fwCardLine(fw)}
           </span>
         </Link>
       </nav>

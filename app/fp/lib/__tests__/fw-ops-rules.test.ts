@@ -13,6 +13,8 @@ import {
   isFwTombstoneName,
   narrowFwEventTimeZone,
   normalizeFwCohortSlug,
+  archiveFwCohortFailureCopy,
+  unarchiveFwCohortFailureCopy,
 } from "../fw-ops-rules";
 
 /**
@@ -432,5 +434,42 @@ describe("fwReplayRejectReasonCopy", () => {
     // A reason this table has no copy for still has to be legible: a future machine
     // string must surface as itself, never as a blank or a crash.
     expect(fwReplayRejectReasonCopy("some_future_reason")).toContain("some_future_reason");
+  });
+});
+
+describe("archive/unarchive failure copy (Unit 7)", () => {
+  it("collapses the id-probing reasons to the staff-only sentence", () => {
+    expect(archiveFwCohortFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(archiveFwCohortFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+    expect(unarchiveFwCohortFailureCopy("cohort_not_found")).toBe(
+      unarchiveFwCohortFailureCopy("cohort_not_fw")
+    );
+  });
+
+  it("revoke_failed says the weekend was NOT archived — the ordering's user-facing half", () => {
+    const copy = archiveFwCohortFailureCopy("revoke_failed");
+    expect(copy).toMatch(/NOT archived/);
+    expect(copy).toMatch(/board/i);
+  });
+
+  it("already_archived and already_active are calm facts, not errors", () => {
+    expect(archiveFwCohortFailureCopy("already_archived")).toMatch(/someone got there first/i);
+    expect(unarchiveFwCohortFailureCopy("already_active")).toMatch(/already active/i);
+    for (const c of [
+      archiveFwCohortFailureCopy("already_archived"),
+      unarchiveFwCohortFailureCopy("already_active"),
+    ]) {
+      expect(c).not.toMatch(/error|fail/i);
+    }
+  });
+
+  it("unavailable claims nothing was changed and names the retry", () => {
+    for (const c of [
+      archiveFwCohortFailureCopy("unavailable"),
+      unarchiveFwCohortFailureCopy("unavailable"),
+    ]) {
+      expect(c).toMatch(/nothing was changed/i);
+      expect(c).toMatch(/try again/i);
+    }
   });
 });

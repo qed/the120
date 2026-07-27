@@ -34,11 +34,13 @@ import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import { resolveFwActorForCohort, resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 import {
   anonymizeFwStudent,
+  archiveFwCohort,
   createFwCohort,
   linkFwStudentToCohort,
   loadFwMatchResolution,
   mintFwBoardToken,
   resolveFwReplayReject,
+  unarchiveFwCohort,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   type AnonymizeStudentActionResult,
@@ -51,8 +53,10 @@ import {
   type RevokeGuideGrantActionResult,
 } from "@/app/fp/lib/fw-ops-core";
 import {
+  archiveFwCohortFailureCopy,
   fwCohortWindowFromLocal,
   normalizeFwCohortSlug,
+  unarchiveFwCohortFailureCopy,
 } from "@/app/fp/lib/fw-ops-rules";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
@@ -301,6 +305,78 @@ export async function revokeBoardTokenAction(
   }
 
   revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  return { success: true };
+}
+
+const archiveCohortSchema = z.object({ cohortId: z.uuid() });
+
+export type ArchiveCohortActionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+/**
+ * Archive one weekend (Unit 7; R19/R20).
+ *
+ * The SEQUENCE — revoke the board, then set archive state, with a failed revoke
+ * stopping everything — lives in `archiveFwCohort`, the core the CLI drives too.
+ * This layer is only gate → zod → core → copy, per the file's canon. The copy
+ * functions live in `fw-ops-rules.ts` (pure, tested), not here — a sentence in a
+ * "use server" file is a sentence CI cannot read.
+ *
+ * The revalidate set (plan, deferred item, resolved here): the ops LIST (the
+ * cohort disappears from the default view), the cohort's own ops page (the
+ * archive panel flips), and the guide picker at /fp/fw (its cohort list is
+ * role-derived server-side; Unit 8 decides what it shows for archived, but the
+ * cache must not outlive the state either way).
+ */
+export async function archiveCohortAction(
+  input: unknown
+): Promise<ArchiveCohortActionResult> {
+  const parsed = archiveCohortSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const archived = await archiveFwCohort(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!archived.ok) {
+    return { success: false, error: archiveFwCohortFailureCopy(archived.reason) };
+  }
+
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  revalidatePath("/fp/fw");
+  return { success: true };
+}
+
+export type UnarchiveCohortActionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+/** The reverse door. Same gate, same layering, same revalidate set. */
+export async function unarchiveCohortAction(
+  input: unknown
+): Promise<UnarchiveCohortActionResult> {
+  const parsed = archiveCohortSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const restored = await unarchiveFwCohort(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+  });
+  if (!restored.ok) {
+    return { success: false, error: unarchiveFwCohortFailureCopy(restored.reason) };
+  }
+
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  revalidatePath("/fp/fw");
   return { success: true };
 }
 

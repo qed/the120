@@ -69,6 +69,24 @@ import {
 const IDENTITY_KEY = "staffBar.identity";
 
 /**
+ * The bar's own height, published to CSS so the sticky headers BELOW it can stack
+ * under it instead of being covered by it (Unit 4).
+ *
+ * Two `position: sticky` elements that both resolve to `top: 0` do not stack — the
+ * one with the higher z-index simply paints over the other, and `/fp/fw/ops` and
+ * every per-cohort surface have a sticky working header of their own. The offset
+ * cannot be a constant: this bar wraps at narrow widths and grows a second line
+ * whenever it has a queue chip or an error message to show, all of which happen on
+ * the 375px shared iPad rather than in spite of it.
+ *
+ * Measured rather than declared, and cleared on unmount so a layout without a bar
+ * inherits nothing. Consumers read `var(--staff-bar-h, 0px)`, so the fallback is
+ * exactly today's behaviour — which is also the plan's named rollback for this slice
+ * (unmount the bar from `/fp/fw` alone and the guide headers are unchanged).
+ */
+const BAR_HEIGHT_PROPERTY = "--staff-bar-h";
+
+/**
  * The persisted identity as an external store.
  *
  * `useSyncExternalStore` rather than an effect, for one reason that is not style:
@@ -133,6 +151,7 @@ export function StaffBar({
    *  needs before identity has resolved. */
   actorUserId: string;
 }) {
+  const barRef = useRef<HTMLElement | null>(null);
   const [live, setLive] = useState<StaffBarIdentity | null>(null);
   const [queue, setQueue] = useState<StaffBarQueueState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -164,6 +183,29 @@ export function StaffBar({
   // A chip is rendered only from a queue we actually looked at. Declining to look
   // must read as "no chip", never as "the queue is empty".
   const chip = staffBarQueueChip({ application, state: probe.probe ? queue : null });
+
+  // ── publish the bar's height for the sticky headers below it ────────────────
+  // A ResizeObserver rather than a one-shot measurement: the bar changes height when
+  // the queue chip appears, when a message renders, and when a narrow viewport wraps
+  // it — and a stale offset leaves a gap or a covered header rather than failing
+  // loudly. No decision here, so nothing to extract: this is a measurement.
+  useEffect(() => {
+    const node = barRef.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const publish = () => {
+      document.documentElement.style.setProperty(
+        BAR_HEIGHT_PROPERTY,
+        `${node.getBoundingClientRect().height}px`
+      );
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty(BAR_HEIGHT_PROPERTY);
+    };
+  }, []);
 
   // ── identity: persisted first (offline), authoritative when it lands ─────────
   useEffect(() => {
@@ -305,7 +347,7 @@ export function StaffBar({
 
   return (
     // print:hidden — staff chrome never belongs on a printed dossier.
-    <header className={`sticky top-0 z-30 print:hidden ${skin.bar}`}>
+    <header ref={barRef} className={`sticky top-0 z-30 print:hidden ${skin.bar}`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-2.5 sm:px-7">
         <span className={skin.label}>{staffBarApplicationLabel(application)}</span>
 

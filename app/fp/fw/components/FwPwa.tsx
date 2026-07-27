@@ -29,7 +29,6 @@ import {
   isFwAuthRequired,
   isFwQueueSupported,
   readFwQueueSummary,
-  reconcileFwCacheOwner,
   runFwClientDrain,
   startFwSyncEngine,
   subscribeFwQueue,
@@ -65,24 +64,12 @@ export function FwPwa({ actorUserId }: { actorUserId: string }) {
     () => true
   );
 
-  // ── identity reconcile (security): clear a prior guide's cached residue ─────
-  // Runs BEFORE the first drain so a device that changed hands without a sign-out
-  // never serves the previous guide's authed shell / roster to this one. As of Staff
-  // Front Door Unit 3 it PRESERVES an undrained queue rather than destroying it (B2).
-  //
-  // ⚠️ THIS EFFECT MOVES TO `StaffBar` IN UNIT 4, NOT HERE. The plan lists the
-  // removal under Unit 3, but the removal is only safe at the moment the bar takes
-  // it over — and Unit 4 is what mounts the bar in `app/fp/fw/(app)/layout.tsx`.
-  // Deleting it a PR early would leave `main` with no reconcile at all on the one
-  // subtree where shared iPads change hands. `surfaceCreatesResidue` is true here
-  // and true for the bar's FW instance; running BOTH would race two reconciles on
-  // one localStorage key, which is exactly why Unit 4 deletes this and not something
-  // else.
-  useEffect(() => {
-    void reconcileFwCacheOwner({ actorUserId, surfaceCreatesResidue: true }).catch((e) =>
-      console.error("[fw/pwa] cache-owner reconcile failed:", e)
-    );
-  }, [actorUserId]);
+  // ── THE IDENTITY RECONCILE USED TO LIVE HERE. It is `StaffBar`'s now (Unit 4).
+  // The bar mounts in this same `(app)` layout, one element above, so the reconcile
+  // still runs before the first drain — and it now runs on `/crm` and `/staff` too,
+  // where a shared device can equally have changed hands. Keeping a copy here would
+  // race two reconciles on one localStorage key; `bar-wiring.test.ts` counts the
+  // owners in this subtree and reddens at zero or two.
 
   // ── sync engine lifecycle + queue summary ──────────────────────────────────
   useEffect(() => {

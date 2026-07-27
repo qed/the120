@@ -5,16 +5,16 @@ import CrmTabs from "./CrmTabs";
 /**
  * Persistent CRM chrome (brief §4/§11): the Admin.dc.html top bar grown up —
  * #0300ED band with logo chip, mono breadcrumb, blush STAFF ONLY pill, live
- * seat label — plus the slim tab row. Server component; seat count and the
- * signed-in email arrive as props from the guarded layout.
+ * seat label — plus the slim tab row. Server component; the seat count arrives as a
+ * prop from the guarded layout.
+ *
+ * NO LONGER TAKES THE SIGNED-IN EMAIL (Staff Front Door Unit 4, R15/R17). Identity
+ * is the staff bar's, one element above this in the same layout — and it is resolved
+ * there over a Server Action rather than passed down, so it never lands in a cached
+ * payload. This component keeps the seat count, which is a fact about the programme
+ * rather than about the person reading it.
  */
-export default function CrmChrome({
-  seatsRemaining,
-  email,
-}: {
-  seatsRemaining: number;
-  email: string;
-}) {
+export default function CrmChrome({ seatsRemaining }: { seatsRemaining: number }) {
   const filled = SEATS_TOTAL - seatsRemaining;
 
   // print:hidden — staff chrome never belongs on a printed dossier (Unit 5).
@@ -41,7 +41,7 @@ export default function CrmChrome({
         </span>
       </div>
 
-      <CrmTabs email={email} />
+      <CrmTabs />
     </header>
   );
 }

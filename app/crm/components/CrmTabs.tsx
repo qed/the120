@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/app/lib/supabase/client";
+import { usePathname } from "next/navigation";
 
 const TABS = [
   { label: "DASHBOARD", href: "/crm" },
@@ -15,24 +14,29 @@ const TABS = [
 
 /**
  * The slim tab row under the blue band (brief §4): mono 11px letterspaced
- * chips, active = #0300ED filled; signed-in email + sign-out far right.
- * Client component only for pathname-driven active state and sign-out —
- * everything else in the chrome stays server-rendered.
+ * chips, active = #0300ED filled. Client component only for pathname-driven
+ * active state — everything else in the chrome stays server-rendered.
  * Scrolls horizontally on narrow viewports (survive-at-375px contract).
+ *
+ * IDENTITY AND SIGN-OUT MOVED UP to the persistent staff bar (Staff Front Door
+ * Unit 4; R15, R16, R24). The SECTIONS stay here, deliberately: folding six
+ * destinations plus identity plus sign-out into one bar would break the 375px
+ * contract this row already meets only by scrolling, and dropping them would strand
+ * five CRM sections behind URL-typing. What left was one email string and a
+ * client-side `supabaseBrowser().auth.signOut()` that ran no drain gate and landed
+ * every account on `/crm/login` — including a staff member who is also a guide, and
+ * including one whose device still held unsent check-ins.
+ *
+ * The row is now three sticky-free rows deep under the bar; it does not offset
+ * itself, because `CrmChrome` has never been sticky.
  */
-export default function CrmTabs({ email }: { email: string }) {
+export default function CrmTabs() {
   const pathname = usePathname();
-  const router = useRouter();
 
   const isActive = (href: string) =>
     href === "/crm"
       ? pathname === "/crm"
       : pathname === href || pathname.startsWith(`${href}/`);
-
-  const handleSignOut = async () => {
-    await supabaseBrowser().auth.signOut();
-    router.push("/crm/login");
-  };
 
   return (
     <nav
@@ -53,17 +57,6 @@ export default function CrmTabs({ email }: { email: string }) {
           {tab.label}
         </Link>
       ))}
-
-      <span className="ml-auto flex flex-none items-center gap-3 pl-4">
-        <span className="font-mono text-[10.5px] text-crm-faint">{email}</span>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="cursor-pointer rounded-full font-mono text-[10.5px] uppercase tracking-[0.08em] text-crm-muted transition-colors hover:text-crm-red focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crm-blue"
-        >
-          Sign out
-        </button>
-      </span>
     </nav>
   );
 }

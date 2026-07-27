@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { glob } from "tinyglobby";
 
 /**
  * The properties of the WIRING that no behavioural test in this repo can reach.
@@ -30,6 +31,35 @@ import { describe, expect, it } from "vitest";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const read = (relative: string) => readFileSync(new URL(relative, `file://${dir}`), "utf8");
+/** `app/lib/staff-bar/__tests__/` → the repo root. Four levels, from THIS file. */
+const REPO_ROOT = fileURLToPath(new URL("../../../../", `file://${dir}`));
+
+/**
+ * Every production source file under `app/`, comment-stripped, keyed by repo path.
+ *
+ * Tests are EXCLUDED, and not for convenience: the scans below look for symbols by
+ * name, and this file necessarily names the very symbols it is asserting the absence
+ * of. Stripping comments does not help — they appear inside string literals here, as
+ * arguments. The question the scans actually ask is "does any shipped surface still
+ * reach this?", which is a question about production code.
+ */
+const productionSources = async (): Promise<Map<string, string>> => {
+  const files = await glob(["app/**/*.ts", "app/**/*.tsx"], {
+    cwd: REPO_ROOT,
+    absolute: false,
+    dot: false,
+    ignore: ["**/__tests__/**"],
+  });
+  // An empty expansion would make every "is it gone?" assertion below pass vacuously,
+  // which is the one failure mode a scan like this must not have.
+  expect(files.length).toBeGreaterThan(0);
+  return new Map(
+    files.map((f) => [
+      f.replace(/\\/g, "/"),
+      stripComments(readFileSync(`${REPO_ROOT}${f}`, "utf8")),
+    ])
+  );
+};
 
 const SOURCE = read("../StaffBar.tsx");
 
@@ -44,7 +74,10 @@ const SOURCE = read("../StaffBar.tsx");
  * branch passed. (`fp-rename-straggler.test.ts` has the same shape: fix the scan,
  * never the comment.) Any assertion about what the CODE does uses this.
  */
-const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+const CODE = stripComments(SOURCE);
 
 /** The component's props block — everything the SERVER is allowed to hand it. */
 const PROPS_BLOCK = CODE.slice(
@@ -183,10 +216,10 @@ describe("the bar takes no lock of its own", () => {
 
 /* ═══════════════════════════ the Unit 4 tripwire ══ */
 
-describe("exactly one module reconciles the FW cache owner on /fp/fw", () => {
-  const FW_APP_LAYOUT = read("../../../fp/fw/(app)/layout.tsx");
-  const FW_PWA = read("../../../fp/fw/components/FwPwa.tsx");
+const FW_APP_LAYOUT = read("../../../fp/fw/(app)/layout.tsx");
+const FW_PWA = read("../../../fp/fw/components/FwPwa.tsx");
 
+describe("exactly one module reconciles the FW cache owner on /fp/fw", () => {
   /** A call, not a mention — both files discuss the reconcile in comments. */
   const callsReconcile = (source: string) => /reconcileFwCacheOwner\(\s*\{/.test(source);
   const mountsStaffBar = /<StaffBar[\s/>]/.test(FW_APP_LAYOUT);
@@ -205,11 +238,146 @@ describe("exactly one module reconciles the FW cache owner on /fp/fw", () => {
     expect(owners).toBe(1);
   });
 
-  it("names which module owns it today, so Unit 4 knows what to remove", () => {
-    // As of Unit 3: FwPwa owns it and the bar is not mounted here. When Unit 4 flips
-    // both in one change, this assertion is the one to update — and the count above is
-    // what stops it being flipped only half way.
-    expect(mountsStaffBar).toBe(false);
-    expect(callsReconcile(FW_PWA)).toBe(true);
+  it("names which module owns it today, so the next editor knows what moved", () => {
+    // FLIPPED IN UNIT 4, in the same change that mounted the bar here. Before: FwPwa
+    // owned the reconcile and the bar was not mounted. After: the bar owns it and
+    // FwPwa's effect is gone. The count above is what stopped this being flipped only
+    // half way — and it still is, in whichever direction the next change goes.
+    expect(mountsStaffBar).toBe(true);
+    expect(callsReconcile(FW_PWA)).toBe(false);
+  });
+
+  it("FwPwa is still mounted for the things that did NOT move", () => {
+    // Only the reconcile moved. SW registration, the drain engine and the queued
+    // indicator stay here, because `FwPwa`'s Background Sync effect awaits
+    // `navigator.serviceWorker.ready` — which off `/fp/fw` matches no registration and
+    // NEVER SETTLES. "Delete the reconcile" must not slide into "delete the mount".
+    expect(FW_APP_LAYOUT).toMatch(/<FwPwa[\s/>]/);
+  });
+});
+
+/* ═══════════════════════ where the bar mounts, and where it must not ══ */
+
+/**
+ * The three OUTERMOST guarded layouts — one per application, settled in planning.
+ *
+ * Paths are repo-relative and compared as a SET against a repo-wide scan below, so
+ * this list cannot drift from reality in either direction: a bar added to a fourth
+ * layout reddens, and a bar removed from one of these reddens.
+ */
+const BAR_MOUNTS = [
+  "app/staff/layout.tsx",
+  "app/crm/(app)/layout.tsx",
+  "app/fp/fw/(app)/layout.tsx",
+] as const;
+
+/**
+ * FW layouts that NEST inside `app/fp/fw/(app)/layout.tsx`. Mounting the bar in these
+ * too is the failure the "exactly once" requirement names: it would render two or
+ * three bars stacked down the page on `/fp/fw/ops` and `/fp/fw/cohort/X`.
+ */
+const NESTED_FW_LAYOUTS = [
+  "../../../fp/fw/(app)/ops/layout.tsx",
+  "../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx",
+] as const;
+
+describe("the bar mounts exactly once per page (R15, R18)", () => {
+  it("is mounted in each of the three outermost guarded layouts", () => {
+    for (const relative of ["../../../staff/layout.tsx", "../../../crm/(app)/layout.tsx"]) {
+      expect(read(relative), relative).toMatch(/<StaffBar[\s/>]/);
+    }
+    expect(FW_APP_LAYOUT).toMatch(/<StaffBar[\s/>]/);
+  });
+
+  it("is NOT mounted in the FW layouts that nest inside one of them", () => {
+    for (const relative of NESTED_FW_LAYOUTS) {
+      expect(read(relative), relative).not.toMatch(/<StaffBar[\s/>]/);
+    }
+  });
+
+  it("is mounted NOWHERE ELSE in the repo — which is also what gives R18 for free", async () => {
+    // The set, not a spot check. R18's three exclusions (the projected board, the
+    // family app, and the unauthenticated doors sharing the guarded prefixes) are not
+    // enforced by naming them: they fall out of the bar living in `(app)` route groups
+    // rather than being matched by URL prefix. That property is only true while this
+    // set is exactly the three, so it is the set that is asserted.
+    //
+    // Scanned over COMMENT-STRIPPED source: `StaffBar.tsx` and several layouts discuss
+    // where the bar mounts, and a scan that cannot tell a sentence from a JSX tag would
+    // pass on a file that only talks about mounting it.
+    const mounts = [...(await productionSources())]
+      .filter(([, code]) => /<StaffBar[\s/>]/.test(code))
+      .map(([path]) => path)
+      .sort();
+    expect(mounts).toEqual([...BAR_MOUNTS].sort());
+  });
+
+  it("every mount hands it the two settled props and nothing else", () => {
+    // The prop shape is a SECURITY property, not a style one: props to a client
+    // component are serialized into the RSC payload, and `/fp/fw` navigations are
+    // cached into `path-sw-fw-shell-v1`. An email or a role added here — at any ONE of
+    // the three call sites — leaves a cached shell that differs between a staff and a
+    // non-staff visit. The component's own props block is pinned at the top of this
+    // file; this pins the call sites, which is the half a component signature cannot.
+    for (const relative of [
+      "../../../staff/layout.tsx",
+      "../../../crm/(app)/layout.tsx",
+      "../../../fp/fw/(app)/layout.tsx",
+    ]) {
+      const tag = stripComments(read(relative)).match(/<StaffBar\b([\s\S]*?)\/>/);
+      expect(tag, relative).not.toBeNull();
+      const attributes = [...tag![1].matchAll(/(\w+)\s*=/g)].map((m) => m[1]).sort();
+      expect(attributes, relative).toEqual(["actorUserId", "application"]);
+    }
+  });
+});
+
+/* ═══════════════════════ the disagreeing sign-outs, retired (R16) ══ */
+
+describe("R16 — one sign-out control, and the other two are GONE not merely unlinked", () => {
+  /**
+   * A repo-wide scan for the retired symbols, over comment-stripped source.
+   *
+   * "Gone rather than unlinked" is the distinction that matters here. `signOutFwGuide`
+   * is a `"use server"` export: an unrendered form does not make it unreachable,
+   * because a Server Action is POST-addressable independently of any component that
+   * calls it. Leaving it exported would leave a sign-out with no verdict, no drain and
+   * no evidence gate one request away from anyone who knows its id — which is the
+   * whole defect this unit retires.
+   */
+  const scanFor = async (symbol: string) =>
+    [...(await productionSources())]
+      .filter(([, code]) => new RegExp(`\\b${symbol}\\b`).test(code))
+      .map(([path]) => path)
+      .sort();
+
+  it("the FW ops header's ungated sign-out action no longer exists anywhere", async () => {
+    // `app/fp/fw/(app)/ops/layout.tsx` posted a bare <form action={signOutFwGuide}>:
+    // no verdict, no drain, no evidence gate, no atomic clear. A guide who is also
+    // staff could capture check-ins in the cohort view, walk to /fp/fw/ops, sign out
+    // there, and abandon the queue on a shared iPad.
+    expect(await scanFor("signOutFwGuide")).toEqual([]);
+  });
+
+  it("the per-cohort drain-gated button is retired too — the bar carries its sequence", async () => {
+    // Not deleted for tidiness: it awaited a redirect()ing action inside a generic
+    // catch with no `isNextRedirect` check, so a SUCCESSFUL sign-out could report
+    // "Couldn't sign out just now." `StaffBar` has that fix and a test pinning the
+    // ordering (above), so retiring the button is how the defect stops existing rather
+    // than being copied.
+    expect(await scanFor("FwSignOutButton")).toEqual([]);
+  });
+
+  it("the CRM tab row keeps its six sections and gives up identity and sign-out", async () => {
+    // R24: the tabs SURVIVE as their own row — folding six destinations plus identity
+    // plus sign-out into one bar breaks the survive-at-375px contract the tab row
+    // already meets only by scrolling. Only the two things the bar now owns move up.
+    const tabs = stripComments(read("../../../crm/components/CrmTabs.tsx"));
+    expect(tabs).toMatch(/aria-label="CRM sections"/);
+    expect(tabs).not.toMatch(/signOut/);
+    expect(tabs).not.toMatch(/\bemail\b/);
+    // …and the third disagreeing sign-out (a client-side supabase signOut with no
+    // gate, landing on /crm/login regardless of account) is gone with it.
+    expect(await scanFor("supabaseBrowser")).not.toContain("app/crm/components/CrmTabs.tsx");
   });
 });

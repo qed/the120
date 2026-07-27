@@ -222,3 +222,8 @@ place these paths get exercised.
       case actually fires, and what the person holding the device did next.
 - [ ] Note the Safari version(s), the iPad model(s), and the venue's network shape. Every
       finding above is conditional on those, and next time the conditions will differ.
+- [ ] **Before deleting any guide/staff ACCOUNT** (offboarding): query
+      `path_fw_residue_reports` for that account first. Its rows CASCADE away with the
+      account — deliberate, so telemetry never blocks a deletion — which means the
+      pointer to "device D still holds their un-sent check-ins" vanishes with it.
+      Recover the device's queue before the account, not after.

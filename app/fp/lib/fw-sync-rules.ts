@@ -1034,10 +1034,14 @@ export async function runFwSignOutFlow(input: {
     // authenticated HTML; either surviving is a handover leak, and reporting success
     // on top of it is the part that makes it invisible.
     //
-    // `queueRemaining === null` joins the refusals for the reconcile's reason: the
-    // clear THREW instead of answering, so nothing is known about what survived —
-    // reporting a fabricated count under a successful sign-out would be the sentinel
-    // collapse one layer up (Unit 6).
+    // `queueRemaining === null` here is DEFENCE IN DEPTH, not a live branch: the
+    // production clear sets it null only in the same catch that sets
+    // `queueCleared: false`, which the `raced` return above already consumed — so
+    // with the current ports this line is unreachable (correctness review traced
+    // it). It stays because the ports are an interface: a future clear that answers
+    // "cleared" with an unknown count must land on clear_failed, not on a success
+    // carrying a fabricated 0 — the sentinel collapse one layer up. The reconcile's
+    // twin of this check IS load-bearing (no raced-return ahead of it there).
     if (!fwResidueFullyCleared(result) || result.queueRemaining === null) {
       return { kind: "clear_failed" };
     }

@@ -84,27 +84,28 @@ describe("20260806130000_fw_residue_reports — the beacon's durable store", () 
   });
 
   it("session_user_id CASCADES (telemetry must not block account deletion) and the CLAIM has NO FK", () => {
-    const sessionStmt = reportsSql.slice(
-      reportsSql.indexOf("session_user_id"),
-      reportsSql.indexOf(",", reportsSql.indexOf("session_user_id"))
-    );
+    // Sliced to END OF LINE, not to the next comma: a comma inside a future CHECK
+    // (`in (0,1)`) would truncate a comma-bounded slice into a fragment that passes
+    // vacuously (data-migrations review). One column per line is this repo's SQL
+    // style, asserted implicitly by these slices.
+    const lineOf = (needle: string): string => {
+      const at = reportsSql.indexOf(needle);
+      expect(at, needle).toBeGreaterThan(-1);
+      return reportsSql.slice(at, reportsSql.indexOf("\n", at));
+    };
+    const sessionStmt = lineOf("session_user_id");
     expect(sessionStmt).toMatch(/references\s+auth\.users\s*\(\s*id\s*\)\s+on\s+delete\s+cascade/);
     // claimed_actor_user_id deliberately has NO references clause: its value is that
     // it may disagree with reality (a handover raced the POST; an old bundle claimed
     // a deleted account). An FK would refuse exactly the rows worth reading.
-    const claimStmt = reportsSql.slice(
-      reportsSql.indexOf("claimed_actor_user_id"),
-      reportsSql.indexOf(",", reportsSql.indexOf("claimed_actor_user_id"))
-    );
+    const claimStmt = lineOf("claimed_actor_user_id");
     expect(claimStmt).not.toContain("references");
     expect(claimStmt).toMatch(/not\s+null/);
   });
 
   it("queue_remaining is NULLABLE with a >= 0 check — null is 'the clear threw', not zero", () => {
-    const stmt = reportsSql.slice(
-      reportsSql.indexOf("queue_remaining"),
-      reportsSql.indexOf(",", reportsSql.indexOf("queue_remaining"))
-    );
+    const at = reportsSql.indexOf("queue_remaining");
+    const stmt = reportsSql.slice(at, reportsSql.indexOf("\n", at));
     expect(stmt).not.toMatch(/not\s+null/);
     expect(stmt).toMatch(/check\s*\(\s*queue_remaining\s*>=\s*0\s*\)/);
   });
@@ -119,17 +120,23 @@ describe("20260806130000_fw_residue_reports — the beacon's durable store", () 
     // added on either side without the other turns this red — the TS-enum-vs-CHECK
     // drift docs/solutions/best-practices/crm-audit-action-allowlist-db-check-
     // constraint-drifts-from-ts-enum-2026-07-15.md documents.
-    const actions = readFileSync(
+    // COMMENT-STRIPPED, like the SQL sides — the raw-text version of this was
+    // walked through with a decoy comment containing `outcome: z.enum([...])`
+    // placed above the real schema (testing review, 0.9). And anchored INSIDE the
+    // schema declaration, not on a bare indexOf over the whole file.
+    const actionsRaw = readFileSync(
       new URL("../../../lib/staff-bar/actions.ts", import.meta.url),
       "utf8"
     );
-    const outcomeEnum = /z\.enum\(\[([^\]]*)\]\)/.exec(
-      actions.slice(actions.indexOf("outcome:"))
-    );
+    const actions = actionsRaw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const schemaStart = actions.indexOf("const residueBeaconSchema = z.object({");
+    expect(schemaStart).toBeGreaterThan(-1);
+    const schemaBlock = actions.slice(schemaStart, actions.indexOf("});", schemaStart));
+    const outcomeEnum = /outcome:\s*z\.enum\(\[([^\]]*)\]\)/.exec(schemaBlock);
     expect(outcomeEnum?.[1].replace(/["\s]/g, "")).toBe("queue_preserved,clear_failed");
-    const appEnum = /z\.enum\(\[([^\]]*)\]\)/.exec(
-      actions.slice(actions.indexOf("application:"))
-    );
+    const appEnum = /application:\s*z\.enum\(\[([^\]]*)\]\)/.exec(schemaBlock);
     expect(appEnum?.[1].replace(/["\s]/g, "")).toBe("fw,crm,staff");
   });
 
@@ -140,11 +147,13 @@ describe("20260806130000_fw_residue_reports — the beacon's durable store", () 
   });
 });
 
-describe("neither file hijacks a sibling scanner", () => {
-  it("the archive file never names the tables the sibling parity suites scope to", () => {
-    // The hijack happened once (an unrelated column matched another suite's
-    // allowlist). These files must not mention the tables the other parity tests
-    // anchor on — comments included, because some sibling scanners read raw text.
+describe("neither file touches an unrelated table", () => {
+  it("the two files never name the tables other subsystems own", () => {
+    // HONEST SCOPE (testing review): every sibling parity suite reads its OWN named
+    // file, so nothing in THIS file's text can hijack one — the guard is not
+    // protecting them. What it does assert is narrower and real: these migrations
+    // touch no unrelated table, in DDL or in comment, so a reviewer's grep for any
+    // of these names never surfaces Unit 6 as a false positive.
     for (const forbidden of ["path_fw_board_tokens", "path_fw_replay_rejects", "fw_move_task", "path_students"]) {
       expect(archiveRaw.toLowerCase(), forbidden).not.toContain(forbidden);
       expect(reportsRaw.toLowerCase(), forbidden).not.toContain(forbidden);

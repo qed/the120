@@ -29,6 +29,7 @@ import {
   clearFwRoster,
   deleteFwEntry,
   getFwRoster,
+  hasFwQueueDbOpened,
   isFwQueueSupported,
   listFwRawEntries,
   listFwRawEntriesSerialized,
@@ -37,27 +38,25 @@ import {
 } from "@/app/fp/lib/fw-queue";
 import {
   applyFwDrainOutcome,
-  decideFwSignOut,
+  classifyFwSignOutQueue,
   FW_AUTO_RETRY_ATTEMPT_CEILING,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   FW_ROSTER_CACHE_SCHEMA_VERSION,
   FW_SHELL_CACHE_NAME,
   isFwRosterCacheUsable,
-  isRecognizedFwEntry,
+  partitionFwQueue,
+  runFwSignOutFlow,
   selectFwDrainable,
   summarizeFwQueue,
   type FwCachedRosterStudent,
+  type FwDeviceEvidence,
+  type FwQuarantinedRecord,
   type FwQueueEntry,
   type FwQueueEntryInput,
   type FwQueueSummary,
   type FwRosterCache,
-  type FwSignOutVerdict,
+  type FwSignOutOutcome,
 } from "@/app/fp/lib/fw-sync-rules";
-
-/** A note for a record this app version cannot drain (future schema / corrupt) —
- *  surfaced, dismissible, never silently dropped. */
-const FW_QUARANTINE_NOTE =
-  "This saved check-in is from a different app version and can't be sent. Dismiss it, or update the app and sign in again.";
 
 /* ══════════════════════════════════════════════════════════ subscription ══ */
 
@@ -187,55 +186,18 @@ export async function dismissFwEntry(id: string): Promise<void> {
 
 /* ══════════════════════════════════════════════════════════ queue reading ══ */
 
-/** One quarantined record — a shape this app version cannot drain, surfaced by id
- *  and note so it can be shown and dismissed. */
-type FwQuarantined = { id: string; note: string };
-
-/**
- * Partition a raw IndexedDB read into drainable entries and quarantined records.
- *
- * A record that fails `isRecognizedFwEntry` (a future schema, a corrupt shape) is
- * NOT cast into a `FwQueueEntry` it does not satisfy — the previous version wrote
- * `{...record, blocked} as FwQueueEntry`, but adding `blocked` never fixed what made
- * it unrecognized, so it failed recognition again on every later read and vanished
- * from every view (kieran-typescript / reliability / api-contract review: it could
- * then be silently destroyed by sign-out). Instead it is surfaced directly from the
- * raw record by its id, with its own note, on every scan — no write, no lying cast,
- * never a silent drop of a child's captured check-in.
- */
-function partitionFwQueue(raw: readonly unknown[]): {
+async function scanFwQueue(): Promise<{
   recognized: FwQueueEntry[];
-  quarantined: FwQuarantined[];
-} {
-  const recognized: FwQueueEntry[] = [];
-  const quarantined: FwQuarantined[] = [];
-  for (const record of raw) {
-    if (isRecognizedFwEntry(record)) {
-      recognized.push(record);
-      continue;
-    }
-    const shell = record as { id?: unknown; blocked?: unknown };
-    if (typeof shell.id === "string") {
-      const note =
-        typeof shell.blocked === "object" &&
-        shell.blocked !== null &&
-        typeof (shell.blocked as { note?: unknown }).note === "string"
-          ? (shell.blocked as { note: string }).note
-          : FW_QUARANTINE_NOTE;
-      quarantined.push({ id: shell.id, note });
-    }
-  }
-  return { recognized, quarantined };
-}
-
-async function scanFwQueue(): Promise<{ recognized: FwQueueEntry[]; quarantined: FwQuarantined[] }> {
+  quarantined: FwQuarantinedRecord[];
+}> {
   return partitionFwQueue(await listFwRawEntries());
 }
 
-/** This session's own, non-blocked captures — the drain's scope. */
+/** This session's own, non-blocked captures — the drain's scope. Expressed through
+ *  the SAME classifier the sign-out verdict and the queue clear read, so "what this
+ *  guide still owes the server" has exactly one definition in this app. */
 async function readDrainableFwEntries(actorUserId: string): Promise<FwQueueEntry[]> {
-  const { recognized } = await scanFwQueue();
-  return selectFwDrainable(recognized, actorUserId).filter((e) => !e.blocked);
+  return classifyFwSignOutQueue(await listFwRawEntries(), actorUserId).drainable;
 }
 
 /** The queued-indicator's counts, scoped to this session (a shared device could
@@ -259,90 +221,128 @@ export type FwDrainOptions = { wait?: boolean; includeStuck?: boolean };
 
 let fallbackDrainChain: Promise<void> = Promise.resolve();
 
+/** The single-drainer lock name. An offline three-tab guide iPad must not ship the
+ *  same queue thrice, and the sign-out sequence must not have a background drain land
+ *  a tap between its check and its act. */
+const FW_DRAIN_LOCK = "fw-offline-drain";
+
 /**
- * Drain the queue once. Reads IndexedDB, ships the drainable set through the
- * `drainFwQueue` action (which re-authes, scopes to this session's captures,
- * resolves per-cohort authorization, and runs the tested fold), then applies the
- * per-entry outcomes: settled → delete, rejected → local tombstone with the
- * staff-visible note, retry → attempts++.
+ * Run `fn` under the single-drainer lock, WAITING for it if another holder has it.
  *
- * Single-drainer via Web Locks (an offline three-tab guide iPad must not ship the
- * same queue thrice). Background signals skip when a drain is running; a caller
- * that passes `wait` queues behind it instead — a user-waited-on sign-out drain
- * must never silently lose the lock race.
+ * THE ONE PLACE THE LOCK IS TAKEN — read this before adding a second. Web Locks are
+ * NOT reentrant: a function that acquires `fw-offline-drain` and then calls another
+ * function that acquires it again does not error, it HANGS forever (or, on the
+ * `ifAvailable` path, silently skips the inner work and returns as though it ran).
+ * The sign-out sequence must hold the lock across verdict → drain → re-verdict →
+ * clear, so it passes `drainFwQueueOnce` — the LOCK-FREE inner drain — as its drain
+ * port, and takes the lock here exactly once for the whole sequence.
+ *
+ * Falls back to a module-level promise chain where `navigator.locks` is absent (older
+ * Safari): single-document serialization only, which is what that browser can offer.
+ */
+function withFwDrainLock<T>(fn: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== "undefined" && "locks" in navigator && navigator.locks) {
+    return navigator.locks.request(FW_DRAIN_LOCK, fn) as Promise<T>;
+  }
+  const turn = fallbackDrainChain.then(fn);
+  fallbackDrainChain = turn.then(
+    () => {},
+    () => {}
+  );
+  return turn;
+}
+
+/**
+ * ONE drain pass — LOCK-FREE by design. Callers hold `fw-offline-drain` themselves
+ * (see `withFwDrainLock`); nothing in here may acquire it.
+ *
+ * Reads IndexedDB, ships the drainable set through the `drainFwQueue` action (which
+ * re-authes, scopes to this session's captures, resolves per-cohort authorization,
+ * and runs the tested fold), then applies the per-entry outcomes: settled → delete,
+ * rejected → local tombstone with the staff-visible note, retry → attempts++.
+ */
+async function drainFwQueueOnce(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Promise<void> {
+  authRequired = false;
+  const drainable = await readDrainableFwEntries(ctx.actorUserId);
+  const runnable = opts.includeStuck
+    ? drainable
+    : drainable.filter((e) => e.attempts < FW_AUTO_RETRY_ATTEMPT_CEILING);
+  if (runnable.length === 0) return;
+
+  let res;
+  try {
+    res = await drainFwQueue(runnable);
+  } catch (e) {
+    if (isNextRedirect(e)) {
+      authRequired = true;
+      notify();
+      return;
+    }
+    console.error("[fw/sync] drain action threw:", e);
+    return;
+  }
+
+  if (!res.ok) {
+    if (res.reason === "no_session") {
+      authRequired = true;
+      notify();
+      return;
+    }
+    // invalid_input: the WHOLE batch failed server-side validation. With the
+    // stricter isRecognizedFwEntry this should be unreachable for client-recognized
+    // entries, but if it ever happens, ADVANCE attempts so the batch reaches the
+    // auto-retry ceiling and surfaces as "still trying" — never a silent no-op that
+    // re-ships the identical failing batch forever with no guide-visible signal
+    // (api-contract review).
+    for (const entry of runnable) {
+      await putFwEntry({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
+    }
+    notify();
+    return;
+  }
+
+  // Look outcomes up in the batch we already hold, rather than re-reading each
+  // entry from IndexedDB (performance review), and apply the mutation the pure,
+  // exhaustive `applyFwDrainOutcome` decides — so a future disposition is a compile
+  // error, not a silent retry.
+  const byId = new Map(runnable.map((e) => [e.id, e]));
+  for (const outcome of res.outcomes) {
+    const entry = byId.get(outcome.entryId);
+    if (!entry) continue;
+    const mutation = applyFwDrainOutcome(entry, outcome, nowIso());
+    if (mutation.op === "delete") await deleteFwEntry(outcome.entryId);
+    else await putFwEntry(mutation.entry);
+  }
+  notify();
+}
+
+/**
+ * Drain the queue once, under the single-drainer lock.
+ *
+ * Background signals SKIP when a drain is already running (`ifAvailable`); a caller
+ * that passes `wait` queues behind it instead — a user-waited-on drain must never
+ * silently lose the lock race. The sign-out sequence does NOT call this: it holds the
+ * lock itself and calls `drainFwQueueOnce` directly (Web Locks are not reentrant).
  */
 export async function runFwClientDrain(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Promise<void> {
   if (!isFwQueueSupported()) return;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return;
 
-  const run = async () => {
-    authRequired = false;
-    const drainable = await readDrainableFwEntries(ctx.actorUserId);
-    const runnable = opts.includeStuck
-      ? drainable
-      : drainable.filter((e) => e.attempts < FW_AUTO_RETRY_ATTEMPT_CEILING);
-    if (runnable.length === 0) return;
-
-    let res;
-    try {
-      res = await drainFwQueue(runnable);
-    } catch (e) {
-      if (isNextRedirect(e)) {
-        authRequired = true;
-        notify();
-        return;
-      }
-      console.error("[fw/sync] drain action threw:", e);
-      return;
-    }
-
-    if (!res.ok) {
-      if (res.reason === "no_session") {
-        authRequired = true;
-        notify();
-        return;
-      }
-      // invalid_input: the WHOLE batch failed server-side validation. With the
-      // stricter isRecognizedFwEntry this should be unreachable for client-recognized
-      // entries, but if it ever happens, ADVANCE attempts so the batch reaches the
-      // auto-retry ceiling and surfaces as "still trying" — never a silent no-op that
-      // re-ships the identical failing batch forever with no guide-visible signal
-      // (api-contract review).
-      for (const entry of runnable) {
-        await putFwEntry({ ...entry, attempts: entry.attempts + 1, lastAttemptAt: nowIso() });
-      }
-      notify();
-      return;
-    }
-
-    // Look outcomes up in the batch we already hold, rather than re-reading each
-    // entry from IndexedDB (performance review), and apply the mutation the pure,
-    // exhaustive `applyFwDrainOutcome` decides — so a future disposition is a compile
-    // error, not a silent retry.
-    const byId = new Map(runnable.map((e) => [e.id, e]));
-    for (const outcome of res.outcomes) {
-      const entry = byId.get(outcome.entryId);
-      if (!entry) continue;
-      const mutation = applyFwDrainOutcome(entry, outcome, nowIso());
-      if (mutation.op === "delete") await deleteFwEntry(outcome.entryId);
-      else await putFwEntry(mutation.entry);
-    }
-    notify();
-  };
+  const run = () => drainFwQueueOnce(ctx, opts);
 
   if (typeof navigator !== "undefined" && "locks" in navigator && navigator.locks) {
     if (opts.wait) {
-      await navigator.locks.request("fw-offline-drain", run);
+      await withFwDrainLock(run);
     } else {
-      await navigator.locks.request("fw-offline-drain", { ifAvailable: true }, async (lock) => {
+      await navigator.locks.request(FW_DRAIN_LOCK, { ifAvailable: true }, async (lock) => {
         if (lock) await run();
       });
     }
     return;
   }
-  const turn = fallbackDrainChain.then(run);
-  fallbackDrainChain = turn.catch(() => {});
+  const turn = withFwDrainLock(run);
   if (opts.wait) await turn;
+  else void turn.catch(() => {});
 }
 
 /* ══════════════════════════════════════════════════════════ foreground signals ══ */
@@ -435,47 +435,47 @@ export async function readUsableFwRoster(cohortId: string): Promise<FwRosterCach
 /* ══════════════════════════════════════════════════ block-until-drained sign-out ══ */
 
 /**
- * The sign-out verdict for this device's queue (Decision 8).
+ * What this device shows of ever having run Founders Weekend — the gate that keeps
+ * `openFwDb()` (which CREATES the database) away from a browser that never needed it.
  *
- * Reads through the SERIALIZED path so an in-flight enqueue is observed (not raced
- * past — the adversarial P0). A read FAILURE returns `unreadable` and BLOCKS sign-out
- * rather than failing open: a queue we cannot read must never be destroyed on the
- * strength of not being able to see it (correctness / adversarial review — the old
- * fail-open path let a transient IndexedDB error wipe undrained captures). Quarantined
- * records block with `needs_attention` — un-landed captures a blind clear would lose.
+ * A `localStorage` read can THROW under a locked-down storage policy; that is carried
+ * out as `{kind:"unknown"}` rather than swallowed, so `hasFwDeviceEvidence` makes the
+ * fail-closed choice in one tested place. Deliberately NOT `indexedDB.databases()`:
+ * Safari does not implement it, and Safari is the shared iPad's browser.
  */
-export async function fwSignOutVerdict(actorUserId: string): Promise<FwSignOutVerdict> {
-  if (!isFwQueueSupported()) return { ok: true };
+function readFwDeviceEvidence(): FwDeviceEvidence {
   try {
-    const { recognized, quarantined } = partitionFwQueue(await listFwRawEntriesSerialized());
-    const drainable = selectFwDrainable(recognized, actorUserId).filter((e) => !e.blocked);
-    return decideFwSignOut({
-      queuedCount: drainable.length,
-      quarantinedCount: quarantined.length,
-      online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
-    });
-  } catch (e) {
-    console.error("[fw/sync] sign-out queue read failed:", e);
-    return { ok: false, reason: "unreadable", queuedCount: 0 };
+    const cacheOwner =
+      typeof window === "undefined" ? null : window.localStorage.getItem(FW_CACHE_OWNER_KEY);
+    return { kind: "read", cacheOwner, queueDbOpened: hasFwQueueDbOpened() };
+  } catch {
+    return { kind: "unknown" };
   }
 }
 
 /**
  * Clear ALL residue — the queue, the roster cache, AND the cached app shell — after
- * an allowed sign-out (Decision 8). Never an auto-purge: only the sign-out flow and
- * the identity reconcile call this.
+ * an allowed sign-out (Decision 8). Never an auto-purge: only the sign-out flow calls
+ * this.
  *
- * The queue clear is ATOMIC-if-empty: even after the verdict passed, a check-in can
- * be enqueued before the clear runs, and a blind wipe would lose it (adversarial P0).
- * `clearFwQueueIfEmpty` no-ops if a tap raced in; this returns `{ cleared }` so the
- * caller can ABORT sign-out rather than proceed having lost a tap. Clearing the SW
- * shell cache means a shared iPad keeps no authed roster HTML for the next guide.
+ * The queue clear is ATOMIC under `blocksClear`: even after the verdict passed, a
+ * check-in can be enqueued before the clear runs, and a blind wipe would lose it
+ * (adversarial P0). `clearFwQueueIfEmpty` no-ops if a blocking record raced in; this
+ * returns `{ cleared }` so the caller can ABORT sign-out rather than proceed having
+ * lost a tap. Clearing the SW shell cache means a shared iPad keeps no authed roster
+ * HTML for the next guide.
+ *
+ * `blocksClear` comes from the sequence that already took the verdict — see
+ * `clearFwQueueIfEmpty`'s docblock for why passing it in, rather than counting here,
+ * is the whole point.
  */
-export async function clearFwResidue(): Promise<{ cleared: boolean }> {
+export async function clearFwResidue(
+  blocksClear: (rawEntry: unknown) => boolean
+): Promise<{ cleared: boolean }> {
   let cleared = true;
   if (isFwQueueSupported()) {
     try {
-      cleared = (await clearFwQueueIfEmpty()).cleared;
+      cleared = (await clearFwQueueIfEmpty(blocksClear)).cleared;
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
       cleared = false;
@@ -502,6 +502,48 @@ export async function clearFwResidue(): Promise<{ cleared: boolean }> {
     }
   }
   return { cleared };
+}
+
+/**
+ * The whole block-until-drained sign-out for this device — evidence gate, verdict,
+ * one drain, re-verdict, atomic clear.
+ *
+ * All this does is bind browser seams to `runFwSignOutFlow`; the sequence, its
+ * ordering and every refusal live in the pure module, where a node-only runner can
+ * reach them. Two bindings are load-bearing and must not be "simplified":
+ *
+ *   - `drain` is `drainFwQueueOnce`, the LOCK-FREE inner drain — NOT
+ *     `runFwClientDrain`. The flow already holds `fw-offline-drain` via
+ *     `withDrainLock`, and Web Locks are not reentrant, so wiring the lock-taking
+ *     wrapper in here would hang sign-out forever rather than fail loudly.
+ *   - `clear` receives the predicate the flow derived from the SAME classification
+ *     its verdict used, so the emptiness test that destroys the queue and the verdict
+ *     authorising it can no longer disagree.
+ *
+ * A device with no FW residue at all (a CRM-only staff member) never opens IndexedDB
+ * and never takes the lock — the flow's evidence gate returns before either.
+ */
+export function runFwSignOut(actorUserId: string): Promise<FwSignOutOutcome> {
+  return runFwSignOutFlow({
+    actorUserId,
+    ports: {
+      readEvidence: readFwDeviceEvidence,
+      readQueue: async () => {
+        if (!isFwQueueSupported()) return [];
+        try {
+          return await listFwRawEntriesSerialized();
+        } catch (e) {
+          console.error("[fw/sync] sign-out queue read failed:", e);
+          throw e;
+        }
+      },
+      isOnline: () => (typeof navigator === "undefined" ? true : navigator.onLine !== false),
+      isAuthRequired: isFwAuthRequired,
+      drain: () => drainFwQueueOnce({ actorUserId }, { wait: true, includeStuck: true }),
+      clear: clearFwResidue,
+      withDrainLock: withFwDrainLock,
+    },
+  });
 }
 
 /**

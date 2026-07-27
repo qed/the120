@@ -454,44 +454,345 @@ export function applyFwDrainOutcome(
 
 /* ══════════════════════════════════════════ block-until-drained sign-out ══ */
 
-export type FwSignOutVerdict =
-  | { ok: true }
-  | {
-      ok: false;
-      /** `unreadable` is minted by the client wrapper on a queue-read failure, not
-       *  here — sign-out must never fail OPEN on an unread queue and then destroy it. */
-      reason: "queued_offline" | "drain_first" | "needs_attention" | "unreadable";
-      queuedCount: number;
-    };
+/**
+ * How the queue's raw records bear on sign-out — the SINGLE classification both the
+ * verdict and the destructive clear read.
+ *
+ * THE DEFECT THIS SHAPE EXISTS TO KILL: sign-out asks two questions — "may this
+ * device sign out?" and "may this queue be destroyed?" — and they are the same
+ * question asked of each record. They used to be answered by two hand-written
+ * predicates that disagreed: the verdict counted only `drainable`, while
+ * `clearFwQueueIfEmpty` used a bare `store.count()` that counted EVERYTHING. A
+ * device holding exactly one blocked or one foreign entry was therefore told
+ * sign-out was allowed and then told a check-in had raced in — permanently, with no
+ * surface to act on. Both sides now fold over THIS partition, so a future divergence
+ * is a compile-or-test failure rather than a wedged iPad at a live event.
+ *
+ * The five classes, and why each falls where it does:
+ *   - `drainable`        this guide's un-landed taps. Must be sent before sign-out.
+ *   - `ownBlocked`       this guide's taps with a server-recorded reject. The
+ *                        authoritative record is the `path_fw_replay_rejects` row;
+ *                        the local tombstone is only the note they have now read, so
+ *                        clearing it destroys nothing that is not already recorded.
+ *   - `quarantined`      a shape this build cannot drain. An UN-LANDED capture that a
+ *                        blind clear would lose — must be dismissed by a human first.
+ *   - `foreignUndrained` another account's un-landed work. REFUSES: no drain under
+ *                        this session can ship it (the drain scopes to the signed-in
+ *                        actor by design), so clearing it would silently destroy a
+ *                        different guide's captures.
+ *   - `foreignBlocked`   another account's already-rejected work — clearable for the
+ *                        same reason `ownBlocked` is, and it is not this guide's note
+ *                        to read anyway.
+ */
+export type FwSignOutQueueClassification = {
+  drainable: FwQueueEntry[];
+  ownBlocked: FwQueueEntry[];
+  quarantined: FwQuarantinedRecord[];
+  foreignUndrained: FwQueueEntry[];
+  foreignBlocked: FwQueueEntry[];
+};
+
+/**
+ * Partition a raw queue read for the sign-out decision. Reuses `partitionFwQueue`
+ * (recognition) and `selectFwDrainable` (the actor scope) rather than re-deriving
+ * either — a second recognition model is the bug this module's header warns about.
+ */
+export function classifyFwSignOutQueue(
+  raw: readonly unknown[],
+  actorUserId: string
+): FwSignOutQueueClassification {
+  const { recognized, quarantined } = partitionFwQueue(raw);
+  const own = selectFwDrainable(recognized, actorUserId);
+  const foreign = recognized.filter((e) => e.actorUserId !== actorUserId);
+  return {
+    drainable: own.filter((e) => e.blocked === null),
+    ownBlocked: own.filter((e) => e.blocked !== null),
+    quarantined,
+    foreignUndrained: foreign.filter((e) => e.blocked === null),
+    foreignBlocked: foreign.filter((e) => e.blocked !== null),
+  };
+}
+
+/**
+ * How many records stand between this device and an allowed, destructive clear —
+ * the ONE definition of "the queue is not empty enough to wipe."
+ */
+export function countFwSignOutBlockers(queue: FwSignOutQueueClassification): number {
+  return queue.drainable.length + queue.quarantined.length + queue.foreignUndrained.length;
+}
+
+/**
+ * Whether ONE raw record forbids the queue being cleared — the predicate
+ * `clearFwQueueIfEmpty` counts with, inside its own transaction.
+ *
+ * Deliberately expressed as `countFwSignOutBlockers(classifyFwSignOutQueue([raw]))`
+ * rather than as a hand-written test of the same conditions: the check and the act
+ * then agree BY CONSTRUCTION, because they are literally the same two functions. The
+ * clear may not simply re-use the verdict's count — a tap can be enqueued in the
+ * window between them, which is why the count is re-taken inside the transaction —
+ * but it must re-take it with the same rule.
+ */
+export function fwEntryBlocksSignOutClear(raw: unknown, actorUserId: string): boolean {
+  return countFwSignOutBlockers(classifyFwSignOutQueue([raw], actorUserId)) > 0;
+}
+
+/** A refused sign-out, split out so the copy switch can be exhaustive over the
+ *  reasons alone (a missed case is TS2366, not a blank message at a live event). */
+export type FwSignOutRefusal = {
+  ok: false;
+  reason:
+    /** Queued own captures, no network — the device stays with its guide. */
+    | "queued_offline"
+    /** Queued own captures, online — the caller drains and re-checks. */
+    | "drain_first"
+    /** A drain already ran and the queue did not move (captive portal / dead uplink). */
+    | "drain_stalled"
+    /** The session expired before the queue could be sent — re-auth, don't retry. */
+    | "session_expired"
+    /** Another account's un-landed work is on this device. */
+    | "foreign_queue"
+    /** Quarantined records a human must dismiss. */
+    | "needs_attention"
+    /** Minted by the caller on a queue-read failure — sign-out must never fail OPEN
+     *  on an unread queue and then destroy it. */
+    | "unreadable";
+  queuedCount: number;
+};
+
+export type FwSignOutVerdict = { ok: true } | FwSignOutRefusal;
 
 /**
  * The sign-out verdict (Decision 8 / gap G1).
  *
  * A shared guide iPad rotates operators, so its queue must never be abandoned:
  * signing out with queued items OFFLINE is refused with a count (no drain is
- * possible, and no new sign-in is possible either — the accepted, stated
- * consequence is that the device stays with its guide until reconnect). ONLINE,
- * the queue CAN drain, so sign-out asks to drain first; the caller runs a drain
- * and re-checks. QUARANTINED entries (a shape this app version can't drain) block
- * with `needs_attention` — they are un-landed captures that a blind clear would
- * destroy, so the guide must dismiss them first (never a silent drop). Only a queue
- * with nothing drainable AND nothing quarantined allows sign-out — at which point
- * the caller clears the queue, the roster cache, and the shell cache.
+ * possible, and no new sign-in is possible either — the accepted, stated consequence
+ * is that the device stays with its guide until reconnect). ONLINE, the queue CAN
+ * drain, so sign-out asks to drain first; the caller runs a drain and re-checks.
+ * QUARANTINED entries (a shape this app version can't drain) block with
+ * `needs_attention` — un-landed captures a blind clear would destroy, so the guide
+ * must dismiss them first (never a silent drop). Only a queue with NOTHING blocking
+ * allows sign-out — at which point the caller clears the queue, the roster cache,
+ * and the shell cache.
+ *
+ * REFUSAL PRECEDENCE — every refusal must name something the guide can actually do
+ * from the surface they are standing on, so the order is "what is true first":
+ *   1. foreign undrained — no drain, no reconnect and no re-auth by THIS guide can
+ *      resolve it, so naming anything else sends them round a loop that cannot close.
+ *   2. offline — dominates an expired session, because re-authenticating is itself
+ *      impossible offline.
+ *   3. expired session — a drain returning `no_session` used to leave the verdict at
+ *      `drain_first` forever while the copy claimed the captures were "still sending."
+ *   4. drained-and-unchanged — `navigator.onLine` is TRUE behind a venue captive
+ *      portal, so repeating `drain_first` is an infinite "try again in a moment."
+ *   5. quarantined-only — last, because a drain clears the drainable ones first.
  */
 export function decideFwSignOut(input: {
-  queuedCount: number;
-  quarantinedCount?: number;
+  queue: FwSignOutQueueClassification;
   online: boolean;
+  /** The client's `isFwAuthRequired()` — the last drain hit a truly-expired session. */
+  authRequired?: boolean;
+  /** True on the RE-check, after the caller has already run one waited drain. */
+  drainAttempted?: boolean;
 }): FwSignOutVerdict {
-  const quarantined = input.quarantinedCount ?? 0;
-  if (input.queuedCount === 0 && quarantined === 0) return { ok: true };
-  if (input.queuedCount > 0) {
-    return input.online
-      ? { ok: false, reason: "drain_first", queuedCount: input.queuedCount }
-      : { ok: false, reason: "queued_offline", queuedCount: input.queuedCount };
+  const { queue } = input;
+  if (countFwSignOutBlockers(queue) === 0) return { ok: true };
+
+  if (queue.foreignUndrained.length > 0) {
+    return { ok: false, reason: "foreign_queue", queuedCount: queue.foreignUndrained.length };
   }
-  // Only quarantined entries remain — dismissible, but never silently wiped.
-  return { ok: false, reason: "needs_attention", queuedCount: quarantined };
+
+  const queuedCount = queue.drainable.length;
+  if (queuedCount > 0) {
+    if (!input.online) return { ok: false, reason: "queued_offline", queuedCount };
+    if (input.authRequired) return { ok: false, reason: "session_expired", queuedCount };
+    return input.drainAttempted
+      ? { ok: false, reason: "drain_stalled", queuedCount }
+      : { ok: false, reason: "drain_first", queuedCount };
+  }
+
+  // Only quarantined records remain — dismissible, but never silently wiped.
+  return { ok: false, reason: "needs_attention", queuedCount: queue.quarantined.length };
+}
+
+/* ═══════════════════════════════════════════════ the device-evidence gate ══ */
+
+/**
+ * What this device shows of ever having run Founders Weekend.
+ *
+ * `unknown` is NOT a third state of the world — it is the read itself having thrown
+ * (Safari's storage policy can reject `localStorage` outright). It is carried as data
+ * so the fail-closed choice is made in one tested place rather than in a `catch`.
+ */
+export type FwDeviceEvidence =
+  | {
+      kind: "read";
+      /** The `fw.cacheOwner` localStorage key, written on every FW mount. */
+      cacheOwner: string | null;
+      /** Whether THIS document has ever opened the queue database. */
+      queueDbOpened: boolean;
+    }
+  | { kind: "unknown" };
+
+/**
+ * Should sign-out look at the FW queue at all?
+ *
+ * `openFwDb()` CREATES the queue database as a side effect of asking whether it is
+ * empty. On the browser of a staff member who has never opened Founders Weekend that
+ * is pure harm: if the open rejects (Safari storage policy, a locked-down profile,
+ * `onblocked` behind another tab) the verdict is `unreadable` and their sign-out is
+ * blocked permanently on a queue that never existed. Neither signal is checked with
+ * `indexedDB.databases()` — Safari does not implement it, and Safari is the shared
+ * iPad's browser.
+ *
+ * Fails CLOSED on `unknown`: "I could not look" must never be read as "there is
+ * nothing here," because the act it authorises is destructive.
+ */
+export function hasFwDeviceEvidence(evidence: FwDeviceEvidence): boolean {
+  if (evidence.kind === "unknown") return true;
+  return evidence.cacheOwner !== null || evidence.queueDbOpened;
+}
+
+/* ═══════════════════════════════════════════════ the sign-out sequence ══ */
+
+/**
+ * The browser seams the sign-out sequence needs — every one of them an IndexedDB,
+ * `navigator` or Web Locks call that cannot exist under a node-only test runner. The
+ * sequence itself stays pure and lives here, because it IS the composition the live
+ * defect lived in; written inline in the button it would be invisible to CI.
+ */
+export type FwSignOutPorts = {
+  /** Evidence this device ever ran FW. Read BEFORE anything touches IndexedDB. */
+  readEvidence: () => FwDeviceEvidence;
+  /** Raw queue records, read behind any pending write. May reject — see `unreadable`. */
+  readQueue: () => Promise<readonly unknown[]>;
+  isOnline: () => boolean;
+  isAuthRequired: () => boolean;
+  /**
+   * ONE drain pass, LOCK-FREE — the sequence already holds `fw-offline-drain` and
+   * Web Locks are not reentrant, so a drain that re-acquired it would hang forever.
+   */
+  drain: () => Promise<void>;
+  /**
+   * Atomic check-and-clear under the predicate this sequence supplies. Re-counts
+   * inside its own transaction (a tap can land in the gap) but with the SAME rule the
+   * verdict used.
+   */
+  clear: (blocksClear: (raw: unknown) => boolean) => Promise<{ cleared: boolean }>;
+  /**
+   * Acquire the single-drainer lock and run `fn` under it. Held across
+   * verdict → drain → re-verdict → clear, so a background drain in another tab cannot
+   * land a tap between the check and the act. Acquired at EXACTLY this one level.
+   */
+  withDrainLock: <T>(fn: () => Promise<T>) => Promise<T>;
+};
+
+export type FwSignOutOutcome =
+  /** Nothing is left to lose — the caller may end the session. */
+  | { kind: "sign_out" }
+  | { kind: "refused"; verdict: FwSignOutRefusal }
+  /** A capture landed between the verdict and the clear, so the clear no-opped —
+   *  abort rather than sign out having lost it. */
+  | { kind: "raced" };
+
+async function fwVerdictNow(
+  ports: FwSignOutPorts,
+  actorUserId: string,
+  drainAttempted: boolean
+): Promise<FwSignOutVerdict> {
+  let raw: readonly unknown[];
+  try {
+    raw = await ports.readQueue();
+  } catch {
+    // Fail CLOSED: a queue we cannot read must never be destroyed on the strength of
+    // not being able to see it (the old fail-open path let a transient IndexedDB error
+    // wipe undrained captures).
+    return { ok: false, reason: "unreadable", queuedCount: 0 };
+  }
+  return decideFwSignOut({
+    queue: classifyFwSignOutQueue(raw, actorUserId),
+    online: ports.isOnline(),
+    authRequired: ports.isAuthRequired(),
+    drainAttempted,
+  });
+}
+
+/**
+ * The whole block-until-drained sign-out: evidence gate → verdict → (drain →
+ * re-verdict) → atomic clear.
+ *
+ * The evidence gate runs OUTSIDE the lock and before any IndexedDB call, so a staff
+ * member who has never run Founders Weekend pays nothing and creates nothing. The
+ * rest runs under ONE acquisition of `fw-offline-drain`: the verdict and the clear
+ * must observe the same queue, and the drain between them is the reason the lock
+ * exists at all. At most ONE drain is attempted — a second would be the same spin the
+ * `drain_stalled` refusal exists to break.
+ */
+export async function runFwSignOutFlow(input: {
+  actorUserId: string;
+  ports: FwSignOutPorts;
+}): Promise<FwSignOutOutcome> {
+  const { actorUserId, ports } = input;
+  if (!hasFwDeviceEvidence(ports.readEvidence())) return { kind: "sign_out" };
+
+  return ports.withDrainLock(async () => {
+    let verdict = await fwVerdictNow(ports, actorUserId, false);
+    if (!verdict.ok && verdict.reason === "drain_first") {
+      await ports.drain();
+      verdict = await fwVerdictNow(ports, actorUserId, true);
+    }
+    if (!verdict.ok) return { kind: "refused", verdict };
+
+    const { cleared } = await ports.clear((raw) => fwEntryBlocksSignOutClear(raw, actorUserId));
+    return cleared ? { kind: "sign_out" } : { kind: "raced" };
+  });
+}
+
+/* ═══════════════════════════════════════════════════ sign-out copy ══ */
+
+/**
+ * The guide-facing sentence for one refusal. Extracted from the button and pure, for
+ * two reasons: this repo runs node-only tests, so copy written inline in a `.tsx` is
+ * untested; and the `default`-less switch makes a new refusal reason a COMPILE error
+ * (TS2366 — not all code paths return a value) rather than a blank message on a
+ * shared iPad at a live event.
+ *
+ * Every branch names an action available on the surface the guide is standing on.
+ */
+export function fwSignOutRefusalCopy(reason: FwSignOutRefusal["reason"], count: number): string {
+  const s = count === 1 ? "" : "s";
+  const them = count === 1 ? "it" : "them";
+  switch (reason) {
+    case "queued_offline":
+      return `${count} check-in${s} haven't sent yet. Stay signed in until you're back online — they'll send automatically.`;
+    case "drain_first":
+      return `${count} check-in${s} are still sending. Try again in a moment.`;
+    case "drain_stalled":
+      // NOT "try again in a moment" — behind a venue captive portal `onLine` is true
+      // and that sentence is an infinite loop. Name the thing that is actually wrong.
+      return `${count} check-in${s} couldn't be sent. This device looks connected but can't reach The 120 — open the wi-fi sign-in page, or stay signed in until the network is back.`;
+    case "session_expired":
+      return `Your session expired before ${count} check-in${s} could send. Sign in again to send ${them}, then sign out.`;
+    case "foreign_queue":
+      return `${count} check-in${s} on this device belong to another account and haven't sent. That guide needs to sign in here and let ${them} send before this device can be signed out.`;
+    case "needs_attention":
+      return `${count} saved check-in${s} couldn't be read by this app version. Dismiss ${them} in the banner, then sign out.`;
+    case "unreadable":
+      return "Couldn't check your saved check-ins just now. Try again in a moment.";
+  }
+}
+
+/** The message for a whole sequence outcome, or `null` when the session may end.
+ *  `default`-less for the same TS2366 reason as `fwSignOutRefusalCopy`. */
+export function fwSignOutOutcomeCopy(outcome: FwSignOutOutcome): string | null {
+  switch (outcome.kind) {
+    case "sign_out":
+      return null;
+    case "raced":
+      return "A check-in just came in — try signing out again in a moment.";
+    case "refused":
+      return fwSignOutRefusalCopy(outcome.verdict.reason, outcome.verdict.queuedCount);
+  }
 }
 
 /* ═══════════════════════════════════════════════════ roster cache (Decision 15) ══ */
@@ -582,6 +883,58 @@ function isRecognizedFwBlocked(b: unknown): boolean {
   if (typeof b !== "object") return false;
   const rec = b as Record<string, unknown>;
   return typeof rec.reason === "string" && typeof rec.note === "string";
+}
+
+/** A note for a record this app version cannot drain (future schema / corrupt) —
+ *  surfaced, dismissible, never silently dropped. */
+export const FW_QUARANTINE_NOTE =
+  "This saved check-in is from a different app version and can't be sent. Dismiss it, or update the app and sign in again.";
+
+/** One quarantined record — a shape this app version cannot drain, surfaced by id
+ *  and note so it can be shown and dismissed. Deliberately NOT a `FwQueueEntry`. */
+export type FwQuarantinedRecord = { id: string; note: string };
+
+/**
+ * Partition a raw IndexedDB read into drainable entries and quarantined records.
+ *
+ * A record that fails `isRecognizedFwEntry` (a future schema, a corrupt shape) is
+ * NOT cast into a `FwQueueEntry` it does not satisfy — an earlier version wrote
+ * `{...record, blocked} as FwQueueEntry`, but adding `blocked` never fixed what made
+ * it unrecognized, so it failed recognition again on every later read and vanished
+ * from every view (kieran-typescript / reliability / api-contract review: it could
+ * then be silently destroyed by sign-out). Instead it is surfaced directly from the
+ * raw record by its id, with its own note, on every scan — no write, no lying cast,
+ * never a silent drop of a child's captured check-in.
+ *
+ * PURE, and here rather than in the client wrapper, because the sign-out
+ * classification is built on it and every sign-out decision must be testable under a
+ * node-only runner. A record with no usable `id` is neither surfaced nor counted:
+ * there is nothing to show the guide and nothing dismissible, so pretending it is
+ * actionable would wedge sign-out on a record no surface can name.
+ */
+export function partitionFwQueue(raw: readonly unknown[]): {
+  recognized: FwQueueEntry[];
+  quarantined: FwQuarantinedRecord[];
+} {
+  const recognized: FwQueueEntry[] = [];
+  const quarantined: FwQuarantinedRecord[] = [];
+  for (const record of raw) {
+    if (isRecognizedFwEntry(record)) {
+      recognized.push(record);
+      continue;
+    }
+    const shell = record as { id?: unknown; blocked?: unknown };
+    if (typeof shell.id === "string") {
+      const note =
+        typeof shell.blocked === "object" &&
+        shell.blocked !== null &&
+        typeof (shell.blocked as { note?: unknown }).note === "string"
+          ? (shell.blocked as { note: string }).note
+          : FW_QUARANTINE_NOTE;
+      quarantined.push({ id: shell.id, note });
+    }
+  }
+  return { recognized, quarantined };
 }
 
 /* ═══════════════════════════════════════════════ grouping, ordering, scope ══ */

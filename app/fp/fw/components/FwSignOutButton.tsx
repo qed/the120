@@ -2,11 +2,8 @@
 
 import { useState } from "react";
 import { signOutFwGuide } from "@/app/fp/lib/actions/fw-guide";
-import {
-  clearFwResidue,
-  fwSignOutVerdict,
-  runFwClientDrain,
-} from "@/app/fp/lib/fw-sync-client";
+import { runFwSignOut } from "@/app/fp/lib/fw-sync-client";
+import { fwSignOutOutcomeCopy } from "@/app/fp/lib/fw-sync-rules";
 
 /**
  * Block-until-drained sign-out (FW Unit 8; Decision 8 / gap G1).
@@ -14,54 +11,35 @@ import {
  * A shared guide iPad rotates operators, so its queue must never be abandoned on
  * sign-out — the deliberate DIVERGENCE from the Path queue's keep-on-sign-out
  * posture. This wraps the server `signOutFwGuide` action with the client-side
- * verdict, because the queue lives in IndexedDB (client), not the session (server):
+ * sequence, because the queue lives in IndexedDB (client), not the session (server).
  *
- *   - empty queue → clear BOTH stores (queue + roster cache) and sign out;
- *   - queued ONLINE → drain first, then re-check and sign out if it cleared;
- *   - queued OFFLINE → refused with a count (no drain is possible, and — the stated
- *     consequence — no new sign-in is possible either, so the device stays with its
- *     guide until reconnect).
+ * DELIBERATELY THIN. The sequence (evidence gate → verdict → one drain → re-verdict →
+ * atomic clear), the refusal precedence and every sentence below live in
+ * `fw-sync-rules.ts`: this repo's tests are node-only, so a decision written in a
+ * `.tsx` is a decision CI cannot see — and the defect this replaces was exactly two
+ * such decisions disagreeing. The button's whole job is to run the sequence, show
+ * what it says, and only end the session on `sign_out`.
+ *
+ * NOTE for whoever mounts this elsewhere (the plan's staff nav bar): `needs_attention`
+ * tells the guide to dismiss records "in the banner", and that banner is rendered by
+ * `FwPwa` on `/fp/fw` only. Every OTHER refusal is now actionable from anywhere, but
+ * that one still assumes the FW shell is on screen.
  */
 export function FwSignOutButton({ actorUserId }: { actorUserId: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  const messageFor = (reason: "queued_offline" | "drain_first" | "needs_attention" | "unreadable", count: number) => {
-    switch (reason) {
-      case "queued_offline":
-        return `${count} check-in${count === 1 ? "" : "s"} haven't sent yet. Stay signed in until you're back online — they'll send automatically.`;
-      case "drain_first":
-        return `${count} check-in${count === 1 ? "" : "s"} are still sending. Try again in a moment.`;
-      case "needs_attention":
-        return `${count} saved check-in${count === 1 ? "" : "s"} couldn't be read by this app version. Dismiss ${count === 1 ? "it" : "them"} in the banner, then sign out.`;
-      case "unreadable":
-        return "Couldn't check your saved check-ins just now. Try again in a moment.";
-    }
-  };
 
   const onClick = async () => {
     if (busy) return;
     setBusy(true);
     setMessage(null);
     try {
-      let verdict = await fwSignOutVerdict(actorUserId);
-      if (!verdict.ok && verdict.reason === "drain_first") {
-        // Online with queued items — drain, then re-check.
-        await runFwClientDrain({ actorUserId }, { wait: true, includeStuck: true });
-        verdict = await fwSignOutVerdict(actorUserId);
-      }
-      if (verdict.ok) {
-        // The clear is ATOMIC-if-empty: if a check-in raced in after the verdict, it
-        // no-ops and reports cleared:false — abort rather than sign out having lost it.
-        const { cleared } = await clearFwResidue();
-        if (!cleared) {
-          setMessage("A check-in just came in — try signing out again in a moment.");
-          return;
-        }
+      const outcome = await runFwSignOut(actorUserId);
+      if (outcome.kind === "sign_out") {
         await signOutFwGuide(); // redirects
         return;
       }
-      setMessage(messageFor(verdict.reason, verdict.queuedCount));
+      setMessage(fwSignOutOutcomeCopy(outcome));
     } catch (e) {
       console.error("[fw/pwa] sign-out flow failed:", e);
       setMessage("Couldn't sign out just now. Try again.");

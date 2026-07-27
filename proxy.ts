@@ -9,7 +9,8 @@ import {
 } from "@/app/lib/supabase/proxy-rules";
 
 /**
- * Gate for /crm (staff) and /fp (First Profit) — Next 16's `proxy.ts` convention
+ * Gate for /crm (staff), /fp (First Profit) and /staff (the staff hub) —
+ * Next 16's `proxy.ts` convention
  * (the renamed middleware file; Node.js runtime, not configurable).
  *
  * Deliberately cheap: a JWT-only check from the session cookie. The
@@ -92,5 +93,13 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Must be statically analyzable — a literal array, never a computed value.
-  matcher: ["/crm/:path*", "/fp/:path*"],
+  // Next's docs are explicit: "matcher values need to be constants so they can
+  // be statically analyzed at build-time. Dynamic values such as variables
+  // will be IGNORED" — silently, which would unguard whatever it covered.
+  //
+  // `:path*` is zero-or-more, so each entry covers its bare route and
+  // everything below it, and none of them covers a prefix neighbour
+  // (/staffing, /fpology). Both halves are asserted against Next's real
+  // router in proxy-rules.test.ts.
+  matcher: ["/crm/:path*", "/fp/:path*", "/staff/:path*"],
 };

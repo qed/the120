@@ -808,3 +808,43 @@ describe("runFwCheckIn — the anonymize write-path guard (Unit 5b)", () => {
     expect(rpcCalls).toHaveLength(0);
   });
 });
+
+describe("Unit 8 invariant — a guide checks in to an archived cohort and the event LANDS", () => {
+  it("pinned structurally: nothing on the check-in path can read archived_at", () => {
+    // The plan's Scope Boundary, as a property rather than a promise: archiving
+    // must not block guide check-in, and the mechanism is that the check-in core
+    // CANNOT see archive state — this harness does not even model path_cohorts,
+    // because runFwCheckIn never reads it (authz resolves upstream, and archive
+    // state is deliberately not part of the actor verdict). The offline drain
+    // replay inherits this same property (it lands through runFwCheckIn).
+    // Comment-stripped, per the scan discipline.
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    // WIDENED to the shared authz gate (testing review, 0.85): the single most
+    // natural place a future edit would thread archive state into check-in is
+    // `loadFwCohort`'s select plus a branch in `resolveFwActorForCohort` — the row
+    // is already in hand there, and both check-in and quick-create flow through it.
+    // The write-path files alone left that door unscanned.
+    for (const rel of [
+      "../fw-checkin-core.ts",
+      "../fw-sync-engine.ts",
+      "../fw-auth.ts",
+      "../fw-guide-core.ts",
+    ]) {
+      const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      if (rel === "../fw-guide-core.ts") {
+        // fw-guide-core legitimately gates PROVISIONING on archive state (Unit 8's
+        // guard table: new check-in power refuses). What must stay clean is the
+        // AUTHZ LOADER both check-in and quick-create ride: `loadFwCohort`'s select
+        // list, pinned by value.
+        const sel = /from\("path_cohorts"\)\s*\.select\("([^"]+)"\)/.exec(code);
+        expect(sel, "loadFwCohort select not found").not.toBeNull();
+        expect(sel?.[1]).toBe("id, kind, slug");
+        continue;
+      }
+      expect(code, rel).not.toContain("archived_at");
+      expect(code, rel).not.toContain("archivedAt");
+    }
+  });
+});
+

@@ -267,6 +267,30 @@ of its calls bare and both of its states terminal. `fw-auth.ts`'s own docblock n
 it as the sibling. Whoever bounds it must bring this shape along, or they will have
 built the worse-than-the-hang version.
 
+### 7. Fail-closed can OVER-close: a blip on a fact just proven is not an unknown (Unit 8, 2026-07-27)
+
+The inverse failure of the collapse this doc opens with. Unit 8's first draft made
+the board page's shell loader fail closed on ANY cohort-read error, so a retired
+weekend could not hide behind a blip — and in doing so it 404'd a healthy LIVE
+board whenever the same row blipped, on the surface whose whole design brief is
+"never blank a projector at an event". The review's settlement is the rule:
+
+**Before failing closed on a read error, ask what the caller already proved.** The
+page reaches the shell only after `resolveFwBoardToken` succeeded — and THAT
+function read the same cohort row, through the same fence, milliseconds earlier. An
+error on the re-read is a blip on a fact just proven, and the safe degrade is
+correct; what refuses is a read that ANSWERED (an archived row, or no row). The
+same review round fixed the same collapse in the import gate the other way — a
+blip there had been reported as "the cohort is gone", a terminal claim from a
+non-answer — landing both on the same three-way shape this doc's items 1 and 6
+describe: answered-yes, answered-no, could-not-tell, each with its own consequence.
+
+Corollary from the same unit: **an accepted side-channel is a decision to write
+down.** The archived fence gives a once-real token a second read before its 404 —
+a timing difference an attacker could measure. Closing it costs every garbage probe
+a dummy read to hide a fact of no exploitable value; the docblock now says so,
+which is what separates a trade-off from an oversight.
+
 ## Why This Matters
 
 A drain that writes into an append-only log has no undo. Every one of these was a

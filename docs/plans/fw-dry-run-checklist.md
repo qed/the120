@@ -192,6 +192,14 @@ will read on a real screen.
       - **This is a log line, not a table** — a table needs a migration and Lane A does
         not hold the migration lock. Confirm the line is there and legible; the
         persistent store is Unit 6's.
+- [ ] **The archived board CLEARS the projector frame** (Unit 8 — the client half no
+      test can reach). With a board polling on a projector, set the cohort's
+      `archived_at` directly in SQL — deliberately WITHOUT revoking the token (the
+      read-property case). Within one poll interval (~4s) the feed must return 404
+      and the client must CLEAR the grid — no names left on screen, no
+      "catching up" chip holding the last frame. If names persist, the client's
+      404 handling regressed; that is the exact failure the fence's placement in
+      `resolveFwBoardToken` exists to prevent.
 - [ ] **Version skew.** The one that needs two people. Leave the iPad open on `/fp/fw`.
       **Deploy.** Then, on the still-open iPad, tap sign out.
       - Expect a clean **reload**, then a normal sign-out.

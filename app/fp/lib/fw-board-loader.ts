@@ -96,7 +96,49 @@ export async function resolveFwBoardToken(
     },
     now: nowMs,
   });
-  return verdict.ok ? { ok: true, cohortId: row.cohort_id } : { ok: false };
+  if (!verdict.ok) return { ok: false };
+
+  // THE ARCHIVED FENCE LIVES HERE, NOT IN `loadFwBoard` (Unit 8, R25 — the plan's
+  // settled placement, and the cost is stated rather than hidden). Placement is
+  // SEMANTICS: this function's refusal becomes the caller's bare 404, which is the
+  // one signal that makes the projector CLEAR its frame. A refusal from
+  // `loadFwBoard` renders as "couldn't load" — the poller HOLDS its last frame, and
+  // an archived cohort's projector would keep children's names on screen
+  // indefinitely under a "catching up" chip: the exact opposite of the requirement.
+  //
+  // The COST: one `path_cohorts` read added to every four-second poll per live
+  // board. Accepted in planning (the origin's "costs no round trip" claim was
+  // recorded as wrong). Fail-closed BOTH ways: an unreadable cohort row refuses —
+  // a door nobody authenticates must never fall open to "we couldn't check".
+  //
+  // A KNOWN, ACCEPTED SIDE-CHANNEL rides this (correctness review, 0.6): a
+  // once-live token on an archived cohort refuses after TWO reads where a garbage
+  // token refuses after one — a timing difference, though the response is the
+  // identical bare 404. What it could confirm to a timing-capable attacker is "this
+  // guessed token was once real", for a cohort whose board is dark and whose data
+  // this path will never serve. Closing it would mean an unconditional dummy second
+  // read on every garbage probe — paying a real per-poll cost to hide a fact of no
+  // exploitable value. Recorded so the trade-off is a decision, not an oversight.
+  //
+  // This is also the SECOND fence behind Unit 7's mint guard: even if a live token
+  // exists on an archived cohort (the pre-guard world, or a manual SQL archive that
+  // skipped the revoke), the READ refuses. The test for that state sets archived_at
+  // directly without revoking — the read-property, not the side-effect.
+  const cohortRes = await fwRead(
+    () =>
+      db
+        .from("path_cohorts")
+        .select("archived_at")
+        .eq("id", row.cohort_id)
+        .maybeSingle(),
+    `board token cohort gate (${row.cohort_id})`
+  );
+  if (cohortRes.error) return { ok: false };
+  const cohortRow = cohortRes.data as Record<string, unknown> | null;
+  if (!cohortRow) return { ok: false };
+  if (typeof cohortRow.archived_at === "string") return { ok: false };
+
+  return { ok: true, cohortId: row.cohort_id };
 }
 
 /** The board's decision states — the only progress rows the grid draws a cell
@@ -339,17 +381,31 @@ export async function loadFwBoard(
 export async function loadFwBoardShell(
   db: SupabaseClient,
   input: { cohortId: string }
-): Promise<FwBoardShell> {
-  // `slug` only — the shell carries no student data, so it skips `loadFwBoard`'s
-  // defense-in-depth `kind` re-check: the token already validated the cohort, and
-  // a wrong-kind cohort would render nothing sensitive here regardless.
+): Promise<FwBoardShell | null> {
+  // `slug` plus `archived_at` (Unit 8): the shell is DEFENCE IN DEPTH behind
+  // `resolveFwBoardToken`'s own archived fence — the page calls resolve first, so
+  // in the ordinary flow an archived cohort never reaches here. It is gated anyway
+  // because the two calls are separate reads with a window between them, and a
+  // titled shell for a retired weekend is exactly the half-open door the plan says
+  // the page must not paint. `null` → the page's notFound(), same as a bad token.
   const cohortRes = await fwRead(
-    () => db.from("path_cohorts").select("slug").eq("id", input.cohortId).maybeSingle(),
+    () =>
+      db.from("path_cohorts").select("slug, archived_at").eq("id", input.cohortId).maybeSingle(),
     `board shell cohort (${input.cohortId})`
   );
   const cohortRow = cohortRes.data as Record<string, unknown> | null;
-  const cohortSlug =
-    cohortRow && typeof cohortRow.slug === "string" ? cohortRow.slug : input.cohortId;
+  // A read ERROR degrades (the pre-Unit-8 contract, restored by its review): the
+  // page only reaches this function AFTER `resolveFwBoardToken` succeeded, and THAT
+  // read — of this same row, milliseconds earlier — is the archived fence. A blip
+  // here is therefore a blip on a cohort just proven active, and 404ing a healthy
+  // live board over it is over-closed (correctness review, 0.65). What refuses is a
+  // READ THAT ANSWERED: a row that is archived, or no row at all.
+  if (cohortRes.error) {
+    return { cohortSlug: input.cohortId, columns: [] };
+  }
+  if (!cohortRow) return null;
+  if (typeof cohortRow.archived_at === "string") return null;
+  const cohortSlug = typeof cohortRow.slug === "string" ? cohortRow.slug : input.cohortId;
 
   // One member → one profile → the pinned program version → the columns. Two
   // small reads keep the shell fast; the full member/progress/event scan is the

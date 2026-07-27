@@ -342,11 +342,20 @@ const kinds = (outcomes: FwImportOutcome[]) => outcomes.map((o) => o.kind);
 
 /* ══════════════════════════════════════════════════════════════ happy path ══ */
 
+
+/** Unit 8 widened the chunk result with a chunk-level refusal; these tests exercise
+ *  the per-row path, so the helper narrows and fails LOUDLY on an unexpected
+ *  refusal rather than casting past the union. */
+function outcomesOf(res: Awaited<ReturnType<typeof runFwImportChunk>>) {
+  if ("refused" in res) throw new Error(`chunk unexpectedly refused: ${res.refused}`);
+  return res.outcomes;
+}
+
 describe("runFwImportChunk — the happy path", () => {
   it("mints a fresh roster: account + membership + 125 locked rows each, zero events", async () => {
     const { db, tables, authUsers } = makeFakeDb({});
     const rows = [row(2, "Maya", "Chen", "g6_8"), row(3, "José", "García", "g9_12"), row(4, "Sean", "O'Brien", "g3_5")];
-    const { outcomes } = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
+    const outcomes = outcomesOf(await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows }));
 
     expect(kinds(outcomes)).toEqual(["minted", "minted", "minted"]);
     expect(authUsers).toHaveLength(3);
@@ -364,8 +373,10 @@ describe("runFwImportChunk — the happy path", () => {
     const afterFirst = authUsers.length;
     const createUsersAfterFirst = calls.createUser;
 
-    const second = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
-    expect(kinds(second.outcomes)).toEqual(["skipped_existing", "skipped_existing"]);
+    const second = outcomesOf(
+      await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows })
+    );
+    expect(kinds(second)).toEqual(["skipped_existing", "skipped_existing"]);
     expect(authUsers).toHaveLength(afterFirst); // ZERO new accounts
     expect(calls.createUser).toBe(createUsersAfterFirst); // createUser never called again
     expect(tables.path_cohort_members.filter((m) => m.cohort_id === BOSTON)).toHaveLength(2);
@@ -377,7 +388,7 @@ describe("runFwImportChunk — the happy path", () => {
     // the second Maya matches the first (just minted) and skips.
     const { db, authUsers } = makeFakeDb({});
     const rows = [row(2, "Maya", "Chen", "g6_8"), row(3, "Maya", "Chen", "g6_8")];
-    const { outcomes } = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
+    const outcomes = outcomesOf(await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows }));
     expect(kinds(outcomes)).toEqual(["minted", "skipped_existing"]);
     expect(authUsers).toHaveLength(1);
   });
@@ -394,11 +405,11 @@ describe("runFwImportChunk — the returner links, never re-provisions", () => {
       progress: rae.progress,
       authUsers: [rae.authUser],
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Rae", "Kim", "g9_12")],
-    });
+    }));
 
     expect(kinds(outcomes)).toEqual(["linked"]);
     expect(outcomes[0].profileId).toBe("p-rae");
@@ -422,11 +433,11 @@ describe("runFwImportChunk — ambiguous rows park, nothing minted", () => {
       progress: [...a.progress, ...b.progress],
       authUsers: [a.authUser, b.authUser],
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Alex", "Kim", "g6_8")],
-    });
+    }));
 
     expect(kinds(outcomes)).toEqual(["exception"]);
     expect(authUsers).toHaveLength(2); // nothing minted
@@ -446,9 +457,11 @@ describe("runFwImportChunk — ambiguous rows park, nothing minted", () => {
     });
     const rows = [row(2, "Alex", "Kim", "g6_8")];
     await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
-    const second = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
+    const second = outcomesOf(
+      await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows })
+    );
     // The pending exception now surfaces via loadFwMatchCandidates → skip.
-    expect(kinds(second.outcomes)).toEqual(["skipped_pending_exception"]);
+    expect(kinds(second)).toEqual(["skipped_pending_exception"]);
     expect(tables.path_fw_import_exceptions.filter((e) => e.state === "pending")).toHaveLength(1);
   });
 });
@@ -463,7 +476,7 @@ describe("runFwImportChunk — a failed row does not take the file down (G19)", 
       { rowNumber: 3, firstName: "!!!", lastName: "Nobody", band: "g6_8" as const, normalizedName: "bogus" },
       row(4, "Rae", "Kim", "g9_12"),
     ];
-    const { outcomes } = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
+    const outcomes = outcomesOf(await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows }));
     expect(kinds(outcomes)).toEqual(["minted", "failed", "minted"]);
     expect(outcomes[1].reason).toBe("invalid_name");
     expect(authUsers).toHaveLength(2);
@@ -475,11 +488,11 @@ describe("runFwImportChunk — a failed row does not take the file down (G19)", 
     const { db, tables, authUsers, calls } = makeFakeDb({
       failTable: { table: "path_student_profiles", op: "insert", message: "boom" },
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8")],
-    });
+    }));
     expect(kinds(outcomes)).toEqual(["failed"]);
     expect(calls.deleteUser).toBe(1);
     expect(authUsers).toHaveLength(0);
@@ -490,11 +503,11 @@ describe("runFwImportChunk — a failed row does not take the file down (G19)", 
     const { db, tables } = makeFakeDb({
       failTable: { table: "path_cohort_members", op: "upsert", message: "boom" },
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8")],
-    });
+    }));
     expect(outcomes[0].kind).toBe("failed");
     expect(outcomes[0].reason).toBe("membership_failed");
     expect(outcomes[0].retryProfileId).toBe(tables.path_student_profiles[0].id);
@@ -514,7 +527,7 @@ describe("runFwImportChunk — a re-run after a mid-file failure completes the r
       authUsers: [maya.authUser],
     });
     const rows = [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")];
-    const { outcomes } = await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows });
+    const outcomes = outcomesOf(await runFwImportChunk(db, { cohortId: BOSTON, actorUserId: GUIDE, rows }));
 
     expect(kinds(outcomes)).toEqual(["skipped_existing", "minted"]);
     // Maya's account was not duplicated; Rae's was newly minted.
@@ -533,11 +546,11 @@ describe("runFwImportChunk — a re-run after a mid-file failure completes the r
       progress: maya.progress.slice(0, 10), // only 10 of 125 landed
       authUsers: [maya.authUser],
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8")],
-    });
+    }));
     // Completed in place — reported as `resumed` (work happened), distinct from a
     // fresh mint and from a no-op skip.
     expect(outcomes[0].kind).toBe("resumed");
@@ -556,11 +569,11 @@ describe("runFwImportChunk — a re-run after a mid-file failure completes the r
       progress: [], // no progress either
       authUsers: [maya.authUser],
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8")],
-    });
+    }));
     expect(outcomes[0].kind).toBe("linked");
     expect(tables.path_cohort_members.filter((m) => m.cohort_id === BOSTON)).toHaveLength(1);
     expect(tables.path_task_progress.filter((r) => r.student_id === "p-maya")).toHaveLength(125);
@@ -574,11 +587,11 @@ describe("runFwImportChunk — read failures are contained, never crash the chun
     // If the match lookup fails, minting anyway would create a duplicate for a
     // child whose record simply failed to load (the FW-D2 risk).
     const { db, authUsers } = makeFakeDb({ errors: { path_student_profiles: "boom" } });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
-    });
+    }));
     expect(kinds(outcomes)).toEqual(["failed", "failed"]);
     expect(outcomes.every((o) => o.reason === "match_unavailable")).toBe(true);
     expect(authUsers).toHaveLength(0); // nothing minted on a failed check
@@ -593,11 +606,11 @@ describe("runFwImportChunk — read failures are contained, never crash the chun
     // every row accounted for, nothing minted, the chunk returns normally — but the
     // reason is now the more specific, non-crash `unavailable`.
     const { db, authUsers } = makeFakeDb({ throws: ["path_program_versions"] });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
-    });
+    }));
     expect(kinds(outcomes)).toEqual(["failed", "failed"]);
     expect(outcomes.every((o) => o.reason === "unavailable")).toBe(true);
     expect(authUsers).toHaveLength(0);
@@ -610,11 +623,11 @@ describe("runFwImportChunk — read failures are contained, never crash the chun
     // the chunk returns normally. (This restores the coverage the fwRead-guard change moved
     // off the `path_program_versions` path above.)
     const { db, authUsers } = makeFakeDb({ throwCreateUser: true });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Maya", "Chen", "g6_8"), row(3, "Rae", "Kim", "g9_12")],
-    });
+    }));
     expect(kinds(outcomes)).toEqual(["failed", "failed"]);
     expect(outcomes.every((o) => o.reason === "unexpected_error")).toBe(true);
     expect(authUsers).toHaveLength(0);
@@ -631,11 +644,11 @@ describe("runFwImportChunk — read failures are contained, never crash the chun
       authUsers: [rae.authUser],
       failTable: { table: "path_cohort_members", op: "insert", message: "boom" },
     });
-    const { outcomes } = await runFwImportChunk(db, {
+    const outcomes = outcomesOf(await runFwImportChunk(db, {
       cohortId: BOSTON,
       actorUserId: GUIDE,
       rows: [row(2, "Rae", "Kim", "g9_12"), row(3, "Ada", "Fresh", "g3_5")],
-    });
+    }));
     expect(outcomes[0].kind).toBe("failed");
     expect(outcomes[0].retryProfileId).toBe("p-rae");
     expect(outcomes[1].kind).toBe("minted"); // the clean mint (upsert) still lands
@@ -670,7 +683,7 @@ const parkAlex = (db: any) =>
 describe("listFwImportExceptions / resolveFwImportException (via the fold)", () => {
   it("parks a row through the fold and lists it as pending", async () => {
     const { db } = ambiguousDb();
-    const { outcomes } = await parkAlex(db);
+    const outcomes = outcomesOf(await parkAlex(db));
     expect(outcomes[0].kind).toBe("exception");
 
     const listed = await listFwImportExceptions(db, { cohortId: BOSTON });
@@ -686,7 +699,7 @@ describe("listFwImportExceptions / resolveFwImportException (via the fold)", () 
     const { db, tables } = ambiguousDb({
       failTable: { table: "path_fw_import_exceptions", op: "insert", message: "timeout", applyAnyway: true },
     });
-    const { outcomes } = await parkAlex(db);
+    const outcomes = outcomesOf(await parkAlex(db));
     expect(outcomes[0].kind).toBe("exception"); // recovered, not reported failed
     expect(tables.path_fw_import_exceptions.filter((e) => e.state === "pending")).toHaveLength(1);
   });
@@ -695,7 +708,7 @@ describe("listFwImportExceptions / resolveFwImportException (via the fold)", () 
     const { db, tables, authUsers } = ambiguousDb({
       failTable: { table: "path_fw_import_exceptions", op: "insert", message: "boom" },
     });
-    const { outcomes } = await parkAlex(db);
+    const outcomes = outcomesOf(await parkAlex(db));
     expect(outcomes[0].kind).toBe("failed");
     expect(outcomes[0].reason).toBe("exception_park_failed");
     expect(tables.path_fw_import_exceptions).toHaveLength(0);
@@ -796,3 +809,72 @@ describe("listFwImportExceptions / resolveFwImportException (via the fold)", () 
     expect(listed.exceptions).toHaveLength(1500);
   });
 });
+
+describe("Unit 8 — exception resolution PROCEEDS on an archived cohort (guard table ✓ row)", () => {
+  it("a pending import exception on a retired weekend can still be dismissed", async () => {
+    // Cleanup of the past is never blocked by retirement — the exception row is
+    // about work already attempted, not new roster-building.
+    const { db, tables } = ambiguousDb();
+    const parked = outcomesOf(await parkAlex(db));
+    expect(parked[0].kind).toBe("exception");
+    tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at = "2026-08-24T00:00:00Z";
+    const pending = tables.path_fw_import_exceptions.find((e) => e.state === "pending")!;
+    expect(
+      await resolveFwImportException(db, {
+        exceptionId: pending.id as string,
+        cohortId: BOSTON,
+        actorUserId: GUIDE,
+        disposition: "dismissed",
+        now: 5,
+      })
+    ).toEqual({ ok: true });
+  });
+});
+
+describe("Unit 8 — the CSV chunk refuses an archived cohort, whole-chunk", () => {
+  it("a chunk POSTed at an archived cohort is refused: zero accounts, zero memberships, zero exceptions", async () => {
+    const { db, tables, authUsers } = makeFakeDb({});
+    const cohort = tables.path_cohorts.find((c) => c.id === BOSTON)!;
+    cohort.archived_at = "2026-08-24T00:00:00Z";
+    const accountsBefore = authUsers.length;
+    const res = await runFwImportChunk(db, {
+      cohortId: BOSTON,
+      actorUserId: GUIDE,
+      rows: [row(1, "Maya", "Quinn", "g9_12")],
+    });
+    // CHUNK-LEVEL, deliberately (the deferred decision, recorded at the type): one
+    // cohort-level fact gets one refusal — not N fabricated row outcomes and N
+    // exception rows for a refusal none of the rows caused.
+    expect(res).toEqual({ refused: "cohort_archived" });
+    expect(authUsers.length).toBe(accountsBefore);
+    expect(tables.path_cohort_members).toHaveLength(0);
+    expect(tables.path_fw_import_exceptions).toHaveLength(0);
+  });
+
+  it("the guard sits at the CHUNK, not provisionFwStudent — quick-create's shared core stays unguarded", () => {
+    // The plan's placement, pinned structurally: `provisionFwStudent` is shared with
+    // guide quick-create, which MUST keep working on an archived cohort (a guide who
+    // can check a child in must be able to add the child in front of them). So the
+    // word archived_at may appear in THIS file only inside runFwImportChunk's gate.
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const src = readFileSync(new URL("../fw-import-core.ts", import.meta.url), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const hits = [...code.matchAll(/archived_at/g)];
+    expect(hits.length).toBeGreaterThan(0); // the gate exists
+    const chunkStart = code.indexOf("export async function runFwImportChunk");
+    // Statement-start anchor, not a bare substring: a future log message containing
+    // the WORD "export" inside the chunk body would truncate a substring search and
+    // misclassify in-body references as outside (testing review, 0.6 — a false
+    // positive, but a confusing one).
+    const after = code.slice(chunkStart + 10);
+    const m = /\n\s*export\s/.exec(after);
+    const chunkEnd = m ? chunkStart + 10 + (m.index ?? 0) : code.length;
+    for (const h of hits) {
+      expect(
+        (h.index ?? 0) > chunkStart && (h.index ?? 0) < chunkEnd,
+        "archived_at referenced outside runFwImportChunk"
+      ).toBe(true);
+    }
+  });
+});
+

@@ -632,7 +632,8 @@ export async function linkStudentAction(input: unknown): Promise<LinkStudentActi
 }
 
 function linkFailureMessage(
-  reason: "student_not_found" | "not_fw_profile" | "student_anonymized" | "cohort_not_fw" | "unavailable"
+  reason: "student_not_found" | "not_fw_profile"
+    | "cohort_archived" | "student_anonymized" | "cohort_not_fw" | "unavailable"
 ): string {
   switch (reason) {
     case "student_not_found":
@@ -643,6 +644,8 @@ function linkFailureMessage(
       return "That student's record was removed and can't be added to a weekend. Search again.";
     case "cohort_not_fw":
       return "Students can only be linked into Founders Weekend cohorts.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before linking students.";
     case "unavailable":
       return GENERIC_ERROR;
   }

@@ -355,7 +355,20 @@ async function exceptionRow(
 
 /* ═══════════════════════════════════════════════════════════════ the chunk ══ */
 
-export type RunFwImportChunkResult = { outcomes: FwImportOutcome[] };
+/**
+ * Unit 8 WIDENED this union with a whole-chunk refusal — the deferred decision
+ * (plan, Deferred to Implementation), decided as chunk-level and recorded here:
+ * per-row `failed` outcomes would fabricate N row-shaped facts for one cohort-level
+ * fact, write N exception rows staff would then resolve one by one for a refusal
+ * none of them caused, and imply the rows were EXAMINED (they were not — the chunk
+ * was refused at the door). The core still never REJECTS; the refusal is a value.
+ */
+export type RunFwImportChunkResult =
+  | { outcomes: FwImportOutcome[] }
+  /** `unavailable` is the gate READ failing — retryable, never a claim about the
+   *  cohort (the B4 discipline: a blip on a healthy cohort mid-import must not
+   *  report as "the cohort is gone"). The other two are terminal facts. */
+  | { refused: "cohort_archived" | "cohort_not_found" | "unavailable" };
 
 /**
  * Provision one chunk of rows, in order, SEQUENTIALLY.
@@ -370,6 +383,22 @@ export async function runFwImportChunk(
   db: SupabaseClient,
   input: { cohortId: string; actorUserId: string; rows: readonly FwImportRowInput[] }
 ): Promise<RunFwImportChunkResult> {
+  // THE ARCHIVED GUARD SITS HERE, NOT IN `provisionFwStudent` (the plan's settled
+  // placement): that function is shared with guide quick-create, which must KEEP
+  // working on an archived cohort — a guide who can check a child in must be able
+  // to add the child in front of them, and the consequence (a new minor inside a
+  // cohort hidden from staff's default list) is accepted and named in Scope
+  // Boundaries. Bulk import has no child standing in front of anyone.
+  const gate = await fwRead(
+    () =>
+      db.from("path_cohorts").select("archived_at").eq("id", input.cohortId).maybeSingle(),
+    `import chunk cohort gate (${input.cohortId})`
+  );
+  if (gate.error) return { refused: "unavailable" };
+  const gateRow = gate.data as Record<string, unknown> | null;
+  if (!gateRow) return { refused: "cohort_not_found" };
+  if (typeof gateRow.archived_at === "string") return { refused: "cohort_archived" };
+
   const outcomes: FwImportOutcome[] = [];
   for (const row of input.rows) {
     try {

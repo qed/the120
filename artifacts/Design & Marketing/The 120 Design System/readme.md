@@ -62,7 +62,7 @@ Everything here is distilled from the attached codebase (read-only):
 - **The one recurring glyph is `→`** (rightwards arrow), used on CTAs and pipeline steps.
 - **Separators use `·`** (middle dot) between mono label segments.
 - **Status is carried by pills and pips, not icons:** mono uppercase status pills, an 8px **red dot** for the seats indicator, five 8px red **squares** for CRM heat, numbered mono indices (`01 / 02 / 03`) for ordered content.
-- **The brand mark is type, not an SVG:** a solid red square chip containing white **"120"** beside the **"The 120"** wordmark over a letterspaced sublabel (`TORONTO` / `GT TORONTO`). The favicon is the same "120" badge (`app/icon.tsx`). There is **no separate logo file** — render the `Wordmark` component. The legacy `mla-icon-*.svg` orbital marks belong to the retired "Maple Leaf Academy" identity; do not use them.
+- **The brand mark is type, not an SVG:** a solid red square chip containing white **"120"** beside the **"The 120"** wordmark over a letterspaced sublabel (`TORONTO` / `GT TORONTO`). The favicon is the same "120" badge, drawn as geometry (not type) by `scripts/generate-brand-icons.ts` into the committed `app/favicon.ico`, `app/icon.png` and `app/apple-icon.png` — edit the script, never the outputs. There is **no separate logo file** — render the `Wordmark` component. The legacy `mla-icon-*.svg` orbital marks belong to the retired "Maple Leaf Academy" identity; do not use them.
 - **Checkmarks (`✓`) and `+ / −`** appear as plain characters (consent confirmed, FAQ accordion toggles) — no icon assets.
 - The lone inline SVG in the codebase is a data line-graph in `PaceSimulator` — a chart, not an icon.
 

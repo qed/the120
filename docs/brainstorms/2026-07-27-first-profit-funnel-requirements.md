@@ -40,7 +40,8 @@ no mini-app, and `/groups/[slug]` still serves the retiring brochure treatment.
 
 ## Rulings Made In This Brainstorm
 
-The two briefs conflict in four places. These are the resolutions, and they are settled.
+The two briefs conflict in four places (F1–F4). Four further rulings (F5–F8) were added
+after planning research surfaced blockers the briefs never addressed. All are settled.
 
 | # | Conflict | Ruling |
 |---|---|---|
@@ -48,6 +49,10 @@ The two briefs conflict in four places. These are the resolutions, and they are 
 | F2 | Interactive brief (A4, A6) puts real parent-verified task work between the application and the deposit, with Gate 2 firing when task `1.2.1` is verified. The handoff prototype goes application → Next Steps → checkout with no task work between. | **Handoff wins. Ship the short funnel.** No pre-deposit task work, no Gate 2 at `1.2.1`, no pre-deposit verification mechanic. The data model must not preclude adding it later, but nothing in this build depends on it. |
 | F3 | Interactive brief (A10, A13) makes the landing page inbound-marketing-only with nothing internal linking to it. Unified brief (D1) makes the five group landing pages the canonical `/groups/[slug]`, linked from the home page's five cards. | **Unified brief wins**, by its own supersession clause. The group landings are internal destinations; only `/first-profit` is ad-only. |
 | F4 | Interactive brief (A8) puts the Apply button and FAQ accordion on the Reveal screen. Handoff closes the Reveal with "Continue Application →" into the dossier wizard, with the FAQ accordion below. | **Handoff wins.** It is the pixel source of truth. |
+| F5 | The handoff runs submit → Next Steps → checkout with no offer step. But `canReserveSeat` (`app/dashboard/data.ts`) requires status ≥ `offered`, and `app/api/checkout/route.ts` re-enforces it server-side. **A staff member must offer a seat before any family may pay.** The funnel silently deleted admissions approval from the payment path. | **Admissions approval is preserved.** After C2 the family sees a review state. Staff offer through the existing CRM path, which fires the existing offer email (PR #8), and that email carries the deposit CTA into Next Steps. C3 is no longer contiguous with C2. The handoff's screen order is unchanged; only its timing is. |
+| F6 | The capture screen is pixel-final and carries no consent control, but nurture's send gate requires `consent_given` on the family. Without a recorded CASL basis at C1, no funnel family may lawfully be emailed. | **An explicit consent checkbox ships at C1**, a deliberate deviation from the pixel-final handoff. Express consent is the only basis that clearly survives scrutiny for a flow involving minors, and implied consent's six-month expiry would silently drop exactly the stalled families the nurture exists to recover. |
+| F7 | Nothing covers the 120th seat going mid-run, and `DEPOSIT_REFUND_DEADLINE_LABEL` is a display string already duplicated in three other files. | **Waitlist at zero seats**, closing checkout. The September 30 2026 date stays presentational this build, but a machine-readable `Date` constant lands beside the label so a later unit can enforce it without a second literal. |
+| F8 | R7 originally specified Supabase `signInWithOtp` for magic-link resume. Research found three independent defects: the built-in mailer is capped at **2 emails/hour project-wide**; `createServerClient` forces PKCE *after* the options spread so `flowType` cannot be overridden, breaking cross-device resume; and the repo has no OTP precedent at all. | **No Supabase OTP.** Resume uses the repo's own proven shape — a self-issued 256-bit token stored as sha256, mailed via Resend, landing on a read-only GET that mutates only on POST. This is what `app/fp/lib/actions/invite.ts` already does. It sidesteps the rate limit, the PKCE cross-device failure, and the `no-auth-mail-guard` tripwire simultaneously. |
 
 ## The Shape
 
@@ -115,20 +120,40 @@ through follows them as a hint, never a lock.
 
 ### Resume and identity
 
-- R6. Email capture at C1 creates no password. The family's way back is a magic link sent
-  to the captured parent address.
-- R7. The magic link is sent from a **Server Action**, never the browser, so that
-  `assertNoAuthMailToFwStudent` (`app/fp/lib/fw-provision-rules.ts`) sits in the request
-  path. The recipient is passed through that guard before sending.
-  `app/fp/lib/__tests__/no-auth-mail-guard.test.ts` enforces this and will fail on any
-  unguarded `signInWithOtp(` added anywhere under `app/`. Adding this call site to
-  `REVIEWED_CALL_SITES` instead of guarding it is not acceptable: the two entries already
-  there are client-side and unguardable, which is the only reason they are exempt.
+- R6. Email capture at C1 creates no password. The family's way back is a resume link
+  mailed to the captured parent address (F8).
+- R7. The resume link is a **self-issued 256-bit token stored only as sha256**, single-use,
+  short TTL, mailed via the existing Resend rails — not Supabase `signInWithOtp` (F8).
+  The pattern is already proven in `app/fp/lib/actions/invite.ts` and
+  `path_parent_invites`.
+- R7a. **The link is never itself the credential.** The emailed URL lands on a read-only
+  `GET` that renders a page with a button and no session; redemption happens on `POST`.
+  Mail scanners (Defender Safe Links, Proofpoint, Barracuda) fetch every URL in an inbox,
+  and a link that authenticates on GET is burned or claimed before the parent clicks. This
+  is a documented past incident in this repo, not a hypothetical.
+- R7b. **The resume position is never in the URL.** The server resolves the family's
+  furthest-progressed state after redemption. A forwarded or leaked link must not deep-link
+  into a specific child's data.
+- R7c. The request-a-link response is byte-identical whether or not the address exists. An
+  enumeration oracle here leaks which families have applied to a program for children.
+- R7d. Requests are rate-limited per email **and** per IP, backed by the database rather
+  than process memory. The repo's in-memory limiter has a documented TOCTOU race and a FIFO
+  eviction that silently clears lockouts.
 - R8. A session cookie carries the family through the ten-minute run with no auth friction.
-  The magic link is the way back after the cookie expires or on another device.
+  The resume link is the way back after the cookie expires or on another device.
+- R8a. **Authorization is server-side and explicit.** A password-less family has no
+  `auth.uid()`, so RLS authorizes nothing for them. Every funnel read and write runs
+  server-side under the service role with a hand-written family-scope check. No funnel
+  screen may rely on RLS, and no per-child authorization may live in a UI conditional.
 - R9. Existing families with passwords keep signing in exactly as they do today. The Join
   modal retires for logged-out visitors only; nothing about an enrolled family's access
   changes.
+- R9a. **Re-entry is specified as a matrix, not inferred.** Rows: live cookie, dead cookie,
+  expired link, second click, different device, family already holds a password, family
+  already enrolled. Columns: one child, several children at different stages. Every cell
+  names a destination screen.
+- R9b. An unverified email address must never bind to, merge with, or overwrite an existing
+  family record. Forged consent through exactly this path is a documented past incident.
 
 ### Marketing rewire
 
@@ -191,7 +216,13 @@ through follows them as a hint, never a lock.
   child designs a real business; you'll see exactly where it leads; this is the
   application.
 - R30. Capture asks parent first name, last name, and email. This is **Conversion 1** and
-  posts to `app/crm/lib/lead-ingest.ts` with `entry_source` written onto the lead.
+  posts to `app/crm/lib/lead-ingest.ts` with `entry_source` written onto the lead. It calls
+  `matchOrCreateLead` — never a blind upsert, which is a documented P0 consent hijack on a
+  public endpoint, and which PostgREST cannot infer a conflict target for anyway against
+  the partial unique index on `lower(email)`.
+- R30a. Capture carries an **explicit, unticked CASL consent checkbox** (F6) whose accepted
+  text and version are recorded with the timestamp. Consent is never granted on a generic
+  match, and a revoked family is never re-subscribed.
 - R31. Add a Child takes first name and grade per child, one or more, addable at any later
   point. Grade drives band and skin: 3–5 Trail, 6–12 HQ.
 - R32. An application progress bar runs in the floating nav card from explainer through
@@ -219,9 +250,31 @@ through follows them as a hint, never a lock.
 - R39. AI composition is a single server-side call returning validated JSON: name (≤5
   words), description (≤120 words, second person, band register), offer sketch, first
   customer hypothesis. Never called from the browser.
-- R40. Regeneration is limited to two per quiz run. Every field is editable afterwards and
-  the edit is recorded. Per-template canned fallbacks render on error — the funnel never
-  dead-ends on an AI failure.
+- R39a. **No child identifier leaves the country.** The call receives grade band, group,
+  template id, and the scrubbed length-capped free-text answers. It never receives the
+  child's name, the parent's name or email, the school, the city, or any internal id. The
+  child's name is substituted client-side after the call.
+- R39b. **Weak-signal fields are nullable, not required.** A schema that forces
+  `firstCustomerHypothesis` on every call instructs the model to fabricate one for a child
+  who wrote three words. `null` is a first-class "ask again" branch in the UI.
+- R39c. The child's free text is **spotlighted** as untrusted data inside explicit
+  delimiters, with the system prompt stating it is content to summarise and never
+  instructions. Input containing the reserved delimiter is rejected before the call. The
+  call is stateless, has no tools, and has no retrieval.
+- R40. Regeneration is limited to two per quiz run, **counted server-side against a
+  persisted counter**, never client state. Every field is editable afterwards and the edit
+  is recorded. Per-template canned fallbacks render on error — the funnel never dead-ends
+  on an AI failure.
+- R40a. The failure taxonomy is explicit, because "on error" is not a specification:
+  invalid JSON (retry once with the validation error appended, then fall back), safety
+  refusal (arrives as a **successful** response — `stop_reason` must be read before
+  `content` — fall back), truncation (fall back, never repair), timeout or 429 (backoff,
+  then fall back). The fallback is a real product state that reads as a legitimate first
+  draft, not an error screen.
+- R40b. **Every AI output field is treated as untrusted user input at every render
+  surface** — the project page, the CRM dossier, and any email. HTML-escaped in mail, never
+  `dangerouslySetInnerHTML`. This repo has already shipped an HTML injection into the
+  admissions inbox through unescaped child and parent names.
 - R41. AI output obeys the copy rules: no em dashes, no promised outcomes, no dollar
   predictions, no invented facts about the child, no brand names, no emoji. Kid inputs are
   filtered for profanity and brand names, and no real names or addresses reach the
@@ -248,21 +301,52 @@ through follows them as a hint, never a lock.
   `2026 − 11 + grade` and editable.
 - R48. The application asks for the child's email with a "Don't have one" option.
 - R49. Submission is **Conversion 2**. The dossier header flips to SUBMITTED FOR REVIEW.
+- R49a. **The deposit does not open on submission (F5).** After C2 the family sees a review
+  state. Staff offer the seat through the existing CRM path, which fires the existing offer
+  email (PR #8); that email carries the deposit CTA. C2 and C3 are no longer contiguous,
+  and every screen between them must read as an admissions process rather than a stall.
 - R50. Next Steps is three swipes in the explainer UX: progress made, set your goal (with
-  an editable goal input), secure the seat.
+  an editable goal input), secure the seat. It is reached from the offer email or from the
+  parent dashboard once the child is `offered` — never directly from submission.
 - R51. The deposit is $250, fully refundable until September 30 2026, stated at the point
-  of ask. This date is read from the existing `DEPOSIT_REFUND_DEADLINE_LABEL` constant in
-  `app/lib/site.ts` — one source, never a second literal.
+  of ask. A machine-readable `Date` constant lands beside the existing
+  `DEPOSIT_REFUND_DEADLINE_LABEL` in `app/lib/site.ts`, and the three existing duplicate
+  literals are collapsed onto it (F7).
+- R51a. **The full refund-policy text renders inline at the point of payment**, above an
+  unticked checkbox, and the accepted text's version, hash, timestamp and IP are persisted.
+  A checkbox containing only a link to a policy is explicitly rejected by card issuers as
+  dispute evidence.
 - R52. Payment is **Conversion 3** and rides the existing Stripe rails.
+- R52a. **A child may hold at most one live paid deposit.** Enforced by a partial unique
+  index, not an application probe. Today's schema is unique on `stripe_session_id` only, so
+  two tabs or an impatient second tap produce two paid rows and consume two of 120 seats.
+- R52b. When seats reach zero the funnel routes to a waitlist state and checkout closes
+  (F7). The existing `WAITLIST_LABEL` treatment extends beyond the marketing surfaces.
 - R53. Deposit receipt provisions the student account. If the family chose "Don't have
   one", a unique `@the120.school` address is created, and the parent is emailed the login
   address and password.
+- R53a. **`assertNoAuthMailToFwStudent` widens to the whole student namespace**, not just
+  `*.fw@`. R53 mints deliverable addresses in a namespace the guard does not currently
+  match, which turns the existing browser-side `resetPasswordForEmail` in
+  `app/dashboard/SignIn.tsx` into a way for any visitor to send mail to a child's real
+  inbox. That call is inert only because the namespace has no catch-all today; R53 arms it.
+- R53b. Provisioning returns a **discriminated union that forces a create-vs-adopt branch
+  before any credential is reachable**. `ok: true` is not permission to issue a credential
+   — an idempotent primitive plus an unconditional caller already rotated a live guide's
+  working credential once in this repo.
 - R54. The arrival screen is an acceptance-letter moment, not a settings screen. Login
   email, fallback password, forced reset on first login, parent-email preview, and the
   September 30 calendar note.
-- R55. Never-deposited families are never reaped. Applications stay on file indefinitely
-  for re-engagement, exactly as a competitive school keeps applicant files. The evidence
-  reaper exempts application-context records.
+- R55. Never-deposited families are never reaped. Applications stay on file for
+  re-engagement, exactly as a competitive school keeps applicant files. (The `path-evidence-
+  reaper` cron reaps orphaned *storage objects* and is unrelated; the earlier wording named
+  the wrong system.)
+- R55a. **A written retention schedule ships before launch, and is automated.** A child's
+  free-text quiz answers and generated project are deleted or irreversibly de-identified
+  after a defined period of inactivity. Aggregate funnel analytics are kept as counts on
+  non-identifying dimensions, so retention never costs measurement. R55's "keep the
+  application on file" and this are not in tension: the file is the application, not the
+  child's free text.
 
 ### Instrumentation and CRM
 
@@ -301,9 +385,14 @@ through follows them as a hint, never a lock.
 
 ## Build Order
 
-Thirteen units in four phases. Phase 0 precedes everything; Phase 1 ships before Phase 2
-because C1 is a real conversion and `entry_source` starts producing the data the ads plan
-needs (R58) weeks before the mini-app is ready.
+**Superseded by `docs/plans/2026-07-27-002-feat-first-profit-funnel-plan.md`**, which is the
+authoritative sequencing artifact. Planning research added units this table does not carry
+(the reserve-gate and trigger repair, the authorization model, moderation). The shape below
+is kept as the original intent; where the two differ, the plan wins.
+
+Phase 0 precedes everything; Phase 1 ships before Phase 2 because C1 is a real conversion
+and `entry_source` starts producing the data the ads plan needs (R58) weeks before the
+mini-app is ready.
 
 | Phase | Unit | Scope | Migration |
 |---|---|---|---|
@@ -323,7 +412,7 @@ needs (R58) weeks before the mini-app is ready.
 
 ## Dependencies Outside The Build
 
-Three things this build cannot produce for itself.
+Five things this build cannot produce for itself.
 
 1. **Hero photography does not exist.** All six landing pages need art; the handoff states
    it is not bundled. U4 builds the image slot and can merge without it, but those pages
@@ -335,7 +424,23 @@ Three things this build cannot produce for itself.
    integration that does not exist today. U11 is blocked on it; nothing earlier is.
 3. **No AI dependency exists in the repo.** R39 needs a provider. Recommendation is the
    Vercel AI Gateway through the AI SDK with plain `"provider/model"` strings, server-side
-   only. This is a new dependency and a recurring cost line.
+   only. This is a new dependency and a recurring cost line. Zero Data Retention should be
+   pursued given the inputs are children's free text — note that ZDR forecloses Fable 5,
+   which requires 30-day retention, so the model choice and the ZDR decision are one
+   decision, not two.
+4. **No content moderation of any kind exists in the repo.** R41 requires profanity
+   filtering, brand-name filtering, and PII redaction of child-typed input. There is no
+   precedent to follow and no library installed. This was missing from the original
+   dependency list and is a real cost, not a free line item. **If it lands as a hosted
+   third-party API it is a second offshore trust boundary, and a worse one than the model:
+   by construction moderation sees the child's raw unredacted text, including anything the
+   redaction pass exists to remove.** It needs the same retention, PII-handling and geography
+   treatment as dependency 3, decided before the unit rather than during it.
+5. **Ontario counsel review before launch.** The Consumer Protection Act gives a statutory
+   cancellation right that operates independently of the September 30 refund deadline, and
+   agreements over $50 must be in writing with a copy delivered. If the marketing deadline
+   is shorter than the statutory right, that is a compliance gap and a dispute that will be
+   lost. Flagging the constraint, not advising on it.
 
 ## Non-Goals
 
@@ -351,11 +456,19 @@ Three things this build cannot produce for itself.
 
 ## Success Criteria
 
-- A logged-out visitor cannot reach the Join modal from any marketing surface.
+- A logged-out visitor cannot reach the Join modal from any **marketing** surface. The
+  Gauntlet's `openAccountModal` is deliberately excluded: it is a functional signup gate for
+  tournament entry, not a marketing CTA, and the Gauntlet is a stated non-goal. Rerouting it
+  would break tournament entry.
 - Every entry surface stamps a distinct `src=`, and C1→C2→C3 is segmentable by it from the
   event stream alone, per channel, per band, per group.
 - A family can complete landing → deposit on a phone, one-handed, without a password.
 - A family that abandons at any point can resume at the exact point of abandonment from a
   link in their email.
 - The switch rate from a pre-selected door is measurable per landing page.
-- No magic link can ever be addressed to a `*.fw@the120.school` address.
+- No resume link, password reset, or auth mail of any kind can be addressed to **any**
+  student address in the `@the120.school` namespace, not merely `*.fw@`.
+- A child's name, the parent's identity, and any internal id never appear in a request to
+  the model provider.
+- One child can hold at most one live paid deposit, proven by constraint rather than by a
+  code path.

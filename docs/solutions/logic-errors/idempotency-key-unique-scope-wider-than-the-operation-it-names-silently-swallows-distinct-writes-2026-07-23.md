@@ -232,6 +232,11 @@ entities share one key, collide, and one is silently discarded.
 
 ## Related
 
+- `docs/solutions/database-issues/partial-unique-index-under-live-upsert-onconflict-names-different-key-23505-retry-storm-2026-07-27.md`
+  — the same class (an index's identity vs. the code's assumed identity), inverse
+  symptom: there an unnamed partial unique index hard-rejects the write (23505 →
+  webhook retry storm) instead of `DO NOTHING` silently swallowing it. Together they
+  are the two directions this mismatch can fail.
 - `docs/solutions/best-practices/webhook-idempotency-record-dedupe-key-after-idempotent-effect-and-scope-cancels-by-provenance-2026-07-17.md`
   — the sibling concern: dedupe key *ordering* (record after the effect) and
   provenance scoping. This doc is about the key's *uniqueness scope*; together

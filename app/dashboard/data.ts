@@ -4,6 +4,8 @@
  *   parents → children → subject_picks / workshop_selections / project_pitch → dossier(status)
  */
 
+import { applicantStateAllowsReserve } from "@/app/lib/funnel/applicant-rules";
+
 export type SeatStatus =
   | "draft"
   | "submitted"
@@ -47,6 +49,46 @@ export const hasPaidDeposit = (deposits: { status: string }[]) =>
 export function canReserveSeat(status: string, deposits: { status: string }[]): boolean {
   const idx = statusIndex(status as SeatStatus);
   return idx >= statusIndex("offered") && !hasPaidDeposit(deposits);
+}
+
+/**
+ * The gate a FUNNEL child passes (U1). `children.status` above stays the
+ * authoritative source — it is what `move_candidate` writes and what the
+ * checkout route already re-enforces — and `applicant_state` is a second
+ * condition layered on top, never a replacement.
+ *
+ * Why both, and why this cannot collapse into `canReserveSeat` alone: the two
+ * vocabularies OVERLAP. `submitted`, `in_review` and `offered` are members of
+ * SeatStatus *and* of ApplicantState. So the usual protection — `statusIndex`
+ * is an allow-list returning -1, therefore an unknown value fails closed —
+ * does not hold for a mistakenly-passed applicant state: `offered` resolves in
+ * both, and the mistake fails OPEN, on the wrong column. Passing the two
+ * separately is what keeps that impossible to write by accident.
+ *
+ * `applicantState = null` — every child in production today — returns exactly
+ * what `canReserveSeat` returned before this column existed. That equivalence
+ * is swept over the whole seat vocabulary in
+ * `app/lib/__tests__/funnel-applicant-rules.test.ts`.
+ *
+ * Named fields, not positional strings: `status` and `applicantState` share
+ * three literal values, so two adjacent string parameters would compile
+ * swapped and — for exactly those shared values — return a plausible wrong
+ * answer. The overlap paragraph above is the reason this signature exists.
+ *
+ * Consulted by `/api/checkout` (the server gate). The dashboard CTA and the
+ * two CRM gates still call `canReserveSeat` alone: their data paths don't
+ * carry `applicant_state` yet, no funnel child exists until U6 ships, and
+ * each adopts this predicate in the unit that loads the column into its view.
+ */
+export function canReserveSeatForChild(opts: {
+  status: string;
+  applicantState: string | null;
+  deposits: { status: string }[];
+}): boolean {
+  return (
+    canReserveSeat(opts.status, opts.deposits) &&
+    applicantStateAllowsReserve(opts.applicantState)
+  );
 }
 
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;

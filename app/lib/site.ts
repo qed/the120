@@ -21,10 +21,28 @@ export const SITE_URL = "https://the120.school";
 
 /**
  * Seat-deposit refund deadline — single source of truth for copy.
- * (Adopting sites: offer email. Known hardcoded stragglers that could adopt
- * it: welcome route, nurture copy, DashboardApp ×2, crm engine nudge.)
+ * Every straggler named in the original note (DashboardApp, nurture copy, the
+ * welcome template) now reads the label below; the offer email already did.
  */
 export const DEPOSIT_REFUND_DEADLINE_LABEL = "September 30, 2026";
+
+/**
+ * The same deadline, machine-readable (F7). The date stays PRESENTATIONAL this
+ * build — nothing compares against it yet — but it lands here so the unit that
+ * eventually enforces it (checkout closing, or the October-customer copy the
+ * plan's Design Gaps flags) does not have to introduce a second literal and
+ * pick which one is authoritative.
+ *
+ * End of day in Toronto, where the deadline is offered: 2026-09-30 is inside
+ * EDT (UTC-4), so the offset is written explicitly rather than left to the
+ * server's zone — a bare `new Date("2026-09-30")` is UTC midnight, which is
+ * September 29 in Toronto and would expire the refund a day early.
+ *
+ * The label is NOT derived from this at runtime (formatting would depend on the
+ * host's ICU build); `app/lib/__tests__/site-deadline.test.ts` asserts the two
+ * agree instead, so a change to either without the other goes red.
+ */
+export const DEPOSIT_REFUND_DEADLINE = new Date("2026-09-30T23:59:59.999-04:00");
 
 /**
  * Booking target for every "Book a call" CTA (T1/T2).
@@ -56,7 +74,45 @@ export function isActiveNav(pathname: string | null, href: string): boolean {
   return pathname === href;
 }
 
-/** The five groups (handoff Home + group pages). Scholars route to their own program page. */
+/**
+ * The five phase colour tokens (`app/globals.css`), one per group door.
+ * Mapping is by door position and is authoritative — unified brief §3.3, D9,
+ * confirmed by Peter: Athletes coral, Founders blue, Givers purple, Makers
+ * green, Scholars gold.
+ *
+ * These are the CSS custom-property NAMES exactly as `globals.css` declares
+ * them, not Tailwind class names, and deliberately so. Tailwind v4's scanner
+ * cannot see `` `text-${g.phaseToken}` `` — a class assembled from this field
+ * would compile to nothing and fail silently in production while looking
+ * correct in source. U4/U5 map these to COMPLETE literal class strings; they
+ * must never interpolate the token into a class.
+ *
+ * The brief spells them `--tp-phase-*`; that prefix does not exist in this
+ * repo. Pinned against `globals.css` by `app/lib/__tests__/site-groups.test.ts`.
+ */
+export const PHASE_TOKENS = [
+  "--color-phase-sell",
+  "--color-phase-build",
+  "--color-phase-validate",
+  "--color-phase-grow",
+  "--color-phase-scale",
+] as const;
+
+export type PhaseToken = (typeof PHASE_TOKENS)[number];
+
+/**
+ * The five groups (handoff Home + group pages).
+ *
+ * Extended in U1 with the landing-page fields (R5) — headline line 1, subhead,
+ * hero asset, phase colour token — rather than a parallel content module, so
+ * `/groups/[slug]`, `/first-profit` and the home cards keep one source.
+ *
+ * NOTE Scholars' `href` is deliberately still `/scholars`. R5 moves it to
+ * `/groups/scholars`, but that move belongs to U5, in the same change that
+ * admits scholars to `generateStaticParams` and drops the `notFound()`.
+ * `app/components/GroupsBand.tsx` renders `href` directly, so moving it here
+ * would point a live home-page card at a 404 for the length of Phase 1.
+ */
 export type Group = {
   slug: string;
   name: string;
@@ -67,7 +123,24 @@ export type Group = {
   body: string;
   href: string;
   cta: string;
+  /** Landing headline line 1 (Georgia). Line 2 is constant across all six. */
+  headline: string;
+  /** Landing subhead. Its final sentence is constant across all six. */
+  subhead: string;
+  /** Hero image slot. The art is an external content dependency (U5 ships the
+   *  slot; the photography does not exist yet). */
+  hero: string;
+  phaseToken: PhaseToken;
 };
+
+/**
+ * The constant tail every group's subhead ends on (unified brief §3.2), and the
+ * constant second line of every landing headline. Exported so the six landing
+ * pages assert identity rather than duplicating the sentence six times.
+ */
+export const LANDING_SUBHEAD_TAIL =
+  "In 10 minutes, your kid designs their business and you see where this can go.";
+export const LANDING_HEADLINE_LINE_2 = "We'll show you how right now.";
 
 export const groups: Group[] = [
   {
@@ -80,6 +153,10 @@ export const groups: Group[] = [
     body: "For kids who train seriously and want more than practice. A year-long athletic project: a season record, a training system, a documented climb. Mentored by people who have competed, and demoed to the whole network at the Toronto intensives.",
     href: "/groups/athletes",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
+    headline: "Your athlete will build a real brand this year.",
+    subhead: `NIL branding, a training clinic for younger kids, team merch people actually buy. ${LANDING_SUBHEAD_TAIL}`,
+    hero: "/landing/heroes/athletes.jpg",
+    phaseToken: "--color-phase-sell",
   },
   {
     slug: "founders",
@@ -91,6 +168,10 @@ export const groups: Group[] = [
     body: "For kids who want to start something real. A year-long venture: customers, revenue, lessons learned. Mentored by people who have built companies, and pitched to the whole network at the Toronto intensives.",
     href: "/groups/founders",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
+    headline: "Your kid will start a real company this year.",
+    subhead: `A typical startup: a product, first customers, real revenue. ${LANDING_SUBHEAD_TAIL}`,
+    hero: "/landing/heroes/founders.jpg",
+    phaseToken: "--color-phase-build",
   },
   {
     slug: "makers",
@@ -102,6 +183,10 @@ export const groups: Group[] = [
     body: "For kids who need to make things. A year-long body of work: a film, an album, an invention, a portfolio. Mentored by working artists and builders, and shown to the whole network at the Toronto intensives.",
     href: "/groups/makers",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
+    headline: "Your kid will sell real work to real people this year.",
+    subhead: `Shows and exhibits, prints and commissions, an audience that pays. ${LANDING_SUBHEAD_TAIL}`,
+    hero: "/landing/heroes/makers.jpg",
+    phaseToken: "--color-phase-grow",
   },
   {
     slug: "scholars",
@@ -111,8 +196,14 @@ export const groups: Group[] = [
     kicker: "GROUP 04 · GIFTED & TALENTED · ENROLLING NOW",
     blurb: "Accelerated academics. Mastery with no ceiling.",
     body: "For gifted kids who love to learn. Accelerated, mastery-based academics with no ceiling.",
+    // Still /scholars, NOT /groups/scholars — R5 moves it in U5, with the route
+    // that will serve it. See the note on `Group`.
     href: "/scholars",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
+    headline: "Your kid's ideas will earn real money this year.",
+    subhead: `Thought leadership: teaching, writing, tutoring, a paid workshop of their own. ${LANDING_SUBHEAD_TAIL}`,
+    hero: "/landing/heroes/scholars.jpg",
+    phaseToken: "--color-phase-scale",
   },
   {
     slug: "givers",
@@ -124,8 +215,24 @@ export const groups: Group[] = [
     body: "For kids who lead with service. A year-long service program that changes a corner of the city: planned, run, and measured by them. Mentored by people who have done it, and presented to the whole network at the Toronto intensives.",
     href: "/groups/givers",
     cta: "ENROLLING NOW · BOOK OR JOIN →",
+    headline: "Your kid will run a real service venture this year.",
+    subhead: `A service venture that changes a corner of the city, funded and run by them. ${LANDING_SUBHEAD_TAIL}`,
+    hero: "/landing/heroes/givers.jpg",
+    phaseToken: "--color-phase-validate",
   },
 ];
+
+/**
+ * The neutral, ad-only sixth landing page (`/first-profit`) — same content
+ * shape as a group, but not a group: it carries no `?g=` hint and never
+ * appears on the home cards. U5 builds the route; the copy lives here so all
+ * six landings read from one module (R5).
+ */
+export const FIRST_PROFIT_LANDING = {
+  headline: "Your kid will build a real business this year.",
+  subhead: `Whatever they are into — sport, a company, art, ideas, service — it becomes something real people pay for. ${LANDING_SUBHEAD_TAIL}`,
+  hero: "/landing/heroes/first-profit.jpg",
+} as const;
 
 export const groupBySlug = (slug: string) => groups.find((g) => g.slug === slug);
 

@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Staff Front Door — Test Roadmap v1</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#14171c; --dim:#5c6672; --line:#e3e7ec;
+  --accent:#2f6df6; --pass:#12864b; --passbg:#e6f5ec; --odd:#a2670a; --oddbg:#fdf2dd;
+  --fail:#c22c34; --failbg:#fdeaea; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.05);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+html[data-theme="dark"]{
+  --bg:#0f1216; --panel:#171b21; --ink:#e7ecf2; --dim:#98a3b0; --line:#262c35;
+  --accent:#6ea0ff; --pass:#4ed08a; --passbg:#12281d; --odd:#e8b256; --oddbg:#2a2113;
+  --fail:#ff8181; --failbg:#2d1618; --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-text-size-adjust:100%; padding-bottom:60vh;
+}
+code{font-family:var(--mono);font-size:.88em;background:rgba(127,140,158,.14);padding:1px 5px;border-radius:4px;white-space:nowrap}
+a.lnk{color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:.88em;
+  background:rgba(47,109,246,.09);padding:1px 5px;border-radius:4px;border-bottom:1px solid rgba(47,109,246,.35);word-break:break-all}
+a.lnk:hover{background:rgba(47,109,246,.2)}
+a.lnk.needs{color:var(--odd);background:var(--oddbg);border-bottom-color:var(--odd)}
+.cmd{display:inline-flex;align-items:center;gap:4px;max-width:100%}
+.cmd code{white-space:pre-wrap;word-break:break-word}
+.copy{font:600 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.04em;color:var(--dim);
+  background:transparent;border:1px solid var(--line);border-radius:4px;padding:3px 5px;cursor:pointer}
+.copy:hover{color:var(--ink);border-color:var(--dim)}
+.copy.ok{color:var(--pass);border-color:var(--pass)}
+
+/* ---------- header ---------- */
+header{position:sticky;top:0;z-index:40;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+.wrap{max-width:1020px;margin:0 auto;padding:0 16px}
+.htop{display:flex;align-items:center;gap:12px;padding:10px 0 8px;flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:650;letter-spacing:-.01em}
+h1 span{color:var(--dim);font-weight:400}
+.spacer{flex:1}
+.stat{font:600 12px/1 var(--mono);color:var(--dim);white-space:nowrap}
+.stat b{color:var(--ink)}
+.chip{display:inline-flex;align-items:center;gap:5px;font:600 12px/1 inherit;padding:6px 10px;border-radius:99px;
+  border:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;white-space:nowrap}
+.chip:hover{color:var(--ink);border-color:var(--dim)}
+.chip.on{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.75}
+.bar{display:flex;height:6px;border-radius:99px;overflow:hidden;background:var(--line);margin-bottom:8px}
+.bar i{display:block;height:100%;transition:width .2s}
+.bar .p{background:var(--pass)} .bar .o{background:var(--odd)} .bar .f{background:var(--fail)}
+.tools{display:flex;gap:6px;align-items:center;padding-bottom:10px;flex-wrap:wrap}
+#q{flex:1;min-width:150px;font:14px inherit;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+#q:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.sep{width:1px;height:20px;background:var(--line);margin:0 2px}
+
+/* ---------- config ---------- */
+details.cfg{border-bottom:1px solid var(--line);background:var(--panel)}
+details.cfg summary{cursor:pointer;padding:9px 0;font-size:13px;color:var(--dim);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+details.cfg summary::-webkit-details-marker{display:none}
+details.cfg summary:before{content:"▸";font-size:11px;transition:transform .15s}
+details.cfg[open] summary:before{transform:rotate(90deg)}
+.cfgbody{padding:2px 0 16px;display:grid;gap:12px}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.field label{display:block;font:600 11px/1.6 inherit;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.field input{width:100%;font:13px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+.field input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.quick .lbl{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.ref{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ref table{width:100%;border-collapse:collapse;font-size:13px}
+.ref td{padding:6px 10px;border-top:1px solid var(--line)}
+.ref tr:first-child td{border-top:0}
+.ref td:first-child{color:var(--dim);white-space:nowrap;width:1%}
+.note-inline{font-size:13px;color:var(--dim)}
+
+/* ---------- levels ---------- */
+main{max-width:1020px;margin:0 auto;padding:16px}
+.level{margin-bottom:28px}
+.lvhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 6px}
+.lvhead h2{font-size:19px;margin:0;letter-spacing:-.01em}
+.lvhead .who{font-size:12px;color:var(--dim)}
+.lvblurb{color:var(--dim);font-size:13.5px;margin:0 0 12px}
+.callout{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 8px 8px 0;
+  padding:9px 12px;font-size:13.5px;color:var(--dim);margin:0 0 12px}
+.callout strong{color:var(--ink)}
+
+section.sec{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;box-shadow:var(--shadow);overflow:hidden}
+.sechead{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;user-select:none}
+.sechead:hover{background:rgba(127,140,158,.06)}
+.sechead .sid{font:700 12px/1 var(--mono);color:var(--dim);background:rgba(127,140,158,.14);padding:5px 7px;border-radius:6px}
+.sechead h3{font-size:15px;margin:0;font-weight:600;flex:1;letter-spacing:-.005em}
+.sechead .prog{font:600 11px/1 var(--mono);color:var(--dim);white-space:nowrap}
+.sechead .dot{width:8px;height:8px;border-radius:99px;background:var(--line);flex:none}
+.sechead .dot.done{background:var(--pass)} .sechead .dot.has-fail{background:var(--fail)} .sechead .dot.has-odd{background:var(--odd)}
+.secbody{border-top:1px solid var(--line)}
+section.sec.closed .secbody{display:none}
+
+.blk{padding:9px 14px;font-size:13.5px;color:var(--dim);border-bottom:1px solid var(--line)}
+.blk.sub{color:var(--ink);font-weight:600;background:rgba(127,140,158,.05)}
+.blk.flag{background:var(--oddbg);color:var(--odd)}
+.blk.flag:before{content:"Flag if: ";font-weight:700}
+.blk.term:before{content:"Terminal ";font:700 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--dim);margin-right:6px}
+.blk.note{background:rgba(127,140,158,.05)}
+
+.item{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.item:last-child{border-bottom:0}
+.item:hover{background:rgba(127,140,158,.05)}
+.item.cursor{box-shadow:inset 3px 0 0 var(--accent)}
+.item .id{font:700 11.5px/1.5 var(--mono);color:var(--dim);flex:none;padding-top:3px;min-width:52px;cursor:copy}
+.item .id:hover{color:var(--accent)}
+.item .txt{flex:1 1 200px;min-width:0;padding-top:1px;overflow-wrap:anywhere}
+.item .acts{display:flex;gap:4px;flex:none}
+.item .acts button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:transparent;
+  cursor:pointer;font-size:14px;line-height:1;color:var(--dim);display:flex;align-items:center;justify-content:center;padding:0}
+.item .acts button:hover{border-color:var(--dim);color:var(--ink)}
+.item[data-s="pass"]{background:var(--passbg)}
+.item[data-s="pass"] .txt{opacity:.55}
+.item[data-s="pass"] .acts .b-pass{background:var(--pass);border-color:var(--pass);color:#fff}
+.item[data-s="odd"]{background:var(--oddbg)}
+.item[data-s="odd"] .acts .b-odd{background:var(--odd);border-color:var(--odd);color:#fff}
+.item[data-s="fail"]{background:var(--failbg)}
+.item[data-s="fail"] .acts .b-fail{background:var(--fail);border-color:var(--fail);color:#fff}
+.item .noteWrap{flex-basis:100%;order:9;margin:6px 0 2px 62px}
+.item textarea{width:100%;font:13px/1.45 inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;min-height:52px}
+.item textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.hidden{display:none !important}
+
+/* ---------- footer ---------- */
+footer{max-width:1020px;margin:0 auto;padding:0 16px 40px}
+footer details{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;box-shadow:var(--shadow)}
+footer summary{cursor:pointer;padding:11px 14px;font-weight:600;font-size:14px;list-style:none}
+footer summary::-webkit-details-marker{display:none}
+footer summary:before{content:"▸ ";color:var(--dim)}
+footer details[open] summary:before{content:"▾ "}
+footer .fb{padding:0 14px 14px;font-size:13.5px;color:var(--dim)}
+footer .fb li{margin-bottom:6px}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;z-index:100;background:rgba(10,13,18,.5);display:flex;align-items:center;justify-content:center;padding:16px}
+.modal .box{background:var(--panel);border-radius:14px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line)}
+.modal .mh{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.modal .mh h3{margin:0;font-size:15px;flex:1}
+.modal textarea{flex:1;border:0;padding:14px;font:12.5px/1.55 var(--mono);color:var(--ink);background:var(--panel);resize:none;min-height:320px}
+.modal textarea:focus{outline:none}
+.modal .mf{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.btn{font:600 13px/1 inherit;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--dim)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.kbd{font:600 11px/1 var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:3px 5px;color:var(--dim)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);z-index:200;
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:13px;font-weight:600;
+  transition:transform .18s;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0)}
+.warn{background:var(--oddbg);color:var(--odd);font-size:13px;padding:8px 16px;text-align:center;font-weight:600}
+
+@media (max-width:640px){
+  .item .id{min-width:46px}
+  .item .noteWrap{margin-left:0}
+  .htop{padding-bottom:6px}
+  h1{font-size:15px}
+}
+@media print{
+  header,footer,.acts,#toast{display:none}
+  .item,.sec{break-inside:avoid}
+  body{background:#fff;padding:0}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="htop">
+      <h1>The Staff Front Door <span>· /staff test roadmap v1</span></h1>
+      <div class="spacer"></div>
+      <div class="stat" id="stat"></div>
+      <button class="chip" id="theme" title="Toggle dark mode">Dark</button>
+    </div>
+    <div class="bar"><i class="p" id="bp" style="width:0"></i><i class="o" id="bo" style="width:0"></i><i class="f" id="bf" style="width:0"></i></div>
+    <div class="tools">
+      <button class="chip lv on" data-lv="all">All</button>
+      <button class="chip lv" data-lv="1">L1 · Smoke <span class="n" id="c1"></span></button>
+      <button class="chip lv" data-lv="2">L2 · Thread <span class="n" id="c2"></span></button>
+      <button class="chip lv" data-lv="3">L3 · Long list <span class="n" id="c3"></span></button>
+      <div class="sep"></div>
+      <button class="chip fl on" data-fl="all">Everything</button>
+      <button class="chip fl" data-fl="todo">Untested <span class="n" id="fn-todo"></span></button>
+      <button class="chip fl" data-fl="odd">⚠️ <span class="n" id="fn-odd"></span></button>
+      <button class="chip fl" data-fl="fail">❌ <span class="n" id="fn-fail"></span></button>
+      <input id="q" type="search" placeholder="Search text or ID  (press /)" autocomplete="off">
+      <button class="chip" id="report">📋 Report</button>
+      <button class="chip" id="more">⋯</button>
+    </div>
+  </div>
+  <div class="wrap">
+    <details class="cfg" id="cfg">
+      <summary>Setup — base URL, board token, cohort ID <span class="note-inline" id="cfgstate"></span></summary>
+      <div class="cfgbody">
+        <div class="fields">
+          <div class="field"><label for="f-base">Base URL</label><input id="f-base" spellcheck="false"></div>
+          <div class="field"><label for="f-token">Board token <span style="text-transform:none;letter-spacing:0">(from 2.4)</span></label><input id="f-token" placeholder="paste minted token" spellcheck="false"></div>
+          <div class="field"><label for="f-uuid">Cohort UUID</label><input id="f-uuid" placeholder="paste cohort uuid" spellcheck="false"></div>
+        </div>
+        <div class="quick"><span class="lbl">Cohorts</span>
+          <button class="chip qc" data-uuid="596dd02a-40fe-4a3d-8f82-8c0ffdb0d942">rehearsal-unit9 · archived · 90 students</button>
+          <span class="note-inline">— for archived-state reads; your <code>sfd-test-…</code> throwaway (2.3) for anything active</span>
+        </div>
+        <div class="ref"><table><tbody>
+          <tr><td>Staff hub</td><td><a class="lnk" data-path="/staff" target="_blank" rel="noopener">/staff</a></td></tr>
+          <tr><td>Staff sign-in</td><td><a class="lnk" data-path="/crm/login" target="_blank" rel="noopener">/crm/login</a> <em>(lands on /staff now)</em></td></tr>
+          <tr><td>Admissions CRM</td><td><a class="lnk" data-path="/crm" target="_blank" rel="noopener">/crm</a></td></tr>
+          <tr><td>FW ops / archived view</td><td><a class="lnk" data-path="/fp/fw/ops" target="_blank" rel="noopener">/fp/fw/ops</a> · <a class="lnk" data-path="/fp/fw/ops?archived=1" target="_blank" rel="noopener">?archived=1</a></td></tr>
+          <tr><td>Guide surface / sign-in</td><td><a class="lnk" data-path="/fp/fw" target="_blank" rel="noopener">/fp/fw</a> · <a class="lnk" data-path="/fp/fw/sign-in" target="_blank" rel="noopener">/fp/fw/sign-in</a></td></tr>
+          <tr><td>Big screen</td><td><a class="lnk" data-path="/fp/fw/board/{token}" data-raw="/fp/fw/board/{token}" target="_blank" rel="noopener">/fp/fw/board/&lt;token&gt;</a></td></tr>
+          <tr><td>Rehearsal guide</td><td><code>rehearsal.guide@the120.invalid</code> — password in <code>scripts/.fw-rehearsal.local.txt</code></td></tr>
+          <tr><td>Terminal</td><td><span class="cmd" data-cmd="npm run fw"><code>npm run fw</code><button class="copy" type="button">copy</button></span> prints the full command list</td></tr>
+        </tbody></table></div>
+        <div class="note-inline">All four rehearsal cohorts are <strong>archived in production on purpose</strong> — the hub&#x27;s “no upcoming weekends” is a fact, and the tests keep it one. Filling in a token or cohort UUID rewrites every link and terminal command on this page.</div>
+      </div>
+    </details>
+  </div>
+  <div class="warn hidden" id="nostore">Progress can't be saved on this device (private browsing or storage disabled) — export before you close the tab.</div>
+</header>
+
+<main id="main"></main>
+
+<footer>
+  <details>
+    <summary>How to flag &amp; report back</summary>
+    <div class="fb">
+      <p>✅ works · ⚠️ works-but-odd · ❌ broken. For ⚠️ and ❌ record: <strong>what you did · what you expected · what happened · URL · rough time</strong> — the notes box on each item captures exactly this, and 📋 Report turns it into a paste-ready summary grouped by severity.</p>
+      <ol>
+        <li><strong>Blockers</strong> (❌) — anything that loses a capture, shows names on a dead board, or locks someone out of sign-out</li>
+        <li><strong>Should-fix</strong> (⚠️) — noticeable, especially on the shared iPad</li>
+        <li><strong>Nice-to-have</strong> — polish for later</li>
+        <li><strong>Confusing but not broken</strong> — if it confused you, it&#x27;ll confuse staff at 9 a.m. on a Saturday</li>
+      </ol>
+      <p><em>Example:</em> <code>3.3.5 ❌ — captive portal with 4 queued taps; expected “looks connected but can&#x27;t reach The 120”; got “try again in a moment” forever. iPad, /fp/fw, ~10:15.</code></p>
+      <p>Device findings from 3.3–4 and 3.10–12 are worth more than a green suite — those paths have no other test. Note the Safari version, iPad model, and network shape with each one.</p>
+    </div>
+  </details>
+  <details>
+    <summary>Known and expected — do <strong>not</strong> flag these</summary>
+    <div class="fb"><ul>
+      <li>The hub&#x27;s FW card saying <strong>“No upcoming weekends”</strong> — true: all four rehearsal cohorts were archived by migration (Unit 10). The honest zero is the launch state.</li>
+      <li><strong>“Archived by: unrecorded”</strong> on the four rehearsal cohorts — a migration archived them, and a migration is not a human.</li>
+      <li>The bar showing the <strong>account email</strong> rather than a name — no display name exists.</li>
+      <li>An archived cohort still accepting <strong>guide check-in and quick-create</strong> — deliberate and tested; archiving is staff visibility plus a closed board, not a disabled cohort.</li>
+      <li><strong>Unarchiving not restoring the board token</strong> — tokens are one-way; mint a new one.</li>
+      <li>A <strong>non-staff account signing in at /crm/login</strong> landing on a 404 at /staff — recorded, functionally identical to the old dead end.</li>
+      <li>A sign-out refused with <strong>clear_failed</strong> (a cache clear threw) — an open decision awaiting device evidence; record how often it fires and what the person did next.</li>
+      <li>Internal names still containing “path” (<code>path_cohorts</code>, <code>path-sw-*</code> caches, <code>fw.cacheOwner</code>) — deliberately unchanged.</li>
+    </ul></div>
+  </details>
+  <details>
+    <summary>Keyboard shortcuts</summary>
+    <div class="fb">
+      <span class="kbd">j</span> / <span class="kbd">k</span> next / previous item &nbsp;·&nbsp;
+      <span class="kbd">1</span> ✅ pass &nbsp;·&nbsp; <span class="kbd">2</span> ⚠️ odd &nbsp;·&nbsp; <span class="kbd">3</span> ❌ fail &nbsp;·&nbsp;
+      <span class="kbd">0</span> clear &nbsp;·&nbsp; <span class="kbd">n</span> note &nbsp;·&nbsp; <span class="kbd">o</span> open first link &nbsp;·&nbsp;
+      <span class="kbd">c</span> copy ID &nbsp;·&nbsp; <span class="kbd">/</span> search &nbsp;·&nbsp; <span class="kbd">esc</span> close
+      <p style="margin:10px 0 0">Marking with 1/2/3 jumps to the next untested item automatically. Tapping anywhere on a row toggles ✅ — good for a thumb on an iPad.</p>
+    </div>
+  </details>
+  <p class="note-inline" style="text-align:center;padding:8px 0">Generated from <code>docs/plans/2026-07-27-001-feat-staff-front-door-plan.md</code> + <code>docs/plans/fw-dry-run-checklist.md</code> · 142 checks · progress saves in this browser</p>
+</footer>
+
+<div id="toast"></div>
+<script id="data" type="application/json">[{"n": "1", "title": "Big, obvious things", "blurb": "Stop-the-line checks. If any fail, don&#x27;t bother with Levels 2–3 until fixed.", "who": "Peter", "time": "~15 min", "short": "Smoke", "intro": [], "sections": [{"id": "1.1", "title": "The front door exists", "plain": "The front door exists", "blocks": [{"t": "item", "id": "1.1.1", "html": "Signed in as staff, \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> loads: a hub with \u003cstrong>two cards\u003c/strong> — Admissions and Founders Weekend"}, {"t": "item", "id": "1.1.2", "html": "Signed out, \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> sends you to the staff sign-in at \u003ca class=\"lnk\" data-path=\"/crm/login\" data-raw=\"/crm/login\" target=\"_blank\" rel=\"noopener\">/crm/login\u003c/a>"}, {"t": "item", "id": "1.1.3", "html": "Sign in at \u003ca class=\"lnk\" data-path=\"/crm/login\" data-raw=\"/crm/login\" target=\"_blank\" rel=\"noopener\">/crm/login\u003c/a> → you land on \u003cstrong>/staff\u003c/strong>, not /crm (Unit 12&#x27;s whole point)"}, {"t": "item", "id": "1.1.4", "html": "\u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> still loads normally — six section tabs intact, everything reachable"}, {"t": "item", "id": "1.1.5", "html": "\u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> and \u003ca class=\"lnk\" data-path=\"/fp/fw/ops\" data-raw=\"/fp/fw/ops\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops\u003c/a> still load for the accounts that could reach them before"}]}, {"id": "1.2", "title": "The gate holds", "plain": "The gate holds", "blocks": [{"t": "item", "id": "1.2.1", "html": "As a \u003cstrong>guide\u003c/strong> (non-staff), type \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> → a \u003cstrong>404\u003c/strong> with the URL bar still reading \u003ccode>/staff\u003c/code> — and the session survives (going back to \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> still works)"}, {"t": "item", "id": "1.2.2", "html": "\u003ca class=\"lnk\" data-path=\"/staffing\" data-raw=\"/staffing\" target=\"_blank\" rel=\"noopener\">/staffing\u003c/a> → an ordinary 404, \u003cstrong>not\u003c/strong> the staff gate (prefix leak check)"}, {"t": "item", "id": "1.2.3", "html": "Signed out, a deep path like \u003ca class=\"lnk\" data-path=\"/staff/anything\" data-raw=\"/staff/anything\" target=\"_blank\" rel=\"noopener\">/staff/anything\u003c/a> → staff sign-in, not an error"}]}, {"id": "1.3", "title": "The bar is everywhere it should be", "plain": "The bar is everywhere it should be", "blocks": [{"t": "item", "id": "1.3.1", "html": "One bar on \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>, \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a>, and \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a>: \u003cstrong>account email\u003c/strong> · application label · \u003cstrong>Sign out\u003c/strong>"}, {"t": "item", "id": "1.3.2", "html": "As staff, the bar carries a \u003cstrong>hub link\u003c/strong> on \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> and \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> — and it returns to \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>"}, {"t": "item", "id": "1.3.3", "html": "As a \u003cstrong>guide\u003c/strong> on \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a>, there is \u003cstrong>no hub link\u003c/strong>"}, {"t": "item", "id": "1.3.4", "html": "The sign-in doors (\u003ca class=\"lnk\" data-path=\"/crm/login\" data-raw=\"/crm/login\" target=\"_blank\" rel=\"noopener\">/crm/login\u003c/a>, \u003ca class=\"lnk\" data-path=\"/fp/fw/sign-in\" data-raw=\"/fp/fw/sign-in\" target=\"_blank\" rel=\"noopener\">/fp/fw/sign-in\u003c/a>, \u003ca class=\"lnk\" data-path=\"/fp/sign-in\" data-raw=\"/fp/sign-in\" target=\"_blank\" rel=\"noopener\">/fp/sign-in\u003c/a>) carry \u003cstrong>no bar\u003c/strong>"}, {"t": "flag", "html": "the bar renders twice on any page, or appears on an unauthenticated door."}]}, {"id": "1.4", "title": "The hub&#x27;s numbers", "plain": "The hub's numbers", "blocks": [{"t": "item", "id": "1.4.1", "html": "Admissions card reads \u003cstrong>“N of 120 seats remaining.”\u003c/strong>"}, {"t": "item", "id": "1.4.2", "html": "Founders Weekend card reads \u003cstrong>“No upcoming weekends. Create one from the ops page.”\u003c/strong> — the honest zero (all four rehearsal cohorts are archived; this is a fact, not a bug)"}, {"t": "item", "id": "1.4.3", "html": "Both cards \u003cstrong>click through\u003c/strong> — the number never hides the door"}, {"t": "note", "html": "If the FW card instead says “Couldn&#x27;t load the weekend count just now — the door still works”, that is the deliberate degrade for a failed read. Reload once; if it persists, flag it — but it must NEVER show a fabricated 0."}]}, {"id": "1.5", "title": "Nothing is on fire", "plain": "Nothing is on fire", "blocks": [{"t": "item", "id": "1.5.1", "html": "No error screens or blank pages anywhere you clicked"}, {"t": "item", "id": "1.5.2", "html": "No obviously broken layout on an iPad"}, {"t": "item", "id": "1.5.3", "html": "Vercel runtime errors for the last hour — should be empty"}, {"t": "item", "id": "1.5.4", "html": "Marketing site (\u003ca class=\"lnk\" data-path=\"/\" data-raw=\"/\" target=\"_blank\" rel=\"noopener\">/\u003c/a>, \u003ca class=\"lnk\" data-path=\"/scholars\" data-raw=\"/scholars\" target=\"_blank\" rel=\"noopener\">/scholars\u003c/a>, \u003ca class=\"lnk\" data-path=\"/tuition\" data-raw=\"/tuition\" target=\"_blank\" rel=\"noopener\">/tuition\u003c/a>) untouched — and carries \u003cstrong>no staff bar\u003c/strong>"}]}]}, {"n": "2", "title": "The single thread", "blurb": "One continuous story: fresh sign-in → the hub → both spokes → a full \u003cstrong>archive lifecycle\u003c/strong> on a throwaway cohort → sign-outs. Run it start to finish in one sitting.", "who": "Peter", "time": "~60 min", "short": "Single thread", "intro": [{"t": "note", "html": "\u003cstrong>Leave production true:\u003c/strong> everything you create uses a recognizable slug like \u003ccode>sfd-test-2026-07\u003c/code>, and step 2.9 re-archives it — the hub&#x27;s “no upcoming weekends” is currently a \u003cstrong>fact\u003c/strong> and should still be one when you finish."}], "sections": [{"id": "2.1", "title": "Fresh login lands on the hub", "plain": "Fresh login lands on the hub", "blocks": [{"t": "item", "id": "2.1.1", "html": "Sign out fully, then sign in at \u003ca class=\"lnk\" data-path=\"/crm/login\" data-raw=\"/crm/login\" target=\"_blank\" rel=\"noopener\">/crm/login\u003c/a> → you land on \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>"}, {"t": "item", "id": "2.1.2", "html": "Run the \u003cstrong>password reset\u003c/strong> flow → after the success beat (~1s) you land on \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> — this is a new staff member&#x27;s first-ever session, the path that matters most"}, {"t": "item", "id": "2.1.3", "html": "A \u003cstrong>non-staff\u003c/strong> account through the same form (if you have one handy) → lands on a 404 at \u003ccode>/staff\u003c/code>. Expected dead end — flag only crashes or loops"}]}, {"id": "2.2", "title": "Hub and spoke", "plain": "Hub and spoke", "blocks": [{"t": "item", "id": "2.2.1", "html": "From \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>, the Admissions card → \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a>; the bar persists and its application label reads as admissions"}, {"t": "item", "id": "2.2.2", "html": "The bar&#x27;s hub link on \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> → back to \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>"}, {"t": "item", "id": "2.2.3", "html": "From \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>, the FW card → the ops list; the label flips to Founders Weekend"}, {"t": "item", "id": "2.2.4", "html": "Hub link from \u003ca class=\"lnk\" data-path=\"/fp/fw/ops\" data-raw=\"/fp/fw/ops\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops\u003c/a> → back to \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>"}]}, {"id": "2.3", "title": "Create the throwaway cohort", "plain": "Create the throwaway cohort", "blocks": [{"t": "item", "id": "2.3.1", "html": "Create \u003ccode>sfd-test-…\u003c/code> with a \u003cstrong>future\u003c/strong> window and an explicit time zone"}, {"t": "item", "id": "2.3.2", "html": "It appears in the ops list"}, {"t": "item", "id": "2.3.3", "html": "👀 The hub&#x27;s FW card now reads \u003cstrong>“1 upcoming weekend. Next: sfd-test-… (date).”\u003c/strong>"}, {"t": "term", "html": "\u003cspan class=\"cmd\" data-cmd=\"npm run fw -- cohort-create --slug sfd-test-2026-07 --start 2026-09-05 --start-time 09:00 --end 2026-09-07 --end-time 17:00 --tz America/Toronto\">\u003ccode>npm run fw -- cohort-create --slug sfd-test-2026-07 --start 2026-09-05 --start-time 09:00 --end 2026-09-07 --end-time 17:00 --tz America/Toronto\u003c/code>\u003cbutton class=\"copy\" type=\"button\" title=\"Copy command\">copy\u003c/button>\u003c/span>"}]}, {"id": "2.4", "title": "Board up", "plain": "Board up", "blocks": [{"t": "item", "id": "2.4.1", "html": "Mint a board token; open \u003ca class=\"lnk\" data-path=\"/fp/fw/board/{token}\" data-raw=\"/fp/fw/board/&lt;token&gt;\" target=\"_blank\" rel=\"noopener\">/fp/fw/board/&lt;token&gt;\u003c/a> on a second screen — it renders and polls (~4s)"}, {"t": "term", "html": "\u003cspan class=\"cmd\" data-cmd=\"npm run fw -- token-mint --cohort {uuid}\">\u003ccode>npm run fw -- token-mint --cohort {uuid}\u003c/code>\u003cbutton class=\"copy\" type=\"button\" title=\"Copy command\">copy\u003c/button>\u003c/span>"}]}, {"id": "2.5", "title": "Archive it — the heart of the feature", "plain": "Archive it — the heart of the feature", "blocks": [{"t": "item", "id": "2.5.1", "html": "On the cohort&#x27;s ops page, find the \u003cstrong>Archive\u003c/strong> control. Type a \u003cstrong>wrong\u003c/strong> slug → the button stays disabled"}, {"t": "item", "id": "2.5.2", "html": "Type the right slug → it archives"}, {"t": "item", "id": "2.5.3", "html": "The page flips to \u003cstrong>archived mode\u003c/strong>: a banner with the date and \u003cstrong>you\u003c/strong> as the archiver, and an Unarchive control"}, {"t": "item", "id": "2.5.4", "html": "Roster-building controls are \u003cstrong>gone\u003c/strong> from the page (import, link student, add guide)"}, {"t": "item", "id": "2.5.5", "html": "👀 \u003cstrong>The board URL dies within ~5 seconds\u003c/strong> — a clean dead page, the grid cleared. Not a frozen last frame, not a “catching up” chip"}, {"t": "item", "id": "2.5.6", "html": "The default ops list omits it; the archived view (\u003ca class=\"lnk\" data-path=\"/fp/fw/ops?archived=1\" data-raw=\"/fp/fw/ops?archived=1\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops?archived=1\u003c/a>) shows it with a \u003cstrong>Board revoked\u003c/strong> chip"}, {"t": "item", "id": "2.5.7", "html": "👀 The hub&#x27;s FW card is back to \u003cstrong>“No upcoming weekends”\u003c/strong> — archived cohorts never inflate the count"}, {"t": "item", "id": "2.5.8", "html": "Try to \u003cstrong>mint\u003c/strong> a token on the archived cohort → refused with an archived reason"}, {"t": "flag", "html": "the projected board still shows children&#x27;s names after the archive — that is the exact exposure this feature exists to close. Blocker."}]}, {"id": "2.6", "title": "The guide notices nothing", "plain": "The guide notices nothing", "blocks": [{"t": "item", "id": "2.6.1", "html": "A guide holding a grant on the archived cohort: \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> still lists it (with an archived badge), and they can \u003cstrong>enter\u003c/strong> it"}, {"t": "item", "id": "2.6.2", "html": "Inside it, the header shows the cohort&#x27;s \u003cstrong>slug\u003c/strong> (not “This weekend”), and the Switch link still renders if they hold another cohort"}, {"t": "item", "id": "2.6.3", "html": "A \u003cstrong>check-in still lands\u003c/strong> inside the archived cohort — deliberate, do not flag"}, {"t": "item", "id": "2.6.4", "html": "\u003cstrong>Quick-create still works\u003c/strong> inside it — deliberate (a guide who can check in must be able to add the child in front of them)"}]}, {"id": "2.7", "title": "Unarchive", "plain": "Unarchive", "blocks": [{"t": "item", "id": "2.7.1", "html": "Unarchive (typed-slug confirm) → the page flips back to active mode"}, {"t": "item", "id": "2.7.2", "html": "The board panel shows \u003cstrong>no live token\u003c/strong> — the old URL is still dead. Tokens are one-way; unarchiving never resurrects a board"}, {"t": "item", "id": "2.7.3", "html": "Mint a \u003cstrong>new\u003c/strong> token → the new URL works; the old one still 404s"}, {"t": "item", "id": "2.7.4", "html": "👀 Hub count is 1 again"}, {"t": "term", "html": "\u003cspan class=\"cmd\" data-cmd=\"npm run fw -- unarchive --cohort {uuid}\">\u003ccode>npm run fw -- unarchive --cohort {uuid}\u003c/code>\u003cbutton class=\"copy\" type=\"button\" title=\"Copy command\">copy\u003c/button>\u003c/span>"}]}, {"id": "2.8", "title": "Sign out from everywhere", "plain": "Sign out from everywhere", "blocks": [{"t": "item", "id": "2.8.1", "html": "Staff sign-out from \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> → lands on the staff sign-in (\u003ca class=\"lnk\" data-path=\"/crm/login\" data-raw=\"/crm/login\" target=\"_blank\" rel=\"noopener\">/crm/login\u003c/a>)"}, {"t": "item", "id": "2.8.2", "html": "Staff sign-out from \u003ca class=\"lnk\" data-path=\"/fp/fw/ops\" data-raw=\"/fp/fw/ops\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops\u003c/a> → also the staff sign-in — the same verdict from every surface"}, {"t": "item", "id": "2.8.3", "html": "Guide sign-out from \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> → the \u003cstrong>guide\u003c/strong> door (\u003ca class=\"lnk\" data-path=\"/fp/fw/sign-in\" data-raw=\"/fp/fw/sign-in\" target=\"_blank\" rel=\"noopener\">/fp/fw/sign-in\u003c/a>)"}, {"t": "item", "id": "2.8.4", "html": "An account that is both staff and guide → resolves \u003cstrong>staff-first\u003c/strong>"}, {"t": "item", "id": "2.8.5", "html": "After sign-out the back button does not restore the session"}]}, {"id": "2.9", "title": "Close the thread", "plain": "Close the thread", "blocks": [{"t": "item", "id": "2.9.1", "html": "Re-archive \u003ccode>sfd-test-…\u003c/code> → the hub&#x27;s zero is true again"}, {"t": "item", "id": "2.9.2", "html": "Spot-check \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> one last time — untouched throughout"}, {"t": "text", "html": "\u003cstrong>✅ If the thread passes, the front door works.\u003c/strong> Hand Level 3 to the intern — and book a device day for 3.3–4 and 3.10–12."}]}]}, {"n": "3", "title": "The long list", "blurb": "Work top to bottom. Sections 3.3–3.4 and 3.10–3.12 need \u003cstrong>real hardware\u003c/strong>: a shared iPad on Safari at 375px, a projector, and a network you can genuinely kill (airplane mode or an unsigned captive portal — \u003ccode>navigator.onLine\u003c/code> lies behind a portal, and several branches exist only for that). They fold in the whole device dry-run checklist — those paths have \u003cstrong>no CI coverage of any kind\u003c/strong>; this is their only test.", "who": "Intern + a device day", "time": "~1–2 days", "short": "Long list", "intro": [{"t": "text", "html": "Use \u003cstrong>\u003ccode>rehearsal-unit9\u003c/code>\u003c/strong> (\u003ccode>596dd02a-40fe-4a3d-8f82-8c0ffdb0d942\u003c/code>, 90 students) for archived-state \u003cem>reads\u003c/em> — it is archived on purpose. If a check needs an \u003cem>active\u003c/em> cohort, use the Level 2 throwaway and re-archive after. \u003cstrong>Never leave a rehearsal cohort unarchived.\u003c/strong>"}], "sections": [{"id": "3.1", "title": "Routing &amp; the gate", "plain": "Routing & the gate", "blocks": [{"t": "item", "id": "3.1.1", "html": "Signed out: \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> and nested paths all route to the staff sign-in"}, {"t": "item", "id": "3.1.2", "html": "A \u003cstrong>guide\u003c/strong> session at \u003ccode>/staff\u003c/code> → 404, URL bar still \u003ccode>/staff\u003c/code>, session survives"}, {"t": "item", "id": "3.1.3", "html": "A \u003cstrong>student\u003c/strong> session at \u003ccode>/staff\u003c/code> → 404 too"}, {"t": "item", "id": "3.1.4", "html": "A \u003cstrong>parent\u003c/strong> session at \u003ccode>/staff\u003c/code> → 404 too"}, {"t": "item", "id": "3.1.5", "html": "\u003ca class=\"lnk\" data-path=\"/staffing\" data-raw=\"/staffing\" target=\"_blank\" rel=\"noopener\">/staffing\u003c/a> and other \u003ccode>/staff…\u003c/code>-prefixed non-paths → generic 404, never the staff gate"}, {"t": "item", "id": "3.1.6", "html": "View source on \u003ccode>/staff\u003c/code>: robots \u003ccode>noindex\u003c/code> is present"}, {"t": "item", "id": "3.1.7", "html": "A staff member whose staff row is \u003cstrong>deactivated\u003c/strong> — valid session and all → loses access"}, {"t": "item", "id": "3.1.8", "html": "The 404 page renders cleanly when reached signed out — no rewrite loop"}]}, {"id": "3.2", "title": "The bar, surface by surface", "plain": "The bar, surface by surface", "blocks": [{"t": "item", "id": "3.2.1", "html": "Exactly \u003cstrong>once\u003c/strong> per page on: \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a>, every \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> section, \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a>, \u003ca class=\"lnk\" data-path=\"/fp/fw/ops\" data-raw=\"/fp/fw/ops\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops\u003c/a>, and a per-cohort page — the last three nest layouts, the classic double-mount risk"}, {"t": "item", "id": "3.2.2", "html": "It shows the account \u003cstrong>email\u003c/strong> — there is no display name; do not flag the email"}, {"t": "item", "id": "3.2.3", "html": "The application label differs between CRM and FW surfaces"}, {"t": "item", "id": "3.2.4", "html": "Queue chip states map to distinct copy: \u003cstrong>n queued · offline · attention · another account&#x27;s\u003c/strong>"}, {"t": "item", "id": "3.2.5", "html": "The family app (\u003ca class=\"lnk\" data-path=\"/fp/family\" data-raw=\"/fp/family\" target=\"_blank\" rel=\"noopener\">/fp/family\u003c/a>) and student surfaces have \u003cstrong>no bar\u003c/strong>; the projected board never will"}, {"t": "item", "id": "3.2.6", "html": "At \u003cstrong>375px\u003c/strong> the CRM&#x27;s six tabs are all still reachable, with the bar above the tab row"}, {"t": "item", "id": "3.2.7", "html": "Throttle the identity read to failure → the identity string degrades but \u003cstrong>Sign out still renders\u003c/strong> (R23: the control is unconditional)"}]}, {"id": "3.3", "title": "Sign-out &amp; the queue interlock — real iPad", "plain": "Sign-out & the queue interlock — real iPad", "blocks": [{"t": "item", "id": "3.3.1", "html": "No residue → sign-out is immediate, destination by account type"}, {"t": "item", "id": "3.3.2", "html": "Capture ~3 check-ins \u003cstrong>offline\u003c/strong> as a guide, then sign out from \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> → \u003cstrong>refused with the count\u003c/strong>, told to stay signed in"}, {"t": "item", "id": "3.3.3", "html": "Walk to \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> and \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> with that queue → the \u003cstrong>same refusal, same count\u003c/strong> — one verdict from every surface"}, {"t": "item", "id": "3.3.4", "html": "Reconnect, let it drain → sign-out now completes and clears residue"}, {"t": "item", "id": "3.3.5", "html": "\u003cstrong>Captive portal\u003c/strong> (joined, not signed in — \u003ccode>onLine\u003c/code> is true): sign out with a queue → “looks connected but can&#x27;t reach The 120” (\u003ccode>drain_stalled\u003c/code>), \u003cstrong>not\u003c/strong> “try again in a moment” — that sentence is an infinite loop here"}, {"t": "item", "id": "3.3.6", "html": "A queue holding only a \u003cstrong>server-rejected\u003c/strong> (blocked) entry → does not refuse"}, {"t": "item", "id": "3.3.7", "html": "\u003cstrong>Another account&#x27;s undrained captures\u003c/strong> on the device → your sign-out is NOT refused (R16 scopes to the signing-out account), and their captures are \u003cstrong>preserved\u003c/strong> afterwards — verify both halves"}, {"t": "item", "id": "3.3.8", "html": "A \u003cstrong>quarantined\u003c/strong> record (edit one in the inspector to a bogus \u003ccode>schemaVersion\u003c/code>) → refuses \u003cstrong>nobody\u003c/strong> — including an admissions-only staffer on /crm — and is still on the device afterwards"}, {"t": "item", "id": "3.3.9", "html": "A \u003cstrong>CRM-only staffer\u003c/strong> who has never opened FW: after browsing and signing out, Safari&#x27;s storage inspector shows \u003cstrong>no FW IndexedDB database was ever created\u003c/strong> — one appearing here is B1 regressing"}, {"t": "item", "id": "3.3.10", "html": "Two tabs, sign out in both within a second → exactly one proceeds, the other observes the result, \u003cstrong>neither hangs\u003c/strong>"}, {"t": "item", "id": "3.3.11", "html": "No queue state produces a hang or a refusal you cannot act on from where you stand"}, {"t": "item", "id": "3.3.12", "html": "\u003cstrong>Version skew\u003c/strong> (two people): leave the iPad open on /fp/fw, deploy, then tap sign out → a clean \u003cstrong>reload\u003c/strong>, then a normal sign-out. If it wipes-then-errors instead, \u003ccode>deploymentId\u003c/code> is not reaching the build — curl the page and grep for \u003ccode>data-dpl-id\u003c/code>"}]}, {"id": "3.4", "title": "Handover &amp; reconcile — shared iPad", "plain": "Handover & reconcile — shared iPad", "blocks": [{"t": "item", "id": "3.4.1", "html": "\u003cstrong>Offline handover:\u003c/strong> guide A captures ~10 offline and closes the tab; guide B signs in, still offline → \u003cstrong>A&#x27;s captures survive\u003c/strong> (foreign count on the chip), B&#x27;s session and fresh caches work"}, {"t": "item", "id": "3.4.2", "html": "\u003cstrong>Online handover:\u003c/strong> same, online → A&#x27;s captures are still preserved — \u003cstrong>never drained under B&#x27;s session\u003c/strong>, and not lost"}, {"t": "item", "id": "3.4.3", "html": "\u003cstrong>First-ever FW use\u003c/strong> on a clean device → the owner key is adopted, nothing is destroyed, no reconcile runs"}, {"t": "item", "id": "3.4.4", "html": "Offline on a cached shell as the \u003cstrong>next holder\u003c/strong>: no email and \u003cstrong>no staff-only affordance\u003c/strong> in the cached page"}, {"t": "item", "id": "3.4.5", "html": "\u003cstrong>The orphaned-reconcile probe:\u003c/strong> navigate fast between /crm, /staff and /fp/fw a dozen times during a handover reconcile, then read \u003ccode>localStorage[“fw.cacheOwner”]\u003c/code> → it must equal the account you are signed in as. Record what you see — if it is ever the other account, the race is real"}, {"t": "item", "id": "3.4.6", "html": "\u003cstrong>Timing:\u003c/strong> a ~90-entry queue (a full weekend&#x27;s backlog) — time the selective clear. It runs while the cross-document drain lock is held. Record the ms; \u003cstrong>over ~500ms is a finding\u003c/strong>"}, {"t": "item", "id": "3.4.7", "html": "\u003cstrong>Mixed queue:\u003c/strong> ~90 entries across all five classes → own-blocked and foreign-blocked gone; \u003cstrong>quarantined and foreign-undrained still there\u003c/strong>"}, {"t": "item", "id": "3.4.8", "html": "Record each iPad&#x27;s \u003cstrong>Safari version\u003c/strong>. Below 15.4 there is no cross-tab lock guarantee on that device — worth knowing before an event"}]}, {"id": "3.5", "title": "Identity unavailable — the error boundaries", "plain": "Identity unavailable — the error boundaries", "blocks": [{"t": "item", "id": "3.5.1", "html": "Throttle the network to near-zero, load \u003ca class=\"lnk\" data-path=\"/crm\" data-raw=\"/crm\" target=\"_blank\" rel=\"noopener\">/crm\u003c/a> and \u003ca class=\"lnk\" data-path=\"/staff\" data-raw=\"/staff\" target=\"_blank\" rel=\"noopener\">/staff\u003c/a> → \u003cstrong>“We couldn&#x27;t confirm your access just now”\u003c/strong> with a Try again — \u003cem>not\u003c/em> a 404, \u003cem>not\u003c/em> “staff-only”"}, {"t": "item", "id": "3.5.2", "html": "Restore the network, tap \u003cstrong>Try again\u003c/strong> → the page loads (proves it re-fetches rather than re-rendering the same failure)"}, {"t": "item", "id": "3.5.3", "html": "Same throttle on \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> → the guide is \u003cstrong>not\u003c/strong> evicted to the sign-in door mid-shift — a slow read is UNKNOWN, never “signed out”"}, {"t": "item", "id": "3.5.4", "html": "The \u003cstrong>root\u003c/strong> error page (an anonymous marketing visitor) uses different copy — no “you are still signed in” claim to someone who never was"}, {"t": "item", "id": "3.5.5", "html": "The Try again button has a short cooldown and doesn&#x27;t double-fire"}]}, {"id": "3.6", "title": "Archive — staff mechanics", "plain": "Archive — staff mechanics", "blocks": [{"t": "item", "id": "3.6.1", "html": "Archive with a \u003cstrong>live token\u003c/strong> → the token dies \u003cstrong>first\u003c/strong>. If anything fails mid-way you get an active cohort with a dark board — never a hidden cohort with a live board"}, {"t": "item", "id": "3.6.2", "html": "Archive with no token ever minted → succeeds"}, {"t": "item", "id": "3.6.3", "html": "Archive from two tabs at once → one wins, the other reports \u003cstrong>already archived\u003c/strong>; the banner names the \u003cstrong>first\u003c/strong> actor"}, {"t": "item", "id": "3.6.4", "html": "Unarchive an already-active cohort → “already active”, not an error"}, {"t": "item", "id": "3.6.5", "html": "Banner attribution, three states: your \u003cstrong>email\u003c/strong> after a UI archive; \u003cstrong>“unrecorded”\u003c/strong> on the four rehearsals (a migration archived them — deliberate); and a failed lookup shows an \u003cem>unresolvable\u003c/em> state — never blank or “undefined”"}, {"t": "item", "id": "3.6.6", "html": "Create a cohort reusing an \u003cstrong>archived\u003c/strong> cohort&#x27;s slug → refused, and the message points at the archived list"}, {"t": "item", "id": "3.6.7", "html": "\u003ca class=\"lnk\" data-path=\"/fp/fw/ops?archived=1\" data-raw=\"/fp/fw/ops?archived=1\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops?archived=1\u003c/a>: correct counts on archived rows, \u003cstrong>Board revoked\u003c/strong> chip"}, {"t": "item", "id": "3.6.8", "html": "Every cohort archived → the ops zero-state looks intentional and offers a create path"}, {"t": "item", "id": "3.6.9", "html": "Double-tap Archive/Unarchive buttons → nothing double-fires"}, {"t": "term", "html": "\u003cspan class=\"cmd\" data-cmd=\"npm run fw -- archive --cohort {uuid} --actor \u003cstaff-user-uuid>\">\u003ccode>npm run fw -- archive --cohort {uuid} --actor \u003cstaff-user-uuid>\u003c/code>\u003cbutton class=\"copy\" type=\"button\" title=\"Copy command\">copy\u003c/button>\u003c/span> — \u003ccode>--actor\u003c/code> is required; \u003cspan class=\"cmd\" data-cmd=\"npm run fw -- unarchive --cohort {uuid}\">\u003ccode>npm run fw -- unarchive --cohort {uuid}\u003c/code>\u003cbutton class=\"copy\" type=\"button\" title=\"Copy command\">copy\u003c/button>\u003c/span>"}]}, {"id": "3.7", "title": "Archive — the doors that must REFUSE", "plain": "Archive — the doors that must REFUSE", "blocks": [{"t": "item", "id": "3.7.1", "html": "\u003cstrong>Mint\u003c/strong> on an archived cohort (one with a \u003cem>future\u003c/em> window — a past window would refuse for the wrong reason) → refused with an archived reason"}, {"t": "item", "id": "3.7.2", "html": "Board \u003cstrong>feed and page\u003c/strong> for an archived cohort → 404; the page paints no titled shell"}, {"t": "item", "id": "3.7.3", "html": "\u003cstrong>CSV import\u003c/strong> into an archived cohort → the \u003cstrong>whole file\u003c/strong> refused; verify zero accounts and zero memberships were created"}, {"t": "item", "id": "3.7.4", "html": "\u003cstrong>Link an existing student\u003c/strong> → refused"}, {"t": "item", "id": "3.7.5", "html": "\u003cstrong>Add a guide grant\u003c/strong> → refused (revoking one still works — next section)"}, {"t": "item", "id": "3.7.6", "html": "\u003cstrong>The read-property case:\u003c/strong> set \u003ccode>archived_at\u003c/code> directly in SQL \u003cem>without\u003c/em> revoking the token, with a board polling on a projector → within one ~4s poll the feed 404s and the client \u003cstrong>clears the grid\u003c/strong> — no names left on screen, no “catching up” chip holding the last frame"}]}, {"id": "3.8", "title": "Archive — the doors that must STAY OPEN (deliberate; do not flag)", "plain": "Archive — the doors that must STAY OPEN (deliberate; do not flag)", "blocks": [{"t": "item", "id": "3.8.1", "html": "A guide&#x27;s \u003cstrong>check-in lands\u003c/strong> in an archived cohort"}, {"t": "item", "id": "3.8.2", "html": "An \u003cstrong>offline drain replays\u003c/strong> into an archived cohort → lands, no reject rows"}, {"t": "item", "id": "3.8.3", "html": "\u003cstrong>Quick-create succeeds\u003c/strong> — accepted consequence, by design: a new minor&#x27;s account can be created inside a cohort hidden from staff&#x27;s default list"}, {"t": "item", "id": "3.8.4", "html": "\u003cstrong>Revoke a guide grant\u003c/strong> works — de-escalation is never blocked"}, {"t": "item", "id": "3.8.5", "html": "\u003cstrong>Revoke a board token\u003c/strong> works (inert post-archive)"}, {"t": "item", "id": "3.8.6", "html": "\u003cstrong>Anonymize a student\u003c/strong> works — the privacy obligation outlives the weekend"}, {"t": "item", "id": "3.8.7", "html": "\u003cstrong>Replay-reject and import-exception resolution\u003c/strong> both work — closing a tombstone is not roster-building"}]}, {"id": "3.9", "title": "The hub&#x27;s numbers, all states", "plain": "The hub's numbers, all states", "blocks": [{"t": "item", "id": "3.9.1", "html": "Two upcoming cohorts → “2 upcoming weekends.” and \u003cstrong>Next:\u003c/strong> names the earlier, with its date"}, {"t": "item", "id": "3.9.2", "html": "A weekend \u003cstrong>running right now\u003c/strong> → it IS “next” — the one needing staff attention first"}, {"t": "item", "id": "3.9.3", "html": "A cohort with \u003cstrong>no dates\u003c/strong> → counts in the total but is never “next”, and nothing crashes"}, {"t": "item", "id": "3.9.4", "html": "All windows past → no “next”, defined copy"}, {"t": "item", "id": "3.9.5", "html": "Break the FW read (if you can) → the card renders \u003cstrong>number-less\u003c/strong>: “Couldn&#x27;t load the weekend count just now — the door still works.” \u003cstrong>Never a fabricated 0\u003c/strong> — the true count IS 0, so a fake zero would be indistinguishable from the truth"}, {"t": "item", "id": "3.9.6", "html": "The seats card never says “live”, “current” or “as of” — its number can be a hand-maintained fallback and the copy must not overclaim"}]}, {"id": "3.10", "title": "The board &amp; the projector", "plain": "The board & the projector", "blocks": [{"t": "item", "id": "3.10.1", "html": "The board works with \u003cstrong>no session at all\u003c/strong> — a projector never signs in"}, {"t": "item", "id": "3.10.2", "html": "A network \u003cstrong>blip\u003c/strong> → the board holds its last frame with a stale indicator — never a blank screen"}, {"t": "item", "id": "3.10.3", "html": "…but an \u003cstrong>archive\u003c/strong> → clears within a poll. Blip holds, archive clears — confirm both, in that order, on the same board"}, {"t": "item", "id": "3.10.4", "html": "Re-mint kills the old URL immediately"}, {"t": "item", "id": "3.10.5", "html": "A garbage token → clean 404 revealing nothing about whether the cohort exists"}]}, {"id": "3.11", "title": "Sticky stacking at 375px — real device", "plain": "Sticky stacking at 375px — real device", "blocks": [{"t": "item", "id": "3.11.1", "html": "At 375px on \u003ca class=\"lnk\" data-path=\"/fp/fw/ops\" data-raw=\"/fp/fw/ops\" target=\"_blank\" rel=\"noopener\">/fp/fw/ops\u003c/a> and a per-cohort page, scroll down → \u003cstrong>the weekend name is never covered by the bar\u003c/strong>. That name is wrong-stamp prevention — how a guide knows which weekend they are checking a child into. Covered = a data-integrity bug in a CSS costume"}, {"t": "item", "id": "3.11.2", "html": "Force the bar to \u003cstrong>wrap to two lines\u003c/strong> (queue chip + an error at 375px) → both screens still hold; the height is measured, not constant, and this is the case a constant gets wrong"}, {"t": "item", "id": "3.11.3", "html": "Rotate to landscape and back → the measurement survives"}]}, {"id": "3.12", "title": "The residue beacon", "plain": "The residue beacon", "blocks": [{"t": "item", "id": "3.12.1", "html": "After any preserved-queue sign-out above: a row lands in \u003ccode>path_fw_residue_reports\u003c/code> AND a \u003ccode>[fw/residue]\u003c/code> line in the runtime logs — one JSON object with the outcome, the count (or null), \u003ccode>sessionUserId\u003c/code>, \u003ccode>claimedActorUserId\u003c/code>, \u003ccode>deviceId\u003c/code>, and the application"}, {"t": "item", "id": "3.12.2", "html": "A \u003ccode>clear_failed\u003c/code> (force it via 1.3&#x27;s storage-denial trick if you can) reports the same way"}, {"t": "item", "id": "3.12.3", "html": "Sender vs claimed actor \u003cstrong>differ exactly when a handover raced the report\u003c/strong> — the mismatch is the race made visible, not an error"}, {"t": "item", "id": "3.12.4", "html": "A \u003cstrong>parent or student\u003c/strong> session cannot post residue reports; hammering the action gets rate-limited (20 per 10 min)"}, {"t": "item", "id": "3.12.5", "html": "\u003cstrong>Offboarding rule:\u003c/strong> before deleting any guide/staff account, query its residue rows first — they CASCADE away with the account, taking the “device D still holds their un-sent check-ins” pointer with them"}]}, {"id": "3.13", "title": "What must NOT have changed", "plain": "What must NOT have changed", "blocks": [{"t": "item", "id": "3.13.1", "html": "The guide check-in loop end to end — tap, undo, board updates — exactly as before this work"}, {"t": "item", "id": "3.13.2", "html": "A single-cohort \u003cstrong>guide\u003c/strong> is still redirected straight in; a multi-cohort guide still picks explicitly with no default"}, {"t": "item", "id": "3.13.3", "html": "\u003cstrong>Staff\u003c/strong> with exactly one cohort at \u003ca class=\"lnk\" data-path=\"/fp/fw\" data-raw=\"/fp/fw\" target=\"_blank\" rel=\"noopener\">/fp/fw\u003c/a> → the picker renders, \u003cstrong>no\u003c/strong> redirect (R14 — staff choose; guides are routed)"}, {"t": "item", "id": "3.13.4", "html": "Staff with zero cohorts → “none exist yet” plus a create path; a guide with zero grants → the old copy, unchanged"}, {"t": "item", "id": "3.13.5", "html": "The family app (\u003ca class=\"lnk\" data-path=\"/fp/family\" data-raw=\"/fp/family\" target=\"_blank\" rel=\"noopener\">/fp/family\u003c/a>) is untouched — no bar, no behaviour change"}, {"t": "item", "id": "3.13.6", "html": "\u003ca class=\"lnk\" data-path=\"/fp\" data-raw=\"/fp\" target=\"_blank\" rel=\"noopener\">/fp\u003c/a> still 404s for staff — there is deliberately no Path staff administration"}, {"t": "item", "id": "3.13.7", "html": "A guide \u003cstrong>invite claim\u003c/strong> still signs the claiming guide in over whatever session the iPad held — deliberate, out of scope, do not flag"}, {"t": "item", "id": "3.13.8", "html": "Every CRM section works; the marketing site is unaffected"}]}]}]</script>
+<script>
+(function(){
+"use strict";
+var DATA = JSON.parse(document.getElementById('data').textContent);
+var KEY = 'sfd-test-v1';
+var DEFAULT_BASE = 'https://the120.school';
+var mem = null, canStore = true;
+try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); } catch(e){ canStore = false; }
+if(!canStore) document.getElementById('nostore').classList.remove('hidden');
+
+var S = load();
+function load(){
+  var base = {items:{}, cfg:{base:DEFAULT_BASE, token:'', uuid:''}, ui:{lv:'all', fl:'all', theme:'light', closed:{}}};
+  if(!canStore) return mem = base;
+  try{
+    var r = JSON.parse(localStorage.getItem(KEY)||'null');
+    if(r){ base.items = r.items||{}; Object.assign(base.cfg, r.cfg||{}); Object.assign(base.ui, r.ui||{}); }
+  }catch(e){}
+  return base;
+}
+var saveT;
+function save(){
+  if(!canStore) return;
+  clearTimeout(saveT);
+  saveT = setTimeout(function(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }, 150);
+}
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(function(){t.classList.remove('show');},1600); }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function hhmm(iso){ if(!iso) return ''; var d=new Date(iso);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+/* ---------- render ---------- */
+var main = document.getElementById('main');
+var itemEls = [];
+DATA.forEach(function(lv){
+  var sec = document.createElement('div');
+  sec.className = 'level'; sec.dataset.lv = lv.n;
+  var h = '<div class="lvhead"><h2>Level '+lv.n+' — '+esc(lv.title)+'</h2>'+
+          '<span class="who">'+esc(lv.who)+' · '+esc(lv.time)+'</span></div>'+
+          '<p class="lvblurb">'+lv.blurb+'</p>';
+  (lv.intro||[]).forEach(function(b){ h += '<p class="callout">'+b.html+'</p>'; });
+  sec.innerHTML = h;
+  lv.sections.forEach(function(sc){
+    var el = document.createElement('section');
+    el.className = 'sec'; el.dataset.sid = sc.id;
+    if(S.ui.closed[sc.id]) el.classList.add('closed');
+    var body = '';
+    sc.blocks.forEach(function(b){
+      if(b.t === 'item'){
+        body += '<div class="item" data-id="'+b.id+'" data-lv="'+lv.n+'">'+
+          '<span class="id" title="Copy ID">'+b.id+'</span>'+
+          '<span class="txt">'+b.html+'</span>'+
+          '<span class="acts">'+
+            '<button class="b-pass" type="button" title="Works (1)">✓</button>'+
+            '<button class="b-odd" type="button" title="Works but odd (2)">!</button>'+
+            '<button class="b-fail" type="button" title="Broken (3)">✕</button>'+
+          '</span></div>';
+      } else {
+        body += '<div class="blk '+b.t+'">'+b.html+'</div>';
+      }
+    });
+    el.innerHTML = '<div class="sechead"><span class="dot"></span><span class="sid">'+sc.id+'</span>'+
+      '<h3>'+sc.title+'</h3><span class="prog"></span></div><div class="secbody">'+body+'</div>';
+    sec.appendChild(el);
+  });
+  main.appendChild(sec);
+});
+itemEls = Array.prototype.slice.call(document.querySelectorAll('.item'));
+var byId = {};
+itemEls.forEach(function(el){ byId[el.dataset.id] = el; });
+
+/* ---------- links & commands ---------- */
+function fill(tpl){
+  return tpl.replace('{token}', S.cfg.token || '<token>').replace('{uuid}', S.cfg.uuid || '<uuid>');
+}
+function refreshLinks(){
+  var base = (S.cfg.base || DEFAULT_BASE).replace(/\/+$/,'');
+  document.querySelectorAll('a.lnk[data-path]').forEach(function(a){
+    var p = a.dataset.path, need = (p.indexOf('{token}')>-1 && !S.cfg.token) || (p.indexOf('{uuid}')>-1 && !S.cfg.uuid);
+    a.href = base + fill(p);
+    a.classList.toggle('needs', need);
+    if(a.dataset.raw) a.textContent = fill(a.dataset.raw);
+    a.title = need ? 'Add a token / cohort UUID in Setup first' : a.href;
+  });
+  document.querySelectorAll('.cmd[data-cmd]').forEach(function(c){
+    var code = c.querySelector('code'); if(code) code.textContent = fill(c.dataset.cmd);
+  });
+  var t = [];
+  if(S.cfg.token) t.push('token ✓'); if(S.cfg.uuid) t.push('cohort ✓');
+  document.getElementById('cfgstate').textContent = t.length ? '· ' + t.join(' · ') : '· not set';
+}
+document.addEventListener('click', function(e){
+  var a = e.target.closest('a.lnk');
+  if(a && a.classList.contains('needs')){
+    e.preventDefault();
+    document.getElementById('cfg').open = true;
+    document.getElementById(a.dataset.path.indexOf('{token}')>-1 ? 'f-token' : 'f-uuid').focus();
+    toast('Add it here first');
+  }
+}, true);
+document.addEventListener('click', function(e){
+  var b = e.target.closest('.copy');
+  if(!b) return;
+  e.stopPropagation(); e.preventDefault();
+  var txt = fill(b.parentNode.dataset.cmd || '');
+  navigator.clipboard && navigator.clipboard.writeText(txt);
+  b.classList.add('ok'); b.textContent = 'copied';
+  setTimeout(function(){ b.classList.remove('ok'); b.textContent = 'copy'; }, 1200);
+});
+
+/* ---------- state ---------- */
+function rec(id){ return S.items[id]; }
+function setStatus(id, st){
+  var cur = S.items[id] || {};
+  if(cur.s === st) st = null;
+  if(!st && !(cur.n||'').trim()) delete S.items[id];
+  else S.items[id] = {s: st, n: cur.n || '', t: st ? new Date().toISOString() : cur.t};
+  paint(id); tally(); save();
+}
+function setNote(id, txt){
+  var cur = S.items[id] || {s:null, n:'', t:new Date().toISOString()};
+  cur.n = txt;
+  if(!cur.s && !txt.trim()) delete S.items[id]; else S.items[id] = cur;
+  tally(); save();
+}
+function paint(id){
+  var el = byId[id], r = rec(id);
+  if(!el) return;
+  var st = r && r.s;
+  if(st) el.dataset.s = st; else el.removeAttribute('data-s');
+  var wrap = el.querySelector('.noteWrap');
+  var wantNote = st === 'odd' || st === 'fail' || (r && (r.n||'').trim());
+  if(wantNote && !wrap){
+    wrap = document.createElement('div');
+    wrap.className = 'noteWrap';
+    wrap.innerHTML = '<textarea placeholder="What you did · what you expected · what happened · URL"></textarea>';
+    var ta = wrap.querySelector('textarea');
+    ta.value = (r && r.n) || '';
+    ta.addEventListener('input', function(){ setNote(id, ta.value); autosize(ta); });
+    ta.addEventListener('click', function(e){ e.stopPropagation(); });
+    el.appendChild(wrap);
+    autosize(ta);
+  } else if(!wantNote && wrap){ wrap.remove(); }
+}
+function autosize(ta){ ta.style.height='auto'; ta.style.height = Math.max(52, ta.scrollHeight+2)+'px'; }
+
+/* ---------- tallies ---------- */
+function tally(){
+  var tot = itemEls.length, c = {pass:0, odd:0, fail:0};
+  var perLv = {1:{n:0,d:0},2:{n:0,d:0},3:{n:0,d:0}};
+  itemEls.forEach(function(el){
+    var r = rec(el.dataset.id), lv = el.dataset.lv;
+    perLv[lv].n++;
+    if(r && r.s){ c[r.s]++; perLv[lv].d++; }
+  });
+  var done = c.pass + c.odd + c.fail;
+  document.getElementById('stat').innerHTML =
+    '<b>'+done+'</b>/'+tot+' &nbsp; <b style="color:var(--pass)">'+c.pass+'</b>✅ '+
+    '<b style="color:var(--odd)">'+c.odd+'</b>⚠️ <b style="color:var(--fail)">'+c.fail+'</b>❌';
+  document.getElementById('bp').style.width = (c.pass/tot*100)+'%';
+  document.getElementById('bo').style.width = (c.odd/tot*100)+'%';
+  document.getElementById('bf').style.width = (c.fail/tot*100)+'%';
+  [1,2,3].forEach(function(n){ document.getElementById('c'+n).textContent = perLv[n].d+'/'+perLv[n].n; });
+  document.getElementById('fn-todo').textContent = tot - done;
+  document.getElementById('fn-odd').textContent = c.odd;
+  document.getElementById('fn-fail').textContent = c.fail;
+
+  document.querySelectorAll('section.sec').forEach(function(sc){
+    var its = sc.querySelectorAll('.item'), d = 0, f = 0, o = 0;
+    its.forEach(function(el){ var r = rec(el.dataset.id); if(r&&r.s){ d++; if(r.s==='fail') f++; if(r.s==='odd') o++; } });
+    sc.querySelector('.prog').textContent = d + '/' + its.length;
+    var dot = sc.querySelector('.dot');
+    dot.className = 'dot' + (f ? ' has-fail' : o ? ' has-odd' : (d === its.length && d) ? ' done' : '');
+  });
+}
+
+/* ---------- filters ---------- */
+function applyFilter(){
+  var lv = S.ui.lv, fl = S.ui.fl, q = (document.getElementById('q').value||'').trim().toLowerCase();
+  document.querySelectorAll('.level').forEach(function(L){
+    L.classList.toggle('hidden', lv !== 'all' && L.dataset.lv !== lv);
+  });
+  itemEls.forEach(function(el){
+    var r = rec(el.dataset.id), st = r && r.s, ok = true;
+    if(fl === 'todo') ok = !st;
+    else if(fl === 'odd') ok = st === 'odd';
+    else if(fl === 'fail') ok = st === 'fail';
+    if(ok && q) ok = (el.dataset.id + ' ' + el.querySelector('.txt').textContent).toLowerCase().indexOf(q) > -1;
+    el.classList.toggle('hidden', !ok);
+  });
+  var narrow = fl !== 'all' || !!q;
+  document.querySelectorAll('section.sec').forEach(function(sc){
+    var vis = sc.querySelectorAll('.item:not(.hidden)').length;
+    sc.classList.toggle('hidden', narrow && vis === 0);
+    sc.querySelectorAll('.blk').forEach(function(b){ b.classList.toggle('hidden', narrow); });
+    if(narrow) sc.classList.remove('closed');
+    else sc.classList.toggle('closed', !!S.ui.closed[sc.dataset.sid]);
+  });
+  document.querySelectorAll('.chip.lv').forEach(function(b){ b.classList.toggle('on', b.dataset.lv === lv); });
+  document.querySelectorAll('.chip.fl').forEach(function(b){ b.classList.toggle('on', b.dataset.fl === fl); });
+}
+document.querySelectorAll('.chip.lv').forEach(function(b){
+  b.addEventListener('click', function(){ S.ui.lv = b.dataset.lv; save(); applyFilter(); window.scrollTo(0,0); });
+});
+document.querySelectorAll('.chip.fl').forEach(function(b){
+  b.addEventListener('click', function(){ S.ui.fl = b.dataset.fl; save(); applyFilter(); });
+});
+document.getElementById('q').addEventListener('input', applyFilter);
+
+/* ---------- interaction ---------- */
+main.addEventListener('click', function(e){
+  var head = e.target.closest('.sechead');
+  if(head){
+    var sc = head.parentNode;
+    sc.classList.toggle('closed');
+    S.ui.closed[sc.dataset.sid] = sc.classList.contains('closed'); save();
+    return;
+  }
+  var it = e.target.closest('.item');
+  if(!it) return;
+  var id = it.dataset.id;
+  if(e.target.closest('a') || e.target.closest('textarea') || e.target.closest('.copy')) return;
+  if(e.target.closest('.id')){
+    navigator.clipboard && navigator.clipboard.writeText(id);
+    toast(id + ' copied'); return;
+  }
+  var b = e.target.closest('.acts button');
+  cursorTo(it);
+  setStatus(id, b ? (b.classList.contains('b-pass') ? 'pass' : b.classList.contains('b-odd') ? 'odd' : 'fail') : 'pass');
+  if(S.ui.fl !== 'all'){
+    var v0 = visible(), i0 = v0.indexOf(it);
+    applyFilter();
+    if(cursor && cursor.classList.contains('hidden')){
+      var v1 = visible();
+      cursorTo(v1[Math.min(v1.length - 1, Math.max(0, i0))] || null);
+    }
+  }
+  var ta2 = it.querySelector('textarea'); if(ta2 && !it.classList.contains('hidden')) ta2.focus();
+});
+
+/* ---------- keyboard ---------- */
+var cursor = null;
+function visible(){ return itemEls.filter(function(el){
+  return !el.classList.contains('hidden') && el.offsetParent !== null; }); }
+function cursorTo(el, scroll){
+  if(cursor) cursor.classList.remove('cursor');
+  cursor = el;
+  if(el){ el.classList.add('cursor');
+    if(scroll){ var r = el.getBoundingClientRect();
+      if(r.top < 160 || r.bottom > window.innerHeight - 40) el.scrollIntoView({block:'center'}); } }
+}
+function move(d){
+  var v = visible(); if(!v.length) return;
+  var i = cursor ? v.indexOf(cursor) : -1;
+  i = i < 0 ? (d > 0 ? 0 : v.length-1) : Math.min(v.length-1, Math.max(0, i+d));
+  cursorTo(v[i], true);
+}
+function mark(st){
+  if(!cursor) { move(1); if(!cursor) return; }
+  var id = cursor.dataset.id, prev = cursor;
+  setStatus(id, st);
+  if(st === 'pass'){
+    var v = visible(), i = v.indexOf(prev), nx = null;
+    for(var k = i+1; k < v.length; k++){ if(!rec(v[k].dataset.id) || !rec(v[k].dataset.id).s){ nx = v[k]; break; } }
+    if(S.ui.fl !== 'all'){ applyFilter(); var w = visible(); nx = w[Math.min(w.length-1, Math.max(0, i))] || null; }
+    if(nx) cursorTo(nx, true);
+  } else {
+    var ta = cursor.querySelector('textarea'); if(ta) ta.focus();
+  }
+}
+document.addEventListener('keydown', function(e){
+  var tag = (e.target.tagName||'').toLowerCase();
+  var typing = tag === 'input' || tag === 'textarea';
+  if(e.key === 'Escape'){
+    if(document.querySelector('.modal')) closeModal();
+    else if(typing){ e.target.blur(); }
+    return;
+  }
+  if(typing) return;
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  var k = e.key;
+  if(k === 'j' || k === 'ArrowDown'){ e.preventDefault(); move(1); }
+  else if(k === 'k' || k === 'ArrowUp'){ e.preventDefault(); move(-1); }
+  else if(k === '1'){ e.preventDefault(); mark('pass'); }
+  else if(k === '2'){ e.preventDefault(); mark('odd'); }
+  else if(k === '3'){ e.preventDefault(); mark('fail'); }
+  else if(k === '0'){ e.preventDefault(); if(cursor){ var r = rec(cursor.dataset.id); if(r && r.s) setStatus(cursor.dataset.id, r.s); } }
+  else if(k === 'n'){ e.preventDefault(); if(cursor){ var r2 = rec(cursor.dataset.id);
+      if(!r2 || !r2.s) setStatus(cursor.dataset.id, 'odd');
+      var t = cursor.querySelector('textarea'); if(t){ t.focus(); } } }
+  else if(k === 'o'){ if(cursor){ var a = cursor.querySelector('a.lnk'); if(a && !a.classList.contains('needs')){ e.preventDefault(); window.open(a.href,'_blank','noopener'); } } }
+  else if(k === 'c'){ if(cursor){ navigator.clipboard && navigator.clipboard.writeText(cursor.dataset.id); toast(cursor.dataset.id+' copied'); } }
+  else if(k === '/'){ e.preventDefault(); document.getElementById('q').focus(); }
+});
+
+/* ---------- config fields ---------- */
+[['f-base','base'],['f-token','token'],['f-uuid','uuid']].forEach(function(p){
+  var el = document.getElementById(p[0]);
+  el.value = S.cfg[p[1]] || '';
+  el.addEventListener('input', function(){ S.cfg[p[1]] = el.value.trim(); refreshLinks(); save(); });
+});
+document.querySelectorAll('.qc').forEach(function(b){
+  b.addEventListener('click', function(){
+    S.cfg.uuid = b.dataset.uuid; document.getElementById('f-uuid').value = b.dataset.uuid;
+    refreshLinks(); save(); toast('Cohort set');
+  });
+});
+
+/* ---------- theme ---------- */
+function theme(t){ S.ui.theme = t; document.documentElement.dataset.theme = t;
+  document.getElementById('theme').textContent = t === 'dark' ? 'Light' : 'Dark'; save(); }
+theme(S.ui.theme || 'light');
+document.getElementById('theme').addEventListener('click', function(){ theme(S.ui.theme === 'dark' ? 'light' : 'dark'); });
+
+/* ---------- report ---------- */
+function textOf(id){
+  var el = byId[id]; return el ? el.querySelector('.txt').textContent.replace(/\s+/g,' ').trim() : id;
+}
+function sectionOf(id){ return id.split('.').slice(0,2).join('.'); }
+function buildReport(){
+  var groups = {fail:[], odd:[]}, pass = [], todo = [];
+  itemEls.forEach(function(el){
+    var id = el.dataset.id, r = rec(id);
+    if(!r || !r.s){ todo.push(id); return; }
+    if(r.s === 'pass'){ pass.push(id); return; }
+    groups[r.s].push({id:id, n:(r.n||'').trim(), t:r.t});
+  });
+  var d = new Date();
+  var out = '# The Staff Front Door — test report — ' + d.toISOString().slice(0,10) + '\n\n';
+  out += pass.length + ' ✅ · ' + groups.odd.length + ' ⚠️ · ' + groups.fail.length + ' ❌ · ' +
+         todo.length + ' untested (of ' + itemEls.length + ')\n';
+  if(S.cfg.uuid) out += 'Cohort: ' + S.cfg.uuid + '\n';
+  out += '\n## 1. Blockers ❌\n';
+  out += groups.fail.length ? groups.fail.map(line).join('\n') + '\n' : '_none_\n';
+  out += '\n## 2. Should-fix ⚠️\n';
+  out += groups.odd.length ? groups.odd.map(line).join('\n') + '\n' : '_none_\n';
+  out += '\n## 3. Not yet tested (' + todo.length + ')\n';
+  out += todo.length ? compress(todo) + '\n' : '_none — full pass complete_\n';
+  out += '\n## 4. Passed (' + pass.length + ')\n' + (pass.length ? compress(pass) + '\n' : '_none_\n');
+  return out;
+  function line(x){
+    return '- **' + x.id + '** ' + (x.n ? x.n : '_(no note)_ — ' + textOf(x.id)) +
+           (x.t ? ' · ~' + hhmm(x.t) : '');
+  }
+}
+function compress(ids){
+  var bySec = {};
+  ids.forEach(function(id){ (bySec[sectionOf(id)] = bySec[sectionOf(id)] || []).push(id); });
+  return Object.keys(bySec).map(function(s){ return '- ' + s + ': ' + bySec[s].join(', '); }).join('\n');
+}
+function closeModal(){ var m = document.querySelector('.modal'); if(m) m.remove(); }
+function showModal(title, body, actions){
+  closeModal();
+  var m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = '<div class="box"><div class="mh"><h3>'+esc(title)+'</h3>'+
+    '<button class="btn" data-x>Close</button></div>'+body+'<div class="mf">'+actions+'</div></div>';
+  m.addEventListener('click', function(e){ if(e.target === m || e.target.hasAttribute('data-x')) closeModal(); });
+  document.body.appendChild(m);
+  return m;
+}
+document.getElementById('report').addEventListener('click', function(){
+  var txt = buildReport();
+  var m = showModal('Report — paste this back', '<textarea id="rep" spellcheck="false"></textarea>',
+    '<button class="btn" id="dl">Download .md</button><button class="btn pri" id="cp">Copy to clipboard</button>');
+  m.querySelector('#rep').value = txt;
+  m.querySelector('#cp').addEventListener('click', function(){
+    var t = m.querySelector('#rep'); t.select();
+    if(navigator.clipboard) navigator.clipboard.writeText(t.value); else document.execCommand('copy');
+    toast('Report copied');
+  });
+  m.querySelector('#dl').addEventListener('click', function(){
+    download('sfd-test-report-' + new Date().toISOString().slice(0,10) + '.md', m.querySelector('#rep').value);
+  });
+});
+function download(name, text){
+  var b = new Blob([text], {type:'text/plain'}), u = URL.createObjectURL(b);
+  var a = document.createElement('a'); a.href = u; a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(u); }, 2000);
+}
+document.getElementById('more').addEventListener('click', function(){
+  var m = showModal('Progress', '<div class="fb" style="padding:16px 14px">' +
+    '<p>Progress is saved in this browser automatically. Export a backup if you are switching devices, ' +
+    'or hand the file to someone else to merge later.</p></div>',
+    '<button class="btn" id="imp">Import JSON…</button>' +
+    '<button class="btn" id="exp">Export JSON</button>' +
+    '<button class="btn" id="prt">Print</button>' +
+    '<button class="btn" id="rst" style="color:var(--fail)">Reset all</button>');
+  m.querySelector('#exp').addEventListener('click', function(){
+    download('sfd-test-progress-' + new Date().toISOString().slice(0,10) + '.json', JSON.stringify(S, null, 2));
+  });
+  m.querySelector('#prt').addEventListener('click', function(){ closeModal(); setTimeout(function(){ window.print(); }, 60); });
+  m.querySelector('#imp').addEventListener('click', function(){
+    var f = document.createElement('input'); f.type = 'file'; f.accept = '.json,application/json';
+    f.addEventListener('change', function(){
+      var file = f.files[0]; if(!file) return;
+      var rd = new FileReader();
+      rd.onload = function(){
+        try{
+          var o = JSON.parse(rd.result);
+          Object.keys(o.items || {}).forEach(function(k){ S.items[k] = o.items[k]; });
+          if(o.cfg) Object.assign(S.cfg, o.cfg);
+          save(); closeModal(); redrawAll(); toast('Imported');
+        }catch(err){ toast('Could not read that file'); }
+      };
+      rd.readAsText(file);
+    });
+    f.click();
+  });
+  m.querySelector('#rst').addEventListener('click', function(){
+    if(!confirm('Clear every result and note on this device?')) return;
+    S.items = {}; save(); closeModal(); redrawAll(); toast('Cleared');
+  });
+});
+function redrawAll(){
+  itemEls.forEach(function(el){ paint(el.dataset.id); });
+  [['f-base','base'],['f-token','token'],['f-uuid','uuid']].forEach(function(p){
+    document.getElementById(p[0]).value = S.cfg[p[1]] || '';
+  });
+  refreshLinks(); tally(); applyFilter();
+}
+
+/* ---------- boot ---------- */
+redrawAll();
+window.addEventListener('beforeunload', function(){
+  if(canStore){ clearTimeout(saveT); try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+});
+})();
+</script>
+</body>
+</html>

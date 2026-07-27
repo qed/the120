@@ -512,7 +512,7 @@ stateDiagram-v2
 
 ### Phase 5 — The hub
 
-- [ ] **Unit 11: The hub page**
+- [x] **Unit 11: The hub page** — landed 2026-07-27. Two commits. **114 files / 3107 tests**, tsc/build/eslint clean, no migration. Two cards, one live number each, every decision in `hub-rules.ts` (pure, tested): `nextFwWeekend` returns the earliest NOT-ENDED dated weekend — so one in progress IS next (decided, reasoned, tested); null starts neither crash nor win but still count; all-past yields null with defined copy. **R4's asymmetry stated where the numbers are shaped**: the FW card degrades on typed failure to a number-less card whose copy says the door still works — never a fabricated zero, load-bearing twice since R21 made the true count 0 (the honest zero and the degrade differ in kind, copy and cause, both tested); the seats number cannot report failure by design, so its copy claims no freshness. Unit 9's carried scenario closed (archived cohorts cannot inflate the count). **Review (2 findings):** the seats leg was the hub's one UNBOUNDED read — its catch converts a rejection to the constant but not a fetch that never settles, and an unsettled leg held the whole hub behind a marketing RPC — bounded at the call site, degrading to the same constant, marketing contract untouched; and force-dynamic overrides the fetch's `revalidate: 60`, so seats.ts's ISR comment is true off this page only (recorded at the call site). Mutations M36–M38 all reddened. Compound skipped honestly — both findings are instances of already-documented families (the tri-state doc's items 6–8; the bound-the-client's-own-await doc).
 
 **Goal:** Two application cards with one live number each, neither of which can hide a door.
 

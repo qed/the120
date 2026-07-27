@@ -101,6 +101,51 @@ export const PHASE_TOKENS = [
 export type PhaseToken = (typeof PHASE_TOKENS)[number];
 
 /**
+ * The five group slugs as a closed union. `DOOR_CLASSES` is keyed on it, so a
+ * sixth group — or a renamed slug — is a COMPILE error rather than a card
+ * that silently falls back to red, a colour this app already uses for errors
+ * and the waitlist state. The runtime test that used to be the only backstop
+ * now guards a property the compiler already enforces.
+ */
+export const GROUP_SLUGS = [
+  "athletes",
+  "founders",
+  "makers",
+  "scholars",
+  "givers",
+] as const;
+
+export type GroupSlug = (typeof GROUP_SLUGS)[number];
+
+/**
+ * The door colours as COMPLETE LITERAL Tailwind class strings (R14, R15, R17).
+ *
+ * Literals, not `` `text-${slug}` `` — Tailwind v4's scanner reads source text,
+ * so an interpolated class compiles to nothing and fails silently in
+ * production while looking correct in the editor. Every string here must be
+ * greppable in this file exactly as it ships.
+ *
+ * `label` uses the text-safe `-ink` variant because all five raw tokens fail
+ * WCAG AA as small text on paper (R16, measured — see globals.css). `accent`
+ * keeps the raw token for chips and underlines, where contrast rules do not
+ * bind. `app/lib/__tests__/door-colors.test.ts` recomputes the ratios.
+ *
+ * R17: these five are the ONLY Path-register colours permitted on the
+ * marketing site — the card footer line and the pre-selected door, nowhere
+ * else.
+ */
+export const DOOR_CLASSES: Record<GroupSlug, { label: string; accent: string }> = {
+  athletes: { label: "text-phase-sell-ink", accent: "text-phase-sell" },
+  founders: { label: "text-phase-build-ink", accent: "text-phase-build" },
+  givers: { label: "text-phase-validate-ink", accent: "text-phase-validate" },
+  makers: { label: "text-phase-grow-ink", accent: "text-phase-grow" },
+  scholars: { label: "text-phase-scale-ink", accent: "text-phase-scale" },
+};
+
+/** The home cards' footer line (R14) — one spelling, five colours. */
+export const GROUP_CARD_CTA = "EXPLORE YOUR GROUP →";
+
+/**
  * The five groups (handoff Home + group pages).
  *
  * Extended in U1 with the landing-page fields (R5) — headline line 1, subhead,
@@ -114,7 +159,7 @@ export type PhaseToken = (typeof PHASE_TOKENS)[number];
  * would point a live home-page card at a 404 for the length of Phase 1.
  */
 export type Group = {
-  slug: string;
+  slug: GroupSlug;
   name: string;
   accent: string; // italic display word
   category: string;
@@ -122,7 +167,9 @@ export type Group = {
   blurb: string;
   body: string;
   href: string;
-  cta: string;
+  /** R14 retired the per-group CTA string: the card footer is one shared
+   *  constant (GROUP_CARD_CTA) in five colours, and the old copy carried the
+   *  "BOOK OR JOIN" wording R18 removes from the logged-out site. */
   /** Landing headline line 1 (Georgia). Line 2 is constant across all six. */
   headline: string;
   /** Landing subhead. Its final sentence is constant across all six. */
@@ -152,7 +199,6 @@ export const groups: Group[] = [
     blurb: "Train seriously, compete seriously, and think like a pro.",
     body: "For kids who train seriously and want more than practice. A year-long athletic project: a season record, a training system, a documented climb. Mentored by people who have competed, and demoed to the whole network at the Toronto intensives.",
     href: "/groups/athletes",
-    cta: "ENROLLING NOW · BOOK OR JOIN →",
     headline: "Your athlete will build a real brand this year.",
     subhead: `NIL branding, a training clinic for younger kids, team merch people actually buy. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/athletes.jpg",
@@ -167,7 +213,6 @@ export const groups: Group[] = [
     blurb: "Start something real. Customers, revenue, lessons learned.",
     body: "For kids who want to start something real. A year-long venture: customers, revenue, lessons learned. Mentored by people who have built companies, and pitched to the whole network at the Toronto intensives.",
     href: "/groups/founders",
-    cta: "ENROLLING NOW · BOOK OR JOIN →",
     headline: "Your kid will start a real company this year.",
     subhead: `A typical startup: a product, first customers, real revenue. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/founders.jpg",
@@ -182,7 +227,6 @@ export const groups: Group[] = [
     blurb: "Art, film, music, invention. A real body of work, shipped.",
     body: "For kids who need to make things. A year-long body of work: a film, an album, an invention, a portfolio. Mentored by working artists and builders, and shown to the whole network at the Toronto intensives.",
     href: "/groups/makers",
-    cta: "ENROLLING NOW · BOOK OR JOIN →",
     headline: "Your kid will sell real work to real people this year.",
     subhead: `Shows and exhibits, prints and commissions, an audience that pays. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/makers.jpg",
@@ -199,7 +243,6 @@ export const groups: Group[] = [
     // Still /scholars, NOT /groups/scholars — R5 moves it in U5, with the route
     // that will serve it. See the note on `Group`.
     href: "/scholars",
-    cta: "ENROLLING NOW · BOOK OR JOIN →",
     headline: "Your kid's ideas will earn real money this year.",
     subhead: `Thought leadership: teaching, writing, tutoring, a paid workshop of their own. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/scholars.jpg",
@@ -214,7 +257,6 @@ export const groups: Group[] = [
     blurb: "Lead real service. Projects that change a corner of the city.",
     body: "For kids who lead with service. A year-long service program that changes a corner of the city: planned, run, and measured by them. Mentored by people who have done it, and presented to the whole network at the Toronto intensives.",
     href: "/groups/givers",
-    cta: "ENROLLING NOW · BOOK OR JOIN →",
     headline: "Your kid will run a real service venture this year.",
     subhead: `A service venture that changes a corner of the city, funded and run by them. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/givers.jpg",

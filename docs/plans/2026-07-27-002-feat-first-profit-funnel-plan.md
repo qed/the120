@@ -510,7 +510,44 @@ entry, because no Supabase auth-mail call was added.
 
 ### Phase 1 — Marketing rewire
 
-- [ ] **Unit 4: Attribution and the sitewide CTA reroute**
+- [x] **Unit 4: Attribution and the sitewide CTA reroute** — *part one landed
+  2026-07-27; **the CTA swap itself moves to U6**, see below*
+
+  **Scope decision (the plan's own fallback, taken deliberately):** Operational
+  Notes say "U4 must not merge before U6… if the two are ever separated, leave
+  `JoinButton` wired until U6 ships." `AccountModal.tsx` holds the only
+  `signUp()` in `app/`, and U6 depends on U4's source vocabulary — so the
+  dependency and the merge order point opposite ways. Resolved by splitting at
+  the seam the plan names: **everything except the `JoinButton` swap landed
+  here; U6 performs the swap in the same PR that ships `/start`.** The reroute
+  therefore never exists without an account-creating destination behind it.
+
+  **What landed:** `app/lib/cta-source.ts` — the twelve-marker closed vocabulary
+  (R11) with `funnelEntryHref` and, new, a **read-back** (`readCtaSource`,
+  fail-closed to null: a wrong attribution is worse than a missing one). The
+  original `SRC_MARKER` had been applied at two call sites since launch and read
+  back nowhere. `app/2026-27/cta-source.ts` re-exports the two moved symbols and
+  keeps its page-local vocabulary — it has **17 importers, fourteen for
+  `Audience` alone**; extract, never delete. Door colours (R14–R17): all five
+  raw phase tokens were **measured failing** WCAG AA on `#f7f6f3` (gold worst at
+  1.83:1) — the brief predicted only gold and coral would — so `globals.css`
+  gains `--phase-*-ink` text-safe variants at the same hue and saturation, and
+  `DOOR_CLASSES` maps each group to complete literal class strings keyed on a
+  `GroupSlug` union, so a missing entry is a compile error rather than a card
+  silently rendering in error-red. `Group.cta` deleted (zero consumers, carried
+  the retired "BOOK OR JOIN" copy R18 removes). Contrast is **recomputed from
+  `globals.css` in the test**, not asserted from a comment.
+
+  **Verification:** route table diffed before/after — identical, no
+  static→dynamic regression. Tailwind confirmed to emit all ten door classes
+  from the `.ts` literals (verified against a fresh build, and independently by
+  a reviewer compiling the real PostCSS pipeline). Suite **115 files / 3064
+  tests**; `tsc`, build, eslint clean.
+
+  **Carried to U6:** the `JoinButton` swap at the 13 marketing call sites, the
+  home hero's "Start Here →" (R12), and R18's "Book a call" removal — all
+  landing together with `/start`. The three preserved call sites (Gauntlet ×2,
+  `SignIn.tsx:168`) must be asserted by count in that PR.
 
 **Goal:** Every marketing CTA leads to `/start` with a source marker, and the marker is read
 back — which nothing does today.

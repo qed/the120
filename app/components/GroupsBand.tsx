@@ -1,6 +1,6 @@
 import Link from "next/link";
 import SeatsDot from "./SeatsDot";
-import { groups } from "@/app/lib/site";
+import { DOOR_CLASSES, GROUP_CARD_CTA, groups } from "@/app/lib/site";
 
 /** Handoff: intro paragraph + seats dot, then the #0300ED five-groups band. */
 export default function GroupsBand({ seatsRemaining }: { seatsRemaining?: number }) {
@@ -28,8 +28,9 @@ export default function GroupsBand({ seatsRemaining }: { seatsRemaining?: number
                 Every kid needs <span className="accent-blush">their people</span>
               </h2>
             </div>
+            {/* R18: no "Book a call" on the logged-out marketing site. */}
             <span className="max-w-[380px] text-[15px] leading-relaxed text-white/75">
-              120 seats across 5 groups. Book a call or join today.
+              120 seats across 5 groups. Find your child&rsquo;s.
             </span>
           </div>
 
@@ -45,8 +46,17 @@ export default function GroupsBand({ seatsRemaining }: { seatsRemaining?: number
                 </span>
                 <span className="display mt-2 text-[26px] leading-[1.05]">{g.name}</span>
                 <span className="mt-2.5 text-[13px] leading-[1.55] opacity-85">{g.blurb}</span>
-                <span className="mt-auto pt-[18px] font-mono text-[10px] tracking-[0.08em] text-red">
-                  {g.cta}
+                {/* R14: one line, five colours. The class is a complete
+                    literal from DOOR_CLASSES — Tailwind's scanner cannot see
+                    an interpolated one, and it would compile to nothing.
+                    R16: the label takes the text-safe `-ink` variant, since
+                    every raw phase token fails AA on this paper.
+                    No `?? fallback`: DOOR_CLASSES is keyed on GroupSlug, so a
+                    missing entry is a compile error, not a silently red card. */}
+                <span
+                  className={`mt-auto pt-[18px] font-mono text-[10px] tracking-[0.08em] ${DOOR_CLASSES[g.slug].label}`}
+                >
+                  {GROUP_CARD_CTA}
                 </span>
               </Link>
             ))}

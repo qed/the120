@@ -9,8 +9,14 @@ import { seatsLabel } from "@/app/lib/site";
 /** The page's two voices. Mirrors the keys of the COPY dictionary. */
 export type Audience = "parents" | "kids";
 
-/** Conversion-attribution marker appended to the http(s) booking URL. */
-export const SRC_MARKER = "src=2026-27";
+/**
+ * `SRC_MARKER` and `attributedBookingUrl` MOVED to `app/lib/cta-source.ts`
+ * (funnel U4, R11) — every entry surface needs them, and the funnel adds the
+ * read-back path this page never had. They are re-exported here rather than
+ * deleted: this file has 17 importers and the page-local vocabulary below
+ * (`Audience`, `ctaLabels`, `seatsDisplay`, `WAITLIST_LABEL`) stays put.
+ */
+export { SRC_MARKER, attributedBookingUrl } from "@/app/lib/cta-source";
 
 /** Shown in the red band / seat indicator once the founding cohort is full. */
 export const WAITLIST_LABEL = "Founding cohort full — join the waitlist";
@@ -30,20 +36,6 @@ export interface CtaLabels {
  */
 export function ctaLabels(audience: Audience): CtaLabels {
   return { join: COPY[audience].joinCta, book: COPY[audience].callCta };
-}
-
-/**
- * Append the 2026-27 conversion-source marker to an http(s) booking URL so
- * signups from this page are attributable at launch (no analytics layer yet).
- * - Non-http targets (the `mailto:` fallback) are returned unchanged.
- * - Uses `&` when the URL already carries a query, `?` otherwise.
- * - Idempotent: a URL that already has the marker is returned unchanged.
- */
-export function attributedBookingUrl(url: string): string {
-  if (!/^https?:\/\//i.test(url)) return url;
-  if (url.includes(SRC_MARKER)) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}${SRC_MARKER}`;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   runFwMatchLookup,
@@ -391,7 +392,6 @@ describe("Unit 8 invariant — guide quick-create SUCCEEDS on an archived cohort
     // Scope Boundaries. This test is the tripwire against someone "fixing" that by
     // threading archive state into `provisionFwStudent`/`runFwQuickCreate`, which
     // would also break the CSV import's shared core placement.
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const src = readFileSync(new URL("../fw-student-core.ts", import.meta.url), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code).not.toContain("archived_at");

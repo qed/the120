@@ -10,7 +10,7 @@ applies_when:
   - "You are DELETING an exported `\"use server\"` function rather than just removing the component that renders a form for it"
   - "The action is the final step of a sequence whose earlier steps already mutated CLIENT-side state (IndexedDB, localStorage, Cache Storage)"
   - "The surface is long-lived — a kiosk, a shared tablet, a PWA left open across a multi-day event — so 'they will reload eventually' is not a safe assumption"
-  - "The project has no `deploymentId` configured and no confirmed platform skew protection"
+  - "The project has no `deploymentId` configured and no confirmed platform skew protection (RESOLVED 2026-07-27 — see the discharged-debt note)"
   - "You are weighing 'leave it exported but unrendered' against 'delete it' — read the security half below before choosing the first"
 related_components:
   - app/fp/lib/actions/fw-guide.ts
@@ -23,6 +23,7 @@ tags:
   - pwa
   - offline
   - retirement
+last_updated: 2026-07-27
 ---
 
 # Deleting a `"use server"` export is correct AND a deploy-skew hazard — the old bundle still holds the action id
@@ -151,11 +152,29 @@ it("the FW ops header's ungated sign-out action no longer exists anywhere", asyn
 });
 ```
 
-**What was NOT done, and is owed:** no `deploymentId` was added and no
-stale-bundle copy was written. Both were left as a recorded decision for the
-reliability pass rather than smuggled into a unit about mounting a nav bar. If you are
-reading this because a guide reported "it says it can't sign me out and the button
-never works," that is this, and the fix on the device is a hard reload.
+**DEBT DISCHARGED (Staff Front Door Unit 5, 2026-07-27).** The paragraph below is the
+note as it stood when this doc shipped; both owed items were paid in the reliability
+pass it named. `next.config.ts` now sets `deploymentId`, resolved
+`NEXT_DEPLOYMENT_ID` → `VERCEL_DEPLOYMENT_ID` → `VERCEL_GIT_COMMIT_SHA` (undefined
+locally, deliberately — skew protection would fight `next dev`'s fast-refresh loop),
+and the resolution ORDER is pinned by a test that sets all three variables to distinct
+values and re-imports the config — after a first draft that mirrored the production
+formula was shown to pass for any order when the variables are unset. With it, a stale
+tab's next client navigation hard-reloads instead of calling a dead action id.
+
+> *As originally written:* no `deploymentId` was added and no stale-bundle copy was
+> written. Both were left as a recorded decision for the reliability pass rather than
+> smuggled into a unit about mounting a nav bar. If you are reading this because a
+> guide reported "it says it can't sign me out and the button never works," that is
+> this, and the fix on the device is a hard reload.
+
+**The residual exposure `deploymentId` does NOT close:** the hard reload triggers on a
+client-side NAVIGATION after the mismatch is detected. A long-lived tab that invokes a
+Server Action directly without navigating first — the drain loop under the Web Lock is
+exactly that shape — can still hit the new server once with the old bundle's
+expectations during the rollout window. Widened result unions must therefore stay
+old-client-safe for one deploy (see the `unavailable` member's rollout note in
+`fw-sync-engine.ts`).
 
 ## Related
 

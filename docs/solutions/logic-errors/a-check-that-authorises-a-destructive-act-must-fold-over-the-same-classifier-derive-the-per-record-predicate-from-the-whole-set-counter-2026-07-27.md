@@ -215,11 +215,29 @@ making a check and an act agree by construction guarantees they answer the *same
 question. It says nothing about whether that is the *right* question. Both properties
 need review, and the first one passing makes the second easier to stop looking at.
 
-**A sibling of the same shape is still open.** `quarantined` records are also counted as
-blockers, and `partitionFwQueue` cannot attribute them to any actor at all — a record
-whose shape this build cannot read has no readable `actorUserId`. So a corrupted record
-left by a departed guide still refuses an unrelated staff member's sign-out, and the
-copy sends them into an app they have never opened to dismiss it. Three reviewers raised
-it independently. It is not fixed here because the fix needs a *resolved* identity that
-does not exist at the moment the button is tapped; it is recorded for the reliability
-pass.
+**SECOND OCCURRENCE, CLOSED (Staff Front Door Unit 5, 2026-07-27, Peter's call).** The
+sibling predicted below went exactly as predicted, and its fix carried a trap the first
+occurrence did not have. `quarantined` left `countFwSignOutBlockers` — the same
+correction as `foreignUndrained`, applied to the class Unit 4 could not reach, because
+a record whose shape this build cannot read has no `actorUserId` to scope by; the
+refusal was not merely excessive but *unactionable* (the person refused could not fix
+it even in principle).
+
+The trap: **dropping a class from the blocker count is only HALF the change.** A
+quarantined record used to reach `abort` *through* the count, so removing it from the
+count alone let it fall through `fwEntryClearDisposition`'s branches to the `remove`
+tail — silently DESTROYING the one class defined as "un-landed work this build cannot
+even read". The other half is the explicit `preserve` branch, and the mutation that
+deletes it is pinned by name in `fw-sync-rules.test.ts` ("…and they are PRESERVED by
+the clear, never removed — the half that must not drift"). When check and act fold over
+one classifier, editing what the CHECK counts silently re-routes what the ACT does —
+that is the coupling working as designed, and it cuts both ways.
+
+> *As originally written:* `quarantined` records are also counted as blockers, and
+> `partitionFwQueue` cannot attribute them to any actor at all — a record whose shape
+> this build cannot read has no readable `actorUserId`. So a corrupted record left by a
+> departed guide still refuses an unrelated staff member's sign-out, and the copy sends
+> them into an app they have never opened to dismiss it. Three reviewers raised it
+> independently. It is not fixed here because the fix needs a *resolved* identity that
+> does not exist at the moment the button is tapped; it is recorded for the reliability
+> pass.

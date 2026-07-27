@@ -108,6 +108,26 @@ A rename's failure modes are all *silent*: a green test that proves nothing, a m
 - **Keep-stable, documented inline:** `QUEUE_DB_NAME = "path-offline-queue"` stays; the comment says *why* ("internal DB key, not a route; renaming orphans installed devices' queues"). The plan required this rationale inline at each decision site.
 - **Operational tail:** a device that installed the PWA under the old `/path` scope (e.g. a Founders-Weekend guide iPad) will, post-rename, tap its home-screen icon → 308 outside the old scope → drop from standalone to a browser tab. No data loss (queues key on the unrenamed store), but plan a re-install briefing.
 
+## Aftermath — the scanner bites unrelated work (2026-07-27)
+
+Three units later, Staff Front Door Unit 2 added a `/staff` test whose fixture
+URLs included `"/staff/deep/path"`. The straggler catcher reddened: that is a
+route-shaped `/path` literal, and the scanner cannot tell a fixture from a
+survivor.
+
+The fix that mattered was **moving the fixture, not widening the allowlist** —
+the guard was right and the new code was the false positive. Widening it for
+convenience is how a count-bounded allowlist decays into an unbounded one.
+
+Then the same test reddened a second time, on the *comment written to explain
+the first fix*, because it too contained the literal. **The scanner reads raw
+source lines; it does not strip comments.** So prose about the scanner trips
+the scanner. Anything documenting this trap in-repo has to describe the old
+prefix without writing it.
+
+Cost: two cycles. Cheap, and both cycles were the guard doing its job — but
+worth knowing before you spend them.
+
 ## See also
 
 - `docs/solutions/test-failures/migration-scanning-parity-test-must-scope-to-its-table-unrelated-column-hijacks-the-allowlist-2026-07-23.md` — the same "allowlist too broad → hijacked" failure mode in the migration-parity domain (sibling learning).

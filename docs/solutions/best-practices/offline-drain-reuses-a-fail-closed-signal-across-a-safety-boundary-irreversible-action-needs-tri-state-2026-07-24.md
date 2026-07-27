@@ -114,16 +114,20 @@ export function clearFwQueueIfEmpty(): Promise<{ cleared: boolean; count: number
 > from the check and `cleared:false` from the act — permanently, with the UI showing
 > race-condition copy for a state that was not a race and would never resolve.
 >
-> The current signature takes the verdict's own predicate, so check and act cannot
-> drift:
+> The signature takes the verdict's own predicate, so check and act cannot drift.
+> **Renamed and widened again on 2026-07-27 (Unit 4)** — the boolean became a three-way
+> disposition, because "must not be destroyed" and "must stop the clear" turned out to
+> be different questions (another account's un-landed work is the first without being
+> the second):
 >
 > ```ts
-> export function clearFwQueueIfEmpty(
->   blocksClear: (rawEntry: unknown) => boolean
-> ): Promise<{ cleared: boolean; blocking: number }>
+> export function clearFwQueueUnlessBlocked(
+>   disposition: (rawEntry: unknown) => FwClearDisposition   // "abort" | "preserve" | "remove"
+> ): Promise<{ cleared: boolean; blocking: number; remaining: number }>
 > ```
 >
-> `fwSignOutVerdict` no longer exists; the sequence is `runFwSignOutFlow`. See
+> `fwSignOutVerdict` and `fwEntryBlocksSignOutClear` no longer exist; the sequence is
+> `runFwSignOutFlow` and the per-record rule is `fwEntryClearDisposition`. See
 > `logic-errors/a-check-that-authorises-a-destructive-act-must-fold-over-the-same-classifier-derive-the-per-record-predicate-from-the-whole-set-counter-2026-07-27.md`.
 
 ### 3. A reused type-guard makes a quarantined record invisible, then destroyed
@@ -172,9 +176,66 @@ if (res.reason === "unavailable" && (await queueBackstop(action, ids))) return; 
 } catch { if (await queueBackstop(action, ids)) return; }                       // durable
 ```
 
+### 5. A COUNT is a two-valued disposition too: `1` cannot mean "I could not tell" (added 2026-07-27, Staff Front Door Unit 4)
+
+The four above are all booleans or verdicts, which makes the tri-state fix look like a
+lesson about *flags*. It is not. It is a lesson about any type whose legal range has no
+room left for "unknown".
+
+The device's residue clear reports how many queue records survived it, so the handover
+reconcile can tell *"kept another guide's captures on purpose"* (a policy outcome —
+advance the owner key, this is fine) from *"wiped the device clean"*. The clear can also
+**throw** — `openFwDb()` rejecting, `tx.onabort`, Safari under storage pressure. The
+first draft handled that in the obvious way:
+
+```ts
+} catch (e) {
+  console.error("[fw/sync] residue clear failed:", e);
+  queueCleared = false;
+  queueRemaining = 1;   // ← "something is probably still there"
+}
+```
+
+The reasoning was sound as far as it went: `0` would read as *"this device is clean"*,
+which a failed clear is in no position to claim. So it reported a non-zero number.
+
+**But `1` is a perfectly legal value on the success path** — it is exactly what "one
+foreign capture deliberately preserved" looks like. So downstream, in
+`runFwCacheOwnerReconcile`, a genuine IndexedDB fault arrived indistinguishable from a
+routine, correct preserve: the reconcile took the `queueRemaining > 0` branch, returned
+`queue_preserved`, and **advanced the owner key over it**. The next mount then sees
+`prior === actorUserId`, skips the reconcile entirely, and the failure is masked
+permanently. That is B2 — the defect this whole subsystem was rewritten to fix — coming
+back one layer down, through a sentinel rather than through an unconditional overwrite.
+Two reviewers traced it independently.
+
+**Fix — the same third value, in the type rather than in the range:**
+
+```ts
+/** `null` means COULD NOT DETERMINE — the clear threw rather than answering.
+ *  Every number here is a claim about the device that a failed transaction is in
+ *  no position to make. */
+queueRemaining: number | null;
+
+// …and at the last boundary before the irreversible effect (advancing the key):
+if (!result.rosterCleared || !result.shellCleared || result.queueRemaining === null) {
+  return { kind: "clear_failed" };   // key NOT advanced; next mount retries
+}
+```
+
+**The generalised rule: a sentinel must not be an in-range value of the type it stands
+in for.** When you reach for a stand-in — `1`, `0`, `-1`, `""`, `Number.MAX_SAFE_INTEGER`,
+an empty array — ask whether a correct run can produce it. If it can, you have not
+added a third state; you have made two states collide, and the collision is silent
+precisely because both are plausible.
+
+The tell is identical to the four above ("a two-valued disposition at an irreversible
+boundary"), but it hides better: nobody reads `number` as a two-valued type. It becomes
+one the moment the only alternative to "a real count" is "a fake count".
+
 ## Why This Matters
 
-A drain that writes into an append-only log has no undo. Every one of these four was a
+A drain that writes into an append-only log has no undo. Every one of these was a
 signal whose designer made the RIGHT call for their context — deny on an auth outage,
 don't trap a guide, don't feed an unknown shape to a typed switch, branch on the
 platform's own online flag — and every reuse turned that right call into a silent,
@@ -202,6 +263,9 @@ the clear, the reject), never upstream where the collapse was legitimately made.
   one serialized, atomic snapshot, and fail CLOSED (preserve) when the check can't run.
   **And make them observe the same PREDICATE, not just the same snapshot** — one atomic
   count of the wrong set is still the wrong answer (added 2026-07-27; see below).
+- Any function reporting a COUNT, a SIZE, or an ID whose failure path needs a stand-in
+  value. Ask whether a correct run can produce that same value; if it can, use
+  `T | null` rather than a reserved number (added 2026-07-27; see item 5).
 
 ## Related
 

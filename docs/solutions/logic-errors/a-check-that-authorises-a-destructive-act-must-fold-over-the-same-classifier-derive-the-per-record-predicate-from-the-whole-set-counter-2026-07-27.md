@@ -1,8 +1,9 @@
 ---
 title: "A CHECK that authorises a DESTRUCTIVE ACT and the act itself were two hand-written predicates for one question, so one blocked or foreign queue entry made the verdict say `ok` and the clear say `cleared:false` — forever, on a shared device with no way out. Don't re-derive the act's predicate: express it AS the check's classifier applied to a single record, so the two agree by construction rather than by review"
 date: 2026-07-27
+last_updated: 2026-07-27
 category: logic-errors
-module: "path / First Profit (FW) — offline sign-out (fwSignOutVerdict + clearFwQueueIfEmpty, app/fp/lib/fw-sync-rules.ts, app/fp/lib/fw-queue.ts)"
+module: "path / First Profit (FW) — offline sign-out (runFwSignOutFlow + clearFwQueueUnlessBlocked, app/fp/lib/fw-sync-rules.ts, app/fp/lib/fw-queue.ts; both renamed from fwSignOutVerdict + clearFwQueueIfEmpty)"
 problem_type: logic_error
 component: sync_engine
 severity: critical
@@ -14,8 +15,8 @@ symptoms:
 root_cause: logic_error
 resolution_type: code_fix
 related_components:
-  - app/fp/lib/fw-sync-rules.ts (classifyFwSignOutQueue, countFwSignOutBlockers, fwEntryBlocksSignOutClear)
-  - app/fp/lib/fw-queue.ts (clearFwQueueIfEmpty)
+  - app/fp/lib/fw-sync-rules.ts (classifyFwSignOutQueue, countFwSignOutBlockers, fwEntryClearDisposition)
+  - app/fp/lib/fw-queue.ts (clearFwQueueUnlessBlocked)
   - authentication
 tags:
   - check-then-act
@@ -83,11 +84,15 @@ export function classifyFwSignOutQueue(
 ): FwSignOutQueueClassification { /* drainable | ownBlocked | quarantined | foreignUndrained | foreignBlocked */ }
 
 // ONE definition of "not empty enough to wipe".
+// ⚠️ `foreignUndrained` was REMOVED from this count on 2026-07-27 — see the addendum
+//    at the end of this doc. The shape of the lesson is unchanged; the membership is not.
 export function countFwSignOutBlockers(q: FwSignOutQueueClassification): number {
   return q.drainable.length + q.quarantined.length + q.foreignUndrained.length;
 }
 
 // The clear's per-record predicate IS the counter, applied to a singleton.
+// ⚠️ Now `fwEntryClearDisposition`, returning "abort" | "preserve" | "remove". Same
+//    derivation, three answers instead of two — see the addendum.
 export function fwEntryBlocksSignOutClear(raw: unknown, actorUserId: string): boolean {
   return countFwSignOutBlockers(classifyFwSignOutQueue([raw], actorUserId)) > 0;
 }
@@ -154,3 +159,67 @@ deriving the per-record predicate from it.
 - `docs/solutions/logic-errors/retire-in-place-soft-delete-keeps-the-relationship-row-so-the-write-path-stays-reachable-guard-the-mutation-choke-point-2026-07-24.md` and `docs/solutions/logic-errors/confirmation-gate-in-one-entry-point-bypassed-by-retry-paths-and-re-read-live-state-2026-07-24.md` — the neighbouring but **distinct** shape: a guard that exists but does not cover every path. Worth reading together; they are two failure families, not one.
 - `docs/solutions/best-practices/web-locks-are-not-reentrant-re-entry-hangs-instead-of-throwing-so-hold-the-lock-at-exactly-one-level-2026-07-27.md` — from the same fix.
 - `docs/solutions/best-practices/checking-a-lazily-created-client-resource-creates-it-gate-on-a-separately-persisted-usage-signal-2026-07-27.md` — from the same fix.
+
+---
+
+## ⚠️ ADDENDUM 2026-07-27 (Staff Front Door Unit 4): the derivation held; one member of the set was wrong
+
+Everything above is still the rule, and the rule is what made this next fix safe to
+make. But two things in the code samples are now stale, and one *behavioural* claim in
+the Problem section has been deliberately reversed. Read this before citing the doc.
+
+**1. The symbols were renamed and the predicate became three-valued.**
+
+| Then | Now |
+|---|---|
+| `fwEntryBlocksSignOutClear(raw, actor): boolean` | `fwEntryClearDisposition(raw, actor): "abort" \| "preserve" \| "remove"` |
+| `clearFwQueueIfEmpty(blocksClear)` | `clearFwQueueUnlessBlocked(disposition)` |
+| `{ cleared, blocking }` | `{ cleared, blocking, remaining }` |
+
+The derivation is unchanged — the per-record answer is still
+`classifyFwSignOutQueue([raw], actorUserId)` folded down, never a hand-written twin, and
+the agreement test still pins that the whole-set counter and the per-record rule are
+the same function. Only the arity of the answer changed.
+
+**Why it needed three values:** the boolean was answering two different questions with
+one bit. *"This record must not be destroyed"* and *"this record must stop the clear
+happening at all"* are not the same requirement. Another account's un-landed capture is
+the first without being the second — it must survive, but there is nothing about it that
+should abort a clear of everything else.
+
+**2. The foreign-entry half of the Problem statement is now reversed by design.**
+
+The symptom above reads: *"a guide iPad holding exactly ONE blocked … or ONE foreign
+(another account's) queue entry could not sign out, ever."* The **blocked** half was a
+straightforward defect and stays fixed. The **foreign** half was fixed here in the wrong
+direction — this doc made the check and the act agree, and they agreed on *refuse*.
+
+R16 scopes the sign-out interlock to *"undrained captures **for the signing-out
+account**"*. Refusing on another account's work exceeded that, and the excess had teeth:
+a guide who walked off without signing out left a shared iPad that **nobody else could
+ever sign out of**, with the only remedy — "that guide has to come back and sign in
+here" — entirely outside the refused person's control.
+
+The original justification for refusing was that reconciliation would destroy the
+survivors, so blocking sign-out was what kept them alive. That premise was removed by a
+later fix (the handover reconcile now preserves what it cannot ship). Once the premise
+went, nothing was left holding the refusal up but its own inertia.
+
+So `countFwSignOutBlockers` no longer counts `foreignUndrained`; the clear still refuses
+to destroy it (`preserve`), and the staff bar's queue chip is what names the account it
+belongs to. `foreign_queue` was deleted from the refusal union outright rather than left
+unreachable.
+
+**The transferable part — and the reason this is an addendum rather than a new doc:**
+making a check and an act agree by construction guarantees they answer the *same*
+question. It says nothing about whether that is the *right* question. Both properties
+need review, and the first one passing makes the second easier to stop looking at.
+
+**A sibling of the same shape is still open.** `quarantined` records are also counted as
+blockers, and `partitionFwQueue` cannot attribute them to any actor at all — a record
+whose shape this build cannot read has no readable `actorUserId`. So a corrupted record
+left by a departed guide still refuses an unrelated staff member's sign-out, and the
+copy sends them into an app they have never opened to dismiss it. Three reviewers raised
+it independently. It is not fixed here because the fix needs a *resolved* identity that
+does not exist at the moment the button is tapped; it is recorded for the reliability
+pass.

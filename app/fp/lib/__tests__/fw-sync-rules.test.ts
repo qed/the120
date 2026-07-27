@@ -806,9 +806,47 @@ describe("hasFwDeviceEvidence — never CREATE a queue db on a browser that neve
     ).toBe(true);
   });
 
-  it("B1: …and it outranks even a negative database probe read", () => {
+  it("Unit 4: a NEGATIVE database probe outranks the guide signal — the fact beats the guess", () => {
+    // REVERSED FROM UNIT 3, deliberately, and this test is the record of why.
+    //
+    // Unit 3 checked `actorIsFwGuide` first. That was safe only while the value was a
+    // SERVER-RENDERED PROP on `FwSignOutButton`, correct from first paint. Unit 4
+    // deletes that component; the only sign-out left is the staff bar's, where the
+    // value is `staffBarSignOutActorIsFwGuide(live)` — which fails CLOSED to `true`
+    // while the identity round trip is in flight, and R23 keeps the button live
+    // throughout. Checking the guess first therefore let a CRM-only staffer who tapped
+    // sign-out early short-circuit past this probe into `openFwDb()`, CREATING the FW
+    // queue database on a browser that had never run Founders Weekend — permanently,
+    // since nothing deletes it and the probe then answers `true` forever after.
+    //
+    // Nothing is lost by the reversal: `queueDbExists === false` means there is no
+    // database, therefore no queue, therefore nothing a guide could lose.
     expect(
       hasFwDeviceEvidence({ evidence: read({ queueDbExists: false }), actorIsFwGuide: true })
+    ).toBe(false);
+  });
+
+  it("…but the guide signal still answers when the probe could NOT (B1 intact)", () => {
+    // The half of B1 that must survive the reversal: `databases()` unavailable
+    // (pre-2024 Safari) or throwing gives `null`, and there the storage heuristic
+    // fails OPEN — so the server-known signal is what stops a guide whose localStorage
+    // was evicted from skipping their own queue check.
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: null, queueDbOpened: false, queueDbExists: null }),
+        actorIsFwGuide: true,
+      })
+    ).toBe(true);
+  });
+
+  it("a guide with a REAL queue is still checked — eviction cannot hide a database", () => {
+    // The scenario B1 exists for, end to end: localStorage evicted, fresh document, but
+    // the queue database is still there holding their captures.
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: null, queueDbOpened: false, queueDbExists: true }),
+        actorIsFwGuide: true,
+      })
     ).toBe(true);
   });
 

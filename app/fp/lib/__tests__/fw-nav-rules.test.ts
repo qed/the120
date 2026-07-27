@@ -450,6 +450,14 @@ describe("parseFwActiveCohort", () => {
 /**
  * The three role-branched decisions on `/fp/fw`.
  *
+ * ⚠️ THE OTHER HALF OF THIS LIVES IN `app/lib/staff-bar/__tests__/bar-wiring.test.ts`.
+ * The rules are tested here; that `/fp/fw/(app)/page.tsx` actually CALLS them, and
+ * re-derives none of them inline, is a property of the component source that only a
+ * scan can reach (no jsdom). A reviewer noted the split is not obvious from either
+ * file's name — consolidating the scans nearer the code they describe is an open
+ * follow-up, recorded rather than done, because moving them means duplicating the
+ * source-reading helpers into three files.
+ *
  * They live here, in a pure module, for the reason the file header already gives and
  * the Staff Front Door plan repeats: this repo runs `environment: "node"` with no
  * jsdom, so an `isStaff ? … : …` written inline in `page.tsx` is a decision CI cannot
@@ -498,8 +506,7 @@ describe("fwPickerHeadline / fwPickerZeroState — R13, the two zeroes mean diff
     expect(zero.body).toMatch(/staff/i);
     // A guide cannot create a weekend, and offering them the path would hand them a
     // 404 from a surface that refuses non-staff.
-    expect(zero.createHref).toBeNull();
-    expect(zero.createLabel).toBeNull();
+    expect(zero.create).toBeNull();
   });
 
   it("a staff member's zero means NONE EXIST, and offers the create path", () => {
@@ -509,8 +516,18 @@ describe("fwPickerHeadline / fwPickerZeroState — R13, the two zeroes mean diff
     const zero = fwPickerZeroState(true);
     expect(zero.body).not.toMatch(/ask/i);
     expect(zero.body).toMatch(/none|no founders weekend|don't exist|doesn't exist|not been/i);
-    expect(zero.createHref).toBe(FW_OPS_CREATE_PATH);
-    expect(zero.createLabel).toBeTruthy();
+    expect(zero.create).toEqual({ href: FW_OPS_CREATE_PATH, label: expect.any(String) });
+    expect(zero.create?.label).toBeTruthy();
+  });
+
+  it("the guide's zero-state sentence is UNCHANGED from before the staff branch existed", () => {
+    // The plan requires the guide's copy to stay exactly as it was -- R13 adds a staff
+    // branch, it does not reword the guide one. Pinned as an exact string rather than
+    // by keyword, because "still mentions guide and staff" is satisfied by a rewrite
+    // that changes what a guide is told at the start of a shift.
+    expect(fwPickerZeroState(false).body).toBe(
+      "You're signed in, but you aren't a guide on any Founders Weekend cohort yet. Ask The 120 staff to add you."
+    );
   });
 
   it("the two bodies are not the same sentence", () => {

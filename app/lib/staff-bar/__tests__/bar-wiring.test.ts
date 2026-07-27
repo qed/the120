@@ -43,7 +43,12 @@ const REPO_ROOT = fileURLToPath(new URL("../../../../", `file://${dir}`));
  * arguments. The question the scans actually ask is "does any shipped surface still
  * reach this?", which is a question about production code.
  */
-const productionSources = async (): Promise<Map<string, string>> => {
+let productionSourcesCache: Promise<Map<string, string>> | null = null;
+
+const productionSources = (): Promise<Map<string, string>> =>
+  (productionSourcesCache ??= readProductionSources());
+
+const readProductionSources = async (): Promise<Map<string, string>> => {
   const files = await glob(["app/**/*.ts", "app/**/*.tsx"], {
     cwd: REPO_ROOT,
     absolute: false,
@@ -76,6 +81,33 @@ const SOURCE = read("../StaffBar.tsx");
  */
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+/* ── how the scans below decide "this decision was made inline" ──────────────────
+ *
+ * NOT by listing the spellings we expect. A testing reviewer defeated three earlier
+ * versions of these scans by writing what the author had not thought of — `identity
+ * === null || (<button…>)` walked through an `&&`/`?` check, `application == "fw"`
+ * walked through an `===` check, and `isStaff === true ?` walked through `/isStaff\s*\?/`
+ * — each a genuine regression that left the whole suite green.
+ *
+ * So the property asserted is structural instead: a decision is a value being COMPARED
+ * or used as a CONDITION, whatever operator does it. If an identifier that must only
+ * ever be passed to a tested rule function turns up next to one of these operators,
+ * something is deciding with it here.
+ */
+const COMPARISON = String.raw`(===|!==|==|!=|\?\?)`;
+const CONDITIONAL = String.raw`(===|!==|==|!=|\?\?|\?|&&|\|\|)`;
+
+/** Is `identifier` compared against anything, in either direction? */
+const isCompared = (code: string, identifier: string) =>
+  new RegExp(`\\b${identifier}\\b\\s*${COMPARISON}`).test(code) ||
+  new RegExp(`${COMPARISON}[\\s\\S]{0,24}?\\b${identifier}\\b`).test(code);
+
+/** Is `identifier` used as the test of a conditional, in either direction? */
+const isBranchedOn = (code: string, identifier: string) =>
+  isCompared(code, identifier) ||
+  new RegExp(`\\b${identifier}\\b\\s*${CONDITIONAL}`).test(code) ||
+  new RegExp(`${CONDITIONAL}[\\s\\S]{0,24}?\\b${identifier}\\b`).test(code);
 
 const CODE = stripComments(SOURCE);
 
@@ -116,20 +148,25 @@ describe("R23 — the sign-out control renders unconditionally", () => {
   );
 
   it("is not gated on identity by ANY conditional shape", () => {
-    // R16 retires the per-subtree sign-outs that today work independently of the
-    // identity read (Unit 4 does the retiring). Once they are gone, a gate here would
-    // strand a staff member on a page with no way out whenever that read is slow or
-    // fails — strictly worse than the three disagreeing-but-functional chromes this
-    // replaces. Matches `identity` inside any `&&` or ternary, however it is spelled
-    // or wrapped, rather than the two spellings the first draft happened to guess.
+    // Unit 4 retired the per-subtree sign-outs that used to work independently of the
+    // identity read, so a gate here now strands a staff member on a page with no way
+    // out whenever that read is slow or fails, on every guarded surface at once —
+    // strictly worse than the three disagreeing-but-functional chromes this replaced.
+    //
+    // The FIRST draft of this rejected `identity &&` and `identity ?`, and a reviewer
+    // walked through it with `{Boolean(identity) && …}`. The SECOND draft widened to
+    // `&&|?` and a reviewer walked through THAT with `{identity === null || (<button…>)}`
+    // — a real R23 regression, whole suite green. There is no list of operators that
+    // ends this game, so the slice is asserted to contain NO conditional operator at
+    // all: nothing legitimately decides anything between the identity string and the
+    // button.
     expect(beforeButton.length).toBeGreaterThan(0);
-    expect(beforeButton).not.toMatch(/identity[\s\S]{0,40}(&&|\?)/);
-    expect(beforeButton).not.toMatch(/(&&|\?)[\s\S]{0,40}identity/);
+    expect(beforeButton).not.toMatch(new RegExp(CONDITIONAL));
   });
 
   it("…and neither is it gated on the queue, the probe, or the persisted copy", () => {
-    for (const gate of ["queue", "probe", "persisted", "live"]) {
-      expect(beforeButton, gate).not.toMatch(new RegExp(`\\b${gate}\\b[\\s\\S]{0,40}(&&|\\?)`));
+    for (const gate of ["queue", "probe", "persisted", "live", "identity", "chip"]) {
+      expect(isBranchedOn(beforeButton, gate), gate).toBe(false);
     }
   });
 
@@ -169,8 +206,14 @@ describe("the bar decides nothing itself", () => {
   });
 
   it("never re-derives those gates inline", () => {
-    expect(CODE).not.toMatch(/isFwGuide\s*\?\?/);
-    expect(CODE).not.toMatch(/application\s*===\s*"fw"/);
+    // Pinned to SEMANTICS, not to the two spellings the Unit 3 P0 happened to use. A
+    // reviewer defeated the spelling version by adding
+    // `staffBarSurfaceCreatesFwResidue(application) || application == "fw"` — the real
+    // call still present, the real bug back beside it, 28 tests green. `application`
+    // and `isFwGuide` may be PASSED to the rule functions; they may never be compared.
+    for (const decided of ["application", "isFwGuide"]) {
+      expect(isCompared(CODE, decided), decided).toBe(false);
+    }
   });
 
   it("passes the LIVE identity to them, never the persisted copy", () => {
@@ -271,6 +314,13 @@ const BAR_MOUNTS = [
   "app/fp/fw/(app)/layout.tsx",
 ] as const;
 
+/** The same three, relative to this file, for the per-layout reads. */
+const BAR_MOUNT_SOURCES = [
+  "../../../staff/layout.tsx",
+  "../../../crm/(app)/layout.tsx",
+  "../../../fp/fw/(app)/layout.tsx",
+] as const;
+
 /**
  * FW layouts that NEST inside `app/fp/fw/(app)/layout.tsx`. Mounting the bar in these
  * too is the failure the "exactly once" requirement names: it would render two or
@@ -283,10 +333,31 @@ const NESTED_FW_LAYOUTS = [
 
 describe("the bar mounts exactly once per page (R15, R18)", () => {
   it("is mounted in each of the three outermost guarded layouts", () => {
-    for (const relative of ["../../../staff/layout.tsx", "../../../crm/(app)/layout.tsx"]) {
-      expect(read(relative), relative).toMatch(/<StaffBar[\s/>]/);
+    // stripComments, like every sibling assertion: a reviewer commented the mount out
+    // (`{/* <StaffBar … /> */}`) and this specific check stayed green because it read
+    // raw source. Its siblings caught that mutation, but an assertion that does not do
+    // what its own name says is one "this is redundant" refactor away from being the
+    // only one left.
+    for (const relative of BAR_MOUNT_SOURCES) {
+      expect(stripComments(read(relative)), relative).toMatch(/<StaffBar[\s/>]/);
     }
-    expect(FW_APP_LAYOUT).toMatch(/<StaffBar[\s/>]/);
+  });
+
+  it("hands each mount the actor id from that layout's OWN gate, not some other field", () => {
+    // The wiring test's own blind spot, found in review: pinning the ATTRIBUTE NAMES
+    // (`application`, `actorUserId`) says nothing about the VALUE. Wiring
+    // `actorUserId={staff.email}` would satisfy every other assertion in this file
+    // while silently changing the scope the sign-out evidence gate, the queue probe
+    // and the handover reconcile all key on — so a device's residue would be
+    // attributed to a string that is not a user id at all.
+    const expected: [string, RegExp][] = [
+      ["../../../staff/layout.tsx", /actorUserId=\{staff\.staffId\}/],
+      ["../../../crm/(app)/layout.tsx", /actorUserId=\{staff\.staffId\}/],
+      ["../../../fp/fw/(app)/layout.tsx", /actorUserId=\{session\.userId\}/],
+    ];
+    for (const [relative, value] of expected) {
+      expect(stripComments(read(relative)), relative).toMatch(value);
+    }
   });
 
   it("is NOT mounted in the FW layouts that nest inside one of them", () => {
@@ -330,6 +401,28 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
       new RegExp(`setProperty\\(\\s*BAR_HEIGHT_PROPERTY|setProperty\\(\\s*"${property}"`)
     );
 
+    // …published from useLAYOUTEffect, before paint. `useEffect` runs after the browser
+    // has painted, so every mount would show one frame with the previous bar's height
+    // or the 0px fallback, and the header below would flash underneath this bar. On a
+    // cohort surface the thing that flashes is the weekend name, which is wrong-stamp
+    // prevention. Found by two reviewers; reverting the hook is invisible otherwise.
+    const publishAt = CODE.indexOf("setProperty(");
+    expect(publishAt).toBeGreaterThan(0);
+    // The nearest hook ABOVE the publish, whichever it is — so swapping the hook
+    // reddens rather than just failing to find the one we hoped for. (A
+    // `lastIndexOf(...) === -1` returns a negative index, which `slice` reads from the
+    // END of the string; the first draft of this assertion did exactly that and
+    // happily "found" useLayoutEffect in an unrelated part of the file.)
+    const hookAt = Math.max(
+      CODE.lastIndexOf("useEffect(", publishAt),
+      CODE.lastIndexOf("useLayoutEffect(", publishAt)
+    );
+    expect(hookAt).toBeGreaterThan(0);
+    expect(
+      CODE.slice(hookAt, publishAt),
+      "the height publish must run in useLayoutEffect, before paint"
+    ).toMatch(/^useLayoutEffect\(/);
+
     for (const relative of NESTED_FW_LAYOUTS) {
       const header = stripComments(read(relative));
       // The offset must be on a STICKY element: `top` on a statically-positioned
@@ -338,6 +431,29 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
         new RegExp(`sticky\\s+top-\\[var\\(${property},\\s*0px\\)\\]`)
       );
     }
+  });
+
+  it("no scanned file hides a `//` inside a string, which stripComments would truncate", () => {
+    // stripComments treats any `//` not preceded by `:` as a line comment, so a string
+    // or template literal containing one silently swallows the rest of that line —
+    // and every "is it gone?" / "is it mounted?" scan in this file rests on it. No
+    // production file trips this today; this is what makes that an ENFORCED assumption
+    // rather than a lucky one, since a URL fragment or a path in a literal is an
+    // ordinary thing for someone to write.
+    return productionSources().then((sources) => {
+      const offenders: string[] = [];
+      for (const [path, code] of sources) {
+        for (const line of code.split("\n")) {
+          const at = line.indexOf("//");
+          if (at < 1 || line[at - 1] === ":") continue;
+          const before = line.slice(0, at);
+          for (const quote of ['"', "'", "`"]) {
+            if (before.split(quote).length % 2 === 0) offenders.push(`${path}: ${line.trim()}`);
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 
   it("every mount hands it the two settled props and nothing else", () => {
@@ -382,8 +498,32 @@ describe("the picker decides nothing itself either (R12, R13, R14)", () => {
     // The mutation this stops: reinstating `{isStaff ? "Weekends you can run" : …}`
     // beside the rule call, where the rule is still imported, still called, still
     // green — and no longer the thing on screen.
-    expect(PICKER).not.toMatch(/isStaff\s*\?/);
-    expect(PICKER).not.toMatch(/cohorts\.length\s*===\s*1/);
+    //
+    // Semantic, because the spelling version was defeated: a reviewer added
+    // `|| (isStaff === true ? false : listed.cohorts.length == 1)` next to the real
+    // call and every test stayed green. `isStaff` and the cohort count may be PASSED
+    // to the rule functions; neither may be compared or branched on here.
+    //
+    // ONE legitimate comparison exists and is excluded by name: the `isStaff`
+    // declaration itself, `session.hasAdminClaim ? await loadStaffRowActive(…) : false`,
+    // which is a DATA decision (skip the staff-row read without the claim), not a UI
+    // one. Excluded by matching that line rather than by loosening the rule.
+    const decidingLines = PICKER.split("\n").filter((line) => !line.includes("hasAdminClaim"));
+    expect(isBranchedOn(decidingLines.join("\n"), "isStaff")).toBe(false);
+  });
+
+  it("R14's redirect is GUARDED by the rule, not by a count comparison beside it", () => {
+    // `cohorts.length` is not banned outright — the page legitimately renders the
+    // zero state on `cohorts.length === 0`, which is a data branch with no role in it.
+    // What must not happen is the REDIRECT being decided by a comparison, because that
+    // is the staff exemption. Anchored on the redirect statement itself, so
+    // `|| listed.cohorts.length == 1` added next to the real call reddens: the guard
+    // is read from the `if` that actually contains the redirect.
+    const at = PICKER.indexOf("redirect(`/fp/fw/cohort/");
+    expect(at).toBeGreaterThan(0);
+    const guard = PICKER.slice(PICKER.lastIndexOf("if (", at), at);
+    expect(guard).toContain("fwPickerRedirectsToSingleCohort");
+    expect(isCompared(guard, String.raw`cohorts\.length`)).toBe(false);
   });
 
   it("renders no server-side hub link — R12 is the bar's, client-evaluated", () => {

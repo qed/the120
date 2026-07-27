@@ -254,17 +254,17 @@ export function deleteFwEntry(id: string): Promise<void> {
  * used (`fwEntryClearDisposition`), so check and act cannot drift again; this driver
  * keeps no emptiness opinion of its own, exactly as the header demands.
  *
- * WHY THE SECOND PASS RE-CLASSIFIES rather than reusing the first pass's array: the
+ * THREE SHAPES, not one, and the cheapest correct one is picked per call: anything
+ * aborting means touch nothing; nothing to preserve means a single `store.clear()`
+ * (the overwhelmingly common case, and O(1)); only a queue that must keep something
+ * pays for a per-record cursor walk.
+ *
+ * WHY THE CURSOR PASS RE-CLASSIFIES rather than reusing the first pass's array: the
  * cursor walks the store in key order and `getAll()` returns its own array, and pairing
  * the two by index would be an assumption about IndexedDB's ordering guarantees that
  * this driver has no business making. `disposition` is pure, so evaluating it twice per
  * record is free of consequence and self-evidently correct — which matters more here
  * than one traversal, because getting it wrong deletes a child's check-in.
- *
- * A CURSOR, not per-id deletes: a record whose shape carries no usable `id` (corrupt,
- * or from a future schema) has nothing to delete BY, and `store.clear()` used to sweep
- * it. `cursor.delete()` removes the record in front of it whatever its shape, so the
- * selective clear does not quietly start accumulating garbage the blind one collected.
  *
  * A disposition that THROWS aborts the transaction, which rejects — and a rejected
  * clear is `cleared:false` at the caller. Failing closed is the correct direction:
@@ -285,19 +285,66 @@ export function clearFwQueueUnlessBlocked(
           let remaining = 0;
           allReq.onsuccess = () => {
             const records = (allReq.result ?? []) as unknown[];
-            const dispositions = records.map(disposition);
-            blocking = dispositions.filter((d) => d === "abort").length;
+            // Counted through an EXHAUSTIVE switch, not `filter(d => d === …)`. A
+            // fourth disposition must be a compile error here rather than a value
+            // that counts as neither blocking nor preserved — and then, one line
+            // down, gets deleted for not being `"preserve"`. This file is the one
+            // place in the FW stack node-only CI can never execute, so the compiler
+            // is the only reviewer it gets.
+            for (const d of records.map(disposition)) {
+              switch (d) {
+                case "abort":
+                  blocking += 1;
+                  break;
+                case "preserve":
+                  remaining += 1;
+                  break;
+                case "remove":
+                  break;
+                default: {
+                  const _exhaustive: never = d;
+                  throw new Error(`unknown clear disposition: ${String(_exhaustive)}`);
+                }
+              }
+            }
             if (blocking > 0) {
               // Nothing is touched, so everything is still here.
               remaining = records.length;
               return;
             }
-            remaining = dispositions.filter((d) => d === "preserve").length;
+            if (remaining === 0) {
+              // THE COMMON CASE, and it stays O(1). Nothing on this device belongs to
+              // anyone else, so there is nothing to walk around: one engine-level
+              // clear, exactly as before Unit 4. This matters because the whole
+              // transaction runs while the cross-document `fw-offline-drain` lock is
+              // HELD — a per-record cursor walk after a long offline stretch would
+              // hold it for a time proportional to the backlog, blocking every other
+              // tab's drain and sign-out (reliability review).
+              store.clear();
+              return;
+            }
+            // Something must survive, so each record is decided individually.
+            //
+            // A CURSOR, not per-id deletes: a record whose shape carries no usable
+            // `id` has nothing to delete BY, and `store.clear()` used to sweep it.
+            // `cursor.delete()` removes whatever it is sitting on.
+            //
+            // Deletes only on an explicit `"remove"` — never "anything that is not
+            // preserve". The difference is what happens to a disposition this build
+            // does not recognise: kept, not destroyed.
+            //
+            // HAS NO BEHAVIOURAL SIGNATURE TODAY, and that is stated rather than
+            // dressed up: the exhaustive switch above throws on a fourth value before
+            // this line can run, so no test can tell the two spellings apart, and a
+            // mutation from `=== "remove"` to `!== "preserve"` survives the suite. It
+            // is kept because the two failure modes are not symmetric — one keeps a
+            // record it did not understand, the other destroys a child's check-in —
+            // and because the switch and this line can drift apart in a later edit.
             const cursorReq = store.openCursor();
             cursorReq.onsuccess = () => {
               const cursor = cursorReq.result;
               if (!cursor) return;
-              if (disposition(cursor.value) !== "preserve") cursor.delete();
+              if (disposition(cursor.value) === "remove") cursor.delete();
               cursor.continue();
             };
           };

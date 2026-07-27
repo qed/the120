@@ -27,8 +27,13 @@ const TABS = [
  * every account on `/crm/login` — including a staff member who is also a guide, and
  * including one whose device still held unsent check-ins.
  *
- * The row is now three sticky-free rows deep under the bar; it does not offset
- * itself, because `CrmChrome` has never been sticky.
+ * This row does not offset itself under the bar the way the Founders Weekend headers
+ * do, and does not need to: `CrmChrome` has never been sticky, so it scrolls away
+ * normally and never competes with the bar for `top: 0`.
+ *
+ * The six sections, and the `overflow-x-auto` that is how this row meets its
+ * survive-at-375px contract, are pinned in
+ * `app/lib/staff-bar/__tests__/bar-wiring.test.ts`.
  */
 export default function CrmTabs() {
   const pathname = usePathname();

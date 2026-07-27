@@ -103,12 +103,12 @@ export default async function FwHomePage() {
       {listed.cohorts.length === 0 ? (
         <>
           <p className="mt-3 font-path-body text-sm leading-6 text-hq-ink-soft">{zero.body}</p>
-          {zero.createHref !== null && (
+          {zero.create && (
             <Link
-              href={zero.createHref}
+              href={zero.create.href}
               className="mt-4 inline-flex min-h-[44px] items-center rounded-xl border border-hq-border px-4 font-path-body text-sm font-semibold text-hq-ink hover:bg-hq-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink"
             >
-              {zero.createLabel}
+              {zero.create.label}
             </Link>
           )}
         </>

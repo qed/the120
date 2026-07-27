@@ -476,10 +476,14 @@ export function applyFwDrainOutcome(
  *                        clearing it destroys nothing that is not already recorded.
  *   - `quarantined`      a shape this build cannot drain. An UN-LANDED capture that a
  *                        blind clear would lose — must be dismissed by a human first.
- *   - `foreignUndrained` another account's un-landed work. REFUSES: no drain under
- *                        this session can ship it (the drain scopes to the signed-in
- *                        actor by design), so clearing it would silently destroy a
- *                        different guide's captures.
+ *   - `foreignUndrained` another account's un-landed work. PRESERVED, never cleared:
+ *                        no drain under this session can ship it (the drain scopes to
+ *                        the signed-in actor by design), so destroying it would lose a
+ *                        different guide's captures outright. It does NOT refuse this
+ *                        account's sign-out — it did until Unit 4, and that was the
+ *                        part that was wrong: R16 scopes the interlock to the
+ *                        signing-out account, and nothing this session can do would
+ *                        resolve it anyway. The bar's queue chip names it instead.
  *   - `foreignBlocked`   another account's already-rejected work — clearable for the
  *                        same reason `ownBlocked` is, and it is not this guide's note
  *                        to read anyway.
@@ -738,21 +742,39 @@ export type FwDeviceEvidence =
  * outside that group.
  *
  * The fix is NOT a harder client-storage heuristic. It is two signals the heuristic
- * never had, checked before it:
+ * never had:
  *
- *   1. `actorIsFwGuide` — SERVER-KNOWN at the layout that mounts the bar (the actor
- *      holds at least one `guide` grant). Storage-independent by construction, so no
- *      eviction of anything can hide it. A guide's queue is always checked, full
- *      stop. Staff hold no grants by design (`fw-auth.ts`), so this stays FALSE for
- *      the CRM-only staff member the gate exists to protect — it is a real branch,
- *      not a constant.
- *   2. `queueDbExists` — `indexedDB.databases()`, which asks the question directly.
- *      If the database does not exist there is definitionally no queue AND opening it
- *      would create it, so skipping is both safe and the whole point. If it DOES
- *      exist, opening it creates nothing, so checking is free. (An older comment
- *      dismissed `databases()` because "Safari lacks it" — true of pre-2024 Safari
- *      only. It is Baseline since May 2024. Where it is genuinely absent the value is
- *      `null` and the legacy heuristic still answers, for non-guides only.)
+ *   1. `queueDbExists` — `indexedDB.databases()`, which asks the question directly
+ *      and creates nothing. If the database does not exist there is definitionally no
+ *      queue AND opening it would create it, so skipping is both safe and the whole
+ *      point. If it DOES exist, opening it creates nothing, so checking is free. (An
+ *      older comment dismissed `databases()` because "Safari lacks it" — true of
+ *      pre-2024 Safari only. It is Baseline since May 2024.)
+ *   2. `actorIsFwGuide` — the actor holds at least one `guide` grant.
+ *      Storage-independent by construction, so no eviction can hide it. This is what
+ *      answers when `databases()` is genuinely unavailable and the legacy heuristic
+ *      would otherwise fail open.
+ *
+ * ── THE ORDER, AND WHY UNIT 4 CHANGED IT ──────────────────────────────────────
+ * Unit 3 checked `actorIsFwGuide` FIRST. That was safe only while the value arrived
+ * as a SERVER-RENDERED PROP: `FwCohortLayout` computed it synchronously from the
+ * session, so it was correct from first paint. Unit 4 retires that component. The
+ * only sign-out left is the staff bar's, where the value comes from
+ * `staffBarSignOutActorIsFwGuide(live)` — which fails CLOSED to `true` while the
+ * identity round trip is still in flight, and R23 requires the button to be live the
+ * whole time. Checking the guess first therefore meant a CRM-only admissions staffer
+ * who tapped sign-out before identity resolved short-circuited straight past the
+ * probe into `openFwDb()`, CREATING the FW queue database on a browser that had never
+ * run Founders Weekend — permanently, because nothing deletes it and `queueDbExists`
+ * then answers `true` for that origin forever, retiring the zero-cost path this gate
+ * exists to take. That is Unit 3's own P0 recurring by the exact mechanism its
+ * solution doc predicted ("unreachable today only because of incidental coupling —
+ * which stops holding the moment the control is mounted elsewhere").
+ *
+ * So the FACT is consulted before either GUESS. B1 is unaffected: a guide whose
+ * localStorage was evicted still has a database, so `queueDbExists` is `true` and
+ * their queue is still checked. What changed is only that a definite "no database"
+ * now beats an unresolved "maybe a guide".
  *
  * Fails CLOSED on `unknown`: "I could not look" must never be read as "there is
  * nothing here," because the act it authorises is destructive.
@@ -762,10 +784,13 @@ export function hasFwDeviceEvidence(input: {
   /** SERVER-KNOWN: this actor holds an FW guide grant. See (1) above. */
   actorIsFwGuide: boolean;
 }): boolean {
-  if (input.actorIsFwGuide) return true;
   const { evidence } = input;
+  // "I could not look at all" is not "there is nothing here". First, and absolute.
   if (evidence.kind === "unknown") return true;
+  // THE DIRECT ANSWER OUTRANKS BOTH GUESSES — see the ORDER section above.
   if (evidence.queueDbExists !== null) return evidence.queueDbExists;
+  // No direct answer available: the server-known signal, then the legacy heuristic.
+  if (input.actorIsFwGuide) return true;
   return evidence.cacheOwner !== null || evidence.queueDbOpened;
 }
 
@@ -795,8 +820,17 @@ export type FwResidueClearResult = {
    * captures, or — when the clear aborted — everything, since nothing was touched.
    * The handover reconcile reads this to tell "kept something on purpose" apart from
    * "wiped the device clean", which is a distinction B2 exists to keep visible.
+   *
+   * `null` means COULD NOT DETERMINE — the clear threw rather than answering. Carried
+   * as its own value rather than reported as a number, because every number here is a
+   * claim about the device that a failed transaction is in no position to make. The
+   * first draft of this field used `1` as a stand-in on the throw path; two reviewers
+   * traced that a genuine IndexedDB fault then arrived at the reconcile looking
+   * exactly like a legitimate "one foreign capture preserved" — advancing the owner
+   * key and masking the failure forever, which is precisely the B2 defect one layer
+   * down.
    */
-  queueRemaining: number;
+  queueRemaining: number | null;
   /** The IndexedDB roster cache was cleared, or was deliberately not attempted. */
   rosterCleared: boolean;
   /** The service-worker app-shell cache was deleted, or was not attempted. */
@@ -1014,10 +1048,16 @@ export type FwReconcileOutcome =
   /** A handover: every residue went and the key now names this actor. */
   | { kind: "reconciled" }
   /**
-   * A handover where undrained captures were found and DELIBERATELY preserved. The
-   * key is NOT advanced, so the device stays visibly un-reconciled and the next mount
-   * tries again. Sign-out refuses on these via `foreign_queue` — which is the surface
-   * that actually names the other guide.
+   * A handover where un-landed captures were found and DELIBERATELY preserved — the
+   * departed guide's, or this actor's own if a tap raced the clear.
+   *
+   * The owner key IS advanced: it describes the roster and shell caches, which did go,
+   * and holding it back would re-wipe the CURRENT guide's roster cache on every
+   * subsequent mount for a queue no retry could ever ship. Nothing is lost by
+   * advancing — every entry carries its own `actorUserId`, so the queue stays
+   * self-describing and the bar's queue chip is what names the account the survivors
+   * belong to. Sign-out does NOT refuse over them (Unit 4; see
+   * `countFwSignOutBlockers`).
    */
   | { kind: "queue_preserved"; preservedCount: number }
   /** A clear THREW. The key is not advanced, so this is retried rather than masked. */
@@ -1101,7 +1141,15 @@ export async function runFwCacheOwnerReconcile(input: {
     // fault, and collapsing them would put this right back where B2 started — a
     // failure indistinguishable from a policy. The FAULT does not advance the key, so
     // the next mount retries it.
-    if (!result.rosterCleared || !result.shellCleared) return { kind: "clear_failed" };
+    //
+    // `queueRemaining === null` is the QUEUE step's version of that fault: the clear
+    // threw instead of answering, so nothing is known about what survived. Reading it
+    // here is what stops a real IndexedDB failure being reported as `queue_preserved`
+    // with a fabricated count while the owner key advances and hides it for good
+    // (correctness + reliability review, two reporters).
+    if (!result.rosterCleared || !result.shellCleared || result.queueRemaining === null) {
+      return { kind: "clear_failed" };
+    }
 
     // THE KEY DESCRIBES THE CACHES, NOT THE QUEUE — so it advances as soon as the
     // caches are this actor's, even with a foreign queue preserved.

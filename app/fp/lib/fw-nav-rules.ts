@@ -1,7 +1,13 @@
 /**
- * The guide's navigation decisions (FW Unit 4; FW-R13–R15, FW-D1, FW-D5,
- * Decisions 3, 14; gaps G21, G22) — roster search, duplicate disambiguation,
+ * The `/fp/fw` navigation decisions, BY ROLE (FW Unit 4; FW-R13–R15, FW-D1, FW-D5,
+ * Decisions 3, 14; gaps G21, G22 — plus Staff Front Door R12–R14) — the picker's
+ * redirect, headline and zero state, then roster search, duplicate disambiguation,
  * the resume chip, the drill-down tree, and the batch picker's cap.
+ *
+ * Named for the SURFACE rather than for the guide, because the first section is
+ * staff-branched: the single-cohort redirect exempts staff, the headline differs, and
+ * the zero state offers staff a create path a guide must never be shown. Everything
+ * below that section is still guide-only.
  *
  * PLAIN module by convention (no next/supabase/react imports), so it is
  * importable under vitest and `tsx`. Sibling of `fw-rules.ts`, deliberately not
@@ -66,9 +72,15 @@ export function fwPickerHeadline(isStaff: boolean): string {
 
 export type FwPickerZeroState = {
   body: string;
-  /** Where to go and create one, or `null` for a role that cannot. */
-  createHref: string | null;
-  createLabel: string | null;
+  /**
+   * The create affordance, or `null` for a role that has none.
+   *
+   * ONE nullable field rather than a nullable href beside a nullable label: the two
+   * must always travel together, and as separate fields nothing said so. A consumer
+   * narrowing on the href learns nothing about the label, so a producer that set one
+   * without the other would type-check and render a link with no visible text.
+   */
+  create: { href: string; label: string } | null;
 };
 
 /**
@@ -89,21 +101,28 @@ export type FwPickerZeroState = {
  * redirect is a role-branched server decision that cannot be anything else. Moving one
  * sentence to the client would buy a neutral-then-correct flicker on the screen a
  * guide reads at the start of a shift, and leave the page's actual role signal exactly
- * where it was. The cached shell is cleared on sign-out and on every handover
- * reconcile, which is the mitigation that does work.
+ * where it was.
+ *
+ * WHAT THIS COSTS, STATED HONESTLY. The staff branch puts a link to `/fp/fw/ops` — a
+ * staff-only surface — into HTML the service worker caches, and the zero-cohort state
+ * is the one state whose HTML was otherwise role-identical. The cached shell is
+ * cleared on sign-out and on every handover reconcile, but that is a partial
+ * mitigation, not a complete one: the reconcile is a client effect, so it can stop the
+ * NEXT navigation reusing a stale shell and cannot undo the render that just served
+ * one. The residual exposure is a non-staff holder of a shared device, offline, on the
+ * first paint after a handover, learning that the previous operator was staff and
+ * seeing a link that 404s for them. Accepted deliberately; the dry run exercises it.
  */
 export function fwPickerZeroState(isStaff: boolean): FwPickerZeroState {
   if (isStaff) {
     return {
       body: "No Founders Weekend cohorts exist yet. Create one to start adding guides and students.",
-      createHref: FW_OPS_CREATE_PATH,
-      createLabel: "Create a weekend",
+      create: { href: FW_OPS_CREATE_PATH, label: "Create a weekend" },
     };
   }
   return {
     body: "You're signed in, but you aren't a guide on any Founders Weekend cohort yet. Ask The 120 staff to add you.",
-    createHref: null,
-    createLabel: null,
+    create: null,
   };
 }
 

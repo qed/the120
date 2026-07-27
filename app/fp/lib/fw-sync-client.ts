@@ -509,7 +509,7 @@ export async function clearFwResidue(
   policy: FwResiduePolicy
 ): Promise<FwResidueClearResult> {
   let queueCleared = true;
-  let queueRemaining = 0;
+  let queueRemaining: number | null = 0;
   if (isFwQueueSupported()) {
     try {
       const cleared = await clearFwQueueUnlessBlocked(disposition);
@@ -517,13 +517,15 @@ export async function clearFwResidue(
       queueRemaining = cleared.remaining;
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
-      // Not `queueRemaining = 0`: the clear never ran, so whatever was there still is.
-      // Reported as UNKNOWN-but-nonzero rather than zero, because zero is the value
-      // that reads as "this device is clean" — the exact claim a failed clear cannot
-      // make. `queueCleared: false` already refuses the sign-out; this keeps the
-      // handover reconcile from reporting `reconciled` over a throw.
+      // NOT a number. The clear threw instead of answering, so nothing is known about
+      // what is still on this device — and every number here is a claim a failed
+      // transaction is in no position to make. `0` would read as "clean"; a stand-in
+      // like `1` reads as "one foreign capture preserved", which is how a genuine
+      // IndexedDB fault reached the handover reconcile disguised as a policy outcome
+      // and advanced the owner key over it. `null` is the honest answer and the
+      // reconcile treats it as `clear_failed`.
       queueCleared = false;
-      queueRemaining = 1;
+      queueRemaining = null;
     }
   }
   // ABORT-SAFE under `sign_out`: if a tap raced in, the sign-out aborts — so the

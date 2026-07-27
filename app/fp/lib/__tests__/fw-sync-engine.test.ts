@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { runFwDrain, type FwDrainInput } from "../fw-sync-engine";
@@ -775,6 +777,9 @@ type FakeDevice = {
   onDrain: (dev: FakeDevice) => void;
   /** A tap that lands in the window between the verdict and the clear. */
   beforeClear: ((dev: FakeDevice) => void) | null;
+  /** Models the QUEUE clear transaction itself throwing (openFwDb reject, tx.onabort)
+   *  -- distinct from a disposition-driven abort, which resolves normally. */
+  queueClearThrows: boolean;
   /** The roster cache, and whether clearing it throws (B3). */
   rosterCached: boolean;
   rosterClearFails: boolean;
@@ -793,6 +798,7 @@ function device(over: Partial<FakeDevice> = {}): FakeDevice {
     authRequired: false,
     evidence: { kind: "read", cacheOwner: GUIDE, queueDbOpened: true, queueDbExists: true },
     readFails: false,
+    queueClearThrows: false,
     reads: 0,
     drains: 0,
     rosterCached: true,
@@ -834,6 +840,17 @@ function portsFor(
     },
     clear: async (disposition, policy) => {
       dev.beforeClear?.(dev);
+      // A THROWN queue clear reports `queueRemaining: null` -- "could not determine" --
+      // exactly as `clearFwResidue`'s catch does. Never a number: a fabricated count
+      // is what let a real IndexedDB fault reach the reconcile disguised as a
+      // legitimate preserve.
+      if (dev.queueClearThrows) {
+        const rosterCleared = !dev.rosterClearFails;
+        if (rosterCleared) dev.rosterCached = false;
+        const shellCleared = !dev.shellClearFails;
+        if (shellCleared) dev.shellCached = false;
+        return { queueCleared: false, queueRemaining: null, rosterCleared, shellCleared };
+      }
       // Models `clearFwQueueUnlessBlocked`: classify-then-delete in ONE transaction,
       // under the disposition the flow supplied — never a second, hand-written
       // emptiness test. `abort` stops the whole clear (a tap raced in since the
@@ -1012,6 +1029,28 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
     expect(dev.reads).toBe(0);
     expect(lock.acquisitions).toBe(0); // no lock, no IndexedDB, no side effects
+  });
+
+  it("a CRM-only staffer signing out BEFORE identity resolves still never opens the queue db", async () => {
+    // THE UNIT 4 REGRESSION, end to end. The bar's sign-out is live from first paint
+    // (R23), but its `actorIsFwGuide` is `staffBarSignOutActorIsFwGuide(live)`, which
+    // fails CLOSED to `true` until the identity Server Action answers. Before the
+    // evidence gate was reordered, that fail-closed guess short-circuited the whole
+    // gate, and a tap on `/crm` in that window reached `openFwDb()` — creating the FW
+    // queue database on an admissions staffer's browser, permanently, because nothing
+    // deletes it and `fwQueueDbExists()` answers `true` for that origin ever after.
+    //
+    // `actorIsFwGuide: true` here is NOT "this person is a guide" — it is the
+    // unresolved default, which is exactly the point.
+    const lock = makeFakeLockManager();
+    const dev = device({
+      readFails: true,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
+    });
+
+    expect(await signOut(dev, lock, { actorIsFwGuide: true })).toEqual({ kind: "sign_out" });
+    expect(dev.reads).toBe(0); // never read, therefore never opened, therefore never created
+    expect(lock.acquisitions).toBe(0);
   });
 
   it("an evidence read that threw still checks the queue (unknown is not absence)", async () => {
@@ -1312,6 +1351,22 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     expect(dev.store).toEqual([theirs]);
   });
 
+  it("B2: a THROWN queue clear is clear_failed, not a preserve with an invented count", async () => {
+    // Two reviewers traced this independently. The queue clear throwing (openFwDb
+    // rejecting, tx.onabort) is a FAULT; a preserved foreign capture is a POLICY. The
+    // first draft reported the fault as `queue_preserved` with a stand-in count of 1
+    // and then advanced the owner key over it -- which is the B2 defect exactly, one
+    // layer down: the failure becomes invisible and is never retried, because the key
+    // now matches and the mismatch never recurs.
+    const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({ owner: OTHER_GUIDE, store: [theirs], queueClearThrows: true });
+
+    expect(await reconcile(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.owner).toBe(OTHER_GUIDE); // NOT advanced -- the next mount retries
+    expect(dev.ownerWrites).toBe(0);
+    expect(dev.store).toEqual([theirs]);
+  });
+
   it("B2: the prior guide's BLOCKED entries are clearable — their reject row is authoritative", async () => {
     const dev = device({
       owner: OTHER_GUIDE,
@@ -1388,5 +1443,38 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
       kind: "reconciled",
     });
     expect(dev.rosterCached).toBe(false);
+  });
+});
+
+/* ═══════════════ what only a source scan can reach in fw-sync-client.ts ══ */
+
+/**
+ * `app/fp/lib/fw-sync-client.ts` binds browser seams — IndexedDB, `navigator.locks`,
+ * `caches` — so node-only CI can import it but can never execute the branches that
+ * matter. Everything decidable was pushed into `fw-sync-rules.ts` for exactly that
+ * reason, and the harness above drives the sequence through fake ports.
+ *
+ * ONE thing is left that no fake can reach: how the real `clearFwResidue` disposes of
+ * its own thrown clear. Two reviewers traced that reporting a NUMBER there makes a
+ * genuine IndexedDB fault arrive at the handover reconcile looking exactly like a
+ * legitimate "one foreign capture preserved" — the owner key advances, the failure is
+ * masked forever, and that is the B2 defect one layer down. The fix is one word, and
+ * a future "simplify" pass would undo it with nothing going red. So it is pinned here,
+ * in the file that owns this stack, over comment-stripped source.
+ */
+describe("clearFwResidue reports a thrown queue clear as UNKNOWN, never as a count", () => {
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const source = readFileSync(new URL("../fw-sync-client.ts", `file://${dir}`), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("assigns null in the catch, and never a numeric stand-in", () => {
+    const start = source.indexOf("export async function clearFwResidue");
+    expect(start).toBeGreaterThan(0);
+    const body = source.slice(start, source.indexOf("\n}", start));
+    const catchBlock = body.slice(body.indexOf("} catch"));
+
+    expect(catchBlock).toMatch(/queueRemaining\s*=\s*null/);
+    expect(catchBlock).not.toMatch(/queueRemaining\s*=\s*\d/);
   });
 });

@@ -23,10 +23,12 @@
  *
  * R23 IS THE INVARIANT TO PROTECT WHEN EDITING THIS. The bar and its sign-out render
  * unconditionally. If identity fails, is slow, or the device is offline with nothing
- * persisted, the STRING degrades — the control does not. R16 RETIRES the per-subtree
- * sign-outs that today work independently of that read (Unit 4 does the retiring;
- * `FwSignOutButton` is still mounted as of this unit), so once they are gone a silent
- * failure here would strand a staff member on a page with no way out.
+ * persisted, the STRING degrades — the control does not. This is now the ONLY
+ * sign-out on every guarded staff surface: Unit 4 retired the FW ops header's form,
+ * the per-cohort `FwSignOutButton` (deleted) and the CRM tab row's control, all of
+ * which used to work independently of this read. A silent failure here therefore
+ * strands a staff member on a page with no way out, with nothing else to fall back
+ * to.
  *
  * THE SIGN-OUT SEQUENCE IS UNIT 1'S, unchanged. `runFwSignOut` takes the lock exactly
  * once around verdict → drain → re-verdict → atomic clear. Nothing here may acquire
@@ -35,7 +37,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   readFwDeviceQueueState,
   reconcileFwCacheOwner,
@@ -85,6 +87,10 @@ const IDENTITY_KEY = "staffBar.identity";
  * (unmount the bar from `/fp/fw` alone and the guide headers are unchanged).
  */
 const BAR_HEIGHT_PROPERTY = "--staff-bar-h";
+
+/** Which bar element currently owns `--staff-bar-h`. Module scope because the
+ *  property it guards is document scope — see the cleanup below. */
+let barOwner: HTMLElement | null = null;
 
 /**
  * The persisted identity as an external store.
@@ -189,7 +195,16 @@ export function StaffBar({
   // the queue chip appears, when a message renders, and when a narrow viewport wraps
   // it — and a stale offset leaves a gap or a covered header rather than failing
   // loudly. No decision here, so nothing to extract: this is a measurement.
-  useEffect(() => {
+  //
+  // useLAYOUTEffect, deliberately. `useEffect` runs after the browser has painted, so
+  // every mount — hydration, and every remount from crossing route groups — would
+  // paint one frame with the previous bar's height or the 0px fallback, and the
+  // headers below (`sticky top-[var(--staff-bar-h,0px)]`) would flash underneath this
+  // one. On `/fp/fw/cohort/X` the thing that flashes is the weekend name, which is
+  // wrong-stamp prevention, so those frames are not cosmetic. A synchronous
+  // `getBoundingClientRect()` read plus an inline style write is exactly the case
+  // this hook exists for.
+  useLayoutEffect(() => {
     const node = barRef.current;
     if (node === null || typeof ResizeObserver === "undefined") return;
     const publish = () => {
@@ -197,13 +212,31 @@ export function StaffBar({
         BAR_HEIGHT_PROPERTY,
         `${node.getBoundingClientRect().height}px`
       );
+      // Claim ownership of the shared property in the same breath as setting it, so
+      // the cleanup below can tell "I am still the bar" from "someone else took over".
+      barOwner = node;
     };
     publish();
     const observer = new ResizeObserver(publish);
     observer.observe(node);
     return () => {
       observer.disconnect();
-      document.documentElement.style.removeProperty(BAR_HEIGHT_PROPERTY);
+      // ONLY if no other bar has since claimed it. The property lives on
+      // `document.documentElement`, so it is shared global state, and a blind
+      // `removeProperty` here would blank the value an incoming bar had just set if a
+      // future routing change ever mounts one before this one unmounts. React's
+      // destroy-before-create ordering makes that impossible within a single commit
+      // today — but that is a scheduling property of the current route shape (and of
+      // there being no `loading.tsx` between these trees), not an invariant this
+      // component controls, and the failure it would cause (every header below jumping
+      // under the bar) is silent.
+      //
+      // UNVERIFIABLE BY CI, said plainly: there is no DOM here, so mutating this guard
+      // to `if (true)` reddens nothing. It belongs to the on-device dry run.
+      if (barOwner === node) {
+        barOwner = null;
+        document.documentElement.style.removeProperty(BAR_HEIGHT_PROPERTY);
+      }
     };
   }, []);
 
@@ -233,10 +266,10 @@ export function StaffBar({
   // Keyed on the SERVER-supplied `actorUserId`, not on the resolved identity, so a
   // slow or failed identity read cannot delay clearing a prior guide's cached roster.
   //
-  // ⚠️ UNIT 4 REMOVES `FwPwa`'s COPY OF THIS EFFECT when it mounts the bar in
-  // `app/fp/fw/(app)/layout.tsx`. Until then FwPwa still owns it there and the bar is
-  // not mounted, so exactly one reconcile runs. Running both would race two
-  // reconciles on one localStorage key.
+  // THIS IS THE ONLY RECONCILE OWNER, on every surface. `FwPwa` used to carry a copy
+  // for `/fp/fw`; Unit 4 deleted it in the same change that mounted the bar there,
+  // because running both would race two reconciles on one localStorage key.
+  // `bar-wiring.test.ts` counts the owners in that subtree and reddens at zero or two.
   useEffect(() => {
     // The bar's own persisted identity is residue too: it is an email address, and it
     // must not outlive the account it names on a device that changed hands.

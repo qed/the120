@@ -1,10 +1,15 @@
 # Migration lock
 
-**Current holder: Lane A — Staff Front Door.**
+**Current holder: Lane B — First Profit funnel.**
 
-*(Transferred 2026-07-27 with Peter's approval, in the PR that authors
-`20260806120000_fw_cohort_archive.sql` and `20260806130000_fw_residue_reports.sql` —
-Staff Front Door Unit 6. Previous holder: Lane B, through funnel Unit 1.)*
+*(Handed back 2026-07-27 in the PR that authors
+`20260807120000_fw_archive_rehearsal_cohorts.sql` — Staff Front Door Unit 10, the
+staff plan's LAST migration. Lane A held it Units 6–10, per the option Peter
+approved at Unit 6. NOTE for the record: while Lane A held it, Lane B authored and
+applied `20260805150000_funnel_resume_tokens.sql` without a transfer — surfaced to
+Peter 2026-07-27; the schemas were verified compatible after the fact. The rule
+stands: this file is the strongest signal the toolchain allows, and it only works
+if both lanes read it.)*
 
 Two worktrees of this repo run in parallel against the **same live Supabase project**, and
 this repo's standing rule is that a migration applies to production the moment it is

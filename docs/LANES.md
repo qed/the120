@@ -31,9 +31,15 @@ Both worktrees point at the **same live Supabase project**, and this repo's stan
 is that migrations apply to production the moment they are authored. There is no staging
 copy and no rehearsal window.
 
-**Lane B is the sole migration author.** Lane A stops and asks Peter before authoring one.
-`supabase/MIGRATION-LOCK.md` records the current holder; a lane taking the lock changes
-that file in the same PR as the migration.
+**`supabase/MIGRATION-LOCK.md` names the sole migration author** — that file is the
+authority, not this paragraph (it moved twice on 2026-07-27: Lane A held it for the
+staff plan's Units 6–10 with Peter's approval, then handed it back). A lane that is
+not the named holder stops and asks Peter before authoring one; a lane taking the
+lock changes the holder line in the same PR as the migration. One breach is on
+record (funnel U3 authored+applied while Lane A held it — surfaced to Peter,
+schemas verified compatible after the fact): the file only works if both lanes
+read it before every migration, which is why this rule now points there instead of
+naming a lane.
 
 This is a rule, not a mechanism. It is written down in three places (here, the lock file,
 and each lane's handoff prompt) because nothing in the toolchain can enforce it.

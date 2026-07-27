@@ -5,7 +5,11 @@ import {
   compareFwTaskIds,
   fwBatchStudentIds,
   fwDuplicateNameStudentIds,
+  fwPickerHeadline,
+  fwPickerRedirectsToSingleCohort,
+  fwPickerZeroState,
   fwSearchDistanceBudget,
+  FW_OPS_CREATE_PATH,
   normalizeFwSearchTerm,
   searchFwRoster,
   summarizeFwResume,
@@ -438,5 +442,88 @@ describe("parseFwActiveCohort", () => {
       expect(() => parseFwActiveCohort(raw)).not.toThrow();
       expect(parseFwActiveCohort(raw)).toBeNull();
     }
+  });
+});
+
+/* ══════════════════════ the /fp/fw picker, by role (Unit 4; R13, R14) ══ */
+
+/**
+ * The three role-branched decisions on `/fp/fw`.
+ *
+ * They live here, in a pure module, for the reason the file header already gives and
+ * the Staff Front Door plan repeats: this repo runs `environment: "node"` with no
+ * jsdom, so an `isStaff ? … : …` written inline in `page.tsx` is a decision CI cannot
+ * see. The previous unit's headline review finding was exactly that shape — two
+ * decisions inline in a `.tsx` where flipping either left the whole suite green, found
+ * independently by five reviewers.
+ *
+ * Every assertion below therefore pins BOTH branches and their difference. A test that
+ * only checked the staff branch would pass on a rule that had stopped branching.
+ */
+describe("fwPickerRedirectsToSingleCohort — R14, staff are exempt", () => {
+  it("redirects a guide who holds exactly one cohort", () => {
+    // Decision 3, unchanged: one grant means one place to work and nothing to choose,
+    // so the switcher never appears for them.
+    expect(fwPickerRedirectsToSingleCohort({ isStaff: false, cohortCount: 1 })).toBe(true);
+  });
+
+  it("does NOT redirect staff who can see exactly one cohort", () => {
+    // THE EXEMPTION, and the mutation guard for it. For staff, one cohort means "one
+    // exists so far and more are coming" — the picker and the create path are exactly
+    // what they need. Without this, R11–R13 are unreachable in the one-cohort state,
+    // which is the state the system sits in from the first real weekend until the
+    // second.
+    expect(fwPickerRedirectsToSingleCohort({ isStaff: true, cohortCount: 1 })).toBe(false);
+  });
+
+  it("never redirects on zero or on two, for either role", () => {
+    for (const isStaff of [false, true]) {
+      for (const cohortCount of [0, 2, 5]) {
+        expect(fwPickerRedirectsToSingleCohort({ isStaff, cohortCount }), `${isStaff}/${cohortCount}`).toBe(
+          false
+        );
+      }
+    }
+  });
+});
+
+describe("fwPickerHeadline / fwPickerZeroState — R13, the two zeroes mean different things", () => {
+  it("headlines differ by role", () => {
+    expect(fwPickerHeadline(true)).not.toBe(fwPickerHeadline(false));
+  });
+
+  it("a guide's zero means NO GRANTS, and sends them to staff", () => {
+    const zero = fwPickerZeroState(false);
+    expect(zero.body).toMatch(/guide/i);
+    expect(zero.body).toMatch(/staff/i);
+    // A guide cannot create a weekend, and offering them the path would hand them a
+    // 404 from a surface that refuses non-staff.
+    expect(zero.createHref).toBeNull();
+    expect(zero.createLabel).toBeNull();
+  });
+
+  it("a staff member's zero means NONE EXIST, and offers the create path", () => {
+    // Staff see every weekend, so their zero is a fact about the system rather than
+    // about their own grants. Telling them to "ask The 120 staff" would be telling
+    // them to ask themselves.
+    const zero = fwPickerZeroState(true);
+    expect(zero.body).not.toMatch(/ask/i);
+    expect(zero.body).toMatch(/none|no founders weekend|don't exist|doesn't exist|not been/i);
+    expect(zero.createHref).toBe(FW_OPS_CREATE_PATH);
+    expect(zero.createLabel).toBeTruthy();
+  });
+
+  it("the two bodies are not the same sentence", () => {
+    // The whole of R13 in one line: a rule that stopped branching would still satisfy
+    // every "contains the word staff" assertion above, because both sentences can
+    // legitimately contain it.
+    expect(fwPickerZeroState(true).body).not.toBe(fwPickerZeroState(false).body);
+  });
+
+  it("the create path is the ops surface that actually holds the form", () => {
+    // Pinned as a value, not just as "some string": the New weekend form lives at the
+    // bottom of `/fp/fw/ops`, and a link to a page without it is a dead end offered to
+    // someone who has just been told there is nothing here.
+    expect(FW_OPS_CREATE_PATH).toBe("/fp/fw/ops");
   });
 });

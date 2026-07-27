@@ -22,7 +22,6 @@
  */
 
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 import { sendEmail } from "@/app/lib/email";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";

@@ -24,6 +24,89 @@ import type { Band } from "@/app/fp/content/types";
 import { FW_BATCH_MAX } from "./fw-rules";
 import type { TaskState } from "./transition-table";
 
+/* ═══════════════════════════ the /fp/fw picker, by role (Staff Front Door Unit 4) ══ */
+
+/**
+ * Where a staff member creates a weekend — the ops list page, whose "New weekend"
+ * section holds the form.
+ *
+ * A constant rather than a literal in the copy, because it is the destination of a
+ * link offered to someone who has just been told there is nothing here: a path that
+ * has drifted turns the one actionable thing on an empty screen into a dead end.
+ */
+export const FW_OPS_CREATE_PATH = "/fp/fw/ops";
+
+/**
+ * Does `/fp/fw` redirect straight into the only cohort it can see? (R14)
+ *
+ * The redirect is a GUIDE affordance and stays exactly as Decision 3 shipped it: one
+ * grant means one place to work, and a switcher with a single entry is a question with
+ * one answer. STAFF ARE EXEMPT, and the asymmetry is the requirement rather than a
+ * convenience — staff see every `kind='fw'` cohort through the FW-D3 bridge, so their
+ * "one" means *one exists so far and more are coming*, which is precisely when they
+ * need the picker and the create path rather than to be thrown inside the only weekend
+ * that happens to exist.
+ *
+ * Without the exemption R11–R13 are unreachable in the one-cohort state — the state
+ * the system sits in from the moment the first real weekend is created until the
+ * second.
+ */
+export function fwPickerRedirectsToSingleCohort(input: {
+  isStaff: boolean;
+  cohortCount: number;
+}): boolean {
+  return !input.isStaff && input.cohortCount === 1;
+}
+
+/** The picker's heading. Staff are looking at the whole programme; a guide is looking
+ *  at their own shifts, and the two are different claims about the same list. */
+export function fwPickerHeadline(isStaff: boolean): string {
+  return isStaff ? "Weekends you can run" : "Your weekends";
+}
+
+export type FwPickerZeroState = {
+  body: string;
+  /** Where to go and create one, or `null` for a role that cannot. */
+  createHref: string | null;
+  createLabel: string | null;
+};
+
+/**
+ * What an empty `/fp/fw` says, by role (R13).
+ *
+ * THE TWO ZEROES ARE DIFFERENT FACTS, which is the whole requirement. A guide's list
+ * is scoped to their grants, so empty means *nobody has added you to a weekend* — the
+ * remedy is a person. A staff member's list is every `kind='fw'` cohort, so empty
+ * means *no weekend exists* — the remedy is a form, and telling them to ask The 120
+ * staff would be telling them to ask themselves at the start of the one task they are
+ * here to do.
+ *
+ * Rendered SERVER-side by `app/fp/fw/(app)/page.tsx`, deliberately and against the
+ * plan's default that role-derived branches resolve client-side. That default exists
+ * because `/fp/fw` navigations are cached into `path-sw-fw-shell-v1` and the staff bar
+ * mounts on surfaces with no other role signal — but this page is not such a surface:
+ * its cohort LIST is role-scoped, its headline above is role-branched, and R14's
+ * redirect is a role-branched server decision that cannot be anything else. Moving one
+ * sentence to the client would buy a neutral-then-correct flicker on the screen a
+ * guide reads at the start of a shift, and leave the page's actual role signal exactly
+ * where it was. The cached shell is cleared on sign-out and on every handover
+ * reconcile, which is the mitigation that does work.
+ */
+export function fwPickerZeroState(isStaff: boolean): FwPickerZeroState {
+  if (isStaff) {
+    return {
+      body: "No Founders Weekend cohorts exist yet. Create one to start adding guides and students.",
+      createHref: FW_OPS_CREATE_PATH,
+      createLabel: "Create a weekend",
+    };
+  }
+  return {
+    body: "You're signed in, but you aren't a guide on any Founders Weekend cohort yet. Ask The 120 staff to add you.",
+    createHref: null,
+    createLabel: null,
+  };
+}
+
 /* ══════════════════════════════════════════════════════════ search normalization ══ */
 
 /**

@@ -312,6 +312,34 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
     expect(mounts).toEqual([...BAR_MOUNTS].sort());
   });
 
+  it("the sticky headers below it offset by the height the bar publishes", () => {
+    // FOUND BY MUTATION, not by inspection: reverting these two headers to `top-0`
+    // left every other test in this file green, and the failure is invisible until
+    // someone scrolls — two `position: sticky` elements that both resolve to `top: 0`
+    // do not stack, so the bar (z-30) simply paints over the guide's working header
+    // (z-10) and the weekend name disappears mid-shift. That name is wrong-stamp
+    // prevention, on the surface this plan is least allowed to regress.
+    //
+    // The property NAME is read out of `StaffBar.tsx` rather than written twice, so a
+    // consistent rename passes and an inconsistent one — the way this actually breaks
+    // — reddens. It is a contract between three files; nothing else enforces it.
+    const declared = CODE.match(/BAR_HEIGHT_PROPERTY\s*=\s*"(--[a-z0-9-]+)"/);
+    expect(declared, "StaffBar must declare the custom property it publishes").not.toBeNull();
+    const property = declared![1];
+    expect(CODE).toMatch(
+      new RegExp(`setProperty\\(\\s*BAR_HEIGHT_PROPERTY|setProperty\\(\\s*"${property}"`)
+    );
+
+    for (const relative of NESTED_FW_LAYOUTS) {
+      const header = stripComments(read(relative));
+      // The offset must be on a STICKY element: `top` on a statically-positioned
+      // header is inert, which is the shape of the mistake worth catching.
+      expect(header, relative).toMatch(
+        new RegExp(`sticky\\s+top-\\[var\\(${property},\\s*0px\\)\\]`)
+      );
+    }
+  });
+
   it("every mount hands it the two settled props and nothing else", () => {
     // The prop shape is a SECURITY property, not a style one: props to a client
     // component are serialized into the RSC payload, and `/fp/fw` navigations are
@@ -329,6 +357,41 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
       const attributes = [...tag![1].matchAll(/(\w+)\s*=/g)].map((m) => m[1]).sort();
       expect(attributes, relative).toEqual(["actorUserId", "application"]);
     }
+  });
+});
+
+/* ═══════════════════════ /fp/fw's role branches stay OUT of the .tsx ══ */
+
+describe("the picker decides nothing itself either (R12, R13, R14)", () => {
+  const PICKER = stripComments(read("../../../fp/fw/(app)/page.tsx"));
+
+  it("delegates all three role branches to the tested rules module", () => {
+    // The same property `bar-rules.ts` exists for, one route over: no jsdom means an
+    // `isStaff ? … : …` written here is a decision CI cannot see. Anchored on the
+    // CALLS, so a rule that was imported and then not used still reddens.
+    for (const rule of [
+      "fwPickerRedirectsToSingleCohort(",
+      "fwPickerHeadline(",
+      "fwPickerZeroState(",
+    ]) {
+      expect(PICKER, rule).toContain(rule);
+    }
+  });
+
+  it("never re-derives a role branch inline", () => {
+    // The mutation this stops: reinstating `{isStaff ? "Weekends you can run" : …}`
+    // beside the rule call, where the rule is still imported, still called, still
+    // green — and no longer the thing on screen.
+    expect(PICKER).not.toMatch(/isStaff\s*\?/);
+    expect(PICKER).not.toMatch(/cohorts\.length\s*===\s*1/);
+  });
+
+  it("renders no server-side hub link — R12 is the bar's, client-evaluated", () => {
+    // A staff-only `/staff` link rendered here would sit in HTML the service worker
+    // caches into `path-sw-fw-shell-v1`, so the cached shell would differ between a
+    // staff and a non-staff visit and hand the next holder of a shared iPad the
+    // previous operator's role. The bar carries R12 instead, deciding client-side.
+    expect(PICKER).not.toMatch(/href=\{?["'`]\/staff/);
   });
 });
 

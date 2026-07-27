@@ -13,6 +13,7 @@ import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { listFwImportExceptions } from "@/app/fp/lib/fw-import-core";
+import { withFwTimeout } from "@/app/fp/lib/fw-call";
 import { fwArchivedBanner, fwOpsCohortAffordances } from "@/app/fp/lib/fw-ops-rules";
 import {
   listFwCohortGuides,
@@ -84,10 +85,28 @@ export default async function FwOpsCohortPage({
   // The archived banner names an EMAIL where an actor was recorded — a uuid in a
   // banner is noise. Resolved here (one bounded read, archived cohorts only);
   // launch's four backfilled cohorts all carry NULL and render "unrecorded".
-  let archivedByEmail: string | null = null;
+  // BOUNDED, like the identical call inside listFwCohortGuides and for its stated
+  // reason: a stalled Admin API call here would otherwise block the ENTIRE archived
+  // page — sections whose data already loaded fine — behind one banner nicety
+  // (Unit 9 review, 0.75). A timeout or miss degrades to "unresolvable", which is a
+  // different sentence from "unrecorded": the row HOLDS an actor we failed to name.
+  let archivedBy:
+    | { kind: "unrecorded" }
+    | { kind: "unresolvable" }
+    | { kind: "email"; email: string } = { kind: "unrecorded" };
   if (cohort?.archivedAt && cohort.archivedBy) {
-    const who = await supabaseAdmin().auth.admin.getUserById(cohort.archivedBy);
-    archivedByEmail = who.data?.user?.email ?? null;
+    try {
+      const raced = await withFwTimeout(
+        supabaseAdmin().auth.admin.getUserById(cohort.archivedBy),
+        `archived-by lookup (${cohort.archivedBy})`
+      );
+      archivedBy =
+        !raced.timedOut && raced.value.data?.user?.email
+          ? { kind: "email", email: raced.value.data.user.email }
+          : { kind: "unresolvable" };
+    } catch {
+      archivedBy = { kind: "unresolvable" };
+    }
   }
   // The gate already proved this cohort is `kind='fw'` and that the caller may
   // act in it; a null here is a read failure, not an authorization answer.
@@ -110,7 +129,7 @@ export default async function FwOpsCohortPage({
   const show = fwOpsCohortAffordances({ archived: cohort.archivedAt !== null });
   const banner =
     cohort.archivedAt !== null
-      ? fwArchivedBanner({ archivedAt: cohort.archivedAt, archivedByEmail })
+      ? fwArchivedBanner({ archivedAt: cohort.archivedAt, archivedBy })
       : null;
 
   return (

@@ -2665,6 +2665,27 @@ describe("Unit 9 — archive-aware lists", () => {
     expect(boston.boardTokenStatus).toBe("revoked"); // the "Board revoked" chip's input
   });
 
+  it("the WIDENED view's counts are computed over the widened set (R3's contract)", async () => {
+    // The review's mutation: ids for the count fan-out derived from a
+    // default-filtered subset while archived rows still return — every prior test
+    // stayed green because none asserted counts ON an archived row.
+    const { db } = makeFakeDb({
+      members: [
+        { student_id: "s1", cohort_id: BOSTON },
+        { student_id: "s2", cohort_id: BOSTON },
+      ],
+      grants: [
+        { id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON },
+      ],
+    });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const listed = await listFwOpsCohorts(db, { now: NOW, includeArchived: true });
+    if (!listed.ok) throw new Error("unreachable");
+    const boston = listed.cohorts.find((c) => c.id === BOSTON)!;
+    expect(boston.studentCount).toBe(2);
+    expect(boston.guideCount).toBe(1);
+  });
+
   it("listFwActiveWeekends: only non-archived, with the window dates, one narrow read", async () => {
     const { db } = makeFakeDb({});
     await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });

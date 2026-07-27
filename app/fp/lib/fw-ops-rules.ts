@@ -521,15 +521,28 @@ export function unarchiveFwCohortFailureCopy(
  */
 export function fwArchivedBanner(input: {
   archivedAt: string;
-  archivedByEmail: string | null;
+  /**
+   * THREE states, because two lied (Unit 9's review): `unrecorded` is archived_by
+   * NULL (the launch state — the fact itself is absent); `unresolvable` is a
+   * RECORDED actor whose email lookup failed or timed out — calling that
+   * "unrecorded" would misstate a fact the row holds. The page maps its bounded
+   * lookup onto these; this function never guesses.
+   */
+  archivedBy:
+    | { kind: "unrecorded" }
+    | { kind: "unresolvable" }
+    | { kind: "email"; email: string };
 }): { title: string; detail: string } {
   const date = input.archivedAt.slice(0, 10);
+  const by =
+    input.archivedBy.kind === "unrecorded"
+      ? "archived by: unrecorded."
+      : input.archivedBy.kind === "unresolvable"
+        ? "archived by a staff account we couldn't name just now."
+        : `by ${input.archivedBy.email}.`;
   return {
     title: "This weekend is archived",
-    detail:
-      input.archivedByEmail === null
-        ? `Archived ${date} — archived by: unrecorded.`
-        : `Archived ${date} by ${input.archivedByEmail}.`,
+    detail: `Archived ${date} ${input.archivedBy.kind === "email" ? "" : "— "}${by}`.replace("  ", " "),
   };
 }
 
@@ -582,4 +595,12 @@ export function fwOpsCohortAffordances(input: { archived: boolean }): {
  */
 export function fwArchiveConfirmMatches(typed: string, slug: string): boolean {
   return typed.trim() === slug;
+}
+
+/** The slug-collision sentence (Unit 9) — pure so the "points at the archived
+ *  list" half of the scenario is a tested string, not JSX prose. An archived
+ *  weekend keeps its name, and staff who cannot see it on the default list need
+ *  to be told where it went. */
+export function fwSlugTakenCopy(slug: string): string {
+  return `A weekend named "${slug}" already exists — check the ARCHIVED list too; an archived weekend keeps its name. Unarchive it, or pick another name.`;
 }

@@ -17,6 +17,7 @@ import {
   unarchiveFwCohortFailureCopy,
   fwArchivedBanner,
   fwArchiveConfirmMatches,
+  fwSlugTakenCopy,
   fwOpsCohortAffordances,
 } from "../fw-ops-rules";
 
@@ -481,7 +482,10 @@ describe("fwArchivedBanner (Unit 9)", () => {
   it("the LAUNCH state — archived_at set, archived_by NULL — says unrecorded, never blank", () => {
     // The plan's named edge: all four backfilled cohorts ship in exactly this
     // state, and it is the ONLY attribution state present at launch.
-    const b = fwArchivedBanner({ archivedAt: "2026-08-24T00:00:00Z", archivedByEmail: null });
+    const b = fwArchivedBanner({
+      archivedAt: "2026-08-24T00:00:00Z",
+      archivedBy: { kind: "unrecorded" },
+    });
     expect(b.title).toMatch(/archived/i);
     expect(b.detail).toContain("2026-08-24");
     expect(b.detail).toMatch(/unrecorded/i);
@@ -491,10 +495,30 @@ describe("fwArchivedBanner (Unit 9)", () => {
   it("a recorded actor is named by EMAIL", () => {
     const b = fwArchivedBanner({
       archivedAt: "2026-08-24T00:00:00Z",
-      archivedByEmail: "staff@the120.school",
+      archivedBy: { kind: "email", email: "staff@the120.school" },
     });
     expect(b.detail).toContain("staff@the120.school");
     expect(b.detail).not.toMatch(/unrecorded/i);
+  });
+
+  it("a RECORDED actor whose email lookup failed is 'unresolvable', never 'unrecorded'", () => {
+    // The third state the review demanded: the row holds an actor; only the naming
+    // failed. Calling that "unrecorded" would misstate a fact the database has.
+    const b = fwArchivedBanner({
+      archivedAt: "2026-08-24T00:00:00Z",
+      archivedBy: { kind: "unresolvable" },
+    });
+    expect(b.detail).toMatch(/couldn't name/i);
+    expect(b.detail).not.toMatch(/unrecorded/i);
+  });
+});
+
+describe("fwSlugTakenCopy — the archived-list pointer is a tested string", () => {
+  it("names the ARCHIVED list and the unarchive path", () => {
+    const copy = fwSlugTakenCopy("boston-2026-08");
+    expect(copy).toContain("boston-2026-08");
+    expect(copy).toMatch(/archived/i);
+    expect(copy).toMatch(/unarchive/i);
   });
 });
 

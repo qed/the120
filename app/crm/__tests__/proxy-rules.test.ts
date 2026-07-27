@@ -317,6 +317,27 @@ describe("resolveProxyOutcome — /staff (the hub, Staff Front Door Unit 2)", ()
     }
   });
 
+  it("introduces no new outcome, so it cannot bypass carryOverAuthState", () => {
+    // proxy.ts has exactly one gated path: any outcome other than "pass"
+    // builds a fresh response and then carries the refreshed auth cookies and
+    // no-store headers across. A NEW ProxyOutcome variant would be the one way
+    // to reach a gated response without that copy — and the cost of missing it
+    // is a live session silently ending mid-navigation, the bug carryOverAuthState
+    // exists to fix. The hub deliberately reuses the CRM's outcomes instead, so
+    // the property is structural rather than remembered.
+    const known = new Set(["pass", "crm-login", "crm-staff-only"]);
+    for (const session of [
+      null,
+      adminSession,
+      parentSession,
+      claimlessSession,
+    ] as ProxySessionLike[]) {
+      for (const path of ["/staff", "/staff/", "/staff/deep/path"]) {
+        expect(known.has(outcome(path, session))).toBe(true);
+      }
+    }
+  });
+
   it("routes that merely share the /staff prefix are NOT the hub", () => {
     // Today they fall through to the CRM branch and earn the same verdicts, so
     // this asserts the reachable behaviour: a /staffing that is not the hub is

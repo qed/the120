@@ -354,7 +354,39 @@ behaviour unchanged for existing non-funnel children, pinned by a regression tes
 
 ---
 
-- [ ] **Unit 2: Account provisioning at C1 and the re-entry matrix**
+- [x] **Unit 2: Account provisioning at C1 and the re-entry matrix** *(landed
+  2026-07-27)*
+
+  **What landed:** `app/lib/funnel/session-rules.ts` (the R9a matrix as one pure
+  priority-ordered function, per-screen discriminated destinations carrying a
+  `reason` rule-id; full situation-space enumerated in tests — 192 cells, none
+  undefined) and `app/lib/funnel/account.ts` (provision-or-recognize;
+  `server-only`, NOT an action). **The C1 session-minting question is closed:**
+  `admin.createUser` + server-generated discarded password + server-side
+  `signInWithPassword` — `email_confirm: true` at the AUTH layer only, because
+  hosted confirmations are ON and an unconfirmed user cannot sign in at all
+  (verified against production: `email_not_confirmed`); inbox-verification truth
+  stays with the funnel's own consent flow, and nothing may read
+  `email_confirmed_at` as "verified" (source-scan enforced). No migration
+  needed; no vitest allowlist change. A cookie-writability probe fails CLOSED
+  before any side effect (the @supabase/ssr adapter silently swallows
+  Server-Component cookie writes — documented in
+  `docs/solutions/logic-errors/cookie-probe-before-account-side-effect-2026-07-27.md`).
+  Compensation is one atomic `deleteUser` riding the FK cascade. Behavioral
+  tests through a typed injection seam (`ProvisionDeps`), not source scans.
+  Production probe (rolled-back/cleaned): unconfirmed-cannot-sign-in,
+  session mint, email_exists convergence, children insert under real JWT,
+  status-guard coercion, **RLS isolation (family B reads zero of family A's
+  children)** — Decision 2 verified end to end. Matrix nuance from review: an
+  enrolled family holding a VALID resume link routes to dashboard, not
+  sign_in — a funnel family has no password, so sign_in would strand them even
+  on a stale `enrolled` bit. Suite: **110 files / 2949 tests** measured after rebasing onto Lane A's Unit 5 (own delta: +1 file / +32 tests; U1 baseline 106 /
+  2871), `tsc` and `next build` clean.
+
+  **Carried forward to U3:** resume redemption should self-heal a missing
+  parents row (recovery for a compensation-interrupted stranded account), and
+  redemption owns session-vs-link family-identity reconciliation — the matrix's
+  `ReentryContext` is single-family by contract.
 
 **Goal:** A real auth account from the first screen, so RLS authorizes the funnel — and one
 pure function that says where any returning visitor lands.

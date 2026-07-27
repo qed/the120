@@ -308,6 +308,33 @@ function sits within N chars of a `try {`, and the file contains a
 `catch … isIdentityUnavailable(` — structure adjacent to the thing guarded, per this
 doc's ROUND 2 rule, not presence of a name anywhere in the file.
 
+## ROUND 5 (2026-07-27, First Profit funnel Unit 2) — retire the scan with an injection seam
+
+The terminal move in this arms race, where it is available: **stop scanning and
+make the code behaviorally testable instead.** Funnel U2's first cut guarded
+`account.ts`'s compensation logic with scans — `/deleteUser/` and a
+parents-delete regex over stripped source. Four reviewers independently made
+the same objection: a scan proves the right words exist, not that the branch
+runs. Dead code satisfies it; an early `return` above the compensation line
+defeats it invisibly.
+
+The fix was a typed dependency-injection seam (`ProvisionDeps`: the admin
+client, the server client, and the cookie-writability probe, typed structurally
+and narrowly to what the function actually touches). Production callers pass
+nothing; tests pass fakes that record calls and fail on command. The scans that
+guarded *behaviour* were replaced by eight behavioral tests (call order,
+compensation firing per failure branch, the never-a-throw contract); the scans
+that guard *absence* (no `consent` write, no `generateLink`, no
+`"use server"`) stay scans — absence of a call has no behaviour to observe, so
+a scan genuinely is the strongest available tool there.
+
+The rule of thumb this settles: **a scan earns its place only when the property
+is an absence.** If the property is "X happens on branch Y", the scan is a
+placeholder for a missing seam — ROUND 2's stub observation, generalized into
+the default technique. (The inert-defensive-branch doc covers the third case:
+a branch whose output equals its fallback has no signature even behaviorally,
+and needs a wiring assertion instead.)
+
 ## Related
 
 - `docs/solutions/test-failures/migration-parity-assertions-that-cannot-fail-clause-scope-and-comment-stripping-2026-07-23.md` — prior art on comment-stripping, and the rule "apply it uniformly, or not at all". Cite it rather than re-deriving it.

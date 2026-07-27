@@ -1,6 +1,10 @@
 # Migration lock
 
-**Current holder: Lane B — First Profit funnel.**
+**Current holder: Lane A — Staff Front Door.**
+
+*(Transferred 2026-07-27 with Peter's approval, in the PR that authors
+`20260806120000_fw_cohort_archive.sql` and `20260806130000_fw_residue_reports.sql` —
+Staff Front Door Unit 6. Previous holder: Lane B, through funnel Unit 1.)*
 
 Two worktrees of this repo run in parallel against the **same live Supabase project**, and
 this repo's standing rule is that a migration applies to production the moment it is

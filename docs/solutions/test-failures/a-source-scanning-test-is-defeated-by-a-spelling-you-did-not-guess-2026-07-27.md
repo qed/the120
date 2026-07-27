@@ -308,6 +308,16 @@ function sits within N chars of a `try {`, and the file contains a
 `catch … isIdentityUnavailable(` — structure adjacent to the thing guarded, per this
 doc's ROUND 2 rule, not presence of a name anywhere in the file.
 
+**ROUND 4 coda (Unit 6, same day):** a parity test that reads BOTH a SQL file and a
+TS file must strip comments on BOTH sides. Unit 6's zod-vs-CHECK vocabulary test
+stripped `--` comments from the SQL and read the TypeScript raw — and was walked
+through with a decoy comment containing `outcome: z.enum([...])` placed above the
+real schema while the real enum widened underneath (proven live, whole suite green).
+Fixed by stripping and anchoring INSIDE the schema declaration block. And a
+clause-slice bounded by `indexOf(",")` is one future in-list CHECK (`in (0,1)`) away
+from truncating into a fragment that passes vacuously — bound slices to the
+statement's `;` or the line's `\n`, never to the next comma.
+
 ## ROUND 5 (2026-07-27, First Profit funnel Unit 2) — retire the scan with an injection seam
 
 The terminal move in this arms race, where it is available: **stop scanning and

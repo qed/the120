@@ -27,6 +27,7 @@ import {
   orderFwEntries,
   planFwStudentTask,
   reduceFwOps,
+  runFwSignOutFlow,
   selectFwDrainable,
   summarizeFwQueue,
   type FwDeviceEvidence,
@@ -758,7 +759,10 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
   });
 
   it("maps every outcome the flow can return to copy (or to silence on success)", () => {
-    expect(fwSignOutOutcomeCopy({ kind: "sign_out" })).toBeNull();
+    expect(fwSignOutOutcomeCopy({ kind: "sign_out", queueRemaining: 0 })).toBeNull();
+    // …at ANY count: the leftover work is reported by the beacon, off-device, not by
+    // a sentence blocking the person who was allowed to leave (Unit 6).
+    expect(fwSignOutOutcomeCopy({ kind: "sign_out", queueRemaining: 3 })).toBeNull();
     expect(fwSignOutOutcomeCopy({ kind: "raced" })).toMatch(/just came in/i);
     expect(
       fwSignOutOutcomeCopy({
@@ -1300,7 +1304,7 @@ describe("fwResidueBeacon — the off-device report of un-landed work (Unit 5)",
     // outcomes that matter in a stream of noise, which is how a signal becomes
     // ignorable — the failure mode this beacon exists to fix, recreated one layer up.
     const silent = [
-      { kind: "sign_out" },
+      { kind: "sign_out", queueRemaining: 0 },
       { kind: "raced" },
       { kind: "refused", verdict: { ok: false, reason: "drain_first", queuedCount: 2 } },
       { kind: "none" },
@@ -1346,5 +1350,99 @@ describe("fwResidueBeacon — the off-device report of un-landed work (Unit 5)",
       outcome: { kind: "queue_preserved", preservedCount: 2 },
     });
     expect(beacon?.actorUserId).toBe(OTHER_GUIDE);
+  });
+});
+
+describe("Unit 6: an orderly sign-out over preserved work now beacons (Peter, 2026-07-27)", () => {
+  const base = { actorUserId: GUIDE, application: "fw" as const };
+
+  it("sign_out with a positive count reports as queue_preserved", () => {
+    // The gap this closes: the MOST COMMON residue-leaving path — sign out normally
+    // of a device still holding a departed guide's captures — produced no off-device
+    // record, because the success kind carried no count and the beacon had nothing to
+    // fire on. Same payload kind as the reconcile's, deliberately: it is the same
+    // fact reached through the other door, and a desk query should not need two
+    // vocabularies for one situation.
+    expect(fwResidueBeacon({ ...base, outcome: { kind: "sign_out", queueRemaining: 2 } }))
+      .toEqual({
+        outcome: "queue_preserved",
+        queueRemaining: 2,
+        actorUserId: GUIDE,
+        application: "fw",
+      });
+  });
+
+  it("a CLEAN sign-out stays silent — zero is the ordinary case, not a report", () => {
+    expect(fwResidueBeacon({ ...base, outcome: { kind: "sign_out", queueRemaining: 0 } }))
+      .toBeNull();
+  });
+
+  it("the flow reports the count the CLEAR preserved, from its own snapshot", async () => {
+    // Through runFwSignOutFlow with a foreign entry: sign-out is allowed (R16), the
+    // clear preserves it, and the outcome now says so instead of a bare success.
+    // (The engine test exercises the same through the fake ports; this pins the
+    // rules-level composition.)
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const store: unknown[] = [foreign];
+    const outcome = await runFwSignOutFlow({
+      actorUserId: GUIDE,
+      actorIsFwGuide: true,
+      ports: {
+        readEvidence: async () => ({
+          kind: "read" as const,
+          cacheOwner: GUIDE,
+          queueDbOpened: true,
+          queueDbExists: true,
+        }),
+        readQueue: async () => [...store],
+        isOnline: () => true,
+        isAuthRequired: () => false,
+        drain: async () => {},
+        clear: async (disposition) => {
+          const keep = store.filter((raw) => disposition(raw) === "preserve");
+          store.length = 0;
+          store.push(...keep);
+          return {
+            queueCleared: true,
+            rosterCleared: true,
+            shellCleared: true,
+            queueRemaining: keep.length,
+          };
+        },
+        withDrainLock: async (fn) => fn(),
+      },
+    });
+    expect(outcome).toEqual({ kind: "sign_out", queueRemaining: 1 });
+    expect(store).toHaveLength(1); // and the foreign capture genuinely survived
+  });
+
+  it("a NULL count under an otherwise-clean clear is clear_failed, never a fabricated success", () => {
+    // The sentinel rule one layer up: null means the queue step threw, so claiming
+    // "signed out, 0 left behind" would report a fault as the clean case.
+    return runFwSignOutFlow({
+      actorUserId: GUIDE,
+      actorIsFwGuide: true,
+      ports: {
+        readEvidence: async () => ({
+          kind: "read" as const,
+          cacheOwner: GUIDE,
+          queueDbOpened: true,
+          queueDbExists: true,
+        }),
+        readQueue: async () => [],
+        isOnline: () => true,
+        isAuthRequired: () => false,
+        drain: async () => {},
+        clear: async () => ({
+          queueCleared: true,
+          rosterCleared: true,
+          shellCleared: true,
+          queueRemaining: null,
+        }),
+        withDrainLock: async (fn) => fn(),
+      },
+    }).then((outcome) => {
+      expect(outcome).toEqual({ kind: "clear_failed" });
+    });
   });
 });

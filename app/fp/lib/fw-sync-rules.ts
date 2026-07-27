@@ -946,7 +946,16 @@ export type FwSignOutPorts = {
 
 export type FwSignOutOutcome =
   /** Nothing is left to lose — the caller may end the session. */
-  | { kind: "sign_out" }
+  /**
+   * Nothing blocks the session from ending. `queueRemaining` (Unit 6, Peter,
+   * 2026-07-27) counts what the clear PRESERVED — a departed guide's foreign
+   * captures, or quarantined records — because an orderly sign-out over someone
+   * else's leftover work was the one residue-leaving path that produced no
+   * off-device report: the beacon fired on `queue_preserved` (a reconcile-only
+   * kind) and `clear_failed`, and this kind carried no count to fire on. Zero on
+   * the evidence-gate fast path, where no queue was ever opened to count.
+   */
+  | { kind: "sign_out"; queueRemaining: number }
   | { kind: "refused"; verdict: FwSignOutRefusal }
   /** A capture landed between the verdict and the clear, so the clear no-opped —
    *  abort rather than sign out having lost it. */
@@ -1003,7 +1012,9 @@ export async function runFwSignOutFlow(input: {
 }): Promise<FwSignOutOutcome> {
   const { actorUserId, actorIsFwGuide, ports } = input;
   const evidence = await ports.readEvidence();
-  if (!hasFwDeviceEvidence({ evidence, actorIsFwGuide })) return { kind: "sign_out" };
+  if (!hasFwDeviceEvidence({ evidence, actorIsFwGuide })) {
+    return { kind: "sign_out", queueRemaining: 0 };
+  }
 
   return ports.withDrainLock(async () => {
     let verdict = await fwVerdictNow(ports, actorUserId, false);
@@ -1022,7 +1033,19 @@ export async function runFwSignOutFlow(input: {
     // cache holds children's first and last names and the shell cache holds
     // authenticated HTML; either surviving is a handover leak, and reporting success
     // on top of it is the part that makes it invisible.
-    return fwResidueFullyCleared(result) ? { kind: "sign_out" } : { kind: "clear_failed" };
+    //
+    // `queueRemaining === null` here is DEFENCE IN DEPTH, not a live branch: the
+    // production clear sets it null only in the same catch that sets
+    // `queueCleared: false`, which the `raced` return above already consumed — so
+    // with the current ports this line is unreachable (correctness review traced
+    // it). It stays because the ports are an interface: a future clear that answers
+    // "cleared" with an unknown count must land on clear_failed, not on a success
+    // carrying a fabricated 0 — the sentinel collapse one layer up. The reconcile's
+    // twin of this check IS load-bearing (no raced-return ahead of it there).
+    if (!fwResidueFullyCleared(result) || result.queueRemaining === null) {
+      return { kind: "clear_failed" };
+    }
+    return { kind: "sign_out", queueRemaining: result.queueRemaining };
   });
 }
 
@@ -1288,6 +1311,18 @@ export function fwResidueBeacon(input: {
   application: "fw" | "crm" | "staff";
 }): FwResidueBeacon | null {
   const { outcome } = input;
+  // An orderly sign-out that left someone else's work behind IS a preserved queue —
+  // same fact as the reconcile's `queue_preserved`, reached through the other door
+  // (Unit 6, Peter). Zero stays silent: that is the ordinary clean sign-out.
+  if (outcome.kind === "sign_out") {
+    if (outcome.queueRemaining <= 0) return null;
+    return {
+      outcome: "queue_preserved",
+      queueRemaining: outcome.queueRemaining,
+      actorUserId: input.actorUserId,
+      application: input.application,
+    };
+  }
   if (outcome.kind === "queue_preserved") {
     return {
       outcome: "queue_preserved",

@@ -88,6 +88,15 @@ export const INVITE_ACCEPT_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000
  * rate (the busiest hour of the busiest weekend is a few dozen) and far below
  * what enumerating a name list needs.
  */
+/**
+ * The residue beacon's durable insert (Staff Front Door Unit 6). Generous — a
+ * legitimate device reports at most once per handover or refused sign-out — but
+ * present, because the action is an open HTTP endpoint and the table it writes is
+ * one a human at a desk ACTS on (security review: unbounded, any authenticated
+ * account could flood it into noise).
+ */
+export const FW_RESIDUE_REPORT_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 20 };
+
 export const FW_MATCH_LOOKUP_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 60 };
 
 /** Events still inside the window (future-stamped ones included). Non-mutating. */

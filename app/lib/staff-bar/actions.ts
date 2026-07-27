@@ -30,10 +30,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { FW_CALL_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
+import { FW_CALL_TIMEOUT_MS, fwWrite, withFwTimeout } from "@/app/fp/lib/fw-call";
 import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/fp/lib/fw-auth";
 import { loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
 import type { FwResidueBeacon } from "@/app/fp/lib/fw-sync-rules";
+import { FW_RESIDUE_REPORT_RATE_LIMIT } from "@/app/fp/lib/rate-limit-rules";
+import { checkAndRecordRateLimit } from "@/app/fp/lib/rate-limit-store";
 import {
   narrowStaffBarApplication,
   staffBarSignOutDestination,
@@ -184,50 +186,96 @@ export async function loadStaffBarIdentity(): Promise<StaffBarIdentityResult> {
  * The PAYLOAD DECISION is `fwResidueBeacon` (pure, tested), not this function. This
  * one is the transport, and re-derives nothing but the authenticated sender.
  */
+/**
+ * The one place a residue report becomes durable — shared by the fire-and-forget
+ * action below and by `signOutStaffBar`, which writes the success-path report
+ * ITSELF, in its own request, before ending the session (see there for why).
+ * Non-fatal by contract: an insert failure degrades to Unit 5's log line, which
+ * this function always emits regardless.
+ */
+async function writeFwResidueReport(
+  sessionUserId: string,
+  data: z.infer<typeof residueBeaconSchema>
+): Promise<void> {
+  const inserted = await fwWrite(
+    () =>
+      supabaseAdmin()
+        .from("path_fw_residue_reports")
+        .insert({
+          schema_version: data.schemaVersion,
+          outcome: data.outcome,
+          queue_remaining: data.queueRemaining,
+          session_user_id: sessionUserId,
+          claimed_actor_user_id: data.claimedActorUserId,
+          device_id: data.deviceId,
+          application: data.application,
+        })
+        .select("id")
+        .maybeSingle(),
+    "residue report insert"
+  );
+  if (inserted.error) {
+    console.error(
+      `[fw/residue] durable insert failed (log line still emitted): ${inserted.error.message}`
+    );
+  }
+  // ONE LINE, one JSON object, stable keys — parseable, not prose. `sessionUserId`
+  // is WHO SENT THIS (authenticated); `claimedActorUserId` is who the device says
+  // the outcome happened under. They differ exactly when a handover raced the
+  // report, and logging both is what makes that race a visible fact instead of a
+  // silent misattribution (frontend-races review).
+  console.log(
+    `[fw/residue] ${JSON.stringify({
+      schemaVersion: data.schemaVersion,
+      outcome: data.outcome,
+      queueRemaining: data.queueRemaining,
+      sessionUserId,
+      claimedActorUserId: data.claimedActorUserId,
+      deviceId: data.deviceId,
+      application: data.application,
+      at: new Date().toISOString(),
+    })}`
+  );
+}
+
 export async function sendFwResidueBeacon(input: unknown): Promise<void> {
   const parsed = residueBeaconSchema.safeParse(input);
   if (!parsed.success) {
     console.error("[fw/residue] refused a malformed beacon");
     return;
   }
-  // The AUTHENTICATED identity — one bounded getUser(), NOT the full session read.
-  // The grants query that loadFwSessionRead also makes exists to compute isFwGuide,
-  // which nothing in a log line needs; paying a second Supabase round trip per
-  // beacon on the COMMON handover path was the performance review's finding.
-  let raced;
-  try {
-    raced = await withFwTimeout((await supabaseServer()).auth.getUser(), "residue beacon getUser", FW_CALL_TIMEOUT_MS);
-  } catch (e) {
-    console.error("[fw/residue] dropped a beacon: getUser threw:", e);
-    return;
-  }
-  const sessionUser = raced.timedOut ? null : raced.value.data.user;
-  if (sessionUser === null) {
-    // No resolvable session, nothing safe to attribute. The CLAIMED id alone is not
-    // enough — an unauthenticated endpoint that records whatever account id it is
-    // handed is an invitation to attribute residue to an arbitrary account.
+  // The FULL session read, not a bare getUser — deliberately, since the Unit 6
+  // review. This action is an open HTTP endpoint, and the table it writes is one a
+  // human ACTS on ("go find that iPad"); ungated, any authenticated parent or
+  // student account could insert rows naming arbitrary claimed actors and devices,
+  // poisoning the exact query the table exists to answer (security review). Every
+  // LEGITIMATE sender holds a role by construction — the bar only mounts on
+  // guarded layouts — so requiring one loses nothing. The grants read this costs
+  // is what buys the gate; the cheap-getUser version guarded nothing.
+  const read = await loadFwSessionRead();
+  if (read.kind !== "identity") {
     console.error("[fw/residue] dropped a beacon with no resolvable session");
     return;
   }
-  // ONE LINE, one JSON object, stable keys — parseable, not prose. `sessionUserId`
-  // is WHO SENT THIS (authenticated); `claimedActorUserId` is who the device says
-  // the outcome happened under. They differ exactly when a handover raced the POST,
-  // and logging both is what makes that race a visible fact instead of a silent
-  // misattribution (frontend-races review). console.log, not console.error: this is
-  // routine telemetry on a successful path, and error-level would teach every
-  // severity-based alert to ignore the [fw/residue] prefix (agent-native review).
-  console.log(
-    `[fw/residue] ${JSON.stringify({
-      schemaVersion: parsed.data.schemaVersion,
-      outcome: parsed.data.outcome,
-      queueRemaining: parsed.data.queueRemaining,
-      sessionUserId: sessionUser.id,
-      claimedActorUserId: parsed.data.claimedActorUserId,
-      deviceId: parsed.data.deviceId,
-      application: parsed.data.application,
-      at: new Date().toISOString(),
-    })}`
-  );
+  const roles = await resolveStaffBarRoles(read.identity);
+  if (!roles.isStaff && !roles.isFwGuide) {
+    console.error(
+      `[fw/residue] refused a beacon from a role-less session ${read.identity.userId}`
+    );
+    return;
+  }
+  // Bounded senders even so: a looping client bundle must not be able to flood the
+  // table into noise. A legitimate device reports at most once per handover.
+  if (
+    !checkAndRecordRateLimit(
+      `fw-residue-report:${read.identity.userId}`,
+      FW_RESIDUE_REPORT_RATE_LIMIT
+    ).allowed
+  ) {
+    console.warn(`[fw/residue] rate-limited ${read.identity.userId}`);
+    return;
+  }
+  await writeFwResidueReport(read.identity.userId, parsed.data);
 }
 
 /**
@@ -251,7 +299,21 @@ export async function sendFwResidueBeacon(input: unknown): Promise<void> {
  * This action REDIRECTS, which Next implements by throwing. Callers must let that
  * throw propagate — see `StaffBar.tsx`'s `isNextRedirect` check.
  */
-export async function signOutStaffBar(application: unknown): Promise<void> {
+export async function signOutStaffBar(
+  application: unknown,
+  /**
+   * The success-path residue report, written HERE — in this request, before the
+   * session ends — rather than by a parallel `sendFwResidueBeacon` POST. The
+   * fire-and-forget version RACED `auth.signOut()`: two independent requests, no
+   * ordering, and when the sign-out won, the beacon's own `getUser()` found no
+   * session and dropped the report — silently, on the most common residue-leaving
+   * path, the one Peter's decision exists to cover (correctness review, 0.72).
+   * Same request = same session context = no race, and authenticated by
+   * construction. `unknown` and zod-validated like every action input; `null`
+   * means a clean sign-out with nothing to report.
+   */
+  residue: unknown
+): Promise<void> {
   const surface = narrowStaffBarApplication(application);
   // An unreadable session degrades to the application tiebreak, exactly as a
   // session-less one does. NOT a B4 exception: sign-out is the action that must never
@@ -263,6 +325,22 @@ export async function signOutStaffBar(application: unknown): Promise<void> {
     identity: read.kind === "identity" ? await resolveStaffBarRoles(read.identity) : null,
     application: surface,
   });
+
+  // The report, while the session is still alive to attribute it. Gated like the
+  // beacon action: only a role-holding session's report lands (the signing-out
+  // account IS the sender). Non-fatal on every branch — a failed report must never
+  // fail a sign-out.
+  if (residue !== null && residue !== undefined && read.kind === "identity") {
+    const parsedResidue = residueBeaconSchema.safeParse(residue);
+    if (parsedResidue.success) {
+      const roles = await resolveStaffBarRoles(read.identity);
+      if (roles.isStaff || roles.isFwGuide) {
+        await writeFwResidueReport(read.identity.userId, parsedResidue.data);
+      }
+    } else {
+      console.error("[fw/residue] refused a malformed sign-out residue report");
+    }
+  }
 
   // NOT bounded. Everything above degrades safely on a timeout, but this call IS the
   // sign-out: giving up on waiting would hand back a redirect while the session was

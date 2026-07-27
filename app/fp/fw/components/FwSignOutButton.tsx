@@ -25,7 +25,17 @@ import { fwSignOutOutcomeCopy } from "@/app/fp/lib/fw-sync-rules";
  * `FwPwa` on `/fp/fw` only. Every OTHER refusal is now actionable from anywhere, but
  * that one still assumes the FW shell is on screen.
  */
-export function FwSignOutButton({ actorUserId }: { actorUserId: string }) {
+export function FwSignOutButton({
+  actorUserId,
+  actorIsFwGuide,
+}: {
+  actorUserId: string;
+  /** SERVER-KNOWN at the cohort layout (does this account hold a `guide` grant?).
+   *  The device-evidence gate reads it instead of guessing from localStorage — see
+   *  `hasFwDeviceEvidence`, B1. Staff reaching a cohort through the FW-D3 bridge hold
+   *  no grant, so this is genuinely false for them. */
+  actorIsFwGuide: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -34,7 +44,7 @@ export function FwSignOutButton({ actorUserId }: { actorUserId: string }) {
     setBusy(true);
     setMessage(null);
     try {
-      const outcome = await runFwSignOut(actorUserId);
+      const outcome = await runFwSignOut({ actorUserId, actorIsFwGuide });
       if (outcome.kind === "sign_out") {
         await signOutFwGuide(); // redirects
         return;

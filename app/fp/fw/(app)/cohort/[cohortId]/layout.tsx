@@ -94,8 +94,13 @@ export default async function FwCohortLayout({
             </Link>
           )}
           {/* Block-until-drained (Decision 8): a shared iPad's queue must never be
-              abandoned, so sign-out is gated client-side on the drain verdict. */}
-          <FwSignOutButton actorUserId={session.userId} />
+              abandoned, so sign-out is gated client-side on the drain verdict.
+              `actorIsFwGuide` is the SERVER-known half of that gate (B1) — a device
+              whose localStorage was evicted must still have its queue checked. */}
+          <FwSignOutButton
+            actorUserId={session.userId}
+            actorIsFwGuide={grantedCohortIds(session.grants).length > 0}
+          />
         </div>
       </header>
 

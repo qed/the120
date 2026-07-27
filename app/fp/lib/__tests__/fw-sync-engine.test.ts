@@ -7,9 +7,12 @@ import {
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   fwSignOutOutcomeCopy,
   isRecognizedFwEntry,
+  runFwCacheOwnerReconcile,
   runFwSignOutFlow,
+  shouldClearFwCaches,
   type FwDeviceEvidence,
   type FwQueueEntry,
+  type FwReconcilePorts,
   type FwSignOutPorts,
 } from "../fw-sync-rules";
 import type { TaskState } from "../transition-table";
@@ -772,6 +775,15 @@ type FakeDevice = {
   onDrain: (dev: FakeDevice) => void;
   /** A tap that lands in the window between the verdict and the clear. */
   beforeClear: ((dev: FakeDevice) => void) | null;
+  /** The roster cache, and whether clearing it throws (B3). */
+  rosterCached: boolean;
+  rosterClearFails: boolean;
+  /** The SW app-shell cache, and whether deleting it throws (B3). */
+  shellCached: boolean;
+  shellClearFails: boolean;
+  /** The `fw.cacheOwner` key. `undefined` models a localStorage read that threw. */
+  owner: string | null | undefined;
+  ownerWrites: number;
 };
 
 function device(over: Partial<FakeDevice> = {}): FakeDevice {
@@ -779,10 +791,16 @@ function device(over: Partial<FakeDevice> = {}): FakeDevice {
     store: [],
     online: true,
     authRequired: false,
-    evidence: { kind: "read", cacheOwner: GUIDE, queueDbOpened: true },
+    evidence: { kind: "read", cacheOwner: GUIDE, queueDbOpened: true, queueDbExists: true },
     readFails: false,
     reads: 0,
     drains: 0,
+    rosterCached: true,
+    rosterClearFails: false,
+    shellCached: true,
+    shellClearFails: false,
+    owner: GUIDE,
+    ownerWrites: 0,
     onDrain: (dev) => {
       dev.store = dev.store.filter(
         (r) => !isRecognizedFwEntry(r) || r.actorUserId !== GUIDE || r.blocked !== null
@@ -798,7 +816,7 @@ function portsFor(
   lock: ReturnType<typeof makeFakeLockManager>
 ): FwSignOutPorts {
   return {
-    readEvidence: () => dev.evidence,
+    readEvidence: async () => dev.evidence,
     readQueue: async () => {
       dev.reads += 1;
       if (dev.readFails) throw new Error("fw queue db open blocked");
@@ -814,19 +832,63 @@ function portsFor(
       expect(lock.held).toBe(1);
       dev.onDrain(dev);
     },
-    clear: async (blocksClear) => {
+    clear: async (blocksClear, policy) => {
       dev.beforeClear?.(dev);
       // Models `clearFwQueueIfEmpty`: count-then-clear in ONE transaction, under the
       // predicate the flow supplied — never a second, hand-written emptiness test.
       const blocking = dev.store.filter(blocksClear).length;
-      if (blocking === 0) dev.store = [];
-      return { cleared: blocking === 0 };
+      const queueCleared = blocking === 0;
+      if (queueCleared) dev.store = [];
+      // …and `clearFwResidue`'s cache policy: all three together on sign-out, caches
+      // unconditionally on a handover (they are the PRIOR account's names).
+      if (!shouldClearFwCaches(policy, queueCleared)) {
+        return { queueCleared, rosterCleared: true, shellCleared: true };
+      }
+      const rosterCleared = !dev.rosterClearFails;
+      if (rosterCleared) dev.rosterCached = false;
+      const shellCleared = !dev.shellClearFails;
+      if (shellCleared) dev.shellCached = false;
+      return { queueCleared, rosterCleared, shellCleared };
     },
   };
 }
 
-const signOut = (dev: FakeDevice, lock = makeFakeLockManager()) =>
-  runFwSignOutFlow({ actorUserId: GUIDE, ports: portsFor(dev, lock) });
+function reconcilePortsFor(
+  dev: FakeDevice,
+  lock: ReturnType<typeof makeFakeLockManager>
+): FwReconcilePorts {
+  return {
+    ...portsFor(dev, lock),
+    readOwner: () => dev.owner,
+    writeOwner: (owner) => {
+      dev.owner = owner;
+      dev.ownerWrites += 1;
+      return true;
+    },
+  };
+}
+
+const reconcile = (
+  dev: FakeDevice,
+  lock = makeFakeLockManager(),
+  over: { actorUserId?: string; surfaceCreatesResidue?: boolean } = {}
+) =>
+  runFwCacheOwnerReconcile({
+    actorUserId: over.actorUserId ?? GUIDE,
+    surfaceCreatesResidue: over.surfaceCreatesResidue ?? true,
+    ports: reconcilePortsFor(dev, lock),
+  });
+
+const signOut = (
+  dev: FakeDevice,
+  lock = makeFakeLockManager(),
+  over: { actorIsFwGuide?: boolean } = {}
+) =>
+  runFwSignOutFlow({
+    actorUserId: GUIDE,
+    actorIsFwGuide: over.actorIsFwGuide ?? false,
+    ports: portsFor(dev, lock),
+  });
 
 const rejected = { reason: "guard_refused" as const, note: "Staff will follow up." };
 
@@ -906,7 +968,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     const lock = makeFakeLockManager();
     const dev = device({
       readFails: true,
-      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false },
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
     });
     expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
     expect(dev.reads).toBe(0);
@@ -972,6 +1034,72 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(dev.drains).toBe(1);
   });
 
+  it("B1: a guide's REAL undrained queue is checked even when fw.cacheOwner was evicted", async () => {
+    // THE P0 STAFF-FRONT-DOOR-UNIT-3 BLOCKER (four reviewers converged).
+    //
+    // `cacheOwner === null && !queueDbOpened` is indistinguishable from "this device
+    // holds an undrained queue but localStorage was evicted" — localStorage and
+    // IndexedDB evict independently, and `queueDbOpened` is per-DOCUMENT and false on
+    // every fresh load. The old gate read that state as "no FW residue here" and
+    // skipped the queue check entirely, so sign-out completed and three verified
+    // check-ins were abandoned on a shared iPad.
+    //
+    // It was unreachable only because `FwPwa` opened the database on every mount of
+    // the layout that rendered the sign-out button. The staff bar mounts OUTSIDE that
+    // group, which is what makes it reachable — so the gate now takes the
+    // SERVER-KNOWN fact instead of hardening the client-storage heuristic.
+    const dev = device({
+      store: [entry("checkmark"), entry("checkmark"), entry("checkmark")],
+      online: false,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: null },
+    });
+    const outcome = await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true });
+
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "queued_offline", queuedCount: 3 },
+    });
+    expect(dev.reads).toBe(1); // the queue was READ, not assumed absent
+    expect(dev.store).toHaveLength(3); // …and the captures survive
+  });
+
+  it("B1: the same device with the same evidence still skips when the actor is NOT a guide", async () => {
+    // The other side of the branch — without this the server signal would be inert
+    // (it would return exactly what the fallback returns) and deleting it would leave
+    // the suite green. A CRM-only staff member must still never create the database.
+    const lock = makeFakeLockManager();
+    const dev = device({
+      store: [entry("checkmark")],
+      online: false,
+      evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: null },
+    });
+    expect(await signOut(dev, lock, { actorIsFwGuide: false })).toEqual({ kind: "sign_out" });
+    expect(dev.reads).toBe(0);
+    expect(lock.acquisitions).toBe(0);
+  });
+
+  it("B3: a throwing ROSTER clear does NOT report a successful sign-out", async () => {
+    // The roster cache holds children's first and last names. `clearFwResidue` used
+    // to compute `cleared` from the queue step alone and log-and-swallow this, so the
+    // guide was told sign-out worked while the names stayed for the next operator.
+    const dev = device({ rosterClearFails: true });
+    expect(await signOut(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.rosterCached).toBe(true);
+    expect(fwSignOutOutcomeCopy({ kind: "clear_failed" })).toMatch(/still signed in/i);
+  });
+
+  it("B3: a throwing SHELL-cache delete does NOT report a successful sign-out", async () => {
+    const dev = device({ shellClearFails: true });
+    expect(await signOut(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.shellCached).toBe(true);
+  });
+
+  it("B3: the queue still goes first, so the captures are not held hostage to a cache fault", async () => {
+    const dev = device({ store: [entry("checkmark")], rosterClearFails: true });
+    expect(await signOut(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.store).toEqual([]); // drained and cleared — nothing was lost
+  });
+
   it("two documents — a drain in one, sign-out in the other — leave no entry behind", async () => {
     const lock = makeFakeLockManager();
     const dev = device({ store: [entry("checkmark"), entry("checkmark")] });
@@ -997,5 +1125,164 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(dev.store).toEqual([]); // nothing survived, and nothing was lost
     expect(dev.drains).toBe(0); // B found an empty queue — A had already sent it
     expect(lock.acquisitions).toBe(2); // one per document, never twice in one
+  });
+});
+
+/* ══════════════════════════════ the device-handover reconcile (Unit 3, B2) ══ */
+
+/**
+ * The shared-iPad handover, driven end-to-end through the same fake device.
+ *
+ * WHAT THIS REPLACES. `reconcileFwCacheOwner` called an unconditional purge —
+ * `clearFwQueue()` with no verdict — on EVERY mount where identity differed, which is
+ * the ordinary handover after a crash, a revoked grant, or a forgotten sign-out. The
+ * outgoing guide's verified check-ins were destroyed, the purge swallowed every
+ * failure, and the owner key advanced regardless, so a failed purge could never
+ * recur. Moving that code to a bar mounted on `/staff` and `/crm` would have fired it
+ * far more often, which is why it is rewritten before the bar mounts, not after.
+ *
+ * The prior owner's captures are `foreignUndrained` to this session and no drain
+ * under this session can ever ship them (`selectFwDrainable` scopes to the actor, and
+ * the server action re-authes as them). So the assertion that matters is not "the
+ * reconcile succeeded" — it is "the captures still exist".
+ */
+describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
+  it("same owner: no lock, no reads, no clears", async () => {
+    const lock = makeFakeLockManager();
+    const dev = device({ owner: GUIDE, store: [entry("checkmark")] });
+    expect(await reconcile(dev, lock)).toEqual({ kind: "none" });
+    expect(lock.acquisitions).toBe(0);
+    expect(dev.store).toHaveLength(1);
+    expect(dev.rosterCached).toBe(true);
+  });
+
+  it("an unclaimed key is ADOPTED on an FW surface — nothing is destroyed", async () => {
+    const dev = device({ owner: null, store: [entry("checkmark")] });
+    expect(await reconcile(dev)).toEqual({ kind: "adopted" });
+    expect(dev.owner).toBe(GUIDE);
+    expect(dev.store).toHaveLength(1);
+  });
+
+  it("an unclaimed key is NOT claimed from /crm or /staff", async () => {
+    // The key feeds `hasFwDeviceEvidence`'s legacy branch. A bar that wrote it on a
+    // browser which has never run FW would manufacture the evidence it later trusts.
+    const dev = device({ owner: null });
+    expect(await reconcile(dev, makeFakeLockManager(), { surfaceCreatesResidue: false })).toEqual({
+      kind: "none",
+    });
+    expect(dev.owner).toBeNull();
+    expect(dev.ownerWrites).toBe(0);
+  });
+
+  it("B2: a handover with the PRIOR guide's undrained captures and NO connectivity preserves them", async () => {
+    // THE P0. The old code wiped these three check-ins on mount, silently, with no
+    // way to recover them — a guide's verified record of three children.
+    const theirs = [
+      entry("checkmark", { actorUserId: OTHER_GUIDE }),
+      entry("checkmark", { actorUserId: OTHER_GUIDE }),
+      entry("not_yet", { actorUserId: OTHER_GUIDE }),
+    ];
+    const dev = device({ owner: OTHER_GUIDE, store: [...theirs], online: false });
+
+    expect(await reconcile(dev)).toEqual({ kind: "queue_preserved", preservedCount: 3 });
+    expect(dev.store).toEqual(theirs); // the captures SURVIVE
+    expect(dev.drains).toBe(0); // …and no drain was even attempted: offline
+    // The caches DO go — they are the prior guide's children's names and authed HTML,
+    // and preserving them protects nobody.
+    expect(dev.rosterCached).toBe(false);
+    expect(dev.shellCached).toBe(false);
+    // The key is NOT advanced, so the device stays visibly un-reconciled and the next
+    // mount tries again rather than treating the state as settled.
+    expect(dev.owner).toBe(OTHER_GUIDE);
+    expect(dev.ownerWrites).toBe(0);
+  });
+
+  it("B2: a handover WITH connectivity drains this session's own entries, then clears", async () => {
+    const dev = device({ owner: OTHER_GUIDE, store: [entry("checkmark"), entry("not_yet")] });
+    expect(await reconcile(dev)).toEqual({ kind: "reconciled" });
+    expect(dev.drains).toBe(1); // these are THIS actor's — a drain can ship them
+    expect(dev.store).toEqual([]);
+    expect(dev.owner).toBe(GUIDE);
+  });
+
+  it("B2: an empty queue reconciles cleanly and advances the key", async () => {
+    const dev = device({ owner: OTHER_GUIDE });
+    expect(await reconcile(dev)).toEqual({ kind: "reconciled" });
+    expect(dev.drains).toBe(0);
+    expect(dev.owner).toBe(GUIDE);
+    expect(dev.rosterCached).toBe(false);
+    expect(dev.shellCached).toBe(false);
+  });
+
+  it("B2: a FAILED clear does not advance the key, so it is retried instead of masked", async () => {
+    // The P1 half. The purge returned `Promise<void>` and the caller advanced the
+    // owner regardless — after which the mismatch never recurred and the failure was
+    // permanent and invisible.
+    const dev = device({ owner: OTHER_GUIDE, rosterClearFails: true });
+    expect(await reconcile(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.owner).toBe(OTHER_GUIDE);
+    expect(dev.ownerWrites).toBe(0);
+
+    // The next mount tries again — and succeeds once the fault clears.
+    dev.rosterClearFails = false;
+    expect(await reconcile(dev)).toEqual({ kind: "reconciled" });
+    expect(dev.owner).toBe(GUIDE);
+  });
+
+  it("B2: a thrown clear outranks a preserved queue — a fault is not a policy", async () => {
+    const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({
+      owner: OTHER_GUIDE,
+      store: [theirs],
+      online: false,
+      shellClearFails: true,
+    });
+    expect(await reconcile(dev)).toEqual({ kind: "clear_failed" });
+    expect(dev.store).toEqual([theirs]);
+  });
+
+  it("B2: the prior guide's BLOCKED entries are clearable — their reject row is authoritative", async () => {
+    const dev = device({
+      owner: OTHER_GUIDE,
+      store: [entry("undo", { actorUserId: OTHER_GUIDE, blocked: rejected })],
+    });
+    expect(await reconcile(dev)).toEqual({ kind: "reconciled" });
+    expect(dev.store).toEqual([]);
+  });
+
+  it("B2: a QUARANTINED record blocks the queue clear — an un-landed capture, unread", async () => {
+    const quarantined = { id: "q-1", schemaVersion: 99 };
+    const dev = device({ owner: OTHER_GUIDE, store: [quarantined], online: false });
+    expect(await reconcile(dev)).toEqual({ kind: "queue_preserved", preservedCount: 1 });
+    expect(dev.store).toEqual([quarantined]);
+  });
+
+  it("B2: the reconcile takes the drain lock EXACTLY once and does not deadlock", async () => {
+    const lock = makeFakeLockManager();
+    const dev = device({ owner: OTHER_GUIDE, store: [entry("checkmark")] });
+    expect(await reconcile(dev, lock)).toEqual({ kind: "reconciled" });
+    expect(lock.acquisitions).toBe(1);
+    expect(lock.held).toBe(0);
+  });
+
+  it("B2 + R16 end to end: after a handover, the new guide's sign-out REFUSES on the survivors", async () => {
+    // The whole point of preserving them. The reconcile keeps the captures; sign-out
+    // is the surface that names the account which has to come back for them.
+    const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({ owner: OTHER_GUIDE, store: [theirs], online: false });
+    await reconcile(dev);
+
+    const outcome = await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true });
+    expect(outcome).toEqual({
+      kind: "refused",
+      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
+    });
+    expect(dev.store).toEqual([theirs]);
+  });
+
+  it("a localStorage read that THREW is treated as no prior owner — nothing is destroyed", async () => {
+    const dev = device({ owner: undefined, store: [entry("checkmark")] });
+    expect(await reconcile(dev)).toEqual({ kind: "adopted" });
+    expect(dev.store).toHaveLength(1);
   });
 });

@@ -9,7 +9,10 @@ import {
   fwEntryBlocksSignOutClear,
   fwSignOutOutcomeCopy,
   fwSignOutRefusalCopy,
+  fwResidueFullyCleared,
+  decideFwCacheOwnerAction,
   hasFwDeviceEvidence,
+  shouldClearFwCaches,
   projectFwPendingState,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   FW_ROSTER_CACHE_SCHEMA_VERSION,
@@ -24,6 +27,7 @@ import {
   reduceFwOps,
   selectFwDrainable,
   summarizeFwQueue,
+  type FwDeviceEvidence,
   type FwQueueEntry,
   type FwRosterCache,
   type FwServerRow,
@@ -680,22 +684,219 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
       })
     ).toMatch(/try again/i);
   });
+
+  it("B3: clear_failed says the session is STILL OPEN and names the remedy", () => {
+    // The failure this replaces was reported to the guide as a successful sign-out.
+    // The copy has to contradict that belief explicitly, because the guide is about to
+    // hand the device to someone else.
+    const copy = fwSignOutOutcomeCopy({ kind: "clear_failed" }) ?? "";
+    expect(copy).toMatch(/still signed in/i);
+    expect(copy).toMatch(/site data/i);
+    expect(copy).not.toMatch(/signed out|success/i);
+  });
+
+  it("needs_attention names the BANNER on /fp/fw and Founders Weekend everywhere else", () => {
+    // Unit 1 left this open on purpose and named it: the dismiss control is the
+    // queued-indicator banner, which `FwPwa` renders on `/fp/fw` only. The staff bar
+    // is what puts this refusal on `/staff` and `/crm`, so it is the unit that owes
+    // the fix.
+    expect(fwSignOutRefusalCopy("needs_attention", 2, "fw")).toMatch(/in the banner/i);
+
+    const elsewhere = fwSignOutRefusalCopy("needs_attention", 2, "elsewhere");
+    expect(elsewhere).not.toMatch(/banner/i);
+    expect(elsewhere).toMatch(/founders weekend/i);
+    expect(elsewhere).toMatch(/\b2 saved check-ins\b/);
+  });
+
+  it("every OTHER reason reads identically on both surfaces — only that one moved", () => {
+    const reasons = [
+      "queued_offline",
+      "drain_first",
+      "drain_stalled",
+      "session_expired",
+      "foreign_queue",
+      "unreadable",
+    ] as const;
+    for (const reason of reasons) {
+      expect(fwSignOutRefusalCopy(reason, 2, "elsewhere")).toBe(
+        fwSignOutRefusalCopy(reason, 2, "fw")
+      );
+    }
+  });
+
+  it("the surface variant is pluralized too", () => {
+    expect(fwSignOutRefusalCopy("needs_attention", 1, "elsewhere")).not.toMatch(
+      /\b1 saved check-ins\b/
+    );
+    expect(fwSignOutRefusalCopy("needs_attention", 2, "elsewhere")).not.toMatch(
+      /\b2 saved check-in\b/
+    );
+  });
 });
 
 describe("hasFwDeviceEvidence — never CREATE a queue db on a browser that never ran FW", () => {
-  it("no cache owner and no opened db means this device has no FW residue", () => {
-    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: null, queueDbOpened: false })).toBe(false);
+  /** Every field explicit: this gate's whole failure mode is a field being absent and
+   *  reading as "nothing here", so no helper is allowed to default one in. */
+  const read = (over: {
+    cacheOwner?: string | null;
+    queueDbOpened?: boolean;
+    queueDbExists?: boolean | null;
+  }): FwDeviceEvidence => ({
+    kind: "read",
+    cacheOwner: over.cacheOwner ?? null,
+    queueDbOpened: over.queueDbOpened ?? false,
+    queueDbExists: over.queueDbExists ?? null,
   });
 
-  it("either signal alone is evidence", () => {
-    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: GUIDE, queueDbOpened: false })).toBe(true);
-    expect(hasFwDeviceEvidence({ kind: "read", cacheOwner: null, queueDbOpened: true })).toBe(true);
+  it("B1: a SERVER-KNOWN guide is checked whatever the device's storage says", () => {
+    // The blocker. `cacheOwner === null && !queueDbOpened` is exactly what a fresh
+    // document on a device whose localStorage was evicted looks like — and also
+    // exactly what a device holding three undrained check-ins looks like. The two are
+    // indistinguishable from the client, so the answer comes from the server.
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: null, queueDbOpened: false, queueDbExists: null }),
+        actorIsFwGuide: true,
+      })
+    ).toBe(true);
+  });
+
+  it("B1: …and it outranks even a negative database probe read", () => {
+    expect(
+      hasFwDeviceEvidence({ evidence: read({ queueDbExists: false }), actorIsFwGuide: true })
+    ).toBe(true);
+  });
+
+  it("a non-guide with the SAME evidence still skips — the server signal is a real branch", () => {
+    // Deleting `actorIsFwGuide` must redden something. This is the pair that makes it
+    // do so: identical evidence, opposite answers, and the ONLY difference is the
+    // server's. (Unit 2's headline finding: a branch that returns what its fallback
+    // returns has no behavioural signature.)
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: null, queueDbOpened: false, queueDbExists: null }),
+        actorIsFwGuide: false,
+      })
+    ).toBe(false);
   });
 
   it("an evidence read that THREW fails CLOSED — unknown is not proof of absence", () => {
     // Safari's storage policy can throw on localStorage. "I could not look" must
     // never be treated as "there is nothing here" — that is how a queue gets wiped.
-    expect(hasFwDeviceEvidence({ kind: "unknown" })).toBe(true);
+    expect(hasFwDeviceEvidence({ evidence: { kind: "unknown" }, actorIsFwGuide: false })).toBe(true);
+  });
+
+  it("the database probe is AUTHORITATIVE when it answered, in both directions", () => {
+    // It exists → opening it creates nothing, so checking is free.
+    expect(
+      hasFwDeviceEvidence({ evidence: read({ queueDbExists: true }), actorIsFwGuide: false })
+    ).toBe(true);
+    // It does not exist → there is definitionally no queue, and opening would CREATE
+    // the database this gate exists to keep off a CRM-only staff member's browser.
+    expect(
+      hasFwDeviceEvidence({ evidence: read({ queueDbExists: false }), actorIsFwGuide: false })
+    ).toBe(false);
+  });
+
+  it("the probe overrides the stale localStorage heuristic when the two disagree", () => {
+    // A signed-out guide's `fw.cacheOwner` can outlive the database. The old gate
+    // would have opened IndexedDB on the strength of a key naming nobody.
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: GUIDE, queueDbOpened: true, queueDbExists: false }),
+        actorIsFwGuide: false,
+      })
+    ).toBe(false);
+  });
+
+  it("with no probe available the legacy heuristic still answers — either signal alone", () => {
+    // Pre-2024 browsers have no `indexedDB.databases()`. The heuristic is unsound
+    // (that is B1) but it is bounded to non-guides on those browsers, and it is
+    // strictly better than nothing there.
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ cacheOwner: GUIDE, queueDbExists: null }),
+        actorIsFwGuide: false,
+      })
+    ).toBe(true);
+    expect(
+      hasFwDeviceEvidence({
+        evidence: read({ queueDbOpened: true, queueDbExists: null }),
+        actorIsFwGuide: false,
+      })
+    ).toBe(true);
+  });
+});
+
+/* ═══════════════════════════════ residue clearing (Unit 3, B2 + B3) ══ */
+
+describe("fwResidueFullyCleared — the queue step is NOT the whole answer (B3)", () => {
+  it("all three cleared is the only success", () => {
+    expect(
+      fwResidueFullyCleared({ queueCleared: true, rosterCleared: true, shellCleared: true })
+    ).toBe(true);
+  });
+
+  it("a surviving ROSTER cache is a failure — it holds children's first and last names", () => {
+    expect(
+      fwResidueFullyCleared({ queueCleared: true, rosterCleared: false, shellCleared: true })
+    ).toBe(false);
+  });
+
+  it("a surviving SHELL cache is a failure — it holds the authenticated roster HTML", () => {
+    expect(
+      fwResidueFullyCleared({ queueCleared: true, rosterCleared: true, shellCleared: false })
+    ).toBe(false);
+  });
+
+  it("a surviving queue is a failure too", () => {
+    expect(
+      fwResidueFullyCleared({ queueCleared: false, rosterCleared: true, shellCleared: true })
+    ).toBe(false);
+  });
+});
+
+describe("shouldClearFwCaches — the two callers want opposite things on a stuck queue", () => {
+  it("sign-out keeps all three together, so an aborted sign-out leaves no degraded shell", () => {
+    expect(shouldClearFwCaches("sign_out", false)).toBe(false);
+    expect(shouldClearFwCaches("sign_out", true)).toBe(true);
+  });
+
+  it("a handover clears the caches whatever the queue did — they are the PRIOR account's", () => {
+    expect(shouldClearFwCaches("handover", false)).toBe(true);
+    expect(shouldClearFwCaches("handover", true)).toBe(true);
+  });
+});
+
+describe("decideFwCacheOwnerAction — who may claim the fw.cacheOwner key", () => {
+  it("the same account is a no-op", () => {
+    expect(
+      decideFwCacheOwnerAction({ prior: GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: true })
+    ).toBe("none");
+  });
+
+  it("a different account is a reconcile, on any surface", () => {
+    expect(
+      decideFwCacheOwnerAction({ prior: OTHER_GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: true })
+    ).toBe("reconcile");
+    expect(
+      decideFwCacheOwnerAction({ prior: OTHER_GUIDE, actorUserId: GUIDE, surfaceCreatesResidue: false })
+    ).toBe("reconcile");
+  });
+
+  it("an unclaimed key is adopted on an FW surface", () => {
+    expect(
+      decideFwCacheOwnerAction({ prior: null, actorUserId: GUIDE, surfaceCreatesResidue: true })
+    ).toBe("adopt");
+  });
+
+  it("…but NOT on /crm or /staff — the bar must not manufacture the evidence it reads", () => {
+    // The key is an input to `hasFwDeviceEvidence`'s legacy branch. A bar that wrote
+    // it on a browser which has never run Founders Weekend would mark that browser as
+    // holding FW residue and then trust its own mark.
+    expect(
+      decideFwCacheOwnerAction({ prior: null, actorUserId: GUIDE, surfaceCreatesResidue: false })
+    ).toBe("none");
   });
 });
 

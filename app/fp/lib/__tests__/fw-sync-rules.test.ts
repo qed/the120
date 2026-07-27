@@ -630,6 +630,30 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
     expect(stalled).toMatch(/wi-?fi|network|connect/i);
   });
 
+  it("names STAYING SIGNED IN when the device is offline with its own work", () => {
+    // The action is "keep the device"; a copy edit that drops it leaves a guide
+    // who has been refused with no idea what to do next.
+    const copy = fwSignOutRefusalCopy("queued_offline", 1);
+    expect(copy).toMatch(/stay signed in/i);
+    expect(copy).toMatch(/automatically/i);
+  });
+
+  it("names WAITING while its own work is still sending", () => {
+    const copy = fwSignOutRefusalCopy("drain_first", 2);
+    expect(copy).toMatch(/still sending/i);
+    expect(copy).toMatch(/try again/i);
+  });
+
+  it("names the DISMISS control for quarantined records", () => {
+    // The one refusal whose action lives on another surface: the banner is
+    // rendered by FwPwa across the /fp/fw (app) group. Mounting the sign-out
+    // control outside that group makes this sentence unactionable, so pin the
+    // wording that ties it to the banner.
+    const copy = fwSignOutRefusalCopy("needs_attention", 1);
+    expect(copy).toMatch(/dismiss/i);
+    expect(copy).toMatch(/banner/i);
+  });
+
   it("agrees with itself on singular/plural for every reason", () => {
     const reasons = [
       "queued_offline",

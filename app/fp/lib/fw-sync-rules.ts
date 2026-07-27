@@ -942,7 +942,7 @@ export function partitionFwQueue(raw: readonly unknown[]): {
 /** The reduction's grouping key — the cohort is in the key because two cohorts can
  *  never share a (student, task) drain sequence (a returner belongs to two). */
 export function fwStudentTaskKey(entry: Pick<FwQueueEntry, "cohortId" | "studentId" | "taskId">): string {
-  return `${entry.cohortId} ${entry.studentId} ${entry.taskId}`;
+  return `${entry.cohortId}\x00${entry.studentId}\x00${entry.taskId}`;
 }
 
 /** FIFO by `enqueuedAt`, id tiebreak — a total, stable order (the Path queue's

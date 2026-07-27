@@ -1,0 +1,61 @@
+-- Staff Front Door, Unit 6: archive state and attribution on the cohort row.
+--
+-- Apply via the Management API — `supabase db push` is dead here (no DB
+-- password). See docs/solutions/integration-issues/supabase-cli-stale-db-
+-- password-management-api-workaround-2026-07-13.md.
+--
+-- APPLY IMMEDIATELY (no migration holds; Chicago cancelled 2026-07-23).
+--
+-- ⚠️ THE MIGRATION LOCK moves to Lane A in this same PR (supabase/
+-- MIGRATION-LOCK.md) — Lane B held it through funnel Unit 1. The plan named
+-- this file `20260805120000_…`; that timestamp was consumed by Lane B's
+-- `20260805120000_funnel_applicant_state.sql` while this unit was in review,
+-- which is why this one is 20260806.
+--
+-- Rollout phase: SCHEMA ONLY (plan Unit 6, deliberately). Two nullable
+-- columns; backfills nothing; no reader exists until Unit 7 ships the cores,
+-- so applying this ahead of that code changes no behaviour anywhere.
+-- No new audit action: FW_OPS_AUDIT_ACTIONS is untouched by design — archive
+-- attribution lives on the row itself (the plan's audit-mechanism decision:
+-- the audit table's subject column is `not null` and a cohort has no human
+-- subject).
+--
+-- Idempotent — re-applying is a no-op (`add column if not exists`).
+--
+-- PRE-APPLY:
+--   1. select to_regclass('public.path_cohorts');              -- not null
+--   2. select count(*) from information_schema.columns
+--        where table_schema='public' and table_name='path_cohorts'
+--          and column_name in ('archived_at','archived_by');   -- 0
+-- POST-APPLY (verify BEFORE recording the version):
+--   3. same query;                                             -- 2
+--   4. select column_name, data_type, is_nullable
+--        from information_schema.columns
+--        where table_schema='public' and table_name='path_cohorts'
+--          and column_name in ('archived_at','archived_by');
+--      -- archived_at  timestamp with time zone  YES
+--      -- archived_by  uuid                      YES
+--   5. select confdeltype from pg_constraint
+--        where conname = 'path_cohorts_archived_by_fkey';      -- 'r' (RESTRICT)
+--   6. Only then: insert the version into
+--      supabase_migrations.schema_migrations.
+--
+-- ROLLBACK: both columns drop cleanly (nullable, nothing reads them yet).
+--
+-- ── Shape ────────────────────────────────────────────────────────────────────
+--
+-- Direct siblings of `created_by` (same FK target, same `on delete restrict`):
+-- attribution describes the CURRENT state, not a history — unarchive nulls
+-- both, and reversal genuinely loses who archived it (plan: accepted).
+-- `restrict`, not cascade, for the same reason `created_by` restricts: a staff
+-- account that has archived a weekend must not be deletable out from under the
+-- attribution while the state still claims it.
+--
+-- NOT `not null`: an active cohort has neither value, and every production row
+-- is active at the moment this applies.
+
+alter table public.path_cohorts
+  add column if not exists archived_at timestamptz;
+
+alter table public.path_cohorts
+  add column if not exists archived_by uuid references auth.users (id) on delete restrict;

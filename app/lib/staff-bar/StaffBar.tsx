@@ -425,6 +425,14 @@ export function StaffBar({
       }
       // Reaching here means the local residue is already GONE — clearing it is what
       // earned the `sign_out` outcome, not a consequence of it.
+      //
+      // THE SUCCESS PATH BEACONS TOO (Unit 6, Peter). An orderly sign-out over a
+      // departed guide's preserved captures was the one residue-leaving path with no
+      // off-device report — the most common one. `dispatchFwResidueBeacon` is silent
+      // at queueRemaining 0, so the ordinary clean sign-out sends nothing. Fired
+      // BEFORE the redirect-throwing action below: fire-and-forget survives the
+      // navigation, but a dispatch placed after a throw never runs at all.
+      dispatchFwResidueBeacon(outcome, actorUserId, application);
       cleared = true;
       // The account's own copy of its identity goes with the session, or the next
       // operator's bar opens showing the last one's address.

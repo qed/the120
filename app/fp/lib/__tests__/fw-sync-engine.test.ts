@@ -917,14 +917,14 @@ const rejected = { reason: "guard_refused" as const, note: "Staff will follow up
 describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
   it("an empty queue signs out, and the clear runs", async () => {
     const dev = device();
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.reads).toBe(1); // one verdict; no drain was needed
     expect(dev.drains).toBe(0);
   });
 
   it("three own drainable entries online drain first, then sign out", async () => {
     const dev = device({ store: [entry("checkmark"), entry("checkmark"), entry("not_yet")] });
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.drains).toBe(1);
     expect(dev.reads).toBe(2); // the verdict said drain_first, and the flow RE-CHECKED
     expect(dev.store).toEqual([]);
@@ -936,7 +936,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     // store.count() saw the blocked entry), so the button said "a check-in just came
     // in — try again in a moment" on a device where nothing would ever change.
     const dev = device({ store: [entry("checkmark", { blocked: rejected })] });
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.drains).toBe(0); // a tombstoned entry is not drainable
     expect(dev.store).toEqual([]); // …and it did not survive the clear
   });
@@ -950,7 +950,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
     const dev = device({ store: [foreign] });
 
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 1 });
     expect(dev.store).toEqual([foreign]); // un-landed work of a guide who is not here
     expect(dev.drains).toBe(0); // this session could never ship it anyway
     // The caches DID go — they hold this account's names and authed HTML.
@@ -967,7 +967,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
       store: [entry("checkmark"), entry("not_yet", { blocked: rejected }), foreign],
     });
 
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 1 });
     expect(dev.drains).toBe(1); // its own drainable tap shipped first
     expect(dev.store).toEqual([foreign]);
   });
@@ -995,7 +995,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     const dev = device({
       store: [entry("undo", { actorUserId: OTHER_GUIDE, blocked: rejected })],
     });
-    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.store).toEqual([]);
   });
 
@@ -1010,7 +1010,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     // clear REMOVED the record would destroy un-landed work silently.
     const dev = device({ store: [{ id: "q-1", schemaVersion: 99 }] });
     const outcome = await signOut(dev);
-    expect(outcome).toEqual({ kind: "sign_out" });
+    expect(outcome).toEqual({ kind: "sign_out", queueRemaining: 1 });
     expect(dev.store).toHaveLength(1);
     expect(dev.store[0]).toMatchObject({ id: "q-1" });
   });
@@ -1032,7 +1032,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
       readFails: true,
       evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
     });
-    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.reads).toBe(0);
     expect(lock.acquisitions).toBe(0); // no lock, no IndexedDB, no side effects
   });
@@ -1054,7 +1054,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
       evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: false },
     });
 
-    expect(await signOut(dev, lock, { actorIsFwGuide: true })).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev, lock, { actorIsFwGuide: true })).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.reads).toBe(0); // never read, therefore never opened, therefore never created
     expect(lock.acquisitions).toBe(0);
   });
@@ -1112,7 +1112,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     // drain port would never be reached — the test would time out instead of failing.
     const lock = makeFakeLockManager();
     const dev = device({ store: [entry("checkmark"), entry("not_yet")] });
-    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev, lock)).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(lock.acquisitions).toBe(1);
     expect(lock.held).toBe(0); // released
     expect(dev.drains).toBe(1);
@@ -1157,7 +1157,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
       online: false,
       evidence: { kind: "read", cacheOwner: null, queueDbOpened: false, queueDbExists: null },
     });
-    expect(await signOut(dev, lock, { actorIsFwGuide: false })).toEqual({ kind: "sign_out" });
+    expect(await signOut(dev, lock, { actorIsFwGuide: false })).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.reads).toBe(0);
     expect(lock.acquisitions).toBe(0);
   });
@@ -1205,7 +1205,7 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
 
     releaseDocA();
     await docA;
-    expect(await docB).toEqual({ kind: "sign_out" });
+    expect(await docB).toEqual({ kind: "sign_out", queueRemaining: 0 });
     expect(dev.store).toEqual([]); // nothing survived, and nothing was lost
     expect(dev.drains).toBe(0); // B found an empty queue — A had already sent it
     expect(lock.acquisitions).toBe(2); // one per document, never twice in one
@@ -1412,6 +1412,7 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
 
     expect(await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true })).toEqual({
       kind: "sign_out",
+      queueRemaining: 1,
     });
     expect(dev.store).toEqual([theirs]);
   });

@@ -30,7 +30,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { FW_CALL_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
+import { FW_CALL_TIMEOUT_MS, fwWrite, withFwTimeout } from "@/app/fp/lib/fw-call";
 import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/fp/lib/fw-auth";
 import { loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
 import type { FwResidueBeacon } from "@/app/fp/lib/fw-sync-rules";
@@ -209,6 +209,33 @@ export async function sendFwResidueBeacon(input: unknown): Promise<void> {
     console.error("[fw/residue] dropped a beacon with no resolvable session");
     return;
   }
+  // THE DURABLE ROW (Unit 6 — the table Peter approved once Lane A held the lock).
+  // Written through `fwWrite` (bounded + throw-guarded), and NON-FATAL on failure:
+  // the log line below is the Unit 5 fallback and still always emits, so an insert
+  // that fails degrades to exactly the pre-table behaviour rather than costing the
+  // report entirely. The insert failure is logged with its own prefix so a broken
+  // table is visible without breaking a single sign-out.
+  const inserted = await fwWrite(
+    () =>
+      supabaseAdmin()
+        .from("path_fw_residue_reports")
+        .insert({
+          schema_version: parsed.data.schemaVersion,
+          outcome: parsed.data.outcome,
+          queue_remaining: parsed.data.queueRemaining,
+          session_user_id: sessionUser.id,
+          claimed_actor_user_id: parsed.data.claimedActorUserId,
+          device_id: parsed.data.deviceId,
+          application: parsed.data.application,
+        })
+        .select("id")
+        .maybeSingle(),
+    "residue report insert"
+  );
+  if (inserted.error) {
+    console.error(`[fw/residue] durable insert failed (log line still emitted): ${inserted.error.message}`);
+  }
+
   // ONE LINE, one JSON object, stable keys — parseable, not prose. `sessionUserId`
   // is WHO SENT THIS (authenticated); `claimedActorUserId` is who the device says
   // the outcome happened under. They differ exactly when a handover raced the POST,

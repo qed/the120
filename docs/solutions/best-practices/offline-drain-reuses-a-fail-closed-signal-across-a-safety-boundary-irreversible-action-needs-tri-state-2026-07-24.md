@@ -291,6 +291,18 @@ a timing difference an attacker could measure. Closing it costs every garbage pr
 a dummy read to hide a fact of no exploitable value; the docblock now says so,
 which is what separates a trade-off from an oversight.
 
+### 8. "Unknown" is not one state — absent-fact and failed-lookup need different words (Unit 9, 2026-07-27)
+
+The smallest recurrence yet, in a banner: `archived_by` NULL means the FACT is
+absent ("archived by: unrecorded" — the honest launch state); a recorded uuid whose
+email lookup timed out means only the NAMING failed ("a staff account we couldn't
+name just now"). The first draft collapsed both into "unrecorded" the moment the
+lookup was given a timeout — quietly converting a transient blip into a false claim
+about what the database holds. Whenever a degrade path reuses the copy written for
+a genuinely-absent value, check which fact each sentence asserts; if they differ,
+the state space grows by one. (Same shape at every size: B4's unknown-vs-none,
+item 6's gate verdicts, this banner's three words.)
+
 ## Why This Matters
 
 A drain that writes into an append-only log has no undo. Every one of these was a

@@ -793,6 +793,15 @@ fresh link emailed to ${issued.email}`);
     const started = Date.now();
     for (const chunk of chunks) {
       const res = await runFwImportChunk(db, { cohortId, actorUserId: actor, rows: chunk });
+      if ("refused" in res) {
+        // Chunk-level refusal (Unit 8): the cohort is archived or gone. Nothing in
+        // this or any later chunk will land — stop, say why, non-zero exit.
+        throw new Error(
+          res.refused === "cohort_archived"
+            ? `cohort ${cohortId} is archived — unarchive it before importing`
+            : `cohort ${cohortId} not found`
+        );
+      }
       outcomes.push(...res.outcomes);
       // Progress to stderr so a 90-row import over venue wifi never looks hung.
       console.error(`[fw] import: ${outcomes.length}/${unique.length} rows processed`);

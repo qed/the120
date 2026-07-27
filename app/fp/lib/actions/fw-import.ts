@@ -116,14 +116,26 @@ export async function importFwStudentsChunk(input: unknown): Promise<ImportChunk
   // pre-deriving it with the THROWING `buildNormalizedFwName` would let a single
   // unfoldable name in a hand-crafted request reject the whole chunk instead of
   // failing one row (kieran-typescript review).
-  const { outcomes } = await runFwImportChunk(supabaseAdmin(), {
+  const chunk = await runFwImportChunk(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
     actorUserId: gate.actorUserId,
     rows: parsed.data.rows,
   });
+  if ("refused" in chunk) {
+    // Whole-chunk, deliberately (Unit 8's recorded decision): one cohort-level fact
+    // gets one refusal, not N fabricated row outcomes and N exception rows to
+    // resolve by hand. The archived sentence names the restore path.
+    return {
+      success: false,
+      error:
+        chunk.refused === "cohort_archived"
+          ? "This weekend is archived — restore it before importing students."
+          : fwStaffGateCopy("not_staff"),
+    };
+  }
 
   revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
-  return { success: true, outcomes };
+  return { success: true, outcomes: chunk.outcomes };
 }
 
 /* ═══════════════════════════════════════════════════ close an import exception ══ */

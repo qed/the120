@@ -232,7 +232,8 @@ export async function provisionGuideAction(
 }
 
 function provisionFailureMessage(
-  reason: "invalid_email" | "cohort_not_found" | "cohort_not_fw" | "address_in_use" | "unavailable"
+  reason: "invalid_email" | "cohort_not_found" | "cohort_not_fw" | "address_in_use"
+    | "cohort_archived" | "unavailable"
 ): string {
   switch (reason) {
     case "invalid_email":
@@ -243,6 +244,8 @@ function provisionFailureMessage(
       return "Guides are only granted into Founders Weekend cohorts.";
     case "address_in_use":
       return "That address already belongs to another 120 account — use a different one.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before adding guides.";
     case "unavailable":
       return GENERIC_ERROR;
   }

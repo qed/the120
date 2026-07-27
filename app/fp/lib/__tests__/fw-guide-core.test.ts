@@ -1088,3 +1088,19 @@ describe("provisionFwGuide — a grant upsert that LANDED but reported an error"
     expect(tables.path_fw_ops_audit).toHaveLength(0);
   });
 });
+
+describe("Unit 8 — new check-in power refuses on archived; existing power stays revocable", () => {
+  it("provisionFwGuide refuses an archived cohort before touching the Auth admin API", async () => {
+    const { db, calls } = makeFakeDb({
+      cohorts: [
+        { id: BOSTON, slug: "boston-2026-08", kind: "fw", archived_at: "2026-08-24T00:00:00Z" },
+      ],
+    });
+    const before = calls.createUser;
+    expect(
+      await provisionFwGuide(db, { email: "new-guide@example.com", cohortId: BOSTON, createdBy: STAFF })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+    expect(calls.createUser).toBe(before); // no account minted for a dead weekend
+  });
+});
+

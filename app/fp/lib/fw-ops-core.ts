@@ -1885,6 +1885,8 @@ export type LinkFwStudentToCohortResult =
         | "not_fw_profile"
         | "student_anonymized"
         | "cohort_not_fw"
+        /** Unit 8: roster-building refuses on a retired weekend. */
+        | "cohort_archived"
         | "unavailable";
     };
 
@@ -1925,6 +1927,9 @@ export async function linkFwStudentToCohort(
   const cohort = await loadFwOpsCohort(db, input.cohortId);
   if (!cohort) return { ok: false, reason: "unavailable" };
   if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  // Unit 8 (guard table: "link an existing student → refuse"). Roster-building on a
+  // retired weekend; the read already carries the state.
+  if (cohort.archivedAt !== null) return { ok: false, reason: "cohort_archived" };
 
   const profile = await fwRead(
     () =>

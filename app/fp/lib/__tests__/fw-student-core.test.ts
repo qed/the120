@@ -382,3 +382,20 @@ describe("runFwMatchLookup", () => {
     });
   });
 });
+
+describe("Unit 8 invariant — guide quick-create SUCCEEDS on an archived cohort", () => {
+  it("pinned structurally: the quick-create path cannot read archived_at — and the consequence is accepted by name", () => {
+    // A guide who can check a child in must be able to add the child standing in
+    // front of them; the consequence — a NEW MINOR'S ACCOUNT created inside a
+    // cohort hidden from staff's default list — is accepted and named in the plan's
+    // Scope Boundaries. This test is the tripwire against someone "fixing" that by
+    // threading archive state into `provisionFwStudent`/`runFwQuickCreate`, which
+    // would also break the CSV import's shared core placement.
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const src = readFileSync(new URL("../fw-student-core.ts", import.meta.url), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code).not.toContain("archived_at");
+    expect(code).not.toContain("archivedAt");
+  });
+});
+

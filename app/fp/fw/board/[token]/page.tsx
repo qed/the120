@@ -48,6 +48,9 @@ export default async function FwBoardPage({ params }: { params: Promise<{ token:
   if (!auth.ok) notFound();
 
   const shell = await loadFwBoardShell(db, { cohortId: auth.cohortId });
+  // Archived (or vanished) between the token check and the shell read — the same
+  // bare notFound() as a bad token, so nothing about the cohort leaks (Unit 8).
+  if (shell === null) notFound();
 
   return <FwBoard token={token} shell={shell} />;
 }

@@ -162,6 +162,9 @@ export type ProvisionFwGuideFailure =
   | "invalid_email"
   | "cohort_not_found"
   | "cohort_not_fw"
+  /** Unit 8: no NEW check-in power for a retired weekend (existing power is
+   *  never blocked — revoke stays live). */
+  | "cohort_archived"
   /** The address already belongs to an account this system did not mint as a
    *  guide (staff, parent, student). Never adopted — see canAdoptAsGuideAccount. */
   | "address_in_use"
@@ -215,6 +218,24 @@ export async function provisionFwGuide(
   const cohort = await loadFwCohort(db, input.cohortId);
   if (!cohort) return { ok: false, reason: "cohort_not_found" };
   if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+
+  // Unit 8 (guard table: "add a guide grant → refuse"). A separate targeted read
+  // rather than a widening of `loadFwCohort`: that loader feeds the CHECK-IN path's
+  // actor resolution, and the plan's Scope Boundary is that nothing on the check-in
+  // path can see `archived_at` — carrying the field there would put the temptation
+  // one destructure away from the surface it must never influence. GRANTING new
+  // check-in power to a retired weekend is a different act from using power already
+  // granted; the first is refused, the second (revoke, below) must never be.
+  const archived = await fwRead(
+    () =>
+      db.from("path_cohorts").select("archived_at").eq("id", input.cohortId).maybeSingle(),
+    `guide provision archived gate (${input.cohortId})`
+  );
+  if (archived.error) return { ok: false, reason: "unavailable" };
+  const archivedRow = archived.data as Record<string, unknown> | null;
+  if (archivedRow && typeof archivedRow.archived_at === "string") {
+    return { ok: false, reason: "cohort_archived" };
+  }
 
   let payload;
   try {

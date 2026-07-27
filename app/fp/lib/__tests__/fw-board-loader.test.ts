@@ -347,6 +347,7 @@ describe("loadFwBoardShell — the PII-free server shell", () => {
       profiles: [profile("a", "Maya", "Chen")],
     });
     const shell = await loadFwBoardShell(db, { cohortId: BOSTON });
+    if (shell === null) throw new Error("shell unexpectedly null for an active cohort");
     expect(shell.cohortSlug).toBe("boston-2026-08");
     expect(shell.columns).toHaveLength(5);
     expect(shell.columns[0].name).toBe("Sell");
@@ -358,21 +359,20 @@ describe("loadFwBoardShell — the PII-free server shell", () => {
   it("still paints (empty columns) for a cohort with no resolvable members", async () => {
     const db = makeFakeDb({ members: [] });
     const shell = await loadFwBoardShell(db, { cohortId: BOSTON });
+    if (shell === null) throw new Error("shell unexpectedly null for an active cohort");
     expect(shell.cohortSlug).toBe("boston-2026-08");
     expect(shell.columns).toEqual([]);
   });
 
-  it("degrades (never throws / never {ok:false}) when a shell read errors", async () => {
-    // The token is already validated, so a transient blip must still paint a shell
-    // (cohortId as the title, empty columns) rather than throwing — the client's
-    // feed poll then fills it (testing review). Verified by failing the cohort read.
-    const db = makeFakeDb({
-      members: [{ student_id: "a", cohort_id: BOSTON }],
-      profiles: [profile("a", "Maya", "Chen")],
-      failTable: "path_cohorts",
-    });
-    const shell = await loadFwBoardShell(db, { cohortId: BOSTON });
-    expect(shell.cohortSlug).toBe(BOSTON); // fell back to the id, did not throw
+  it("FAILS CLOSED (null) when the shell's cohort read errors — changed by Unit 8, deliberately", async () => {
+    // This test used to pin the opposite: a shell read error degraded to a
+    // slug-less shell so the page still painted. Unit 8's archived fence changes
+    // the failure semantics on purpose — the shell now refuses (null → the page's
+    // bare notFound) whenever the cohort row cannot be READ, because a retired
+    // weekend must not be able to hide behind a blip and paint a titled shell.
+    // Same fail-closed posture as the token resolve one function up.
+    const db = makeFakeDb({ failTable: "path_cohorts" });
+    expect(await loadFwBoardShell(db, { cohortId: BOSTON })).toBeNull();
   });
 });
 
@@ -433,3 +433,77 @@ describe("resolveFwBoardToken — per-request validation, one 404 for all refusa
     expect(await resolveFwBoardToken(noExpiry, { token: "m2", nowMs: NOW })).toEqual({ ok: false });
   });
 });
+
+describe("Unit 8 — the archived fence at the READ (R25, 404 semantics)", () => {
+  const NOW = Date.parse("2026-08-22T15:00:00Z");
+  it("archived_at set directly in SQL WITHOUT revoking → the token resolve refuses (read-property, not side-effect)", async () => {
+    // THE test that distinguishes the fence from the archive sequence's side
+    // effects: no revoke ran, the token row is live and unexpired — only the
+    // COHORT is archived, the state a manual SQL archive (or the pre-Unit-7 world)
+    // produces. The read must refuse on the cohort's own state, so the caller's
+    // bare 404 clears the projector frame. A 503-shaped failure would make the
+    // poller HOLD its last frame — children's names on screen indefinitely.
+    const db = makeFakeDb({
+      cohorts: [
+        { id: BOSTON, slug: "boston-2026-08", kind: "fw", archived_at: "2026-08-24T00:00:00Z" },
+      ],
+      tokens: [
+        {
+          id: "t1",
+          cohort_id: BOSTON,
+          token_hash: hashFwBoardToken("live-token"),
+          expires_at: "2027-01-01T00:00:00Z",
+          revoked_at: null,
+        },
+      ],
+    });
+    expect(
+      await resolveFwBoardToken(db, { token: "live-token", nowMs: NOW })
+    ).toEqual({ ok: false });
+  });
+
+  it("an UNREADABLE cohort row refuses too — the unauthenticated door never falls open on a blip", async () => {
+    const db = makeFakeDb({
+      tokens: [
+        {
+          id: "t1",
+          cohort_id: BOSTON,
+          token_hash: hashFwBoardToken("live-token"),
+          expires_at: "2027-01-01T00:00:00Z",
+          revoked_at: null,
+        },
+      ],
+      failTable: "path_cohorts",
+    });
+    expect(
+      await resolveFwBoardToken(db, { token: "live-token", nowMs: NOW })
+    ).toEqual({ ok: false });
+  });
+
+  it("an ACTIVE cohort's live token still resolves — the fence did not close the working door", async () => {
+    const db = makeFakeDb({
+      tokens: [
+        {
+          id: "t1",
+          cohort_id: BOSTON,
+          token_hash: hashFwBoardToken("live-token"),
+          expires_at: "2027-01-01T00:00:00Z",
+          revoked_at: null,
+        },
+      ],
+    });
+    expect(
+      await resolveFwBoardToken(db, { token: "live-token", nowMs: NOW })
+    ).toEqual({ ok: true, cohortId: BOSTON });
+  });
+
+  it("the SHELL refuses an archived cohort with null — the page paints no titled shell for a retired weekend", async () => {
+    const db = makeFakeDb({
+      cohorts: [
+        { id: BOSTON, slug: "boston-2026-08", kind: "fw", archived_at: "2026-08-24T00:00:00Z" },
+      ],
+    });
+    expect(await loadFwBoardShell(db, { cohortId: BOSTON })).toBeNull();
+  });
+});
+

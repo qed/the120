@@ -2573,3 +2573,47 @@ describe("the widened cohort read", () => {
     expect(pre?.archivedBy).toBeNull();
   });
 });
+
+describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (positive invariants, named for their reasons)", () => {
+  // ✓ rows are AUDIT CONFIRMATIONS that no regression occurred. Each is named for
+  // the reason the plan records, because both defaults are structurally invisible
+  // and a reviewer applying the retire-in-place learning would otherwise file them
+  // as P1s and "fix" them.
+  const archivedSeed = async () => {
+    const made = makeFakeDb({});
+    await archiveFwCohort(made.db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    return made;
+  };
+
+  it("REVOKE A GUIDE GRANT proceeds — never block de-escalation", async () => {
+    const { db, tables } = await archivedSeed();
+    tables.path_role_grants.push({
+      id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON,
+    });
+    const res = await revokeFwGuideGrant(db, { cohortId: BOSTON, userId: RAVI, actorUserId: STAFF });
+    expect(res.ok).toBe(true);
+    expect(
+      tables.path_role_grants.filter((g) => g.scope_id === BOSTON && g.user_id === RAVI)
+    ).toHaveLength(0);
+  });
+
+  it("TOKEN REVOKE proceeds (inert post-archive) — a live token on an archived cohort must always be killable", async () => {
+    const { db } = await archivedSeed();
+    // Nothing live (the archive revoked it) — inert, and honestly reported.
+    expect(
+      await revokeFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: false, reason: "no_active_token" });
+  });
+
+  it("LINK AN EXISTING STUDENT refuses — roster-building on a retired weekend", async () => {
+    const { db, tables } = await archivedSeed();
+    tables.path_student_profiles.push({
+      id: "s-new", child_id: null, band: "912", first_name: "Maya", last_name: "Quinn",
+    });
+    expect(
+      await linkFwStudentToCohort(db, { studentId: "s-new", cohortId: BOSTON })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+    expect(tables.path_cohort_members).toHaveLength(0);
+  });
+});
+

@@ -808,3 +808,23 @@ describe("runFwCheckIn — the anonymize write-path guard (Unit 5b)", () => {
     expect(rpcCalls).toHaveLength(0);
   });
 });
+
+describe("Unit 8 invariant — a guide checks in to an archived cohort and the event LANDS", () => {
+  it("pinned structurally: nothing on the check-in path can read archived_at", () => {
+    // The plan's Scope Boundary, as a property rather than a promise: archiving
+    // must not block guide check-in, and the mechanism is that the check-in core
+    // CANNOT see archive state — this harness does not even model path_cohorts,
+    // because runFwCheckIn never reads it (authz resolves upstream, and archive
+    // state is deliberately not part of the actor verdict). The offline drain
+    // replay inherits this same property (it lands through runFwCheckIn).
+    // Comment-stripped, per the scan discipline.
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    for (const rel of ["../fw-checkin-core.ts", "../fw-sync-engine.ts"]) {
+      const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      expect(code, rel).not.toContain("archived_at");
+      expect(code, rel).not.toContain("archivedAt");
+    }
+  });
+});
+

@@ -9,7 +9,7 @@
  *
  * Before this unit both gates had exactly two: "here is who you are" and "you are
  * nobody". A Supabase call that timed out or threw collapsed into the second one,
- * and the second one is TERMINAL — `loadFwSession` returning null redirects a guide
+ * and the second one is TERMINAL — the old `loadFwSession` returning null redirected a guide
  * to the sign-in door mid-Saturday, and `requireStaff` falling through to
  * `forbidden` tells an active staff member their account does not exist. Neither is
  * true. The truth is "we could not find out", and the correct response to it is to
@@ -66,6 +66,16 @@ export type IdentityRead<T> =
   | { kind: "none" }
   | { kind: "unknown"; detail: string };
 
+/*
+ * VOCABULARY NOTE (maintainability review). This state is spelled `"unknown"` here
+ * and `"unavailable"` everywhere a Server Action's typed refusal carries it —
+ * `FwStaffGate`, `StaffAccessVerdict`, `FwSyncActionResult`, the cohort gates. Same
+ * state, two words, on purpose at the boundary: `unknown` describes a READ ("the
+ * answer is unknown"), `unavailable` describes a SERVICE to its caller ("the gate
+ * could not serve you; retry"). A grep for either word alone is incomplete — grep
+ * for both, or for `IdentityUnavailableError`, which every path passes through.
+ */
+
 /**
  * The sentence every identity-unavailable boundary shows.
  *
@@ -84,6 +94,30 @@ export function identityUnavailableCopy(): { title: string; body: string; retry:
     body:
       "This is a connection problem, not a problem with your account — you are still signed in. " +
       "Try again. If it keeps failing, check whether this device needs to sign in to the wi-fi.",
+    retry: "Try again",
+  };
+}
+
+/**
+ * The ROOT boundary's copy — for surfaces whose audience is NOT known to be gated.
+ *
+ * `app/error.tsx` catches every uncaught error in the app that no closer boundary
+ * claimed: a staff layout's identity throw, but ALSO a rendering bug on a public
+ * marketing page viewed by someone who has never signed in. The identity copy's
+ * "you are still signed in" is a false assurance to that second reader — an
+ * authentication claim made to an anonymous visitor — and it dresses a genuine
+ * defect up as a network hiccup (security review). Next replaces `error.message`
+ * in production, so the boundary CANNOT branch on the cause; the root therefore
+ * says only what is true for every reader. The gated boundaries (`/crm`, and the
+ * `/staff` PAGE segment) keep the identity copy, because their audience is behind
+ * the gate by construction.
+ */
+export function generalErrorCopy(): { title: string; body: string; retry: string } {
+  return {
+    title: "Something went wrong loading this page",
+    body:
+      "Try again. If it keeps failing, this device may need to sign in to the wi-fi — " +
+      "nothing you entered has been changed.",
     retry: "Try again",
   };
 }

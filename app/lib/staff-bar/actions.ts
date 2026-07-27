@@ -19,7 +19,7 @@
  * action re-pays a session load (and, for staff, a `staff`-row read) that the page's
  * own gate paid moments earlier. That duplication is the price of keeping identity
  * out of the cached shell, and it is accepted deliberately. What is NOT accepted is
- * paying it twice over: `loadFwSession()` already resolves the auth user, so its
+ * paying it twice over: `loadFwSessionRead()` already resolves the auth user, so its
  * email is carried on `FwSession` rather than fetched by a second `getUser()`.
  *
  * Both actions read only the CALLER's own session and act only on it, so there is no
@@ -33,6 +33,7 @@ import { supabaseServer } from "@/app/lib/supabase/server";
 import { FW_CALL_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
 import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/fp/lib/fw-auth";
 import { loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
+import type { FwResidueBeacon } from "@/app/fp/lib/fw-sync-rules";
 import {
   narrowStaffBarApplication,
   staffBarSignOutDestination,
@@ -45,13 +46,42 @@ import {
  * schema rather than derived from the type, because this is a `"use server"` boundary:
  * the payload arrives over HTTP from a client that may be running an older bundle, so
  * it is narrowed at the door like every other action's input. `actorUserId` is
- * deliberately ABSENT — see `reportFwResidue` on why it is taken from the session.
+ * deliberately ABSENT as an attribution — the session names the sender; the client's
+ * claim rides alongside as `claimedActorUserId`. See `sendFwResidueBeacon`.
  */
 const residueBeaconSchema = z.object({
+  schemaVersion: z.literal(1),
   outcome: z.enum(["queue_preserved", "clear_failed"]),
   queueRemaining: z.number().int().min(0).max(100_000).nullable(),
   application: z.enum(["fw", "crm", "staff"]),
+  /**
+   * The actor the CLIENT observed the outcome for — carried as a CLAIM, not as the
+   * attribution. A handover can complete between the client detecting the outcome
+   * and this POST landing, at which point the live session names the NEW holder
+   * while the outcome belonged to the old one (frontend-races review). Logging both
+   * ids makes that race visible instead of silently mis-attributing; constrained to
+   * a uuid so nothing free-text can ride into the log line.
+   */
+  claimedActorUserId: z.uuid(),
+  /**
+   * A random, client-persisted device identifier — the field the beacon's own
+   * purpose ("which iPad?") requires, since one guide account can hold several
+   * devices across a weekend. Not identifying beyond this app's own localStorage;
+   * carries no hardware fact.
+   */
+  deviceId: z.uuid(),
 });
+
+/** Compile-time drift tripwire: the schema and the pure payload type must move
+ *  together. Narrowing or widening either side turns this assignment red. */
+type _BeaconSchemaMatches =
+  Omit<z.infer<typeof residueBeaconSchema>, "claimedActorUserId" | "deviceId" | "schemaVersion"> extends Omit<FwResidueBeacon, "actorUserId">
+    ? Omit<FwResidueBeacon, "actorUserId"> extends Omit<z.infer<typeof residueBeaconSchema>, "claimedActorUserId" | "deviceId" | "schemaVersion">
+      ? true
+      : never
+    : never;
+const _beaconSchemaMatches: _BeaconSchemaMatches = true;
+void _beaconSchemaMatches;
 
 export type StaffBarIdentityResult =
   | { ok: true; identity: StaffBarIdentity }
@@ -120,7 +150,8 @@ export async function loadStaffBarIdentity(): Promise<StaffBarIdentityResult> {
 }
 
 /**
- * Report, OFF-DEVICE, that this iPad finished a sign-out or a handover still holding
+ * Report, OFF-DEVICE, that this iPad finished a handover (or was refused mid-sign-out)
+ * still holding
  * work — Staff Front Door Unit 5, Peter's decision of 2026-07-27.
  *
  * ── Why this exists
@@ -151,32 +182,48 @@ export async function loadStaffBarIdentity(): Promise<StaffBarIdentityResult> {
  * would hold the sign-out open on a stalled link.
  *
  * The PAYLOAD DECISION is `fwResidueBeacon` (pure, tested), not this function. This
- * one is the transport, and re-derives nothing.
+ * one is the transport, and re-derives nothing but the authenticated sender.
  */
-export async function reportFwResidue(input: unknown): Promise<void> {
+export async function sendFwResidueBeacon(input: unknown): Promise<void> {
   const parsed = residueBeaconSchema.safeParse(input);
   if (!parsed.success) {
     console.error("[fw/residue] refused a malformed beacon");
     return;
   }
-  const read = await loadFwSessionRead();
-  // The reported `actorUserId` is NOT trusted from the client — it is replaced by the
-  // session's own id. A client-supplied identifier on an unauthenticated-writable
-  // endpoint is an invitation to attribute residue to an arbitrary account, and this
-  // record's whole value is that a human can act on the name in it. A session-less or
-  // unreadable caller is dropped: there is nobody to attribute it to, and inventing an
-  // attribution is worse than losing one line.
-  if (read.kind !== "identity") {
+  // The AUTHENTICATED identity — one bounded getUser(), NOT the full session read.
+  // The grants query that loadFwSessionRead also makes exists to compute isFwGuide,
+  // which nothing in a log line needs; paying a second Supabase round trip per
+  // beacon on the COMMON handover path was the performance review's finding.
+  let raced;
+  try {
+    raced = await withFwTimeout((await supabaseServer()).auth.getUser(), "residue beacon getUser", FW_CALL_TIMEOUT_MS);
+  } catch (e) {
+    console.error("[fw/residue] dropped a beacon: getUser threw:", e);
+    return;
+  }
+  const sessionUser = raced.timedOut ? null : raced.value.data.user;
+  if (sessionUser === null) {
+    // No resolvable session, nothing safe to attribute. The CLAIMED id alone is not
+    // enough — an unauthenticated endpoint that records whatever account id it is
+    // handed is an invitation to attribute residue to an arbitrary account.
     console.error("[fw/residue] dropped a beacon with no resolvable session");
     return;
   }
-  // ONE LINE, one JSON object, so a log search returns parseable records rather than
-  // prose that a future reader has to regex apart.
-  console.error(
+  // ONE LINE, one JSON object, stable keys — parseable, not prose. `sessionUserId`
+  // is WHO SENT THIS (authenticated); `claimedActorUserId` is who the device says
+  // the outcome happened under. They differ exactly when a handover raced the POST,
+  // and logging both is what makes that race a visible fact instead of a silent
+  // misattribution (frontend-races review). console.log, not console.error: this is
+  // routine telemetry on a successful path, and error-level would teach every
+  // severity-based alert to ignore the [fw/residue] prefix (agent-native review).
+  console.log(
     `[fw/residue] ${JSON.stringify({
+      schemaVersion: parsed.data.schemaVersion,
       outcome: parsed.data.outcome,
       queueRemaining: parsed.data.queueRemaining,
-      actorUserId: read.identity.userId,
+      sessionUserId: sessionUser.id,
+      claimedActorUserId: parsed.data.claimedActorUserId,
+      deviceId: parsed.data.deviceId,
       application: parsed.data.application,
       at: new Date().toISOString(),
     })}`

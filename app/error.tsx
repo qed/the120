@@ -13,6 +13,14 @@
  * in its layout — so `app/staff/error.tsx` cannot catch it and this one does. Do not
  * delete this on the grounds that the leaf routes have their own.
  *
+ * It renders the GENERAL copy, not the identity copy, and that is a deliberate cost:
+ * a staff member whose /staff LAYOUT gate stalls sees "Something went wrong" rather
+ * than the more specific "we couldn't confirm your access" — because this same
+ * boundary also fronts every public marketing page, where the identity copy's "you
+ * are still signed in" would be a false authentication claim to an anonymous visitor
+ * (security review). The specific copy still shows on /crm and on /staff's PAGE
+ * renders, whose boundaries sit behind the gate by construction.
+ *
  * NOT accompanied by a `global-error.tsx`. That one exists to catch throws from the
  * ROOT LAYOUT, and `app/layout.tsx` fetches nothing and gates nothing — it renders
  * fonts and chrome. Adding one would mean maintaining a second full `<html>` document
@@ -20,7 +28,7 @@
  * read, that changes and this note is the tripwire.
  */
 
-import { IdentityUnavailable } from "@/app/lib/staff-bar/IdentityUnavailable";
+import { IdentityUnavailable } from "@/app/lib/IdentityUnavailable";
 
 export default function RootError({
   error,
@@ -29,5 +37,5 @@ export default function RootError({
   error: Error & { digest?: string };
   unstable_retry: () => void;
 }) {
-  return <IdentityUnavailable error={error} retry={unstable_retry} />;
+  return <IdentityUnavailable error={error} retry={unstable_retry} variant="general" />;
 }

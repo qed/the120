@@ -119,7 +119,14 @@ export const loadFwSessionRead = cache(async function loadFwSessionRead(): Promi
     console.error("[fw/auth] getUser threw:", e);
     return { kind: "unknown", detail: "getUser threw" };
   }
-  if (userRaced.timedOut) return { kind: "unknown", detail: "getUser timed out" };
+  if (userRaced.timedOut) {
+    // Logged HERE, where the timeout is minted — not only where a caller throws.
+    // B5's promise is that on-call can tell "revoked" from "blip" by grepping; a
+    // silent branch keeps the distinction in which PAGE the user saw, which no log
+    // search can recover (agent-native review).
+    console.error("[fw/auth] getUser timed out — session unknown");
+    return { kind: "unknown", detail: "getUser timed out" };
+  }
 
   const user = userRaced.value.data.user;
   if (!user) return { kind: "none" };
@@ -296,8 +303,16 @@ export async function resolveFwStaffGate(): Promise<FwStaffGate> {
     console.error("[fw/auth] staff row read threw:", e);
     return { ok: false, reason: "unavailable" };
   }
-  if (raced.timedOut) return { ok: false, reason: "unavailable" };
-  if (!raced.value) return { ok: false, reason: "not_staff" };
+  if (raced.timedOut) {
+    console.error(`[fw/auth] staff row read timed out for ${session.userId} — gate unavailable`);
+    return { ok: false, reason: "unavailable" };
+  }
+  if (!raced.value) {
+    // The genuine refusal logs too — symmetry is what makes the log a decision
+    // record rather than an accident. Server-side only; the client copy stays merged.
+    console.error(`[fw/auth] staff gate refused ${session.userId}: no active staff row`);
+    return { ok: false, reason: "not_staff" };
+  }
   return { ok: true, userId: session.userId };
 }
 

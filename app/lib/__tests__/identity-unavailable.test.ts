@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  generalErrorCopy,
   IdentityUnavailableError,
   identityUnavailableCopy,
   isIdentityUnavailable,
@@ -87,5 +89,52 @@ describe("IdentityRead — the shape that makes the old collapse a compile error
     }
     // And the three kinds are distinct, so a switch over them is meaningful.
     expect(new Set(reads.map((r) => r.kind)).size).toBe(3);
+  });
+});
+
+describe("generalErrorCopy — the root boundary's words, safe for an anonymous reader", () => {
+  it("makes NO claim about a session", () => {
+    // The root boundary fronts every public page. "You are still signed in" told an
+    // anonymous marketing visitor something false about authentication state — a
+    // phishing-adjacent assurance (security review). The general copy claims nothing.
+    const copy = generalErrorCopy();
+    const all = `${copy.title} ${copy.body}`;
+    expect(all).not.toMatch(/signed in|session|account|access/i);
+  });
+
+  it("still names the retry and the wi-fi remedy", () => {
+    const copy = generalErrorCopy();
+    expect(copy.retry).toMatch(/try again/i);
+    expect(copy.body).toMatch(/wi-?fi/i);
+  });
+
+  it("the identity variant asserts the session and the general variant does not — that difference is the point", () => {
+    expect(identityUnavailableCopy().body).toMatch(/still signed in/i);
+    expect(generalErrorCopy().body).not.toMatch(/still signed in/i);
+  });
+});
+
+describe("the three boundaries wire the right variant — pinned in source, the only way node can see them", () => {
+  // A flipped variant survived every behavioural test (review mutation M9), because
+  // error.tsx components cannot render under environment:"node". So the wiring is
+  // pinned the way this repo pins every untestable-by-construction property: read the
+  // source. Comment-stripped, per the standing rule.
+  const stripComments = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const read = (rel: string) =>
+    stripComments(readFileSync(new URL(rel, import.meta.url), "utf8"));
+
+  it("the ROOT boundary is general — it must not tell an anonymous visitor they are signed in", () => {
+    const root = read("../../error.tsx");
+    expect(root).toContain('variant="general"');
+    expect(root).not.toContain('variant="identity"');
+  });
+
+  it("the gated boundaries are identity — their audience is behind the gate by construction", () => {
+    for (const rel of ["../../staff/error.tsx", "../../crm/error.tsx"]) {
+      const src = read(rel);
+      expect(src, rel).toContain('variant="identity"');
+      expect(src, rel).not.toContain('variant="general"');
+    }
   });
 });

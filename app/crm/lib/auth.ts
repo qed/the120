@@ -5,7 +5,7 @@ import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { FW_CALL_TIMEOUT_MS, fwRead, withFwTimeout } from "@/app/fp/lib/fw-call";
 import { IdentityUnavailableError } from "@/app/lib/identity-unavailable";
-import { resolveStaffAccess, type SessionRead, type StaffRowLike } from "./access";
+import { resolveStaffAccess, type SessionRead } from "./access";
 
 /** The signed-in staff identity every CRM page/action works with. */
 export type StaffSession = { staffId: string; email: string };
@@ -23,7 +23,7 @@ export type StaffSession = { staffId: string; email: string };
  * REQUEST-MEMOIZED with React's `cache()`.
  *
  * NOTE the shape differs from this repo's two existing memoized loaders, and
- * the difference is deliberate rather than an oversight. `loadFwSession`
+ * the difference is deliberate rather than an oversight. `loadFwSessionRead`
  * (`fw-auth.ts`) and `loadFamilyContextCached` (`family-loader.ts`) both
  * memoize a NON-throwing loader and leave the redirecting wrapper
  * (`requireFwSession`) uncached. This memoizes the throwing gate itself,
@@ -67,14 +67,20 @@ export const requireStaff = cache(async function requireStaff(): Promise<StaffSe
     console.error("[crm/auth] getUser threw:", e);
     userRaced = null;
   }
+  if (userRaced?.timedOut) {
+    // Logged where the timeout is minted; the throw far below is generic (its
+    // message is replaced client-side anyway), so this line is what lets on-call
+    // grep "timed out" apart from "revoked" — the whole point of B5.
+    console.error("[crm/auth] getUser timed out — session unreadable");
+  }
+  // ONE derivation of "did the read answer", consumed twice — the review found the
+  // condition written out twice, which is the two-predicates-that-must-agree shape
+  // this repo's Unit 1 exists to kill, one size smaller. A narrowed const rather
+  // than a boolean, because a boolean cannot carry the narrowing to the compiler.
+  const answered = userRaced !== null && !userRaced.timedOut ? userRaced : null;
+  const user = answered === null ? null : answered.value.data.user;
   const sessionRead: SessionRead =
-    userRaced === null || userRaced.timedOut
-      ? "unreadable"
-      : userRaced.value.data.user
-        ? { user: { app_metadata: userRaced.value.data.user.app_metadata } }
-        : null;
-  const user =
-    userRaced !== null && !userRaced.timedOut ? userRaced.value.data.user : null;
+    answered === null ? "unreadable" : user ? { user: { app_metadata: user.app_metadata } } : null;
 
   // One indexed PK lookup; skipped entirely when there's no readable session.
   // Through `fwRead`, the repo's single definition of "bounded and guarded against a
@@ -103,7 +109,13 @@ export const requireStaff = cache(async function requireStaff(): Promise<StaffSe
       `[crm/auth] staff row lookup failed for ${user!.id}: ${staffQuery.error.message}`
     );
   }
-  const staffRow: StaffRowLike = staffQuery === null
+  // Carries `email` — which `resolveStaffAccess` does not need but this function's
+  // OWN return does. The non-null branch is structurally assignable to
+  // `StaffRowLike`, so the pure decision table takes it as-is and the final return
+  // reads `.email` off a value the compiler has actually narrowed, instead of the
+  // `as { email: string }` cast the first draft smuggled in (typescript review).
+  type StaffRowRead = { id: string; email: string; is_active: boolean } | null | "unreadable";
+  const staffRow: StaffRowRead = staffQuery === null
     ? null
     : staffQuery.error
       ? "unreadable"
@@ -112,7 +124,16 @@ export const requireStaff = cache(async function requireStaff(): Promise<StaffSe
   const verdict = resolveStaffAccess({ session: sessionRead, staffRow });
 
   if (verdict === "login") redirect("/crm/login");
-  if (verdict === "forbidden") redirect("/crm/staff-only");
+  if (verdict === "forbidden") {
+    // The genuine refusal is logged so it is distinguishable FROM LOGS ALONE from
+    // the unavailable throw below — B5's stated purpose, previously true only in
+    // which page the user happened to see (agent-native review). Server-side only.
+    console.error(
+      `[crm/auth] staff gate refused${user ? ` ${user.id}` : ""}: ` +
+        (user === null ? "no admin claim path" : staffRow === null ? "no staff row" : "row inactive or claim absent")
+    );
+    redirect("/crm/staff-only");
+  }
   // THROWS rather than redirecting, and the difference is the whole of B5. A redirect
   // is an answer about the account; this is the admission that there was no answer.
   // The nearest `error.tsx` catches it and offers a retry — which is the only control
@@ -130,5 +151,12 @@ export const requireStaff = cache(async function requireStaff(): Promise<StaffSe
     throw new IdentityUnavailableError("requireStaff", "session or staff row unreadable");
   }
 
-  return { staffId: user!.id, email: (staffQuery!.data as { email: string }).email };
+  // `verdict === "ok"` implies all three below by `resolveStaffAccess`'s table; the
+  // guard makes the compiler prove it rather than an `!` asserting it, and if a
+  // future edit to the table breaks the implication this throws the retryable error
+  // rather than rendering with a hole (typescript review).
+  if (user === null || staffRow === null || staffRow === "unreadable") {
+    throw new IdentityUnavailableError("requireStaff", "ok verdict without a resolved user or staff row");
+  }
+  return { staffId: user.id, email: staffRow.email };
 });

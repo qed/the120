@@ -20,7 +20,7 @@
  * scoped to the `/staff` subtree, so the segment retries alone.
  */
 
-import { IdentityUnavailable } from "@/app/lib/staff-bar/IdentityUnavailable";
+import { IdentityUnavailable } from "@/app/lib/IdentityUnavailable";
 
 export default function StaffError({
   error,
@@ -29,5 +29,5 @@ export default function StaffError({
   error: Error & { digest?: string };
   unstable_retry: () => void;
 }) {
-  return <IdentityUnavailable error={error} retry={unstable_retry} className="text-hq-ink" />;
+  return <IdentityUnavailable error={error} retry={unstable_retry} variant="identity" className="text-hq-ink" />;
 }

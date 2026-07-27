@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { glob } from "tinyglobby";
 import {
   OFFLINE_URL,
@@ -223,23 +223,39 @@ describe("sw.js delivery headers (next.config.ts)", () => {
     // Server Action whose id no longer resolves — leaving a device that looks
     // handed-over-ready with a live session and copy saying "try again", which can
     // never work. With it, Next hard-navigates on a deployment mismatch.
-    //
-    // The value is environment-derived, so what is pinned is the property that
-    // matters: the key is declared, and its resolution reaches the documented
-    // variables in the documented order. A literal would only be right on one machine.
     expect("deploymentId" in nextConfig).toBe(true);
-    const expected =
-      process.env.NEXT_DEPLOYMENT_ID ||
-      process.env.VERCEL_DEPLOYMENT_ID ||
-      process.env.VERCEL_GIT_COMMIT_SHA ||
-      undefined;
-    expect((nextConfig as { deploymentId?: string }).deploymentId).toBe(expected);
-    // Locally and in CI none of the three is set, and `undefined` is the deliberate
-    // "feature off" value — skew protection during `next dev` would fight the
-    // fast-refresh loop it exists to survive in production. Asserted so a future reader
-    // does not read the green test above as proof the feature is ON here.
-    if (expected === undefined) {
-      expect((nextConfig as { deploymentId?: string }).deploymentId).toBeUndefined();
+    // Locally and in CI none of the three variables is set and `undefined` is the
+    // deliberate "feature off" value — skew protection during `next dev` would fight
+    // the fast-refresh loop it exists to survive in production.
+    expect((nextConfig as { deploymentId?: string }).deploymentId).toBeUndefined();
+  });
+
+  it("…and the fallback ORDER is real, verified with the variables actually set", async () => {
+    // The first version of this test copy-pasted the production formula and compared
+    // the two — which, in an environment where all three variables are unset, passes
+    // for ANY order including a wrong one (testing review). This one sets the
+    // variables to distinct values and re-imports the config fresh, so the priority
+    // chain is exercised rather than mirrored.
+    vi.stubEnv("NEXT_DEPLOYMENT_ID", "explicit-id");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "vercel-id");
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "sha-id");
+    try {
+      vi.resetModules();
+      let cfg = (await import("@/next.config")).default as { deploymentId?: string };
+      expect(cfg.deploymentId).toBe("explicit-id"); // the documented override wins
+
+      vi.stubEnv("NEXT_DEPLOYMENT_ID", "");
+      vi.resetModules();
+      cfg = (await import("@/next.config")).default as { deploymentId?: string };
+      expect(cfg.deploymentId).toBe("vercel-id"); // then the platform's own id
+
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+      vi.resetModules();
+      cfg = (await import("@/next.config")).default as { deploymentId?: string };
+      expect(cfg.deploymentId).toBe("sha-id"); // then the commit, same for all instances
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
     }
   });
 });
@@ -316,10 +332,45 @@ const productionSources = async (): Promise<Map<string, string>> => {
  * `register(` call whose receiver traces to `serviceWorker`, or a `register(` call
  * taking a worker URL constant", so both spellings and the destructured form match.
  */
+const REGISTER_CALL_PATTERNS = [
+  // Dot or BRACKET access reaching `register` within reach of `serviceWorker` — the
+  // review defeated the dot-only version with `navigator["serviceWorker"]["register"](`.
+  // The lookbehind excludes the Background Sync API's `registration.sync.register(…)`,
+  // which legitimately appears near `serviceWorker` in both PWA components and is a
+  // tag registration, not a worker registration.
+  /\bserviceWorker\b[\s\S]{0,120}?(?<!\bsync)(?<!\bsync\?)(\.\s*register|\[\s*["'`]register["'`]\s*\])\s*\(/g,
+  // Any register call taking one of the worker URL constants…
+  /(?<!\bsync)(?<!\bsync\?)(\.\s*register|\[\s*["'`]register["'`]\s*\])\s*\(\s*(FW_)?SW_URL\b/g,
+  // …or the literal script path.
+  /\bregister\b\s*(\]\s*)?\(\s*["'`]\/sw\.js["'`]/g,
+];
+
 const registersAWorker = (code: string) =>
-  /\bserviceWorker\b[\s\S]{0,120}?\.\s*register\s*\(/.test(code) ||
-  /\.\s*register\s*\(\s*(FW_)?SW_URL\b/.test(code) ||
-  /\bregister\s*\(\s*["'`]\/sw\.js["'`]/.test(code);
+  REGISTER_CALL_PATTERNS.some((p) => {
+    p.lastIndex = 0;
+    return p.test(code);
+  });
+
+/**
+ * How many DISTINCT register-call sites a source contains — the per-file half the
+ * set-equality below cannot see. The review's second defeat: a rogue second
+ * registration added INSIDE an already-allowed file leaves the file set unchanged.
+ * Counting by position (deduped across patterns) closes it.
+ */
+const registerCallCount = (code: string): number => {
+  const positions = new Set<number>();
+  for (const p of REGISTER_CALL_PATTERNS) {
+    p.lastIndex = 0;
+    for (let m = p.exec(code); m !== null; m = p.exec(code)) {
+      // Key on the position of the call's OPENING PAREN — the one token every
+      // pattern's match contains at a comparable place — so one call matched by two
+      // patterns (a registration is usually both "near serviceWorker" and "taking
+      // SW_URL") counts once, not twice.
+      positions.add(m.index + m[0].lastIndexOf("("));
+    }
+  }
+  return positions.size;
+};
 
 describe("service-worker registration is confined to the two PWA components (Unit 5, R18)", () => {
   it("EXACTLY these two files register a worker — a third anywhere reddens", async () => {
@@ -329,6 +380,12 @@ describe("service-worker registration is confined to the two PWA components (Uni
       .map(([file]) => file)
       .sort();
     expect(registrars).toEqual([...ALLOWED_REGISTRARS].sort());
+    // …and EXACTLY ONE call site inside each. The set equality alone is file-level:
+    // a second, broader-scoped registration added inside PathPwa or FwPwa would not
+    // change which files match (testing review's defeat #2).
+    for (const file of ALLOWED_REGISTRARS) {
+      expect(registerCallCount(sources.get(file) ?? ""), file).toBe(1);
+    }
   });
 
   it("the detector is not vacuous — it fires on all three spellings it claims to catch", () => {
@@ -342,6 +399,20 @@ describe("service-worker registration is confined to the two PWA components (Uni
       registersAWorker('const { serviceWorker } = navigator;\nserviceWorker\n  .register("/sw.js")')
     ).toBe(true);
     expect(registersAWorker('worker.register("/sw.js", { scope: "/" })')).toBe(true);
+    // BRACKET NOTATION — the exact spelling the testing review walked through the
+    // first version of this detector with. Both halves bracketed, and mixed.
+    expect(
+      registersAWorker('navigator["serviceWorker"]["register"](FW_SW_URL, { scope: "/" })')
+    ).toBe(true);
+    expect(registersAWorker('navigator["serviceWorker"].register("/sw.js")')).toBe(true);
+    expect(registersAWorker('navigator.serviceWorker["register"](SW_URL)')).toBe(true);
+    // And the counter sees two calls as two — the per-file half of the assertion.
+    expect(
+      registerCallCount(
+        'navigator.serviceWorker.register(FW_SW_URL, {});' +
+          'navigator.serviceWorker.register("/sw.js", { scope: "/" });'
+      )
+    ).toBe(2);
     // And it does NOT fire on unrelated `register(` calls, or the scan would name every
     // file with an event registry and be deleted for crying wolf.
     expect(registersAWorker('formRegistry.register(field)')).toBe(false);
@@ -356,8 +427,19 @@ describe("service-worker registration is confined to the two PWA components (Uni
     const pwa = stripComments(
       readFileSync(resolve(TEST_DIR, "../../fw/components/FwPwa.tsx"), "utf8")
     );
-    expect(pwa).toContain("scope: FW_SW_SCOPE");
-    expect(pwa).toContain('updateViaCache: "none"');
+    // ANCHORED TO THE CALL, not the file. `toContain` over the whole source is
+    // satisfied by a decoy literal in dead code while the real call registers at the
+    // broad scope (testing review's defeat #3) — so the assertions run against the
+    // register call's own argument list, sliced from the call to its options
+    // object's closing brace.
+    // Anchored on the WORKER registration specifically (the call taking FW_SW_URL) —
+    // a bare `.register(` search finds the Background Sync tag registration first.
+    const callStart = pwa.search(/(\.\s*register|\[\s*["'`]register["'`]\s*\])\s*\(\s*FW_SW_URL/);
+    expect(callStart).toBeGreaterThan(-1);
+    const callArgs = pwa.slice(callStart, pwa.indexOf("})", callStart) + 2);
+    expect(callArgs).toContain("FW_SW_URL");
+    expect(callArgs).toContain("scope: FW_SW_SCOPE");
+    expect(callArgs).toContain('updateViaCache: "none"');
     expect(pwa).toContain("shouldRegisterServiceWorker(window.location.hostname)");
   });
 

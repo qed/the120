@@ -177,7 +177,7 @@ export async function drainFwQueue(input: unknown): Promise<FwSyncActionResult> 
  *
  * The verdict rests on three independent reads (grants, cohort, staff row), and a
  * blip in ANY of them collapses to the same fail-closed refusal. Re-resolving is not
- * an option — `loadFwSession` is request-memoized, so a retry in this request returns
+ * an option — `loadFwSessionRead` is request-memoized, so a retry in this request returns
  * the same blipped result — so we probe the tables directly with fresh reads. Any
  * unreadable table means the refusal could be a blip → treat the cohort as UNKNOWN
  * (retry). Only when all three read cleanly is the refusal trusted as a revoke.

@@ -5,6 +5,13 @@
  * write path, the quick-create core, and Unit 8's drain engine can all share
  * ONE definition of "how long we are willing to wait" instead of three.
  *
+ * CONSUMERS OUTSIDE `app/fp/` (recorded so "who may use it" is answered here, not
+ * only at each import): `app/crm/lib/auth.ts` and `app/lib/staff-bar/actions.ts`,
+ * since Staff Front Door Unit 5. The `fw` prefix names where this file grew up, not
+ * who may call it — but anything ADDED here must stay app-neutral, because an
+ * FW-specific default would now silently change the CRM gate's behaviour too. If
+ * this list grows again, move the module to `app/lib/` instead of extending it.
+ *
  * ── Why this got extracted rather than copied
  *
  * Unit 3 built the timeout and the throw-guard for `fw_move_task` and documented

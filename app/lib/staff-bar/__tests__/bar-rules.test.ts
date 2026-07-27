@@ -449,7 +449,9 @@ describe("Unit 5: staffBarSignOutSurface is DELETED, not merely unused", () => {
     // comment necessarily contains the name.
     const exported = barRules as Record<string, unknown>;
     expect(exported.staffBarSignOutSurface).toBeUndefined();
-    // And the thing it existed to feed now takes two arguments, not three.
-    expect(fwSignOutRefusalCopy.length).toBe(2);
+    // The signature scan for the function it fed lives in fw-sync-rules.test.ts —
+    // `.length` is theatre (a defaulted third parameter keeps it at 2), so the arity
+    // assertion that used to sit here was retired with it (testing review).
+    expect(typeof fwSignOutRefusalCopy).toBe("function");
   });
 });

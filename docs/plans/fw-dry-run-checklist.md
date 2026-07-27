@@ -182,9 +182,13 @@ will read on a real screen.
         that proves `unstable_retry` re-fetches rather than merely re-rendering.
 - [ ] **A slow read must not evict a guide.** Same throttle, on `/fp/fw`. The guide must
       **not** be redirected to the sign-in door. B4's entire purpose.
-- [ ] **The residue beacon.** After any `queue_preserved` or `clear_failed` above, search
-      the deployment's runtime logs for `[fw/residue]`. Each should be one JSON object
-      naming the outcome, the count (or `null`), the account and the application.
+- [ ] **The residue beacon.** *(Automatable — a script with Vercel log access can
+      parse-and-shape-check this without a human; only the device half needs hands.)*
+      After any `queue_preserved` or `clear_failed` above, search the deployment's
+      runtime logs for `[fw/residue]`. Each should be one JSON object with stable keys:
+      the outcome, the count (or `null`), the **sender** (`sessionUserId`), the
+      **claimed actor** (`claimedActorUserId` — these differ exactly when a handover
+      raced the report), the `deviceId`, and the application.
       - **This is a log line, not a table** — a table needs a migration and Lane A does
         not hold the migration lock. Confirm the line is there and legible; the
         persistent store is Unit 6's.
@@ -196,7 +200,9 @@ will read on a real screen.
         live session and a "try again" that could never work.
       - **If this still fails, `deploymentId` is not reaching the build.** Check that
         `VERCEL_DEPLOYMENT_ID` or `VERCEL_GIT_COMMIT_SHA` is present at build time, and
-        that `<html>` carries a `data-dpl-id` attribute in production.
+        that `<html>` carries a `data-dpl-id` attribute in production. *(That
+        sub-check is automatable — curl the page and grep the attribute; only the
+        two-person deploy-while-open sequence needs humans.)*
 
 ---
 

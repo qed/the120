@@ -167,3 +167,54 @@ describe("loadFwSessionRead — a non-answer is `unknown`, never `none` (B4)", (
     expect(read.identity.grants).toEqual([]);
   });
 });
+
+describe("every Server Action calling resolveFwActorForCohort guards its throw (B4 rollout tripwire)", () => {
+  it("each importing action file also imports isIdentityUnavailable", async () => {
+    // The api-contract review found 3 of 5 call sites missed the rollout: fw-import,
+    // fw-checkin and fw-student let the new throw escape as a raw rejection, breaking
+    // the actions-never-throw canon on the exact venue-wifi event this unit exists to
+    // survive. The actions are "use server" files node cannot invoke, so the guard is
+    // pinned as a source property: a file that CALLS the throwing resolver must also
+    // import the one guard that can catch it. A new action added without the guard
+    // reddens here by name. (Coarse on purpose — importing the guard and using it
+    // wrongly is possible, but every wrong use so far started with not importing it.)
+    const { readFileSync: rf } = await import("node:fs");
+    const { glob } = await import("tinyglobby");
+    const dir = new URL("../actions/", import.meta.url);
+    const files = await glob(["*.ts"], { cwd: dir.pathname.replace(/^\//, "").replace(/\//g, "/"), absolute: false }).catch(() => [] as string[]);
+    // Resolve robustly on Windows: read via URL, not cwd.
+    const names = files.length > 0 ? files : ["fw-checkin.ts", "fw-guide.ts", "fw-import.ts", "fw-ops.ts", "fw-student.ts", "fw-sync.ts"];
+    const callers: string[] = [];
+    for (const name of names) {
+      let src = "";
+      try {
+        src = rf(new URL(name, dir), "utf8");
+      } catch {
+        continue;
+      }
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      const callPattern = /\bresolveFwActorForCohort\s*\(/g;
+      let sawCall = false;
+      for (let m = callPattern.exec(code); m !== null; m = callPattern.exec(code)) {
+        sawCall = true;
+        // STRUCTURAL, not an import check — the import line survives deleting the
+        // catch, which is exactly the mutation that walked through this scan's first
+        // draft. Every CALL must sit within reach of a `try {` (the guard's shape in
+        // all the action files), and the file must contain a catch testing the guard.
+        const preceding = code.slice(Math.max(0, m.index - 260), m.index);
+        expect(/\btry\s*\{/.test(preceding), `${name}: call at ${m.index} not inside a try`).toBe(
+          true
+        );
+      }
+      if (sawCall) {
+        callers.push(name);
+        expect(
+          /\bcatch\b[\s\S]{0,240}?isIdentityUnavailable\s*\(/.test(code),
+          `${name}: no catch testing isIdentityUnavailable`
+        ).toBe(true);
+      }
+    }
+    // The scan is not vacuous: the resolver has known callers today.
+    expect(callers.length).toBeGreaterThanOrEqual(4);
+  });
+});

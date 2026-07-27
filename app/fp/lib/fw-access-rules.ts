@@ -363,9 +363,11 @@ export function fwClaimStrikeDisposition(
  * asserted from a query that never answered. That is the precise failure B4 and B5
  * exist to remove, one layer up from the gate itself.
  *
- * `default`-less on purpose: a fourth reason is TS2366 here (not all code paths
- * return a value) rather than an empty error string in an ops console at a live
- * event. Same tripwire as `fwSignOutRefusalCopy`.
+ * Exhaustive with an EXPLICIT `never` default, matching `fwSignOutOutcomeCopy` and
+ * for its reason: the `default`-less TS2366 tripwire is a property of the compiler
+ * flags and evaporates under a config change, while the `never` assignment fails
+ * whatever the flags say (typescript review — the repo had both patterns and this
+ * one is strictly stronger).
  *
  * The `unavailable` sentence must name a RETRY, because unlike the other two the
  * caller's next attempt can genuinely succeed.
@@ -380,5 +382,9 @@ export function fwStaffGateCopy(
       return "That action is staff-only.";
     case "unavailable":
       return "Couldn't check your staff access just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
   }
 }

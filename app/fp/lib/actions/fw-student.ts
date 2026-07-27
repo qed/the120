@@ -28,6 +28,7 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import type { Band } from "@/app/fp/content/types";
 import { narrowFwBand } from "@/app/fp/lib/fw-provision-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import {
   runFwMatchLookup,
   runFwQuickCreate,
@@ -91,7 +92,21 @@ export async function lookupFwStudentMatch(input: unknown): Promise<FwMatchLooku
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
   const { cohortId, firstName, lastName } = parsed.data;
 
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
+  // Unit 5 (B4): an unreadable session THROWS from the resolver; here it becomes the
+  // typed `unavailable` the client already renders as "That didn't go through. Try
+  // again." — never `forbidden`, which is a verdict about the account this path did
+  // not reach. Actions never throw (canon).
+  let resolved;
+  try {
+    resolved = await resolveFwActorForCohort(cohortId);
+  } catch (e) {
+    if (isIdentityUnavailable(e)) {
+      console.error(`[fw/student] actor resolve could not read identity: ${e.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    throw e;
+  }
+  const { verdict, session } = resolved;
   if (!verdict.ok) {
     // `cohort_not_found`, `cohort_not_fw` and `not_a_guide` collapse to one
     // answer: distinguishing them would tell a caller which cohort ids are real.
@@ -133,7 +148,21 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
 
   await headers(); // force dynamic; never prerendered
 
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
+  // Unit 5 (B4): an unreadable session THROWS from the resolver; here it becomes the
+  // typed `unavailable` the client already renders as "That didn't go through. Try
+  // again." — never `forbidden`, which is a verdict about the account this path did
+  // not reach. Actions never throw (canon).
+  let resolved;
+  try {
+    resolved = await resolveFwActorForCohort(cohortId);
+  } catch (e) {
+    if (isIdentityUnavailable(e)) {
+      console.error(`[fw/student] actor resolve could not read identity: ${e.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    throw e;
+  }
+  const { verdict, session } = resolved;
   if (!verdict.ok) {
     return {
       ok: false,

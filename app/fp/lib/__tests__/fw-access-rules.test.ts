@@ -12,6 +12,7 @@ import {
   FW_COHORT_KIND,
   FW_GUIDE_INVITE_TTL_MS,
   FW_GUIDE_ROLE,
+  fwStaffGateCopy,
 } from "../fw-access-rules";
 import { PARENT_INVITE_TTL_MS } from "../onboarding-rules";
 
@@ -350,5 +351,32 @@ describe("FW_GUIDE_INVITE_TTL_MS — its own constant (Decision 12)", () => {
         now: now + FW_GUIDE_INVITE_TTL_MS + 1000,
       })
     ).toEqual({ ok: false, reason: "expired" });
+  });
+});
+
+describe("fwStaffGateCopy — one sentence per refusal, and the third is not an accusation (Unit 5)", () => {
+  it("unavailable names a RETRY and asserts nothing about the account", () => {
+    // The reason this function exists: before it, ten call sites answered every
+    // `!gate.ok` with a hand-copied "That action is staff-only." — so a timed-out
+    // staff-row read told an active staff member their access was revoked.
+    const copy = fwStaffGateCopy("unavailable");
+    expect(copy).toMatch(/try again/i);
+    expect(copy).toMatch(/nothing was changed/i);
+    expect(copy).not.toMatch(/staff.only|not allowed|denied/i);
+  });
+
+  it("the three reasons produce three DISTINCT sentences", () => {
+    const all = (["no_session", "not_staff", "unavailable"] as const).map(fwStaffGateCopy);
+    expect(new Set(all).size).toBe(3);
+  });
+
+  it("not_staff keeps the deliberately collapsed message", () => {
+    // The enumeration argument (fw-ops.ts): a guide probing ops endpoints must not
+    // be able to tell "not staff" from "that cohort id is real but not fw".
+    expect(fwStaffGateCopy("not_staff")).toBe("That action is staff-only.");
+  });
+
+  it("no_session names signing in, which is the one thing that can work", () => {
+    expect(fwStaffGateCopy("no_session")).toMatch(/sign in/i);
   });
 });

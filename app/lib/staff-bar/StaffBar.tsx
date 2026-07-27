@@ -38,15 +38,21 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
 import {
   readFwDeviceQueueState,
   reconcileFwCacheOwner,
   runFwSignOut,
   subscribeFwQueue,
 } from "@/app/fp/lib/fw-sync-client";
-import { fwResidueBeacon, fwSignOutOutcomeCopy } from "@/app/fp/lib/fw-sync-rules";
+import {
+  fwResidueBeacon,
+  fwSignOutOutcomeCopy,
+  type FwReconcileOutcome,
+  type FwSignOutOutcome,
+} from "@/app/fp/lib/fw-sync-rules";
 import { isNextRedirect } from "@/app/fp/lib/next-redirect";
-import { loadStaffBarIdentity, reportFwResidue, signOutStaffBar } from "./actions";
+import { loadStaffBarIdentity, sendFwResidueBeacon, signOutStaffBar } from "./actions";
 import {
   parseStaffBarIdentity,
   selectStaffBarIdentity,
@@ -84,18 +90,50 @@ const IDENTITY_KEY = "staffBar.identity";
  * cannot throw into its caller: `void` plus a `.catch` means a beacon that fails on
  * venue wifi never becomes a sign-out that fails.
  */
-function beaconResidue(
-  outcome: Parameters<typeof fwResidueBeacon>[0]["outcome"],
+function dispatchFwResidueBeacon(
+  outcome: FwSignOutOutcome | FwReconcileOutcome,
   actorUserId: string,
   application: StaffBarApplication
 ) {
   const payload = fwResidueBeacon({ outcome, actorUserId, application });
   if (payload === null) return;
-  void reportFwResidue({
+  void sendFwResidueBeacon({
+    schemaVersion: 1,
     outcome: payload.outcome,
     queueRemaining: payload.queueRemaining,
     application: payload.application,
+    // The CLAIM — who this device observed the outcome for. The server logs it
+    // beside its own authenticated read of who SENT the beacon; they differ exactly
+    // when a handover races the POST, and carrying both is what makes that race a
+    // visible log fact rather than a silent misattribution (frontend-races review).
+    claimedActorUserId: payload.actorUserId,
+    deviceId: readFwDeviceId(),
   }).catch((e) => console.error("[staff-bar] residue beacon failed:", e));
+}
+
+/** Where this browser's random beacon identity lives. Localstorage, not IDB — the
+ *  evidence gate's "never CREATE the queue db" rule does not extend to a plain key. */
+const DEVICE_ID_KEY = "fw.deviceId";
+
+/**
+ * A stable random identifier for THIS browser profile, minted on first use.
+ *
+ * It exists because the beacon's question is "WHICH iPad is holding work", and an
+ * account id cannot answer it — one guide signs into several devices across a
+ * weekend. Random uuid, no hardware fact, meaningless outside this app's own logs.
+ * On storage failure (private mode) every beacon reports a fresh id, which reads at
+ * the desk as "an unpersistable device" — itself useful information.
+ */
+function readFwDeviceId(): string {
+  try {
+    const existing = window.localStorage.getItem(DEVICE_ID_KEY);
+    if (existing) return existing;
+    const minted = crypto.randomUUID();
+    window.localStorage.setItem(DEVICE_ID_KEY, minted);
+    return minted;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 /**
@@ -319,7 +357,7 @@ export function StaffBar({
         // holding whatever the reconcile preserved. Skipping the report on unmount
         // would drop exactly the fast-navigation cases, and this is the automatic path
         // that runs far more often than the sign-out button.
-        beaconResidue(outcome, actorUserId, application);
+        dispatchFwResidueBeacon(outcome, actorUserId, application);
         if (cancelled || outcome.kind !== "clear_failed") return;
         console.error("[staff-bar] handover clear failed; residue may remain on this device");
         setMessage(
@@ -376,7 +414,7 @@ export function StaffBar({
         actorIsFwGuide: signOutActorIsFwGuide,
       });
       if (outcome.kind !== "sign_out") {
-        beaconResidue(outcome, actorUserId, application);
+        dispatchFwResidueBeacon(outcome, actorUserId, application);
         setMessage(fwSignOutOutcomeCopy(outcome));
         if (probeActorIsFwGuide !== null) {
           setQueue(
@@ -391,7 +429,26 @@ export function StaffBar({
       // The account's own copy of its identity goes with the session, or the next
       // operator's bar opens showing the last one's address.
       writePersistedIdentity(null);
-      await signOutStaffBar(application); // redirects
+      // BOUNDED CLIENT-SIDE (Unit 5, reliability review). The server half is
+      // deliberately unbounded — giving up server-side would hand back a redirect
+      // while the session lived — but this AWAIT is a fetch on venue wifi, and
+      // unbounded it leaves the button on "Checking…" forever with a reload as the
+      // only escape: the exact failure shape the rest of this unit removes. A
+      // timeout here does NOT claim the sign-out failed (it may still land); the
+      // copy says exactly that. The action ends in redirect(), whose digest arrives
+      // as a rejection and is re-thrown below unchanged.
+      const raced = await withFwTimeout(
+        signOutStaffBar(application), // redirects
+        "sign-out action",
+        FW_ACTION_TIMEOUT_MS
+      );
+      if (raced.timedOut) {
+        setMessage(
+          "Still trying to end the session — this device looks connected but the network is slow. " +
+            "Don't hand the device over yet; if this message stays, reload this page to check whether you are signed out."
+        );
+        return;
+      }
     } catch (e) {
       // `signOutStaffBar` ends in `redirect()`, which Next implements by THROWING a
       // digest. Swallowing it here would report a successful sign-out as a failure —

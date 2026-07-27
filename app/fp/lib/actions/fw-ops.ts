@@ -105,7 +105,13 @@ async function requireCohortStaff(
     throw e;
   }
   const { verdict, session } = resolved;
-  if (!isFwStaffActor(verdict)) return { ok: false, reason: "not_staff" };
+  if (!isFwStaffActor(verdict)) {
+    // SERVER-SIDE only. The client-facing message stays collapsed (the enumeration
+    // argument above); the log does not have to be, and a silent refusal branch is
+    // indistinguishable from the gate never running (agent-native review).
+    console.error(`[fw/ops] cohort staff gate refused: ${verdict.ok ? "not staff for cohort" : verdict.reason}`);
+    return { ok: false, reason: "not_staff" };
+  }
   if (typeof session.userId !== "string" || session.userId.length === 0) {
     console.error("[fw/ops] staff verdict passed with no session user id — refusing");
     return { ok: false, reason: "not_staff" };

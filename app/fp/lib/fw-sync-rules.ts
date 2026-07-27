@@ -1355,6 +1355,12 @@ export function fwSignOutRefusalCopy(
       return `Your session expired before ${count} check-in${s} could send. Sign in again to send ${them}, then sign out.`;
     case "unreadable":
       return "Couldn't check your saved check-ins just now. Try again in a moment.";
+    default: {
+      // Explicit never, matching `fwSignOutOutcomeCopy` below — the TS2366 tripwire
+      // this switch used to lean on evaporates under a flag change; this does not.
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
   }
 }
 

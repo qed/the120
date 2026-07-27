@@ -14,7 +14,7 @@
  * still offer a way forward rather than the framework's page.
  */
 
-import { IdentityUnavailable } from "@/app/lib/staff-bar/IdentityUnavailable";
+import { IdentityUnavailable } from "@/app/lib/IdentityUnavailable";
 
 export default function CrmError({
   error,
@@ -24,6 +24,6 @@ export default function CrmError({
   unstable_retry: () => void;
 }) {
   return (
-    <IdentityUnavailable error={error} retry={unstable_retry} className="bg-crm-card text-crm-ink" />
+    <IdentityUnavailable error={error} retry={unstable_retry} variant="identity" className="bg-crm-card text-crm-ink" />
   );
 }

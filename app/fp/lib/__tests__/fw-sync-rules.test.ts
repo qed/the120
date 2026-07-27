@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -783,11 +784,28 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
     // that reason gone the parameter, the `FwSignOutSurface` type and
     // `staffBarSignOutSurface` were all deleted rather than left defaulted.
     //
-    // This asserts the ARITY, which is what a reviewer would otherwise have to take on
-    // trust: passing a third argument is a compile error, so the check is that the
-    // function declares exactly two parameters.
-    expect(fwSignOutRefusalCopy.length).toBe(2);
-    expect(fwSignOutOutcomeCopy.length).toBe(1);
+    // NOT `Function.prototype.length` — that stops counting at the first defaulted
+    // parameter, so `(reason, count, surface = "fw")` reports 2 and the deleted
+    // parameter could return wearing a default (testing review). The SIGNATURE in
+    // source is what is pinned: the parameter list between the declaration's parens
+    // must contain exactly `reason` and `count`, nothing after.
+    const rulesSource = readFileSync(
+      new URL("../fw-sync-rules.ts", import.meta.url),
+      "utf8"
+    );
+    const refusalSig = /export function fwSignOutRefusalCopy\(([^)]*)\)/.exec(rulesSource);
+    expect(refusalSig).not.toBeNull();
+    const params = (refusalSig?.[1] ?? "")
+      .split(",")
+      .map((p) => p.split(":")[0].trim())
+      .filter(Boolean);
+    expect(params).toEqual(["reason", "count"]);
+    const outcomeSig = /export function fwSignOutOutcomeCopy\(([^)]*)\)/.exec(rulesSource);
+    const outcomeParams = (outcomeSig?.[1] ?? "")
+      .split(",")
+      .map((p) => p.split(":")[0].trim())
+      .filter(Boolean);
+    expect(outcomeParams).toEqual(["outcome"]);
   });
 });
 

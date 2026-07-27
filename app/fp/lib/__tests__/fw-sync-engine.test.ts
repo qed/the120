@@ -999,14 +999,20 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(dev.store).toEqual([]);
   });
 
-  it("one QUARANTINED record refuses with needs_attention and a count", async () => {
+  it("one QUARANTINED record does NOT refuse — and survives the clear (Unit 5)", async () => {
+    // Peter, 2026-07-27. The end-to-end half of the rules-level change: a record this
+    // build cannot read has no readable `actorUserId`, so it cannot be attributed and
+    // Unit 4's scope-to-the-actor remedy cannot apply. It used to refuse whoever was
+    // holding the device and send them to an app they may never have used.
+    //
+    // BOTH halves are asserted through the real flow, because they are separable and
+    // getting only the first is the dangerous outcome: allowing sign-out while the
+    // clear REMOVED the record would destroy un-landed work silently.
     const dev = device({ store: [{ id: "q-1", schemaVersion: 99 }] });
     const outcome = await signOut(dev);
-    expect(outcome).toEqual({
-      kind: "refused",
-      verdict: { ok: false, reason: "needs_attention", queuedCount: 1 },
-    });
-    expect(dev.store).toHaveLength(1); // never silently wiped
+    expect(outcome).toEqual({ kind: "sign_out" });
+    expect(dev.store).toHaveLength(1);
+    expect(dev.store[0]).toMatchObject({ id: "q-1" });
   });
 
   it("a queue read that THROWS with FW evidence present fails CLOSED", async () => {

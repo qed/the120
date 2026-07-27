@@ -320,6 +320,15 @@ async function drainFwQueueOnce(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Pro
       notify();
       return;
     }
+    // `unavailable`: the server could not READ the session (B4). Identical disposal to
+    // the timeout branch above and for the identical reason — nothing is known, so
+    // nothing is concluded. Explicitly NOT `authRequired`: claiming the session
+    // expired would put "sign in again to send them" in front of a guide whose
+    // session is fine, on the one screen where the wrong instruction costs captures.
+    if (res.reason === "unavailable") {
+      notify();
+      return;
+    }
     // invalid_input: the WHOLE batch failed server-side validation. With the
     // stricter isRecognizedFwEntry this should be unreachable for client-recognized
     // entries, but if it ever happens, ADVANCE attempts so the batch reaches the

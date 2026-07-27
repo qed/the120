@@ -27,7 +27,7 @@ import { sendEmail } from "@/app/lib/email";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { clientIp } from "@/app/fp/lib/client-ip";
-import { fwClaimStrikeDisposition } from "@/app/fp/lib/fw-access-rules";
+import { fwClaimStrikeDisposition, fwStaffGateCopy } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 import {
   claimFwGuideInvite,
@@ -49,7 +49,6 @@ import {
 } from "@/app/fp/lib/rate-limit-store";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
-const STAFF_ONLY = "That action is staff-only.";
 const GUIDE_SIGN_IN_FAILED =
   "That email and password don't match. Check both and try again.";
 const RATE_LIMITED = "Too many tries for now. Wait a few minutes, then try again.";
@@ -172,7 +171,7 @@ export async function provisionGuideAction(
   input: unknown
 ): Promise<ProvisionGuideActionResult> {
   const gate = await resolveFwStaffGate();
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const parsed = provisionSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Enter a valid email and cohort." };
@@ -268,7 +267,7 @@ export async function reissueGuideInviteAction(
   input: unknown
 ): Promise<ReissueGuideInviteResult> {
   const gate = await resolveFwStaffGate();
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const parsed = reissueSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };

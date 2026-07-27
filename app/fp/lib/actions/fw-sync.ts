@@ -30,7 +30,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { fwRead, withFwTimeout } from "@/app/fp/lib/fw-call";
-import { loadFwSession, resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { loadFwSessionRead, resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import { runFwDrain, type FwSyncActionResult } from "@/app/fp/lib/fw-sync-engine";
 import type { FwQueueEntry } from "@/app/fp/lib/fw-sync-rules";
 import { FW_ACTIONS } from "@/app/fp/lib/fw-rules";
@@ -62,11 +63,22 @@ export async function drainFwQueue(input: unknown): Promise<FwSyncActionResult> 
   const parsed = drainSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid_input" };
 
-  // Re-auth at drain (Decision 14). `loadFwSession` uses `getUser()`, which is
+  // Re-auth at drain (Decision 14). `loadFwSessionRead` uses `getUser()`, which is
   // revocation-sensitive and triggers Supabase's silent token refresh; a genuinely
-  // expired session returns null here and the client re-prompts the same guide.
-  const session = await loadFwSession();
-  if (!session) return { ok: false, reason: "no_session" };
+  // expired session is `none` here and the client re-prompts the same guide.
+  //
+  // UNKNOWN IS NOT THAT (Unit 5, B4). This call is the first thing the drain does and
+  // it runs inside the client's Web Lock, which is exactly why it is now bounded —
+  // but a bounded call that reported its timeout as `no_session` would be strictly
+  // worse than the hang it replaced. The client treats `no_session` as a truly expired
+  // session: it sets `authRequired`, which `decideFwSignOut` reads to refuse sign-out
+  // with "sign in again to send them". On a stalled venue link that sentence is false
+  // and the guide cannot act on it. A drain that could not authenticate has simply not
+  // happened yet, so it reports as a retryable failure and every entry stays queued.
+  const read = await loadFwSessionRead();
+  if (read.kind === "unknown") return { ok: false, reason: "unavailable" };
+  if (read.kind === "none") return { ok: false, reason: "no_session" };
+  const session = read.identity;
 
   // Scope to THIS session's own captures — the author the same-actor guard reads
   // must equal the session that stamps the replay, and that identity is only true
@@ -105,7 +117,29 @@ export async function drainFwQueue(input: unknown): Promise<FwSyncActionResult> 
     // Bound the resolution: it runs inside the client's Web Lock, so an unguarded
     // hang here would wedge the single-drainer (reliability P1b). A timeout is
     // treated as UNKNOWN — retry, never a permanent reject.
-    const raced = await withFwTimeout(resolveFwActorForCohort(cohortId), `fw drain authz (${cohortId})`);
+    //
+    // THE THROW GUARD IS NOT DECORATION (Unit 5). `withFwTimeout` races a promise; it
+    // does not catch one. A rejection here propagates straight out of the action, so
+    // the client's `await drainFwQueue(...)` rejects — inside the drain lock, with no
+    // typed outcome to apply — and every entry's `attempts` counter goes un-advanced
+    // while the UI shows a generic failure. `resolveFwActorForCohort` can now reject
+    // deliberately (B4's unknown session) and could always reject accidentally (a
+    // supabase-js network abort throws rather than reporting in-band). Both are the
+    // same fact — no answer arrived — and this loop already has the right bucket for
+    // that fact, so they go in it.
+    let raced;
+    try {
+      raced = await withFwTimeout(
+        resolveFwActorForCohort(cohortId),
+        `fw drain authz (${cohortId})`
+      );
+    } catch (e) {
+      if (!isIdentityUnavailable(e)) {
+        console.error(`[fw/sync] drain authz for ${cohortId} threw:`, e);
+      }
+      unknownCohortIds.push(cohortId);
+      continue;
+    }
     if (raced.timedOut) {
       unknownCohortIds.push(cohortId);
       continue;

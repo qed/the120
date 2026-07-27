@@ -3,7 +3,9 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { resolveStaffAccess } from "./access";
+import { FW_CALL_TIMEOUT_MS, fwRead, withFwTimeout } from "@/app/fp/lib/fw-call";
+import { IdentityUnavailableError } from "@/app/lib/identity-unavailable";
+import { resolveStaffAccess, type SessionRead, type StaffRowLike } from "./access";
 
 /** The signed-in staff identity every CRM page/action works with. */
 export type StaffSession = { staffId: string; email: string };
@@ -47,39 +49,86 @@ export type StaffSession = { staffId: string; email: string };
  */
 export const requireStaff = cache(async function requireStaff(): Promise<StaffSession> {
   const supabase = await supabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  // One indexed PK lookup; skipped entirely when there's no session.
+  // BOUNDED + throw-guarded (Staff Front Door Unit 5, B5). Neither call here had any
+  // timeout or AbortSignal: nothing in the Supabase client sets a fetch timeout and no
+  // route configures `maxDuration`, so a stalled round trip held the front door to
+  // every staff tool open for the whole serverless budget.
+  //
+  // Unit 4 made that quantifiably worse rather than theoretically so. `StaffBar` mounts
+  // in three guarded layouts and calls `loadStaffBarIdentity` on every fresh mount, in
+  // a SEPARATE request that this `cache()` cannot span — so `/staff` and `/crm` now pay
+  // an unbounded `getUser()` round trip that never happened on those surfaces before,
+  // and `/fp/fw` pays it twice per view.
+  let userRaced;
+  try {
+    userRaced = await withFwTimeout(supabase.auth.getUser(), "staff gate getUser", FW_CALL_TIMEOUT_MS);
+  } catch (e) {
+    console.error("[crm/auth] getUser threw:", e);
+    userRaced = null;
+  }
+  const sessionRead: SessionRead =
+    userRaced === null || userRaced.timedOut
+      ? "unreadable"
+      : userRaced.value.data.user
+        ? { user: { app_metadata: userRaced.value.data.user.app_metadata } }
+        : null;
+  const user =
+    userRaced !== null && !userRaced.timedOut ? userRaced.value.data.user : null;
+
+  // One indexed PK lookup; skipped entirely when there's no readable session.
+  // Through `fwRead`, the repo's single definition of "bounded and guarded against a
+  // throw" for a Supabase read — the FW prefix names where it lives, not who may use
+  // it, and a second hand-rolled race here would be the drift that helper exists to
+  // prevent.
   const staffQuery = user
-    ? await supabaseAdmin()
-        .from("staff")
-        .select("id, email, is_active")
-        .eq("id", user.id)
-        .maybeSingle()
+    ? await fwRead(
+        () =>
+          supabaseAdmin()
+            .from("staff")
+            .select("id, email, is_active")
+            .eq("id", user.id)
+            .maybeSingle(),
+        `staff row for ${user.id}`
+      )
     : null;
 
-  // A failed query and a genuinely absent row both arrive here as null, and
-  // both fail closed to `forbidden` → a 404. That is the right verdict, but
-  // it means an active staff member hitting a transient database fault is
-  // told "not found" with nothing to distinguish it after the fact. Log it,
-  // matching `loadFwSession`'s handling of its own grants query, so on-call
-  // can tell revocation apart from a blip (review: reliability).
+  // A failed query and a genuinely absent row USED TO both arrive here as null and
+  // both fail closed to `forbidden` → a 404, so an active staff member hitting a
+  // transient fault was told their account does not exist. They are now distinct:
+  // `"unreadable"` reaches `unavailable` and a retryable boundary. Still logged, so
+  // on-call can tell revocation apart from a blip.
   if (staffQuery?.error) {
     console.error(
       `[crm/auth] staff row lookup failed for ${user!.id}: ${staffQuery.error.message}`
     );
   }
-  const staffRow = staffQuery?.data ?? null;
+  const staffRow: StaffRowLike = staffQuery === null
+    ? null
+    : staffQuery.error
+      ? "unreadable"
+      : staffQuery.data;
 
-  const verdict = resolveStaffAccess({
-    session: user ? { user: { app_metadata: user.app_metadata } } : null,
-    staffRow,
-  });
+  const verdict = resolveStaffAccess({ session: sessionRead, staffRow });
 
   if (verdict === "login") redirect("/crm/login");
   if (verdict === "forbidden") redirect("/crm/staff-only");
+  // THROWS rather than redirecting, and the difference is the whole of B5. A redirect
+  // is an answer about the account; this is the admission that there was no answer.
+  // The nearest `error.tsx` catches it and offers a retry — which is the only control
+  // that can succeed here — while rendering none of the guarded subtree.
+  //
+  // ⚠️ WHERE IT IS CAUGHT IS NOT UNIFORM, and the boundaries were placed knowing it.
+  // Next's `error.js` wraps a segment's children but NOT the `layout.js` in its own
+  // segment. `app/crm/(app)/layout.tsx` gates, and `app/crm/error.tsx` sits a segment
+  // ABOVE it, so that one is caught locally. `app/staff/layout.tsx` gates in the same
+  // segment as `app/staff/error.tsx`, so ITS throw bubbles past it to the root
+  // `app/error.tsx`. Both render a retry; only the amount of surrounding chrome
+  // differs. Verified against
+  // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/error.md.
+  if (verdict === "unavailable") {
+    throw new IdentityUnavailableError("requireStaff", "session or staff row unreadable");
+  }
 
-  return { staffId: user!.id, email: staffRow!.email };
+  return { staffId: user!.id, email: (staffQuery!.data as { email: string }).email };
 });

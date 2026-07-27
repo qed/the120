@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { glob } from "tinyglobby";
 import {
   OFFLINE_URL,
   PATH_MANIFEST_URL,
@@ -12,6 +14,8 @@ import {
   FW_BOARD_PREFIX,
   FW_OPS_PREFIX,
   FW_SHELL_CACHE_NAME,
+  FW_SW_SCOPE,
+  FW_SW_URL,
 } from "../fw-sync-rules";
 import nextConfig from "@/next.config";
 
@@ -211,5 +215,167 @@ describe("sw.js delivery headers (next.config.ts)", () => {
     expect(pwa).toContain('updateViaCache: "none"');
     expect(pwa).toContain("shouldRegisterServiceWorker(window.location.hostname)");
     expect(pwa).toContain("scope: SW_SCOPE");
+  });
+
+  it("deploymentId is configured and resolves from a per-deployment build variable (Unit 5)", () => {
+    // Peter's decision, 2026-07-27. Without it a guide iPad left open across a deploy
+    // runs the old bundle: sign-out clears the device's residue FIRST, then calls a
+    // Server Action whose id no longer resolves — leaving a device that looks
+    // handed-over-ready with a live session and copy saying "try again", which can
+    // never work. With it, Next hard-navigates on a deployment mismatch.
+    //
+    // The value is environment-derived, so what is pinned is the property that
+    // matters: the key is declared, and its resolution reaches the documented
+    // variables in the documented order. A literal would only be right on one machine.
+    expect("deploymentId" in nextConfig).toBe(true);
+    const expected =
+      process.env.NEXT_DEPLOYMENT_ID ||
+      process.env.VERCEL_DEPLOYMENT_ID ||
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      undefined;
+    expect((nextConfig as { deploymentId?: string }).deploymentId).toBe(expected);
+    // Locally and in CI none of the three is set, and `undefined` is the deliberate
+    // "feature off" value — skew protection during `next dev` would fight the
+    // fast-refresh loop it exists to survive in production. Asserted so a future reader
+    // does not read the green test above as proof the feature is ON here.
+    if (expected === undefined) {
+      expect((nextConfig as { deploymentId?: string }).deploymentId).toBeUndefined();
+    }
+  });
+});
+
+/* ═════════════════════════ Unit 5: registration discipline, repo-wide (R18) ══ */
+
+/**
+ * Resolved from THIS FILE, never `process.cwd()`. A scan that reads the wrong
+ * directory — or no files at all — is worse than no scan, because it passes silently.
+ * That exact mistake was caught in a sibling test during Unit 3's review.
+ */
+const TEST_DIR = fileURLToPath(new URL(".", import.meta.url));
+/** `app/fp/lib/__tests__/` → the repo root. Four levels up, from THIS file. */
+const REPO_ROOT = fileURLToPath(new URL("../../../../", `file://${TEST_DIR}`));
+
+/**
+ * Comments removed before scanning.
+ *
+ * Same helper, same reason, as `bar-wiring.test.ts`. These files are heavily commented
+ * BY DESIGN, including comments that name the very identifiers being scanned for —
+ * this file's own docblocks say `serviceWorker.register` repeatedly. Unit 3 shipped an
+ * assertion satisfied by the comment explaining the branch it meant to pin, and Unit
+ * 4's reviewer defeated three more. Fix the scan, never the comment.
+ */
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+/**
+ * THE FILES THAT MAY REGISTER A SERVICE WORKER — asserted by SET EQUALITY, not by a
+ * directory prefix.
+ *
+ * ⚠️ The plan's wording for this check ("nothing outside `app/fp/fw/**` calls
+ * `serviceWorker.register`") is not implementable as written, and saying so is part of
+ * the finding rather than a shortcut around it. `PathPwa.tsx` lives at
+ * `app/fp/components/pwa/` — outside that glob — and legitimately registers the same
+ * worker script at the wider `/fp` scope. A literal reading would have to fail on day
+ * one or carve out a second directory prefix, and a prefix carve-out re-opens the hole
+ * for the next component added beside it.
+ *
+ * Equality is strictly stronger than the plan's version in both directions: a third
+ * registrar reddens ANYWHERE, including inside `app/fp/fw/**`, which a prefix check
+ * would have permitted. Two workers at two scopes is the design; a third is a bug
+ * wherever it lives.
+ */
+const ALLOWED_REGISTRARS = [
+  "app/fp/components/pwa/PathPwa.tsx",
+  "app/fp/fw/components/FwPwa.tsx",
+];
+
+const productionSources = async (): Promise<Map<string, string>> => {
+  const files = await glob(["app/**/*.ts", "app/**/*.tsx", "public/**/*.js"], {
+    cwd: REPO_ROOT,
+    absolute: false,
+    dot: false,
+    ignore: ["**/__tests__/**"],
+  });
+  // An empty expansion would make every "is it gone?" assertion below pass vacuously,
+  // which is the one failure mode a scan like this must never have.
+  expect(files.length).toBeGreaterThan(0);
+  return new Map(
+    files.map((f) => [
+      f.replace(/\\/g, "/"),
+      stripComments(readFileSync(`${REPO_ROOT}${f}`, "utf8")),
+    ])
+  );
+};
+
+/**
+ * Does this source register a service worker?
+ *
+ * STRUCTURAL, not a spelling. Anchoring on the literal `navigator.serviceWorker.register(`
+ * is walked through by one intermediate variable — `const sw = navigator.serviceWorker;
+ * sw.register(...)` — which is ordinary code, not an attack. The property is "a
+ * `register(` call whose receiver traces to `serviceWorker`, or a `register(` call
+ * taking a worker URL constant", so both spellings and the destructured form match.
+ */
+const registersAWorker = (code: string) =>
+  /\bserviceWorker\b[\s\S]{0,120}?\.\s*register\s*\(/.test(code) ||
+  /\.\s*register\s*\(\s*(FW_)?SW_URL\b/.test(code) ||
+  /\bregister\s*\(\s*["'`]\/sw\.js["'`]/.test(code);
+
+describe("service-worker registration is confined to the two PWA components (Unit 5, R18)", () => {
+  it("EXACTLY these two files register a worker — a third anywhere reddens", async () => {
+    const sources = await productionSources();
+    const registrars = [...sources.entries()]
+      .filter(([, code]) => registersAWorker(code))
+      .map(([file]) => file)
+      .sort();
+    expect(registrars).toEqual([...ALLOWED_REGISTRARS].sort());
+  });
+
+  it("the detector is not vacuous — it fires on all three spellings it claims to catch", () => {
+    // MUTATION-TESTING THE SCAN ITSELF. The assertion above is an equality against a
+    // two-element list, so a detector that matched NOTHING would fail loudly — but one
+    // that matched only the spelling used today would pass while missing a real third
+    // registrar written any other way. These are the mutations a reviewer would write.
+    expect(registersAWorker('navigator.serviceWorker.register(FW_SW_URL, { scope })')).toBe(true);
+    expect(registersAWorker('const sw = navigator.serviceWorker;\nsw.register(SW_URL, {})')).toBe(true);
+    expect(
+      registersAWorker('const { serviceWorker } = navigator;\nserviceWorker\n  .register("/sw.js")')
+    ).toBe(true);
+    expect(registersAWorker('worker.register("/sw.js", { scope: "/" })')).toBe(true);
+    // And it does NOT fire on unrelated `register(` calls, or the scan would name every
+    // file with an event registry and be deleted for crying wolf.
+    expect(registersAWorker('formRegistry.register(field)')).toBe(false);
+    expect(registersAWorker('register(handler)')).toBe(false);
+  });
+
+  it("FwPwa registers at FW_SW_SCOPE with updateViaCache 'none' and the hostname guard", () => {
+    // PathPwa's twin of this has existed since T1 Unit 11; FwPwa's was never pinned,
+    // and that gap is what this unit closes. Broadening this scope to "/" would put the
+    // FW worker — the one carrying the app-shell caching exception — in control of the
+    // marketing site.
+    const pwa = stripComments(
+      readFileSync(resolve(TEST_DIR, "../../fw/components/FwPwa.tsx"), "utf8")
+    );
+    expect(pwa).toContain("scope: FW_SW_SCOPE");
+    expect(pwa).toContain('updateViaCache: "none"');
+    expect(pwa).toContain("shouldRegisterServiceWorker(window.location.hostname)");
+  });
+
+  it("the SCOPE is the only thing separating the two registrations — so it is pinned by value", () => {
+    // ⚠️ BOTH components register the SAME SCRIPT: `SW_URL` and `FW_SW_URL` are both
+    // "/sw.js". So a substitute-constant mutation in FwPwa (`FW_SW_SCOPE` → `SW_SCOPE`)
+    // changes nothing about which file is fetched and everything about what the worker
+    // controls — it would hand the FW worker the whole `/fp` subtree. The `toContain`
+    // above only checks the KEY is present and survives that mutation, which is why the
+    // VALUES are pinned here too.
+    expect(FW_SW_URL).toBe(SW_URL);
+    expect(FW_SW_SCOPE).toBe("/fp/fw");
+    expect(SW_SCOPE).toBe("/fp");
+    // The FW scope must be strictly INSIDE the Path scope. Not a tautology: it is the
+    // property that makes two workers on one origin coherent, because the more specific
+    // registration is what wins for `/fp/fw` navigations. Were they siblings, the
+    // app-shell exception would never fire.
+    expect(FW_SW_SCOPE.startsWith(SW_SCOPE)).toBe(true);
+    expect(FW_SW_SCOPE.length).toBeGreaterThan(SW_SCOPE.length);
   });
 });

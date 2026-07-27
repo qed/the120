@@ -89,7 +89,15 @@ export type FwDrainResult = { outcomes: FwDrainOutcome[] };
  */
 export type FwSyncActionResult =
   | { ok: true; outcomes: FwDrainOutcome[] }
-  | { ok: false; reason: "no_session" | "invalid_input" };
+  /**
+   * `unavailable` (Staff Front Door Unit 5, B4) — the drain could not establish WHO
+   * is asking, so it did not run. Distinct from `no_session` because the client acts
+   * on that one by setting `authRequired`, which routes the guide to "sign in again";
+   * on a stalled link that is both false and unactionable. Disposed of exactly like
+   * the client's own action timeout: queue untouched, attempts NOT advanced, no
+   * auth prompt — the next drain tries again.
+   */
+  | { ok: false; reason: "no_session" | "invalid_input" | "unavailable" };
 
 const settled = (e: FwQueueEntry): FwDrainOutcome => ({
   entryId: e.id,

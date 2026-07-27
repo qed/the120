@@ -44,9 +44,9 @@ import {
   runFwSignOut,
   subscribeFwQueue,
 } from "@/app/fp/lib/fw-sync-client";
-import { fwSignOutOutcomeCopy } from "@/app/fp/lib/fw-sync-rules";
+import { fwResidueBeacon, fwSignOutOutcomeCopy } from "@/app/fp/lib/fw-sync-rules";
 import { isNextRedirect } from "@/app/fp/lib/next-redirect";
-import { loadStaffBarIdentity, signOutStaffBar } from "./actions";
+import { loadStaffBarIdentity, reportFwResidue, signOutStaffBar } from "./actions";
 import {
   parseStaffBarIdentity,
   selectStaffBarIdentity,
@@ -58,7 +58,6 @@ import {
   staffBarIdentityLabel,
   staffBarQueueChip,
   staffBarShowsHubLink,
-  staffBarSignOutSurface,
   staffBarSkin,
   type StaffBarApplication,
   type StaffBarIdentity,
@@ -69,6 +68,35 @@ import {
  *  whenever the account changes, so a previous operator's address can never outlive
  *  their session on a shared device. */
 const IDENTITY_KEY = "staffBar.identity";
+
+/**
+ * Report an outcome that left work on this device (Unit 5), or do nothing.
+ *
+ * MODULE-LEVEL, not a closure in the component body, for a mundane but load-bearing
+ * reason: one caller is inside the reconcile `useEffect`, and a body-level function
+ * would either join that effect's dependency array — re-running a destructive
+ * handover reconcile whenever an unrelated render produced a new identity — or need a
+ * ref to dodge it. Neither is worth it for a function that reads nothing but its
+ * arguments.
+ *
+ * The DECISION of whether there is anything to report is `fwResidueBeacon`'s, which is
+ * pure and tested; `null` means silence. This wrapper is only the dispatch, and it
+ * cannot throw into its caller: `void` plus a `.catch` means a beacon that fails on
+ * venue wifi never becomes a sign-out that fails.
+ */
+function beaconResidue(
+  outcome: Parameters<typeof fwResidueBeacon>[0]["outcome"],
+  actorUserId: string,
+  application: StaffBarApplication
+) {
+  const payload = fwResidueBeacon({ outcome, actorUserId, application });
+  if (payload === null) return;
+  void reportFwResidue({
+    outcome: payload.outcome,
+    queueRemaining: payload.queueRemaining,
+    application: payload.application,
+  }).catch((e) => console.error("[staff-bar] residue beacon failed:", e));
+}
 
 /**
  * The bar's own height, published to CSS so the sticky headers BELOW it can stack
@@ -286,6 +314,12 @@ export function StaffBar({
         // rejections, so a bare `.catch()` drops exactly the outcomes the unit exists
         // to surface, and this is the automatic path that runs far more often than
         // the sign-out button.
+        // THE BEACON IS NOT GATED ON `cancelled` (Unit 5). `cancelled` means this bar
+        // unmounted — a navigation — and says nothing about the device, which is still
+        // holding whatever the reconcile preserved. Skipping the report on unmount
+        // would drop exactly the fast-navigation cases, and this is the automatic path
+        // that runs far more often than the sign-out button.
+        beaconResidue(outcome, actorUserId, application);
         if (cancelled || outcome.kind !== "clear_failed") return;
         console.error("[staff-bar] handover clear failed; residue may remain on this device");
         setMessage(
@@ -342,7 +376,8 @@ export function StaffBar({
         actorIsFwGuide: signOutActorIsFwGuide,
       });
       if (outcome.kind !== "sign_out") {
-        setMessage(fwSignOutOutcomeCopy(outcome, staffBarSignOutSurface(application)));
+        beaconResidue(outcome, actorUserId, application);
+        setMessage(fwSignOutOutcomeCopy(outcome));
         if (probeActorIsFwGuide !== null) {
           setQueue(
             await readFwDeviceQueueState({ actorUserId, actorIsFwGuide: probeActorIsFwGuide })

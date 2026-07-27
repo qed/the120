@@ -349,3 +349,36 @@ export function fwClaimStrikeDisposition(
 ): "keep" | "release" {
   return reason === "dead_link" ? "keep" : "release";
 }
+
+/* ═══════════════════════════════════ the staff-gate sentence (Unit 5, B4) ══ */
+
+/**
+ * The one sentence a refused `resolveFwStaffGate` shows.
+ *
+ * Exists because Unit 5 gave that gate a THIRD refusal — `unavailable`, meaning the
+ * session or the `staff` row could not be read at all — and every one of its eleven
+ * call sites answered `!gate.ok` with the same hand-copied `STAFF_ONLY` string, in
+ * three separate files. Left alone, a timed-out staff-row lookup would have told an
+ * active staff member their action was staff-only: a verdict about their account,
+ * asserted from a query that never answered. That is the precise failure B4 and B5
+ * exist to remove, one layer up from the gate itself.
+ *
+ * `default`-less on purpose: a fourth reason is TS2366 here (not all code paths
+ * return a value) rather than an empty error string in an ops console at a live
+ * event. Same tripwire as `fwSignOutRefusalCopy`.
+ *
+ * The `unavailable` sentence must name a RETRY, because unlike the other two the
+ * caller's next attempt can genuinely succeed.
+ */
+export function fwStaffGateCopy(
+  reason: "no_session" | "not_staff" | "unavailable"
+): string {
+  switch (reason) {
+    case "no_session":
+      return "Your session has ended. Sign in again to continue.";
+    case "not_staff":
+      return "That action is staff-only.";
+    case "unavailable":
+      return "Couldn't check your staff access just now — nothing was changed. Try again.";
+  }
+}

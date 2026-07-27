@@ -13,12 +13,13 @@ import {
   staffBarQueueChip,
   staffBarShowsHubLink,
   staffBarSignOutDestination,
-  staffBarSignOutSurface,
   staffBarSkin,
   type StaffBarApplication,
   type StaffBarIdentity,
   type StaffBarQueueState,
 } from "../bar-rules";
+import * as barRules from "../bar-rules";
+import { fwSignOutRefusalCopy } from "@/app/fp/lib/fw-sync-rules";
 
 /**
  * Every decision the persistent staff bar takes (Staff Front Door Unit 3; R5, R15,
@@ -434,13 +435,21 @@ describe("staffBarSkin — one component, two token namespaces", () => {
 
 /* ═══════════════════════════════════════ which refusal copy the surface gets ══ */
 
-describe("staffBarSignOutSurface — the needs_attention banner lives on /fp/fw only", () => {
-  it("Founders Weekend gets the FW copy", () => {
-    expect(staffBarSignOutSurface("fw")).toBe("fw");
-  });
-
-  it("everywhere else gets copy that does not name a banner it cannot see", () => {
-    expect(staffBarSignOutSurface("crm")).toBe("elsewhere");
-    expect(staffBarSignOutSurface("staff")).toBe("elsewhere");
+describe("Unit 5: staffBarSignOutSurface is DELETED, not merely unused", () => {
+  it("the module exports no surface helper and imports no surface type", () => {
+    // It answered "which variant of `fwSignOutRefusalCopy` may this surface show", and
+    // exactly one refusal ever varied: `needs_attention`, whose off-`/fp/fw` sentence
+    // told the reader to open Founders Weekend and dismiss a record there. That refusal
+    // no longer exists (Peter, 2026-07-27), so the helper had one caller passing a
+    // value nothing read.
+    //
+    // ASSERTED ON THE MODULE, not on the source text. A source scan here would be
+    // defeated by the explanatory comment that replaced the function — the exact way
+    // three of Unit 3's and three of Unit 4's scans were walked through — because the
+    // comment necessarily contains the name.
+    const exported = barRules as Record<string, unknown>;
+    expect(exported.staffBarSignOutSurface).toBeUndefined();
+    // And the thing it existed to feed now takes two arguments, not three.
+    expect(fwSignOutRefusalCopy.length).toBe(2);
   });
 });

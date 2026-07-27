@@ -642,11 +642,22 @@ export type FwDeviceEvidence =
  * is pure harm: if the open rejects (Safari storage policy, a locked-down profile,
  * `onblocked` behind another tab) the verdict is `unreadable` and their sign-out is
  * blocked permanently on a queue that never existed. Neither signal is checked with
- * `indexedDB.databases()` — Safari does not implement it, and Safari is the shared
- * iPad's browser.
+ * `indexedDB.databases()`: it is async, and it answers "does a database exist" rather
+ * than "did this actor ever use FW". (An earlier comment justified avoiding it by
+ * saying Safari lacks it — true of pre-2024 Safari, not of current versions. Don't
+ * repeat that as fact.)
  *
  * Fails CLOSED on `unknown`: "I could not look" must never be read as "there is
  * nothing here," because the act it authorises is destructive.
+ *
+ * ⚠️ IT CAN STILL FAIL OPEN, which `unknown` does not cover. `cacheOwner === null`
+ * and `queueDbOpened === false` is indistinguishable from "this device holds an
+ * undrained queue but localStorage was evicted" — localStorage and IndexedDB evict
+ * independently. Four reviewers converged on this. It is unreachable in practice only
+ * while every mount that renders the sign-out control also mounts `FwPwa` (which
+ * opens the database and sets the flag). Staff Front Door Unit 3 mounts the bar
+ * outside that group and must replace this gate with the server-known "is this actor
+ * an FW guide" rather than harden the client-storage heuristic.
  */
 export function hasFwDeviceEvidence(evidence: FwDeviceEvidence): boolean {
   if (evidence.kind === "unknown") return true;

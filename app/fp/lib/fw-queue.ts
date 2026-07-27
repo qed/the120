@@ -52,10 +52,25 @@ export function isFwQueueSupported(): boolean {
  * database — half of the sign-out evidence gate in `hasFwDeviceEvidence`.
  *
  * `indexedDB.open` creates the database as a side effect, so "is the queue empty?"
- * cannot be asked without first answering "was there ever a queue?". Safari does not
- * implement `indexedDB.databases()` and Safari is the shared iPad's browser, so the
- * only portable signal is this in-document flag plus the persisted `fw.cacheOwner`
- * key — a page that captured, drained or cached a roster has necessarily set it.
+ * cannot be asked without first answering "was there ever a queue?". The signal used
+ * is this in-document flag plus the persisted `fw.cacheOwner` key — a page that
+ * captured, drained or cached a roster has necessarily set it.
+ *
+ * NOT `indexedDB.databases()`. An earlier version of this comment justified that by
+ * saying Safari does not implement it; that was true of pre-2024 Safari but is no
+ * longer, so do not repeat it as fact. The reasons that still hold: it is async, and
+ * it answers "does a database exist" rather than "did this actor ever use FW" — which
+ * is the question the gate is actually asking.
+ *
+ * ⚠️ THIS GATE IS NOT SOUND ON ITS OWN, and the plan's staff nav bar is where that
+ * starts to matter. `queueDbOpened` is per-DOCUMENT and false on every fresh load, so
+ * the gate rests entirely on a localStorage key surviving independently of IndexedDB
+ * — two storage subsystems with independent eviction. Evict the key while the queue
+ * survives and sign-out skips the check completely. It is safe TODAY only because
+ * `FwPwa` opens this database on every mount of the layout that renders the sign-out
+ * button, which is incidental coupling, not a guarantee. Mounting that button outside
+ * the `/fp/fw` (app) group requires replacing this heuristic with the server-known
+ * fact of whether the actor is an FW guide (Staff Front Door Unit 3).
  */
 let queueDbOpened = false;
 

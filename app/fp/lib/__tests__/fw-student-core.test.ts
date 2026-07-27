@@ -396,6 +396,13 @@ describe("Unit 8 invariant — guide quick-create SUCCEEDS on an archived cohort
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     expect(code).not.toContain("archived_at");
     expect(code).not.toContain("archivedAt");
+    // And the shared gate it rides (see fw-checkin-core.test.ts for the full sweep):
+    // provisioning's own core must not import archive state through the ACTOR path.
+    const auth = readFileSync(new URL("../fw-auth.ts", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(auth).not.toContain("archived_at");
+    expect(auth).not.toContain("archivedAt");
   });
 });
 

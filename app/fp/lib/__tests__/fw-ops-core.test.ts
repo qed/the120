@@ -2605,6 +2605,32 @@ describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (posi
     ).toEqual({ ok: false, reason: "no_active_token" });
   });
 
+  it("STUDENT ANONYMIZE proceeds — the privacy obligation outlives the weekend", async () => {
+    // A parent's erasure request does not expire because staff retired the cohort;
+    // blocking it would turn an archive into a compliance hole.
+    const { db } = makeFakeDb(anonymizeSeed());
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const res = await anonymizeFwStudent(db, {
+      studentId: MAYA,
+      cohortId: BOSTON,
+      actorUserId: STAFF,
+      confirmName: "Maya Chen",
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("REPLAY-REJECT RESOLUTION proceeds — closing a tombstone is not roster-building", async () => {
+    const { db, tables } = await archivedSeed();
+    tables.path_fw_replay_rejects.push({
+      id: "rej-arch", student_id: RAVI, task_id: "1.2.4", cohort_id: BOSTON,
+      actor: RAVI, action: "undo", reason: "cross_actor_undo",
+      created_at: "2026-08-22T14:30:00Z", resolved_at: null, resolved_by: null,
+    });
+    expect(
+      await resolveFwReplayReject(db, { rejectId: "rej-arch", cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+    ).toEqual({ ok: true });
+  });
+
   it("LINK AN EXISTING STUDENT refuses — roster-building on a retired weekend", async () => {
     const { db, tables } = await archivedSeed();
     tables.path_student_profiles.push({

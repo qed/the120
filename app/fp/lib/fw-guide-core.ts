@@ -233,7 +233,11 @@ export async function provisionFwGuide(
   );
   if (archived.error) return { ok: false, reason: "unavailable" };
   const archivedRow = archived.data as Record<string, unknown> | null;
-  if (archivedRow && typeof archivedRow.archived_at === "string") {
+  // An ABSENT row fails closed to not-found, matching the two other archived-gate
+  // reads in this unit — cohorts are never hard-deleted today, so this is
+  // consistency armour, not a live branch (correctness review).
+  if (!archivedRow) return { ok: false, reason: "cohort_not_found" };
+  if (typeof archivedRow.archived_at === "string") {
     return { ok: false, reason: "cohort_archived" };
   }
 

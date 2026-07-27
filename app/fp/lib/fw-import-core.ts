@@ -365,7 +365,10 @@ async function exceptionRow(
  */
 export type RunFwImportChunkResult =
   | { outcomes: FwImportOutcome[] }
-  | { refused: "cohort_archived" | "cohort_not_found" };
+  /** `unavailable` is the gate READ failing — retryable, never a claim about the
+   *  cohort (the B4 discipline: a blip on a healthy cohort mid-import must not
+   *  report as "the cohort is gone"). The other two are terminal facts. */
+  | { refused: "cohort_archived" | "cohort_not_found" | "unavailable" };
 
 /**
  * Provision one chunk of rows, in order, SEQUENTIALLY.
@@ -391,7 +394,7 @@ export async function runFwImportChunk(
       db.from("path_cohorts").select("archived_at").eq("id", input.cohortId).maybeSingle(),
     `import chunk cohort gate (${input.cohortId})`
   );
-  if (gate.error) return { refused: "cohort_not_found" };
+  if (gate.error) return { refused: "unavailable" };
   const gateRow = gate.data as Record<string, unknown> | null;
   if (!gateRow) return { refused: "cohort_not_found" };
   if (typeof gateRow.archived_at === "string") return { refused: "cohort_archived" };

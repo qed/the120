@@ -111,6 +111,15 @@ export async function resolveFwBoardToken(
   // recorded as wrong). Fail-closed BOTH ways: an unreadable cohort row refuses —
   // a door nobody authenticates must never fall open to "we couldn't check".
   //
+  // A KNOWN, ACCEPTED SIDE-CHANNEL rides this (correctness review, 0.6): a
+  // once-live token on an archived cohort refuses after TWO reads where a garbage
+  // token refuses after one — a timing difference, though the response is the
+  // identical bare 404. What it could confirm to a timing-capable attacker is "this
+  // guessed token was once real", for a cohort whose board is dark and whose data
+  // this path will never serve. Closing it would mean an unconditional dummy second
+  // read on every garbage probe — paying a real per-poll cost to hide a fact of no
+  // exploitable value. Recorded so the trade-off is a decision, not an oversight.
+  //
   // This is also the SECOND fence behind Unit 7's mint guard: even if a live token
   // exists on an archived cohort (the pre-guard world, or a manual SQL archive that
   // skipped the revoke), the READ refuses. The test for that state sets archived_at
@@ -385,7 +394,16 @@ export async function loadFwBoardShell(
     `board shell cohort (${input.cohortId})`
   );
   const cohortRow = cohortRes.data as Record<string, unknown> | null;
-  if (cohortRes.error || !cohortRow) return null;
+  // A read ERROR degrades (the pre-Unit-8 contract, restored by its review): the
+  // page only reaches this function AFTER `resolveFwBoardToken` succeeded, and THAT
+  // read — of this same row, milliseconds earlier — is the archived fence. A blip
+  // here is therefore a blip on a cohort just proven active, and 404ing a healthy
+  // live board over it is over-closed (correctness review, 0.65). What refuses is a
+  // READ THAT ANSWERED: a row that is archived, or no row at all.
+  if (cohortRes.error) {
+    return { cohortSlug: input.cohortId, columns: [] };
+  }
+  if (!cohortRow) return null;
   if (typeof cohortRow.archived_at === "string") return null;
   const cohortSlug = typeof cohortRow.slug === "string" ? cohortRow.slug : input.cohortId;
 

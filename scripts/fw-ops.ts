@@ -799,7 +799,9 @@ fresh link emailed to ${issued.email}`);
         throw new Error(
           res.refused === "cohort_archived"
             ? `cohort ${cohortId} is archived — unarchive it before importing`
-            : `cohort ${cohortId} not found`
+            : res.refused === "unavailable"
+              ? `the cohort check failed (transient read error) — nothing imported from this chunk on; re-run the import`
+              : `cohort ${cohortId} not found`
         );
       }
       outcomes.push(...res.outcomes);

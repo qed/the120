@@ -810,6 +810,27 @@ describe("listFwImportExceptions / resolveFwImportException (via the fold)", () 
   });
 });
 
+describe("Unit 8 — exception resolution PROCEEDS on an archived cohort (guard table ✓ row)", () => {
+  it("a pending import exception on a retired weekend can still be dismissed", async () => {
+    // Cleanup of the past is never blocked by retirement — the exception row is
+    // about work already attempted, not new roster-building.
+    const { db, tables } = ambiguousDb();
+    const parked = outcomesOf(await parkAlex(db));
+    expect(parked[0].kind).toBe("exception");
+    tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at = "2026-08-24T00:00:00Z";
+    const pending = tables.path_fw_import_exceptions.find((e) => e.state === "pending")!;
+    expect(
+      await resolveFwImportException(db, {
+        exceptionId: pending.id as string,
+        cohortId: BOSTON,
+        actorUserId: GUIDE,
+        disposition: "dismissed",
+        now: 5,
+      })
+    ).toEqual({ ok: true });
+  });
+});
+
 describe("Unit 8 — the CSV chunk refuses an archived cohort, whole-chunk", () => {
   it("a chunk POSTed at an archived cohort is refused: zero accounts, zero memberships, zero exceptions", async () => {
     const { db, tables, authUsers } = makeFakeDb({});
@@ -841,7 +862,13 @@ describe("Unit 8 — the CSV chunk refuses an archived cohort, whole-chunk", () 
     const hits = [...code.matchAll(/archived_at/g)];
     expect(hits.length).toBeGreaterThan(0); // the gate exists
     const chunkStart = code.indexOf("export async function runFwImportChunk");
-    const chunkEnd = code.indexOf("export", chunkStart + 10);
+    // Statement-start anchor, not a bare substring: a future log message containing
+    // the WORD "export" inside the chunk body would truncate a substring search and
+    // misclassify in-body references as outside (testing review, 0.6 — a false
+    // positive, but a confusing one).
+    const after = code.slice(chunkStart + 10);
+    const m = /\n\s*export\s/.exec(after);
+    const chunkEnd = m ? chunkStart + 10 + (m.index ?? 0) : code.length;
     for (const h of hits) {
       expect(
         (h.index ?? 0) > chunkStart && (h.index ?? 0) < chunkEnd,

@@ -124,13 +124,17 @@ export async function importFwStudentsChunk(input: unknown): Promise<ImportChunk
   if ("refused" in chunk) {
     // Whole-chunk, deliberately (Unit 8's recorded decision): one cohort-level fact
     // gets one refusal, not N fabricated row outcomes and N exception rows to
-    // resolve by hand. The archived sentence names the restore path.
+    // resolve by hand. Each reason gets ITS OWN sentence — the first draft mapped
+    // `cohort_not_found` onto the staff-only copy, telling a caller who had just
+    // PASSED the staff gate that they were not staff (correctness review, 0.85).
     return {
       success: false,
       error:
         chunk.refused === "cohort_archived"
           ? "This weekend is archived — restore it before importing students."
-          : fwStaffGateCopy("not_staff"),
+          : chunk.refused === "unavailable"
+            ? "Couldn't check this weekend just now — nothing was imported. Try again."
+            : "This weekend no longer exists. Refresh the ops list.",
     };
   }
 

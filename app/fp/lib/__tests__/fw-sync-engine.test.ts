@@ -832,23 +832,28 @@ function portsFor(
       expect(lock.held).toBe(1);
       dev.onDrain(dev);
     },
-    clear: async (blocksClear, policy) => {
+    clear: async (disposition, policy) => {
       dev.beforeClear?.(dev);
-      // Models `clearFwQueueIfEmpty`: count-then-clear in ONE transaction, under the
-      // predicate the flow supplied — never a second, hand-written emptiness test.
-      const blocking = dev.store.filter(blocksClear).length;
-      const queueCleared = blocking === 0;
-      if (queueCleared) dev.store = [];
+      // Models `clearFwQueueUnlessBlocked`: classify-then-delete in ONE transaction,
+      // under the disposition the flow supplied — never a second, hand-written
+      // emptiness test. `abort` stops the whole clear (a tap raced in since the
+      // verdict); `preserve` survives it; everything else goes.
+      const dispositions = dev.store.map(disposition);
+      const queueCleared = !dispositions.includes("abort");
+      if (queueCleared) {
+        dev.store = dev.store.filter((_, i) => dispositions[i] === "preserve");
+      }
+      const queueRemaining = dev.store.length;
       // …and `clearFwResidue`'s cache policy: all three together on sign-out, caches
       // unconditionally on a handover (they are the PRIOR account's names).
       if (!shouldClearFwCaches(policy, queueCleared)) {
-        return { queueCleared, rosterCleared: true, shellCleared: true };
+        return { queueCleared, queueRemaining, rosterCleared: true, shellCleared: true };
       }
       const rosterCleared = !dev.rosterClearFails;
       if (rosterCleared) dev.rosterCached = false;
       const shellCleared = !dev.shellClearFails;
       if (shellCleared) dev.shellCached = false;
-      return { queueCleared, rosterCleared, shellCleared };
+      return { queueCleared, queueRemaining, rosterCleared, shellCleared };
     },
   };
 }
@@ -919,18 +924,52 @@ describe("runFwSignOutFlow — check and act observe ONE predicate", () => {
     expect(dev.store).toEqual([]); // …and it did not survive the clear
   });
 
-  it("one FOREIGN UNDRAINED entry refuses, names the other account, and is NOT destroyed", async () => {
+  it("R16: one FOREIGN UNDRAINED entry SIGNS OUT and is preserved, not destroyed", async () => {
+    // Staff Front Door Unit 4. This used to refuse, which exceeded R16 ("undrained
+    // captures FOR THE SIGNING-OUT ACCOUNT") and stranded whoever was holding a shared
+    // iPad after a guide walked off without signing out. Both halves are asserted
+    // together on purpose: the session ends AND the departed guide's tap is still
+    // there. Asserting only the first is how the fix becomes a data-loss bug.
     const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
     const dev = device({ store: [foreign] });
-    const outcome = await signOut(dev);
 
-    expect(outcome).toEqual({
-      kind: "refused",
-      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
-    });
-    expect(fwSignOutOutcomeCopy(outcome)).toMatch(/another account/i);
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
     expect(dev.store).toEqual([foreign]); // un-landed work of a guide who is not here
     expect(dev.drains).toBe(0); // this session could never ship it anyway
+    // The caches DID go — they hold this account's names and authed HTML.
+    expect(dev.rosterCached).toBe(false);
+    expect(dev.shellCached).toBe(false);
+  });
+
+  it("…and the departed guide's tap survives alongside this account's own clear", async () => {
+    // The mixed queue is where a fix that "filters foreign out" instead of preserving
+    // it goes wrong: this account's own entries and tombstones must go, the other
+    // account's must not, in ONE clear.
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const dev = device({
+      store: [entry("checkmark"), entry("not_yet", { blocked: rejected }), foreign],
+    });
+
+    expect(await signOut(dev)).toEqual({ kind: "sign_out" });
+    expect(dev.drains).toBe(1); // its own drainable tap shipped first
+    expect(dev.store).toEqual([foreign]);
+  });
+
+  it("a tap racing in from THIS account still aborts the clear, foreign entries or not", async () => {
+    // The adversarial-review P0 that the three-way split must not weaken: `preserve`
+    // means "leave it and carry on", `abort` still means "stop". A queue holding both
+    // must stop.
+    const foreign = entry("checkmark", { actorUserId: OTHER_GUIDE });
+    const raced = entry("checkmark");
+    const dev = device({
+      store: [foreign],
+      beforeClear: (d) => {
+        d.store = [...d.store, raced];
+      },
+    });
+
+    expect(await signOut(dev)).toEqual({ kind: "raced" });
+    expect(dev.store).toEqual([foreign, raced]); // nothing destroyed
   });
 
   it("one FOREIGN BLOCKED entry does not wedge — it clears with the rest", async () => {
@@ -1297,17 +1336,21 @@ describe("runFwCacheOwnerReconcile — a device that changed hands", () => {
     expect(lock.held).toBe(0);
   });
 
-  it("B2 + R16 end to end: after a handover, the new guide's sign-out REFUSES on the survivors", async () => {
-    // The whole point of preserving them. The reconcile keeps the captures; sign-out
-    // is the surface that names the account which has to come back for them.
+  it("B2 + R16 end to end: after a handover the new guide signs out, and the survivors survive", async () => {
+    // The scenario the whole preserve/refuse design exists for, run as one sequence:
+    // guide A leaves undrained captures on a shared iPad, B picks it up, works, and
+    // signs out. B's session must END (Unit 4 — refusing here was outside R16's scope
+    // and outside B's control to fix) and A's captures must still BE THERE.
+    //
+    // Both assertions in one test on purpose. They are the two ways this can be got
+    // wrong, and each is the other's guard: pass the first alone and you have a
+    // data-loss bug, pass the second alone and you have the wedge B had before.
     const theirs = entry("checkmark", { actorUserId: OTHER_GUIDE });
     const dev = device({ owner: OTHER_GUIDE, store: [theirs], online: false });
-    await reconcile(dev);
+    expect(await reconcile(dev)).toEqual({ kind: "queue_preserved", preservedCount: 1 });
 
-    const outcome = await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true });
-    expect(outcome).toEqual({
-      kind: "refused",
-      verdict: { ok: false, reason: "foreign_queue", queuedCount: 1 },
+    expect(await signOut(dev, makeFakeLockManager(), { actorIsFwGuide: true })).toEqual({
+      kind: "sign_out",
     });
     expect(dev.store).toEqual([theirs]);
   });

@@ -13,7 +13,7 @@
  * the Path's `offline-queue.ts` is NOT cleared on sign-out because a family device
  * protects a child's evidence across sessions. A shared guide iPad is the opposite
  * case — it rotates operators — so FW BLOCKS sign-out while items are queued and,
- * after a successful drain, clears BOTH stores (`clearFwQueueIfEmpty` +
+ * after a successful drain, clears BOTH stores (`clearFwQueueUnlessBlocked` +
  * `clearFwRoster`). The clearing is the caller's (the sign-out flow's) after
  * `decideFwSignOut` returns ok; this file only exposes the primitives — and the
  * queue primitive is CONDITIONAL by construction, never a blind wipe.
@@ -35,6 +35,7 @@ import {
   FW_QUEUE_DB_VERSION,
   FW_QUEUE_STORE,
   FW_ROSTER_STORE,
+  type FwClearDisposition,
   type FwQueueEntry,
   type FwRosterCache,
 } from "./fw-sync-rules";
@@ -228,53 +229,83 @@ export function deleteFwEntry(id: string): Promise<void> {
  * what it cannot ship, the export had zero callers. It is deleted rather than left
  * exported, following Unit 1's handling of `fwSignOutVerdict`: an unguarded
  * "empty the queue" primitive sitting one import away is how B2 comes back. Every
- * destructive path now goes through `clearFwQueueIfEmpty` and its predicate.
+ * destructive path now goes through `clearFwQueueUnlessBlocked` and its disposition.
  */
 
 /**
- * ATOMIC check-and-clear: clears the queue ONLY if no record BLOCKS the clear, in ONE
- * transaction, serialized on the write chain.
+ * ATOMIC classify-and-clear: removes every record the caller's disposition says may go,
+ * keeps the ones it says to preserve, and does NOTHING AT ALL if any record aborts — in
+ * ONE transaction, serialized on the write chain.
  *
  * The sign-out flow's safety backstop (adversarial review's P0): even after the
  * verdict says the queue may be wiped, a check-in can be enqueued in the window
  * before the clear runs. A blind `store.clear()` would then wipe that
- * just-committed tap. By counting and clearing inside one transaction that runs AFTER
- * every pending enqueue (the chain) and observes a consistent snapshot (the
- * transaction), a tap that raced in makes the count non-zero and the clear a no-op —
+ * just-committed tap. By classifying and clearing inside one transaction that runs
+ * AFTER every pending enqueue (the chain) and observes a consistent snapshot (the
+ * transaction), a tap that raced in yields `abort` and the clear becomes a no-op —
  * the caller sees `cleared:false` and aborts sign-out rather than losing the tap.
  *
- * `blocksClear` IS THE POINT OF THE SIGNATURE. This used to be a bare `store.count()`,
+ * `disposition` IS THE POINT OF THE SIGNATURE. This used to be a bare `store.count()`,
  * which counted EVERY record — including the blocked tombstones and foreign entries
  * the verdict deliberately excluded from its own count. One blocked entry therefore
  * produced `ok` from the check and `cleared:false` from the act, and the guide got
  * "a check-in just came in — try again in a moment" forever, on a device where
- * nothing would ever change. The caller now passes the SAME predicate its verdict
- * classified with (`fwEntryBlocksSignOutClear`), so check and act cannot drift again;
- * this driver keeps no emptiness opinion of its own, exactly as the header demands.
+ * nothing would ever change. The caller passes the SAME classification its verdict
+ * used (`fwEntryClearDisposition`), so check and act cannot drift again; this driver
+ * keeps no emptiness opinion of its own, exactly as the header demands.
  *
- * A predicate that THROWS aborts the transaction, which rejects — and a rejected
+ * WHY THE SECOND PASS RE-CLASSIFIES rather than reusing the first pass's array: the
+ * cursor walks the store in key order and `getAll()` returns its own array, and pairing
+ * the two by index would be an assumption about IndexedDB's ordering guarantees that
+ * this driver has no business making. `disposition` is pure, so evaluating it twice per
+ * record is free of consequence and self-evidently correct — which matters more here
+ * than one traversal, because getting it wrong deletes a child's check-in.
+ *
+ * A CURSOR, not per-id deletes: a record whose shape carries no usable `id` (corrupt,
+ * or from a future schema) has nothing to delete BY, and `store.clear()` used to sweep
+ * it. `cursor.delete()` removes the record in front of it whatever its shape, so the
+ * selective clear does not quietly start accumulating garbage the blind one collected.
+ *
+ * A disposition that THROWS aborts the transaction, which rejects — and a rejected
  * clear is `cleared:false` at the caller. Failing closed is the correct direction:
  * the queue survives.
  */
-export function clearFwQueueIfEmpty(
-  blocksClear: (rawEntry: unknown) => boolean
-): Promise<{ cleared: boolean; blocking: number }> {
+export function clearFwQueueUnlessBlocked(
+  disposition: (rawEntry: unknown) => FwClearDisposition
+): Promise<{ cleared: boolean; blocking: number; remaining: number }> {
   return enqueueWrite(async () => {
     const db = await openFwDb();
     try {
-      return await new Promise<{ cleared: boolean; blocking: number }>((resolve, reject) => {
-        const tx = db.transaction(FW_QUEUE_STORE, "readwrite");
-        const store = tx.objectStore(FW_QUEUE_STORE);
-        const allReq = store.getAll();
-        let blocking = 0;
-        allReq.onsuccess = () => {
-          blocking = ((allReq.result ?? []) as unknown[]).filter(blocksClear).length;
-          if (blocking === 0) store.clear();
-        };
-        tx.oncomplete = () => resolve({ cleared: blocking === 0, blocking });
-        tx.onerror = () => reject(tx.error ?? new Error("clearIfEmpty failed"));
-        tx.onabort = () => reject(tx.error ?? new Error("clearIfEmpty aborted"));
-      });
+      return await new Promise<{ cleared: boolean; blocking: number; remaining: number }>(
+        (resolve, reject) => {
+          const tx = db.transaction(FW_QUEUE_STORE, "readwrite");
+          const store = tx.objectStore(FW_QUEUE_STORE);
+          const allReq = store.getAll();
+          let blocking = 0;
+          let remaining = 0;
+          allReq.onsuccess = () => {
+            const records = (allReq.result ?? []) as unknown[];
+            const dispositions = records.map(disposition);
+            blocking = dispositions.filter((d) => d === "abort").length;
+            if (blocking > 0) {
+              // Nothing is touched, so everything is still here.
+              remaining = records.length;
+              return;
+            }
+            remaining = dispositions.filter((d) => d === "preserve").length;
+            const cursorReq = store.openCursor();
+            cursorReq.onsuccess = () => {
+              const cursor = cursorReq.result;
+              if (!cursor) return;
+              if (disposition(cursor.value) !== "preserve") cursor.delete();
+              cursor.continue();
+            };
+          };
+          tx.oncomplete = () => resolve({ cleared: blocking === 0, blocking, remaining });
+          tx.onerror = () => reject(tx.error ?? new Error("clearUnlessBlocked failed"));
+          tx.onabort = () => reject(tx.error ?? new Error("clearUnlessBlocked aborted"));
+        }
+      );
     } finally {
       db.close();
     }

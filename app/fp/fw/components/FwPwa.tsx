@@ -65,11 +65,21 @@ export function FwPwa({ actorUserId }: { actorUserId: string }) {
     () => true
   );
 
-  // ── identity reconcile (security): purge a prior guide's cached residue ─────
+  // ── identity reconcile (security): clear a prior guide's cached residue ─────
   // Runs BEFORE the first drain so a device that changed hands without a sign-out
-  // never serves the previous guide's authed shell / roster / queue to this one.
+  // never serves the previous guide's authed shell / roster to this one. As of Staff
+  // Front Door Unit 3 it PRESERVES an undrained queue rather than destroying it (B2).
+  //
+  // ⚠️ THIS EFFECT MOVES TO `StaffBar` IN UNIT 4, NOT HERE. The plan lists the
+  // removal under Unit 3, but the removal is only safe at the moment the bar takes
+  // it over — and Unit 4 is what mounts the bar in `app/fp/fw/(app)/layout.tsx`.
+  // Deleting it a PR early would leave `main` with no reconcile at all on the one
+  // subtree where shared iPads change hands. `surfaceCreatesResidue` is true here
+  // and true for the bar's FW instance; running BOTH would race two reconciles on
+  // one localStorage key, which is exactly why Unit 4 deletes this and not something
+  // else.
   useEffect(() => {
-    void reconcileFwCacheOwner(actorUserId).catch((e) =>
+    void reconcileFwCacheOwner({ actorUserId, surfaceCreatesResidue: true }).catch((e) =>
       console.error("[fw/pwa] cache-owner reconcile failed:", e)
     );
   }, [actorUserId]);

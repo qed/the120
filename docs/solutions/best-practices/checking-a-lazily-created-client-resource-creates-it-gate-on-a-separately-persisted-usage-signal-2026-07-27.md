@@ -1,6 +1,7 @@
 ---
 title: "Merely CHECKING a lazily-created client resource CREATES it: `indexedDB.open()` makes the database, so \"is anything queued?\" cannot be asked without first answering \"was there ever a queue?\" — and on a user who never used the feature, a rejecting open then blocks them permanently on a queue that never existed. Gate on a separately-persisted usage signal BEFORE touching the resource — and know that such a gate can fail OPEN"
 date: 2026-07-27
+last_updated: 2026-07-27
 category: best-practices
 module: "path / First Profit (FW) — offline sign-out evidence gate (hasFwDeviceEvidence / readFwDeviceEvidence, app/fp/lib/fw-sync-rules.ts, app/fp/lib/fw-queue.ts)"
 problem_type: best_practice
@@ -12,6 +13,8 @@ applies_when:
   - "The open/create call can REJECT for reasons unrelated to the data — storage policy, a locked-down profile, `onblocked` behind another tab — and the caller fails closed on that rejection"
   - "You are about to add a 'has this device ever used X?' heuristic built from client-side storage"
   - "A control is being mounted on a new surface where the component that previously initialised the resource is no longer co-mounted"
+  - "A fail-closed default written for a DESTRUCTIVE consumer is about to be reused by a second, READ-ONLY consumer of the same gate"
+  - "A probe's own side effect would change the answer that probe gives on every future call"
 related_components:
   - app/fp/lib/fw-queue.ts (openFwDb, hasFwQueueDbOpened)
   - app/fp/lib/fw-sync-rules.ts (FwDeviceEvidence, hasFwDeviceEvidence)
@@ -21,6 +24,7 @@ tags:
   - side-effects
   - fail-closed
   - offline-sync
+  - read-side-effects
 ---
 
 # Checking a lazily-created resource creates it
@@ -120,21 +124,98 @@ stops holding the moment the control is mounted elsewhere.
 server-side — here, "is this actor an FW guide?", known at the layout — gate on that
 instead. It is unambiguous, needs no storage archaeology, and cannot be evicted.
 
+### RESOLVED 2026-07-27 (Staff Front Door Unit 3)
+
+It stopped being incidental. The gate now takes the server-known signal first, then a
+direct existence probe, and only then the old heuristic:
+
+```ts
+export function hasFwDeviceEvidence(input: {
+  evidence: FwDeviceEvidence;
+  actorIsFwGuide: boolean;   // SERVER-known at the layout. Cannot be evicted.
+}): boolean {
+  if (input.actorIsFwGuide) return true;
+  const { evidence } = input;
+  if (evidence.kind === "unknown") return true;                       // could not look
+  if (evidence.queueDbExists !== null) return evidence.queueDbExists; // asked directly
+  return evidence.cacheOwner !== null || evidence.queueDbOpened;      // legacy, bounded
+}
+```
+
+Note both new branches carry real signal: staff hold no guide grants by design, so
+`actorIsFwGuide` is genuinely `false` for the CRM-only user this gate protects. A
+same-evidence/opposite-answer test pair pins it, because a branch that returns what its
+fallback returns has no behavioural signature.
+
+## ⚠️ THE SEQUEL: the same fail-closed default, reused on a READ, inverted it
+
+This is the part the fix above did not anticipate, and five independent reviewers found
+it.
+
+`actorIsFwGuide` has to fail **closed** when identity has not resolved — an unresolved
+actor is treated as a guide, so the queue IS checked, because under-checking authorises
+a destructive clear. Correct.
+
+Then a second consumer appeared: a status **badge** showing what the device is holding.
+It reused the same value. And `hasFwDeviceEvidence` short-circuits on it — so on every
+first mount, before the identity round trip could resolve, the badge sailed past the
+gate into `openFwDb()` and **created the database on exactly the browser this entire
+document exists to protect.**
+
+Two things make it worse than the original bug:
+
+- **It is self-perpetuating.** Nothing in the codebase deletes that database, so the
+  existence probe now answers `true` for that origin *forever*. The zero-cost path is
+  not just skipped once; it is permanently retired for that device.
+- **It fires on the core scenario, not an edge.** The persisted identity is deliberately
+  refused when it names a different account — which is precisely a device handover, the
+  case the whole subsystem exists for.
+
+**The rule: "fail closed" is not a property of a value. It is a property of a value
+used by a particular consumer.** Its direction is set by what the branch authorises:
+
+| Consumer | Under-checking costs | Over-checking costs | Correct default |
+|---|---|---|---|
+| Destructive gate (sign-out) | captured data | a wasted read | **fail closed** — assume the worst |
+| Observational read (badge) | nothing; no badge for a moment | **an irreversible side effect** | **decline to act** |
+
+So the fix is not one default, tuned. It is two separately-named, separately-tested
+functions — `staffBarSignOutActorIsFwGuide` (fails closed) and `staffBarQueueProbe`
+(returns "do not probe" until identity is known) — and a test asserting they *differ*
+on the unresolved case. Collapsing them back is what recreates the bug.
+
+The general trigger: **when a safety default is about to be shared, ask what each
+consumer does with it.** A default is only "safe" relative to an action.
+
 ## When to apply
 
 See `applies_when`. The sharpest trigger: **you are mounting an existing control on a
 new surface.** Ask what the old surface was initialising that the new one is not.
 
-## A note on `indexedDB.databases()`
+## A note on `indexedDB.databases()` — SUPERSEDED 2026-07-27
 
-It is tempting as a way to ask "does this database exist" without creating it. Two
-real objections remain: it is async, and it answers *does a database exist* rather than
-*did this actor ever use this feature* — which is usually the question you actually
-have.
+The original text of this section argued against it: *"it is async, and it answers
+'does a database exist' rather than 'did this actor ever use this feature' — which is
+usually the question you actually have."*
 
-A third objection often cited — "Safari does not implement it" — was true of pre-2024
-Safari and is **no longer true**. This repo carried that claim in two comments until it
-was corrected. If you rely on a browser-support fact in a comment, date it.
+**The second half of that was wrong, and the fix above is why.** "Does the database
+exist" is in fact the better question for THIS gate, because it is the question the
+side effect turns on: a database that does not exist holds no queue AND opening it is
+the harm; a database that already exists can be opened for free. The distinction
+between "does it exist" and "did this actor use it" only matters when you are trying to
+attribute the data, which this gate is not.
+
+The "async" objection survives, and grew teeth: `databases()` is documented to **hang**
+rather than reject on some engines. The synchronous heuristic it replaced could not
+hang, so bounding the probe with a timeout is what keeps the swap a strict improvement.
+A timeout is carried out as the same `null` ("could not look") a rejection produces.
+
+The third objection once cited — "Safari does not implement it" — was true of pre-2024
+Safari and is **no longer true** (Baseline since May 2024). This repo carried that
+claim in two comments until it was corrected, and then carried the superseded objection
+above for one more unit. If you rely on a browser-support fact in a comment, date it —
+and when you reverse the conclusion, rewrite the comment rather than deleting it, so
+the next reader sees the reversal instead of re-deriving it.
 
 ## Related
 

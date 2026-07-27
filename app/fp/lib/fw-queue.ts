@@ -13,9 +13,10 @@
  * the Path's `offline-queue.ts` is NOT cleared on sign-out because a family device
  * protects a child's evidence across sessions. A shared guide iPad is the opposite
  * case — it rotates operators — so FW BLOCKS sign-out while items are queued and,
- * after a successful drain, clears BOTH stores (`clearFwQueue` + `clearFwRoster`).
- * The clearing is the caller's (the sign-out flow's) after `decideFwSignOut`
- * returns ok; this file only exposes the primitives.
+ * after a successful drain, clears BOTH stores (`clearFwQueueIfEmpty` +
+ * `clearFwRoster`). The clearing is the caller's (the sign-out flow's) after
+ * `decideFwSignOut` returns ok; this file only exposes the primitives — and the
+ * queue primitive is CONDITIONAL by construction, never a blind wipe.
  *
  * Client-only: import from client components / the drain engine / the roster
  * loader's client seam. `indexedDB` is touched inside the functions, not at module
@@ -28,6 +29,7 @@
  * unserialized (they do not mutate).
  */
 
+import { FW_STORAGE_PROBE_TIMEOUT_MS, withFwTimeout } from "./fw-call";
 import {
   FW_QUEUE_DB_NAME,
   FW_QUEUE_DB_VERSION,
@@ -52,30 +54,72 @@ export function isFwQueueSupported(): boolean {
  * database — half of the sign-out evidence gate in `hasFwDeviceEvidence`.
  *
  * `indexedDB.open` creates the database as a side effect, so "is the queue empty?"
- * cannot be asked without first answering "was there ever a queue?". The signal used
- * is this in-document flag plus the persisted `fw.cacheOwner` key — a page that
- * captured, drained or cached a roster has necessarily set it.
+ * cannot be asked without first answering "was there ever a queue?". This flag plus
+ * the persisted `fw.cacheOwner` key were the original answer — a page that captured,
+ * drained or cached a roster has necessarily set one of them.
  *
- * NOT `indexedDB.databases()`. An earlier version of this comment justified that by
- * saying Safari does not implement it; that was true of pre-2024 Safari but is no
- * longer, so do not repeat it as fact. The reasons that still hold: it is async, and
- * it answers "does a database exist" rather than "did this actor ever use FW" — which
- * is the question the gate is actually asking.
+ * (An earlier version of this comment ended "NOT `indexedDB.databases()`", on the
+ * grounds that it is async and answers "does a database exist" rather than "did this
+ * actor ever use FW". Unit 3 established that "does a database exist" is in fact the
+ * better question — a database that does not exist holds no queue, and opening it is
+ * exactly the harm — so `fwQueueDbExists()` below now uses it. The comment is
+ * rewritten rather than deleted because it is the second false claim this docblock
+ * has carried about that API.)
  *
- * ⚠️ THIS GATE IS NOT SOUND ON ITS OWN, and the plan's staff nav bar is where that
- * starts to matter. `queueDbOpened` is per-DOCUMENT and false on every fresh load, so
- * the gate rests entirely on a localStorage key surviving independently of IndexedDB
- * — two storage subsystems with independent eviction. Evict the key while the queue
- * survives and sign-out skips the check completely. It is safe TODAY only because
- * `FwPwa` opens this database on every mount of the layout that renders the sign-out
- * button, which is incidental coupling, not a guarantee. Mounting that button outside
- * the `/fp/fw` (app) group requires replacing this heuristic with the server-known
- * fact of whether the actor is an FW guide (Staff Front Door Unit 3).
+ * ⚠️ THIS FLAG IS NOT SOUND ON ITS OWN (B1). `queueDbOpened` is per-DOCUMENT and
+ * false on every fresh load, so on its own the gate rested entirely on a localStorage
+ * key surviving independently of IndexedDB — two storage subsystems with independent
+ * eviction. Evict the key while the queue survives and sign-out skipped the check
+ * completely. Staff Front Door Unit 3 fixed that in `hasFwDeviceEvidence` with two
+ * signals this flag never had: the SERVER-known "is this actor an FW guide", and
+ * `fwQueueDbExists()` below. This flag now only answers on browsers where neither is
+ * available, and it is kept because it is free and strictly additive.
  */
 let queueDbOpened = false;
 
 export function hasFwQueueDbOpened(): boolean {
   return queueDbOpened;
+}
+
+/**
+ * Does the FW queue database EXIST on this origin — without creating it?
+ *
+ * The question the evidence gate is actually asking, answered directly rather than by
+ * proxy. `false` means opening it would CREATE it, so there is definitionally nothing
+ * to check; `true` means opening it creates nothing, so checking is free. Returns
+ * `null` where `indexedDB.databases()` is unavailable (pre-2024 Safari; it has been
+ * Baseline since May 2024) or rejects — never a guess, so the pure gate can decide
+ * what "I could not look" means in one tested place.
+ *
+ * Deliberately does NOT set `queueDbOpened`: it opens nothing.
+ *
+ * BOUNDED. `databases()` is documented to HANG rather than reject on some engines and
+ * storage states, and this is awaited by the sign-out flow before it even reaches the
+ * drain lock — an unbounded wait here is an indefinitely disabled "Checking…" button
+ * with a reload as the only escape, on a shared iPad at a live event. The heuristic
+ * this replaced was synchronous and could not hang, so bounding it is what keeps the
+ * swap a strict improvement. A timeout is disposed of exactly as a rejection is:
+ * `null`, meaning "could not look", which the pure gate then fails closed on.
+ *
+ * `lib.dom.d.ts` declares `databases()` as a REQUIRED method of `IDBFactory`, so no
+ * cast is needed to call it. The runtime `typeof` check stays anyway, because the
+ * ambient type is a claim about the standard rather than about the browser in front of
+ * us, and pre-2024 engines genuinely lack it.
+ */
+export async function fwQueueDbExists(): Promise<boolean | null> {
+  if (typeof indexedDB === "undefined") return null;
+  if (typeof indexedDB.databases !== "function") return null;
+  try {
+    const raced = await withFwTimeout(
+      indexedDB.databases(),
+      "indexedDB.databases",
+      FW_STORAGE_PROBE_TIMEOUT_MS
+    );
+    if (raced.timedOut) return null;
+    return raced.value.some((db) => db.name === FW_QUEUE_DB_NAME);
+  } catch {
+    return null;
+  }
 }
 
 function openFwDb(): Promise<IDBDatabase> {
@@ -175,13 +219,17 @@ export function deleteFwEntry(id: string): Promise<void> {
   });
 }
 
-/** Empty the tap queue — the sign-out flow calls this ONLY after a drain the
- *  verdict allowed (Decision 8), never as an auto-purge. */
-export function clearFwQueue(): Promise<void> {
-  return enqueueWrite(async () => {
-    await withStore(FW_QUEUE_STORE, "readwrite", (store) => store.clear());
-  });
-}
+/**
+ * ⚠️ THERE IS NO UNCONDITIONAL `clearFwQueue()`, AND THAT IS DELIBERATE.
+ *
+ * One existed, and its only caller was `purgeFwResidue` — the identity-change purge
+ * that destroyed an outgoing guide's undrained captures on every shared-iPad handover
+ * (Staff Front Door Unit 3, B2). Once the handover reconcile was made to preserve
+ * what it cannot ship, the export had zero callers. It is deleted rather than left
+ * exported, following Unit 1's handling of `fwSignOutVerdict`: an unguarded
+ * "empty the queue" primitive sitting one import away is how B2 comes back. Every
+ * destructive path now goes through `clearFwQueueIfEmpty` and its predicate.
+ */
 
 /**
  * ATOMIC check-and-clear: clears the queue ONLY if no record BLOCKS the clear, in ONE
@@ -189,7 +237,7 @@ export function clearFwQueue(): Promise<void> {
  *
  * The sign-out flow's safety backstop (adversarial review's P0): even after the
  * verdict says the queue may be wiped, a check-in can be enqueued in the window
- * before the clear runs. A blind `clearFwQueue()` would then wipe that
+ * before the clear runs. A blind `store.clear()` would then wipe that
  * just-committed tap. By counting and clearing inside one transaction that runs AFTER
  * every pending enqueue (the chain) and observes a consistent snapshot (the
  * transaction), a tap that raced in makes the count non-zero and the clear a no-op —

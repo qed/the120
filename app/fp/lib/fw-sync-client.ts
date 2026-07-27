@@ -23,12 +23,16 @@
 
 import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 import { drainFwQueue } from "@/app/fp/lib/actions/fw-sync";
-import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
 import {
-  clearFwQueue,
+  FW_ACTION_TIMEOUT_MS,
+  FW_STORAGE_PROBE_TIMEOUT_MS,
+  withFwTimeout,
+} from "@/app/fp/lib/fw-call";
+import {
   clearFwQueueIfEmpty,
   clearFwRoster,
   deleteFwEntry,
+  fwQueueDbExists,
   getFwRoster,
   hasFwQueueDbOpened,
   isFwQueueSupported,
@@ -40,23 +44,32 @@ import {
 import {
   applyFwDrainOutcome,
   classifyFwSignOutQueue,
+  hasFwDeviceEvidence,
+  summarizeFwDeviceQueue,
   FW_AUTO_RETRY_ATTEMPT_CEILING,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   FW_ROSTER_CACHE_SCHEMA_VERSION,
   FW_SHELL_CACHE_NAME,
   isFwRosterCacheUsable,
   partitionFwQueue,
+  runFwCacheOwnerReconcile,
   runFwSignOutFlow,
   selectFwDrainable,
+  shouldClearFwCaches,
   summarizeFwQueue,
   type FwCachedRosterStudent,
   type FwDeviceEvidence,
+  type FwDeviceQueueState,
   type FwQuarantinedRecord,
   type FwQueueEntry,
   type FwQueueEntryInput,
   type FwQueueSummary,
+  type FwReconcileOutcome,
+  type FwResidueClearResult,
+  type FwResiduePolicy,
   type FwRosterCache,
   type FwSignOutOutcome,
+  type FwSignOutPorts,
 } from "@/app/fp/lib/fw-sync-rules";
 
 /* ══════════════════════════════════════════════════════════ subscription ══ */
@@ -458,14 +471,16 @@ export async function readUsableFwRoster(cohortId: string): Promise<FwRosterCach
  *
  * A `localStorage` read can THROW under a locked-down storage policy; that is carried
  * out as `{kind:"unknown"}` rather than swallowed, so `hasFwDeviceEvidence` makes the
- * fail-closed choice in one tested place. Deliberately NOT `indexedDB.databases()`:
- * Safari does not implement it, and Safari is the shared iPad's browser.
+ * fail-closed choice in one tested place. `fwQueueDbExists()` is the signal that
+ * makes the gate SOUND rather than heuristic (B1) — it asks whether the database
+ * exists without opening it, so it can never be the thing that creates it.
  */
-function readFwDeviceEvidence(): FwDeviceEvidence {
+async function readFwDeviceEvidence(): Promise<FwDeviceEvidence> {
+  const queueDbExists = await fwQueueDbExists();
   try {
     const cacheOwner =
       typeof window === "undefined" ? null : window.localStorage.getItem(FW_CACHE_OWNER_KEY);
-    return { kind: "read", cacheOwner, queueDbOpened: hasFwQueueDbOpened() };
+    return { kind: "read", cacheOwner, queueDbOpened: hasFwQueueDbOpened(), queueDbExists };
   } catch {
     return { kind: "unknown" };
   }
@@ -488,38 +503,49 @@ function readFwDeviceEvidence(): FwDeviceEvidence {
  * is the whole point.
  */
 export async function clearFwResidue(
-  blocksClear: (rawEntry: unknown) => boolean
-): Promise<{ cleared: boolean }> {
-  let cleared = true;
+  blocksClear: (rawEntry: unknown) => boolean,
+  policy: FwResiduePolicy
+): Promise<FwResidueClearResult> {
+  let queueCleared = true;
   if (isFwQueueSupported()) {
     try {
-      cleared = (await clearFwQueueIfEmpty(blocksClear)).cleared;
+      queueCleared = (await clearFwQueueIfEmpty(blocksClear)).cleared;
     } catch (e) {
       console.error("[fw/sync] residue clear failed:", e);
-      cleared = false;
+      queueCleared = false;
     }
   }
-  // ABORT-SAFE: if a tap raced in (queue not cleared), the sign-out aborts — so the
-  // roster cache and shell cache must be KEPT too, or the guide is left with a
-  // degraded offline shell on the flaky connectivity that caused the race. Clear all
-  // three residues together, or none (adversarial re-review regression).
-  if (!cleared) return { cleared };
+  // ABORT-SAFE under `sign_out`: if a tap raced in, the sign-out aborts — so the
+  // roster cache and shell cache are KEPT too, or the guide is left with a degraded
+  // offline shell on the flaky connectivity that caused the race. Under `handover`
+  // they go regardless: they are the PRIOR account's children's names and authed
+  // HTML, and keeping them protects nobody (Unit 3, B2).
+  if (!shouldClearFwCaches(policy, queueCleared)) {
+    return { queueCleared, rosterCleared: true, shellCleared: true };
+  }
+
+  // B3: each clear reports what it actually did. These used to be logged and
+  // swallowed while the caller was told the whole residue was gone.
+  let rosterCleared = true;
   if (isFwQueueSupported()) {
     try {
       await clearFwRoster();
       notify();
     } catch (e) {
       console.error("[fw/sync] roster clear failed:", e);
+      rosterCleared = false;
     }
   }
+  let shellCleared = true;
   if (typeof caches !== "undefined") {
     try {
       await caches.delete(FW_SHELL_CACHE_NAME);
     } catch (e) {
       console.error("[fw/sync] shell cache clear failed:", e);
+      shellCleared = false;
     }
   }
-  return { cleared };
+  return { queueCleared, rosterCleared, shellCleared };
 }
 
 /**
@@ -541,85 +567,142 @@ export async function clearFwResidue(
  * A device with no FW residue at all (a CRM-only staff member) never opens IndexedDB
  * and never takes the lock — the flow's evidence gate returns before either.
  */
-export function runFwSignOut(actorUserId: string): Promise<FwSignOutOutcome> {
+export function runFwSignOut(input: {
+  actorUserId: string;
+  /** SERVER-KNOWN at the layout — see `hasFwDeviceEvidence`. Never inferred here. */
+  actorIsFwGuide: boolean;
+}): Promise<FwSignOutOutcome> {
   return runFwSignOutFlow({
-    actorUserId,
-    ports: {
-      readEvidence: readFwDeviceEvidence,
-      readQueue: async () => {
-        if (!isFwQueueSupported()) return [];
-        try {
-          return await listFwRawEntriesSerialized();
-        } catch (e) {
-          console.error("[fw/sync] sign-out queue read failed:", e);
-          throw e;
-        }
-      },
-      isOnline: () => (typeof navigator === "undefined" ? true : navigator.onLine !== false),
-      isAuthRequired: isFwAuthRequired,
-      drain: () => drainFwQueueOnce({ actorUserId }, { wait: true, includeStuck: true }),
-      clear: clearFwResidue,
-      withDrainLock: withFwDrainLock,
-    },
+    actorUserId: input.actorUserId,
+    actorIsFwGuide: input.actorIsFwGuide,
+    ports: fwClientPorts(input.actorUserId),
   });
 }
 
 /**
- * Force-clear ALL residue unconditionally — for the identity-change case, where the
- * data belongs to a DIFFERENT guide and must not survive. Unlike `clearFwResidue`,
- * this does NOT gate on emptiness (a prior guide's un-drained taps are theirs to lose
- * on a device that changed hands, and block-until-drained already prevented an
- * offline handoff). Used only by `reconcileFwCacheOwner`.
+ * The browser bindings both device sequences share — THE portable export the staff
+ * bar mounts (plan Unit 3: "export the portable sign-out sequence").
+ *
+ * Exported rather than inlined twice because the sign-out flow and the handover
+ * reconcile must bind the SAME seams: two copies could differ in which drain they
+ * pass, and passing `runFwClientDrain` instead of `drainFwQueueOnce` is the
+ * non-reentrant-lock hang the whole port shape exists to make impossible.
  */
-async function purgeFwResidue(): Promise<void> {
-  if (isFwQueueSupported()) {
-    try {
-      await clearFwQueue();
-      await clearFwRoster();
-      notify();
-    } catch (e) {
-      console.error("[fw/sync] residue purge failed:", e);
-    }
-  }
-  if (typeof caches !== "undefined") {
-    try {
-      await caches.delete(FW_SHELL_CACHE_NAME);
-    } catch (e) {
-      console.error("[fw/sync] shell cache purge failed:", e);
-    }
+export function fwClientPorts(actorUserId: string): FwSignOutPorts {
+  return {
+    readEvidence: readFwDeviceEvidence,
+    readQueue: async () => {
+      if (!isFwQueueSupported()) return [];
+      try {
+        // BOUNDED, because this runs while `fw-offline-drain` is HELD. The read is
+        // serialized behind the write chain, so one wedged IndexedDB transaction
+        // would otherwise hold the lock forever — and Web Locks are origin-scoped and
+        // cross-document, so that blocks every later drain and every future sign-out
+        // in every tab, with a reload the only escape. A timeout THROWS here, which
+        // the flow already disposes of as `unreadable`: fail closed, queue untouched.
+        const raced = await withFwTimeout(
+          listFwRawEntriesSerialized(),
+          "queue read",
+          FW_STORAGE_PROBE_TIMEOUT_MS
+        );
+        if (raced.timedOut) throw new Error("fw queue read timed out");
+        return raced.value;
+      } catch (e) {
+        console.error("[fw/sync] sign-out queue read failed:", e);
+        throw e;
+      }
+    },
+    isOnline: () => (typeof navigator === "undefined" ? true : navigator.onLine !== false),
+    isAuthRequired: isFwAuthRequired,
+    drain: () => drainFwQueueOnce({ actorUserId }, { wait: true, includeStuck: true }),
+    clear: clearFwResidue,
+    withDrainLock: withFwDrainLock,
+  };
+}
+
+/**
+ * What this device is holding, for a chrome that is not `/fp/fw` — the staff bar's
+ * queue chip (Unit 3, R24). `null` when the evidence gate declined to look.
+ *
+ * RUNS THE EVIDENCE GATE FIRST, for the same reason sign-out does: reading the queue
+ * means opening the database, and opening it CREATES it. A bar mounted on `/crm` must
+ * not create an FW queue database on an admissions staffer's browser merely to render
+ * a chip they will never see. Never throws — a chip is not worth an error boundary,
+ * and a failed read is reported as "did not look", which renders as nothing.
+ */
+export async function readFwDeviceQueueState(input: {
+  actorUserId: string;
+  actorIsFwGuide: boolean;
+}): Promise<FwDeviceQueueState | null> {
+  try {
+    const evidence = await readFwDeviceEvidence();
+    if (!hasFwDeviceEvidence({ evidence, actorIsFwGuide: input.actorIsFwGuide })) return null;
+    if (!isFwQueueSupported()) return null;
+    return summarizeFwDeviceQueue({
+      queue: classifyFwSignOutQueue(await listFwRawEntries(), input.actorUserId),
+      authRequired: isFwAuthRequired(),
+      online: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+    });
+  } catch (e) {
+    console.error("[fw/sync] bar queue read failed (non-fatal):", e);
+    return null;
   }
 }
 
-/** localStorage key naming the guide whose residue (queue, roster cache, SW shell)
- *  is currently on this device. */
+/** localStorage key naming the account whose ROSTER and SHELL residue is currently on
+ *  this device. The QUEUE is deliberately not covered: every entry carries its own
+ *  `actorUserId`, so the queue is self-describing and `classifyFwSignOutQueue` reads
+ *  it directly. */
 const FW_CACHE_OWNER_KEY = "fw.cacheOwner";
 
 /**
- * Ensure the device's cached residue belongs to the CURRENT guide (security review).
+ * Ensure the device's cached residue belongs to the CURRENT account (security review;
+ * rewritten for Unit 3's B2).
  *
  * The SW app-shell cache holds authenticated roster HTML, and the roster/queue caches
  * hold names — none of it session-scoped. Sign-out clears it, but a session that ends
  * WITHOUT the sign-out button (app killed, grant revoked, forgotten) leaves it for
- * whoever authenticates next. On every FW mount this compares the current guide to the
- * stored owner; on a mismatch it PURGES all residue before the new guide can be served
- * a prior guide's cached authed page offline. Called from `FwPwa` on mount.
+ * whoever authenticates next.
+ *
+ * WHAT CHANGED: this used to call an unconditional purge that destroyed the outgoing
+ * guide's undrained captures, and then advanced the owner key whether or not the purge
+ * worked. It now drains what this session can ship, preserves what it cannot, clears
+ * the caches either way, and advances the key ONLY when every residue actually went —
+ * so a failure retries on the next mount instead of being masked forever. The whole
+ * sequence is `runFwCacheOwnerReconcile` in the pure module, where node-only CI can
+ * see it; this is the binding.
+ *
+ * `surfaceCreatesResidue` is false on `/crm` and `/staff`: the bar mounts there, but
+ * nothing there writes an FW roster or shell, so claiming the key would manufacture
+ * exactly the device evidence the sign-out gate reads.
  */
-export async function reconcileFwCacheOwner(actorUserId: string): Promise<void> {
-  if (typeof window === "undefined") return;
-  let prior: string | null = null;
-  try {
-    prior = window.localStorage.getItem(FW_CACHE_OWNER_KEY);
-  } catch {
-    /* private mode — no persisted owner; treat as a fresh device */
-  }
-  if (prior !== null && prior !== actorUserId) {
-    await purgeFwResidue();
-  }
-  try {
-    window.localStorage.setItem(FW_CACHE_OWNER_KEY, actorUserId);
-  } catch {
-    /* private mode — the reconcile still purged; nothing more to persist */
-  }
+export function reconcileFwCacheOwner(input: {
+  actorUserId: string;
+  surfaceCreatesResidue: boolean;
+}): Promise<FwReconcileOutcome> {
+  if (typeof window === "undefined") return Promise.resolve({ kind: "none" });
+  return runFwCacheOwnerReconcile({
+    actorUserId: input.actorUserId,
+    surfaceCreatesResidue: input.surfaceCreatesResidue,
+    ports: {
+      ...fwClientPorts(input.actorUserId),
+      readOwner: () => {
+        try {
+          return window.localStorage.getItem(FW_CACHE_OWNER_KEY);
+        } catch {
+          return undefined; // private mode / locked-down storage policy
+        }
+      },
+      writeOwner: (owner) => {
+        try {
+          window.localStorage.setItem(FW_CACHE_OWNER_KEY, owner);
+          return true;
+        } catch {
+          return false; // private mode — the reconcile still ran; nothing to persist
+        }
+      },
+    },
+  });
 }
 
 export { isFwQueueSupported };

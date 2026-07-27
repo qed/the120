@@ -37,6 +37,17 @@ import { loadFwCohort, loadStaffRowActive } from "./fw-guide-core";
 
 export type FwSession = {
   userId: string;
+  /**
+   * The account's email, carried from the `getUser()` this loader already makes.
+   *
+   * Nullable because `auth.users.email` is nullable in principle. Added for the staff
+   * bar's identity read (R17: the bar names the ACCOUNT, and an email is all the
+   * schema holds) — carried here rather than re-fetched, because a second
+   * `auth.getUser()` is a second network round trip to the Auth server on every bar
+   * mount, and `getUser()` is deliberately revocation-sensitive rather than a local
+   * JWT decode. No existing caller is affected.
+   */
+  email: string | null;
   /** Already scoped to THIS user by the `.eq("user_id", …)` below — the trust
    *  boundary `resolveFwActor` documents and cannot enforce itself. */
   grants: RoleGrant[];
@@ -90,6 +101,7 @@ export const loadFwSession = cache(async function loadFwSession(): Promise<FwSes
 
   return {
     userId: user.id,
+    email: user.email ?? null,
     grants,
     hasAdminClaim: user.app_metadata?.role === "admin",
   };
@@ -131,7 +143,7 @@ export async function resolveFwActorForCohort(cohortId: string): Promise<FwActor
   ]);
   if (!session) {
     return {
-      session: { userId: "", grants: [], hasAdminClaim: false },
+      session: { userId: "", email: null, grants: [], hasAdminClaim: false },
       cohort: null,
       verdict: { ok: false, reason: "no_session" },
     };

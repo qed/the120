@@ -77,7 +77,11 @@ export default function ResetForm() {
       return;
     }
     setDone(true);
-    setTimeout(() => router.push("/crm"), 1200);
+    // Unit 12 (R7). The reset path matters MORE than login: it is a new staff
+    // member's first-ever session, and the hub — both doors visible — is the
+    // right first screen. (The lazy supabaseRef above is load-bearing for the
+    // env-less build; untouched.)
+    setTimeout(() => router.push("/staff"), 1200);
   };
 
   const inputCls =

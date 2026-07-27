@@ -1,7 +1,7 @@
 ---
 title: "feat: The Staff Front Door"
 type: feat
-status: active
+status: completed
 date: 2026-07-27
 origin: docs/brainstorms/2026-07-26-staff-front-door-requirements.md
 deepened: 2026-07-27
@@ -531,7 +531,7 @@ stateDiagram-v2
 - *Error path:* FW read typed failure → card renders, link works, number absent.
 - *Error path:* seats falls back → card renders; the code does not claim it is live.
 
-- [ ] **Unit 12: Post-authentication landing**
+- [x] **Unit 12: Post-authentication landing** — landed 2026-07-27, the plan's last unit. Two `router.push("/crm")` sites became `/staff` (LoginForm; ResetForm's 1.2s-delayed push — the new-staff first-session path the plan weights). `no-auth-mail-guard`'s shape pin passes; the env-less build succeeds (the lazy `supabaseRef` untouched); the non-staff-lands-on-404 equivalence is recorded in the code, not improved, per the plan. **Review: zero findings** — the fresh-login cookie race was traced to @supabase/ssr's awaited synchronous persist (a third-party guarantee, noted as such); the proxy's staff-path gate matches /crm's exactly; a repo grep confirms these two sites were the ONLY landings. 114 files / 3107 tests.
 
 **Goal:** Both authenticated entry points land on the hub.
 

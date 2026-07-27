@@ -32,7 +32,11 @@ export default function LoginForm() {
       setBusy(false);
       return;
     }
-    router.push("/crm");
+    // Unit 12 (R7): the hub is the landing, now that it is real and carries
+    // sign-out (Units 4 and 11 — the dependency the plan names). A non-staff
+    // account authenticating here lands on /staff and is rewritten to a 404 —
+    // functionally identical to the old dead end at /crm; recorded, not improved.
+    router.push("/staff");
   };
 
   const handleReset = async (e: React.FormEvent) => {

@@ -30,8 +30,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { BANDS } from "@/app/fp/content/types";
-import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
+import { fwStaffGateCopy, isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import {
   resolveFwImportException,
   runFwImportChunk,
@@ -42,7 +43,6 @@ import {
 const GENERIC_ERROR = "Something went wrong — please try again.";
 /** ONE message for every refusal shape — not staff, deactivated, Path cohort,
  *  unknown cohort — so probing cannot enumerate which cohort ids are real. */
-const STAFF_ONLY = "That action is staff-only.";
 
 /**
  * The cohort-scoped staff gate every action here runs first. Mirrors
@@ -53,12 +53,27 @@ const STAFF_ONLY = "That action is staff-only.";
  */
 async function requireCohortStaff(
   cohortId: string
-): Promise<{ ok: true; actorUserId: string } | { ok: false }> {
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
-  if (!isFwStaffActor(verdict)) return { ok: false };
+): Promise<{ ok: true; actorUserId: string } | { ok: false; reason: "not_staff" | "unavailable" }> {
+  // `resolveFwActorForCohort` can THROW `IdentityUnavailableError` since Unit 5 (B4).
+  // This catch mirrors fw-ops.ts's gate of the same name — the review found this file
+  // was the one of the two that missed the rollout, so on the exact venue-wifi stall
+  // the unit exists to survive, an import action rejected instead of returning the
+  // typed, retry-worded refusal its siblings return. Actions never throw (canon).
+  let resolved;
+  try {
+    resolved = await resolveFwActorForCohort(cohortId);
+  } catch (e) {
+    if (isIdentityUnavailable(e)) {
+      console.error(`[fw/import] cohort staff gate could not resolve identity: ${e.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    throw e;
+  }
+  const { verdict, session } = resolved;
+  if (!isFwStaffActor(verdict)) return { ok: false, reason: "not_staff" };
   if (typeof session.userId !== "string" || session.userId.length === 0) {
     console.error("[fw/import] staff verdict passed with no session user id — refusing");
-    return { ok: false };
+    return { ok: false, reason: "not_staff" };
   }
   return { ok: true, actorUserId: session.userId };
 }
@@ -94,7 +109,7 @@ export async function importFwStudentsChunk(input: unknown): Promise<ImportChunk
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   // The rows go straight through — no `normalizedName` is computed here. The core
   // recomputes the match key itself (never trusting a client-supplied one), so
@@ -132,7 +147,7 @@ export async function resolveImportExceptionAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const res = await resolveFwImportException(supabaseAdmin(), {
     exceptionId: parsed.data.exceptionId,

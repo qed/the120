@@ -19,7 +19,7 @@
  * action re-pays a session load (and, for staff, a `staff`-row read) that the page's
  * own gate paid moments earlier. That duplication is the price of keeping identity
  * out of the cached shell, and it is accepted deliberately. What is NOT accepted is
- * paying it twice over: `loadFwSession()` already resolves the auth user, so its
+ * paying it twice over: `loadFwSessionRead()` already resolves the auth user, so its
  * email is carried on `FwSession` rather than fetched by a second `getUser()`.
  *
  * Both actions read only the CALLER's own session and act only on it, so there is no
@@ -27,17 +27,61 @@
  */
 
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { FW_CALL_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
-import { grantedCohortIds, loadFwSession, type FwSession } from "@/app/fp/lib/fw-auth";
+import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/fp/lib/fw-auth";
 import { loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
+import type { FwResidueBeacon } from "@/app/fp/lib/fw-sync-rules";
 import {
   narrowStaffBarApplication,
   staffBarSignOutDestination,
   type StaffBarIdentity,
   type StaffBarRoles,
 } from "./bar-rules";
+
+/**
+ * The beacon's wire shape. Mirrors `FwResidueBeacon` but is re-declared as a zod
+ * schema rather than derived from the type, because this is a `"use server"` boundary:
+ * the payload arrives over HTTP from a client that may be running an older bundle, so
+ * it is narrowed at the door like every other action's input. `actorUserId` is
+ * deliberately ABSENT as an attribution — the session names the sender; the client's
+ * claim rides alongside as `claimedActorUserId`. See `sendFwResidueBeacon`.
+ */
+const residueBeaconSchema = z.object({
+  schemaVersion: z.literal(1),
+  outcome: z.enum(["queue_preserved", "clear_failed"]),
+  queueRemaining: z.number().int().min(0).max(100_000).nullable(),
+  application: z.enum(["fw", "crm", "staff"]),
+  /**
+   * The actor the CLIENT observed the outcome for — carried as a CLAIM, not as the
+   * attribution. A handover can complete between the client detecting the outcome
+   * and this POST landing, at which point the live session names the NEW holder
+   * while the outcome belonged to the old one (frontend-races review). Logging both
+   * ids makes that race visible instead of silently mis-attributing; constrained to
+   * a uuid so nothing free-text can ride into the log line.
+   */
+  claimedActorUserId: z.uuid(),
+  /**
+   * A random, client-persisted device identifier — the field the beacon's own
+   * purpose ("which iPad?") requires, since one guide account can hold several
+   * devices across a weekend. Not identifying beyond this app's own localStorage;
+   * carries no hardware fact.
+   */
+  deviceId: z.uuid(),
+});
+
+/** Compile-time drift tripwire: the schema and the pure payload type must move
+ *  together. Narrowing or widening either side turns this assignment red. */
+type _BeaconSchemaMatches =
+  Omit<z.infer<typeof residueBeaconSchema>, "claimedActorUserId" | "deviceId" | "schemaVersion"> extends Omit<FwResidueBeacon, "actorUserId">
+    ? Omit<FwResidueBeacon, "actorUserId"> extends Omit<z.infer<typeof residueBeaconSchema>, "claimedActorUserId" | "deviceId" | "schemaVersion">
+      ? true
+      : never
+    : never;
+const _beaconSchemaMatches: _BeaconSchemaMatches = true;
+void _beaconSchemaMatches;
 
 export type StaffBarIdentityResult =
   | { ok: true; identity: StaffBarIdentity }
@@ -83,13 +127,107 @@ async function resolveStaffBarRoles(session: FwSession | null): Promise<StaffBar
  * inferred from anything on the device, which is the entire point.
  */
 export async function loadStaffBarIdentity(): Promise<StaffBarIdentityResult> {
-  const session = await loadFwSession();
-  if (!session?.email) return { ok: false };
+  // Every non-answer collapses to `{ok:false}` HERE, and that is correct precisely
+  // because of what `{ok:false}` means on this one surface: R23 keeps the sign-out
+  // control rendered unconditionally and the bar falls back to its persisted copy of
+  // the identity string. Nothing is refused and nothing is destroyed — the only
+  // casualty is a line of chrome. This is the ONE B4 call site where folding
+  // `unknown` into "no answer" is not a guess about the account, and the reason it is
+  // safe is a property of the caller, not of the read. Do not copy this collapse to a
+  // call site that acts on the result.
+  const read = await loadFwSessionRead();
+  if (read.kind !== "identity") return { ok: false };
+  const session = read.identity;
+  // An account with no email cannot satisfy R17 (the bar names the ACCOUNT, and the
+  // email is all the schema holds), so it degrades exactly like an unresolved read.
+  const email = session.email;
+  if (email === null) return { ok: false };
   const roles = await resolveStaffBarRoles(session);
   return {
     ok: true,
-    identity: { userId: session.userId, email: session.email, ...roles },
+    identity: { userId: session.userId, email, ...roles },
   };
+}
+
+/**
+ * Report, OFF-DEVICE, that this iPad finished a handover (or was refused mid-sign-out)
+ * still holding
+ * work — Staff Front Door Unit 5, Peter's decision of 2026-07-27.
+ *
+ * ── Why this exists
+ *
+ * Unit 4 stopped a departed guide's un-landed captures from refusing an unrelated
+ * person's sign-out, and Unit 5 did the same for records this build cannot read. Both
+ * were right, and both removed the same accidental safeguard: a refusal forced a HUMAN
+ * to notice. What remains on-device is the bar's queue chip — one device, one viewer,
+ * after identity resolves. Nothing at a desk could answer "which iPads are holding
+ * check-ins that never reached us?"
+ *
+ * ⚠️ WHAT THIS IS AND IS NOT, IN ONE LINE EACH.
+ *   - It is a structured server-side LOG LINE, greppable by `[fw/residue]`.
+ *   - It is NOT a table, and cannot be this unit: writing one needs a migration, Lane
+ *     A does not hold the migration lock (`supabase/MIGRATION-LOCK.md` names Lane B),
+ *     and this repo's standing rule is that authoring a migration IS applying it to
+ *     production. The persistent store is carried to Unit 6, which is the migration
+ *     unit. Until then "a place to read it" means the deployment's runtime logs.
+ *   - It is NOT recovery. The captures still cannot be shipped by anyone but the
+ *     account that made them. This locates the device; a human does the rest.
+ *
+ * ── Why it is fire-and-forget and cannot fail a sign-out
+ *
+ * Every caller invokes it with `void` and it swallows its own errors. A beacon that
+ * could reject would be a new way for a sign-out to fail on venue wifi — adding a
+ * failure mode to the sequence whose failure modes this whole unit exists to reduce.
+ * Bounded for the same reason: it runs on the client's path, and an unbounded await
+ * would hold the sign-out open on a stalled link.
+ *
+ * The PAYLOAD DECISION is `fwResidueBeacon` (pure, tested), not this function. This
+ * one is the transport, and re-derives nothing but the authenticated sender.
+ */
+export async function sendFwResidueBeacon(input: unknown): Promise<void> {
+  const parsed = residueBeaconSchema.safeParse(input);
+  if (!parsed.success) {
+    console.error("[fw/residue] refused a malformed beacon");
+    return;
+  }
+  // The AUTHENTICATED identity — one bounded getUser(), NOT the full session read.
+  // The grants query that loadFwSessionRead also makes exists to compute isFwGuide,
+  // which nothing in a log line needs; paying a second Supabase round trip per
+  // beacon on the COMMON handover path was the performance review's finding.
+  let raced;
+  try {
+    raced = await withFwTimeout((await supabaseServer()).auth.getUser(), "residue beacon getUser", FW_CALL_TIMEOUT_MS);
+  } catch (e) {
+    console.error("[fw/residue] dropped a beacon: getUser threw:", e);
+    return;
+  }
+  const sessionUser = raced.timedOut ? null : raced.value.data.user;
+  if (sessionUser === null) {
+    // No resolvable session, nothing safe to attribute. The CLAIMED id alone is not
+    // enough — an unauthenticated endpoint that records whatever account id it is
+    // handed is an invitation to attribute residue to an arbitrary account.
+    console.error("[fw/residue] dropped a beacon with no resolvable session");
+    return;
+  }
+  // ONE LINE, one JSON object, stable keys — parseable, not prose. `sessionUserId`
+  // is WHO SENT THIS (authenticated); `claimedActorUserId` is who the device says
+  // the outcome happened under. They differ exactly when a handover raced the POST,
+  // and logging both is what makes that race a visible fact instead of a silent
+  // misattribution (frontend-races review). console.log, not console.error: this is
+  // routine telemetry on a successful path, and error-level would teach every
+  // severity-based alert to ignore the [fw/residue] prefix (agent-native review).
+  console.log(
+    `[fw/residue] ${JSON.stringify({
+      schemaVersion: parsed.data.schemaVersion,
+      outcome: parsed.data.outcome,
+      queueRemaining: parsed.data.queueRemaining,
+      sessionUserId: sessionUser.id,
+      claimedActorUserId: parsed.data.claimedActorUserId,
+      deviceId: parsed.data.deviceId,
+      application: parsed.data.application,
+      at: new Date().toISOString(),
+    })}`
+  );
 }
 
 /**
@@ -115,9 +253,14 @@ export async function loadStaffBarIdentity(): Promise<StaffBarIdentityResult> {
  */
 export async function signOutStaffBar(application: unknown): Promise<void> {
   const surface = narrowStaffBarApplication(application);
-  const session = await loadFwSession();
+  // An unreadable session degrades to the application tiebreak, exactly as a
+  // session-less one does. NOT a B4 exception: sign-out is the action that must never
+  // be blocked by a slow read (R23), and the only thing the session buys here is which
+  // of two hard-coded doors to land on. Failing to resolve it picks the door by the
+  // surface the operator was standing on — which is where they came from.
+  const read = await loadFwSessionRead();
   const destination = staffBarSignOutDestination({
-    identity: session === null ? null : await resolveStaffBarRoles(session),
+    identity: read.kind === "identity" ? await resolveStaffBarRoles(read.identity) : null,
     application: surface,
   });
 

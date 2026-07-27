@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,6 +8,7 @@ import {
   decideFwSignOut,
   evaluateFwSameActorGuard,
   fwEntryClearDisposition,
+  fwResidueBeacon,
   fwSignOutOutcomeCopy,
   fwSignOutRefusalCopy,
   fwResidueFullyCleared,
@@ -456,7 +458,11 @@ describe("classifyFwSignOutQueue — the single sign-out partition", () => {
         }),
         "remove",
       ],
-      ["quarantined", quarantineRecord, "abort"],
+      // Unit 5: was "abort". A record this build cannot read has no readable
+      // `actorUserId`, so Unit 4's scope-it-to-the-actor remedy is inapplicable, not
+      // merely incomplete — it refused whoever happened to be holding the device.
+      // PRESERVE, not remove: they stop blocking, they do not stop mattering.
+      ["quarantined", quarantineRecord, "preserve"],
     ];
     for (const [label, raw, disposition] of rows) {
       expect(fwEntryClearDisposition(raw, GUIDE), label).toBe(disposition);
@@ -477,7 +483,10 @@ describe("classifyFwSignOutQueue — the single sign-out partition", () => {
     ];
     const aborts = queue.filter((raw) => fwEntryClearDisposition(raw, GUIDE) === "abort").length;
     expect(countFwSignOutBlockers(classifyFwSignOutQueue(queue, GUIDE))).toBe(aborts);
-    expect(aborts).toBe(2); // own drainable + quarantined. NOT the foreign one.
+    // Unit 5: ONE. Own drainable only — not the foreign entry (Unit 4) and no longer
+    // the quarantined record either. Both are `preserve`, and the equality asserted
+    // above is what stops the count and the clear drifting apart as each was removed.
+    expect(aborts).toBe(1);
   });
 
   it("counts foreign undrained work separately — preserved, never a blocker", () => {
@@ -613,22 +622,40 @@ describe("decideFwSignOut — block-until-drained (Decision 8 / gap G1)", () => 
     });
   });
 
-  it("sign-out with only QUARANTINED entries is refused needs_attention (never silently wiped)", () => {
-    // kieran-typescript / reliability review: a shape this build can't drain is an
-    // un-landed capture; sign-out must surface it for dismissal, not destroy it.
+  it("sign-out with only QUARANTINED entries is ALLOWED (Unit 5) — they refuse nobody", () => {
+    // Peter, 2026-07-27. Unit 4 scoped the interlock to the signing-out account for
+    // FOREIGN captures; a quarantined record cannot be scoped at all, because a record
+    // this build cannot read has no readable `actorUserId`. So one corrupted record
+    // left by a departed guide used to refuse an unrelated admissions staffer's
+    // sign-out and tell them to open an app they have never used.
     const queue = classify([
       { id: "q-1", schemaVersion: 99 },
       { id: "q-2", schemaVersion: 99 },
     ]);
-    expect(decideFwSignOut({ queue, online: true })).toEqual({
-      ok: false,
-      reason: "needs_attention",
-      queuedCount: 2,
-    });
+    expect(decideFwSignOut({ queue, online: true })).toEqual({ ok: true });
+    // OFFLINE too — there is no branch where they come back as a blocker.
+    expect(decideFwSignOut({ queue, online: false })).toEqual({ ok: true });
   });
 
-  it("drainable entries take precedence over quarantined in the verdict", () => {
+  it("...and they are PRESERVED by the clear, never removed — the half that must not drift", () => {
+    // THE MUTATION THIS KILLS is the one the change itself created. Before Unit 5 a
+    // quarantined record reached `abort` through `countFwSignOutBlockers`. Dropping it
+    // from that count without adding the explicit `preserve` branch would have let it
+    // fall through to the `remove` tail — silently DESTROYING the one class of record
+    // defined as "un-landed work this build cannot even read". Allowing sign-out over
+    // them and keeping them are two separate claims; this is the second one.
+    expect(fwEntryClearDisposition({ id: "q-1", schemaVersion: 99 }, GUIDE)).toBe("preserve");
+    // And the count that feeds the chip still sees them, so the fact stays visible.
+    const queue = classify([{ id: "q-1", schemaVersion: 99 }]);
+    expect(queue.quarantined).toHaveLength(1);
+    expect(countFwSignOutBlockers(queue)).toBe(0);
+  });
+
+  it("a quarantined record alongside a drainable one neither refuses nor inflates the count", () => {
     const queue = classify([entry("checkmark"), { id: "q-1", schemaVersion: 99 }]);
+    // The refusal is entirely about the DRAINABLE entry, and the count says 1, not 2 —
+    // a guide told "2 check-ins haven't sent yet" would wait for a second one that no
+    // drain will ever ship.
     expect(decideFwSignOut({ queue, online: false })).toEqual({
       ok: false,
       reason: "queued_offline",
@@ -659,7 +686,6 @@ const ALL_REFUSAL_REASONS = Object.keys({
   drain_first: 0,
   drain_stalled: 0,
   session_expired: 0,
-  needs_attention: 0,
   unreadable: 0,
 } satisfies Record<FwSignOutRefusal["reason"], number>) as FwSignOutRefusal["reason"][];
 
@@ -709,14 +735,19 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
     expect(copy).toMatch(/try again/i);
   });
 
-  it("names the DISMISS control for quarantined records", () => {
-    // The one refusal whose action lives on another surface: the banner is
-    // rendered by FwPwa across the /fp/fw (app) group. Mounting the sign-out
-    // control outside that group makes this sentence unactionable, so pin the
-    // wording that ties it to the banner.
-    const copy = fwSignOutRefusalCopy("needs_attention", 1);
-    expect(copy).toMatch(/dismiss/i);
-    expect(copy).toMatch(/banner/i);
+  it("Unit 5: NO refusal sends the reader to another app or to a dismiss control", () => {
+    // The `needs_attention` sentence is gone with its reason. It was the only copy in
+    // this function that named a control on a surface the reader might not be on
+    // ("Open Founders Weekend and dismiss them there"), and that unactionability is
+    // exactly why the refusal was retired rather than reworded. Behavioural signature,
+    // over the whole union — the type-level removal is enforced by the `satisfies`
+    // above and by the `default`-less switch (TS2366).
+    for (const reason of ALL_REFUSAL_REASONS) {
+      const copy = fwSignOutRefusalCopy(reason, 2);
+      expect(copy, reason).not.toMatch(/banner/i);
+      expect(copy, reason).not.toMatch(/founders weekend/i);
+      expect(copy, reason).not.toMatch(/dismiss/i);
+    }
   });
 
   it("agrees with itself on singular/plural for every reason", () => {
@@ -747,35 +778,34 @@ describe("fwSignOutRefusalCopy — every refusal names an action the guide can t
     expect(copy).not.toMatch(/signed out|success/i);
   });
 
-  it("needs_attention names the BANNER on /fp/fw and Founders Weekend everywhere else", () => {
-    // Unit 1 left this open on purpose and named it: the dismiss control is the
-    // queued-indicator banner, which `FwPwa` renders on `/fp/fw` only. The staff bar
-    // is what puts this refusal on `/staff` and `/crm`, so it is the unit that owes
-    // the fix.
-    expect(fwSignOutRefusalCopy("needs_attention", 2, "fw")).toMatch(/in the banner/i);
-
-    const elsewhere = fwSignOutRefusalCopy("needs_attention", 2, "elsewhere");
-    expect(elsewhere).not.toMatch(/banner/i);
-    expect(elsewhere).toMatch(/founders weekend/i);
-    expect(elsewhere).toMatch(/\b2 saved check-ins\b/);
-  });
-
-  it("every OTHER reason reads identically on both surfaces — only that one moved", () => {
-    for (const reason of ALL_REFUSAL_REASONS) {
-      if (reason === "needs_attention") continue;
-      expect(fwSignOutRefusalCopy(reason, 2, "elsewhere"), reason).toBe(
-        fwSignOutRefusalCopy(reason, 2, "fw")
-      );
-    }
-  });
-
-  it("the surface variant is pluralized too", () => {
-    expect(fwSignOutRefusalCopy("needs_attention", 1, "elsewhere")).not.toMatch(
-      /\b1 saved check-ins\b/
+  it("Unit 5: the copy no longer varies by SURFACE, because nothing left varies", () => {
+    // `fwSignOutRefusalCopy` took a third `surface` argument for exactly one reason:
+    // `needs_attention` had to name a different control on `/fp/fw` than off it. With
+    // that reason gone the parameter, the `FwSignOutSurface` type and
+    // `staffBarSignOutSurface` were all deleted rather than left defaulted.
+    //
+    // NOT `Function.prototype.length` — that stops counting at the first defaulted
+    // parameter, so `(reason, count, surface = "fw")` reports 2 and the deleted
+    // parameter could return wearing a default (testing review). The SIGNATURE in
+    // source is what is pinned: the parameter list between the declaration's parens
+    // must contain exactly `reason` and `count`, nothing after.
+    const rulesSource = readFileSync(
+      new URL("../fw-sync-rules.ts", import.meta.url),
+      "utf8"
     );
-    expect(fwSignOutRefusalCopy("needs_attention", 2, "elsewhere")).not.toMatch(
-      /\b2 saved check-in\b/
-    );
+    const refusalSig = /export function fwSignOutRefusalCopy\(([^)]*)\)/.exec(rulesSource);
+    expect(refusalSig).not.toBeNull();
+    const params = (refusalSig?.[1] ?? "")
+      .split(",")
+      .map((p) => p.split(":")[0].trim())
+      .filter(Boolean);
+    expect(params).toEqual(["reason", "count"]);
+    const outcomeSig = /export function fwSignOutOutcomeCopy\(([^)]*)\)/.exec(rulesSource);
+    const outcomeParams = (outcomeSig?.[1] ?? "")
+      .split(",")
+      .map((p) => p.split(":")[0].trim())
+      .filter(Boolean);
+    expect(outcomeParams).toEqual(["outcome"]);
   });
 });
 
@@ -1237,5 +1267,84 @@ describe("isFwAppShellPath — the never-cache-navigations exception is scoped",
     expect(isFwAppShellPath("/fp/sign-in")).toBe(false);
     expect(isFwAppShellPath("/fp/fworks")).toBe(false); // prefix must be a segment boundary
     expect(isFwAppShellPath("/")).toBe(false);
+  });
+});
+
+describe("fwResidueBeacon — the off-device report of un-landed work (Unit 5)", () => {
+  const base = { actorUserId: GUIDE, application: "fw" as const };
+
+  it("reports queue_preserved WITH its count", () => {
+    expect(fwResidueBeacon({ ...base, outcome: { kind: "queue_preserved", preservedCount: 3 } }))
+      .toEqual({
+        outcome: "queue_preserved",
+        queueRemaining: 3,
+        actorUserId: GUIDE,
+        application: "fw",
+      });
+  });
+
+  it("reports clear_failed with a NULL count, never zero", () => {
+    // Item 5 of the offline-drain solution doc, applied: a sentinel must not be an
+    // in-range value of the type it stands in for. `clear_failed` is minted when a
+    // clear threw or a cache survived, so the queue's size is exactly what could not
+    // be established — and `0` would read at a desk as "nothing was left behind" on
+    // precisely the outcome where nothing is known.
+    const beacon = fwResidueBeacon({ ...base, outcome: { kind: "clear_failed" } });
+    expect(beacon?.queueRemaining).toBeNull();
+    expect(beacon?.queueRemaining).not.toBe(0);
+  });
+
+  it("is SILENT for every outcome that left nothing behind", () => {
+    // Returning null rather than an "empty" payload keeps "nothing to report"
+    // un-sendable by construction. Beaconing routine mounts would bury the two
+    // outcomes that matter in a stream of noise, which is how a signal becomes
+    // ignorable — the failure mode this beacon exists to fix, recreated one layer up.
+    const silent = [
+      { kind: "sign_out" },
+      { kind: "raced" },
+      { kind: "refused", verdict: { ok: false, reason: "drain_first", queuedCount: 2 } },
+      { kind: "none" },
+      { kind: "adopted" },
+      { kind: "reconciled" },
+    ] as const;
+    for (const outcome of silent) {
+      expect(fwResidueBeacon({ ...base, outcome }), outcome.kind).toBeNull();
+    }
+  });
+
+  it("covers BOTH outcome unions — sign-out's and the reconcile's", () => {
+    // `clear_failed` is a member of both `FwSignOutOutcome` and `FwReconcileOutcome`,
+    // and `queue_preserved` only of the second. The reconcile is the path that runs far
+    // more often (every fresh mount of a device that changed hands), so a beacon wired
+    // only to the sign-out button would miss the common case entirely.
+    expect(fwResidueBeacon({ ...base, outcome: { kind: "clear_failed" } })).not.toBeNull();
+    expect(
+      fwResidueBeacon({ ...base, outcome: { kind: "queue_preserved", preservedCount: 1 } })
+    ).not.toBeNull();
+  });
+
+  it("carries the application, so a desk can tell which surface the device was on", () => {
+    for (const application of ["fw", "crm", "staff"] as const) {
+      const beacon = fwResidueBeacon({
+        actorUserId: GUIDE,
+        application,
+        outcome: { kind: "clear_failed" },
+      });
+      expect(beacon?.application).toBe(application);
+    }
+  });
+
+  it("carries the SIGNING-OUT account, which is not necessarily whose captures these are", () => {
+    // Pinned because the field name invites the opposite reading. On the
+    // `queue_preserved` path the two are usually DIFFERENT people — that is what
+    // "preserved" means. This field answers "who was holding the device", which is what
+    // locates the iPad; whose work it is lives on each queue entry's own `actorUserId`
+    // and is deliberately not copied here.
+    const beacon = fwResidueBeacon({
+      actorUserId: OTHER_GUIDE,
+      application: "fw",
+      outcome: { kind: "queue_preserved", preservedCount: 2 },
+    });
+    expect(beacon?.actorUserId).toBe(OTHER_GUIDE);
   });
 });

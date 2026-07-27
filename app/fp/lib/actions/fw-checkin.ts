@@ -29,6 +29,7 @@ import { z } from "zod";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import { runFwCheckIn, type FwCheckInActionResult } from "@/app/fp/lib/fw-checkin-core";
 import { isFwAction, FW_ACTIONS, FW_BATCH_MAX } from "@/app/fp/lib/fw-rules";
 
@@ -76,7 +77,22 @@ export async function applyFwCheckIn(input: unknown): Promise<FwCheckInActionRes
   // FW-D3 staff bridge apply, so a client-supplied kind would let any staff-claim
   // holder declare a Path cohort "fw" and write cascade-free events into a real
   // Path student's record.
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
+  // `resolveFwActorForCohort` can THROW `IdentityUnavailableError` since Unit 5 (B4):
+  // the session read itself did not answer. That is not `no_session` (which sends the
+  // guide to sign in again — a lie on a stalled link) and not `forbidden` (a verdict
+  // this path never reached). It is `unavailable`, the reason the client already
+  // treats as retryable AND durably queues the tap for (the queueBackstop path).
+  let resolved;
+  try {
+    resolved = await resolveFwActorForCohort(cohortId);
+  } catch (e) {
+    if (isIdentityUnavailable(e)) {
+      console.error(`[fw/checkin] actor resolve could not read identity: ${e.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    throw e;
+  }
+  const { verdict, session } = resolved;
   if (!verdict.ok) {
     return {
       ok: false,

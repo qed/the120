@@ -320,6 +320,15 @@ async function drainFwQueueOnce(ctx: FwDrainCtx, opts: FwDrainOptions = {}): Pro
       notify();
       return;
     }
+    // `unavailable`: the server could not READ the session (B4). Identical disposal to
+    // the timeout branch above and for the identical reason — nothing is known, so
+    // nothing is concluded. Explicitly NOT `authRequired`: claiming the session
+    // expired would put "sign in again to send them" in front of a guide whose
+    // session is fine, on the one screen where the wrong instruction costs captures.
+    if (res.reason === "unavailable") {
+      notify();
+      return;
+    }
     // invalid_input: the WHOLE batch failed server-side validation. With the
     // stricter isRecognizedFwEntry this should be unreachable for client-recognized
     // entries, but if it ever happens, ADVANCE attempts so the batch reaches the
@@ -668,6 +677,11 @@ export async function readFwDeviceQueueState(input: {
  *  it directly. */
 const FW_CACHE_OWNER_KEY = "fw.cacheOwner";
 
+/** The last owner THIS DOCUMENT wrote, kept because localStorage can refuse the
+ *  write (private mode) while the reconcile it describes genuinely ran — see
+ *  `readOwner` in the ports below. Never persisted; never a substitute for the key. */
+let memoryCacheOwner: string | null = null;
+
 /**
  * Ensure the device's cached residue belongs to the CURRENT account (security review;
  * rewritten for Unit 3's B2).
@@ -701,17 +715,32 @@ export function reconcileFwCacheOwner(input: {
       ...fwClientPorts(input.actorUserId),
       readOwner: () => {
         try {
-          return window.localStorage.getItem(FW_CACHE_OWNER_KEY);
+          const persisted = window.localStorage.getItem(FW_CACHE_OWNER_KEY);
+          // The in-memory copy backstops a persisted read that answers but is STALE
+          // because the write below could not land (private mode / saturated quota).
+          // Without it, a device whose localStorage rejects writes re-runs the
+          // DESTRUCTIVE handover reconcile on every remount for the rest of the
+          // session — draining, re-clearing the current guide's own roster cache and
+          // the shell cache each time — because the key that says "already this
+          // actor's" can never advance (Unit 5, adversarial review). Memory scope is
+          // exactly right for that failure: it survives remounts within the page's
+          // lifetime (the loop), and a genuinely fresh page load in private mode
+          // reconciles once, which is correct — nothing persisted, so nothing is
+          // known about the device.
+          return persisted ?? memoryCacheOwner;
         } catch {
-          return undefined; // private mode / locked-down storage policy
+          return memoryCacheOwner ?? undefined; // undefined = the read itself threw
         }
       },
       writeOwner: (owner) => {
+        memoryCacheOwner = owner;
         try {
           window.localStorage.setItem(FW_CACHE_OWNER_KEY, owner);
           return true;
         } catch {
-          return false; // private mode — the reconcile still ran; nothing to persist
+          // Private mode — persistence failed but the MEMORY copy above still stops
+          // the same document repeating the destructive reconcile it just finished.
+          return false;
         }
       },
     },

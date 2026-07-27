@@ -349,3 +349,42 @@ export function fwClaimStrikeDisposition(
 ): "keep" | "release" {
   return reason === "dead_link" ? "keep" : "release";
 }
+
+/* ═══════════════════════════════════ the staff-gate sentence (Unit 5, B4) ══ */
+
+/**
+ * The one sentence a refused `resolveFwStaffGate` shows.
+ *
+ * Exists because Unit 5 gave that gate a THIRD refusal — `unavailable`, meaning the
+ * session or the `staff` row could not be read at all — and every one of its eleven
+ * call sites answered `!gate.ok` with the same hand-copied `STAFF_ONLY` string, in
+ * three separate files. Left alone, a timed-out staff-row lookup would have told an
+ * active staff member their action was staff-only: a verdict about their account,
+ * asserted from a query that never answered. That is the precise failure B4 and B5
+ * exist to remove, one layer up from the gate itself.
+ *
+ * Exhaustive with an EXPLICIT `never` default, matching `fwSignOutOutcomeCopy` and
+ * for its reason: the `default`-less TS2366 tripwire is a property of the compiler
+ * flags and evaporates under a config change, while the `never` assignment fails
+ * whatever the flags say (typescript review — the repo had both patterns and this
+ * one is strictly stronger).
+ *
+ * The `unavailable` sentence must name a RETRY, because unlike the other two the
+ * caller's next attempt can genuinely succeed.
+ */
+export function fwStaffGateCopy(
+  reason: "no_session" | "not_staff" | "unavailable"
+): string {
+  switch (reason) {
+    case "no_session":
+      return "Your session has ended. Sign in again to continue.";
+    case "not_staff":
+      return "That action is staff-only.";
+    case "unavailable":
+      return "Couldn't check your staff access just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}

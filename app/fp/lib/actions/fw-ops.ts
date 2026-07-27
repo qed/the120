@@ -29,7 +29,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
+import { fwStaffGateCopy, isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
+import { isIdentityUnavailable } from "@/app/lib/identity-unavailable";
 import { resolveFwActorForCohort, resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 import {
   anonymizeFwStudent,
@@ -55,19 +56,16 @@ import {
 } from "@/app/fp/lib/fw-ops-rules";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
-/**
- * ONE message for every refusal shape: not signed in, signed in as a guide,
- * staff row deactivated, cohort is a Path cohort, cohort does not exist.
- *
- * Collapsed deliberately. A guide probing these endpoints must not be able to
- * tell "you are not staff" from "that cohort id is real but not fw" — the
- * second enumerates cohort ids. Staff never meet this message in normal use,
- * because the surface that calls these actions is only rendered for them.
- */
-const STAFF_ONLY = "That action is staff-only.";
 
 /**
  * The cohort-scoped staff gate every action here runs first.
+ *
+ * `not_staff` is ONE message for five refusal shapes: not signed in, signed in as a
+ * guide, staff row deactivated, cohort is a Path cohort, cohort does not exist.
+ * Collapsed deliberately — a guide probing these endpoints must not be able to tell
+ * "you are not staff" from "that cohort id is real but not fw", because the second
+ * enumerates cohort ids. Staff never meet this message in normal use, because the
+ * surface that calls these actions is only rendered for them.
  *
  * ⚠️ `resolveFwActorForCohort` returns a SYNTHETIC session (`userId: ""`) on the
  * no-session path, so `session.userId` is only meaningful once the verdict has
@@ -75,15 +73,48 @@ const STAFF_ONLY = "That action is staff-only.";
  * below makes that implication a runtime fact rather than an inference a future
  * edit could quietly break — this id is written into an audit row and a token's
  * `created_by`, both of which are FKs to `auth.users`.
+ *
+ * ── Unit 5 (B4): why the refusal grew a reason, when the whole point above is
+ * that the reasons are collapsed
+ *
+ * `resolveFwActorForCohort` now THROWS `IdentityUnavailableError` when the session
+ * itself could not be read. Letting that escape would break this file's canon —
+ * actions return typed refusals and never throw — and would surface a stalled query
+ * as a framework error page on top of an ops console. Catching it into the existing
+ * `{ok:false}` would be worse: staff would read "that action is staff-only" and
+ * reasonably conclude their access had been revoked mid-event.
+ *
+ * So `unavailable` is split out, and it does NOT weaken the enumeration argument it
+ * sits beside. That argument is about not leaking facts about the COHORT ID; this
+ * reason is a fact about the caller's own session and is identical for every id,
+ * real or invented. `not_staff` still collapses all four of the reasons listed above.
  */
+type FwCohortStaffRefusal = "not_staff" | "unavailable";
+
 async function requireCohortStaff(
   cohortId: string
-): Promise<{ ok: true; actorUserId: string } | { ok: false }> {
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
-  if (!isFwStaffActor(verdict)) return { ok: false };
+): Promise<{ ok: true; actorUserId: string } | { ok: false; reason: FwCohortStaffRefusal }> {
+  let resolved;
+  try {
+    resolved = await resolveFwActorForCohort(cohortId);
+  } catch (e) {
+    if (isIdentityUnavailable(e)) {
+      console.error(`[fw/ops] cohort staff gate could not resolve identity: ${e.message}`);
+      return { ok: false, reason: "unavailable" };
+    }
+    throw e;
+  }
+  const { verdict, session } = resolved;
+  if (!isFwStaffActor(verdict)) {
+    // SERVER-SIDE only. The client-facing message stays collapsed (the enumeration
+    // argument above); the log does not have to be, and a silent refusal branch is
+    // indistinguishable from the gate never running (agent-native review).
+    console.error(`[fw/ops] cohort staff gate refused: ${verdict.ok ? "not staff for cohort" : verdict.reason}`);
+    return { ok: false, reason: "not_staff" };
+  }
   if (typeof session.userId !== "string" || session.userId.length === 0) {
     console.error("[fw/ops] staff verdict passed with no session user id — refusing");
-    return { ok: false };
+    return { ok: false, reason: "not_staff" };
   }
   return { ok: true, actorUserId: session.userId };
 }
@@ -116,7 +147,7 @@ export async function createFwCohortAction(
   input: unknown
 ): Promise<CreateFwCohortActionResult> {
   const gate = await resolveFwStaffGate();
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const parsed = createCohortSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Fill in every field." };
@@ -231,7 +262,7 @@ export async function mintBoardTokenAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const minted = await mintFwBoardToken(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
@@ -257,7 +288,7 @@ export async function revokeBoardTokenAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const revoked = await revokeFwBoardToken(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
@@ -332,7 +363,7 @@ export async function revokeGuideGrantAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const revoked = await revokeFwGuideGrant(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
@@ -373,7 +404,7 @@ export async function resolveReplayRejectAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const resolved = await resolveFwReplayReject(supabaseAdmin(), {
     rejectId: parsed.data.rejectId,
@@ -423,7 +454,7 @@ export async function anonymizeStudentAction(
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const result = await anonymizeFwStudent(supabaseAdmin(), {
     studentId: parsed.data.studentId,
@@ -485,7 +516,7 @@ export async function lookupMatchAction(input: unknown): Promise<MatchLookupActi
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const resolution = await loadFwMatchResolution(supabaseAdmin(), {
     cohortId: parsed.data.cohortId,
@@ -509,7 +540,7 @@ export async function linkStudentAction(input: unknown): Promise<LinkStudentActi
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
-  if (!gate.ok) return { success: false, error: STAFF_ONLY };
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
 
   const linked = await linkFwStudentToCohort(supabaseAdmin(), {
     studentId: parsed.data.studentId,

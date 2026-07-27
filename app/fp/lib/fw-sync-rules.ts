@@ -534,26 +534,59 @@ export function classifyFwSignOutQueue(
  * The original justification was that reconciliation would destroy the survivors, so
  * refusing was what kept them. Unit 3's B2 fix removed that premise: the handover
  * reconcile now PRESERVES what it cannot ship. Nothing but the refusal was left.
+ *
+ * ⚠️ QUARANTINED RECORDS ARE ALSO NOT COUNTED (Staff Front Door Unit 5, Peter,
+ * 2026-07-27). This is the SAME correction applied a second time, to the class that
+ * Unit 4 could not reach.
+ *
+ * A quarantined record is one whose shape this build cannot read. That is the whole
+ * definition, and it has a consequence the foreign-capture fix did not have:
+ * `partitionFwQueue` cannot attribute it to ANYONE. A record we cannot parse has no
+ * readable `actorUserId`. So Unit 4's remedy — scope the interlock to the signing-out
+ * account — is not merely incomplete here, it is inapplicable: there is no account to
+ * compare against.
+ *
+ * What that produced in practice: one corrupted record, left by a guide who has gone
+ * home, refused an unrelated admissions staffer's sign-out and told them to open
+ * Founders Weekend — an app they have never used — and dismiss it there. Every clause
+ * of the argument that retired `foreign_queue` applies verbatim, and one more besides:
+ * the person refused cannot fix this even in principle, because the dismissal control
+ * acts on a record no build in the room can display.
+ *
+ * The records are NOT destroyed. `fwEntryClearDisposition` returns `preserve` for
+ * them, which is a strengthening — the previous code reached `remove` for an
+ * unrecognized record with no usable id. They remain visible in
+ * `summarizeFwDeviceQueue`'s `attentionCount`, which is what the bar's queue chip
+ * renders, and (Unit 5) they are reported off-device by `fwResidueBeacon`. Sign-out is
+ * what stops depending on them.
  */
 export function countFwSignOutBlockers(queue: FwSignOutQueueClassification): number {
-  return queue.drainable.length + queue.quarantined.length;
+  return queue.drainable.length;
 }
 
 /**
  * What a destructive clear must do with ONE raw record — the three-way disposition
  * `clearFwQueueUnlessBlocked` applies inside its own transaction.
  *
- *   - `abort`    this account's own un-landed work, or a record whose shape this build
- *                cannot even read. Its presence stops the clear entirely, because a tap
- *                may have been enqueued since the verdict and a partial wipe would
- *                lose it.
- *   - `preserve` another account's un-landed work. Survives the clear untouched, and
- *                (Unit 4) does not stop it: no drain, reconnect or re-auth under THIS
- *                session can ever ship it, so the only thing refusing achieved was
- *                stranding whoever is holding the device.
- *   - `remove`   an already-rejected tombstone, own or foreign, and anything
- *                unrecognized with no usable id. The authoritative record is the
- *                server's `path_fw_replay_rejects` row; the local copy is a note.
+ *   - `abort`    this account's own un-landed work. Its presence stops the clear
+ *                entirely, because a tap may have been enqueued since the verdict and
+ *                a partial wipe would lose it.
+ *   - `preserve` another account's un-landed work, AND (Unit 5) any record whose shape
+ *                this build cannot read. Survives the clear untouched, and does not
+ *                stop it: no drain, reconnect or re-auth under THIS session can ever
+ *                ship either one, so the only thing refusing achieved was stranding
+ *                whoever is holding the device.
+ *   - `remove`   an already-rejected tombstone, own or foreign. The authoritative
+ *                record is the server's `path_fw_replay_rejects` row; the local copy is
+ *                a note.
+ *
+ * ⚠️ THE QUARANTINED BRANCH IS EXPLICIT, AND IT MUST BE. Before Unit 5 a quarantined
+ * record reached `abort` via `countFwSignOutBlockers`, so removing it from that count
+ * did not merely stop it refusing — it dropped it through to the `remove` tail, which
+ * would have DESTROYED the one class of record defined as "un-landed work this build
+ * cannot even read". The whole change is that these stop blocking a sign-out, not that
+ * they stop mattering. Deleting the branch below reddens
+ * `fw-sync-rules.test.ts`'s "a quarantined record is preserved, never removed".
  *
  * Deliberately expressed by re-running `classifyFwSignOutQueue` over the singleton
  * rather than as a hand-written test of the same conditions: the check and the act then
@@ -570,7 +603,9 @@ export function fwEntryClearDisposition(
 ): FwClearDisposition {
   const queue = classifyFwSignOutQueue([raw], actorUserId);
   if (countFwSignOutBlockers(queue) > 0) return "abort";
-  return queue.foreignUndrained.length > 0 ? "preserve" : "remove";
+  if (queue.foreignUndrained.length > 0) return "preserve";
+  if (queue.quarantined.length > 0) return "preserve";
+  return "remove";
 }
 
 /**
@@ -628,13 +663,13 @@ export type FwSignOutRefusal = {
     | "drain_stalled"
     /** The session expired before the queue could be sent — re-auth, don't retry. */
     | "session_expired"
-    /* NOTE: there is no `foreign_queue`. Another account's un-landed captures are
-     * preserved by the clear (`fwEntryClearDisposition`) and reported by the bar's
-     * queue chip — they are not a refusal. Removed in Staff Front Door Unit 4; see
-     * `countFwSignOutBlockers`. Re-adding the member without copy is TS2366 in
-     * `fwSignOutRefusalCopy`, which is the tripwire, not this comment. */
-    /** Quarantined records a human must dismiss. */
-    | "needs_attention"
+    /* NOTE: there is no `foreign_queue`, and since Unit 5 no `needs_attention`.
+     * Another account's un-landed captures and records this build cannot read are
+     * both preserved by the clear (`fwEntryClearDisposition`), reported by the bar's
+     * queue chip, and beaconed off-device by `fwResidueBeacon` — they are not
+     * refusals. See `countFwSignOutBlockers` for why each was removed. Re-adding
+     * either member without copy is TS2366 in `fwSignOutRefusalCopy`, which is the
+     * tripwire, not this comment. */
     /** Minted by the caller on a queue-read failure — sign-out must never fail OPEN
      *  on an unread queue and then destroy it. */
     | "unreadable";
@@ -665,12 +700,16 @@ export type FwSignOutVerdict = { ok: true } | FwSignOutRefusal;
  *      `drain_first` forever while the copy claimed the captures were "still sending."
  *   3. drained-and-unchanged — `navigator.onLine` is TRUE behind a venue captive
  *      portal, so repeating `drain_first` is an infinite "try again in a moment."
- *   4. quarantined-only — last, because a drain clears the drainable ones first.
  *
- * A foreign undrained entry used to top that list. It no longer refuses at all
- * (Unit 4) — precisely BECAUSE it named nothing this guide could do. See
- * `countFwSignOutBlockers`; `queue.foreignUndrained` is still read, by the clear's
- * disposition and by the bar's chip.
+ * TWO CLASSES USED TO REFUSE HERE AND NO LONGER DO, for one reason stated twice:
+ * neither named anything the person tapping the button could actually do. A foreign
+ * undrained entry went in Unit 4; a quarantined record went in Unit 5, and it was the
+ * worse of the two because it cannot even be attributed to an account. Both are still
+ * read — by the clear's `preserve` disposition, by the bar's queue chip, and by the
+ * Unit 5 beacon. See `countFwSignOutBlockers`.
+ *
+ * Every remaining refusal is therefore about THIS account's own drainable captures,
+ * which means `queuedCount` is unambiguously `queue.drainable.length` on every branch.
  */
 export function decideFwSignOut(input: {
   queue: FwSignOutQueueClassification;
@@ -681,19 +720,20 @@ export function decideFwSignOut(input: {
   drainAttempted?: boolean;
 }): FwSignOutVerdict {
   const { queue } = input;
+  const queuedCount = queue.drainable.length;
+  // `countFwSignOutBlockers` IS `drainable.length` since Unit 5, and this reads it
+  // through the named function rather than the field for the reason the function
+  // exists: it is the ONE definition of "there is work here this account must not
+  // lose", and the clear folds over the same one. Inlining `queuedCount === 0` here
+  // would put a second copy of that rule on the verdict side — which is precisely the
+  // two-predicates-that-disagree defect this module's header opens with.
   if (countFwSignOutBlockers(queue) === 0) return { ok: true };
 
-  const queuedCount = queue.drainable.length;
-  if (queuedCount > 0) {
-    if (!input.online) return { ok: false, reason: "queued_offline", queuedCount };
-    if (input.authRequired) return { ok: false, reason: "session_expired", queuedCount };
-    return input.drainAttempted
-      ? { ok: false, reason: "drain_stalled", queuedCount }
-      : { ok: false, reason: "drain_first", queuedCount };
-  }
-
-  // Only quarantined records remain — dismissible, but never silently wiped.
-  return { ok: false, reason: "needs_attention", queuedCount: queue.quarantined.length };
+  if (!input.online) return { ok: false, reason: "queued_offline", queuedCount };
+  if (input.authRequired) return { ok: false, reason: "session_expired", queuedCount };
+  return input.drainAttempted
+    ? { ok: false, reason: "drain_stalled", queuedCount }
+    : { ok: false, reason: "drain_first", queuedCount };
 }
 
 /* ═══════════════════════════════════════════════ the device-evidence gate ══ */
@@ -1180,6 +1220,95 @@ export async function runFwCacheOwnerReconcile(input: {
   });
 }
 
+/* ═════════════════════════════════ the un-landed-work beacon (Unit 5) ══ */
+
+/**
+ * What a device reports OFF-DEVICE when it finishes a sign-out or a handover still
+ * holding captures — Staff Front Door Unit 5, Peter's decision of 2026-07-27.
+ *
+ * ── The gap this closes, stated as the reviewer stated it
+ *
+ * Unit 4 scoped the sign-out interlock to the signing-out account (R16), which was
+ * right: a departed guide's un-landed captures no longer strand whoever picks the
+ * iPad up. But the old refusal had a second effect nobody was buying deliberately —
+ * it forced a HUMAN to notice that the device was holding someone else's work. With
+ * the refusal gone, sign-out succeeds and those captures sit there silently. The only
+ * remaining signal is the bar's queue chip: on that one device, seen by whoever picks
+ * it up, after identity resolves. Nothing at a desk can answer "which iPads are
+ * holding check-ins that never reached us?" — there is no log, table or query.
+ *
+ * ⚠️ WHAT THIS IS NOT. It is not a recovery mechanism. The captures still cannot be
+ * shipped by anyone but the account that made them — the drain scopes to the
+ * signed-in actor by design, and nothing here changes that. It reports a fact so a
+ * human can go find the device. Reading this as "the work is now safe" is the exact
+ * misreading `queue_preserved` already exists to prevent.
+ *
+ * ── Why only these two outcomes
+ *
+ * `queue_preserved` and `clear_failed` are the two that leave something behind:
+ * un-landed captures in the first, an un-cleared roster or shell cache in the second.
+ * `reconciled`, `adopted`, `none` and a plain `sign_out` leave nothing, and beaconing
+ * them would bury the two that matter in a stream of routine mounts — the shape that
+ * makes a signal ignorable. Returning `null` rather than an "empty" payload keeps
+ * "there is nothing to report" un-sendable by construction.
+ */
+export type FwResidueBeacon = {
+  /** The outcome kind, verbatim — the vocabulary the code already uses. */
+  outcome: "queue_preserved" | "clear_failed";
+  /**
+   * Captures still on the device, or `null` when the clear THREW and the count is
+   * genuinely unknown.
+   *
+   * Nullable for the reason item 5 of the offline-drain solution doc records: a
+   * sentinel that is an in-range value of the type it stands in for makes a fault
+   * indistinguishable from a legitimate result. `0` here would read as "nothing left
+   * behind" on precisely the failure where nothing is known.
+   */
+  queueRemaining: number | null;
+  /** WHO signed out — not who owns the captures. See the field note below. */
+  actorUserId: string;
+  application: "fw" | "crm" | "staff";
+};
+
+/**
+ * Build the beacon payload, or `null` when there is nothing to report.
+ *
+ * ⚠️ `actorUserId` IS THE SIGNING-OUT ACCOUNT, NOT THE OWNER OF THE CAPTURES. On the
+ * `queue_preserved` path they are usually DIFFERENT people — that is what "preserved"
+ * means. This field answers "who was holding the device", which is the question that
+ * locates the iPad; the queue's own entries each carry their own `actorUserId`, which
+ * is the field that answers whose work it is, and it is deliberately NOT copied here.
+ * Naming this `actorUserId` matches the reviewer's proposal and the rest of the
+ * codebase, so the ambiguity is resolved by this note rather than by a rename that
+ * would make the beacon the only surface using a different word for the same idea.
+ */
+export function fwResidueBeacon(input: {
+  outcome: FwSignOutOutcome | FwReconcileOutcome;
+  actorUserId: string;
+  application: "fw" | "crm" | "staff";
+}): FwResidueBeacon | null {
+  const { outcome } = input;
+  if (outcome.kind === "queue_preserved") {
+    return {
+      outcome: "queue_preserved",
+      queueRemaining: outcome.preservedCount,
+      actorUserId: input.actorUserId,
+      application: input.application,
+    };
+  }
+  if (outcome.kind === "clear_failed") {
+    // No count: `clear_failed` is minted when a clear threw or a cache survived, so
+    // the queue's size is exactly what could not be established. See the field note.
+    return {
+      outcome: "clear_failed",
+      queueRemaining: null,
+      actorUserId: input.actorUserId,
+      application: input.application,
+    };
+  }
+  return null;
+}
+
 /* ═══════════════════════════════════════════════════ sign-out copy ══ */
 
 /**
@@ -1190,25 +1319,29 @@ export async function runFwCacheOwnerReconcile(input: {
  * shared iPad at a live event.
  *
  * Every branch names an action available on the surface the guide is standing on.
+ *
+ * ── Unit 5: this function no longer takes a `surface`, and that is the point
+ *
+ * It used to, for exactly one reason: `needs_attention` had to name a DIFFERENT
+ * control depending on where you stood, because the dismissal banner it pointed at is
+ * rendered by `FwPwa` on `/fp/fw` only. Off that subtree it produced "Open Founders
+ * Weekend and dismiss them there, then sign out" — an instruction to leave the app you
+ * are in, open one you may never have used, and act on a record no build in the room
+ * can display.
+ *
+ * That refusal is gone (see `countFwSignOutBlockers`), and with it the only reason any
+ * of this copy varied by surface. Every remaining refusal is about THIS account's own
+ * captures and names something available wherever the bar is mounted, so the parameter
+ * would now be a dead input that a future reader would have to reason about. It, and
+ * the `FwSignOutSurface` type and `staffBarSignOutSurface` helper that fed it, are
+ * deleted rather than left defaulted.
  */
 export function fwSignOutRefusalCopy(
   reason: FwSignOutRefusal["reason"],
-  count: number,
-  /**
-   * WHERE the guide is standing. Only `needs_attention` differs, and it has to:
-   * dismissing a quarantined record needs the queued-indicator banner, which `FwPwa`
-   * renders on `/fp/fw` only. Off that subtree the old sentence named a control that
-   * is not on the screen — the carried-forward gap the staff bar creates the moment
-   * it puts this refusal on `/staff` and `/crm`. Defaulted, so the FW callers that
-   * predate the bar are unchanged.
-   */
-  surface: FwSignOutSurface = "fw"
+  count: number
 ): string {
   const s = count === 1 ? "" : "s";
   const them = count === 1 ? "it" : "them";
-  if (reason === "needs_attention" && surface === "elsewhere") {
-    return `${count} saved check-in${s} couldn't be read by this app version. Open Founders Weekend and dismiss ${them} there, then sign out.`;
-  }
   switch (reason) {
     case "queued_offline":
       return `${count} check-in${s} haven't sent yet. Stay signed in until you're back online — they'll send automatically.`;
@@ -1220,23 +1353,20 @@ export function fwSignOutRefusalCopy(
       return `${count} check-in${s} couldn't be sent. This device looks connected but can't reach The 120 — open the wi-fi sign-in page, or stay signed in until the network is back.`;
     case "session_expired":
       return `Your session expired before ${count} check-in${s} could send. Sign in again to send ${them}, then sign out.`;
-    case "needs_attention":
-      return `${count} saved check-in${s} couldn't be read by this app version. Dismiss ${them} in the banner, then sign out.`;
     case "unreadable":
       return "Couldn't check your saved check-ins just now. Try again in a moment.";
+    default: {
+      // Explicit never, matching `fwSignOutOutcomeCopy` below — the TS2366 tripwire
+      // this switch used to lean on evaporates under a flag change; this does not.
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
   }
 }
 
-/** Which chrome the sign-out was requested from. `/fp/fw` renders the queued
- *  indicator's dismiss banner; nothing else does. */
-export type FwSignOutSurface = "fw" | "elsewhere";
-
 /** The message for a whole sequence outcome, or `null` when the session may end.
  *  `default`-less for the same TS2366 reason as `fwSignOutRefusalCopy`. */
-export function fwSignOutOutcomeCopy(
-  outcome: FwSignOutOutcome,
-  surface: FwSignOutSurface = "fw"
-): string | null {
+export function fwSignOutOutcomeCopy(outcome: FwSignOutOutcome): string | null {
   switch (outcome.kind) {
     case "sign_out":
       return null;
@@ -1248,7 +1378,7 @@ export function fwSignOutOutcomeCopy(
       // the failure this replaces was reported to the guide as success.
       return "Your check-ins sent, but this device still holds Founders Weekend data and you're still signed in. Try again — if it keeps failing, don't hand this device over until someone clears the browser's site data.";
     case "refused":
-      return fwSignOutRefusalCopy(outcome.verdict.reason, outcome.verdict.queuedCount, surface);
+      return fwSignOutRefusalCopy(outcome.verdict.reason, outcome.verdict.queuedCount);
     default: {
       // An EXPLICIT never, not the `default`-less TS2366 tripwire this docblock used
       // to credit. That tripwire is real but it is a property of `strictNullChecks`,

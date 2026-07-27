@@ -22,6 +22,7 @@ tags:
   - brittle-tests
   - no-jsdom
   - vitest
+last_updated: 2026-07-27
 ---
 
 # A source-scanning test is only as good as its anchor
@@ -267,6 +268,45 @@ And a correction to ROUND 2's advice: "ask a reviewer to attack it, because the 
 blind spot is exactly the set of spellings they did not think of" is necessary but not
 sufficient — one of ROUND 3's misses sat in the author's **own freshly-edited file**.
 Sweep your own diff's files first; the blind spot begins at home.
+
+## ROUND 4 (Staff Front Door Unit 5, 2026-07-27) — four more defeats, four more rules
+
+Unit 5 wrote a repo-wide "exactly these files may call `serviceWorker.register`" scan
+and an arity pin for a deleted parameter, mutation-tested both per ROUND 2's rule, and
+watched reviewers defeat the first drafts anyway. What survived:
+
+1. **Bracket notation is a spelling.** `navigator["serviceWorker"]["register"](…)` is
+   ordinary JavaScript and contains no literal `.register(`. Every member-access
+   pattern needs the bracketed alternative alongside the dot:
+   `(\.\s*register|\[\s*["'`]register["'`]\s*\])`. The scan's own self-test must
+   include the bracketed spellings, or the self-test is the same trap one level up.
+
+2. **Set equality over FILES is not a cap on CALLS.** "Exactly these two files match"
+   passes when a rogue SECOND call is added inside an already-allowed file — the file
+   set is unchanged. Count call sites per allowed file too (dedupe matches from
+   overlapping patterns by the position of the call's opening paren, or one call
+   matched by two patterns counts twice).
+
+3. **The API you did not think of is adjacent to the one you scanned for.** The first
+   detector flagged Background Sync's `registration.sync?.register("path-drain")` —
+   a tag registration, not a worker registration — sitting legitimately within reach
+   of the word `serviceWorker` in both PWA components. Excluding it took TWO
+   lookbehinds, `(?<!\bsync)(?<!\bsync\?)`, because optional chaining puts a `?`
+   between the receiver and the dot. Every exclusion is itself a spelling.
+
+4. **`Function.prototype.length` is arity theatre.** It stops counting at the first
+   defaulted parameter, so `expect(fn.length).toBe(2)` stays green when the deleted
+   third parameter returns as `surface = undefined`. Pin the SIGNATURE in source
+   instead: extract the declaration's parameter list and assert it equals
+   `["reason", "count"]` — a defaulted revenant changes the list.
+
+**And one from fixing the fixes:** a guard asserted as "the file imports
+`isIdentityUnavailable`" was walked through twice in one session — deleting the catch
+leaves the import (and its mention in comments); deleting the import alone is a compile
+error that never reaches the test. The property that held: every CALL of the throwing
+function sits within N chars of a `try {`, and the file contains a
+`catch … isIdentityUnavailable(` — structure adjacent to the thing guarded, per this
+doc's ROUND 2 rule, not presence of a name anywhere in the file.
 
 ## Related
 

@@ -23,7 +23,7 @@
  * through the functions below.
  */
 
-import type { FwDeviceQueueState, FwSignOutSurface } from "@/app/fp/lib/fw-sync-rules";
+import type { FwDeviceQueueState } from "@/app/fp/lib/fw-sync-rules";
 
 /** The guarded staff applications the bar serves. `/fp` (the family app) and the
  *  projected board are deliberately absent — R18's three exclusions. */
@@ -438,13 +438,18 @@ export function staffBarSkin(application: StaffBarApplication): StaffBarSkin {
 
 /* ═══════════════════════════════════ which sign-out refusal copy applies ══ */
 
-/**
- * Which variant of `fwSignOutRefusalCopy` this surface may show.
+/*
+ * `staffBarSignOutSurface` USED TO LIVE HERE, and Unit 5 deleted it rather than
+ * leaving it unused.
  *
- * Only `needs_attention` differs, and it has to: dismissing a quarantined record
- * needs the queued-indicator banner, which `FwPwa` renders on `/fp/fw` only. Naming
- * that banner from `/crm` points at a control which is not on the screen.
+ * It answered "which variant of `fwSignOutRefusalCopy` may this surface show", and
+ * exactly one refusal ever varied: `needs_attention`, whose off-`/fp/fw` sentence sent
+ * the reader to open Founders Weekend and dismiss a record there. That refusal no
+ * longer exists — a quarantined record does not refuse anyone's sign-out (Peter,
+ * 2026-07-27; see `countFwSignOutBlockers`) — so every remaining sentence is identical
+ * on all three surfaces and the helper had one caller passing a value nothing read.
+ *
+ * Recorded because the deletion is the visible half of a decision whose reasoning is
+ * three files away, and because a reader finding `fwSignOutOutcomeCopy` called with
+ * one argument should be able to learn here that the second was removed on purpose.
  */
-export function staffBarSignOutSurface(application: StaffBarApplication): FwSignOutSurface {
-  return application === "fw" ? "fw" : "elsewhere";
-}

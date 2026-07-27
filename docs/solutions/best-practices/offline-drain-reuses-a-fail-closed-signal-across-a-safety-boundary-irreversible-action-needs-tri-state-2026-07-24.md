@@ -233,6 +233,40 @@ The tell is identical to the four above ("a two-valued disposition at an irrever
 boundary"), but it hides better: nobody reads `number` as a two-valued type. It becomes
 one the moment the only alternative to "a real count" is "a fake count".
 
+### 6. UNKNOWN is not NONE — an identity gate's timeout must not be its terminal state (Unit 5, 2026-07-27)
+
+The tri-state rule's largest application yet, and the one that generalizes it beyond
+the drain: an IDENTITY read that does not answer must not report the answer's absence
+as either of the answers. `loadFwSession()` returned `FwSession | null`, and `null`
+meant "signed out" — so once the call was bounded (it had to be; it runs first inside
+the client's Web Lock), a timeout reported as `null` would have thrown a mid-shift
+guide to the sign-in door with un-landed captures on the device. Strictly worse than
+the hang it replaced. `requireStaff()` had the same two states, where the collapse
+read as *revocation*: a stalled staff-row read redirected an active staff member to a
+404.
+
+The fix is the type, not the timeout: a three-way `IdentityRead<T>` whose third member
+is **neither nullable nor falsy** —
+
+```ts
+type IdentityRead<T> =
+  | { kind: "identity"; identity: T }
+  | { kind: "none" }
+  | { kind: "unknown"; detail: string };
+```
+
+— so the pre-fix idiom (`if (!session) …treat as signed out`) is a compile error at
+every call site rather than a review finding. Each consumer then decides what UNKNOWN
+means FOR IT: pages throw to a retryable error boundary; Server Actions return a typed
+`unavailable` (never `no_session`, which clients act on by demanding re-auth); the
+staff bar alone may collapse it to "no chrome", because R23 keeps its control rendered
+either way and nothing acts on the string.
+
+**The named un-fixed twin:** `requirePathUser` (`app/fp/lib/auth.ts`) still has both
+of its calls bare and both of its states terminal. `fw-auth.ts`'s own docblock names
+it as the sibling. Whoever bounds it must bring this shape along, or they will have
+built the worse-than-the-hang version.
+
 ## Why This Matters
 
 A drain that writes into an append-only log has no undo. Every one of these was a

@@ -183,7 +183,11 @@ export async function provisionOrRecognizeAccount(
       email,
       password,
       email_confirm: true, // auth-layer "can sign in" — NOT inbox verification (header)
-      app_metadata: { role: "parent" },
+      // `funnel: true` marks a funnel-provisioned account — one whose password
+      // was generated and discarded. U3's redemption reads it as the truthful
+      // source of the re-entry matrix's `hasPassword` bit (an account WITHOUT
+      // the stamp chose its own password and keeps signing in with it, R9).
+      app_metadata: { role: "parent", funnel: true },
     });
     if (created.error || !created.data.user) {
       const emailExists =

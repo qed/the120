@@ -163,5 +163,12 @@ it("unwritable cookies fail CLOSED before any side effect", async () => {
 - `docs/solutions/best-practices/shared-db-taking-core-must-not-live-in-a-use-server-file-server-action-boundary-2026-07-17.md`
   — the Server Component / Server Action boundary this failure lives on.
 - `docs/solutions/test-failures/a-source-scanning-test-is-defeated-by-a-spelling-you-did-not-guess-2026-07-27.md`
-  — ROUND 5: the DI-seam technique that retires a scan.
+  — ROUND 5: the DI-seam technique that retires a scan. **ROUND 6** carries the
+  correction learned one unit later: a seam that mirrors a client's chained
+  builders needs `as unknown as` on both sides and turns the checker off; cut
+  the seam at the OPERATION, not the client.
+- `docs/solutions/security-issues/constant-response-is-not-constant-timing-and-a-guard-moves-when-you-extract-2026-07-27.md`
+  — sibling from the next unit: the same "probe/verify what the layer below
+  actually did" instinct, applied to response timing and to a guard that moved
+  during a refactor.
 - GitHub issues: none (searched cookie/session/server component, zero results).

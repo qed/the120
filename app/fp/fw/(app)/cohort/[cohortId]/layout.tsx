@@ -57,6 +57,12 @@ export default async function FwCohortLayout({
   const listed = await listFwCohortsForActor(supabaseAdmin(), {
     grantedCohortIds: grantedCohortIds(session.grants),
     isStaff,
+    // UNFILTERED, per the plan's settled decision: this ONE list feeds the header's
+    // weekend name (which must resolve for an archived cohort a staff member opens —
+    // "This weekend" here is wrong-stamp risk) AND `canSwitch` (which must count
+    // every cohort the actor holds, or a guide standing inside an archived cohort
+    // loses the Switch link back — the guide-facing regression the criterion forbids).
+    includeArchived: true,
   });
   const cohorts = listed.ok ? listed.cohorts : [];
   const active = cohorts.find((c) => c.id === cohortId);

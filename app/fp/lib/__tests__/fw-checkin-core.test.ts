@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   FW_CALL_TIMEOUT_MS,
@@ -818,7 +819,6 @@ describe("Unit 8 invariant — a guide checks in to an archived cohort and the e
     // state is deliberately not part of the actor verdict). The offline drain
     // replay inherits this same property (it lands through runFwCheckIn).
     // Comment-stripped, per the scan discipline.
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     // WIDENED to the shared authz gate (testing review, 0.85): the single most
     // natural place a future edit would thread archive state into check-in is
     // `loadFwCohort`'s select plus a branch in `resolveFwActorForCohort` — the row

@@ -8,10 +8,13 @@ import FwImportExceptions from "@/app/fp/fw/components/FwImportExceptions";
 import FwMatchResolver from "@/app/fp/fw/components/FwMatchResolver";
 import FwReplayRejects from "@/app/fp/fw/components/FwReplayRejects";
 import FwStudentRoster from "@/app/fp/fw/components/FwStudentRoster";
+import FwArchiveControl from "@/app/fp/fw/components/FwArchiveControl";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { listFwImportExceptions } from "@/app/fp/lib/fw-import-core";
+import { withFwTimeout } from "@/app/fp/lib/fw-call";
+import { fwArchivedBanner, fwOpsCohortAffordances } from "@/app/fp/lib/fw-ops-rules";
 import {
   listFwCohortGuides,
   listFwOpsStudents,
@@ -79,6 +82,32 @@ export default async function FwOpsCohortPage({
 
   const { cohort, token, guides, students, rejects, importExceptions } =
     await loadOpsCohortPage(cohortId);
+  // The archived banner names an EMAIL where an actor was recorded — a uuid in a
+  // banner is noise. Resolved here (one bounded read, archived cohorts only);
+  // launch's four backfilled cohorts all carry NULL and render "unrecorded".
+  // BOUNDED, like the identical call inside listFwCohortGuides and for its stated
+  // reason: a stalled Admin API call here would otherwise block the ENTIRE archived
+  // page — sections whose data already loaded fine — behind one banner nicety
+  // (Unit 9 review, 0.75). A timeout or miss degrades to "unresolvable", which is a
+  // different sentence from "unrecorded": the row HOLDS an actor we failed to name.
+  let archivedBy:
+    | { kind: "unrecorded" }
+    | { kind: "unresolvable" }
+    | { kind: "email"; email: string } = { kind: "unrecorded" };
+  if (cohort?.archivedAt && cohort.archivedBy) {
+    try {
+      const raced = await withFwTimeout(
+        supabaseAdmin().auth.admin.getUserById(cohort.archivedBy),
+        `archived-by lookup (${cohort.archivedBy})`
+      );
+      archivedBy =
+        !raced.timedOut && raced.value.data?.user?.email
+          ? { kind: "email", email: raced.value.data.user.email }
+          : { kind: "unresolvable" };
+    } catch {
+      archivedBy = { kind: "unresolvable" };
+    }
+  }
   // The gate already proved this cohort is `kind='fw'` and that the caller may
   // act in it; a null here is a read failure, not an authorization answer.
   if (!cohort) {
@@ -94,8 +123,26 @@ export default async function FwOpsCohortPage({
     );
   }
 
+  // ONE decision table for what renders (fw-ops-rules, tested) — the rendering
+  // twin of Unit 8's server-side guard table. Not a security boundary: everything
+  // hidden here is also refused server-side; hiding is honesty.
+  const show = fwOpsCohortAffordances({ archived: cohort.archivedAt !== null });
+  const banner =
+    cohort.archivedAt !== null
+      ? fwArchivedBanner({ archivedAt: cohort.archivedAt, archivedBy })
+      : null;
+
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
+      {banner && (
+        <div className="mb-6 rounded-xl border border-hq-border bg-hq-sunken p-4">
+          <p className="font-path-display text-base font-semibold text-hq-ink">{banner.title}</p>
+          <p className="mt-1 font-path-body text-sm leading-6 text-hq-ink-soft">{banner.detail}</p>
+          {show.unarchiveControl && (
+            <FwArchiveControl cohortId={cohort.id} slug={cohort.slug} archived={true} />
+          )}
+        </div>
+      )}
       <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
         Weekend
       </p>
@@ -135,7 +182,11 @@ export default async function FwOpsCohortPage({
           Guides
         </h2>
         {guides.ok ? (
-          <FwGuideRoster cohortId={cohort.id} guides={guides.guides} />
+          <FwGuideRoster
+            cohortId={cohort.id}
+            guides={guides.guides}
+            allowProvision={show.guideProvisionForm}
+          />
         ) : (
           <p
             role="alert"
@@ -169,6 +220,7 @@ export default async function FwOpsCohortPage({
         )}
       </section>
 
+      {show.matchResolver && (
       <section className="mt-10">
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
           Find a returning student
@@ -180,6 +232,7 @@ export default async function FwOpsCohortPage({
         </p>
         <FwMatchResolver cohortId={cohort.id} />
       </section>
+      )}
 
       <section className="mt-10">
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
@@ -208,12 +261,14 @@ export default async function FwOpsCohortPage({
           <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
             Students
           </h2>
-          <Link
-            href={`/fp/fw/ops/cohort/${cohort.id}/import`}
-            className="inline-flex min-h-[44px] items-center font-path-body text-sm text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
-          >
-            Import a roster (CSV)
-          </Link>
+          {show.csvImportLink && (
+            <Link
+              href={`/fp/fw/ops/cohort/${cohort.id}/import`}
+              className="inline-flex min-h-[44px] items-center font-path-body text-sm text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
+            >
+              Import a roster (CSV)
+            </Link>
+          )}
         </div>
         <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
           Removing a student anonymizes their record in place — their name is erased and their
@@ -231,6 +286,15 @@ export default async function FwOpsCohortPage({
           </p>
         )}
       </section>
+
+      {!banner && (
+        <section className="mt-12 border-t border-hq-border pt-6">
+          <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+            Retire this weekend
+          </h2>
+          <FwArchiveControl cohortId={cohort.id} slug={cohort.slug} archived={false} />
+        </section>
+      )}
     </main>
   );
 }

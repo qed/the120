@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import "@/app/fp/content/registry";
 import { getProgram } from "@/app/fp/content/manifest";
@@ -856,7 +857,6 @@ describe("Unit 8 — the CSV chunk refuses an archived cohort, whole-chunk", () 
     // guide quick-create, which MUST keep working on an archived cohort (a guide who
     // can check a child in must be able to add the child in front of them). So the
     // word archived_at may appear in THIS file only inside runFwImportChunk's gate.
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const src = readFileSync(new URL("../fw-import-core.ts", import.meta.url), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     const hits = [...code.matchAll(/archived_at/g)];

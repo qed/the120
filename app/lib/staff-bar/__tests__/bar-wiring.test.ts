@@ -613,3 +613,23 @@ describe("R16 — one sign-out control, and the other two are GONE not merely un
     expect(CODE).toMatch(/flex-wrap/);
   });
 });
+
+describe("Unit 9 — who includes archived cohorts is a WIRING decision, pinned", () => {
+  it("the cohort LAYOUT takes everything; the PICKER splits by role", () => {
+    // The plan's settled split, asserted where it lives. The layout's one list
+    // feeds the header name AND canSwitch, so filtering there strands a guide
+    // inside an archived cohort; the picker includes archived for GUIDES (theirs
+    // to open — a guide holding only an archived cohort is redirected into it)
+    // and excludes for STAFF (default visibility is the point of archiving).
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).toMatch(/includeArchived:\s*true/);
+    // …and the CONSUMPTION is pinned too, not just the fetch (testing review, 0.8):
+    // the header resolves by ID over the unfiltered list, and canSwitch is a strict
+    // more-than-one. A `cohorts[0]` header or a `>= 1` canSwitch would have walked
+    // through the fetch-argument pin alone.
+    expect(layout).toMatch(/cohorts\.find\(\(c\) => c\.id === cohortId\)/);
+    expect(layout).toMatch(/cohorts\.length > 1/);
+    const picker = stripComments(read("../../../fp/fw/(app)/page.tsx"));
+    expect(picker).toMatch(/includeArchived:\s*!isStaff/);
+  });
+});

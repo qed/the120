@@ -192,6 +192,11 @@ will read on a real screen.
       - **This is a log line, not a table** — a table needs a migration and Lane A does
         not hold the migration lock. Confirm the line is there and legible; the
         persistent store is Unit 6's.
+- [ ] **The archive control round-trips** (Unit 9 — no jsdom reaches it). On an
+      active weekend's ops page: type a WRONG slug (button stays disabled), the right
+      slug (archives; the page flips to the banner + Unarchive within one refresh),
+      then Unarchive (page flips back; the board panel shows no live token until an
+      explicit mint). Double-tap both buttons — nothing double-fires.
 - [ ] **The archived board CLEARS the projector frame** (Unit 8 — the client half no
       test can reach). With a board polling on a projector, set the cohort's
       `archived_at` directly in SQL — deliberately WITHOUT revoking the token (the

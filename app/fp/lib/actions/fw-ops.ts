@@ -55,6 +55,7 @@ import {
 import {
   archiveFwCohortFailureCopy,
   fwCohortWindowFromLocal,
+  fwSlugTakenCopy,
   normalizeFwCohortSlug,
   unarchiveFwCohortFailureCopy,
 } from "@/app/fp/lib/fw-ops-rules";
@@ -212,7 +213,7 @@ function createCohortFailureMessage(
 ): string {
   switch (reason) {
     case "slug_taken":
-      return `"${slug}" is already taken — pick another name.`;
+      return fwSlugTakenCopy(slug);
     case "invalid_time_zone":
       return "Pick the city's timezone.";
     case "unavailable":

@@ -16,6 +16,7 @@ import {
   mintFwBoardToken,
   recordFwOpsAudit,
   resolveFwReplayReject,
+  listFwActiveWeekends,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   unarchiveFwCohort,
@@ -2643,3 +2644,65 @@ describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (posi
   });
 });
 
+describe("Unit 9 — archive-aware lists", () => {
+  it("the ops list EXCLUDES archived by default, and its counts describe the filtered set (R3)", async () => {
+    const { db } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const listed = await listFwOpsCohorts(db, { now: NOW });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(listed.cohorts.map((c) => c.id)).toEqual([HAMPTONS]);
+  });
+
+  it("includeArchived returns them, archive fields carried, board status honest ('revoked')", async () => {
+    const { db } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    const listed = await listFwOpsCohorts(db, { now: NOW, includeArchived: true });
+    if (!listed.ok) throw new Error("unreachable");
+    const boston = listed.cohorts.find((c) => c.id === BOSTON)!;
+    expect(boston.archivedAt).not.toBeNull();
+    expect(boston.archivedBy).toBe(DANA);
+    expect(boston.boardTokenStatus).toBe("revoked"); // the "Board revoked" chip's input
+  });
+
+  it("the WIDENED view's counts are computed over the widened set (R3's contract)", async () => {
+    // The review's mutation: ids for the count fan-out derived from a
+    // default-filtered subset while archived rows still return — every prior test
+    // stayed green because none asserted counts ON an archived row.
+    const { db } = makeFakeDb({
+      members: [
+        { student_id: "s1", cohort_id: BOSTON },
+        { student_id: "s2", cohort_id: BOSTON },
+      ],
+      grants: [
+        { id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON },
+      ],
+    });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const listed = await listFwOpsCohorts(db, { now: NOW, includeArchived: true });
+    if (!listed.ok) throw new Error("unreachable");
+    const boston = listed.cohorts.find((c) => c.id === BOSTON)!;
+    expect(boston.studentCount).toBe(2);
+    expect(boston.guideCount).toBe(1);
+  });
+
+  it("listFwActiveWeekends: only non-archived, with the window dates, one narrow read", async () => {
+    const { db } = makeFakeDb({});
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const res = await listFwActiveWeekends(db);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.weekends.map((w) => w.id)).toEqual([HAMPTONS]);
+    expect(res.weekends[0].startsAt).toBe("2026-08-28T13:00:00.000Z");
+    expect(res.weekends[0].endsAt).toBe("2026-08-30T21:00:00.000Z");
+  });
+
+  it("listFwActiveWeekends reports a typed FAILURE on a read error — never a fabricated zero", async () => {
+    // The hub renders a number from this; a failure collapsing to [] would put a
+    // confident "0 weekends" on the staff hub over a blip (R4's asymmetry is the
+    // FW side degrading VISIBLY, not lying).
+    const { db } = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "select", message: "blip" },
+    });
+    expect(await listFwActiveWeekends(db)).toEqual({ ok: false });
+  });
+});

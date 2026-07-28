@@ -21,6 +21,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.2",
+    "ai": "^7.0.40",
     "lucide-react": "^1.25.0",
     "mediabunny": "^1.50.9",
     "motion": "^12.42.2",

@@ -941,7 +941,28 @@ verified against a corpus of adversarial samples.
 
 ---
 
-- [ ] **Unit 10: AI project composition**
+- [x] **Unit 10: AI project composition** — *landed 2026-07-28. Provider-agnostic
+  (Peter's decision): `compose-rules.ts` pure (⟦⟧-fenced prompt assembly, zod
+  schema with nullable hypothesis, the WHOLE R40a taxonomy as `composeBranch`,
+  template-derived canned fallbacks), `compose-model.ts` the one model-touching
+  file (`FUNNEL_COMPOSE_MODEL` env string, maxRetries 0, unset = graceful
+  `unconfigured` fallback), `compose-core.ts` + thin actions, compose step in
+  the shell. Review pair found the unit's real bomb: `projects` had RLS with
+  ZERO policies while the cores speak PostgREST with the anon key — every
+  production compose would have paid the model and failed the insert. Fixed by
+  migration `20260808120000` (parent-scoped projects policy + coercing
+  `children_applicant_state_guard`), applied to production and pinned by a
+  migration-scan tripwire. Second converging finding restructured the write
+  order to CLAIM-BEFORE-SPEND: compose inserts the fallback row first (the
+  one-active index arbitrates, losers spend zero model calls), regenerate
+  CAS-reserves the counter before generating. Also: sanitize-then-validate
+  (brand replacement grows word counts), R40a's backoff arm real (one delayed
+  retry on timeout/429), added→project_created advance re-issued on re-entry
+  (self-heal), R2's five-project cap wired, delimiter stripped from family
+  edits. Suite 126 files / 3,311 tests; tsc, build, lint clean. CARRIED to the
+  unit that first renders project fields into email/CRM (U13/U15): R40b's
+  HTML-escape-at-render scenario. ZDR agreement = Peter-owned launch
+  precondition.*
 
 **Goal:** The child's words become a company page, or something equally good when the model
 fails.

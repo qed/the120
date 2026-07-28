@@ -1,0 +1,116 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { supabaseServer } from "@/app/lib/supabase/server";
+import { getSeatsRemaining } from "@/app/lib/seats";
+import {
+  REVIEW_SCREEN,
+  SEATS_FULL_REVIEW_NOTE,
+  postSubmitDestination,
+} from "@/app/lib/funnel/offer-rules";
+
+/**
+ * The review-wait screen (funnel U13; R49a, F5): after C2 the family sees a
+ * real admissions process, not a stall — the screen says what happens next
+ * and when. ⚠ DRAFTED copy (offer-rules.ts), Peter revises; factual claims
+ * registered in DRAFT_CLAIMS_FOR_PETER.
+ *
+ * Routing is per-child and TWO-column (both reviewers): `children.status`
+ * as well as `applicant_state`, because pre-funnel children carry a NULL
+ * state and the sync trigger only bridges funnel children. A family with
+ * nothing left in review goes where their live child is (dashboard /
+ * waitlist); a mixed family stays here but the offered sibling gets a
+ * pointer, never a blanket "nothing is needed from you".
+ */
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "In Review — The 120" };
+
+export default async function ReviewPage() {
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/start");
+
+  const { data: rows } = await supabase
+    .from("children")
+    .select("first_name, status, applicant_state")
+    .neq("status", "draft");
+  const children = rows ?? [];
+  if (children.length === 0) redirect("/dashboard");
+
+  const seatsRemaining = await getSeatsRemaining();
+  const resolved = children.map((c) => ({
+    name: String(c.first_name ?? "").trim(),
+    destination: postSubmitDestination({
+      applicantState: (c.applicant_state as string | null) ?? null,
+      status: String(c.status ?? ""),
+      seatsRemaining,
+    }),
+  }));
+
+  if (!resolved.some((c) => c.destination === "review")) {
+    redirect(
+      resolved.some((c) => c.destination === "dashboard") ? "/dashboard" : "/start/waitlist"
+    );
+  }
+
+  const inReview = resolved.filter((c) => c.destination === "review" && c.name);
+  const offered = resolved.filter((c) => c.destination === "dashboard" && c.name);
+
+  return (
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center bg-paper px-6 py-14 text-ink">
+      <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
+        {REVIEW_SCREEN.kicker}
+      </p>
+      <h1 className="mt-2 font-display text-3xl leading-tight">{REVIEW_SCREEN.title}</h1>
+      <p className="mt-3 text-base leading-7 text-ink-soft">
+        {inReview.length > 0
+          ? `${inReview.map((c) => c.name).join(" and ")}'s application is in. `
+          : ""}
+        {REVIEW_SCREEN.intro}
+      </p>
+
+      {offered.length > 0 && (
+        <p className="mt-3 rounded-xl border border-red/30 bg-red/5 px-4 py-3 text-[14px] leading-6">
+          {offered.map((c) => c.name).join(" and ")} has an offer waiting.{" "}
+          <Link href="/dashboard" className="text-blue underline hover:text-red">
+            Reserve the seat from your dashboard →
+          </Link>
+        </p>
+      )}
+
+      {seatsRemaining <= 0 && (
+        <p className="mt-3 text-[13px] leading-5 text-ink-soft">{SEATS_FULL_REVIEW_NOTE}</p>
+      )}
+
+      <ol className="mt-8 flex flex-col gap-4">
+        {REVIEW_SCREEN.steps.map((step, i) => (
+          <li key={step.label} className="flex gap-4">
+            <span
+              aria-hidden
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-red font-mono text-[0.7rem] text-white"
+            >
+              {i + 1}
+            </span>
+            <div>
+              <p className="text-[15px] font-semibold">{step.label}</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-ink-soft">{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <p className="mt-8 text-[13px] leading-5 text-ink-soft">{REVIEW_SCREEN.footer}</p>
+
+      <Link
+        href="/dashboard"
+        className="mt-8 inline-flex h-11 items-center justify-center self-start rounded-full border border-line-strong px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-ink hover:border-ink"
+      >
+        ← Back to the dashboard
+      </Link>
+    </main>
+  );
+}

@@ -291,7 +291,11 @@ export default function DossierEditor({
               Thank you for your interest in joining The 120. We will review your submission and
               be in touch. Feel free to contact{" "}
               <span className="text-ink">admissions@the120.school</span> for anything else. Your
-              group choice can still be changed until a deposit is paid.
+              group choice can still be changed until a deposit is paid.{" "}
+              {/* U13 (F5): the review state is a real screen, not a stall. */}
+              <a href="/start/review" className="text-blue underline hover:text-red">
+                See what happens next →
+              </a>
             </>
           )}
         </p>

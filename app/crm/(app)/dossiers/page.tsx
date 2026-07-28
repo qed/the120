@@ -3,6 +3,13 @@ import { after } from "next/server";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { fetchDossierQueue, type DossierItem } from "@/app/crm/lib/queries";
+import { getSeatsRemainingStrict } from "@/app/lib/seats";
+import { SEATS_TOTAL } from "@/app/lib/site";
+import {
+  CAPACITY_UNKNOWN,
+  countOutstandingOffers,
+  offerCapacityDisplay,
+} from "@/app/lib/funnel/offer-rules";
 import QueueList from "@/app/crm/components/dossiers/QueueList";
 import DossierDetail from "@/app/crm/components/dossiers/DossierDetail";
 
@@ -66,6 +73,18 @@ export default async function DossiersPage({
     ? items.find((i) => i.childId === childId) ?? null
     : null;
 
+  // U13 (the over-offer trap): offers do NOT reserve seats — seats_claimed()
+  // counts paid deposits only. Surface remaining-minus-outstanding at the
+  // point of offer so staff never promise a seat that is not there.
+  const seatsRemaining = await getSeatsRemainingStrict();
+  const capacity =
+    seatsRemaining === null
+      ? CAPACITY_UNKNOWN
+      : offerCapacityDisplay({
+          paidDeposits: SEATS_TOTAL - seatsRemaining,
+          outstandingOffers: countOutstandingOffers(items),
+        });
+
   if (selected) {
     after(() => logDrillDown(staff.staffId, selected));
   }
@@ -92,7 +111,7 @@ export default async function DossiersPage({
 
       <div className="px-5 py-6 sm:px-7">
         {selected ? (
-          <DossierDetail key={selected.childId} item={selected} />
+          <DossierDetail key={selected.childId} item={selected} capacity={capacity} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-crm-faint">

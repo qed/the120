@@ -57,7 +57,15 @@ function InfoCard({ kicker, children }: { kicker: string; children: React.ReactN
   );
 }
 
-export default function DossierDetail({ item }: { item: DossierItem }) {
+export default function DossierDetail({
+  item,
+  capacity,
+}: {
+  item: DossierItem;
+  /** U13: seats remaining minus outstanding offers, shown in the offer
+   *  confirm dialog — offers do not reserve seats. */
+  capacity?: { line: string; warn: boolean };
+}) {
   const router = useRouter();
   const { toast } = useToast();
   const [moving, setMoving] = useState(false);
@@ -169,6 +177,7 @@ export default function DossierDetail({ item }: { item: DossierItem }) {
             sentAtOverlay={optimisticSentAt}
             onSentAtChange={setOptimisticSentAt}
             onSendingChange={setSendingOffer}
+            capacity={capacity}
           />
         </div>
       </div>

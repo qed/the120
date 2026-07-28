@@ -9,6 +9,7 @@ import {
   fwDuplicateNameStudentIds,
   searchFwRoster,
   FW_BAND_LABEL,
+  type FwUnfinishedStudent,
 } from "@/app/fp/lib/fw-nav-rules";
 
 /**
@@ -29,12 +30,24 @@ import {
 export default function FwRoster({
   cohortId,
   students,
+  unfinished = [],
 }: {
   cohortId: string;
   students: readonly FwRosterEntry[];
+  /**
+   * Half-created quick-creates the server detected (todo 001) — a submit whose
+   * membership or materialization leg failed and whose form was dismissed
+   * before the in-form retry could finish it. Which students qualify is decided
+   * in `fwUnfinishedStudents` (fw-nav-rules.ts); this component only renders
+   * the banner and re-arms the quick-create form's existing retry-in-place
+   * path via its `resume` prop.
+   */
+  unfinished?: readonly FwUnfinishedStudent[];
 }) {
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  /** The banner entry "Finish setup" was tapped for — seeds FwQuickCreate. */
+  const [resumeTarget, setResumeTarget] = useState<FwUnfinishedStudent | null>(null);
 
   const duplicates = useMemo(() => fwDuplicateNameStudentIds(students), [students]);
   const results = useMemo(() => searchFwRoster(students, query), [students, query]);
@@ -58,7 +71,12 @@ export default function FwRoster({
         </label>
         <button
           type="button"
-          onClick={() => setCreating((v) => !v)}
+          onClick={() => {
+            setCreating((v) => !v);
+            // Toggling — either way — leaves finish-setup mode; a fresh "New
+            // student" must never inherit a half-created child's handle.
+            setResumeTarget(null);
+          }}
           aria-expanded={creating}
           className="inline-flex h-14 min-w-[56px] items-center justify-center gap-2 rounded-xl border border-hq-border-strong bg-hq-surface px-4 font-path-body text-sm font-medium text-hq-ink shadow-hq active:bg-hq-sunken"
         >
@@ -67,9 +85,57 @@ export default function FwRoster({
         </button>
       </div>
 
+      {unfinished.length > 0 && (
+        <div
+          role="status"
+          className="mt-4 rounded-xl border border-not-yet/40 bg-not-yet/10 p-4"
+        >
+          <p className="font-path-body text-sm leading-5 text-hq-ink">
+            {unfinished.length === 1
+              ? "1 student is not finished setting up."
+              : `${unfinished.length} students are not finished setting up.`}{" "}
+            Finish them so their task list works at check-in.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {unfinished.map((u) => (
+              <li key={u.profileId} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate font-path-body text-sm font-medium text-hq-ink">
+                  {u.firstName} {u.lastName}{" "}
+                  <span className="font-path-mono text-[11px] uppercase tracking-[0.1em] text-hq-ink-soft">
+                    {FW_BAND_LABEL[u.band]}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResumeTarget(u);
+                    setCreating(true);
+                  }}
+                  className="inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg border border-hq-border bg-hq-surface px-3 font-path-body text-sm font-medium text-hq-ink active:bg-hq-sunken"
+                >
+                  Finish setup
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {creating && (
         <div className="mt-4">
-          <FwQuickCreate cohortId={cohortId} onCancel={() => setCreating(false)} />
+          {/* Keyed on the resume target so tapping a DIFFERENT "Finish setup"
+              (or returning to a fresh create) remounts the form — the seeds are
+              initial state, and a stale retryProfileId would finish the wrong
+              child. */}
+          <FwQuickCreate
+            key={resumeTarget?.profileId ?? "new"}
+            cohortId={cohortId}
+            resume={resumeTarget}
+            onCancel={() => {
+              setCreating(false);
+              setResumeTarget(null);
+            }}
+          />
         </div>
       )}
 

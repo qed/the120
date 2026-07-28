@@ -9,6 +9,7 @@ import {
   fwPickerRedirectsToSingleCohort,
   fwPickerZeroState,
   fwSearchDistanceBudget,
+  fwUnfinishedStudents,
   FW_BRAND_SUFFIX,
   FW_OPS_CREATE_PATH,
   normalizeFwSearchTerm,
@@ -16,6 +17,7 @@ import {
   summarizeFwResume,
   toggleFwBatchExtra,
   type FwRosterStudent,
+  type FwUnfinishedCandidateRow,
 } from "../fw-nav-rules";
 import { FW_BATCH_MAX } from "../fw-rules";
 import { parseFwActiveCohort, FW_PREF_UNKNOWN } from "../fw-device";
@@ -560,5 +562,138 @@ describe("fwPickerHeadline / fwPickerZeroState — R13, the two zeroes mean diff
     // bottom of `/fp/fw/ops`, and a link to a page without it is a dead end offered to
     // someone who has just been told there is nothing here.
     expect(FW_OPS_CREATE_PATH).toBe("/fp/fw/ops");
+  });
+});
+
+/* ═════════════════════════════════════════════════════ unfinished quick-creates ══ */
+
+describe("fwUnfinishedStudents", () => {
+  /**
+   * The roster banner's classifier (todo 001) — which profiles are half-created
+   * quick-creates a guide should be offered to FINISH. The reachable states
+   * mirror `provisionFwStudent`'s strict write order (profile → membership →
+   * materialization): a profile with no membership anywhere, and a member of
+   * this cohort with no materialized rows. "Materialized without membership" is
+   * deliberately NOT a case below, because materialization only runs after the
+   * membership upsert succeeds — the state cannot exist.
+   */
+  const COHORT = "cohort-boston";
+
+  const candidate = (
+    over: Partial<FwUnfinishedCandidateRow> = {}
+  ): FwUnfinishedCandidateRow => ({
+    profileId: "p-maya",
+    firstName: "Maya",
+    lastName: "Chen",
+    band: "g6_8",
+    childId: null,
+    noticeAttestedBy: "guide-1",
+    memberCohortIds: [COHORT],
+    materialized: true,
+    ...over,
+  });
+
+  const run = (candidates: FwUnfinishedCandidateRow[]) =>
+    fwUnfinishedStudents({ cohortId: COHORT, candidates });
+
+  it("a fully-created student — member here, materialized — is NOT unfinished", () => {
+    expect(run([candidate()])).toEqual([]);
+  });
+
+  it("a profile with NO membership anywhere is unfinished (the membership leg failed)", () => {
+    expect(run([candidate({ memberCohortIds: [], materialized: null })])).toEqual([
+      { profileId: "p-maya", firstName: "Maya", lastName: "Chen", band: "g6_8" },
+    ]);
+  });
+
+  it("a member of THIS cohort with no materialized rows is unfinished (the materialization leg failed)", () => {
+    // Reachable: the membership upsert precedes ensureFwStudentProgress in
+    // provisionFwStudent, so the leg after it can fail with the row in place.
+    // This student already renders as a roster row with a tap-dead tree.
+    expect(run([candidate({ materialized: false })])).toEqual([
+      { profileId: "p-maya", firstName: "Maya", lastName: "Chen", band: "g6_8" },
+    ]);
+  });
+
+  it("import-path profiles are NEVER flagged — the importer stamps no attestation", () => {
+    // The discriminator: quick-create stamps notice_attested_by on the profile
+    // insert itself; the bulk importer always passes null (PROPOSED-3 rejected).
+    // A half-imported row belongs to the importer's own exception/resume
+    // machinery, not to a guide's banner — on EITHER arm.
+    expect(run([candidate({ noticeAttestedBy: null, memberCohortIds: [] })])).toEqual([]);
+    expect(run([candidate({ noticeAttestedBy: null, materialized: false })])).toEqual([]);
+  });
+
+  it("a Path (roster-child) profile is never flagged, whatever its rows look like", () => {
+    expect(run([candidate({ childId: "child-1", memberCohortIds: [] })])).toEqual([]);
+  });
+
+  it("another weekend's member stays off this cohort's banner", () => {
+    // The cross-cohort privacy line PROPOSED-1 draws: a Boston guide has no
+    // business reading a Hamptons child's name, even a half-created one. Since
+    // 2026-07-28 the loader's `intended_cohort_id` filter is the PRIMARY scope
+    // (a candidate stamped for another cohort never reaches this classifier);
+    // this membership screen is the second line, kept because the classifier's
+    // contract must hold for whatever candidates it is handed.
+    expect(run([candidate({ memberCohortIds: ["cohort-hamptons"], materialized: false })])).toEqual(
+      []
+    );
+  });
+
+  it("an UNDETERMINABLE materialization is not a failed leg", () => {
+    // null mirrors verifyFwStudentLegs' `leg: null`: the check could not run
+    // (no seeded sentinel task, a read blip). Flagging on it would put a
+    // fully-created child on the banner over an outage.
+    expect(run([candidate({ materialized: null })])).toEqual([]);
+  });
+
+  it("an anonymized tombstone is retired, not unfinished", () => {
+    // Same exclusion as the roster read: a "Removed student" must never grow a
+    // Finish setup button that would re-complete a record staff just retired.
+    expect(
+      run([candidate({ firstName: "Removed", lastName: "student", memberCohortIds: [] })])
+    ).toEqual([]);
+  });
+
+  it("renders name-first, in a stable order, like the roster below the banner", () => {
+    const out = run([
+      candidate({ profileId: "p-z", firstName: "Zoe", lastName: "Ade", memberCohortIds: [] }),
+      candidate({ profileId: "p-a", firstName: "Ana", lastName: "Ives", memberCohortIds: [] }),
+    ]);
+    expect(out.map((u) => u.profileId)).toEqual(["p-a", "p-z"]);
+  });
+
+  it("no candidates → no banner", () => {
+    // The steady state of every healthy roster render — pinned so a refactor
+    // that fabricates a row from nothing cannot pass.
+    expect(run([])).toEqual([]);
+  });
+
+  it("one MIXED call filters and orders together — flagged rows out, in roster order", () => {
+    // The arms above are each pinned in isolation; this is the one call shape
+    // the roster page actually makes — a mixed candidate list — asserting that
+    // filtering and ordering compose rather than merely each working alone.
+    const out = run([
+      candidate(), // fully created — out
+      candidate({
+        profileId: "p-z",
+        firstName: "Zoe",
+        lastName: "Ade",
+        memberCohortIds: [],
+        materialized: null,
+      }), // membership leg failed — in
+      candidate({
+        profileId: "p-i",
+        firstName: "Ivo",
+        lastName: "Kade",
+        noticeAttestedBy: null,
+        memberCohortIds: [],
+      }), // import-minted — out
+      candidate({ profileId: "p-a", firstName: "Ana", lastName: "Ives", materialized: false }), // materialization leg failed — in
+    ]);
+    expect(out).toEqual([
+      { profileId: "p-a", firstName: "Ana", lastName: "Ives", band: "g6_8" },
+      { profileId: "p-z", firstName: "Zoe", lastName: "Ade", band: "g6_8" },
+    ]);
   });
 });

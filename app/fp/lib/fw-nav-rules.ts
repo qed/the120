@@ -27,6 +27,7 @@
 
 import type { DeepReadonly, PhaseKey, ProgramContent } from "@/app/fp/content/types";
 import type { Band } from "@/app/fp/content/types";
+import { isFwTombstoneName } from "./fw-ops-rules";
 import { FW_BATCH_MAX } from "./fw-rules";
 import type { TaskState } from "./transition-table";
 
@@ -353,6 +354,127 @@ export function fwDuplicateNameStudentIds(
     if (bucket.length > 1) for (const id of bucket) dupes.add(id);
   }
   return dupes;
+}
+
+/* ═════════════════════════════════════════════════════ unfinished quick-creates ══ */
+
+/**
+ * One row of evidence about a possibly-half-created student, as plain data the
+ * loader assembles (`loadFwUnfinishedStudents` in fw-loader.ts) and this module
+ * judges. The fields mirror `provisionFwStudent`'s write order — profile (with
+ * `notice_attested_by` stamped on the INSERT itself for the quick-create path),
+ * then membership, then materialization — so "which leg is missing" is readable
+ * off which field is empty.
+ */
+export type FwUnfinishedCandidateRow = {
+  profileId: string;
+  firstName: string;
+  lastName: string;
+  band: Band;
+  /** Non-null means a Path (roster-child) profile — never quick-create's. */
+  childId: string | null;
+  /**
+   * The quick-create discriminator. Quick-create is the ONLY provisioning path
+   * that stamps `notice_attested_by` at insert time (`runFwQuickCreate` passes
+   * the actor; the bulk importer passes null by decision — PROPOSED-3 rejected,
+   * fw-import-core.ts banner). A half-created import row therefore never lands
+   * on a guide's banner; the importer owns its own exception/resume surface.
+   */
+  noticeAttestedBy: string | null;
+  /** Every cohort this profile is a member of. Empty = the membership leg never
+   *  landed anywhere. */
+  memberCohortIds: readonly string[];
+  /**
+   * Whether the materialization leg is observable: `true` when the student has
+   * progress rows for their pinned catalog, `false` when observably absent, and
+   * `null` when the check could not run (no sentinel task for the pinned
+   * version, or the row was not checked because the student is not a member
+   * here). `null` is NOT a failed leg — same posture as `verifyFwStudentLegs`'
+   * `leg: null`: reporting a read outage as a half-created student would put a
+   * fully-created child on the banner over a blip.
+   */
+  materialized: boolean | null;
+};
+
+/** What the roster banner renders per half-created student — enough to name the
+ *  child and to arm the quick-create form's resume path, nothing more. */
+export type FwUnfinishedStudent = {
+  profileId: string;
+  firstName: string;
+  lastName: string;
+  band: Band;
+};
+
+/**
+ * Which candidates are UNFINISHED quick-creates this cohort's roster should
+ * surface (todo 001) — the recovery affordance for a guide who dismissed the
+ * quick-create form while a retryable failure was in flight, orphaning the
+ * in-form retry-in-place state.
+ *
+ * Two reachable half-created shapes, and only two, because `provisionFwStudent`
+ * writes strictly in the order profile → membership → materialization:
+ *
+ *   1. NO MEMBERSHIP ANYWHERE — the membership leg failed (or the process died
+ *      before it).
+ *   2. MEMBER OF THIS COHORT, MATERIALIZATION ABSENT — the membership landed
+ *      and the 125 rows did not. This student already renders as a normal
+ *      roster row with a tap-dead tree, which is precisely the state
+ *      Decision 13 exists to prevent.
+ *
+ * SCOPING (decided 2026-07-28): candidates arrive pre-scoped by the loader —
+ * `loadFwUnfinishedStudents` filters on `intended_cohort_id`, the cohort the
+ * quick-create was attempted in, stamped on the profile insert. The earlier
+ * shape surfaced a membership-less profile on ANY roster (justified then by
+ * the resume-scope rule, which accepts a membership-less profile from any
+ * cohort); that put a Boston half-create's name in front of a Hamptons guide,
+ * crossing the same cross-cohort line the PROPOSED-1 lookup redacts (its
+ * verdict's cross-cohort arm carries a count and nothing else —
+ * actions/fw-student.ts). The query-level filter is PRIMARY; this classifier's
+ * own membership screen below is the second line. A legacy orphan minted
+ * before the column existed carries null and never surfaces on any banner
+ * again — accepted (prod has 0 active cohorts), and the typed-name resume
+ * path still reaches it. The core's resume-scope rule itself is UNCHANGED:
+ * the lookup path still needs it.
+ *
+ * "Materialized without membership" is NOT modeled: materialization runs only
+ * after the membership upsert succeeds, so the state is unreachable.
+ *
+ * Never flagged: Path profiles (childId set), import-minted profiles
+ * (noticeAttestedBy null — see FwUnfinishedCandidateRow), anonymized tombstones
+ * (retired, same exclusion as the roster read), members of OTHER cohorts only
+ * (another weekend's child — the cross-cohort privacy line PROPOSED-1 draws),
+ * and candidates whose materialization check could not run (`null`).
+ */
+export function fwUnfinishedStudents(input: {
+  cohortId: string;
+  candidates: readonly FwUnfinishedCandidateRow[];
+}): FwUnfinishedStudent[] {
+  const unfinished: FwUnfinishedStudent[] = [];
+  for (const c of input.candidates) {
+    if (c.childId !== null) continue;
+    if (c.noticeAttestedBy === null) continue;
+    if (isFwTombstoneName(c.firstName, c.lastName)) continue;
+
+    const membershipMissing = c.memberCohortIds.length === 0;
+    const memberHere = c.memberCohortIds.includes(input.cohortId);
+    if (!membershipMissing && !memberHere) continue;
+
+    if (membershipMissing || c.materialized === false) {
+      unfinished.push({
+        profileId: c.profileId,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        band: c.band,
+      });
+    }
+  }
+  // Stable, name-first order so the banner reads like the roster below it.
+  return unfinished.sort(
+    (a, b) =>
+      a.firstName.localeCompare(b.firstName) ||
+      a.lastName.localeCompare(b.lastName) ||
+      a.profileId.localeCompare(b.profileId)
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════════ the resume chip ══ */

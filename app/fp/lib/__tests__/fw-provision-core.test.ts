@@ -276,12 +276,18 @@ describe("provisionFwStudent — the mint path", () => {
     const profile = tables.path_student_profiles[0];
     expect(profile.notice_attested_by).toBe("guide-1");
     expect(typeof profile.notice_attested_at).toBe("string");
+    // The attested (quick-create) path also stamps WHERE the walk-in was being
+    // added — the scope of the roster's unfinished-student banner (2026-07-28).
+    expect(profile.intended_cohort_id).toBe(COHORT);
   });
 
   it("leaves the attestation null when nobody attested", async () => {
     const { db, tables } = makeFakeDb({});
     await provisionFwStudent(db, MAYA);
     expect(tables.path_student_profiles[0].notice_attested_at).toBeNull();
+    // The unattested (bulk-import) path stamps NO intended cohort — the same
+    // discriminator that keeps a half-imported row off a guide's banner.
+    expect(tables.path_student_profiles[0].intended_cohort_id).toBeNull();
   });
 
   it("suffixes past an address a fully-provisioned student already holds", async () => {

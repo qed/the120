@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FW Ops & Guide Redesign — Test Roadmap v1</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#14171c; --dim:#5c6672; --line:#e3e7ec;
+  --accent:#2f6df6; --pass:#12864b; --passbg:#e6f5ec; --odd:#a2670a; --oddbg:#fdf2dd;
+  --fail:#c22c34; --failbg:#fdeaea; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.05);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+html[data-theme="dark"]{
+  --bg:#0f1216; --panel:#171b21; --ink:#e7ecf2; --dim:#98a3b0; --line:#262c35;
+  --accent:#6ea0ff; --pass:#4ed08a; --passbg:#12281d; --odd:#e8b256; --oddbg:#2a2113;
+  --fail:#ff8181; --failbg:#2d1618; --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-text-size-adjust:100%; padding-bottom:60vh;
+}
+code{font-family:var(--mono);font-size:.88em;background:rgba(127,140,158,.14);padding:1px 5px;border-radius:4px;white-space:nowrap}
+a.lnk{color:var(--accent);text-decoration:none;font-family:var(--mono);font-size:.88em;
+  background:rgba(47,109,246,.09);padding:1px 5px;border-radius:4px;border-bottom:1px solid rgba(47,109,246,.35);word-break:break-all}
+a.lnk:hover{background:rgba(47,109,246,.2)}
+a.lnk.needs{color:var(--odd);background:var(--oddbg);border-bottom-color:var(--odd)}
+.cmd{display:inline-flex;align-items:center;gap:4px;max-width:100%}
+.cmd code{white-space:pre-wrap;word-break:break-word}
+.copy{font:600 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.04em;color:var(--dim);
+  background:transparent;border:1px solid var(--line);border-radius:4px;padding:3px 5px;cursor:pointer}
+.copy:hover{color:var(--ink);border-color:var(--dim)}
+.copy.ok{color:var(--pass);border-color:var(--pass)}
+
+/* ---------- header ---------- */
+header{position:sticky;top:0;z-index:40;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+.wrap{max-width:1020px;margin:0 auto;padding:0 16px}
+.htop{display:flex;align-items:center;gap:12px;padding:10px 0 8px;flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:650;letter-spacing:-.01em}
+h1 span{color:var(--dim);font-weight:400}
+.spacer{flex:1}
+.stat{font:600 12px/1 var(--mono);color:var(--dim);white-space:nowrap}
+.stat b{color:var(--ink)}
+.chip{display:inline-flex;align-items:center;gap:5px;font:600 12px/1 inherit;padding:6px 10px;border-radius:99px;
+  border:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;white-space:nowrap}
+.chip:hover{color:var(--ink);border-color:var(--dim)}
+.chip.on{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.75}
+.bar{display:flex;height:6px;border-radius:99px;overflow:hidden;background:var(--line);margin-bottom:8px}
+.bar i{display:block;height:100%;transition:width .2s}
+.bar .p{background:var(--pass)} .bar .o{background:var(--odd)} .bar .f{background:var(--fail)}
+.tools{display:flex;gap:6px;align-items:center;padding-bottom:10px;flex-wrap:wrap}
+#q{flex:1;min-width:150px;font:14px inherit;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+#q:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.sep{width:1px;height:20px;background:var(--line);margin:0 2px}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:2px}
+.tab{font:600 13.5px/1 inherit;padding:10px 12px;border:0;background:transparent;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .n{font-family:var(--mono);font-size:11px;opacity:.7}
+
+/* ---------- done view ---------- */
+.badge{font:600 10.5px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.04em;padding:4px 7px;border-radius:6px;flex:none;white-space:nowrap;margin-top:2px}
+.badge.pass{color:var(--pass);background:var(--passbg)}
+.badge.fixed{color:var(--accent);background:rgba(47,109,246,.12)}
+.badge.closed{color:var(--odd);background:var(--oddbg)}
+.item.done{cursor:default}
+.item.done:hover{background:transparent}
+#main-done .sechead{cursor:default}
+#main-done .sechead:hover{background:transparent}
+
+/* ---------- config ---------- */
+details.cfg{border-bottom:1px solid var(--line);background:var(--panel)}
+details.cfg summary{cursor:pointer;padding:9px 0;font-size:13px;color:var(--dim);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+details.cfg summary::-webkit-details-marker{display:none}
+details.cfg summary:before{content:"▸";font-size:11px;transition:transform .15s}
+details.cfg[open] summary:before{transform:rotate(90deg)}
+.cfgbody{padding:2px 0 16px;display:grid;gap:12px}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.field label{display:block;font:600 11px/1.6 inherit;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.field input{width:100%;font:13px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+.field input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.quick .lbl{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.ref{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ref table{width:100%;border-collapse:collapse;font-size:13px}
+.ref td{padding:6px 10px;border-top:1px solid var(--line)}
+.ref tr:first-child td{border-top:0}
+.ref td:first-child{color:var(--dim);white-space:nowrap;width:1%}
+.note-inline{font-size:13px;color:var(--dim)}
+
+/* ---------- levels ---------- */
+main{max-width:1020px;margin:0 auto;padding:16px}
+.level{margin-bottom:28px}
+.lvhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 6px}
+.lvhead h2{font-size:19px;margin:0;letter-spacing:-.01em}
+.lvhead .who{font-size:12px;color:var(--dim)}
+.lvblurb{color:var(--dim);font-size:13.5px;margin:0 0 12px}
+.callout{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 8px 8px 0;
+  padding:9px 12px;font-size:13.5px;color:var(--dim);margin:0 0 12px}
+.callout strong{color:var(--ink)}
+
+section.sec{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;box-shadow:var(--shadow);overflow:hidden}
+.sechead{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;user-select:none}
+.sechead:hover{background:rgba(127,140,158,.06)}
+.sechead .sid{font:700 12px/1 var(--mono);color:var(--dim);background:rgba(127,140,158,.14);padding:5px 7px;border-radius:6px}
+.sechead h3{font-size:15px;margin:0;font-weight:600;flex:1;letter-spacing:-.005em}
+.sechead .prog{font:600 11px/1 var(--mono);color:var(--dim);white-space:nowrap}
+.sechead .dot{width:8px;height:8px;border-radius:99px;background:var(--line);flex:none}
+.sechead .dot.done{background:var(--pass)} .sechead .dot.has-fail{background:var(--fail)} .sechead .dot.has-odd{background:var(--odd)}
+.secbody{border-top:1px solid var(--line)}
+section.sec.closed .secbody{display:none}
+
+.blk{padding:9px 14px;font-size:13.5px;color:var(--dim);border-bottom:1px solid var(--line)}
+.blk.sub{color:var(--ink);font-weight:600;background:rgba(127,140,158,.05)}
+.blk.flag{background:var(--oddbg);color:var(--odd)}
+.blk.flag:before{content:"Flag if: ";font-weight:700}
+.blk.term:before{content:"Terminal ";font:700 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--dim);margin-right:6px}
+.blk.note{background:rgba(127,140,158,.05)}
+
+.item{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.item:last-child{border-bottom:0}
+.item:hover{background:rgba(127,140,158,.05)}
+.item.cursor{box-shadow:inset 3px 0 0 var(--accent)}
+.item .id{font:700 11.5px/1.5 var(--mono);color:var(--dim);flex:none;padding-top:3px;min-width:52px;cursor:copy}
+.item .id:hover{color:var(--accent)}
+.item .txt{flex:1 1 200px;min-width:0;padding-top:1px;overflow-wrap:anywhere}
+.item .acts{display:flex;gap:4px;flex:none}
+.item .acts button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:transparent;
+  cursor:pointer;font-size:14px;line-height:1;color:var(--dim);display:flex;align-items:center;justify-content:center;padding:0}
+.item .acts button:hover{border-color:var(--dim);color:var(--ink)}
+.item[data-s="pass"]{background:var(--passbg)}
+.item[data-s="pass"] .txt{opacity:.55}
+.item[data-s="pass"] .acts .b-pass{background:var(--pass);border-color:var(--pass);color:#fff}
+.item[data-s="odd"]{background:var(--oddbg)}
+.item[data-s="odd"] .acts .b-odd{background:var(--odd);border-color:var(--odd);color:#fff}
+.item[data-s="fail"]{background:var(--failbg)}
+.item[data-s="fail"] .acts .b-fail{background:var(--fail);border-color:var(--fail);color:#fff}
+.item .noteWrap{flex-basis:100%;order:9;margin:6px 0 2px 62px}
+.item textarea{width:100%;font:13px/1.45 inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;min-height:52px}
+.item textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.hidden{display:none !important}
+
+/* ---------- footer ---------- */
+footer{max-width:1020px;margin:0 auto;padding:0 16px 40px}
+footer details{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;box-shadow:var(--shadow)}
+footer summary{cursor:pointer;padding:11px 14px;font-weight:600;font-size:14px;list-style:none}
+footer summary::-webkit-details-marker{display:none}
+footer summary:before{content:"▸ ";color:var(--dim)}
+footer details[open] summary:before{content:"▾ "}
+footer .fb{padding:0 14px 14px;font-size:13.5px;color:var(--dim)}
+footer .fb li{margin-bottom:6px}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;z-index:100;background:rgba(10,13,18,.5);display:flex;align-items:center;justify-content:center;padding:16px}
+.modal .box{background:var(--panel);border-radius:14px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line)}
+.modal .mh{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.modal .mh h3{margin:0;font-size:15px;flex:1}
+.modal textarea{flex:1;border:0;padding:14px;font:12.5px/1.55 var(--mono);color:var(--ink);background:var(--panel);resize:none;min-height:320px}
+.modal textarea:focus{outline:none}
+.modal .mf{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.btn{font:600 13px/1 inherit;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--dim)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.kbd{font:600 11px/1 var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:3px 5px;color:var(--dim)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);z-index:200;
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:13px;font-weight:600;
+  transition:transform .18s;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0)}
+.warn{background:var(--oddbg);color:var(--odd);font-size:13px;padding:8px 16px;text-align:center;font-weight:600}
+
+@media (max-width:640px){
+  .item .id{min-width:46px}
+  .item .noteWrap{margin-left:0}
+  .htop{padding-bottom:6px}
+  h1{font-size:15px}
+}
+@media print{
+  header,footer,.acts,#toast{display:none}
+  .item,.sec{break-inside:avoid}
+  body{background:#fff;padding:0}
+}
+</style>
+</head>
+<body>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="htop">
+      <h1>Founders Weekend <span>· ops &amp; guide redesign — test roadmap v1</span></h1>
+      <div class="spacer"></div>
+      <div class="stat" id="stat"></div>
+      <button class="chip" id="theme" title="Toggle dark mode">Dark</button>
+    </div>
+    <div class="bar"><i class="p" id="bp" style="width:0"></i><i class="o" id="bo" style="width:0"></i><i class="f" id="bf" style="width:0"></i></div>
+    <div class="tools">
+      <button class="chip lv on" data-lv="all">All</button>
+      <button class="chip lv" data-lv="1">L1 · Smoke <span class="n" id="c1"></span></button>
+      <button class="chip lv" data-lv="2">L2 · Staff thread <span class="n" id="c2"></span></button>
+      <button class="chip lv" data-lv="3">L3 · Long list <span class="n" id="c3"></span></button>
+      <div class="sep"></div>
+      <button class="chip fl on" data-fl="all">Everything</button>
+      <button class="chip fl" data-fl="todo">Untested <span class="n" id="fn-todo"></span></button>
+      <button class="chip fl" data-fl="odd">⚠️ <span class="n" id="fn-odd"></span></button>
+      <button class="chip fl" data-fl="fail">❌ <span class="n" id="fn-fail"></span></button>
+      <input id="q" type="search" placeholder="Search text or ID  (press /)" autocomplete="off">
+      <button class="chip" id="report">📋 Report</button>
+      <button class="chip" id="more">⋯</button>
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tab="todo" type="button">To test <span class="n">88</span></button>
+      <button class="tab" data-tab="done" type="button">Tested &amp; fixed <span class="n">0</span></button>
+    </div>
+  </div>
+  <div class="wrap">
+    <details class="cfg" id="cfg">
+      <summary>Setup — base URL, board token, cohort ID <span class="note-inline" id="cfgstate"></span></summary>
+      <div class="cfgbody">
+        <div class="fields">
+          <div class="field"><label for="f-base">Base URL</label><input id="f-base" spellcheck="false"></div>
+          <div class="field"><label for="f-token">Board token <span style="text-transform:none;letter-spacing:0">(mint via <code>npm run fw -- token-mint</code>)</span></label><input id="f-token" placeholder="paste minted token" spellcheck="false"></div>
+          <div class="field"><label for="f-uuid">Cohort UUID</label><input id="f-uuid" placeholder="paste cohort uuid" spellcheck="false"></div>
+        </div>
+        <div class="quick"><span class="lbl">Rehearsal cohorts</span>
+          <button class="chip qc" data-uuid="596dd02a-40fe-4a3d-8f82-8c0ffdb0d942">rehearsal-unit9 · 90 students</button>
+          <button class="chip qc" data-uuid="b3e0738f-">unit5-verify</button>
+        </div>
+        <div class="ref"><table><tbody>
+          <tr><td>Staff ops</td><td><a class="lnk" data-path="/fp/fw/ops" target="_blank" rel="noopener">/fp/fw/ops</a></td></tr>
+          <tr><td>Guide surface</td><td><a class="lnk" data-path="/fp/fw" target="_blank" rel="noopener">/fp/fw</a></td></tr>
+          <tr><td>Big screen</td><td><a class="lnk" data-path="/fp/fw/board/{token}" data-raw="/fp/fw/board/{token}" target="_blank" rel="noopener">/fp/fw/board/&lt;token&gt;</a></td></tr>
+          <tr><td>Staff CRM <em>(must be unaffected)</em></td><td><a class="lnk" data-path="/crm" target="_blank" rel="noopener">/crm</a></td></tr>
+          <tr><td>Terminal</td><td><span class="cmd" data-cmd="npm run fw"><code>npm run fw</code><button class="copy" type="button">copy</button></span> prints the full command list — now incl. <code>window-edit</code>, <code>token-remint</code>, <code>delete</code></td></tr>
+        </tbody></table></div>
+        <div class="note-inline">Rehearsal data is live in production — safe to explore, <strong>do not delete</strong>. All archive/delete tests use <strong>scratch weekends you create yourself</strong> (L2 walks you through it). Filling in a token or cohort UUID rewrites every link and terminal command on this page.</div>
+      </div>
+    </details>
+  </div>
+  <div class="warn hidden" id="nostore">Progress can't be saved on this device (private browsing or storage disabled) — export before you close the tab.</div>
+</header>
+
+<div class="wrap" id="todo-note" style="padding-top:16px">
+  <div class="callout"><strong>Shipped 2026-07-28 (PR #94)</strong> — the FW ops &amp; guide redesign: sticky ops tab row + row menus + inline create, truly-untouched hard delete, weekend window/timezone editing with safe board re-mint, staff-as-guide, section jump-nav, the two-pane guide check-in loop with inline icon decisions, attestation checkbox removed, task page retired.
+    <ul style="margin:6px 0 0;padding-left:18px">
+      <li>Everything below runs against production. <strong>0 active FW cohorts</strong>, so it's safe — but delete tests only ever touch scratch weekends created in this session.</li>
+      <li>Offline items (3.11) need a real device in airplane mode — an iPad or a phone, not DevTools throttling.</li>
+    </ul>
+  </div>
+</div>
+
+<main id="main"></main>
+<main id="main-done" class="hidden"></main>
+
+<footer>
+  <details>
+    <summary>How to flag &amp; report back</summary>
+    <div class="fb">
+      <p>✅ works · ⚠️ works-but-odd · ❌ broken. For ⚠️ and ❌ record: <strong>what you did · what you expected · what happened · URL · rough time</strong> — the notes box on each item captures exactly this, and 📋 Report turns it into a paste-ready summary grouped by severity.</p>
+      <ol>
+        <li><strong>Blockers</strong> (❌) — must fix before September planning resumes</li>
+        <li><strong>Should-fix</strong> (⚠️) — noticeable, especially anything a guide hits mid-loop</li>
+        <li><strong>Nice-to-have</strong> — polish for later</li>
+        <li><strong>Confusing but not broken</strong> — if it confused you, it'll confuse a guide at 9 a.m. on a Saturday</li>
+      </ol>
+      <p><em>Example:</em> <code>3.10.3 ❌ — tapped Not-yet on a checked row; expected one-tap flip; got a refusal telling me to undo first. iPad, /fp/fw, ~10:15.</code></p>
+    </div>
+  </details>
+  <details>
+    <summary>Deliberately changed — do <strong>not</strong> flag these</summary>
+    <div class="fb"><ul>
+      <li><strong>The First Dollar confirm dialog is gone on purpose</strong> (decision 2026-07-28). First dollar checks instantly like every other step; a stray tap ringing the bell is the accepted risk. Don't flag the missing "this rings the bell" dialog.</li>
+      <li><strong>Batch check-in ("Same tap for someone else?") is removed as a capability</strong>, including grouped bell celebrations — a three-kid team's first dollars now celebrate one at a time.</li>
+      <li><strong>"— Recorded" lines and the "Next student" button are gone</strong>; the icon state and the left nav replaced them.</li>
+      <li><strong>The per-task page is retired</strong> — old task URLs redirect to the student page (never 404). That redirect is correct behavior, not a bug.</li>
+      <li><strong>The attestation checkbox is gone</strong> — the notice is covered by online registration; quick-create silently stamps provenance. Don't flag the missing checkbox.</li>
+      <li><strong>The Switch link is gone</strong> — the weekend name in the header is the way back to the picker.</li>
+      <li><strong>Archived weekends still accept check-ins</strong> — queued offline work must be able to drain after archiving. By design.</li>
+      <li>Internal names still containing "path" (<code>path-sw-*</code> caches, <code>path-offline-queue</code>) — deliberately unchanged.</li>
+    </ul></div>
+  </details>
+  <details>
+    <summary>Keyboard shortcuts</summary>
+    <div class="fb">
+      <span class="kbd">j</span> / <span class="kbd">k</span> next / previous item &nbsp;·&nbsp;
+      <span class="kbd">1</span> ✅ pass &nbsp;·&nbsp; <span class="kbd">2</span> ⚠️ odd &nbsp;·&nbsp; <span class="kbd">3</span> ❌ fail &nbsp;·&nbsp;
+      <span class="kbd">0</span> clear &nbsp;·&nbsp; <span class="kbd">n</span> note &nbsp;·&nbsp; <span class="kbd">o</span> open first link &nbsp;·&nbsp;
+      <span class="kbd">c</span> copy ID &nbsp;·&nbsp; <span class="kbd">/</span> search &nbsp;·&nbsp; <span class="kbd">esc</span> close
+      <p style="margin:10px 0 0">Marking with 1/2/3 jumps to the next untested item automatically. Tapping anywhere on a row toggles ✅ — good for a thumb on an iPad.</p>
+    </div>
+  </details>
+  <p class="note-inline" style="text-align:center;padding:8px 0">Generated for the 2026-07-28 ship (PR #94) · 88 checks · progress saves in this browser</p>
+</footer>
+
+<div id="toast"></div>
+<script id="data" type="application/json">
+[
+{"n":"1","title":"Big, obvious things","blurb":"Stop-the-line checks. If any fail, don't bother with Levels 2–3 until fixed.","who":"Peter","time":"~10 min","short":"Smoke","intro":[],"sections":[
+{"id":"1.1","title":"The new chrome is up","plain":"The new chrome is up","blocks":[
+{"t":"item","id":"1.1.1","html":"<a class='lnk' data-path='/fp/fw/ops' target='_blank' rel='noopener'>/fp/fw/ops</a> — sticky pill tab row under the staff bar: <strong>Weekends</strong> pill, <strong>ADMIN</strong> chip, <strong>Guide view</strong>, archived toggle, a <strong>+</strong> button"},
+{"t":"item","id":"1.1.2","html":"No always-visible New-weekend form — the page is just the list of weekends"},
+{"t":"item","id":"1.1.3","html":"Guide view (<a class='lnk' data-path='/fp/fw' target='_blank' rel='noopener'>/fp/fw</a> → pick a weekend) — <strong>two-pane</strong>: student names down the left (First L., alphabetical), content pane right"},
+{"t":"item","id":"1.1.4","html":"Open a student — phase rail (<strong>Sell · Build · Validate · Grow · Scale</strong>, single words) + steps accordion with inline <strong>✓ ! ↩</strong> icon controls"},
+{"t":"item","id":"1.1.5","html":"Tap a Checkmark — the icon fills from the server echo, the view <strong>stays put</strong>; no page navigation anywhere in the loop"},
+{"t":"item","id":"1.1.6","html":"After this deploy: SW update toast appears once; after reload DevTools → Application → Cache Storage shows <code>path-sw-fw-shell-v2</code> (v1 gone)"}]},
+{"id":"1.2","title":"Nothing is on fire","plain":"Nothing is on fire","blocks":[
+{"t":"item","id":"1.2.1","html":"No error screens or blank pages anywhere you clicked"},
+{"t":"item","id":"1.2.2","html":"Vercel runtime errors for the last hour — should be empty"},
+{"t":"item","id":"1.2.3","html":"<a class='lnk' data-path='/crm' target='_blank' rel='noopener'>/crm</a> still loads normally and looks untouched"}]}]},
+
+{"n":"2","title":"The staff thread","blurb":"One continuous story: create a mis-zoned weekend, fix it, re-mint its board, add yourself as guide, then archive and delete scratch data. Uses only weekends you create here.","who":"Peter","time":"~30 min","short":"Staff thread","intro":[
+{"t":"note","html":"<strong>Tip:</strong> keep the big screen open from 2.3 onward — the re-mint handoff (old link dies, new link lives) is the point."}],"sections":[
+{"id":"2.1","title":"Create from the + — <a class='lnk' data-path='/fp/fw/ops' data-raw='/fp/fw/ops' target='_blank' rel='noopener'>/fp/fw/ops</a>","plain":"Create from the + — /fp/fw/ops","blocks":[
+{"t":"item","id":"2.1.1","html":"Tap <strong>+</strong> — the create form expands <strong>inline at the top of the list</strong>; Cancel collapses it"},
+{"t":"item","id":"2.1.2","html":"From a weekend's own ops page, tap <strong>+</strong> — you land back on the list <strong>with the panel already open</strong>"},
+{"t":"item","id":"2.1.3","html":"Create <code>fw-smoke-a</code> with a deliberately <strong>wrong time zone</strong> (America/Los_Angeles) — panel auto-collapses, success note <strong>links to the new weekend</strong>"},
+{"t":"item","id":"2.1.4","html":"New row shows in the list with a <strong>No board link</strong> chip"},
+{"t":"term","html":"<span class='cmd' data-cmd='npm run fw -- cohort-create --slug fw-smoke-a --start 2026-09-25 --start-time 09:00 --end 2026-09-27 --end-time 17:00 --tz America/Los_Angeles'><code>npm run fw -- cohort-create --slug fw-smoke-a --start 2026-09-25 --start-time 09:00 --end 2026-09-27 --end-time 17:00 --tz America/Los_Angeles</code><button class='copy' type='button' title='Copy command'>copy</button></span>"}]},
+{"id":"2.2","title":"Correct the window (the Chicago fix)","plain":"Correct the window (the Chicago fix)","blocks":[
+{"t":"item","id":"2.2.1","html":"Open <code>fw-smoke-a</code> — the <strong>Weekend window</strong> section shows the saved local times and zone, prefilled"},
+{"t":"item","id":"2.2.2","html":"Change the zone to <strong>America/Chicago</strong>, save — the displayed window updates and now means Central"},
+{"t":"flag","html":"times shift on save, the zone is ignored, or the form lets you save end-before-start."},
+{"t":"term","html":"<span class='cmd' data-cmd='npm run fw -- window-edit --cohort {uuid} --start 2026-09-25 --start-time 09:00 --end 2026-09-27 --end-time 17:00 --tz America/Chicago'><code>npm run fw -- window-edit --cohort {uuid} --start 2026-09-25 --start-time 09:00 --end 2026-09-27 --end-time 17:00 --tz America/Chicago</code><button class='copy' type='button' title='Copy command'>copy</button></span>"}]},
+{"id":"2.3","title":"Board + re-mint 📺","plain":"Board + re-mint","blocks":[
+{"t":"item","id":"2.3.1","html":"Mint a board link for <code>fw-smoke-a</code>; open it on a second screen"},
+{"t":"item","id":"2.3.2","html":"Edit the window again (push the end a day later) — the window section states the live link <strong>keeps the expiry it was issued for</strong> and offers <strong>Revoke + re-mint for the corrected window</strong>"},
+{"t":"item","id":"2.3.3","html":"Re-mint — a <strong>new URL</strong> is shown once; the <strong>old URL dies</strong> to the dead-link page within ~8 s"},
+{"t":"item","id":"2.3.4","html":"Open the new URL — board works; its expiry follows the corrected end (+6 h)"},
+{"t":"term","html":"<span class='cmd' data-cmd='npm run fw -- token-remint --cohort {uuid} --expected-token-id <token-id>'><code>npm run fw -- token-remint --cohort {uuid} --expected-token-id &lt;token-id&gt;</code><button class='copy' type='button' title='Copy command'>copy</button></span>"}]},
+{"id":"2.4","title":"Staff as guide","plain":"Staff as guide","blocks":[
+{"t":"item","id":"2.4.1","html":"Add <code>pkuperman@gmail.com</code> as a guide — <strong>succeeds</strong>; message says it used the existing <strong>staff account</strong> and <strong>no email was sent</strong>"},
+{"t":"item","id":"2.4.2","html":"Roster row shows a <strong>Staff</strong> chip, no claim state, <strong>no Re-send button</strong> (Revoke still there)"},
+{"t":"item","id":"2.4.3","html":"Add the same address again — calm <em>already a guide, nothing changed</em> message"},
+{"t":"item","id":"2.4.4","html":"Check the inbox — <strong>no invite email arrived</strong> (an invite claim would set the account password; that path must be unreachable for staff)"}]},
+{"id":"2.5","title":"Jump around (section nav)","plain":"Jump around (section nav)","blocks":[
+{"t":"item","id":"2.5.1","html":"The weekend page has a sticky <strong>section nav</strong> with live chips — board <strong>Live</strong>, guides count, students <strong>0</strong>; chips match what the sections actually show"},
+{"t":"item","id":"2.5.2","html":"Tap any entry — jumps straight there, the heading takes focus, and it is <strong>not hidden</strong> under the sticky chrome"}]},
+{"id":"2.6","title":"Archive from the list","plain":"Archive from the list","blocks":[
+{"t":"item","id":"2.6.1","html":"Back on the list: <code>fw-smoke-a</code>'s <strong>⋯</strong> menu → Archive — a typed-slug confirm panel expands <strong>under the row</strong>"},
+{"t":"item","id":"2.6.2","html":"Type the <strong>wrong</strong> slug — the confirm button stays disabled (and the server refuses regardless)"},
+{"t":"item","id":"2.6.3","html":"Type it right, confirm — archived; the row disappears until <strong>Show archived</strong>"},
+{"t":"item","id":"2.6.4","html":"Show archived → Restore from the ⋯ menu — the row returns to the active list"}]},
+{"id":"2.7","title":"Delete a truly-untouched weekend","plain":"Delete a truly-untouched weekend","blocks":[
+{"t":"item","id":"2.7.1","html":"Create a second scratch weekend <code>fw-smoke-b</code> and do <strong>nothing else</strong> to it"},
+{"t":"item","id":"2.7.2","html":"<code>fw-smoke-b</code>'s ⋯ menu shows <strong>Delete…</strong>; <code>fw-smoke-a</code>'s does <strong>not</strong> (its board history makes it touched — forever archivable, never deletable)"},
+{"t":"item","id":"2.7.3","html":"Delete <code>fw-smoke-b</code> with the typed slug — gone from the list, gone for good; finally archive <code>fw-smoke-a</code> to clean up"},
+{"t":"flag","html":"Delete is offered on any weekend with history (students, guides, any board link ever, imports)."},
+{"t":"term","html":"<span class='cmd' data-cmd='npm run fw -- delete --cohort {uuid} --confirm-slug fw-smoke-b'><code>npm run fw -- delete --cohort {uuid} --confirm-slug fw-smoke-b</code><button class='copy' type='button' title='Copy command'>copy</button></span>"}]}]},
+
+{"n":"3","title":"The long list","blurb":"Work top to bottom. Flag <strong>everything</strong> odd, even if minor. Don't fix anything; just record it against its ID.","who":"Peter / intern","time":"~half a day","short":"Long list","intro":[
+{"t":"text","html":"<strong>Use <code>rehearsal-unit9</code> (90 students) for anything about scale</strong> — but never archive or delete it."}],"sections":[
+{"id":"3.1","title":"Ops chrome details","plain":"Ops chrome details","blocks":[
+{"t":"item","id":"3.1.1","html":"Scroll the ops list — the tab row stays pinned <strong>under the staff bar</strong>, never overlapped, never detached"},
+{"t":"item","id":"3.1.2","html":"375 px width (or a phone): pills scroll horizontally; the <strong>+ never scrolls out of view</strong>"},
+{"t":"item","id":"3.1.3","html":"<strong>ADMIN</strong> chip appears on ops pages only — never on guide surfaces"},
+{"t":"item","id":"3.1.4","html":"<a class='lnk' data-path='/fp/fw/ops?archived=1' data-raw='/fp/fw/ops?archived=1' target='_blank' rel='noopener'>/fp/fw/ops?archived=1</a> opened directly shows archived weekends — the toggle is a shareable URL"},
+{"t":"item","id":"3.1.5","html":"Weekend rows: whole card taps through to the weekend; the ⋯ button does <strong>not</strong> trigger the card link"}]},
+{"id":"3.2","title":"Inline create depth","plain":"Inline create depth","blocks":[
+{"t":"item","id":"3.2.1","html":"End before start → inline refusal, nothing created"},
+{"t":"item","id":"3.2.2","html":"A DST-nonexistent start time (e.g. 02:30 on a spring-forward date in a US zone) → clear refusal, not a silent shift"},
+{"t":"item","id":"3.2.3","html":"Success note's link opens the new weekend's ops page directly"}]},
+{"id":"3.3","title":"Row menu a11y","plain":"Row menu a11y","blocks":[
+{"t":"item","id":"3.3.1","html":"⋯ opens the menu; <strong>Escape</strong> closes it and focus returns to the ⋯ button"},
+{"t":"item","id":"3.3.2","html":"Tap/click outside closes it; arrow keys move between Archive and Delete when both show"},
+{"t":"item","id":"3.3.3","html":"Archive/restore failure copy (force one by racing two tabs) renders <strong>inline under the row</strong>, not a toast or a crash"}]},
+{"id":"3.4","title":"Hard delete depth","plain":"Hard delete depth","blocks":[
+{"t":"item","id":"3.4.1","html":"A weekend whose board link was minted then <strong>revoked</strong> → still no Delete (minted-then-revoked is touched)"},
+{"t":"item","id":"3.4.2","html":"A weekend where a guide was added then <strong>removed</strong> → still no Delete (the audit trail counts)"},
+{"t":"item","id":"3.4.3","html":"Race it: open Delete on an untouched weekend in tab A, quick-create a student into it from tab B, then confirm in A → <strong>refused</strong>, copy says the weekend stopped qualifying"},
+{"t":"item","id":"3.4.4","html":"A deleted weekend's old URL → not-found; searching the list finds no trace"}]},
+{"id":"3.5","title":"Window edit depth","plain":"Window edit depth","blocks":[
+{"t":"item","id":"3.5.1","html":"The zone select offers only the FW event zones — no free-text zone entry"},
+{"t":"item","id":"3.5.2","html":"End before start → refused with clear copy; the stored window unchanged"},
+{"t":"item","id":"3.5.3","html":"An <strong>archived</strong> weekend hides/refuses window editing — restore first"},
+{"t":"item","id":"3.5.4","html":"Who-edited shows up nowhere user-facing yet — but <code>window_edited_by/at</code> land in the DB row (spot-check via SQL if curious)"}]},
+{"id":"3.6","title":"Re-mint depth","plain":"Re-mint depth","blocks":[
+{"t":"item","id":"3.6.1","html":"Correct a window so it's <strong>fully in the past</strong>, then re-mint → refused (<em>window is already over</em>); the <strong>old link keeps working</strong> until its own expiry"},
+{"t":"item","id":"3.6.2","html":"Two tabs on the same weekend: re-mint in tab A, then re-mint in tab B (stale token id) → B is refused with a <em>reload</em> message; <strong>nothing was revoked blind</strong>; exactly one live link"}]},
+{"id":"3.7","title":"Staff-as-guide depth","plain":"Staff-as-guide depth","blocks":[
+{"t":"item","id":"3.7.1","html":"A <strong>non-staff</strong> existing address (a family email) → still refused: <em>already belongs to another 120 account</em>"},
+{"t":"item","id":"3.7.2","html":"Revoke the staff member's guide grant — the grant goes; the staff account is untouched (<a class='lnk' data-path='/crm' target='_blank' rel='noopener'>/crm</a> still works for them)"},
+{"t":"item","id":"3.7.3","html":"Guide list roll-ups never count a staff row as <em>unclaimed</em>"}]},
+{"id":"3.8","title":"Guide sidebar &amp; wayfinding","plain":"Guide sidebar & wayfinding","blocks":[
+{"t":"item","id":"3.8.1","html":"Names render <strong>First L.</strong>, alphabetical; on rehearsal-unit9's 90 students the list scrolls smoothly"},
+{"t":"item","id":"3.8.2","html":"Two students who'd share <em>Maya R.</em> get longer surname prefixes (and a band chip) so they're distinguishable"},
+{"t":"item","id":"3.8.3","html":"Sidebar search still finds students, typo-tolerant"},
+{"t":"item","id":"3.8.4","html":"Empty weekend → sidebar shows an empty state that invites quick-create"},
+{"t":"item","id":"3.8.5","html":"The <strong>weekend name</strong> in the header goes back to the picker; the old <strong>Switch link is gone</strong>"},
+{"t":"item","id":"3.8.6","html":"The picker says <strong>Last used</strong> (not <em>Last used on this iPad</em>)"}]},
+{"id":"3.9","title":"Student view: phases, accordion, (i)","plain":"Student view: phases, accordion, (i)","blocks":[
+{"t":"item","id":"3.9.1","html":"Phase rail: five single words with progress counts; picking a phase updates <code>?phase=</code> so a <strong>reload restores your spot</strong>"},
+{"t":"item","id":"3.9.2","html":"The <strong>(i)</strong> on a step opens the detail modal (body, done-when, band variant); <strong>Escape</strong> closes it and focus returns to the (i)"},
+{"t":"item","id":"3.9.3","html":"<strong>Airplane mode</strong>: the (i) modal still shows full detail — the content ships with the page"},
+{"t":"item","id":"3.9.4","html":"An old per-task URL (bookmark or history) <strong>redirects</strong> to the student page at the right phase"}]},
+{"id":"3.10","title":"Inline decisions (online)","plain":"Inline decisions (online)","blocks":[
+{"t":"item","id":"3.10.1","html":"Check on an untouched step → icon fills from the server echo; the accordion <strong>stays put</strong>"},
+{"t":"item","id":"3.10.2","html":"Not-yet on an untouched step → records; Not-yet <strong>again</strong> → allowed (the struggle signal)"},
+{"t":"item","id":"3.10.3","html":"Not-yet on a <strong>checked</strong> step → flips in <strong>one tap</strong> (the undo happens underneath); no confirm, no refusal"},
+{"t":"item","id":"3.10.4","html":"First dollar (task 1.2.4): checks <strong>instantly, no dialog</strong>; the board celebrates exactly once"},
+{"t":"item","id":"3.10.5","html":"Undo on the first-dollar task while its banner is still up → the standing banner comes down"},
+{"t":"item","id":"3.10.6","html":"Double-tap any icon fast → <strong>one</strong> result, not two"}]},
+{"id":"3.11","title":"Offline (real device, airplane mode)","plain":"Offline (real device, airplane mode)","blocks":[
+{"t":"item","id":"3.11.1","html":"Offline taps queue with a distinct <strong>Queued</strong> chip — clearly different from the recorded state"},
+{"t":"item","id":"3.11.2","html":"A <strong>flip</strong> made offline shows <em>Queued — flip</em> while the row still shows the last server truth (not a premature Not-yet paint)"},
+{"t":"item","id":"3.11.3","html":"Reconnect → the queue drains on its own; rows settle to recorded; the board catches up"},
+{"t":"item","id":"3.11.4","html":"A <strong>failed</strong> tap (server error, not offline) looks different from a queued one and offers an inline <strong>Retry</strong>"},
+{"t":"item","id":"3.11.5","html":"Sign-out with queued taps → still refused/drained first (the staff-bar gate is unchanged)"},
+{"t":"item","id":"3.11.6","html":"Kill the app mid-outage and reopen → the queue survives; a 15-tap outage drill all lands after reconnect"}]},
+{"id":"3.12","title":"Removals &amp; regressions","plain":"Removals & regressions","blocks":[
+{"t":"item","id":"3.12.1","html":"No <em>Same tap for someone else?</em> anywhere; no batch selection UI survives"},
+{"t":"item","id":"3.12.2","html":"No <em>— Recorded</em> line; no <em>Next student</em> button — the sidebar is how you switch students"},
+{"t":"item","id":"3.12.3","html":"The projected board itself is unchanged (grid, XP, ticker, no per-child scores)"},
+{"t":"item","id":"3.12.4","html":"Family app (<a class='lnk' data-path='/fp' target='_blank' rel='noopener'>/fp</a>) and <a class='lnk' data-path='/crm' target='_blank' rel='noopener'>/crm</a> spot-checked — untouched by this ship"}]},
+{"id":"3.13","title":"Quick-create","plain":"Quick-create","blocks":[
+{"t":"item","id":"3.13.1","html":"<strong>Three fields, no checkbox</strong> — first, last, band; submit works without any attestation"},
+{"t":"item","id":"3.13.2","html":"Created student is immediately usable (task tree opens, taps record)"},
+{"t":"item","id":"3.13.3","html":"Half-create a student (kill the page mid-flow) → the <strong>unfinished-student banner</strong> still appears; <em>Finish setup</em> carries <code>?finish=</code> and survives a reload"},
+{"t":"item","id":"3.13.4","html":"Duplicate-name match flow intact (same-cohort match offers to open; cross-cohort shows the confirm-with-staff signal)"}]},
+{"id":"3.14","title":"CLI parity","plain":"CLI parity","blocks":[
+{"t":"item","id":"3.14.1","html":"<span class='cmd' data-cmd='npm run fw'><code>npm run fw</code><button class='copy' type='button'>copy</button></span> lists <code>window-edit</code>, <code>token-remint</code>, and <code>delete</code> alongside the old commands"},
+{"t":"item","id":"3.14.2","html":"Run <code>window-edit</code> against a scratch weekend from the terminal — same refusals, same success shape as the UI"}]}]}
+]
+</script>
+<script id="data-done" type="application/json">[]</script>
+<script>
+(function(){
+"use strict";
+var DATA = JSON.parse(document.getElementById('data').textContent);
+var KEY = 'fw-test-v1';
+var DEFAULT_BASE = 'https://the120.school';
+var mem = null, canStore = true;
+try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); } catch(e){ canStore = false; }
+if(!canStore) document.getElementById('nostore').classList.remove('hidden');
+
+var S = load();
+function load(){
+  var base = {items:{}, cfg:{base:DEFAULT_BASE, token:'', uuid:''}, ui:{lv:'all', fl:'all', theme:'light', closed:{}}};
+  if(!canStore) return mem = base;
+  try{
+    var r = JSON.parse(localStorage.getItem(KEY)||'null');
+    if(r){ base.items = r.items||{}; Object.assign(base.cfg, r.cfg||{}); Object.assign(base.ui, r.ui||{}); }
+  }catch(e){}
+  return base;
+}
+var saveT;
+function save(){
+  if(!canStore) return;
+  clearTimeout(saveT);
+  saveT = setTimeout(function(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }, 150);
+}
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(function(){t.classList.remove('show');},1600); }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function hhmm(iso){ if(!iso) return ''; var d=new Date(iso);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+/* ---------- render ---------- */
+var main = document.getElementById('main');
+var itemEls = [];
+DATA.forEach(function(lv){
+  var sec = document.createElement('div');
+  sec.className = 'level'; sec.dataset.lv = lv.n;
+  var h = '<div class="lvhead"><h2>Level '+lv.n+' — '+esc(lv.title)+'</h2>'+
+          '<span class="who">'+esc(lv.who)+' · '+esc(lv.time)+'</span></div>'+
+          '<p class="lvblurb">'+lv.blurb+'</p>';
+  (lv.intro||[]).forEach(function(b){ h += '<p class="callout">'+b.html+'</p>'; });
+  sec.innerHTML = h;
+  lv.sections.forEach(function(sc){
+    var el = document.createElement('section');
+    el.className = 'sec'; el.dataset.sid = sc.id;
+    if(S.ui.closed[sc.id]) el.classList.add('closed');
+    var body = '';
+    sc.blocks.forEach(function(b){
+      if(b.t === 'item'){
+        body += '<div class="item" data-id="'+b.id+'" data-lv="'+lv.n+'">'+
+          '<span class="id" title="Copy ID">'+b.id+'</span>'+
+          '<span class="txt">'+b.html+'</span>'+
+          '<span class="acts">'+
+            '<button class="b-pass" type="button" title="Works (1)">✓</button>'+
+            '<button class="b-odd" type="button" title="Works but odd (2)">!</button>'+
+            '<button class="b-fail" type="button" title="Broken (3)">✕</button>'+
+          '</span></div>';
+      } else {
+        body += '<div class="blk '+b.t+'">'+b.html+'</div>';
+      }
+    });
+    el.innerHTML = '<div class="sechead"><span class="dot"></span><span class="sid">'+sc.id+'</span>'+
+      '<h3>'+sc.title+'</h3><span class="prog"></span></div><div class="secbody">'+body+'</div>';
+    sec.appendChild(el);
+  });
+  main.appendChild(sec);
+});
+itemEls = Array.prototype.slice.call(main.querySelectorAll('.item'));
+var byId = {};
+itemEls.forEach(function(el){ byId[el.dataset.id] = el; });
+
+/* ---------- links & commands ---------- */
+function fill(tpl){
+  return tpl.replace('{token}', S.cfg.token || '<token>').replace('{uuid}', S.cfg.uuid || '<uuid>');
+}
+function refreshLinks(){
+  var base = (S.cfg.base || DEFAULT_BASE).replace(/\/+$/,'');
+  document.querySelectorAll('a.lnk[data-path]').forEach(function(a){
+    var p = a.dataset.path, need = (p.indexOf('{token}')>-1 && !S.cfg.token) || (p.indexOf('{uuid}')>-1 && !S.cfg.uuid);
+    a.href = base + fill(p);
+    a.classList.toggle('needs', need);
+    if(a.dataset.raw) a.textContent = fill(a.dataset.raw);
+    a.title = need ? 'Add a token / cohort UUID in Setup first' : a.href;
+  });
+  document.querySelectorAll('.cmd[data-cmd]').forEach(function(c){
+    var code = c.querySelector('code'); if(code) code.textContent = fill(c.dataset.cmd);
+  });
+  var t = [];
+  if(S.cfg.token) t.push('token ✓'); if(S.cfg.uuid) t.push('cohort ✓');
+  document.getElementById('cfgstate').textContent = t.length ? '· ' + t.join(' · ') : '· not set';
+}
+document.addEventListener('click', function(e){
+  var a = e.target.closest('a.lnk');
+  if(a && a.classList.contains('needs')){
+    e.preventDefault();
+    document.getElementById('cfg').open = true;
+    document.getElementById(a.dataset.path.indexOf('{token}')>-1 ? 'f-token' : 'f-uuid').focus();
+    toast('Add it here first');
+  }
+}, true);
+document.addEventListener('click', function(e){
+  var b = e.target.closest('.copy');
+  if(!b) return;
+  e.stopPropagation(); e.preventDefault();
+  var txt = fill(b.parentNode.dataset.cmd || '');
+  navigator.clipboard && navigator.clipboard.writeText(txt);
+  b.classList.add('ok'); b.textContent = 'copied';
+  setTimeout(function(){ b.classList.remove('ok'); b.textContent = 'copy'; }, 1200);
+});
+
+/* ---------- state ---------- */
+function rec(id){ return S.items[id]; }
+function setStatus(id, st){
+  var cur = S.items[id] || {};
+  if(cur.s === st) st = null;
+  if(!st && !(cur.n||'').trim()) delete S.items[id];
+  else S.items[id] = {s: st, n: cur.n || '', t: st ? new Date().toISOString() : cur.t};
+  paint(id); tally(); save();
+}
+function setNote(id, txt){
+  var cur = S.items[id] || {s:null, n:'', t:new Date().toISOString()};
+  cur.n = txt;
+  if(!cur.s && !txt.trim()) delete S.items[id]; else S.items[id] = cur;
+  tally(); save();
+}
+function paint(id){
+  var el = byId[id], r = rec(id);
+  if(!el) return;
+  var st = r && r.s;
+  if(st) el.dataset.s = st; else el.removeAttribute('data-s');
+  var wrap = el.querySelector('.noteWrap');
+  var wantNote = st === 'odd' || st === 'fail' || (r && (r.n||'').trim());
+  if(wantNote && !wrap){
+    wrap = document.createElement('div');
+    wrap.className = 'noteWrap';
+    wrap.innerHTML = '<textarea placeholder="What you did · what you expected · what happened · URL"></textarea>';
+    var ta = wrap.querySelector('textarea');
+    ta.value = (r && r.n) || '';
+    ta.addEventListener('input', function(){ setNote(id, ta.value); autosize(ta); });
+    ta.addEventListener('click', function(e){ e.stopPropagation(); });
+    el.appendChild(wrap);
+    autosize(ta);
+  } else if(!wantNote && wrap){ wrap.remove(); }
+}
+function autosize(ta){ ta.style.height='auto'; ta.style.height = Math.max(52, ta.scrollHeight+2)+'px'; }
+
+/* ---------- tallies ---------- */
+function tally(){
+  var tot = itemEls.length, c = {pass:0, odd:0, fail:0};
+  var perLv = {1:{n:0,d:0},2:{n:0,d:0},3:{n:0,d:0}};
+  itemEls.forEach(function(el){
+    var r = rec(el.dataset.id), lv = el.dataset.lv;
+    perLv[lv].n++;
+    if(r && r.s){ c[r.s]++; perLv[lv].d++; }
+  });
+  var done = c.pass + c.odd + c.fail;
+  document.getElementById('stat').innerHTML =
+    '<b>'+done+'</b>/'+tot+' &nbsp; <b style="color:var(--pass)">'+c.pass+'</b>✅ '+
+    '<b style="color:var(--odd)">'+c.odd+'</b>⚠️ <b style="color:var(--fail)">'+c.fail+'</b>❌';
+  document.getElementById('bp').style.width = (c.pass/tot*100)+'%';
+  document.getElementById('bo').style.width = (c.odd/tot*100)+'%';
+  document.getElementById('bf').style.width = (c.fail/tot*100)+'%';
+  [1,2,3].forEach(function(n){ document.getElementById('c'+n).textContent = perLv[n].d+'/'+perLv[n].n; });
+  document.getElementById('fn-todo').textContent = tot - done;
+  document.getElementById('fn-odd').textContent = c.odd;
+  document.getElementById('fn-fail').textContent = c.fail;
+
+  main.querySelectorAll('section.sec').forEach(function(sc){
+    var its = sc.querySelectorAll('.item'), d = 0, f = 0, o = 0;
+    its.forEach(function(el){ var r = rec(el.dataset.id); if(r&&r.s){ d++; if(r.s==='fail') f++; if(r.s==='odd') o++; } });
+    sc.querySelector('.prog').textContent = d + '/' + its.length;
+    var dot = sc.querySelector('.dot');
+    dot.className = 'dot' + (f ? ' has-fail' : o ? ' has-odd' : (d === its.length && d) ? ' done' : '');
+  });
+}
+
+/* ---------- filters ---------- */
+function applyFilter(){
+  var lv = S.ui.lv, fl = S.ui.fl, q = (document.getElementById('q').value||'').trim().toLowerCase();
+  main.querySelectorAll('.level').forEach(function(L){
+    L.classList.toggle('hidden', lv !== 'all' && L.dataset.lv !== lv);
+  });
+  itemEls.forEach(function(el){
+    var r = rec(el.dataset.id), st = r && r.s, ok = true;
+    if(fl === 'todo') ok = !st;
+    else if(fl === 'odd') ok = st === 'odd';
+    else if(fl === 'fail') ok = st === 'fail';
+    if(ok && q) ok = (el.dataset.id + ' ' + el.querySelector('.txt').textContent).toLowerCase().indexOf(q) > -1;
+    el.classList.toggle('hidden', !ok);
+  });
+  var narrow = fl !== 'all' || !!q;
+  main.querySelectorAll('section.sec').forEach(function(sc){
+    var vis = sc.querySelectorAll('.item:not(.hidden)').length;
+    sc.classList.toggle('hidden', narrow && vis === 0);
+    sc.querySelectorAll('.blk').forEach(function(b){ b.classList.toggle('hidden', narrow); });
+    if(narrow) sc.classList.remove('closed');
+    else sc.classList.toggle('closed', !!S.ui.closed[sc.dataset.sid]);
+  });
+  document.querySelectorAll('.chip.lv').forEach(function(b){ b.classList.toggle('on', b.dataset.lv === lv); });
+  document.querySelectorAll('.chip.fl').forEach(function(b){ b.classList.toggle('on', b.dataset.fl === fl); });
+}
+document.querySelectorAll('.chip.lv').forEach(function(b){
+  b.addEventListener('click', function(){ S.ui.lv = b.dataset.lv; save(); applyFilter(); window.scrollTo(0,0); });
+});
+document.querySelectorAll('.chip.fl').forEach(function(b){
+  b.addEventListener('click', function(){ S.ui.fl = b.dataset.fl; save(); applyFilter(); });
+});
+document.getElementById('q').addEventListener('input', applyFilter);
+
+/* ---------- interaction ---------- */
+main.addEventListener('click', function(e){
+  var head = e.target.closest('.sechead');
+  if(head){
+    var sc = head.parentNode;
+    sc.classList.toggle('closed');
+    S.ui.closed[sc.dataset.sid] = sc.classList.contains('closed'); save();
+    return;
+  }
+  var it = e.target.closest('.item');
+  if(!it) return;
+  var id = it.dataset.id;
+  if(e.target.closest('a') || e.target.closest('textarea') || e.target.closest('.copy')) return;
+  if(e.target.closest('.id')){
+    navigator.clipboard && navigator.clipboard.writeText(id);
+    toast(id + ' copied'); return;
+  }
+  var b = e.target.closest('.acts button');
+  cursorTo(it);
+  setStatus(id, b ? (b.classList.contains('b-pass') ? 'pass' : b.classList.contains('b-odd') ? 'odd' : 'fail') : 'pass');
+  if(S.ui.fl !== 'all'){
+    var v0 = visible(), i0 = v0.indexOf(it);
+    applyFilter();
+    if(cursor && cursor.classList.contains('hidden')){
+      var v1 = visible();
+      cursorTo(v1[Math.min(v1.length - 1, Math.max(0, i0))] || null);
+    }
+  }
+  var ta2 = it.querySelector('textarea'); if(ta2 && !it.classList.contains('hidden')) ta2.focus();
+});
+
+/* ---------- keyboard ---------- */
+var cursor = null;
+function visible(){ return itemEls.filter(function(el){
+  return !el.classList.contains('hidden') && el.offsetParent !== null; }); }
+function cursorTo(el, scroll){
+  if(cursor) cursor.classList.remove('cursor');
+  cursor = el;
+  if(el){ el.classList.add('cursor');
+    if(scroll){ var r = el.getBoundingClientRect();
+      if(r.top < 160 || r.bottom > window.innerHeight - 40) el.scrollIntoView({block:'center'}); } }
+}
+function move(d){
+  var v = visible(); if(!v.length) return;
+  var i = cursor ? v.indexOf(cursor) : -1;
+  i = i < 0 ? (d > 0 ? 0 : v.length-1) : Math.min(v.length-1, Math.max(0, i+d));
+  cursorTo(v[i], true);
+}
+function mark(st){
+  if(!cursor) { move(1); if(!cursor) return; }
+  var id = cursor.dataset.id, prev = cursor;
+  setStatus(id, st);
+  if(st === 'pass'){
+    var v = visible(), i = v.indexOf(prev), nx = null;
+    for(var k = i+1; k < v.length; k++){ if(!rec(v[k].dataset.id) || !rec(v[k].dataset.id).s){ nx = v[k]; break; } }
+    if(S.ui.fl !== 'all'){ applyFilter(); var w = visible(); nx = w[Math.min(w.length-1, Math.max(0, i))] || null; }
+    if(nx) cursorTo(nx, true);
+  } else {
+    var ta = cursor.querySelector('textarea'); if(ta) ta.focus();
+  }
+}
+document.addEventListener('keydown', function(e){
+  var tag = (e.target.tagName||'').toLowerCase();
+  var typing = tag === 'input' || tag === 'textarea';
+  if(e.key === 'Escape'){
+    if(document.querySelector('.modal')) closeModal();
+    else if(typing){ e.target.blur(); }
+    return;
+  }
+  if(typing) return;
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  var k = e.key;
+  if(k === 'j' || k === 'ArrowDown'){ e.preventDefault(); move(1); }
+  else if(k === 'k' || k === 'ArrowUp'){ e.preventDefault(); move(-1); }
+  else if(k === '1'){ e.preventDefault(); mark('pass'); }
+  else if(k === '2'){ e.preventDefault(); mark('odd'); }
+  else if(k === '3'){ e.preventDefault(); mark('fail'); }
+  else if(k === '0'){ e.preventDefault(); if(cursor){ var r = rec(cursor.dataset.id); if(r && r.s) setStatus(cursor.dataset.id, r.s); } }
+  else if(k === 'n'){ e.preventDefault(); if(cursor){ var r2 = rec(cursor.dataset.id);
+      if(!r2 || !r2.s) setStatus(cursor.dataset.id, 'odd');
+      var t = cursor.querySelector('textarea'); if(t){ t.focus(); } } }
+  else if(k === 'o'){ if(cursor){ var a = cursor.querySelector('a.lnk'); if(a && !a.classList.contains('needs')){ e.preventDefault(); window.open(a.href,'_blank','noopener'); } } }
+  else if(k === 'c'){ if(cursor){ navigator.clipboard && navigator.clipboard.writeText(cursor.dataset.id); toast(cursor.dataset.id+' copied'); } }
+  else if(k === '/'){ e.preventDefault(); document.getElementById('q').focus(); }
+});
+
+/* ---------- config fields ---------- */
+[['f-base','base'],['f-token','token'],['f-uuid','uuid']].forEach(function(p){
+  var el = document.getElementById(p[0]);
+  el.value = S.cfg[p[1]] || '';
+  el.addEventListener('input', function(){ S.cfg[p[1]] = el.value.trim(); refreshLinks(); save(); });
+});
+document.querySelectorAll('.qc').forEach(function(b){
+  b.addEventListener('click', function(){
+    S.cfg.uuid = b.dataset.uuid; document.getElementById('f-uuid').value = b.dataset.uuid;
+    refreshLinks(); save(); toast('Cohort set');
+  });
+});
+
+/* ---------- theme ---------- */
+function theme(t){ S.ui.theme = t; document.documentElement.dataset.theme = t;
+  document.getElementById('theme').textContent = t === 'dark' ? 'Light' : 'Dark'; save(); }
+theme(S.ui.theme || 'light');
+document.getElementById('theme').addEventListener('click', function(){ theme(S.ui.theme === 'dark' ? 'light' : 'dark'); });
+
+/* ---------- report ---------- */
+function textOf(id){
+  var el = byId[id]; return el ? el.querySelector('.txt').textContent.replace(/\s+/g,' ').trim() : id;
+}
+function sectionOf(id){ return id.split('.').slice(0,2).join('.'); }
+function buildReport(){
+  var groups = {fail:[], odd:[]}, pass = [], todo = [];
+  itemEls.forEach(function(el){
+    var id = el.dataset.id, r = rec(id);
+    if(!r || !r.s){ todo.push(id); return; }
+    if(r.s === 'pass'){ pass.push(id); return; }
+    groups[r.s].push({id:id, n:(r.n||'').trim(), t:r.t});
+  });
+  var d = new Date();
+  var out = '# First Profit /fp — test report — ' + d.toISOString().slice(0,10) + '\n\n';
+  out += pass.length + ' ✅ · ' + groups.odd.length + ' ⚠️ · ' + groups.fail.length + ' ❌ · ' +
+         todo.length + ' untested (of ' + itemEls.length + ')\n';
+  if(S.cfg.uuid) out += 'Cohort: ' + S.cfg.uuid + '\n';
+  out += '\n## 1. Blockers ❌\n';
+  out += groups.fail.length ? groups.fail.map(line).join('\n') + '\n' : '_none_\n';
+  out += '\n## 2. Should-fix ⚠️\n';
+  out += groups.odd.length ? groups.odd.map(line).join('\n') + '\n' : '_none_\n';
+  out += '\n## 3. Not yet tested (' + todo.length + ')\n';
+  out += todo.length ? compress(todo) + '\n' : '_none — full pass complete_\n';
+  out += '\n## 4. Passed (' + pass.length + ')\n' + (pass.length ? compress(pass) + '\n' : '_none_\n');
+  return out;
+  function line(x){
+    return '- **' + x.id + '** ' + (x.n ? x.n : '_(no note)_ — ' + textOf(x.id)) +
+           (x.t ? ' · ~' + hhmm(x.t) : '');
+  }
+}
+function compress(ids){
+  var bySec = {};
+  ids.forEach(function(id){ (bySec[sectionOf(id)] = bySec[sectionOf(id)] || []).push(id); });
+  return Object.keys(bySec).map(function(s){ return '- ' + s + ': ' + bySec[s].join(', '); }).join('\n');
+}
+function closeModal(){ var m = document.querySelector('.modal'); if(m) m.remove(); }
+function showModal(title, body, actions){
+  closeModal();
+  var m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = '<div class="box"><div class="mh"><h3>'+esc(title)+'</h3>'+
+    '<button class="btn" data-x>Close</button></div>'+body+'<div class="mf">'+actions+'</div></div>';
+  m.addEventListener('click', function(e){ if(e.target === m || e.target.hasAttribute('data-x')) closeModal(); });
+  document.body.appendChild(m);
+  return m;
+}
+document.getElementById('report').addEventListener('click', function(){
+  var txt = buildReport();
+  var m = showModal('Report — paste this back', '<textarea id="rep" spellcheck="false"></textarea>',
+    '<button class="btn" id="dl">Download .md</button><button class="btn pri" id="cp">Copy to clipboard</button>');
+  m.querySelector('#rep').value = txt;
+  m.querySelector('#cp').addEventListener('click', function(){
+    var t = m.querySelector('#rep'); t.select();
+    if(navigator.clipboard) navigator.clipboard.writeText(t.value); else document.execCommand('copy');
+    toast('Report copied');
+  });
+  m.querySelector('#dl').addEventListener('click', function(){
+    download('fp-test-report-' + new Date().toISOString().slice(0,10) + '.md', m.querySelector('#rep').value);
+  });
+});
+function download(name, text){
+  var b = new Blob([text], {type:'text/plain'}), u = URL.createObjectURL(b);
+  var a = document.createElement('a'); a.href = u; a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(u); }, 2000);
+}
+document.getElementById('more').addEventListener('click', function(){
+  var m = showModal('Progress', '<div class="fb" style="padding:16px 14px">' +
+    '<p>Progress is saved in this browser automatically. Export a backup if you are switching devices, ' +
+    'or hand the file to someone else to merge later.</p></div>',
+    '<button class="btn" id="imp">Import JSON…</button>' +
+    '<button class="btn" id="exp">Export JSON</button>' +
+    '<button class="btn" id="prt">Print</button>' +
+    '<button class="btn" id="rst" style="color:var(--fail)">Reset all</button>');
+  m.querySelector('#exp').addEventListener('click', function(){
+    download('fp-test-progress-' + new Date().toISOString().slice(0,10) + '.json', JSON.stringify(S, null, 2));
+  });
+  m.querySelector('#prt').addEventListener('click', function(){ closeModal(); setTimeout(function(){ window.print(); }, 60); });
+  m.querySelector('#imp').addEventListener('click', function(){
+    var f = document.createElement('input'); f.type = 'file'; f.accept = '.json,application/json';
+    f.addEventListener('change', function(){
+      var file = f.files[0]; if(!file) return;
+      var rd = new FileReader();
+      rd.onload = function(){
+        try{
+          var o = JSON.parse(rd.result);
+          Object.keys(o.items || {}).forEach(function(k){ S.items[k] = o.items[k]; });
+          if(o.cfg) Object.assign(S.cfg, o.cfg);
+          save(); closeModal(); redrawAll(); toast('Imported');
+        }catch(err){ toast('Could not read that file'); }
+      };
+      rd.readAsText(file);
+    });
+    f.click();
+  });
+  m.querySelector('#rst').addEventListener('click', function(){
+    if(!confirm('Clear every result and note on this device?')) return;
+    S.items = {}; save(); closeModal(); redrawAll(); toast('Cleared');
+  });
+});
+function redrawAll(){
+  itemEls.forEach(function(el){ paint(el.dataset.id); });
+  [['f-base','base'],['f-token','token'],['f-uuid','uuid']].forEach(function(p){
+    document.getElementById(p[0]).value = S.cfg[p[1]] || '';
+  });
+  refreshLinks(); tally(); applyFilter();
+}
+
+/* ---------- tested & fixed tab ---------- */
+var DONE = [];
+try { DONE = JSON.parse(document.getElementById('data-done').textContent); } catch(e){}
+var mainDone = document.getElementById('main-done');
+var DISP = {
+  pass:   {c:'pass',   t:'pass 2026-07-28'},
+  fixed:  {c:'fixed',  t:'fixed — PR #83'},
+  closed: {c:'closed', t:'closed — works as designed'}
+};
+DONE.forEach(function(lv){
+  var sec = document.createElement('div');
+  sec.className = 'level';
+  sec.innerHTML = '<div class="lvhead"><h2>Level '+lv.n+' — '+esc(lv.title)+'</h2></div>';
+  lv.sections.forEach(function(sc){
+    var el = document.createElement('section');
+    el.className = 'sec';
+    var body = '';
+    sc.blocks.forEach(function(b){
+      var d = DISP[b.disp] || DISP.pass;
+      body += '<div class="item done">'+
+        '<span class="id">'+b.id+'</span>'+
+        '<span class="txt">'+b.html+'</span>'+
+        '<span class="badge '+d.c+'">'+d.t+'</span></div>';
+    });
+    el.innerHTML = '<div class="sechead"><span class="dot done"></span><span class="sid">'+sc.id+'</span>'+
+      '<h3>'+sc.title+'</h3><span class="prog">'+sc.blocks.length+'</span></div><div class="secbody">'+body+'</div>';
+    sec.appendChild(el);
+  });
+  mainDone.appendChild(sec);
+});
+var todoNote = document.getElementById('todo-note');
+document.querySelectorAll('.tab').forEach(function(b){
+  b.addEventListener('click', function(){
+    var d = b.dataset.tab === 'done';
+    document.querySelectorAll('.tab').forEach(function(x){ x.classList.toggle('on', x === b); });
+    main.classList.toggle('hidden', d);
+    if(todoNote) todoNote.classList.toggle('hidden', d);
+    mainDone.classList.toggle('hidden', !d);
+    window.scrollTo(0, 0);
+  });
+});
+
+/* ---------- boot ---------- */
+redrawAll();
+window.addEventListener('beforeunload', function(){
+  if(canStore){ clearTimeout(saveT); try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+});
+})();
+</script>
+</body>
+</html>

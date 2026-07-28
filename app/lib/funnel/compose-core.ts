@@ -548,7 +548,7 @@ export async function loadActiveProjectViewCore(
 const regenerateInputSchema = z.object({ projectId: z.uuid() });
 
 export type RegenerateResult =
-  | { kind: "regenerated"; view: ProjectView; degraded: FallbackReason | null }
+  | { kind: "regenerated"; view: ProjectView; childId: string; degraded: FallbackReason | null }
   | { kind: "limit" }
   | { kind: "conflict" }
   | { kind: "invalid" }
@@ -625,6 +625,7 @@ export async function regenerateProjectCore(
     return {
       kind: "regenerated",
       view: view(project.id, draft, project.aiRegenerationCount + 1, project.groupSlug),
+      childId: project.childId,
       degraded: run.outcome === "fallback" ? run.reason : null,
     };
   } catch (err) {

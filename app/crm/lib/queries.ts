@@ -34,6 +34,7 @@ import {
 } from "./reviews-rules";
 import { daysSince, fmtDay } from "./dates";
 import { workshopById } from "@/app/dashboard/data";
+import { STAGE_EVENT_NAMES, stageFromEvents } from "@/app/lib/funnel/event-rules";
 
 /* ------------------------------------------------------------- row types */
 /* Column names match supabase/migrations/20260713110000_crm_core.sql and
@@ -719,6 +720,18 @@ export interface DossierItem {
   portfolioLinks: string;
   reviewStatus: ReviewStatus;
   reviewNotes: string;
+  /** R59: the funnel stage the child's event history reached, with when —
+   *  time-in-stage is now-minus-since. Null for pre-funnel children. */
+  funnelStage: { stage: string; since: string } | null;
+  /** R60: the project the kid actually built, streamed into the dossier so
+   *  staff see it before any parent conversation. Null pre-compose. */
+  funnelProject: {
+    name: string;
+    description: string;
+    offerSketch: string;
+    firstCustomerHypothesis: string | null;
+    quizAnswers: Record<string, string>;
+  } | null;
   group: string | null;
   parentName: string;
   parentEmail: string;
@@ -770,6 +783,51 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
           "child_id, status, amount, created_at, refunded_at, stripe_payment_intent"
         ),
     ]);
+
+  // R59/R60: stage events + live projects, bounded by the QUEUE (child-id
+  // filtered), paged in server-max windows, refusing at a page ceiling —
+  // the first version asked for 5000 rows in one range, but this project's
+  // PostgREST max-rows is 1000 (documented), so the refusal was dead code
+  // and the read silently truncated to the OLDEST events: exactly the
+  // stale-stage lie the guard existed to prevent (both reviewers).
+  const SERVER_MAX_ROWS = 1000;
+  const MAX_EVENT_PAGES = 20;
+  const queueChildIds = ((childrenRes.data ?? []) as unknown as { id: unknown }[]).map((c) => String(c.id));
+  const stageEvents: { child_id: string | null; name: string; created_at: string }[] = [];
+  if (queueChildIds.length > 0) {
+    for (let page = 0; ; page++) {
+      if (page >= MAX_EVENT_PAGES) {
+        throw new Error(
+          "Dossier queue refused: stage events exceed the page ceiling — aggregate server-side before trusting stages"
+        );
+      }
+      const { data, error } = await db
+        .from("funnel_events")
+        .select("child_id, name, created_at")
+        .in("name", STAGE_EVENT_NAMES)
+        .in("child_id", queueChildIds)
+        .order("created_at", { ascending: true })
+        .range(page * SERVER_MAX_ROWS, (page + 1) * SERVER_MAX_ROWS - 1);
+      if (error) throw new Error(`Dossier queue fetch failed: ${error.message}`);
+      stageEvents.push(...((data ?? []) as typeof stageEvents));
+      if ((data ?? []).length < SERVER_MAX_ROWS) break;
+    }
+  }
+  const projectsRes =
+    queueChildIds.length > 0
+      ? await db
+          .from("projects")
+          .select(
+            "child_id, name, description, offer_sketch, first_customer_hypothesis, quiz_answers"
+          )
+          .eq("status", "active")
+          .in("child_id", queueChildIds)
+          .range(0, SERVER_MAX_ROWS - 1)
+      : { data: [], error: null };
+  if (projectsRes.error) throw new Error(`Dossier queue fetch failed: ${projectsRes.error.message}`);
+  if ((projectsRes.data ?? []).length >= SERVER_MAX_ROWS) {
+    throw new Error("Dossier queue refused: active projects hit the window — paginate first");
+  }
 
   for (const res of [childrenRes, parentsRes, familiesRes, reviewsRes, depositsRes]) {
     if (res.error) {
@@ -825,6 +883,22 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
     (depositsRes.data ?? []) as (DepositForStrip & { child_id: string })[],
     (d) => d.child_id
   );
+  const projectByChild = new Map(
+    ((projectsRes.data ?? []) as {
+      child_id: string;
+      name: string;
+      description: string;
+      offer_sketch: string;
+      first_customer_hypothesis: string | null;
+      quiz_answers: unknown;
+    }[]).map((p) => [String(p.child_id), p])
+  );
+  const eventsByChild = groupBy(
+    stageEvents.filter(
+      (e): e is { child_id: string; name: string; created_at: string } => e.child_id !== null
+    ),
+    (e) => e.child_id
+  );
 
   // Concatenated select string defeats supabase-js column inference — same
   // cast idiom as FAMILY_COLUMNS above.
@@ -857,6 +931,28 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
         portfolioLinks: c.portfolio_links,
         reviewStatus,
         reviewNotes: review?.review_notes ?? "",
+        funnelStage: stageFromEvents(eventsByChild.get(c.id) ?? []),
+        funnelProject: (() => {
+          const p = projectByChild.get(c.id);
+          if (!p) return null;
+          const answers = p.quiz_answers;
+          return {
+            name: p.name,
+            description: p.description,
+            offerSketch: p.offer_sketch,
+            firstCustomerHypothesis: p.first_customer_hypothesis,
+            // Values FILTERED, not cast: one non-string value in the jsonb
+            // would crash the dossier render (reviewer).
+            quizAnswers:
+              answers && typeof answers === "object" && !Array.isArray(answers)
+                ? Object.fromEntries(
+                    Object.entries(answers as Record<string, unknown>).filter(
+                      (entry): entry is [string, string] => typeof entry[1] === "string"
+                    )
+                  )
+                : {},
+          };
+        })(),
         group: review?.group_assignment ?? null,
         parentName: parent
           ? `${parent.first_name} ${parent.last_name}`.trim()

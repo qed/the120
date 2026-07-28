@@ -7,6 +7,7 @@
  * and because the core's `deps` parameter must never reach the wire.
  */
 
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import {
   addChildCore,
   listChildrenCore,
@@ -15,7 +16,11 @@ import {
 } from "@/app/lib/funnel/children-core";
 
 export async function addChildAction(input: unknown): Promise<AddChildResult> {
-  return addChildCore(input);
+  const result = await addChildCore(input);
+  if (result.kind === "added") {
+    void emitFunnelEvent("child_added", { childId: result.childId });
+  }
+  return result;
 }
 
 export async function listChildrenAction(): Promise<ListChildrenResult> {

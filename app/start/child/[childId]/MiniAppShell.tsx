@@ -13,6 +13,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
+import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
 import {
   composeProjectAction,
   recordProjectEditAction,
@@ -25,7 +26,6 @@ import {
 } from "@/app/lib/funnel/compose-rules";
 import {
   APPLICATION_REGISTER_CLASSES,
-  FAQ_OPEN_EVENT,
   REVEAL_UI_COPY,
   firstTasks,
   revealModel,
@@ -35,6 +35,7 @@ import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import {
   BUILT_STEPS,
   SKIN_ROOT_CLASSES,
+  doorConfirmOutcome,
   doorsModel,
   handoffCopy,
   miniAppProgress,
@@ -156,7 +157,15 @@ export function MiniAppShell({
     if (!selected) return;
     setNotice(null);
     startTransition(async () => {
-      const result = await confirmDoorAction({ childId: child.id, slug: selected });
+      // R57: only the HINT-match flag rides along (the ad hint is client
+      // knowledge); switched_from and first-vs-re-confirm are SERVER truth
+      // derived from the child's prior group (U16 review).
+      const outcome = doorConfirmOutcome(selected, doors);
+      const result = await confirmDoorAction({
+        childId: child.id,
+        slug: selected,
+        preselected: outcome.preselected,
+      });
       if (result.kind === "confirmed") {
         // A DIFFERENT door invalidates everything downstream of it: the old
         // group's template and seeded answers are that group's copy, and a
@@ -751,6 +760,7 @@ export function MiniAppShell({
                   a.click();
                   a.remove();
                   setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  void emitShareCardAction({ childId: child.id });
                 }}
                 className="mt-6 inline-flex h-10 items-center justify-center rounded-full border border-current px-5 font-mono text-[0.65rem] uppercase tracking-[0.12em]"
               >
@@ -773,10 +783,13 @@ export function MiniAppShell({
                       key={row.q}
                       className="group py-3"
                       onToggle={(e) => {
-                        // R44: opening a row emits an event. U16 ships the
-                        // pipe; until then this is its named call site.
+                        // R44: opening a row emits an event — U16's pipe,
+                        // wired at the named call site U11 left for it.
                         if ((e.target as HTMLDetailsElement).open) {
-                          console.debug(`[funnel/event] ${FAQ_OPEN_EVENT}`, row.q);
+                          void emitFaqOpenedAction({
+                            childId: child.id,
+                            row: model.faq.indexOf(row),
+                          });
                         }
                       }}
                     >

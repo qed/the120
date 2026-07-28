@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { loadMiniAppChild } from "@/app/lib/funnel/miniapp-core";
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
+import { parseStep } from "@/app/lib/funnel/miniapp-rules";
 import { loadActiveProjectViewCore } from "@/app/lib/funnel/compose-core";
 import { MiniAppShell } from "./MiniAppShell";
 
@@ -33,6 +35,13 @@ export default async function MiniAppPage({
   if (loaded.kind === "failed") redirect("/start/children");
 
   const rawHint = Array.isArray(query.g) ? query.g[0] : query.g;
+
+  // R56: quiz_start / reveal_viewed emit per SERVER render of the step —
+  // the URL is the step state, so every step entry is a server request.
+  // Fire-and-forget; refresh duplicates are measurement's dedupe problem.
+  const step = parseStep(Array.isArray(query.step) ? query.step[0] : query.step);
+  if (step === "quiz") void emitFunnelEvent("quiz_start", { childId });
+  if (step === "reveal") void emitFunnelEvent("reveal_viewed", { childId });
 
   // The active draft rides in server-side so compose/tasks/reveal survive a
   // refresh; a read failure degrades to "no draft yet" (the shell re-loads

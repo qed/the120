@@ -50,7 +50,7 @@ export type WebhookDeps = {
 };
 
 export type WebhookOutcome =
-  | { kind: "ok" }
+  | { kind: "ok"; fulfilled?: { childId: string; parentId: string; sessionId: string } }
   | { kind: "double_paid" }
   | { kind: "failed" };
 
@@ -145,7 +145,11 @@ export async function applyStripeEvent(
     if (wrote === "error") return { kind: "failed" };
 
     if (s.attemptId) await deps.linkAttempt(s.attemptId, s.id);
-    return { kind: "ok" };
+    // The caller emits c3_deposit ONLY for a fulfil that actually wrote —
+    // replays and pending records must not double-count the conversion.
+    return plan.kind === "fulfil"
+      ? { kind: "ok", fulfilled: { childId: s.childId, parentId: s.parentId, sessionId: s.id } }
+      : { kind: "ok" };
   }
 
   // payment_failed / expired: terminal downgrades, only over a row that

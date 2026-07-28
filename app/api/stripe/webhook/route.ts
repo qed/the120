@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { applyStripeEvent, type WebhookDeps } from "@/app/lib/funnel/deposit-core";
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
 
 /**
  * S3 + funnel U14: the Stripe webhook, rebuilt over the deps-injected core.
@@ -149,6 +150,16 @@ export async function POST(req: Request) {
   if (outcome.kind === "failed") {
     // Non-200 → Stripe retries; the write path is idempotent by session id.
     return NextResponse.json({ error: "DB write failed" }, { status: 500 });
+  }
+  if (outcome.kind === "ok" && outcome.fulfilled) {
+    // R56/R58: C3 — once per WRITTEN fulfilment, never per replay.
+    // AWAITED: a serverless freeze after the 200 must not eat the
+    // conversion the ads math divides by.
+    await emitFunnelEvent(
+      "c3_deposit",
+      { childId: outcome.fulfilled.childId, parentId: outcome.fulfilled.parentId },
+      { session: outcome.fulfilled.sessionId }
+    );
   }
   // "double_paid" is acknowledged (retrying cannot fix it) after the loud log.
   return NextResponse.json({ received: true });

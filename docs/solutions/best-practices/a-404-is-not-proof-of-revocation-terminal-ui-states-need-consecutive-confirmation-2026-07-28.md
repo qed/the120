@@ -39,7 +39,7 @@ Either would have permanently killed a healthy board mid-event (poll stopped, fr
 `fwBoardConnectionState(prev, outcome)` — a pure reducer in `fw-board-rules.ts` returning `{ phase: "live" | "catching_up" | "connecting" | "dead_link", consecutive404 }`:
 
 - **Two consecutive 404 responses** → `dead_link` (sticky terminal: absorbs every later event; interval stops; generic recovery copy — no revoked/expired/never-existed distinction leaks).
-- A **single 404** still clears the displayed frame immediately (children's names off the projector — security acts on suspicion) but stays non-terminal — display and terminality are separate decisions.
+- A **single 404** still clears the displayed frame immediately (children's names off the projector — security acts on suspicion) but stays non-terminal — display and terminality are separate decisions. **Amendment (same day):** "clears the displayed frame" was initially scoped to one state store; adversarial review found the independent celebration overlay kept a name on screen until terminality. The first-404 clear must sweep *every* name-bearing store — see `docs/solutions/security-issues/revocation-clearing-must-sweep-every-name-bearing-state-store-2026-07-28.md`.
 - An answered non-404 (200 *or* 503) resets the 404 run — it proves the token still resolves. A **thrown fetch is no information**: it neither breaks nor extends the run, so `404 / wifi-blip / 404` is still terminal.
 - Header pill, interim body copy, and terminal panel all render from one exported presentation table keyed by phase, so surfaces cannot disagree.
 

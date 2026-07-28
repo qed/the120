@@ -67,7 +67,7 @@ converts, C1→C2→C3 — is one query.
 19. One-click minted resume tokens for nurture deep links (currently /start,
     resume point derived server-side).
 
-## Follow-ups pass (2026-07-28, PR #94)
+## Follow-ups pass (2026-07-28, PR #95)
 
 Items 8, 9, and 18 closed after the build completed (one adversarial review
 pass; its stale-anchor, unawaited-serverless-send, and test-env-mail findings

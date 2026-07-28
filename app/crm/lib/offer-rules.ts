@@ -9,6 +9,7 @@
  */
 
 import { canReserveSeat, hasPaidDeposit, statusIndex, type SeatStatus } from "@/app/dashboard/data";
+import type { ReviewStatus } from "@/app/crm/lib/constants";
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SITE_URL } from "@/app/lib/site";
 
@@ -106,15 +107,22 @@ export function offerButtonState(opts: {
  * seat" button the move would kill. `targetStatus` is typed (menu targets
  * are always a known stage), so the compiler owns validity — unlike
  * `offerButtonState`, which deliberately accepts raw DB strings.
+ *
+ * W7: typed as ReviewStatus, the vocabulary the MOVE MENU actually offers,
+ * which since the waitlist move is wider than SeatStatus. `waitlisted` is
+ * off the parent stepper, so `statusIndex` returns -1 and the comparison
+ * warns — which is the correct answer, not an accident: waitlisting a
+ * child whose offer email is out kills that email's button exactly as a
+ * demotion does, and staff should be asked first.
  */
 export function demoteWarning(opts: {
-  targetStatus: SeatStatus;
+  targetStatus: ReviewStatus;
   offerSentAt: string | null;
   deposits: { status: string }[];
 }): boolean {
   if (!opts.offerSentAt) return false;
   if (hasPaidDeposit(opts.deposits)) return false;
-  return statusIndex(opts.targetStatus) < statusIndex("offered");
+  return statusIndex(opts.targetStatus as SeatStatus) < statusIndex("offered");
 }
 
 /* --------------------------------------------------------- effective email */

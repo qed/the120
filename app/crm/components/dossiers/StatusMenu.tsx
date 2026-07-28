@@ -18,13 +18,18 @@ import { useEffect, useRef, useState } from "react";
 import { REVIEW_STATUS_LABELS, type ReviewStatus } from "@/app/crm/lib/constants";
 import { ReviewPill } from "./QueueList";
 
-/** The five stages staff can move a candidate to (drafts never show here). */
+/** The stages staff can move a candidate to (drafts never show here).
+ *  W7 adds `waitlisted`, last: it is a branch off the ladder rather than a
+ *  rung on it, and putting it after `member` keeps the menu reading as the
+ *  pipeline order it has always been. Moving OFF the waitlist is the same
+ *  menu — pick the stage the child returns to. */
 const MOVE_STAGES: ReviewStatus[] = [
   "submitted",
   "in_review",
   "invited",
   "offered",
   "member",
+  "waitlisted",
 ];
 
 export default function StatusMenu({

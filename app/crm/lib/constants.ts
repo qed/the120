@@ -187,6 +187,12 @@ export const REVIEW_STATUSES = [
   "invited",
   "offered",
   "member",
+  // W7: appended AFTER `member`, deliberately. This array is index-ordered
+  // and `queueCounts` derives needs-review from the open interval
+  // (draft, offered) — inserting `waitlisted` inside that window would
+  // silently inflate the staff queue badge with waitlisted children.
+  // Waitlist is a branch off the ladder, not a rung on it.
+  "waitlisted",
 ] as const;
 
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
@@ -198,6 +204,7 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   invited: "Invited to assessment",
   offered: "Offered a seat",
   member: "Member of the 120",
+  waitlisted: "Waitlisted",
 };
 
 /* ---------------------------------------------------------------- groups */

@@ -109,6 +109,19 @@ describe("offerHeadroom — offers do not reserve seats (the over-offer trap)", 
     }
   });
 
+  it("W7: waitlisting retires the outstanding promise, even though the offer stamp remains", () => {
+    const waitlisted = {
+      offerSentAt: "2026-07-28T00:00:00Z",
+      reviewStatus: "waitlisted",
+      deposits: [] as { status: string; refunded_at?: string | null }[],
+    };
+    expect(countOutstandingOffers([waitlisted])).toBe(0);
+    const split = categorizeOutstanding([waitlisted]);
+    expect(split.clearingDebits + split.unansweredOffers).toBe(0);
+    // Un-waitlisting brings the promise back.
+    expect(countOutstandingOffers([{ ...waitlisted, reviewStatus: "offered" }])).toBe(1);
+  });
+
   it("W6: a refunded or downgraded row is never 'clearing money'", () => {
     const child = (deposits: { status: string; refunded_at?: string | null }[]) => ({
       offerSentAt: "2026-07-28T00:00:00Z",

@@ -19,16 +19,27 @@ export const metadata: Metadata = {
   title: "Add your child — The 120",
 };
 
-export default async function ChildrenPage() {
+export default async function ChildrenPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const listed = await listChildrenCore();
 
   // Outside any try: redirect() signals by throwing.
   if (listed.kind === "unauthenticated") redirect("/start");
 
+  // The `?g=` hint, still riding (R36). This route is force-dynamic, so the
+  // read costs nothing; the grid forwards it into the mini-app for the first
+  // child only.
+  const params = await searchParams;
+  const g = params.g;
+
   return (
     <ChildrenFlow
       initialChildren={listed.kind === "ok" ? listed.children : []}
       loadFailed={listed.kind === "failed"}
+      hintSlug={(Array.isArray(g) ? g[0] : g) ?? null}
     />
   );
 }

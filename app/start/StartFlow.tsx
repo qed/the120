@@ -41,12 +41,12 @@ const EXPLAINER_COPY = [
 type Stage = 0 | 1 | 2 | 3;
 
 /**
- * `group` is deliberately NOT a prop yet. `/start` reads `?g=` (Decision 4 —
- * this is the only route that may), but nothing consumes it until U7's Add a
- * Child pre-selects the door. Passing it now would be an unused prop that
- * reads like wiring; U7 adds it back with its consumer.
+ * `group` rides through capture to Add a Child and on to the doors (R35/R36 —
+ * U8 is its consumer). It is a HINT: never validated here, because doorsModel
+ * treats an unknown slug as cold, and dropping it early would kill the
+ * pre-selection for the one child it is meant for.
  */
-export function StartFlow({ source }: { source?: string }) {
+export function StartFlow({ source, group }: { source?: string; group?: string }) {
   const [stage, setStage] = useState<Stage>(0);
   const [fields, setFields] = useState({
     firstName: "",
@@ -72,11 +72,14 @@ export function StartFlow({ source }: { source?: string }) {
     startTransition(async () => {
       const result = await captureAction({ ...fields, source });
       if (result.kind === "captured") {
-        // The session is live; Add a Child is next (U7). A full navigation
-        // rather than a router push: the session cookie was just set by the
-        // Server Action, and the destination is a server-rendered route that
-        // must read it.
-        window.location.assign("/start/children");
+        // The session is live; Add a Child is next. A full navigation rather
+        // than a router push: the session cookie was just set by the Server
+        // Action, and the destination is a server-rendered route that must
+        // read it. The `?g=` hint rides along — it dies here or reaches the
+        // doors (R36: first child only; the grid enforces that half).
+        window.location.assign(
+          group ? `/start/children?g=${encodeURIComponent(group)}` : "/start/children"
+        );
         return;
       }
       if (result.kind === "invalid") {

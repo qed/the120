@@ -830,7 +830,37 @@ state, verified against production data.
 
 ### Phase 2 — The mini-app
 
-- [ ] **Unit 8: The mini-app shell, handoff seam, and doors**
+- [x] **Unit 8: The mini-app shell, handoff seam, and doors** *(landed 2026-07-28)*
+
+  **The routing decision Decision 5 delegated, taken:** ONE route
+  (`/start/child/[childId]`) with `?step=` — the repo's own URL-as-state idiom,
+  not seven `[step]` segments the repo has never had. Back walks the ladder
+  because the step DERIVES from the URL (`useSearchParams`), and `go()` merges
+  the query rather than replacing it, so the `?g=` hint survives every
+  transition and a refresh.
+
+  **What landed:** `miniapp-rules.ts` (the seven-step ladder pinned to R32's
+  percentages via `satisfies`; `doorsModel` — confirmed > first-child hint >
+  cold, unknown `g` → cold; door order by the handoff's POSITION, not the
+  home-cards order; `doorConfirmOutcome` carrying `preselected`/`switchedFrom`
+  for U16's event; `SKIN_ROOT_CLASSES` — the Decision 10 class-name swap;
+  `handoffCopy` naming the child in both registers). `miniapp-core.ts` — RLS
+  authorization (no `supabaseAdmin`, asserted), someone-else's-child and
+  no-such-child deliberately the SAME 404, and **confirm persists once, only
+  at `applicant_state = "added"`** — taps are client state, and a stale
+  `?step=doors` URL cannot reassign a group under a built project. The `?g=`
+  hint threads capture → grid → mini-app, first-child-only. Steps beyond
+  handoff/doors render a coming-next stub behind `BUILT_STEPS` (U9–U11 flip
+  one list).
+
+  **Review (2 agents) fixed, converging:** `useState(initialStep)` broke the
+  Back button (URL popped, UI stayed — the routing decision's own
+  justification, silently false); `router.push("?step=…")` replaced the whole
+  query and dropped the hint, so a refresh on the doors rendered them cold;
+  the grid gated the hint on **only-child** rather than **first-born**,
+  dropping it the moment a sibling was added. All fixed with wiring
+  assertions. Added the past-doors confirm guard and the tap-never-persists
+  component scan. Suite **122 files / 3227 tests**; `tsc`, build, lint clean.
 
 **Goal:** Routed, refresh-safe mini-app steps, and the group doors with the `?g=` hint.
 

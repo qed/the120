@@ -36,6 +36,10 @@ describe("the schedule is WRITTEN and its claims are registered for Peter", () =
     expect(RETENTION_SCHEDULE.graceDays).toBe(14);
     expect(RETENTION_CLAIMS_FOR_PETER.length).toBeGreaterThanOrEqual(3);
     expect(RETENTION_CLAIMS_FOR_PETER.every((c) => c.includes("Peter"))).toBe(true);
+    // 2026-07-28 batch: every retention claim is confirmed. A reverted or
+    // newly-added UNVERIFIED entry reddens this pin (same discipline as the
+    // offer-rules and deposit-rules registers).
+    expect(RETENTION_CLAIMS_FOR_PETER.filter((c) => c.includes("UNVERIFIED"))).toEqual([]);
   });
 });
 

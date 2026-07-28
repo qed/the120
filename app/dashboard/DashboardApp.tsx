@@ -52,9 +52,20 @@ export default function DashboardApp({
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ childId, policyAccepted: true }),
+        // The version this bundle RENDERED, echoed so the server can refuse
+        // a stale tab: without it, an acceptance clicked against old text
+        // would be stamped with whatever version is live at POST time — a
+        // false consent record (U1 review, adversarial).
+        body: JSON.stringify({ childId, policyAccepted: true, policyVersion: REFUND_POLICY.version }),
       });
       const body = await res.json();
+      if (res.status === 409 && body.stalePolicy) {
+        setCheckoutError(
+          "The policy text was updated since this page loaded. Please refresh and review the current version."
+        );
+        setReservingId(null);
+        return;
+      }
       if (body.redirect) {
         // F7: zero seats routes to the waitlist — a dead-end error string
         // at the sold-out moment strands exactly the family most worth

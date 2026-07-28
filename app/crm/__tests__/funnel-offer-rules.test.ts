@@ -213,7 +213,7 @@ describe("the three renderings carry the same deposit target", () => {
   });
 });
 
-describe("the drafted screens (Peter revises)", () => {
+describe("the confirmed screens (2026-07-28 decision batch)", () => {
   it("the review screen says what happens next AND WHEN", () => {
     const copy = draftedCopy().join(" ");
     expect(copy).toMatch(/within .* days/);
@@ -228,9 +228,12 @@ describe("the drafted screens (Peter revises)", () => {
     }
   });
 
-  it("the unverified claims are explicitly marked for Peter", () => {
+  it("every claim is confirmed — zero UNVERIFIED remain in this register (2026-07-28 batch)", () => {
+    // The counsel-flagged item lives in POLICY_CLAIMS_FOR_PETER
+    // (deposit-rules), not here. A new or reworded claim re-enters as
+    // UNVERIFIED and deliberately reddens this pin.
     const unverified = DRAFT_CLAIMS_FOR_PETER.filter((c) => c.claim.includes("UNVERIFIED"));
-    expect(unverified.length).toBeGreaterThanOrEqual(2);
+    expect(unverified).toEqual([]);
   });
 
   it("copy rules hold: no em dashes, no 'failed', no promised outcomes", () => {

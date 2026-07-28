@@ -5,10 +5,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALLOWED_ORIGINS,
+  CONSENT_MIN_POLICY_VERSION,
   DEPOSIT_AMOUNT_CENTS,
   POLICY_CLAIMS_FOR_PETER,
   REFUND_POLICY,
   nextStepsReachable,
+  policyVersionAtLeast,
   resolveOrigin,
 } from "@/app/lib/funnel/deposit-rules";
 import { policyHash, recordCheckoutAttempt } from "@/app/lib/funnel/deposit-core";
@@ -96,7 +98,47 @@ describe("R51a — the policy record", () => {
     for (const { claim, phrase } of POLICY_CLAIMS_FOR_PETER) {
       expect(REFUND_POLICY.text, claim).toContain(phrase);
     }
-    expect(POLICY_CLAIMS_FOR_PETER.some((c) => c.claim.includes("UNVERIFIED"))).toBe(true);
+    // 2026-07-28 batch: exactly TWO flagged entries survive — the
+    // Ontario-counsel tuition wording and the new consent clause. A new
+    // or reworded claim re-enters as UNVERIFIED and reddens this pin.
+    const unverified = POLICY_CLAIMS_FOR_PETER.filter((c) => c.claim.includes("UNVERIFIED"));
+    expect(unverified.map((c) => c.phrase).sort()).toEqual([
+      "applied to tuition",
+      "school account and email address",
+    ]);
+  });
+
+  it("the consent clause ships in the accepted text; the consent anchor is FIXED and the live version is at-or-after it", () => {
+    expect(REFUND_POLICY.text).toContain("parent or legal guardian");
+    expect(REFUND_POLICY.text).toContain("school account and email address");
+    // The anchor is a historical constant — it must NOT track
+    // REFUND_POLICY.version, or every unrelated text bump would drift the
+    // consent gate forward and orphan valid acceptances (U1 review).
+    expect(CONSENT_MIN_POLICY_VERSION).toBe("2026-07-28.2");
+    expect(policyVersionAtLeast(REFUND_POLICY.version, CONSENT_MIN_POLICY_VERSION)).toBe(true);
+  });
+
+  it("policyVersionAtLeast is structural, not lexicographic — .10 is later than .2", () => {
+    expect(policyVersionAtLeast("2026-07-28.10", "2026-07-28.2")).toBe(true);
+    expect(policyVersionAtLeast("2026-07-28.2", "2026-07-28.10")).toBe(false);
+    expect(policyVersionAtLeast("2026-07-28.2", "2026-07-28.2")).toBe(true);
+    expect(policyVersionAtLeast("2026-08-01.1", "2026-07-28.2")).toBe(true);
+    expect(policyVersionAtLeast("2026-07-28.1", "2026-07-28.2")).toBe(false);
+    // Malformed or absent versions fail CLOSED — never treated as consent.
+    expect(policyVersionAtLeast(null, "2026-07-28.2")).toBe(false);
+    expect(policyVersionAtLeast("garbage", "2026-07-28.2")).toBe(false);
+  });
+
+  it("the client echoes the rendered version and the server refuses a stale one (wiring scan)", () => {
+    // A stale tab must not be recorded as accepting text it never showed:
+    // the UI sends the version its bundle rendered, the route 409s on
+    // mismatch. Pre-echo bundles send nothing and are refused the same way.
+    const ui = read("app/dashboard/DashboardApp.tsx");
+    expect(ui).toContain("policyVersion: REFUND_POLICY.version");
+    expect(ui).toContain("stalePolicy");
+    const route = read("app/api/checkout/route.ts");
+    expect(route).toContain("policyVersion !== REFUND_POLICY.version");
+    expect(route).toContain("stalePolicy: true");
   });
 });
 

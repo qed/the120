@@ -28,23 +28,58 @@ export function resolveOrigin(originHeader: string | null): string {
 /* ─────────────────── R51a: the refund policy, full text, versioned ─────────────────── */
 
 /**
- * ⚠ DRAFT policy text, Peter revises (the U13 claims-register pattern).
- * Rendered IN FULL at the point of payment above an UNTICKED checkbox — a
- * checkbox containing only a link is explicitly rejected by card issuers
- * as dispute evidence. The accepted version/hash/timestamp/IP persist on
- * the attempt row. Change the TEXT → bump the VERSION, always.
+ * Policy text CONFIRMED as written 2026-07-28 (Peter, decision batch);
+ * the post-deadline-tuition wording remains flagged pending Ontario
+ * counsel. Rendered IN FULL at the point of payment above an UNTICKED
+ * checkbox — a checkbox containing only a link is explicitly rejected by
+ * card issuers as dispute evidence. The accepted version/hash/timestamp/IP
+ * persist on the attempt row — and, since 2026-07-28.2, that acceptance
+ * record is ALSO the verifiable parental-consent artifact Google's
+ * Education terms require BEFORE a student account may be provisioned
+ * (the funnel-wrap plan's consent-precedes-minting decision): U15's
+ * provisioning refuses to mint unless the fulfilled deposit carries an
+ * acceptance at-or-after this version. Change the TEXT → bump the
+ * VERSION, always.
  */
 export const REFUND_POLICY = {
-  version: "2026-07-28.1",
+  version: "2026-07-28.2",
   text:
     `The $250 seat deposit reserves your child's place in The 120's founding cohort. ` +
     `It is fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}: email admissions@the120.school ` +
     `from the address on this account and the deposit is returned to the original payment method. ` +
     `After ${DEPOSIT_REFUND_DEADLINE_LABEL}, the deposit is applied to tuition and is no longer refundable. ` +
-    `If The 120 cannot offer your child a place in the program, the deposit is refunded in full regardless of date.`,
+    `If The 120 cannot offer your child a place in the program, the deposit is refunded in full regardless of date. ` +
+    `By paying the deposit you confirm you are the parent or legal guardian of the child named on this application, ` +
+    `and you consent to The 120 creating a school account and email address for your child as part of enrolment.`,
 } as const;
 
-/** ⚠ Factual claims in the policy, registered for Peter (U13 pattern). */
+/** The first policy version whose acceptance includes parental consent to
+ *  provision the child's school account (U15 gates minting on this). A
+ *  fixed HISTORICAL ANCHOR — it does not move on later text bumps unless
+ *  the consent clause itself changes. */
+export const CONSENT_MIN_POLICY_VERSION = "2026-07-28.2";
+
+/**
+ * Structural "at-or-after" for policy versions ("YYYY-MM-DD.N"). NEVER
+ * compare these lexicographically: "2026-07-28.10" < "2026-07-28.2" as a
+ * string, but .10 is the LATER revision (U1 review). Malformed versions
+ * fail closed (false) — an unparsable acceptance is never treated as
+ * consenting.
+ */
+export function policyVersionAtLeast(version: string | null | undefined, min: string): boolean {
+  const parse = (v: string): { date: string; n: number } | null => {
+    const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(v);
+    return m ? { date: m[1], n: Number(m[2]) } : null;
+  };
+  const a = version ? parse(version) : null;
+  const b = parse(min);
+  if (!a || !b) return false;
+  if (a.date !== b.date) return a.date > b.date;
+  return a.n >= b.n;
+}
+
+/** Factual claims in the policy, registered (U13 pattern). Confirmed as
+ *  written 2026-07-28 (Peter) except where flagged. */
 export const POLICY_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
   { claim: "Deposit is $250 — matches R51", phrase: "$250" },
   {
@@ -52,7 +87,7 @@ export const POLICY_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
     phrase: DEPOSIT_REFUND_DEADLINE_LABEL,
   },
   {
-    claim: "Refund requested by email to admissions@ — UNVERIFIED process, Peter to confirm",
+    claim: "Refund requested by email to admissions@ — CONFIRMED 2026-07-28 (Peter)",
     phrase: "admissions@the120.school",
   },
   {
@@ -60,8 +95,13 @@ export const POLICY_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
     phrase: "applied to tuition",
   },
   {
-    claim: "Full refund if no place can be offered — UNVERIFIED policy, Peter to confirm",
+    claim: "Full refund if no place can be offered — CONFIRMED 2026-07-28 (Peter)",
     phrase: "regardless of date",
+  },
+  {
+    claim:
+      "Payment confirms parent/guardian status and consents to the child's school account — UNVERIFIED wording, Peter/Ontario counsel to confirm (ordering decided: consent precedes minting)",
+    phrase: "school account and email address",
   },
 ];
 
@@ -145,8 +185,9 @@ export function nextStepsReachable(input: {
   return input.status === "offered" || input.status === "member";
 }
 
-/** ⚠ DRAFT copy, Peter revises. Swipe 2's goal input persists to the
- *  children row (family_goal) — editable, never required. */
+/** CONFIRMED as written 2026-07-28 (Peter, decision batch). Swipe 2's goal
+ *  input persists to the children row (family_goal) — editable, never
+ *  required. */
 export const NEXT_STEPS = {
   swipes: [
     {

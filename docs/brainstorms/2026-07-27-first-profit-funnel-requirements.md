@@ -298,7 +298,10 @@ through follows them as a hint, never a lock.
   by the chosen door, and the Project step is pre-filled with the actual project the child
   built. The Workshops step is removed.
 - R47. Basics arrives pre-filled with name and grade, with birth year auto-calculated as
-  `2026 − 11 + grade` and editable.
+  `2021 − grade` and editable. *(Text corrected 2026-07-28: the original
+  `2026 − 11 + grade` was inverted — it increases with grade; the implementation's
+  `2021 − grade` matches the evident intent. See
+  docs/solutions/logic-errors/a-requirements-literal-formula-can-be-wrong-assert-the-invariant-not-the-artifact-2026-07-28.md.)*
 - R48. The application asks for the child's email with a "Don't have one" option.
 - R49. Submission is **Conversion 2**. The dossier header flips to SUBMITTED FOR REVIEW.
 - R49a. **The deposit does not open on submission (F5).** After C2 the family sees a review
@@ -369,7 +372,11 @@ through follows them as a hint, never a lock.
   see what a kid built before any parent conversation.
 - R61. Nurture sequences key to the abandonment point: captured-but-no-child,
   child-but-no-project, project-but-no-application, applied-but-no-deposit. Each email
-  deep-links to the exact resume point and carries the child's project name in the subject.
+  deep-links to the exact resume point. Subjects carry nothing beyond a first name —
+  no project name. *(Amended 2026-07-28, Peter: the original asked for the child's
+  project name in the subject; the build's privacy posture — no child data beyond a
+  first name in email — is confirmed as the requirement, and the in-code deviation
+  flag is retired.)*
 
 ### Copy and register
 

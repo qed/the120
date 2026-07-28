@@ -20,25 +20,27 @@ export default function DashboardApp({
   const { ready, session, parent, children, deposits, addChild, refreshDeposits } = useDashboard();
   const [view, setView] = useState<View>("home");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [depositBanner, setDepositBanner] = useState<"success" | "cancelled" | null>(null);
+  // Returning from Stripe Checkout: the banner derives from the URL ONCE at
+  // mount (lazy initializer — no setState-in-effect, the React Compiler
+  // rule); the effect below handles only the side effects.
+  const [depositBanner] = useState<"success" | "cancelled" | null>(() => {
+    if (typeof window === "undefined") return null;
+    const result = new URLSearchParams(window.location.search).get("deposit");
+    return result === "success" || result === "cancelled" ? result : null;
+  });
   const [reservingId, setReservingId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  // Returning from Stripe Checkout: show the banner and pull fresh deposit rows.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const result = params.get("deposit");
-    if (result === "success" || result === "cancelled") {
-      setDepositBanner(result);
-      window.history.replaceState(null, "", "/dashboard");
-      if (result === "success") {
-        refreshDeposits();
-        // The webhook can lag the redirect by a moment — refresh once more.
-        const t = setTimeout(refreshDeposits, 4000);
-        return () => clearTimeout(t);
-      }
+    if (!depositBanner) return;
+    window.history.replaceState(null, "", "/dashboard");
+    if (depositBanner === "success") {
+      refreshDeposits();
+      // The webhook can lag the redirect by a moment — refresh once more.
+      const t = setTimeout(refreshDeposits, 4000);
+      return () => clearTimeout(t);
     }
-  }, [refreshDeposits]);
+  }, [depositBanner, refreshDeposits]);
 
   const reserveSeat = async (childId: string) => {
     setReservingId(childId);

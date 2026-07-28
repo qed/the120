@@ -19,11 +19,9 @@
  * - One email per family per run: if several steps are due, only the
  *   earliest-due one goes out; the rest wait for later runs.
  *
- * The sole import (hasLiveWorkshopPick) is itself pure data — the engine
- * stays I/O-free and directly unit-testable.
+ * Import-free since funnel U12 (the Workshops removal) — the engine is
+ * I/O-free and directly unit-testable.
  */
-
-import { hasLiveWorkshopPick } from "@/app/dashboard/data";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const CATCH_UP_DAYS = 3;
@@ -58,6 +56,8 @@ export type NurtureChildRow = {
   /** jsonb array of {subject, plan, goal} — tolerant-parsed, never trusted. */
   academics: unknown;
   subjects: string[] | null;
+  /** Legacy picks: kept on the row shape for old data, ignored by
+   *  completeness since the Workshops removal (funnel U12). */
   workshop_ids: string[] | null;
   interests: string | null;
   project_pitch: string | null;
@@ -112,18 +112,24 @@ const ms = (iso: string | null): number | null => {
   return Number.isNaN(t) ? null : t;
 };
 
-/** An academics jsonb entry counts when subject AND plan are both set. */
+/** The plan vocabulary, mirrored from the dashboard's ACADEMIC_PLANS —
+ *  see reviews-rules.ts for why an unknown plan must NOT count. */
+const KNOWN_PLANS = ["catch-up", "reach-ahead", "get-solid"];
+
+/** An academics jsonb entry counts when subject AND a KNOWN plan are set. */
 const academicEntryComplete = (a: unknown): boolean =>
   typeof a === "object" &&
   a !== null &&
   String((a as { subject?: unknown }).subject ?? "").trim() !== "" &&
-  String((a as { plan?: unknown }).plan ?? "").trim() !== "";
+  KNOWN_PLANS.includes(String((a as { plan?: unknown }).plan ?? "").trim());
 
 /**
- * Dossier completeness for a raw children row, 0–100. Group-aware (R14):
- * 8 items for everyone, plus a Scholars-only workshops item (9 total); the
- * academics item keeps a legacy fallback on `subjects`. A row fetched
- * without the new columns (old select) classifies as group-unset — no crash.
+ * Dossier completeness for a raw children row, 0–100. EIGHT items for
+ * EVERY group since the Workshops removal (funnel U12, R46) — the
+ * Scholars-only workshops item is gone from all three mirrors in the same
+ * commit; legacy stored `workshop_ids` are ignored. The academics item
+ * keeps a legacy fallback on `subjects`. A row fetched without the new
+ * columns (old select) classifies as group-unset — no crash.
  *
  * LOCKSTEP MIRRORS (R14): this definition is duplicated in
  * `app/dashboard/data.ts` (checklist — parent meter) and
@@ -140,7 +146,6 @@ export function dossierCompleteness(c: NurtureChildRow): number {
     Boolean(c.current_school?.trim()),
     groupSlug !== "",
     academics.some(academicEntryComplete) || (c.subjects ?? []).length >= 1,
-    ...(groupSlug === "scholars" ? [hasLiveWorkshopPick(c.workshop_ids ?? [])] : []),
     (c.interests ?? "").trim().length >= 3,
     (c.project_pitch ?? "").trim().length >= 10,
   ];

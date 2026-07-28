@@ -1068,7 +1068,29 @@ other seam. Build it as such.
 
 ### Phase 3 — The close
 
-- [ ] **Unit 12: Wizard rewiring and the Workshops removal**
+- [x] **Unit 12: Wizard rewiring and the Workshops removal** — *landed 2026-07-28.
+  Characterized first (Scholars 9 items / 89% stranded, others 8 / 100%), then all
+  three mirrors changed in ONE commit: 8 items for EVERY group, Scholars reach
+  100% and can submit. Workshops step deleted (StepWorkshops.tsx, filters,
+  selection bar, switch-confirm); `resolveStep` takes raw strings so stale
+  "workshops" ids route to Project. R46: the store loads active projects (the U10
+  RLS policy) and `prefillDraft` fills pitch + birth year, PERSISTED through the
+  write chain on load — in-memory-only prefill made the parent meter disagree
+  with the CRM queue and stall nudge for exactly the families the nudge targets
+  (adversarial finding). R47: **the requirement's literal formula is inverted**
+  (2026−11+grade → grade 12 born 2027, executed by both reviewers); implemented
+  as the evident intent `2021 − grade` — **Peter: R47's wording needs fixing**.
+  R48: child email + "Don't have one" (migration `20260809120000`, applied +
+  verified; not a checklist item). Review also fixed: mirrors' plan-vocabulary
+  divergence (unknown academic plans now fail closed everywhere, raw-shape parity
+  test added), the nurture nudge email still promising a workshops step, junk
+  ":"-pitch prefill from partial project rows, whitespace child-email storing
+  beside the none-flag, and legacy picks now clear on switch-away. ALSO: the
+  20260808120000 version COLLISION with Lane A's PR #86 repaired (file renamed
+  to 20260808130000, version row inserted, breach recorded in MIGRATION-LOCK.md,
+  version-uniqueness tripwire test shipped). Verification: the one production
+  Scholars child is 100% before and after — no bucket movement. Suite 130 files
+  / 3,392 tests; tsc, build, lint clean.*
 
 **Goal:** The dossier wizard receives the funnel's work pre-done, and loses a step without
 breaking Scholars.

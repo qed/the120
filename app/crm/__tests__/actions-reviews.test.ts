@@ -209,10 +209,13 @@ const emptyDossier: DossierFields = {
 };
 
 describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
-  it("counts 9 checklist items for Scholars, 8 otherwise (R14)", () => {
-    expect(dossierChecklist(fullDossier)).toHaveLength(9);
+  it("counts 8 checklist items for EVERY group since the Workshops removal (U12/R46)", () => {
+    expect(dossierChecklist(fullDossier)).toHaveLength(8);
     expect(dossierChecklist({ ...fullDossier, groupSlug: "makers" })).toHaveLength(8);
     expect(dossierChecklist(emptyDossier)).toHaveLength(8);
+    // Legacy stored picks are ignored, not crashed on — a Scholars dossier
+    // with NO workshop reaches 100 (pre-U12 it was stranded at 89).
+    expect(dossierCompleteness({ ...fullDossier, workshopIds: [] })).toBe(100);
   });
 
   it("full dossier = 100", () => {
@@ -264,8 +267,8 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
   });
 
   it("tolerates junk academics jsonb (non-array → no credit, no crash)", () => {
-    expect(dossierCompleteness({ ...fullDossier, academics: "garbage" })).toBe(89);
-    expect(dossierCompleteness({ ...fullDossier, academics: null })).toBe(89);
+    expect(dossierCompleteness({ ...fullDossier, academics: "garbage" })).toBe(88);
+    expect(dossierCompleteness({ ...fullDossier, academics: null })).toBe(88);
   });
 });
 
@@ -308,13 +311,13 @@ describe("dossierChecklist ≡ dashboard checklist (R14 lockstep)", () => {
 
   const cases: [name: string, child: Child][] = [
     [
-      "complete Scholars",
+      "complete Scholars with legacy picks (ignored, not crashed on)",
       parityChild({ groupSlug: "scholars", workshopIds: ["botball-robotics"] }),
     ],
     ["complete non-Scholars", parityChild()],
-    ["missing one (Scholars without a workshop)", parityChild({ groupSlug: "scholars" })],
+    ["complete Scholars with NO workshop — unstranded by U12", parityChild({ groupSlug: "scholars" })],
     [
-      "missing two (Scholars without workshop or pitch)",
+      "missing one (Scholars without a pitch)",
       parityChild({ groupSlug: "scholars", projectPitch: "" }),
     ],
     ["legacy subjects-only", parityChild({ academics: [], subjects: ["Math"] })],
@@ -340,7 +343,7 @@ describe("dossierChecklist ≡ dashboard checklist (R14 lockstep)", () => {
     delete oldFields.groupSlug;
     delete oldFields.academics;
     const items = dossierChecklist(oldFields as DossierFields);
-    expect(items).toHaveLength(8); // group unset → no Scholars workshops item
+    expect(items).toHaveLength(8); // the one list every group gets (U12)
     expect(items.find((i) => i.label === "A group")?.done).toBe(false);
     expect(items.find((i) => i.label === "Academics (a subject + plan)")?.done).toBe(true);
     // Everything except the group item is satisfied → 7/8 = 88.

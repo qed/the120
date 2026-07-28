@@ -13,6 +13,16 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
+import {
+  composeProjectAction,
+  recordProjectEditAction,
+  regenerateProjectAction,
+} from "@/app/lib/funnel/actions/compose";
+import type { ProjectView } from "@/app/lib/funnel/compose-core";
+import {
+  CUSTOMER_ASK_AGAIN_PLACEHOLDER,
+  type ComposedProject,
+} from "@/app/lib/funnel/compose-rules";
 import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import {
   BUILT_STEPS,
@@ -78,6 +88,16 @@ export function MiniAppShell({
   const [ownIdea, setOwnIdea] = useState("");
   const [answers, setAnswers] = useState<QuizAnswers>({});
   const [quizNotice, setQuizNotice] = useState<string | null>(null);
+  // ── U10: composition state ──
+  // The VIEW is the server's draft (id + fields + regenerations left); the
+  // DRAFT is the family's working copy of those fields. Refresh loses only
+  // the unsaved working copy — re-entering compose finds the persisted row
+  // (`exists`) and the counter is server-side (R40).
+  const [composeView, setComposeView] = useState<ProjectView | null>(null);
+  const [composeDraft, setComposeDraft] = useState<ComposedProject | null>(null);
+  const [composeNotice, setComposeNotice] = useState<string | null>(null);
+  const [composeDegraded, setComposeDegraded] = useState(false);
+
   // What the current `answers` were seeded FROM. Re-advancing through the
   // templates step with the SAME choice must not re-seed — a child who edited
   // four answers and pressed Back to re-read the pitch keeps every edit (both
@@ -134,6 +154,10 @@ export function MiniAppShell({
           setAnswers({});
           setQuizNotice(null);
           setSeededFrom(null);
+          setComposeView(null);
+          setComposeDraft(null);
+          setComposeNotice(null);
+          setComposeDegraded(false);
         }
         setConfirmedSlug(result.slug);
         // Clear the tap so a later re-entry to the doors shows the SAVED
@@ -147,6 +171,84 @@ export function MiniAppShell({
           ? "Your session expired — start again and we'll pick this up."
           : "That didn't save. Give it a second and tap again."
       );
+    });
+  };
+
+  const buildProject = () => {
+    setComposeNotice(null);
+    startTransition(async () => {
+      const result = await composeProjectAction({
+        childId: child.id,
+        templateId: validTemplateId === OWN_IDEA.id ? null : validTemplateId,
+        answers: {
+          what: answers.what ?? "",
+          who: answers.who ?? "",
+          offer: answers.offer ?? "",
+          ...(answers.spark?.trim() ? { spark: answers.spark } : {}),
+        },
+      });
+      if (result.kind === "composed" || result.kind === "exists") {
+        setComposeView(result.view);
+        setComposeDraft(result.view.project);
+        setComposeDegraded(result.kind === "composed" && result.degraded !== null);
+        return;
+      }
+      if (result.kind === "input_rejected") {
+        // Never "failed": the answer needs another look, that's all.
+        setQuizNotice("A couple of answers need another look — finish them and try again.");
+        go("quiz");
+        return;
+      }
+      setComposeNotice(
+        result.kind === "unauthenticated"
+          ? "Your session expired — start again and we'll pick this up."
+          : result.kind === "project_cap"
+            ? "This builder already has five projects — plenty. Talk to us if one should make room."
+            : "That didn't work. Give it a second and tap again."
+      );
+    });
+  };
+
+  const regenerate = () => {
+    if (!composeView) return;
+    setComposeNotice(null);
+    startTransition(async () => {
+      const result = await regenerateProjectAction({ projectId: composeView.id });
+      if (result.kind === "regenerated") {
+        setComposeView(result.view);
+        setComposeDraft(result.view.project);
+        setComposeDegraded(result.degraded !== null);
+        return;
+      }
+      setComposeNotice(
+        result.kind === "limit"
+          ? "That's both redos used — every word below is still yours to change by hand."
+          : result.kind === "conflict"
+            ? "Another tab got there first — refresh to see the newest version."
+            : "That didn't work. Give it a second and tap again."
+      );
+    });
+  };
+
+  const keepProject = () => {
+    if (!composeView || !composeDraft) return;
+    const changed =
+      JSON.stringify(composeDraft) !== JSON.stringify(composeView.project);
+    startTransition(async () => {
+      if (changed) {
+        // R40: the edit is RECORDED (family_edited), not just displayed.
+        const saved = await recordProjectEditAction({
+          projectId: composeView.id,
+          project: composeDraft,
+        });
+        if (saved.kind !== "saved") {
+          setComposeNotice("Saving your edits didn't work — try again.");
+          return;
+        }
+        setComposeView({ ...composeView, project: saved.project });
+        setComposeDraft(saved.project);
+      }
+      go(stepNeighbour("compose", "next"));
     });
   };
 
@@ -385,6 +487,127 @@ export function MiniAppShell({
         )}
 
         {step === "quiz" && !confirmedSlug && (
+          <section>
+            <p className="text-base leading-7 opacity-80">Pick a door first.</p>
+            <button
+              onClick={() => go("doors")}
+              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
+            >
+              ← To the doors
+            </button>
+          </section>
+        )}
+
+        {step === "compose" && confirmedSlug && !composeView && (
+          <section>
+            <h1 className="font-display text-3xl leading-tight">Time to make it real.</h1>
+            <p className="mt-3 text-base leading-7 opacity-80">
+              Your answers become your project&apos;s first page. Every word of it
+              stays yours to change.
+            </p>
+            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
+            <button
+              onClick={buildProject}
+              disabled={pending}
+              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending ? "Building…" : "Make my page →"}
+            </button>
+          </section>
+        )}
+
+        {step === "compose" && confirmedSlug && composeView && composeDraft && (
+          <section>
+            <h1 className="font-display text-3xl leading-tight">Here&apos;s your first draft.</h1>
+            {composeDegraded && (
+              <p className="mt-2 text-[13px] leading-5 opacity-70">
+                We started you with the classic version — every word below is yours
+                to change.
+              </p>
+            )}
+            <div className="mt-7 flex flex-col gap-4">
+              <label className="flex flex-col gap-1.5">
+                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                  Project name
+                </span>
+                <input
+                  value={composeDraft.name}
+                  onChange={(e) =>
+                    setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
+                  }
+                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[16px] font-semibold outline-none focus:border-current"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                  What it is
+                </span>
+                <textarea
+                  value={composeDraft.description}
+                  onChange={(e) =>
+                    setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
+                  }
+                  rows={4}
+                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                  The offer
+                </span>
+                <textarea
+                  value={composeDraft.offerSketch}
+                  onChange={(e) =>
+                    setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
+                  }
+                  rows={2}
+                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                  First customers
+                </span>
+                <textarea
+                  value={composeDraft.firstCustomerHypothesis ?? ""}
+                  onChange={(e) =>
+                    setComposeDraft({
+                      ...composeDraft,
+                      // R39b's null branch survives the edit box: empty = "we
+                      // don't know yet", stored as null, never a made-up name.
+                      firstCustomerHypothesis:
+                        e.target.value.trim().length === 0
+                          ? null
+                          : e.target.value.slice(0, 600),
+                    })
+                  }
+                  placeholder={CUSTOMER_ASK_AGAIN_PLACEHOLDER}
+                  rows={2}
+                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                />
+              </label>
+            </div>
+            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
+            <div className="mt-7 flex flex-col gap-2.5">
+              <button
+                onClick={keepProject}
+                disabled={pending}
+                className="inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {pending ? "Saving…" : "Keep it →"}
+              </button>
+              <button
+                onClick={regenerate}
+                disabled={pending || composeView.regenerationsLeft === 0}
+                className="inline-flex h-11 w-full items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Try another version ({composeView.regenerationsLeft} left)
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === "compose" && !confirmedSlug && (
           <section>
             <p className="text-base leading-7 opacity-80">Pick a door first.</p>
             <button

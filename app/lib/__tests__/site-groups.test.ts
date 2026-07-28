@@ -74,12 +74,16 @@ describe("the landing-page fields (R5)", () => {
     expect(css).not.toContain("--tp-phase-");
   });
 
-  it("keeps scholars' href at /scholars until U5 moves it", () => {
-    // R5 moves it to /groups/scholars, but only in the change that admits
-    // scholars to generateStaticParams and drops the notFound(). Moving it here
-    // would point a live home-page card (GroupsBand renders g.href directly) at
-    // a 404 for the length of Phase 1.
-    expect(groupBySlug("scholars")?.href).toBe("/scholars");
+  it("scholars' href and the landing route moved TOGETHER (U5's scheduled swap)", () => {
+    // The U1-era pin held this at /scholars until the route could serve it;
+    // U5 is that change. The invariant now: every group's href is a page
+    // generateStaticParams actually emits, so a home card can never point at
+    // a notFound() — the property the original pin existed to protect,
+    // stated directly instead of by freezing one value.
+    expect(groupBySlug("scholars")?.href).toBe("/groups/scholars");
+    for (const g of groups) {
+      expect(g.href, g.slug).toBe(`/groups/${g.slug}`);
+    }
   });
 
   it("gives /first-profit the neutral copy, and no group hint", () => {

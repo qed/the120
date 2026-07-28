@@ -27,6 +27,11 @@ export async function getSeatsRemaining(): Promise<number> {
         },
         body: "{}",
         next: { revalidate: 60 },
+        // The env guard covers "no config"; this covers "config present,
+        // endpoint HANGING" — which fails slow, not fast, and since U5 this
+        // function sits in the build path of six static landings. A stalled
+        // Supabase must cost 4 seconds and fall back, not 60s × 6 pages.
+        signal: AbortSignal.timeout(4000),
       }
     );
     if (!res.ok) throw new Error(`seats_claimed ${res.status}`);

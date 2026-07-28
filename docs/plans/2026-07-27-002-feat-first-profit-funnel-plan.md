@@ -598,7 +598,35 @@ back — which nothing does today.
 
 ---
 
-- [ ] **Unit 5: The landing template, six times**
+- [x] **Unit 5: The landing template, six times** *(landed 2026-07-28, after U6/U7
+  — reordered so `/start` existed before six pages pointed at it)*
+
+  **What landed:** `app/components/landing/LandingPage.tsx` — R20's skeleton
+  once (floating nav card, full-bleed hero with the seats lightbox, proof
+  strip, the R21 network paragraph as ONE exported constant asserted by
+  identity, red CTA band, footer). `/groups/[slug]` rebuilt on it with
+  **scholars admitted to `generateStaticParams` in the same change that moved
+  its href** — the U1-deferred swap, executed in its scheduled order; the
+  U1-era pin test expired on cue and now states the invariant directly (every
+  card href is a generated page). `/first-profit` created: `src=fp-generic`,
+  no `?g=`, and **nothing internal links to it** (scanned, stem-anchored, with
+  config files included). All six built **static** (SSG + 60s seats ISR).
+  Decision 4 enforced by shape and by scan: the landings emit `?g=`/`?src=`
+  and read nothing. Zero seats renders the waitlist state via `seatsDisplay`
+  (moved to site.ts with re-exports, so six static pages don't drag the
+  2026-27 content file in for one string).
+
+  **Review (2 agents) fixed:** the seats fetch had an env guard but NO timeout
+  — a hanging (not down) Supabase at build time would stall six static pages
+  for the full page timeout each; now `AbortSignal.timeout(4000)` into the
+  fallback. Dead `Group.kicker`/`accent` removed (their only consumer was the
+  brochure page R26 retired). Stale U1-era comments corrected. Test-robustness:
+  the `/first-profit` scan is stem-anchored with a lookahead (catches
+  `?ref=`/trailing-slash forms, skips the hero asset path) and covers config
+  files; the scholars-notFound scan is dot-all. The unrendered `hero` prop is
+  documented honestly: the slot ships blue, and the art drop must land with
+  its `<Image>` wiring in the same change. Suite **121 files / 3200 tests**;
+  build clean, all six static; lint clean.
 
 **Goal:** Six statically-generated landing pages that carry a group into the funnel without
 becoming dynamic.

@@ -3,13 +3,19 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import type { FwBoardColumnPhase, FwBoardShell } from "@/app/fp/lib/fw-board-loader";
-import type {
-  FwBoardCellState,
-  FwBoardGridRow,
-  FwBoardModel,
-  FwBoardRollups,
-  FwFirstDollarCelebration,
-  FwTickerLine,
+import {
+  FW_BOARD_CONNECTION_INITIAL,
+  FW_BOARD_DEAD_LINK_MESSAGE,
+  fwBoardConnectionState,
+  type FwBoardCellState,
+  type FwBoardConnectionPhase,
+  type FwBoardConnectionState,
+  type FwBoardGridRow,
+  type FwBoardModel,
+  type FwBoardPollOutcome,
+  type FwBoardRollups,
+  type FwFirstDollarCelebration,
+  type FwTickerLine,
 } from "@/app/fp/lib/fw-board-rules";
 
 /**
@@ -27,8 +33,13 @@ import type {
  *
  * ── Honest when stale, never blank (Decision 5 / the plan's non-negotiable)
  *
- * A failed or aged poll flips a STALE indicator and KEEPS the last frame — a room
- * full of families must never see a blank board over a wifi blip. A First Dollar
+ * A failed or aged poll degrades the connection pill and KEEPS the last frame — a
+ * room full of families must never see a blank board over a wifi blip. What the
+ * pill (and the dead-link panel) SAY is decided by the pure connection machine
+ * (`fwBoardConnectionState` in fw-board-rules.ts): this component reports each
+ * poll's facts as an outcome and renders the machine's answer, so the header and
+ * the panel can never disagree. `dead_link` is terminal — the interval stops and
+ * the locked recovery copy takes the screen. A First Dollar
  * BELL rings only for a celebration key the read model NEWLY surfaces (fresh, per
  * Decision 5); the FIRST poll adopts every already-standing key as "already rung"
  * so a projector powering on mid-morning does not fire a salvo of bells for the
@@ -36,9 +47,6 @@ import type {
  */
 
 const POLL_MS = 4000;
-/** A poll older than this with no success flips the stale indicator even absent an
- *  outright failure — a throttled background tab stops polling silently. */
-const STALE_AFTER_MS = 12000;
 /** Abort a single poll fetch after this long. Venue wifi can go half-open
  *  (packets black-holed, never resolving or rejecting), and `fetch` has no default
  *  timeout — without an AbortController a poll could hang for the life of the
@@ -78,8 +86,10 @@ function isRenderableModel(m: unknown): m is FwBoardModel {
 
 export default function FwBoard({ token, shell }: { token: string; shell: FwBoardShell }) {
   const [feed, setFeed] = useState<FeedModel | null>(null);
-  // Stale until the first poll lands — the board carries no server data.
-  const [stale, setStale] = useState<boolean>(true);
+  // The connection machine's state — every disposition (live / catching up /
+  // connecting / dead link) is decided by the pure reducer in fw-board-rules.ts;
+  // this component only stores the state and feeds outcomes back.
+  const [connection, setConnection] = useState<FwBoardConnectionState>(FW_BOARD_CONNECTION_INITIAL);
   // Columns seed from the server shell (instant first paint) but are RESYNCED from
   // each feed frame: a board opened before check-in has an empty shell skeleton,
   // and this is what lets its grid fill once the first member is checked in rather
@@ -87,6 +97,11 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
   const [columns, setColumns] = useState<FwBoardColumnPhase[]>(shell.columns);
 
   const lastOkRef = useRef<number>(0);
+  // Ref mirrors of the machine state and the frame's presence, so the poll
+  // closure (whose effect deps deliberately exclude render state) always reads
+  // the current values.
+  const connectionRef = useRef<FwBoardConnectionState>(FW_BOARD_CONNECTION_INITIAL);
+  const hasFrameRef = useRef<boolean>(false);
   // One poll in flight at a time: skips a tick while a poll is pending, so slow
   // polls cannot stack against the browser's per-origin connection cap AND a
   // slow-then-fast pair cannot deliver responses out of order and regress the
@@ -100,6 +115,14 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
   const queueRef = useRef<FwFirstDollarCelebration[]>([]);
   const activeRef = useRef<FwFirstDollarCelebration | null>(null);
   const [active, setActive] = useState<FwFirstDollarCelebration | null>(null);
+
+  // Feed one poll outcome to the reducer. No decisions here — the reducer owns
+  // them all, including dead-link stickiness and the consecutive-404 memory.
+  const dispatchOutcome = useCallback((outcome: FwBoardPollOutcome) => {
+    const next = fwBoardConnectionState({ prev: connectionRef.current, outcome });
+    connectionRef.current = next;
+    setConnection(next);
+  }, []);
 
   const pump = useCallback(() => {
     if (activeRef.current || queueRef.current.length === 0) return;
@@ -123,7 +146,13 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
     let cancelled = false;
     const feedUrl = `/fp/fw/board/${encodeURIComponent(token)}/feed`;
 
+    /** ms since the last good frame — Infinity until one has ever landed. */
+    const lastOkAgeMs = () =>
+      lastOkRef.current === 0 ? Number.POSITIVE_INFINITY : Date.now() - lastOkRef.current;
+
     async function poll() {
+      // Terminal: the machine declared the link dead — nothing left to ask.
+      if (connectionRef.current.phase === "dead_link") return;
       if (pollInFlightRef.current) return;
       pollInFlightRef.current = true;
       const controller = new AbortController();
@@ -136,14 +165,29 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
           // ONLY incident-response control for a leaked projector URL, so it must
           // actually REMOVE the children's names an open tab is showing, not merely
           // mark them stale. Clear the frame (security review). Distinct from a 503.
+          // Whether this 404 is TERMINAL is the reducer's call (two in a row), not
+          // ours — but the frame comes off on the very first one.
           setFeed(null);
-          setStale(true);
+          hasFrameRef.current = false;
+          dispatchOutcome({
+            httpStatus: 404,
+            fetchThrew: false,
+            frameLanded: false,
+            hasFrame: false,
+            lastOkAgeMs: lastOkAgeMs(),
+          });
           return;
         }
         if (!res.ok) {
           // A 503 (good token, transient read failure) or other transient error:
-          // keep the last frame and show stale — never blank over a wifi blip.
-          setStale(true);
+          // keep the last frame — never blank over a wifi blip.
+          dispatchOutcome({
+            httpStatus: res.status,
+            fetchThrew: false,
+            frameLanded: false,
+            hasFrame: hasFrameRef.current,
+            lastOkAgeMs: lastOkAgeMs(),
+          });
           return;
         }
         const json = (await res.json()) as {
@@ -154,21 +198,34 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
         };
         if (cancelled) return;
         if (json.ok !== true || typeof json.cohortSlug !== "string" || !isRenderableModel(json.model)) {
-          // Malformed / partial payload — degrade to stale, keep the last good
+          // Malformed / partial payload — degrade honestly, keep the last good
           // frame, never throw in the render (TypeScript review).
-          setStale(true);
+          dispatchOutcome({
+            httpStatus: res.status,
+            fetchThrew: false,
+            frameLanded: false,
+            hasFrame: hasFrameRef.current,
+            lastOkAgeMs: lastOkAgeMs(),
+          });
           return;
         }
         const model = json.model;
         setFeed({ cohortSlug: json.cohortSlug, model });
+        hasFrameRef.current = true;
         // Resync the grid skeleton from this frame. Only when NON-EMPTY, so a
         // transient program-resolution blip (empty columns) never wipes a good
         // layout the room is watching.
         if (Array.isArray(json.columns) && json.columns.length > 0) {
           setColumns(json.columns as FwBoardColumnPhase[]);
         }
-        setStale(false);
         lastOkRef.current = Date.now();
+        dispatchOutcome({
+          httpStatus: res.status,
+          fetchThrew: false,
+          frameLanded: true,
+          hasFrame: true,
+          lastOkAgeMs: 0,
+        });
         if (!seededRef.current) {
           // Baseline frame: adopt everything standing as already-rung, ring none.
           for (const c of model.celebrations) rungKeysRef.current.add(c.key);
@@ -185,8 +242,17 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
         }
       } catch {
         // A thrown fetch OR the AbortController firing at POLL_TIMEOUT_MS both land
-        // here: no answer arrived. Keep the last frame, flip stale.
-        if (!cancelled) setStale(true);
+        // here: no answer arrived. Keep the last frame; the reducer knows a throw
+        // is never terminal (a refusal we could not hear is not a refusal).
+        if (!cancelled) {
+          dispatchOutcome({
+            httpStatus: null,
+            fetchThrew: true,
+            frameLanded: false,
+            hasFrame: hasFrameRef.current,
+            lastOkAgeMs: lastOkAgeMs(),
+          });
+        }
       } finally {
         clearTimeout(abortTimer);
         pollInFlightRef.current = false;
@@ -194,10 +260,23 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
     }
 
     const id = setInterval(() => {
+      // Terminal: stop asking. The reducer's stickiness guarantees no later
+      // outcome can revive the tab, so the interval itself winds down.
+      if (connectionRef.current.phase === "dead_link") {
+        clearInterval(id);
+        return;
+      }
       poll();
-      // Even without a failed fetch, an aged last-success means the board is not
-      // live (a throttled tab, a suspended machine) — say so rather than lie.
-      if (Date.now() - lastOkRef.current > STALE_AFTER_MS) setStale(true);
+      // A bare tick: even without a failed fetch, an aged last-success means the
+      // board is not live (a throttled tab, a suspended machine) — the reducer
+      // decides when to say so rather than lie.
+      dispatchOutcome({
+        httpStatus: null,
+        fetchThrew: false,
+        frameLanded: false,
+        hasFrame: hasFrameRef.current,
+        lastOkAgeMs: lastOkAgeMs(),
+      });
     }, POLL_MS);
     // Immediate first poll so the shell hydrates in well under a second.
     poll();
@@ -206,16 +285,18 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
       cancelled = true;
       clearInterval(id);
     };
-  }, [token, pump]);
+  }, [token, pump, dispatchOutcome]);
 
   const model = feed?.model ?? null;
   const title = feed?.cohortSlug ?? shell.cohortSlug ?? "";
 
   return (
     <main className="min-h-screen bg-hq-canvas px-8 py-6 text-hq-ink">
-      <BoardHeader title={title} stale={stale} hasData={model !== null} />
+      <BoardHeader title={title} phase={connection.phase} />
 
-      {model === null ? (
+      {connection.phase === "dead_link" ? (
+        <DeadLinkPanel />
+      ) : model === null ? (
         <div className="mt-24 text-center font-path-body text-2xl text-hq-ink-soft">
           Catching up with the room…
         </div>
@@ -230,14 +311,37 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
         </>
       )}
 
-      {active && <CelebrationOverlay celebration={active} />}
+      {active && connection.phase !== "dead_link" && <CelebrationOverlay celebration={active} />}
     </main>
   );
 }
 
 /* ── header ─────────────────────────────────────────────────────────────── */
 
-function BoardHeader({ title, stale, hasData }: { title: string; stale: boolean; hasData: boolean }) {
+/** Pure lookups from the connection machine's phase — no inline disposition
+ *  logic here, so the pill can never say something the panel contradicts. */
+const PHASE_LABEL: Record<FwBoardConnectionPhase, string> = {
+  live: "live",
+  catching_up: "catching up",
+  connecting: "connecting",
+  dead_link: "link inactive",
+};
+
+const PHASE_DOT_CLASS: Record<FwBoardConnectionPhase, string> = {
+  live: "inline-block h-3 w-3 rounded-full bg-verified",
+  catching_up: "inline-block h-3 w-3 rounded-full bg-not-yet",
+  connecting: "inline-block h-3 w-3 rounded-full bg-not-yet",
+  dead_link: "inline-block h-3 w-3 rounded-full bg-hq-sunken",
+};
+
+const PHASE_TEXT_CLASS: Record<FwBoardConnectionPhase, string> = {
+  live: "text-hq-ink-soft",
+  catching_up: "text-hq-ink-muted",
+  connecting: "text-hq-ink-muted",
+  dead_link: "text-hq-ink-muted",
+};
+
+function BoardHeader({ title, phase }: { title: string; phase: FwBoardConnectionPhase }) {
   return (
     <header className="flex items-baseline justify-between border-b border-hq-border pb-4">
       <div>
@@ -249,19 +353,27 @@ function BoardHeader({ title, stale, hasData }: { title: string; stale: boolean;
         </h1>
       </div>
       <div className="flex items-center gap-2 font-path-mono text-sm">
-        <span
-          aria-hidden
-          className={
-            stale
-              ? "inline-block h-3 w-3 rounded-full bg-not-yet"
-              : "inline-block h-3 w-3 rounded-full bg-verified"
-          }
-        />
-        <span className={stale ? "text-hq-ink-muted" : "text-hq-ink-soft"}>
-          {stale ? (hasData ? "catching up" : "connecting") : "live"}
-        </span>
+        <span aria-hidden className={PHASE_DOT_CLASS[phase]} />
+        <span className={PHASE_TEXT_CLASS[phase]}>{PHASE_LABEL[phase]}</span>
       </div>
     </header>
+  );
+}
+
+/* ── dead-link panel ────────────────────────────────────────────────────── */
+
+/** The terminal panel. The copy is the locked constant from fw-board-rules.ts —
+ *  one generic message for revoked / expired / never-existed alike, naming the
+ *  one recovery an operator can perform (staff mint a fresh link; this tab is
+ *  done). Replaces the interim "catching up" message the moment the machine
+ *  declares the link dead. */
+function DeadLinkPanel() {
+  return (
+    <div role="status" className="mt-24 text-center">
+      <p className="font-path-display text-4xl font-semibold text-hq-ink">
+        {FW_BOARD_DEAD_LINK_MESSAGE}
+      </p>
+    </div>
   );
 }
 

@@ -537,6 +537,73 @@ export function deleteFwCohortFailureCopy(
   }
 }
 
+/**
+ * The window-edit refusals that are NOT window-rules refusals (ops redesign
+ * Unit 4). The six `fwCohortWindowFromLocal` reasons keep their existing
+ * field-naming sentences (the create form's `windowFailureMessage`, reused by
+ * the edit action) — this switch owns only the members the EDIT adds. Same
+ * enumeration collapse, same never-return as its siblings above.
+ */
+export function updateFwCohortWindowFailureCopy(
+  reason: "cohort_not_found" | "cohort_not_fw" | "cohort_archived" | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before editing its window. Nothing was changed.";
+    case "unavailable":
+      return "Couldn't save the new window just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * The re-mint refusals (ops redesign Unit 4) — its OWN switch, not the mint's:
+ * the same reason can need DIFFERENT copy here, because the staffer just
+ * corrected the window and the sentence must speak to that act. Every refusal
+ * truthfully states the old link's fate: the verdict-first sequence revokes
+ * nothing on any refusal, so "the current link still works" is a fact, and
+ * saying it is what keeps a refused re-mint from reading as a dead projector.
+ */
+export function remintFwBoardTokenFailureCopy(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "cohort_archived"
+    | "no_event_window"
+    | "window_passed"
+    | "stale_view"
+    | "no_active_token"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before re-minting the board. The current link was not touched.";
+    case "no_event_window":
+      return "This weekend has no end date, so there's no expiry to issue a board link for. The current link was not touched.";
+    case "window_passed":
+      return "The corrected window is already over — the board can't be re-minted for it. The current link keeps working until its own expiry.";
+    case "stale_view":
+      return "This page is out of date — a different board link is live now. Nothing was revoked; reload, then re-mint.";
+    case "no_active_token":
+      return "There's no live board link to replace any more. Reload, then mint a fresh one from the board panel.";
+    case "unavailable":
+      return "Couldn't re-mint just now — the current link was not touched. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
 /** The unarchive twin. Same collapse, same never-return. */
 export function unarchiveFwCohortFailureCopy(
   reason: "cohort_not_found" | "cohort_not_fw" | "already_active" | "unavailable"

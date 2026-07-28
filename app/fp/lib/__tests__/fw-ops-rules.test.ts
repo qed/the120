@@ -15,7 +15,9 @@ import {
   normalizeFwCohortSlug,
   archiveFwCohortFailureCopy,
   deleteFwCohortFailureCopy,
+  remintFwBoardTokenFailureCopy,
   unarchiveFwCohortFailureCopy,
+  updateFwCohortWindowFailureCopy,
   fwArchivedBanner,
   fwArchiveConfirmMatches,
   fwSlugTakenCopy,
@@ -517,6 +519,63 @@ describe("delete failure copy (redesign Unit 3) — its OWN switch, exhaustively
     const copy = deleteFwCohortFailureCopy("unavailable");
     expect(copy).toMatch(/nothing was changed/i);
     expect(copy).toMatch(/try again/i);
+  });
+});
+
+describe("window-edit failure copy (redesign Unit 4)", () => {
+  it("collapses the id-probing reasons to the staff-only sentence, like its siblings", () => {
+    expect(updateFwCohortWindowFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(updateFwCohortWindowFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("cohort_archived points at restore and claims nothing changed", () => {
+    const copy = updateFwCohortWindowFailureCopy("cohort_archived");
+    expect(copy).toMatch(/archived/i);
+    expect(copy).toMatch(/restore/i);
+    expect(copy).toMatch(/nothing was changed/i);
+  });
+
+  it("unavailable claims nothing was changed and names the retry", () => {
+    const copy = updateFwCohortWindowFailureCopy("unavailable");
+    expect(copy).toMatch(/nothing was changed/i);
+    expect(copy).toMatch(/try again/i);
+  });
+});
+
+describe("re-mint failure copy (redesign Unit 4) — every refusal states the old link's fate", () => {
+  it("collapses the id-probing reasons to the staff-only sentence", () => {
+    expect(remintFwBoardTokenFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(remintFwBoardTokenFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("window_passed says the corrected window is over and the current link survives", () => {
+    // The verdict-first sequence's user-facing half: a refusal revokes nothing,
+    // and the copy says so — otherwise a refused re-mint reads as a dead board.
+    const copy = remintFwBoardTokenFailureCopy("window_passed");
+    expect(copy).toMatch(/corrected window is already over/i);
+    expect(copy).toMatch(/can't be re-minted/i);
+    expect(copy).toMatch(/current link keeps working/i);
+  });
+
+  it("stale_view says nothing was revoked and names the reload", () => {
+    const copy = remintFwBoardTokenFailureCopy("stale_view");
+    expect(copy).toMatch(/out of date/i);
+    expect(copy).toMatch(/nothing was revoked/i);
+    expect(copy).toMatch(/reload/i);
+  });
+
+  it("no_active_token sends staff to the board panel for a fresh mint", () => {
+    const copy = remintFwBoardTokenFailureCopy("no_active_token");
+    expect(copy).toMatch(/no live board link/i);
+    expect(copy).toMatch(/board panel/i);
+  });
+
+  it("cohort_archived, no_event_window, and unavailable each claim the current link untouched", () => {
+    for (const reason of ["cohort_archived", "no_event_window", "unavailable"] as const) {
+      expect(remintFwBoardTokenFailureCopy(reason)).toMatch(/not touched/i);
+    }
+    expect(remintFwBoardTokenFailureCopy("cohort_archived")).toMatch(/restore/i);
+    expect(remintFwBoardTokenFailureCopy("unavailable")).toMatch(/try again/i);
   });
 });
 

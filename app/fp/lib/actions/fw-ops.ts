@@ -40,8 +40,10 @@ import {
   linkFwStudentToCohort,
   loadFwMatchResolution,
   mintFwBoardToken,
+  remintFwBoardTokenForWindow,
   resolveFwReplayReject,
   unarchiveFwCohort,
+  updateFwCohortWindow,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   type AnonymizeStudentActionResult,
@@ -50,7 +52,9 @@ import {
   type LinkStudentActionResult,
   type MatchLookupActionResult,
   type MintBoardTokenActionResult,
+  type RemintBoardTokenForWindowActionResult,
   type ResolveReplayRejectActionResult,
+  type UpdateCohortWindowActionResult,
   type RevokeBoardTokenActionResult,
   type RevokeGuideGrantActionResult,
 } from "@/app/fp/lib/fw-ops-core";
@@ -60,7 +64,9 @@ import {
   fwCohortWindowFromLocal,
   fwSlugTakenCopy,
   normalizeFwCohortSlug,
+  remintFwBoardTokenFailureCopy,
   unarchiveFwCohortFailureCopy,
+  updateFwCohortWindowFailureCopy,
 } from "@/app/fp/lib/fw-ops-rules";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
@@ -247,6 +253,131 @@ function windowFailureMessage(
     case "window_not_ordered":
       return "The weekend has to end after it starts.";
   }
+}
+
+/* ═══════════════════════════════════ redesign Unit 4 — window edit + re-mint ══ */
+
+const updateWindowSchema = z.object({
+  cohortId: z.uuid(),
+  startDate: z.string().min(1).max(20),
+  startTime: z.string().min(1).max(10),
+  endDate: z.string().min(1).max(20),
+  endTime: z.string().min(1).max(10),
+  timeZone: z.string().min(1).max(60),
+});
+
+/**
+ * Correct a weekend's start/end/timezone (R14). Gated per-cohort
+ * (`requireCohortStaff`) like every mutation on the cohort page — not the
+ * cohort-free create gate, because here there IS a cohort to resolve against.
+ *
+ * The conversion, the archived gate, and the always-both-bounds write all live
+ * in `updateFwCohortWindow`; this layer is gate → zod → core → copy. The live
+ * board token is deliberately untouched (stored-expiry truth) — re-minting is
+ * `remintBoardTokenForWindowAction`, a separate explicit act.
+ */
+export async function updateCohortWindowAction(
+  input: unknown
+): Promise<UpdateCohortWindowActionResult> {
+  const parsed = updateWindowSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Fill in every field." };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const updated = await updateFwCohortWindow(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    startDate: parsed.data.startDate,
+    startTime: parsed.data.startTime,
+    endDate: parsed.data.endDate,
+    endTime: parsed.data.endTime,
+    timeZone: parsed.data.timeZone,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!updated.ok) {
+    return { success: false, error: updateWindowFailureMessage(updated.reason) };
+  }
+
+  // The ops LIST renders every weekend's window, and the cohort page renders
+  // this one's. NOT /fp/fw: the picker's cohort SET did not change (the
+  // revalidate-tier canon in this file's header).
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  return { success: true, startsAt: updated.startsAt, endsAt: updated.endsAt };
+}
+
+/** The edit's full refusal union is the six window-rules reasons plus the
+ *  edit-specific members — composed from the two existing switches so each
+ *  sentence has exactly one home, and still default-less end to end. */
+function updateWindowFailureMessage(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "cohort_archived"
+    | "invalid_time_zone"
+    | "invalid_start"
+    | "invalid_end"
+    | "nonexistent_start"
+    | "nonexistent_end"
+    | "window_not_ordered"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "invalid_time_zone":
+    case "invalid_start":
+    case "invalid_end":
+    case "nonexistent_start":
+    case "nonexistent_end":
+    case "window_not_ordered":
+      return windowFailureMessage(reason);
+    case "cohort_not_found":
+    case "cohort_not_fw":
+    case "cohort_archived":
+    case "unavailable":
+      return updateFwCohortWindowFailureCopy(reason);
+  }
+}
+
+/** Re-mint NAMES the live token it means to replace — the CAS the core
+ *  threads through the mint sequence. */
+const remintForWindowSchema = z.object({
+  cohortId: z.uuid(),
+  expectedTokenId: z.uuid(),
+});
+
+/**
+ * Revoke + re-mint the board for the corrected window (R14a) — verdict-first:
+ * a corrected window the mint verdict refuses (already over, archived) leaves
+ * the old token live and nothing revoked. The raw token in the success result
+ * has the same shown-once contract as `mintBoardTokenAction`'s.
+ */
+export async function remintBoardTokenForWindowAction(
+  input: unknown
+): Promise<RemintBoardTokenForWindowActionResult> {
+  const parsed = remintForWindowSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const minted = await remintFwBoardTokenForWindow(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    expectedTokenId: parsed.data.expectedTokenId,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!minted.ok) {
+    return { success: false, error: remintFwBoardTokenFailureCopy(minted.reason) };
+  }
+
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  return {
+    success: true,
+    token: minted.token,
+    expiresAt: minted.expiresAt,
+    revokedPrior: minted.revokedPrior,
+  };
 }
 
 /* ═════════════════════════════════════════════════════════════ board tokens ══ */
@@ -450,6 +581,8 @@ function mintFailureMessage(
     | "cohort_archived"
     | "no_event_window"
     | "window_passed"
+    | "stale_view"
+    | "no_active_token"
     | "unavailable"
 ): string {
   switch (reason) {
@@ -463,6 +596,12 @@ function mintFailureMessage(
       return "This weekend has no end date yet — the board's expiry comes from it.";
     case "window_passed":
       return "This weekend has already finished, so a new board link would be dead on arrival.";
+    case "stale_view":
+    case "no_active_token":
+      // Reachable only through the expectedTokenId CAS, which this plain-mint
+      // action never sends — typed here because the result union carries them,
+      // and the re-mint sentences are the truthful ones if they ever surface.
+      return remintFwBoardTokenFailureCopy(reason);
     case "unavailable":
       return GENERIC_ERROR;
   }

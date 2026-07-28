@@ -17,13 +17,19 @@ import {
   loadFwOpsCohort,
   mintFwBoardToken,
   recordFwOpsAudit,
+  remintFwBoardTokenForWindow,
   resolveFwReplayReject,
   listFwActiveWeekends,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   unarchiveFwCohort,
+  updateFwCohortWindow,
 } from "../fw-ops-core";
-import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
+import {
+  FW_TOMBSTONE_FIRST_NAME,
+  FW_TOMBSTONE_LAST_NAME,
+  fwEventLocalParts,
+} from "../fw-ops-rules";
 import { buildFwTombstoneEmail } from "../fw-provision-rules";
 
 /**
@@ -183,10 +189,15 @@ function makeFakeDb(seed: Seed) {
       if (!hit || hit.applyAnyway) return null;
       return { message: hit.message, code: hit.code };
     };
-    /** Checked AFTER the operation has mutated the tables. */
+    /** Checked AFTER the operation has mutated the tables. Respects `onCall`
+     *  (via the count `failureFor` already stamped for this call), so a retry
+     *  after a landed-but-reported-failed write can succeed — redesign Unit 4's
+     *  idempotent-retry scenarios need call 2 to answer honestly. */
     const failingAfter = (op: "select" | "insert" | "update" | "delete") => {
       const hit = failures.find((f) => f.table === table && f.op === op && f.applyAnyway);
-      return hit ? { message: hit.message, code: hit.code } : null;
+      if (!hit) return null;
+      if (hit.onCall && failCounts[`${table}:${op}`] !== hit.onCall) return null;
+      return { message: hit.message, code: hit.code };
     };
 
     const rows = () => {
@@ -3197,5 +3208,418 @@ describe("listFwOpsCohorts — the per-row untouched flag (the Delete affordance
     const listed = await listFwOpsCohorts(db, { now: NOW });
     if (!listed.ok) throw new Error("unreachable");
     expect(listed.cohorts.find((c) => c.id === BOSTON)!.untouched).toBe(false);
+  });
+});
+
+/* ═══════════════════════════════ redesign Unit 4 — window edit + re-mint ══ */
+
+/** The Chicago weekend stuck on Pacific time — the plan's motivating case.
+ *  Same wall-clock weekend as Boston's fixture, wrong zone stored. */
+const CHICAGO = "cohort-chicago";
+const chicagoMiszoned = () => ({
+  cohorts: [
+    {
+      id: CHICAGO,
+      slug: "chicago-2026-08",
+      kind: "fw",
+      // What a Pacific mis-entry stored for a 21–23 Aug 09:00–17:00 weekend.
+      starts_at: "2026-08-21T16:00:00.000Z",
+      ends_at: "2026-08-24T00:00:00.000Z",
+      time_zone: "America/Los_Angeles",
+      created_at: "2026-07-01T00:00:00Z",
+    },
+  ],
+});
+/** The same wall clocks read in America/Chicago (CDT, UTC-5). */
+const CHICAGO_START = "2026-08-21T14:00:00.000Z";
+const CHICAGO_END = "2026-08-23T22:00:00.000Z";
+const CHICAGO_TOKEN_EXPIRY = "2026-08-24T04:00:00.000Z";
+const CHICAGO_EDIT = {
+  startDate: "2026-08-21",
+  startTime: "09:00",
+  endDate: "2026-08-23",
+  endTime: "17:00",
+  timeZone: "America/Chicago",
+};
+
+/** Wrap a fake db so every `path_cohorts` UPDATE payload is recorded — the
+ *  partial-update-impossibility pin needs to see the statement, not just the
+ *  row it produced. */
+function recordCohortUpdates(db: ReturnType<typeof makeFakeDb>["db"]) {
+  const payloads: Row[] = [];
+  const spied = {
+    ...db,
+    from(table: string) {
+      const builder = (db as unknown as { from(t: string): Record<string, unknown> }).from(table);
+      if (table === "path_cohorts") {
+        const original = (builder.update as (p: Row) => unknown).bind(builder);
+        builder.update = (patch: Row) => {
+          payloads.push(patch);
+          return original(patch);
+        };
+      }
+      return builder;
+    },
+  } as unknown as typeof db;
+  return { spied, payloads };
+}
+
+describe("updateFwCohortWindow", () => {
+  it("Chicago Pacific→Central: rewrites the window, the zone, and stamps who/when", async () => {
+    const { db, tables } = makeFakeDb(chicagoMiszoned());
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res).toEqual({ ok: true, startsAt: CHICAGO_START, endsAt: CHICAGO_END });
+
+    const row = tables.path_cohorts.find((c) => c.id === CHICAGO)!;
+    expect(row).toMatchObject({
+      starts_at: CHICAGO_START,
+      ends_at: CHICAGO_END,
+      time_zone: "America/Chicago",
+      window_edited_by: STAFF,
+      window_edited_at: new Date(NOW).toISOString(),
+    });
+  });
+
+  it("fwEventLocalParts round-trips the stored instants back to what staff typed", async () => {
+    const { db, tables } = makeFakeDb(chicagoMiszoned());
+    await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    const row = tables.path_cohorts.find((c) => c.id === CHICAGO)!;
+    expect(fwEventLocalParts(row.starts_at as string, row.time_zone)).toEqual({
+      date: CHICAGO_EDIT.startDate,
+      time: CHICAGO_EDIT.startTime,
+    });
+    expect(fwEventLocalParts(row.ends_at as string, row.time_zone)).toEqual({
+      date: CHICAGO_EDIT.endDate,
+      time: CHICAGO_EDIT.endTime,
+    });
+  });
+
+  it("the update payload ALWAYS carries both starts_at and ends_at — the pair, structurally", async () => {
+    // `path_cohorts_window_ordered` evaluates the whole post-update row, so a
+    // single-bound payload can 23514 a valid window. Pinned on the STATEMENT:
+    // every path_cohorts update this core issues names both instants.
+    const { db } = makeFakeDb(chicagoMiszoned());
+    const { spied, payloads } = recordCohortUpdates(db);
+    const res = await updateFwCohortWindow(spied, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res.ok).toBe(true);
+    expect(payloads.length).toBeGreaterThan(0);
+    for (const payload of payloads) {
+      expect(Object.keys(payload)).toEqual(
+        expect.arrayContaining(["starts_at", "ends_at", "time_zone", "window_edited_at", "window_edited_by"])
+      );
+    }
+  });
+
+  it("passes the window-rules refusals through: end before start", async () => {
+    const { db, tables } = makeFakeDb(chicagoMiszoned());
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      endDate: "2026-08-20",
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res).toEqual({ ok: false, reason: "window_not_ordered" });
+    // Nothing written — the mis-zoned row survives untouched.
+    expect(tables.path_cohorts.find((c) => c.id === CHICAGO)).toMatchObject({
+      starts_at: "2026-08-21T16:00:00.000Z",
+      time_zone: "America/Los_Angeles",
+    });
+    expect(tables.path_cohorts.find((c) => c.id === CHICAGO)!.window_edited_by).toBeUndefined();
+  });
+
+  it("passes the DST-gap refusal through: a spring-forward start does not exist", async () => {
+    const { db } = makeFakeDb(chicagoMiszoned());
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      startDate: "2026-03-08",
+      startTime: "02:30",
+      endDate: "2026-03-09",
+      endTime: "17:00",
+      timeZone: "America/Chicago",
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res).toEqual({ ok: false, reason: "nonexistent_start" });
+  });
+
+  it("refuses a zone outside the allowlist", async () => {
+    const { db } = makeFakeDb(chicagoMiszoned());
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      timeZone: "America/Denver",
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res).toEqual({ ok: false, reason: "invalid_time_zone" });
+  });
+
+  it("an ARCHIVED weekend refuses cohort_archived and writes nothing — edit after restore", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: [
+        {
+          ...chicagoMiszoned().cohorts[0],
+          archived_at: "2026-08-01T00:00:00Z",
+          archived_by: STAFF,
+        },
+      ],
+    });
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res).toEqual({ ok: false, reason: "cohort_archived" });
+    expect(tables.path_cohorts.find((c) => c.id === CHICAGO)).toMatchObject({
+      time_zone: "America/Los_Angeles",
+    });
+  });
+
+  it("an edit landing the window in the PAST is allowed — the re-mint is what refuses", async () => {
+    const { db, tables } = makeFakeDb(chicagoMiszoned());
+    const res = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      startDate: "2026-08-01",
+      startTime: "09:00",
+      endDate: "2026-08-02",
+      endTime: "17:00",
+      timeZone: "America/Chicago",
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(res.ok).toBe(true);
+    expect(tables.path_cohorts.find((c) => c.id === CHICAGO)!.ends_at).toBe(
+      "2026-08-02T22:00:00.000Z"
+    );
+  });
+
+  it("a kind='path' cohort and a missing id refuse, by the core", async () => {
+    const { db } = makeFakeDb({});
+    expect(
+      await updateFwCohortWindow(db, {
+        cohortId: PATH_COHORT,
+        ...CHICAGO_EDIT,
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "cohort_not_fw" });
+    expect(
+      await updateFwCohortWindow(db, {
+        cohortId: "nope",
+        ...CHICAGO_EDIT,
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "cohort_not_found" });
+  });
+
+  it("a genuine write failure is unavailable", async () => {
+    const { db } = makeFakeDb({
+      ...chicagoMiszoned(),
+      failTable: { table: "path_cohorts", op: "update", message: "down" },
+    });
+    expect(
+      await updateFwCohortWindow(db, {
+        cohortId: CHICAGO,
+        ...CHICAGO_EDIT,
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("a landed-but-reported-failed update reports unavailable, and the RETRY is idempotent", async () => {
+    // fwWrite's documented case: the patch committed, the response was lost.
+    // No post-write verify here (the archive posture): the retry re-applies
+    // identical values, so honesty costs nothing and the second call succeeds.
+    const { db, tables } = makeFakeDb({
+      ...chicagoMiszoned(),
+      failTable: { table: "path_cohorts", op: "update", message: "lost", applyAnyway: true, onCall: 1 },
+    });
+    const first = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(first).toEqual({ ok: false, reason: "unavailable" });
+    // The patch DID land.
+    expect(tables.path_cohorts.find((c) => c.id === CHICAGO)!.time_zone).toBe("America/Chicago");
+    const retry = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(retry).toEqual({ ok: true, startsAt: CHICAGO_START, endsAt: CHICAGO_END });
+  });
+});
+
+describe("remintFwBoardTokenForWindow — verdict first, CAS second, mint third", () => {
+  const liveToken = () => ({
+    id: "tok-live",
+    cohort_id: CHICAGO,
+    token_hash: "old-hash",
+    expires_at: "2026-08-24T06:00:00.000Z",
+    revoked_at: null,
+    created_at: "2026-08-20T10:00:00Z",
+  });
+
+  it("a corrected-to-past window refuses window_passed with ZERO token writes — the old link stays live", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: [{ ...chicagoMiszoned().cohorts[0], ends_at: "2026-08-02T22:00:00.000Z" }],
+      tokens: [liveToken()],
+      // Fault injection as the tripwire: if the sequence touched the token
+      // table at all, the injected failures would flip the reason away from
+      // window_passed. It must never get that far.
+      failTables: [
+        { table: "path_fw_board_tokens", op: "update", message: "must not be reached" },
+        { table: "path_fw_board_tokens", op: "insert", message: "must not be reached" },
+      ],
+    });
+    expect(
+      await remintFwBoardTokenForWindow(db, {
+        cohortId: CHICAGO,
+        expectedTokenId: "tok-live",
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "window_passed" });
+    expect(tables.path_fw_board_tokens).toHaveLength(1);
+    expect(tables.path_fw_board_tokens[0]).toMatchObject({ id: "tok-live", revoked_at: null });
+  });
+
+  it("an ARCHIVED cohort refuses cohort_archived with nothing revoked", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: [
+        {
+          ...chicagoMiszoned().cohorts[0],
+          // FUTURE window (the fixture rule in fwBoardTokenMintVerdict's
+          // comment): a past window would refuse incidentally and mask a
+          // deleted archive guard.
+          archived_at: "2026-08-01T00:00:00Z",
+        },
+      ],
+      tokens: [liveToken()],
+    });
+    expect(
+      await remintFwBoardTokenForWindow(db, {
+        cohortId: CHICAGO,
+        expectedTokenId: "tok-live",
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "cohort_archived" });
+    expect(tables.path_fw_board_tokens[0]).toMatchObject({ revoked_at: null });
+  });
+
+  it("a CAS mismatch refuses stale_view: no revoke, no second mint", async () => {
+    // Another staffer re-minted meanwhile — the page's tokenId is dead and a
+    // DIFFERENT token is live. Killing it blind would blank their projector.
+    const { db, tables } = makeFakeDb({
+      cohorts: chicagoMiszoned().cohorts,
+      tokens: [liveToken()],
+    });
+    expect(
+      await remintFwBoardTokenForWindow(db, {
+        cohortId: CHICAGO,
+        expectedTokenId: "tok-stale",
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "stale_view" });
+    expect(tables.path_fw_board_tokens).toHaveLength(1);
+    expect(tables.path_fw_board_tokens[0]).toMatchObject({ id: "tok-live", revoked_at: null });
+  });
+
+  it("an expectedTokenId with NOTHING live refuses no_active_token, not a blind fresh mint", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: chicagoMiszoned().cohorts,
+      tokens: [{ ...liveToken(), revoked_at: "2026-08-21T00:00:00Z" }],
+    });
+    expect(
+      await remintFwBoardTokenForWindow(db, {
+        cohortId: CHICAGO,
+        expectedTokenId: "tok-live",
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "no_active_token" });
+    expect(tables.path_fw_board_tokens).toHaveLength(1);
+  });
+
+  it("a successful re-mint: exactly one live row, expiry = corrected end + grace, prior attributed", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: chicagoMiszoned().cohorts,
+      tokens: [liveToken()],
+    });
+    // Correct the window first — the composed flow the section runs.
+    const edited = await updateFwCohortWindow(db, {
+      cohortId: CHICAGO,
+      ...CHICAGO_EDIT,
+      actorUserId: STAFF,
+      now: NOW,
+    });
+    expect(edited.ok).toBe(true);
+
+    const res = await remintFwBoardTokenForWindow(db, {
+      cohortId: CHICAGO,
+      expectedTokenId: "tok-live",
+      actorUserId: DANA,
+      now: NOW,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The FRESH cohort read: expiry derives from the CORRECTED end, not the
+    // mis-zoned one the page originally loaded.
+    expect(res.expiresAt).toBe(CHICAGO_TOKEN_EXPIRY);
+    expect(res.revokedPrior).toBe(true);
+
+    const live = tables.path_fw_board_tokens.filter((t) => (t.revoked_at ?? null) === null);
+    expect(live).toHaveLength(1);
+    expect(live[0].token_hash).toBe(hashFwBoardToken(res.token));
+    expect(live[0]).toMatchObject({ expires_at: CHICAGO_TOKEN_EXPIRY, created_by: DANA });
+    expect(tables.path_fw_board_tokens.find((t) => t.id === "tok-live")).toMatchObject({
+      revoked_by: DANA,
+    });
+  });
+
+  it("a failed replacement insert RESTORES the CAS-revoked prior — never revoke without replacement", async () => {
+    const { db, tables } = makeFakeDb({
+      cohorts: chicagoMiszoned().cohorts,
+      tokens: [liveToken()],
+      failTable: { table: "path_fw_board_tokens", op: "insert", message: "insert down" },
+    });
+    expect(
+      await remintFwBoardTokenForWindow(db, {
+        cohortId: CHICAGO,
+        expectedTokenId: "tok-live",
+        actorUserId: STAFF,
+        now: NOW,
+      })
+    ).toEqual({ ok: false, reason: "unavailable" });
+    expect(tables.path_fw_board_tokens).toHaveLength(1);
+    expect(tables.path_fw_board_tokens[0]).toMatchObject({
+      id: "tok-live",
+      revoked_at: null,
+      revoked_by: null,
+    });
   });
 });

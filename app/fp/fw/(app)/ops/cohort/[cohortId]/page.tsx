@@ -9,6 +9,7 @@ import FwMatchResolver from "@/app/fp/fw/components/FwMatchResolver";
 import FwReplayRejects from "@/app/fp/fw/components/FwReplayRejects";
 import FwStudentRoster from "@/app/fp/fw/components/FwStudentRoster";
 import FwArchiveControl from "@/app/fp/fw/components/FwArchiveControl";
+import FwWindowEdit from "@/app/fp/fw/components/FwWindowEdit";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
@@ -163,6 +164,32 @@ export default async function FwOpsCohortPage({
       >
         Open the guide view for this weekend
       </Link>
+
+      {/* Redesign Unit 4 (R14/R14a): the window edit sits between the header and
+          the Projected board — the section order Unit 6's nav will index. Hidden
+          when archived (an archived weekend edits after restore; the core refuses
+          regardless — hiding is honesty, per fwOpsCohortAffordances' doctrine). */}
+      {!banner && (
+        <section className="mt-8">
+          <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+            Weekend window
+          </h2>
+          <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+            Fix the dates, times, or the host city&apos;s clock. A live board link keeps the
+            expiry it was minted with — re-mint it below after saving if the board should
+            follow the corrected window.
+          </p>
+          <FwWindowEdit
+            cohortId={cohort.id}
+            startsAt={cohort.startsAt}
+            endsAt={cohort.endsAt}
+            timeZone={cohort.timeZone}
+            liveTokenId={
+              token.ok && token.token.status === "live" ? token.token.tokenId : null
+            }
+          />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">

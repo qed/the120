@@ -46,6 +46,7 @@ import {
   FW_TOMBSTONE_LAST_NAME,
   fwAnonymizeConfirmMatches,
   fwArchiveConfirmMatches,
+  fwCohortWindowFromLocal,
   isFwTombstoneName,
   narrowFwEventTimeZone,
 } from "./fw-ops-rules";
@@ -213,6 +214,139 @@ export async function createFwCohort(
   return { ok: true, cohortId: row.id, slug: typeof row.slug === "string" ? row.slug : input.slug };
 }
 
+export type UpdateFwCohortWindowInput = {
+  cohortId: string;
+  /** The LOCAL wall-clock parts staff typed — converted here via
+   *  `fwCohortWindowFromLocal`, never pre-converted by the caller, so the
+   *  DST-gap refusals and the zone allowlist run inside the sequence. */
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  timeZone: string;
+  actorUserId: string;
+  now: number;
+};
+
+export type UpdateFwCohortWindowResult =
+  | { ok: true; startsAt: string; endsAt: string }
+  | {
+      ok: false;
+      reason:
+        | "cohort_not_found"
+        | "cohort_not_fw"
+        /** Archived weekends are read-only for window edits — restore first,
+         *  the same archive-gate posture as `linkFwStudentToCohort` and the
+         *  mint verdict. */
+        | "cohort_archived"
+        /** The window-rules refusals, passed through verbatim so the form can
+         *  say which field is wrong (`fwCohortWindowFromLocal`'s contract). */
+        | "invalid_time_zone"
+        | "invalid_start"
+        | "invalid_end"
+        | "nonexistent_start"
+        | "nonexistent_end"
+        | "window_not_ordered"
+        | "unavailable";
+    };
+
+/**
+ * Correct one weekend's event window and zone after creation (ops redesign
+ * Unit 4; R14) — the fix for the Chicago weekend stuck on Pacific time.
+ *
+ * NO new window math: the local→instant conversion is `fwCohortWindowFromLocal`,
+ * the SAME pure rule creation uses, so an edit can never accept a window
+ * creation would have refused (DST gaps, zone allowlist, ordering).
+ *
+ * ── `starts_at` and `ends_at` are ALWAYS written together
+ *
+ * `path_cohorts_window_ordered` (CHECK: ends_at > starts_at) evaluates against
+ * the whole post-update row, so a partial update — writing only the new
+ * `ends_at` against an old `starts_at`, or vice versa — can 23514 on a window
+ * that is perfectly valid as a pair. The core therefore has no single-bound
+ * entry point at all: one payload, both instants, structurally.
+ *
+ * ── Attribution is per-row, NOT an audit row (plan Key Decision)
+ *
+ * `path_fw_ops_audit.subject_user_id` is NOT NULL (a window edit has no human
+ * subject) and that table's charter is the two liability actions. The
+ * `window_edited_by/at` columns (20260811140000) follow the `created_by` /
+ * `revoked_by` per-row pattern and are stamped in the SAME update as the
+ * window, so the answer to "who last moved this window" can never be recorded
+ * without the move or vice versa.
+ *
+ * ── What this deliberately does NOT touch: the live board token
+ *
+ * A live token keeps the `expires_at` it was issued for (stored-at-mint,
+ * `fw-board-rules.ts`'s documented decision) — editing the window neither
+ * extends nor kills a projected board. Re-minting for the corrected window is
+ * its own explicit action (`remintFwBoardTokenForWindow`). An edit that lands
+ * the window in the past is ALLOWED (the row is the truth staff typed); the
+ * re-mint is what refuses (`window_passed`).
+ *
+ * No post-write verify on the error branch: a landed-but-reported-failed
+ * update retried with the same inputs re-applies the identical values, so the
+ * retry is naturally idempotent — the archive/unarchive posture, not the
+ * delete/grant-revoke one (where a retry would misreport).
+ */
+export async function updateFwCohortWindow(
+  db: SupabaseClient,
+  input: UpdateFwCohortWindowInput
+): Promise<UpdateFwCohortWindowResult> {
+  const cohort = await loadFwOpsCohort(db, input.cohortId);
+  if (!cohort) return { ok: false, reason: "cohort_not_found" };
+  if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  if (cohort.archivedAt !== null) return { ok: false, reason: "cohort_archived" };
+
+  const window = fwCohortWindowFromLocal({
+    startDate: input.startDate,
+    startTime: input.startTime,
+    endDate: input.endDate,
+    endTime: input.endTime,
+    timeZone: input.timeZone,
+  });
+  if (!window.ok) return { ok: false, reason: window.reason };
+  // `fwCohortWindowFromLocal` already refused a non-allowlisted zone, so this
+  // narrowing cannot fail here — it exists so the WRITE takes the narrowed
+  // union member, never the raw caller string (the createFwCohort posture).
+  const timeZone = narrowFwEventTimeZone(input.timeZone);
+  if (!timeZone) return { ok: false, reason: "invalid_time_zone" };
+
+  const res = await fwWrite(
+    () =>
+      db
+        .from("path_cohorts")
+        .update({
+          // THE PAIR, always — see the docblock's `path_cohorts_window_ordered`
+          // note. Do not split this payload.
+          starts_at: window.startsAt,
+          ends_at: window.endsAt,
+          time_zone: timeZone,
+          window_edited_at: new Date(input.now).toISOString(),
+          window_edited_by: input.actorUserId,
+        })
+        .eq("id", input.cohortId)
+        // Belt over the pre-read, same as delete: even a stale read can never
+        // turn this statement into a Path-cohort window edit.
+        .eq("kind", FW_COHORT_KIND)
+        .select("id"),
+    `cohort window update (${input.cohortId})`
+  );
+  if (res.error) {
+    console.error(
+      `[fw/ops] window update failed for ${input.cohortId}: ${res.error.message}`
+    );
+    return { ok: false, reason: "unavailable" };
+  }
+  if ((res.data ?? []).length === 0) {
+    // The pre-read saw the cohort; the update matched nothing — it was deleted
+    // (or stopped being fw) mid-flight. Report the truth the caller can act on;
+    // the copy collapses it to the staff-only sentence regardless.
+    return { ok: false, reason: "cohort_not_found" };
+  }
+  return { ok: true, startsAt: window.startsAt, endsAt: window.endsAt };
+}
+
 /* ═══════════════════════════════════════════════════════════════ board tokens ══ */
 
 /**
@@ -334,6 +468,13 @@ export type MintFwBoardTokenResult =
         | "cohort_archived"
         | "no_event_window"
         | "window_passed"
+        /** Redesign Unit 4, reachable only with `expectedTokenId`: the CAS
+         *  matched zero rows and a DIFFERENT token is live — the caller's page
+         *  is out of date. NOTHING was revoked. */
+        | "stale_view"
+        /** Redesign Unit 4, reachable only with `expectedTokenId`: the CAS
+         *  matched zero rows and nothing is live at all. NOTHING was revoked. */
+        | "no_active_token"
         | "unavailable";
     };
 
@@ -357,7 +498,20 @@ export type MintFwBoardTokenResult =
  */
 export async function mintFwBoardToken(
   db: SupabaseClient,
-  input: { cohortId: string; actorUserId: string; now: number }
+  input: {
+    cohortId: string;
+    actorUserId: string;
+    now: number;
+    /**
+     * Redesign Unit 4: a compare-and-set on the revoke-prior step — the same
+     * stale-view guard `revokeFwBoardToken` carries, threaded through THIS
+     * sequence rather than built as a sibling (two mint sequences with subtly
+     * different compensation would be the drift hazard). When set, the prior
+     * revoke matches only this token id; zero rows revokes nothing blind and
+     * refuses (`stale_view` / `no_active_token`) with the live board untouched.
+     */
+    expectedTokenId?: string;
+  }
 ): Promise<MintFwBoardTokenResult> {
   const cohort = await loadFwOpsCohort(db, input.cohortId);
   const verdict = fwBoardTokenMintVerdict({
@@ -374,13 +528,16 @@ export async function mintFwBoardToken(
 
   const revokedAt = new Date(input.now).toISOString();
   const revoked = await fwWrite(
-    () =>
-      db
+    () => {
+      const base = db
         .from("path_fw_board_tokens")
         .update({ revoked_at: revokedAt, revoked_by: input.actorUserId })
         .eq("cohort_id", input.cohortId)
-        .is("revoked_at", null)
-        .select("id"),
+        .is("revoked_at", null);
+      // The CAS: revoke THE TOKEN THE CALLER SAW, not "whatever is live now"
+      // (see `revokeFwBoardToken`'s docblock for the race this closes).
+      return (input.expectedTokenId ? base.eq("id", input.expectedTokenId) : base).select("id");
+    },
     `prior token revoke (${input.cohortId})`
   );
   if (revoked.error) {
@@ -392,6 +549,20 @@ export async function mintFwBoardToken(
   const priorIds = (revoked.data ?? [])
     .map((r) => r.id)
     .filter((id): id is string => typeof id === "string");
+  if (input.expectedTokenId && priorIds.length === 0) {
+    // Zero-row CAS. NOTHING was revoked, so there is nothing to compensate —
+    // refuse before minting, exactly as revokeFwBoardToken does, and take the
+    // same second look to tell "someone else's token is live" (stale_view)
+    // apart from "nothing is live at all" (no_active_token).
+    const current = await loadFwOpsBoardToken(db, { cohortId: input.cohortId, now: input.now });
+    if (current.ok && current.token.status === "live") {
+      console.warn(
+        `[fw/ops] refusing a stale re-mint for ${input.cohortId}: caller expected ${input.expectedTokenId}, but a different token is live`
+      );
+      return { ok: false, reason: "stale_view" };
+    }
+    return { ok: false, reason: "no_active_token" };
+  }
 
   const token = randomBytes(32).toString("base64url");
   const inserted = await fwWrite(
@@ -551,6 +722,37 @@ export async function revokeFwBoardToken(
     return { ok: false, reason: "no_active_token" };
   }
   return { ok: true };
+}
+
+/**
+ * Revoke + re-mint the board for a corrected window (ops redesign Unit 4;
+ * R14a) — the explicit follow-up to `updateFwCohortWindow`, because a live
+ * token keeps its STORED expiry and never follows the edit.
+ *
+ * ── Verdict FIRST, and this function is deliberately THIN
+ *
+ * The whole safety argument is `mintFwBoardToken`'s own ordering, reused, not
+ * rebuilt: it reads the cohort FRESH (so the verdict runs against the
+ * corrected window), runs `fwBoardTokenMintVerdict` BEFORE touching any token
+ * row (a non-mintable corrected window — `window_passed`, `cohort_archived` —
+ * refuses with the old token still live), and only then revokes-prior-then-
+ * inserts with compensation. This wrapper exists to make the intent a named
+ * call site and to make `expectedTokenId` REQUIRED: the re-mint always acts
+ * from a page showing a specific live token, so a blind revoke has no caller
+ * here. A zero-row CAS refuses (`stale_view` / `no_active_token`) with
+ * nothing revoked.
+ *
+ * Invariant carried over from the mint (plan sequence diagram): **no path
+ * revokes the prior token without minting a replacement** — the refusal
+ * branches revoke nothing, and the failed-insert branch restores what it
+ * revoked. The result carries the new raw token exactly as mint does: shown
+ * once, only its hash stored.
+ */
+export async function remintFwBoardTokenForWindow(
+  db: SupabaseClient,
+  input: { cohortId: string; expectedTokenId: string; actorUserId: string; now: number }
+): Promise<MintFwBoardTokenResult> {
+  return mintFwBoardToken(db, input);
 }
 
 /**
@@ -2462,6 +2664,14 @@ export type MintBoardTokenActionResult =
 export type RevokeBoardTokenActionResult =
   | { success: true }
   | { success: false; error: string };
+
+export type UpdateCohortWindowActionResult =
+  | { success: true; startsAt: string; endsAt: string }
+  | { success: false; error: string };
+
+/** Same success payload as mint — the re-mint IS a mint, and its URL has the
+ *  same shown-once contract. */
+export type RemintBoardTokenForWindowActionResult = MintBoardTokenActionResult;
 
 export type RevokeGuideGrantActionResult =
   | { success: true; audited: boolean }

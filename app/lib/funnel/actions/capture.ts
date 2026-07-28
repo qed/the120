@@ -11,7 +11,22 @@
  */
 
 import { captureCore, type CaptureResult } from "@/app/lib/funnel/capture-core";
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
+import { readCtaSource } from "@/app/lib/cta-source";
 
 export async function captureAction(input: unknown): Promise<CaptureResult> {
-  return captureCore(input);
+  const result = await captureCore(input);
+  if (result.kind === "captured") {
+    // R56/R58: C1 — the event's entry_source goes through the SAME
+    // readCtaSource the core just used to stamp the family, so the event
+    // stream and the families table cannot diverge (the review: the raw
+    // input made phantom buckets the C2s would never land in). familyId
+    // resolves inside the emitter's enrichment from the stamped row.
+    const source =
+      typeof (input as { source?: unknown })?.source === "string"
+        ? readCtaSource({ src: (input as { source: string }).source })
+        : null;
+    void emitFunnelEvent("c1_captured", { parentId: result.userId, entrySource: source });
+  }
+  return result;
 }

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { StartFlow } from "./StartFlow";
 import { supabaseServer } from "@/app/lib/supabase/server";
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
+import { readCtaSource } from "@/app/lib/cta-source";
 import { listChildrenCore } from "@/app/lib/funnel/children-core";
 import { resolveReentry, screenRoute } from "@/app/lib/funnel/session-rules";
 import { isApplicantState } from "@/app/lib/funnel/applicant-rules";
@@ -33,6 +35,13 @@ export default async function StartPage({
 }) {
   const params = await searchParams;
   const src = params.src;
+  // R56: start_view, server-side (the funnel's front door is dynamic).
+  // The source goes through the SAME readCtaSource the rest of the funnel
+  // persists — unknown markers fail closed to null, so free text can never
+  // reach the tuple column (the review: the first version stored the raw
+  // param verbatim). Known dirty denominator: bots hit this page; the
+  // bot-resistance carried item owns cleaning it before ad spend.
+  void emitFunnelEvent("start_view", { entrySource: readCtaSource(params) });
   const query_g = params.g;
 
   // ── A signed-in visitor never sees capture (U7; R10's "signed-in visitors

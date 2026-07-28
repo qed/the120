@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { renderNurtureEmail } from "../copy";
 import {
   CATCH_UP_DAYS,
   DAY_MS,
@@ -43,6 +44,7 @@ function child(overrides: Partial<NurtureChildRow> = {}): NurtureChildRow {
     birth_year: "2016",
     current_school: "Maple PS",
     group_slug: "scholars",
+    applicant_state: null,
     academics: [{ subject: "Math", plan: "reach-ahead", goal: "Grade 7 math by June" }],
     subjects: [],
     workshop_ids: ["competitive-chess"],
@@ -283,10 +285,13 @@ describe("stalled-dossier nudge", () => {
     expect(due).toHaveLength(0);
   });
 
-  it("skips submitted dossiers and deposited families", () => {
+  it("R61: a family-level submission no longer silences a stalled sibling — deposited families still skip", () => {
+    // Pre-U17 the family-level dossier_submitted_at gate silenced nurture
+    // for child B once child A submitted (the plan's named edge). The
+    // per-child status filter is the scoping now.
     expect(
       run({ families: [family({ dossier_submitted_at: iso(-1) })], children: [quietChild(3.5)] })
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(
       run({
         families: [family()],
@@ -380,5 +385,136 @@ describe("helpers", () => {
     expect(dossierCompleteness(oldRow as NurtureChildRow)).toBe(88);
     const garbage = child({ academics: "garbage" });
     expect(dossierCompleteness(garbage)).toBe(88); // non-array → [] → item undone (7/8)
+  });
+});
+
+describe("R61: abandonment points (funnel U17)", () => {
+  const quiet = (days: number, over: Partial<NurtureChildRow> = {}) =>
+    child({ updated_at: iso(-days), ...over });
+
+  it("a funnel child stalled at 'added' fires stall-child regardless of dossier completeness", () => {
+    const due = run({
+      families: [family()],
+      children: [quiet(3.5, { applicant_state: "added", academics: [], subjects: [], project_pitch: "", interests: "" })],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0].template).toBe("stall-child");
+    expect(due[0].step).toBe("nudge-child");
+  });
+
+  it("'project_created' fires stall-project and OUTRANKS a sibling stalled at 'added'", () => {
+    const due = run({
+      families: [family()],
+      children: [
+        quiet(3.5, { applicant_state: "added", first_name: "Ada" }),
+        quiet(3.5, { applicant_state: "project_created", first_name: "Bo" }),
+      ],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0].template).toBe("stall-project");
+    expect(due[0].childFirstName).toBe("Bo");
+  });
+
+  it("the POSITIVE sibling edge: one SUBMITTED child, one stalled draft — the stalled child's sequence still sends", () => {
+    const due = run({
+      families: [family({ dossier_submitted_at: iso(-1) })],
+      children: [
+        quiet(1, { status: "submitted", first_name: "Done" }),
+        quiet(3.5, { applicant_state: "project_created", first_name: "Stalled" }),
+      ],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("Stalled");
+  });
+
+  it("one nudge per ABANDONMENT POINT: a stall-child send does not silence a later stall-project", () => {
+    const withPrior = run({
+      families: [family()],
+      children: [quiet(3.5, { applicant_state: "project_created" })],
+      priorSends: [{ family_id: "fam-1", sequence: "stall", step: "nudge-child" }],
+    });
+    expect(withPrior).toHaveLength(1);
+    expect(withPrior[0].step).toBe("nudge-project");
+    // The SAME point does dedupe.
+    const samePoint = run({
+      families: [family()],
+      children: [quiet(3.5, { applicant_state: "project_created" })],
+      priorSends: [{ family_id: "fam-1", sequence: "stall", step: "nudge-project" }],
+    });
+    expect(samePoint).toHaveLength(0);
+  });
+
+  it("the html part ESCAPES a markup-shaped child name; the text part stays raw", () => {
+    const rendered = renderNurtureEmail("stall-child", {
+      firstName: "Dana",
+      childFirstName: "<img src=x>Ada",
+    });
+    expect(rendered.html).not.toContain("<img src=x>");
+    expect(rendered.html).toContain("&lt;img src=x&gt;Ada");
+    expect(rendered.text).toContain("<img src=x>Ada");
+  });
+});
+
+describe("offer sequence (R61's fourth point: applied-but-no-deposit)", () => {
+  it("fires offer-nudge 3 days after the offer email, for the family without a paid deposit", () => {
+    const due = run({
+      families: [family()],
+      children: [child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" })],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ sequence: "offer", step: "o3", template: "offer-nudge" });
+    expect(due[0].childFirstName).toBe("Ada");
+  });
+
+  it("a paid deposit silences it; a prior send never repeats; before day 3 nothing fires", () => {
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
+        deposits: [deposit({ created_at: iso(-1) })],
+      }).filter((s) => s.sequence === "offer")
+    ).toHaveLength(0);
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
+        priorSends: [{ family_id: "fam-1", sequence: "offer", step: "o3" }],
+      })
+    ).toHaveLength(0);
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-1) })],
+      })
+    ).toHaveLength(0);
+  });
+
+  it("anchors on the EARLIEST offer among siblings and goes stale past the catch-up window", () => {
+    const due = run({
+      families: [family()],
+      children: [
+        child({ status: "offered", offer_email_sent_at: iso(-4), first_name: "First" }),
+        child({ status: "offered", offer_email_sent_at: iso(-3.2), first_name: "Second" }),
+      ],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("First");
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-30) })],
+      })
+    ).toHaveLength(0);
+  });
+
+  it("the offer-nudge html escapes the name and carries the dashboard CTA", () => {
+    const rendered = renderNurtureEmail("offer-nudge", {
+      firstName: "Dana",
+      childFirstName: "<b>Ada</b>",
+    });
+    expect(rendered.html).toContain("&lt;b&gt;Ada&lt;/b&gt;");
+    expect(rendered.html).not.toContain("<b>Ada</b>");
+    expect(rendered.text).toContain("/dashboard");
+    expect(rendered.subject).toContain("seat is being held");
   });
 });

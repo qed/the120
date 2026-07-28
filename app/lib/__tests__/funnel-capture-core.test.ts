@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The THREW path calls notifyOps directly (not via deps); a shell with a
+// real RESEND key exported would otherwise mail admissions@ fake reconcile
+// alerts on every test run (reviewer).
+vi.mock("@/app/lib/ops-alert", () => ({ notifyOps: async () => {} }));
 
 import {
   CAPTURE_IP_RATE_LIMIT,

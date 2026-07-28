@@ -204,7 +204,8 @@ describe("confirmDoorCore — persist on confirm, and ONLY on confirm", () => {
   it("writes the group exactly once per confirm", async () => {
     const { writes, deps } = fakeDeps();
     const out = await confirmDoorCore({ childId: CHILD_ID, slug: "makers" }, deps);
-    expect(out).toEqual({ kind: "confirmed", slug: "makers" });
+    // previousSlug is SERVER truth for the door_confirmed event (U16).
+    expect(out).toEqual({ kind: "confirmed", slug: "makers", previousSlug: null });
     // The write COUNT is the assertion (the plan's scenario): persist-on-tap
     // would show up as writes the UI's switching generated, and there is no
     // tap path into this module at all — one confirm, one write.

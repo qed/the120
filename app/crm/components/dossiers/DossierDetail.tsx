@@ -164,6 +164,17 @@ export default function DossierDetail({
             Dossier {item.completeness}% complete
             {item.birthYear ? ` · born ${item.birthYear}` : ""}
           </span>
+          {/* R59: where the funnel's event history says this family IS, and
+              since when — time-in-stage is the stall signal. */}
+          {item.funnelStage && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted">
+              Funnel · {item.funnelStage.stage.replace(/_/g, " ")} · since{" "}
+              {new Date(item.funnelStage.since).toLocaleDateString("en-CA", {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          )}
         </div>
         <div className="flex flex-none flex-col items-end gap-2.5">
           <StatusMenu
@@ -184,6 +195,46 @@ export default function DossierDetail({
 
       {/* payment strip (brief §6 addition) */}
       <PaymentStrip deposits={item.deposits} reviewStatus={item.reviewStatus} />
+
+      {/* R60: the project the kid actually built, streamed from the funnel —
+          staff see it before any parent conversation. React-escaped output
+          (these fields are AI/family text; R40b's render rule). */}
+      {item.funnelProject && (
+        <div className="mt-4 rounded-[12px] border border-crm-line bg-crm-card p-4">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-crm-red">
+            The project they built
+          </p>
+          <p className="mt-1.5 font-serif text-[18px] tracking-[-0.01em] text-crm-ink">
+            {item.funnelProject.name}
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-crm-muted">
+            {item.funnelProject.description}
+          </p>
+          <p className="mt-2 text-[12.5px] text-crm-ink">
+            <span className="text-crm-muted">Offer · </span>
+            {item.funnelProject.offerSketch}
+          </p>
+          <p className="mt-1 text-[12.5px] text-crm-ink">
+            <span className="text-crm-muted">First customers · </span>
+            {item.funnelProject.firstCustomerHypothesis ?? "not sure yet (their honest answer)"}
+          </p>
+          {Object.keys(item.funnelProject.quizAnswers).length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.08em] text-crm-muted">
+                Their quiz answers
+              </summary>
+              <dl className="mt-1.5 space-y-1">
+                {Object.entries(item.funnelProject.quizAnswers).map(([k, v]) => (
+                  <div key={k} className="text-[12px] leading-relaxed">
+                    <dt className="inline font-mono uppercase text-crm-faint">{k} · </dt>
+                    <dd className="inline text-crm-ink">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
+        </div>
+      )}
 
       {/* info cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

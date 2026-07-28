@@ -1201,7 +1201,35 @@ through the path that already exists.
 
 ---
 
-- [ ] **Unit 14: Next Steps, checkout, and deposit integrity**
+- [x] **Unit 14: Next Steps, checkout, and deposit integrity** — *landed
+  2026-07-28. Both Stripe routes rebuilt over deposit-rules (pure taxonomy) +
+  deposit-core (deps-injected), with their first tests. Webhook: completed
+  paid/unpaid, async_payment_succeeded/failed, expired, charge.refunded; the
+  carried refund-resurrection bug closed ATOMICALLY (migration 20260812120000:
+  deposit_fulfil RPC — conditional paid write in SQL, 23505 caught inside);
+  the carried one-live-paid 23505 discharged (double_paid: loud log + 200).
+  THE REVIEW'S CRITICAL: a refund delivered before its completed matched zero
+  rows, answered 200, and was lost forever — zero-row refund updates now fail
+  → 500 → Stripe retries until the row exists. Partial refunds never flip
+  status (charge.refunded boolean gates). Checkout: R51a full policy inline
+  above an unticked per-child checkbox, acceptance (version/hash/timestamp/IP)
+  persisted on deposit_attempts (migration 20260811120000, also
+  children.family_goal); CHILD-scoped idempotency key with stable params (the
+  per-attempt key un-deduped checkout: two clicks = two payable sessions);
+  expires_at 30 min; origin allowlisted (localhost dev-only); pending deposits
+  close the gate for their multi-day clearing window; zero seats → 409 +
+  waitlist redirect honored client-side. R50: /start/next-steps three swipes
+  with per-child ?child= and persisted editable family_goal (zero-row saves
+  fail honestly); the offer email is Next Steps' front door (all three
+  renderings retargeted + tests); dashboard links it and renders a
+  payment-processing state. R51: last "Sept 30" literal collapsed; carve-out
+  removed. Suite 133 files / 3,442 tests; tsc, build, lint clean.
+  NOTES FOR PETER: refund-policy claims registered (POLICY_CLAIMS_FOR_PETER,
+  two UNVERIFIED); whether PENDING deposits should hold a seat in
+  seats_claimed() is an open product question; the oversell window (multiple
+  open sessions at 1 seat left) is narrowed to 30 min, residual documented —
+  the verification's test-mode e2e deposit remains for a Stripe test key
+  session (Peter or a keyed environment).*
 
 **Goal:** Conversion 3, without double-charging or double-selling a seat.
 
@@ -1300,7 +1328,31 @@ real send.
 
 ### Phase 4 — Instruments
 
-- [ ] **Unit 16: Event stream, CRM stages, and live dossiers**
+- [x] **Unit 16: Event stream, CRM stages, and live dossiers** — *landed
+  2026-07-28. funnel_events (migration 20260813120000, applied + verified):
+  18-name CHECK, denormalized tuple (entry_source/band/group), no PII in
+  properties (executable sanitizer + adversarial sweep), RLS zero policies
+  service-role-only, no FKs (purge-survival). 12 of 18 names EMIT server-side
+  (c1 capture, child_added, door_confirmed, quiz_start, project_created/
+  regenerated, reveal_viewed, faq_opened via the U11 seam, c2, c3, start_view,
+  share_card); six RESERVED with documented reasons (lp_view/explainer_start →
+  bot-resistance item; application_started → U17; project_switched → later
+  product op; student_account_created → U15; c4_tuition → post-launch). R59:
+  FUNNEL_STAGES + stageFromEvents (furthest stage, earliest stamp) surfaced in
+  the dossier detail with time-in-stage; R60: the funnel project + quiz answers
+  render in the CRM dossier. REVIEW (both agents, converging): c2 emitted
+  BEFORE auth/claim (unauthenticated conversion forgery — moved inside the won
+  claim, order pinned by test, awaited); tuple columns dodged the property
+  sanitizer (raw ?src= and raw capture source stored verbatim — readCtaSource
+  at every call site now); the 5000-row stage read was DEAD against the
+  documented max-rows=1000 (silent truncation to the oldest events — now
+  paged in 1000 windows filtered to queue children with a refusing ceiling);
+  door_confirmed is SERVER truth (child's prior group; re-confirms emit
+  nothing); Stripe session ids survived the sanitizer only after testing with
+  a real 66-char id; texture events attribute childId via the caller's RLS
+  read. Verification: the ads question is one query over funnel_events
+  (count by name grouped by entry_source — tuple denormalized, no joins).
+  Suite 134 files / 3,472 tests; tsc, build, lint clean.*
 
 **Goal:** Answer the question the whole build exists to answer.
 
@@ -1346,7 +1398,31 @@ answerable from one query.
 
 ---
 
-- [ ] **Unit 17: Nurture and retention**
+- [x] **Unit 17: Nurture and retention** — *landed 2026-07-28, the FINAL unit.
+  R61: the nurture engine is CHILD-aware — the family-level
+  dossier_submitted_at gate is gone (submitting child A no longer silences
+  stalled child B; positive sibling test), funnel children stalled at
+  added/project_created get point-specific templates (stall-child /
+  stall-project, one nudge per POINT per family, deepest-first), names
+  HTML-escaped in the html parts (the never-met plan scenario, now met with an
+  esc() helper + test). Deep links go to /start (the re-entry matrix derives
+  the resume point server-side — never a URL encoding it); one-click minted
+  resume tokens are a documented follow-up. R61 coverage documented per point:
+  captured-no-child = the account sequence; applied-but-no-deposit = DEFERRED
+  (carried item — needs an offer timestamp); project-name-in-subject =
+  deliberate privacy deviation, flagged. R55/R55a: the WRITTEN schedule
+  (retention-rules.ts, 365d inactivity + 14d STATEFUL grace — claims
+  registered for Peter incl. the inactivity DEFINITION) runs weekly via a GET
+  cron (the reviewers: the first draft exported POST, which Vercel cron would
+  have 405'd forever). Fail-closed in every direction: paged refusing reads on
+  ALL inputs incl. the deposits exemption source; inactivity = max(project,
+  child) writes; notice stamped durably (purge_noticed_at, migration
+  20260814120000, applied + verified) before anything irreversible; NaN dates
+  skipped; goal wiped BEFORE the marker so failures retry; purged rows flip to
+  'abandoned' so no active read (wizard prefill!) renders the marker back to a
+  family. Suite 135 files / 3,487 tests; tsc, build, lint clean. Verification
+  note: the full seeded nurture-cycle run and a staged retention rehearsal
+  remain for a keyed environment (Peter or CI with CRON_SECRET).*
 
 **Goal:** Recover abandoned families, and delete what should not be kept.
 

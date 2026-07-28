@@ -42,6 +42,16 @@ function layout(bodyHtml: string, cta: { label: string; url: string }): string {
 
 const p = (html: string) => `<p style="margin: 0 0 16px;">${html}</p>`;
 
+/** Names are family-typed free text; the html part must never carry them
+ *  raw (the plan's scenario — a crafted first name is live markup inside a
+ *  DKIM-signed email otherwise; both U17 reviewers). Text parts stay raw. */
+const esc = (s: string): string =>
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
 export function renderNurtureEmail(template: NurtureTemplate, params: Params): NurtureEmail {
   const hi = greeting(params.firstName);
   const child = params.childFirstName;
@@ -206,12 +216,82 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
           `Finish and submit: ${DASHBOARD_URL}`,
         ].join("\n"),
         html: layout(
-          p(hi) +
+          p(esc(hi)) +
             p(
-              `You're nearly there — <strong>${kid}'s dossier is almost complete</strong>, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`
+              `You're nearly there — <strong>${esc(kid)}'s dossier is almost complete</strong>, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`
             ) +
             p("Nothing is lost; everything you've entered is saved right where you left it."),
           { label: "Finish and submit", url: DASHBOARD_URL }
+        ),
+      };
+    }
+
+    // R61 (funnel U17): the abandonment-point nudges. Deep links go to
+    // /start — the re-entry matrix derives the resume point SERVER-side
+    // (never a URL encoding it); a signed-out family reaches the Unit 3
+    // resume-token flow from there. No child data beyond a first name.
+    case "stall-child": {
+      const kid = child ?? "your child";
+      return {
+        subject: child ? `${child}'s project is waiting to be built` : "The project is waiting to be built",
+        text: [
+          hi,
+          "",
+          `${kid} is added and the fun part hasn't started yet: ten minutes on the phone and ${kid} designs a real business, with real customers. Everything picks up exactly where you left off.`,
+          "",
+          `Pick it back up: ${SITE_URL}/start`,
+        ].join("\n"),
+        html: layout(
+          p(esc(hi)) +
+            p(
+              `<strong>${esc(kid)} is added</strong> and the fun part hasn't started yet: ten minutes on the phone and ${esc(kid)} designs a real business, with real customers. Everything picks up exactly where you left off.`
+            ),
+          { label: "Pick it back up", url: `${SITE_URL}/start` }
+        ),
+      };
+    }
+
+    case "stall-project": {
+      const kid = child ?? "your child";
+      return {
+        subject: child ? `${child} built something real` : "Something real got built",
+        text: [
+          hi,
+          "",
+          `${kid} built a real project page, and it's sitting one short step from a finished application. The work is saved; the application takes about ten minutes from here.`,
+          "",
+          `See the project and finish up: ${SITE_URL}/start`,
+        ].join("\n"),
+        html: layout(
+          p(esc(hi)) +
+            p(
+              `<strong>${esc(kid)} built a real project page</strong>, and it's sitting one short step from a finished application. The work is saved; the application takes about ten minutes from here.`
+            ),
+          { label: "See the project and finish up", url: `${SITE_URL}/start` }
+        ),
+      };
+    }
+
+    // R61's fourth point (follow-ups pass): applied-but-no-deposit. The
+    // offer email was touch one; this is the single reminder, and the
+    // deposit CTA lives on the dashboard.
+    case "offer-nudge": {
+      const kid = child ?? "your child";
+      return {
+        subject: child ? `${child}'s seat is being held` : "The seat is being held",
+        text: [
+          hi,
+          "",
+          `A seat was offered to ${kid} and it's still open. Reserving it takes about two minutes from your dashboard, and the deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
+          "",
+          `Reserve the seat: ${DASHBOARD_URL}`,
+        ].join("\n"),
+        html: layout(
+          p(esc(hi)) +
+            p(
+              `<strong>A seat was offered to ${esc(kid)}</strong> and it's still open. Reserving it takes about two minutes from your dashboard, and the deposit stays fully refundable until ${DEADLINE_NBSP}.`
+            ),
+          { label: "Reserve the seat", url: DASHBOARD_URL }
         ),
       };
     }

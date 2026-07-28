@@ -137,7 +137,14 @@ const confirmSchema = z.object({
 });
 
 export type ConfirmDoorResult =
-  | { kind: "confirmed"; slug: GroupSlug }
+  | {
+      kind: "confirmed";
+      slug: GroupSlug;
+      /** The child's group BEFORE this write — SERVER truth for the
+       *  door_confirmed event (U16): null = first confirm; same slug =
+       *  re-confirm (no event); different = a real switch. */
+      previousSlug: string | null;
+    }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
   | { kind: "failed" };
@@ -174,7 +181,7 @@ export async function confirmDoorCore(
 
     const wrote = await session.writeGroup(child.id, slug);
     if (!wrote) return { kind: "failed" };
-    return { kind: "confirmed", slug };
+    return { kind: "confirmed", slug, previousSlug: child.groupSlug || null };
   } catch (err) {
     console.error("[funnel/miniapp] confirm exception:", err);
     return { kind: "failed" };

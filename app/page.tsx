@@ -22,7 +22,7 @@ export default async function Home() {
         {/* GauntletBand pulled until launch (Peter 2026-07-18) — restore with GAUNTLET_OPEN */}
         <ParentStoriesBand />
         <TuitionTeaser />
-        <CtaBand />
+        <CtaBand source="home" />
       </main>
       <Footer />
     </>

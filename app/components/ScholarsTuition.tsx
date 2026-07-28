@@ -1,5 +1,5 @@
 import Cta from "./Cta";
-import JoinButton from "./JoinButton";
+import StartCta from "./StartCta";
 import SeatsDot from "./SeatsDot";
 
 const checklist = [
@@ -46,7 +46,7 @@ export default function ScholarsTuition({ seatsRemaining }: { seatsRemaining?: n
               </span>
             ))}
           </div>
-          <JoinButton className="w-full py-4">Join the 120</JoinButton>
+          <StartCta source={"scholars-legacy"} className="w-full py-4"/>
           <SeatsDot className="justify-center" remaining={seatsRemaining} />
         </div>
       </div>

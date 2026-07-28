@@ -136,7 +136,7 @@ export default function TournamentRulesPage() {
           </div>
         </div>
 
-        <CtaBand />
+        <CtaBand source="home" />
       </main>
       <Footer />
     </>

@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import Wordmark from "./Wordmark";
 import Cta from "./Cta";
-import JoinButton from "./JoinButton";
+import StartCta from "./StartCta";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { nav as defaultLinks, isActiveNav } from "@/app/lib/site";
 
@@ -91,7 +91,7 @@ export default function Nav() {
                 <Cta href="/dashboard" variant="ghost">
                   Log in
                 </Cta>
-                <JoinButton>Join the 120</JoinButton>
+                <StartCta source={"home"}/>
               </>
             )}
           </span>
@@ -102,7 +102,7 @@ export default function Nav() {
               {signedIn ? (
                 <Cta href="/dashboard">My dashboard</Cta>
               ) : (
-                <JoinButton>Join the 120</JoinButton>
+                <StartCta source={"home"}/>
               )}
             </span>
             <button
@@ -171,9 +171,7 @@ export default function Nav() {
                     </Cta>
                   ) : (
                     <>
-                      <JoinButton className="w-full" onClick={close}>
-                        Join the 120
-                      </JoinButton>
+                      <StartCta source={"home"} className="w-full" onClick={close}/>
                       <Cta href="/dashboard" variant="ghost" className="w-full" onClick={close}>
                         Log in
                       </Cta>

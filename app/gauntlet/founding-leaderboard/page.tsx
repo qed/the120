@@ -52,7 +52,7 @@ export default function FoundingLeaderboardPage() {
           </div>
         </div>
 
-        <CtaBand />
+        <CtaBand source="home" />
       </main>
       <Footer />
     </>

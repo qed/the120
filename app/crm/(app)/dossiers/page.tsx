@@ -7,6 +7,7 @@ import { getSeatsRemainingStrict } from "@/app/lib/seats";
 import { SEATS_TOTAL } from "@/app/lib/site";
 import {
   CAPACITY_UNKNOWN,
+  categorizeOutstanding,
   countOutstandingOffers,
   offerCapacityDisplay,
 } from "@/app/lib/funnel/offer-rules";
@@ -76,13 +77,19 @@ export default async function DossiersPage({
   // U13 (the over-offer trap): offers do NOT reserve seats — seats_claimed()
   // counts paid deposits only. Surface remaining-minus-outstanding at the
   // point of offer so staff never promise a seat that is not there.
+  // W6: the outstanding count SPLITS for display — a clearing bank debit is
+  // money in flight, not a bare promise, and staff should not offer that
+  // seat away. The split reclassifies the same total; the arithmetic below
+  // is unchanged (adding it as a second input would double-count).
   const seatsRemaining = await getSeatsRemainingStrict();
+  const split = categorizeOutstanding(items);
   const capacity =
     seatsRemaining === null
       ? CAPACITY_UNKNOWN
       : offerCapacityDisplay({
           paidDeposits: SEATS_TOTAL - seatsRemaining,
           outstandingOffers: countOutstandingOffers(items),
+          clearingDebits: split.clearingDebits,
         });
 
   if (selected) {

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAPACITY_UNKNOWN,
   DRAFT_CLAIMS_FOR_PETER,
+  categorizeOutstanding,
   countOutstandingOffers,
   draftedCopy,
   offerCapacityDisplay,
@@ -53,6 +54,90 @@ describe("offerHeadroom — offers do not reserve seats (the over-offer trap)", 
     expect(fine.warn).toBe(false);
     const over = offerCapacityDisplay({ paidDeposits: 120, outstandingOffers: 1, seatsTotal: 120 });
     expect(over.warn).toBe(true);
+  });
+
+  it("W6: outstanding splits into clearing debits vs unanswered offers, and the SUM equals the old count", () => {
+    const item = (over: Record<string, unknown>) => ({
+      offerSentAt: "2026-07-28T00:00:00Z",
+      reviewStatus: "offered",
+      deposits: [] as { status: string; refunded_at?: string | null }[],
+      ...over,
+    });
+    const items = [
+      item({ deposits: [{ status: "pending" }] }), // clearing bank debit
+      item({ deposits: [] }), // unanswered
+      item({ deposits: [{ status: "expired" }] }), // failed debit → unanswered
+      item({ deposits: [{ status: "paid", refunded_at: null }] }), // paid → not outstanding at all
+      item({ offerSentAt: null, reviewStatus: "in_review", deposits: [{ status: "pending" }] }), // not offered → excluded
+    ];
+    const split = categorizeOutstanding(items);
+    expect(split.clearingDebits).toBe(1);
+    expect(split.unansweredOffers).toBe(2);
+    // The invariant that prevents double-counting: split sums to the exact
+    // count offerHeadroom already consumes — never a second input to it.
+    expect(split.clearingDebits + split.unansweredOffers).toBe(countOutstandingOffers(items));
+  });
+
+  it("W6: the sum invariant holds across the FULL status × deposit-state space, not hand-picked cases", () => {
+    // Both functions call isOutstandingOffer, so the invariant is
+    // structural — this sweeps the space that would have caught a drift
+    // back when they were two hand-synchronized predicates (U2 review).
+    const statuses = ["draft", "submitted", "in_review", "invited", "offered", "member", "waitlisted"];
+    const depositSets: { status: string; refunded_at?: string | null }[][] = [
+      [],
+      [{ status: "pending" }],
+      [{ status: "pending", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "paid", refunded_at: null }],
+      [{ status: "paid", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "refunded", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "failed" }],
+      [{ status: "expired" }],
+      [{ status: "expired" }, { status: "pending" }],
+      [{ status: "pending" }, { status: "paid", refunded_at: null }],
+    ];
+    for (const reviewStatus of statuses) {
+      for (const offerSentAt of [null, "2026-07-28T00:00:00Z"]) {
+        for (const deposits of depositSets) {
+          const items = [{ offerSentAt, reviewStatus, deposits }];
+          const s = categorizeOutstanding(items);
+          expect(
+            s.clearingDebits + s.unansweredOffers,
+            `${reviewStatus} / offerSentAt=${offerSentAt} / ${JSON.stringify(deposits)}`
+          ).toBe(countOutstandingOffers(items));
+        }
+      }
+    }
+  });
+
+  it("W6: a refunded or downgraded row is never 'clearing money'", () => {
+    const child = (deposits: { status: string; refunded_at?: string | null }[]) => ({
+      offerSentAt: "2026-07-28T00:00:00Z",
+      reviewStatus: "offered",
+      deposits,
+    });
+    const split = categorizeOutstanding([
+      child([{ status: "pending", refunded_at: "2026-07-29T00:00:00Z" }]),
+      child([{ status: "failed" }]),
+    ]);
+    expect(split.clearingDebits).toBe(0);
+    expect(split.unansweredOffers).toBe(2);
+  });
+
+  it("W6: the dialog line carries the two-part breakdown when provided, same totals, same warn semantics", () => {
+    const display = offerCapacityDisplay({
+      paidDeposits: 7,
+      outstandingOffers: 5,
+      seatsTotal: 120,
+      clearingDebits: 2,
+    });
+    expect(display.line).toContain("113 seats unclaimed");
+    expect(display.line).toContain("2 clearing bank debits");
+    expect(display.line).toContain("3 offers unanswered");
+    expect(display.line).toContain("108 truly free");
+    expect(display.warn).toBe(false);
+    // Legacy single-count call keeps the original line (other call sites).
+    const legacy = offerCapacityDisplay({ paidDeposits: 7, outstandingOffers: 5, seatsTotal: 120 });
+    expect(legacy.line).toContain("5 offers outstanding");
   });
 
   it("an unavailable seat count renders as UNKNOWN with the warn flag, never a confident stale number", () => {
@@ -208,6 +293,8 @@ describe("the three renderings carry the same deposit target", () => {
     const page = read("app/crm/(app)/dossiers/page.tsx");
     expect(page).toContain("offerCapacityDisplay(");
     expect(page).toContain("countOutstandingOffers(");
+    // W6: the dialog sees the split — clearing money vs mere promises.
+    expect(page).toContain("categorizeOutstanding(");
     const button = read("app/crm/components/dossiers/OfferEmailButton.tsx");
     expect(button).toContain("capacity.warn");
   });

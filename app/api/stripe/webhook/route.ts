@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { applyStripeEvent, type WebhookDeps } from "@/app/lib/funnel/deposit-core";
+import { alertIfAtCapacity, applyStripeEvent, type WebhookDeps } from "@/app/lib/funnel/deposit-core";
+import { SEATS_TOTAL } from "@/app/lib/site";
+import { FOUNDING_COMMITMENTS } from "@/app/lib/seats";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { notifyOps } from "@/app/lib/ops-alert";
 
@@ -162,6 +164,23 @@ export async function POST(req: Request) {
       { session: outcome.fulfilled.sessionId }
     );
   }
+  // W6a: a cleared bank debit is honoured even past capacity, so the
+  // over-allocation must be visible. The replay suppression lives INSIDE
+  // alertIfAtCapacity (it takes the whole outcome and returns
+  // "not_fulfilled" for a replay_noop), so it is a tested behaviour of
+  // the core rather than a property of where this line sits.
+  await alertIfAtCapacity(
+    {
+      readSeatsClaimed: async () => {
+        const { data } = await supabaseAdmin().rpc("seats_claimed");
+        return typeof data === "number" ? data : null;
+      },
+      notify: notifyOps,
+    },
+    outcome,
+    SEATS_TOTAL,
+    FOUNDING_COMMITMENTS
+  );
   if (outcome.kind === "double_paid" && session) {
     // A family paid twice for one seat: a refund is owed and only a human
     // can issue it. The console.error alone was the whole detection channel

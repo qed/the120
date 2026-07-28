@@ -1,12 +1,18 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  capacityAlarm,
   downgradeAllowed,
   fulfilVerdict,
   webhookPlan,
 } from "@/app/lib/funnel/deposit-rules";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 import {
+  alertIfAtCapacity,
   applyStripeEvent,
   type DepositRow,
   type WebhookDeps,
@@ -232,6 +238,120 @@ describe("applyStripeEvent", () => {
     expect(out).toEqual({ kind: "failed" });
   });
 
+  it("W6a: capacityAlarm fires at-or-past capacity, never below, and fails closed on an unreadable count", () => {
+    expect(capacityAlarm(112, 120, 7)).toBe(false); // 113 sellable, 112 claimed
+    expect(capacityAlarm(113, 120, 7)).toBe(true); // exactly at capacity
+    expect(capacityAlarm(114, 120, 7)).toBe(true); // past (over-allocation)
+    expect(capacityAlarm(null, 120, 7)).toBe(false); // unreadable → no alert, no crash
+    expect(capacityAlarm(Number.NaN, 120, 7)).toBe(false);
+    expect(capacityAlarm(Number.POSITIVE_INFINITY, 120, 7)).toBe(false);
+    // Founding commitments at or past the total clamp sellable to 0 —
+    // every fulfilment is then over-allocation by definition.
+    expect(capacityAlarm(0, 120, 120)).toBe(true);
+    expect(capacityAlarm(0, 120, 999)).toBe(true);
+  });
+});
+
+describe("alertIfAtCapacity — the W6a page, and why a replay cannot re-fire it", () => {
+  const fulfilled = {
+    kind: "ok" as const,
+    fulfilled: { childId: "c1", parentId: "p1", sessionId: "cs_test_a1b2c3" },
+  };
+  const spyDeps = (claimed: number | null) => {
+    const notified: { subject: string; body: string }[] = [];
+    let reads = 0;
+    return {
+      deps: {
+        readSeatsClaimed: async () => {
+          reads += 1;
+          return claimed;
+        },
+        notify: async (subject: string, body: string) => {
+          notified.push({ subject, body });
+        },
+      },
+      notified,
+      readCount: () => reads,
+    };
+  };
+
+  it("a written fulfilment at capacity pages ops ONCE, naming the child, session, and the counts", async () => {
+    const { deps, notified } = spyDeps(113);
+    expect(await alertIfAtCapacity(deps, fulfilled, 120, 7)).toBe("alerted");
+    expect(notified).toHaveLength(1);
+    expect(notified[0].subject).toContain("at capacity");
+    expect(notified[0].body).toContain("cs_test_a1b2c3");
+    expect(notified[0].body).toContain("113 of 113 sellable");
+  });
+
+  it("below capacity: reads the count, pages nobody", async () => {
+    const { deps, notified, readCount } = spyDeps(50);
+    expect(await alertIfAtCapacity(deps, fulfilled, 120, 7)).toBe("below");
+    expect(readCount()).toBe(1);
+    expect(notified).toEqual([]);
+  });
+
+  it("A REPLAYED completed never reads seats and never pages — replay_noop carries no fulfilled payload", async () => {
+    const { deps, notified, readCount } = spyDeps(113);
+    // This is exactly what applyStripeEvent returns for a replay: ok, no payload.
+    expect(await alertIfAtCapacity(deps, { kind: "ok" }, 120, 7)).toBe("not_fulfilled");
+    expect(readCount()).toBe(0);
+    expect(notified).toEqual([]);
+  });
+
+  it("double_paid and failed outcomes are not capacity events", async () => {
+    const { deps, readCount } = spyDeps(113);
+    expect(await alertIfAtCapacity(deps, { kind: "double_paid" }, 120, 7)).toBe("not_fulfilled");
+    expect(await alertIfAtCapacity(deps, { kind: "failed" }, 120, 7)).toBe("not_fulfilled");
+    expect(readCount()).toBe(0);
+  });
+
+  it("a seats read that THROWS is swallowed — the fulfilment 200 is never at risk", async () => {
+    const result = await alertIfAtCapacity(
+      {
+        readSeatsClaimed: async () => {
+          throw new Error("PostgREST down");
+        },
+        notify: async () => {},
+      },
+      fulfilled,
+      120,
+      7
+    );
+    expect(result).toBe("skipped");
+  });
+
+  it("a notify that THROWS is swallowed too — an alert never takes down what it alerts about", async () => {
+    const result = await alertIfAtCapacity(
+      {
+        readSeatsClaimed: async () => 113,
+        notify: async () => {
+          throw new Error("SMTP down");
+        },
+      },
+      fulfilled,
+      120,
+      7
+    );
+    expect(result).toBe("skipped");
+  });
+
+  it("an unreadable count fails closed: no page, no throw", async () => {
+    const { deps, notified } = spyDeps(null);
+    expect(await alertIfAtCapacity(deps, fulfilled, 120, 7)).toBe("below");
+    expect(notified).toEqual([]);
+  });
+
+  it("the route delegates to it (wiring scan) — the guard is the function's, not the call site's", () => {
+    const src = readFileSync(path.resolve(REPO_ROOT, "app/api/stripe/webhook/route.ts"), "utf8");
+    expect(src).toContain("alertIfAtCapacity(");
+    expect(src).toContain("readSeatsClaimed");
+    // The old inline form is gone: no bare capacityAlarm call in the route.
+    expect(src).not.toContain("capacityAlarm(");
+  });
+});
+
+describe("the route's source pins", () => {
   it("the route forwards only FULL refunds — a partial refund never flips status (source pin)", async () => {
     const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
     expect(src).toContain("charge.refunded !== true");

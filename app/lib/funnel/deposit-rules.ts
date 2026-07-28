@@ -171,6 +171,29 @@ export function downgradeAllowed(existing: ExistingDeposit): boolean {
   return existing.status !== "paid" && existing.status !== "refunded" && !existing.refunded_at;
 }
 
+/* ─────────────────── W6a: the over-capacity alarm ─────────────────── */
+
+/**
+ * A cleared bank debit is ALWAYS honoured — the webhook fulfils it even if
+ * the last seat sold while it cleared (W6a). Over-allocation is absorbed
+ * by staff judgment, and staff can only absorb what they can see: this
+ * decides whether a landed fulfilment must page ops.
+ *
+ * `claimed` is `seats_claimed()` read AFTER the write, so the fulfilment
+ * that just landed is included: claimed === sellable is exactly "we just
+ * sold the last seat", and greater than is a real over-allocation. An
+ * unreadable count fails CLOSED (no alert) — the alert must never be the
+ * thing that fails a fulfilment.
+ */
+export function capacityAlarm(
+  claimed: number | null,
+  seatsTotal: number,
+  foundingCommitments: number
+): boolean {
+  if (claimed === null || !Number.isFinite(claimed)) return false;
+  return claimed >= Math.max(0, seatsTotal - foundingCommitments);
+}
+
 /* ─────────────────── R50: Next Steps (three swipes) ─────────────────── */
 
 /** Reachable from the offer email or the dashboard once offered — NEVER

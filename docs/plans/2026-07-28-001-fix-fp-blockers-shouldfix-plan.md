@@ -87,7 +87,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 ## Implementation Units
 
-- [ ] **Unit 1: RC-1 — server-side navigation + missing `revalidatePath` (B2, B5, S1)**
+- [x] **Unit 1: RC-1 — server-side navigation + missing `revalidatePath` (B2, B5, S1)** *(done — sign-in/claim `revalidatePath` resolved "not needed": the server-action redirect carries fresh Flight data rendered after the session cookie is set; manual auth-boundary check still queued)*
 
 **Goal:** Mutation-then-navigation happens in one round trip from the Server Action; created students are immediately searchable.
 
@@ -116,7 +116,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 **Verification:** Origin acceptance for 2.5.8, 3.10.2, 2.4.2 against a live cohort; `npm test` green.
 
-- [ ] **Unit 2: RC-2 — board dead-link terminal state (B4, B6)**
+- [x] **Unit 2: RC-2 — board dead-link terminal state (B4, B6)** *(done — reducer carries `{ phase, consecutive404 }`; two documented judgment calls: an answered 503 resets the 404 run, a network throw doesn't break one)*
 
 **Goal:** A revoked/expired board link reaches a terminal "dead link" panel with a recovery step and stops polling.
 
@@ -149,7 +149,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 **Verification:** Origin acceptance for 3.5.3 / 3.18.2, amended by this plan's two-consecutive-404 decision: terminal panel within ≤8s of revocation (two poll intervals), polling stops (network tab), ops `Revoked` state unregressed.
 
-- [ ] **Unit 3: B7 — board cell non-colour state channel**
+- [x] **Unit 3: B7 — board cell non-colour state channel** *(done — projector-distance sign-off still queued as manual QA)*
 
 **Goal:** Verified / not-yet / untouched cells are distinguishable without colour and carry a programmatic name.
 
@@ -206,7 +206,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 **Verification:** Diagnosis outcome recorded; after fix, a live verified 1.2.4 tap produces the on-screen celebration; `capturedAtClamped` anomalies now visible in logs.
 
-- [ ] **Unit 5: S3 — remove duplicate "Founders Weekend" header (3.18.10)**
+- [x] **Unit 5: S3 — remove duplicate "Founders Weekend" header (3.18.10)** *(done, mutation-tested)*
 
 **Goal:** The cohort sticky header carries only what the StaffBar cannot: cohort name + switcher.
 
@@ -228,7 +228,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 **Verification:** One application label visible on the guide cohort surface; check 3.18.10 acceptance.
 
-- [ ] **Unit 6: D1 Option A — First Profit brand suffix on guide surfaces (B1, B3)**
+- [x] **Unit 6: D1 Option A — First Profit brand suffix on guide surfaces (B1, B3)** *(done, drift guard mutation-tested both ways)*
 
 **Goal:** All guide-facing titles and the invite email carry First Profit branding; a drift guard prevents recurrence.
 
@@ -271,7 +271,7 @@ A verification pass confirmed the work order's root-cause claims against the cod
 
 **Verification:** Checks 1.1.4 and 3.1.6 acceptance; drift guard in the `npm test` run listing.
 
-- [ ] **Unit 7: S4 + S5/S6/S7 closure — boundary test and close-from-source items**
+- [x] **Unit 7: S4 + S5/S6/S7 closure — boundary test and close-from-source items** *(done — S4 live-side case added; S5 headers, S6 attestation layers, and the S7 manifest half stand verified from source per the origin doc, no code; S7 device-half stays queued as physical QA)*
 
 **Goal:** Close the remaining should-fix items with a small test addition and documented no-code verdicts.
 

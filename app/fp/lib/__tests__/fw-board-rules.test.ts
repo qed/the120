@@ -180,6 +180,15 @@ describe("fwBoardTokenVerdict", () => {
     ).toEqual({ ok: false, reason: "expired" });
   });
 
+  it("keeps a token live 1ms before its expiry", () => {
+    // The live side of the boundary (check 3.5.5). Grace was applied at mint
+    // time — it is already inside expiresAt — so this is the ONLY boundary the
+    // verdict owns; testing expiresAt + grace here would double-count it.
+    expect(
+      fwBoardTokenVerdict({ token: { ...live, expiresAt: new Date(NOW + 1).toISOString() }, now: NOW })
+    ).toEqual({ ok: true });
+  });
+
   it("treats the exact expiry instant as expired, not as live", () => {
     expect(
       fwBoardTokenVerdict({ token: { ...live, expiresAt: new Date(NOW).toISOString() }, now: NOW })

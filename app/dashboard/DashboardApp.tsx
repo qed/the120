@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
 import { canReserveSeat, childName, completeness, hasPaidDeposit, statusMeta } from "./data";
+import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
 import DossierEditor from "./DossierEditor";
@@ -29,6 +30,9 @@ export default function DashboardApp({
     return result === "success" || result === "cancelled" ? result : null;
   });
   const [reservingId, setReservingId] = useState<string | null>(null);
+  // R51a: the ids whose policy checkbox is TICKED — unticked by default,
+  // per child, never remembered across loads.
+  const [policyAcceptedIds, setPolicyAcceptedIds] = useState<Set<string>>(new Set());
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,9 +52,16 @@ export default function DashboardApp({
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ childId }),
+        body: JSON.stringify({ childId, policyAccepted: true }),
       });
       const body = await res.json();
+      if (body.redirect) {
+        // F7: zero seats routes to the waitlist — a dead-end error string
+        // at the sold-out moment strands exactly the family most worth
+        // converting to the waitlist (both reviewers).
+        window.location.href = body.redirect;
+        return;
+      }
       if (!res.ok || !body.url) throw new Error(body.error ?? "Could not start checkout");
       window.location.href = body.url;
     } catch (err) {
@@ -214,12 +225,47 @@ export default function DashboardApp({
                         <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
                           ✓ Seat reserved · $250 deposit paid
                         </p>
+                      ) : depositsFor(c.id).some((d) => d.status === "pending") ? (
+                        <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
+                          Payment processing — bank debits can take a few days. No further
+                          action needed.
+                        </p>
                       ) : canReserve ? (
                         <>
+                          {/* R50: the three swipes are the offer's front door. */}
+                          <a
+                            href={`/start/next-steps?child=${c.id}`}
+                            className="mb-3 inline-block rounded font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue underline hover:text-red"
+                          >
+                            See your next steps →
+                          </a>
+                          {/* R51a: the FULL policy text inline at the point
+                              of payment, above an UNTICKED checkbox — a
+                              checkbox holding only a link is rejected by
+                              card issuers as dispute evidence. */}
+                          <p className="mb-2 rounded-lg border border-line bg-paper-2 p-3 text-[11px] leading-4 text-ink-soft">
+                            {REFUND_POLICY.text}
+                          </p>
+                          <label className="mb-3 flex items-start gap-2 text-[12px] leading-4 text-ink">
+                            <input
+                              type="checkbox"
+                              checked={policyAcceptedIds.has(c.id)}
+                              onChange={(e) =>
+                                setPolicyAcceptedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(c.id);
+                                  else next.delete(c.id);
+                                  return next;
+                                })
+                              }
+                              className="mt-0.5 h-4 w-4 accent-blue"
+                            />
+                            I have read and accept the refund policy above.
+                          </label>
                           <button
                             onClick={() => reserveSeat(c.id)}
-                            disabled={reservingId === c.id}
-                            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-wait disabled:opacity-60"
+                            disabled={reservingId === c.id || !policyAcceptedIds.has(c.id)}
+                            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
                           </button>

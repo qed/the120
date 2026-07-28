@@ -39,7 +39,6 @@ const SOURCES: ReadonlyMap<string, string> = new Map(
  */
 const LANE_A_DEADLINE_STRAGGLERS = [
   "app/crm/components/dashboard/DepositThermometer.tsx", // "REFUNDABLE UNTIL SEP 30"
-  "app/crm/lib/engine.ts", // "Refundable until Sept 30."
 ];
 
 /**

@@ -15,9 +15,9 @@
  */
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/app/fp/components/system/Button";
 import { claimGuideInviteAction } from "@/app/fp/lib/actions/fw-guide";
+import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 
 export default function ClaimGuideInviteForm({
   token,
@@ -26,7 +26,6 @@ export default function ClaimGuideInviteForm({
   token: string;
   email: string;
 }) {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,13 +37,16 @@ export default function ClaimGuideInviteForm({
     setError(null);
     try {
       const result = await claimGuideInviteAction({ token, password });
-      if (result.success) {
-        router.push("/fp/fw");
-        router.refresh();
-        return; // finally still clears busy
-      }
-      setError(result.error);
-    } catch {
+      // Only a refusal ever RESOLVES — including the partial success where the
+      // password set but the sign-in handshake hiccuped, which stays a typed
+      // return with its own copy. A FULL success redirects to /fp/fw, so this
+      // promise REJECTS with NEXT_REDIRECT (handled below) while the router
+      // navigates on the session the action just set.
+      if (!result.success) setError(result.error);
+    } catch (e) {
+      // The action's redirect surfaces here as a NEXT_REDIRECT rejection the
+      // router is already acting on — let it pass, never paint it as failure.
+      if (isNextRedirect(e)) return; // finally still clears busy
       setError("Something went wrong — please try again.");
     } finally {
       setBusy(false);

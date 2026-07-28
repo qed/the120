@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/app/fp/components/system/Button";
 import { Icon } from "@/app/fp/components/system/Icon";
 import { signInGuide } from "@/app/fp/lib/actions/fw-guide";
+import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 
 /**
  * The guide door's form (FW Unit 2) — email + password, one door, no tabs.
@@ -19,7 +19,6 @@ import { signInGuide } from "@/app/fp/lib/actions/fw-guide";
  * account enumeration), so nothing is added or specialized here.
  */
 export default function FwSignInForm() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,13 +31,14 @@ export default function FwSignInForm() {
     setError(null);
     try {
       const result = await signInGuide({ email, password });
-      if (result.success) {
-        router.push("/fp/fw");
-        router.refresh();
-        return; // finally still clears busy
-      }
-      setError(result.error);
-    } catch {
+      // Only a refusal ever RESOLVES: on success the action redirects to
+      // /fp/fw, so this promise REJECTS with NEXT_REDIRECT (handled below)
+      // while the router navigates on session freshly set by the action.
+      if (!result.success) setError(result.error);
+    } catch (e) {
+      // The action's redirect surfaces here as a NEXT_REDIRECT rejection the
+      // router is already acting on — let it pass, never paint it as failure.
+      if (isNextRedirect(e)) return; // finally still clears busy
       setError("Something went wrong — try again.");
     } finally {
       setBusy(false);

@@ -22,6 +22,7 @@
  */
 
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { sendEmail } from "@/app/lib/email";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -84,7 +85,8 @@ export type SignInGuideResult = { success: true } | { success: false; error: str
  *     an address is a guide at all. A signed-in non-guide simply resolves
  *     `not_a_guide` at the surface, exactly like any other session;
  *   - the cookie-bound @supabase/ssr client writes the session onto the action
- *     response; the client only navigates.
+ *     response; on success the action itself redirects to /fp/fw (RC-1), so
+ *     the client never navigates — it only renders refusals.
  *
  * NO "forgot password" link exists here, deliberately (see the file banner).
  */
@@ -117,7 +119,15 @@ export async function signInGuide(input: unknown): Promise<SignInGuideResult> {
   if (attempt.error) return { success: false, error: GUIDE_SIGN_IN_FAILED };
 
   clearRateLimitBucket(emailKey);
-  return { success: true };
+
+  // Success navigates FROM HERE (2026-07-28 work order, RC-1): the client-side
+  // `router.push` + `router.refresh` pair raced the freshly-set session cookie
+  // and could paint the hub from a stale client cache. The redirect's 303
+  // carries RSC rendered under the NEW session in the same round trip; no
+  // `revalidatePath` is needed because nothing cached changed — `/fp/fw` is a
+  // cookie-gated dynamic route, rendered fresh per request. `redirect()`
+  // throws NEXT_REDIRECT by design, so it sits outside any try/catch (canon).
+  redirect("/fp/fw");
 }
 
 /**
@@ -430,11 +440,19 @@ export async function claimGuideInviteAction(
   });
   if (signedIn.error) {
     // The password IS set — the credential is real, the session handshake was
-    // not. Send them to the door rather than implying the claim failed.
+    // not. Send them to the door rather than implying the claim failed. This
+    // partial success stays a TYPED RETURN, never a redirect: a redirect to
+    // /fp/fw would bounce an unauthenticated guide straight back to sign-in
+    // with no idea their password already works.
     return {
       success: false,
       error: "Your password is set but sign-in hiccuped — use it on the guide sign-in page.",
     };
   }
-  return { success: true };
+
+  // Full success navigates FROM HERE (2026-07-28 work order, RC-1) — same
+  // shape and reasoning as signInGuide above: 303 with fresh RSC under the new
+  // session, no `revalidatePath` (nothing cached changed), `redirect()`
+  // outside any try/catch because it throws NEXT_REDIRECT by design.
+  redirect("/fp/fw");
 }

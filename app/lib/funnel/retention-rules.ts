@@ -22,7 +22,7 @@
  *   "infinitely old".
  */
 
-/** ⚠ THE WRITTEN SCHEDULE (R55a) — DRAFT numbers, Peter confirms. */
+/** THE WRITTEN SCHEDULE (R55a) — CONFIRMED 2026-07-28 (Peter, decision batch). */
 export const RETENTION_SCHEDULE = {
   /** Days since the LAST activity on either the project row or the child
    *  row before free text becomes a candidate. */
@@ -33,10 +33,10 @@ export const RETENTION_SCHEDULE = {
 } as const;
 
 export const RETENTION_CLAIMS_FOR_PETER: string[] = [
-  "365 days of inactivity before de-identification — UNVERIFIED period, Peter to confirm",
-  "14-day stamped grace window before the irreversible pass — UNVERIFIED, Peter to confirm",
-  "Inactivity DEFINITION: the max of the project row's and the child row's last write — Peter to confirm the boundary",
-  "Scope: projects free text + quiz answers + family_goal; the application fields on children are KEPT (R55) — Peter to confirm",
+  "365 days of inactivity before de-identification — CONFIRMED 2026-07-28 (Peter)",
+  "14-day stamped grace window before the irreversible pass — CONFIRMED 2026-07-28 (Peter)",
+  "Inactivity DEFINITION: the max of the project row's and the child row's last write — CONFIRMED 2026-07-28 (Peter)",
+  "Scope: projects free text + quiz answers + family_goal; the application fields on children are KEPT (R55) — CONFIRMED 2026-07-28 (Peter)",
 ];
 
 /** What de-identified fields read as afterwards. Purged projects also flip

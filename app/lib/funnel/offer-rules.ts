@@ -121,13 +121,13 @@ export function postSubmitDestination(input: {
 }
 
 /** The truthful seats-full line for in-review families (never the waitlist
- *  wall's membership claims). ⚠ DRAFT, Peter revises. */
+ *  wall's membership claims). CONFIRMED as written 2026-07-28 (Peter). */
 export const SEATS_FULL_REVIEW_NOTE =
   "All 120 seats are currently spoken for. Reviews continue, and seats can open if plans change.";
 
-/* ─────────────────── the review-wait screen (DRAFT — Peter revises) ─────────────────── */
+/* ─────────────────── the review-wait screen (confirmed 2026-07-28) ─────────────────── */
 
-/** ⚠ DRAFT COPY, Peter revises (decision on file 2026-07-28). Every factual
+/** CONFIRMED as written 2026-07-28 (Peter, decision batch). Every factual
  *  claim below is registered in DRAFT_CLAIMS_FOR_PETER. */
 export const REVIEW_SCREEN = {
   kicker: "Application received",
@@ -153,7 +153,7 @@ export const REVIEW_SCREEN = {
     "Questions in the meantime? Reply to any email from us, or write admissions@the120.school.",
 } as const;
 
-/* ─────────────────── the waitlist screen (DRAFT — Peter revises) ─────────────────── */
+/* ─────────────────── the waitlist screen (confirmed 2026-07-28) ─────────────────── */
 
 export const WAITLIST_SCREEN = {
   kicker: "The founding cohort",
@@ -176,14 +176,15 @@ export const WAITLIST_SCREEN = {
 } as const;
 
 /**
- * ⚠ EVERY factual claim in the drafted screens, registered for Peter's
- * revision pass. The test asserts each claim's key phrase actually appears
- * in the copy — so editing the copy without re-visiting this register
- * fails the suite, and a claim cannot ship silently.
+ * EVERY factual claim in the drafted screens, registered and CONFIRMED
+ * as written by Peter on 2026-07-28 (the decision batch). The test asserts
+ * each claim's key phrase actually appears in the copy — so editing the
+ * copy without re-visiting this register fails the suite, and a claim
+ * cannot ship silently. New or reworded claims re-enter as UNVERIFIED.
  */
 export const DRAFT_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
   {
-    claim: "Review decisions arrive within five business days — UNVERIFIED, Peter to confirm or reword",
+    claim: "Review decisions arrive within five business days — CONFIRMED 2026-07-28 (Peter)",
     phrase: "five business days",
   },
   {
@@ -195,11 +196,11 @@ export const DRAFT_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
     phrase: DEPOSIT_REFUND_DEADLINE_LABEL,
   },
   {
-    claim: "Released seats go to the waitlist in order — UNVERIFIED policy, Peter to confirm",
+    claim: "Released seats go to the waitlist in order — CONFIRMED 2026-07-28 (Peter)",
     phrase: "in order",
   },
   {
-    claim: "Waitlist families are contacted before a released seat goes elsewhere — UNVERIFIED policy, Peter to confirm",
+    claim: "Waitlist families are contacted before a released seat goes elsewhere — CONFIRMED 2026-07-28 (Peter)",
     phrase: "before the seat goes anywhere else",
   },
   {
@@ -207,7 +208,7 @@ export const DRAFT_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
     phrase: "admissions@the120.school",
   },
   {
-    claim: "A human admissions team reads every full application — UNVERIFIED staffing promise, Peter to confirm",
+    claim: "A human admissions team reads every full application — CONFIRMED 2026-07-28 (Peter)",
     phrase: "admissions team reads the full application",
   },
   {

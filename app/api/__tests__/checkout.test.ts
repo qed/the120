@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALLOWED_ORIGINS,
+  CONSENT_MIN_POLICY_VERSION,
   DEPOSIT_AMOUNT_CENTS,
   POLICY_CLAIMS_FOR_PETER,
   REFUND_POLICY,
@@ -96,7 +97,21 @@ describe("R51a — the policy record", () => {
     for (const { claim, phrase } of POLICY_CLAIMS_FOR_PETER) {
       expect(REFUND_POLICY.text, claim).toContain(phrase);
     }
-    expect(POLICY_CLAIMS_FOR_PETER.some((c) => c.claim.includes("UNVERIFIED"))).toBe(true);
+    // 2026-07-28 batch: exactly TWO flagged entries survive — the
+    // Ontario-counsel tuition wording and the new consent clause. A new
+    // or reworded claim re-enters as UNVERIFIED and reddens this pin.
+    const unverified = POLICY_CLAIMS_FOR_PETER.filter((c) => c.claim.includes("UNVERIFIED"));
+    expect(unverified.map((c) => c.phrase).sort()).toEqual([
+      "applied to tuition",
+      "school account and email address",
+    ]);
+  });
+
+  it("the consent clause ships in the accepted text, and the consent-gate version IS this version (R51a bump)", () => {
+    expect(REFUND_POLICY.text).toContain("parent or legal guardian");
+    expect(REFUND_POLICY.text).toContain("school account and email address");
+    expect(REFUND_POLICY.version).toBe("2026-07-28.2");
+    expect(CONSENT_MIN_POLICY_VERSION).toBe(REFUND_POLICY.version);
   });
 });
 

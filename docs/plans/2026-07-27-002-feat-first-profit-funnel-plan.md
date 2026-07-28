@@ -893,7 +893,22 @@ state, verified against production data.
 
 ---
 
-- [ ] **Unit 9: Templates, the quiz, and input moderation**
+- [x] **Unit 9: Templates, the quiz, and input moderation** — *landed 2026-07-28.
+  `quiz-rules.ts` (10 templates §8.2-verbatim + own-idea box; 4 questions × 3 band
+  registers per group; parent-assist names the group, b35 only; blockers avoid
+  "failed"; template seeds are VALUES, suggestions stay placeholders) and
+  `moderation.ts` (storage pass REDACTS email/phone/street/postal/handle, masks
+  profanity, genericizes brands; model pass REJECTS the reserved delimiter ⟦⟧,
+  empties, over-length; `moderateAnswers` exported as the seam U10's compose MUST
+  wire before any insert). Steps live in MiniAppShell behind the existing ?step=
+  URL ladder; BUILT_STEPS now handoff→quiz. Review pair converged on two highs,
+  both fixed: cross-group contamination (template/answers now reset on door
+  switch AND re-validated at use) and STREET-regex false positives destroying
+  the product's own taught vocabulary ("3 houses on my street") — the honest
+  corpus now comes from the shipped copy. Suite 124 files / 3,263 tests; tsc,
+  build, lint clean. Draft answers stay client-side until the projects row at
+  U10 (accepted). Note: the plan named `app/start/child/[childId]/quiz/*`; steps
+  render inside MiniAppShell per U8's one-route-?step= decision instead.*
 
 **Goal:** Structured answers from a child, safely.
 

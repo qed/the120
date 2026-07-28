@@ -68,7 +68,7 @@ export const miniAppProgress = (step: MiniAppStep): number => progressPercent(st
  * In rules rather than in the component so the tests — and the later units —
  * flip ONE list.
  */
-export const BUILT_STEPS: readonly MiniAppStep[] = ["handoff", "doors"];
+export const BUILT_STEPS: readonly MiniAppStep[] = ["handoff", "doors", "templates", "quiz"];
 
 /* ─────────────────────────────── the doors (R34–R36) ─────────────────────────────── */
 

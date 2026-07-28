@@ -288,6 +288,7 @@ describe("the three lockstep mirrors agree (R14 — compared directly, no render
       });
       const nurturePct = nurtureCompleteness({
         parent_id: "p1",
+        applicant_state: null,
         first_name: c.firstName,
         last_name: c.lastName,
         grade: c.grade === "" ? null : c.grade,
@@ -333,7 +334,7 @@ describe("raw-shape parity: the fixtures the plan demanded (not the sanitizer's 
       workshopIds: [], interests: base.interests, projectPitch: base.projectPitch,
     });
     const nurturePct = nurtureCompleteness({
-      parent_id: "p1", first_name: base.firstName, last_name: base.lastName,
+      parent_id: "p1", applicant_state: null, first_name: base.firstName, last_name: base.lastName,
       grade: 5, birth_year: base.birthYear, current_school: base.currentSchool,
       group_slug: base.groupSlug, academics: rawAcademics, subjects: [],
       workshop_ids: [], interests: base.interests, project_pitch: base.projectPitch,

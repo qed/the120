@@ -56,6 +56,9 @@ export type NurtureChildRow = {
   /** jsonb array of {subject, plan, goal} — tolerant-parsed, never trusted. */
   academics: unknown;
   subjects: string[] | null;
+  /** The funnel ladder rung (NULL = pre-funnel child) — R61's abandonment
+   *  point derives from it. */
+  applicant_state: string | null;
   /** Legacy picks: kept on the row shape for old data, ignored by
    *  completeness since the Workshops removal (funnel U12). */
   workshop_ids: string[] | null;
@@ -81,7 +84,9 @@ export type NurtureTemplate =
   | "deposit-welcome"
   | "deposit-intensive"
   | "deposit-referral"
-  | "stall-nudge";
+  | "stall-nudge"
+  | "stall-child"
+  | "stall-project";
 
 export type DueSend = {
   familyId: string;
@@ -150,6 +155,38 @@ export function dossierCompleteness(c: NurtureChildRow): number {
     (c.project_pitch ?? "").trim().length >= 10,
   ];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+}
+
+/**
+ * R61: the abandonment point a stalled child sits at, deriving the
+ * sequence's template. Funnel children carry the ladder; a pre-funnel
+ * draft (NULL state) with a nearly-done dossier is the classic stall.
+ *
+ * R61's full list and this engine's coverage, explicitly (the reviewers:
+ * an undocumented hole reads as a silent gap):
+ * - captured-but-no-child → the ACCOUNT sequence (d2/d5) is its cover.
+ * - child-but-no-project → stall-child (here).
+ * - project-but-no-application → stall-project (here).
+ * - applied-but-no-deposit → DEFERRED, carried item: the offer email is
+ *   the current touch; a post-offer nudge needs an offer timestamp this
+ *   engine does not load yet. Registered in the build's closing note.
+ * - R61 also asks for the PROJECT name in the subject; the engine has no
+ *   project data and the build's privacy posture is "no child data beyond
+ *   a first name" — the deviation is deliberate, flagged to Peter.
+ */
+export function abandonmentTemplate(c: NurtureChildRow): NurtureTemplate {
+  if (c.applicant_state === "added") return "stall-child";
+  if (c.applicant_state === "project_created") return "stall-project";
+  return "stall-nudge";
+}
+
+/** Which draft children count as STALLED for R61: a funnel child parked on
+ *  the ladder's early rungs, or any near-complete dossier (the original
+ *  nudge). */
+export function isStalledDraft(c: NurtureChildRow): boolean {
+  if (c.status !== "draft") return false;
+  if (c.applicant_state === "added" || c.applicant_state === "project_created") return true;
+  return dossierCompleteness(c) > STALL_COMPLETENESS_MIN;
 }
 
 export function firstNameOf(parentName: string): string {
@@ -240,29 +277,47 @@ export function computeDueSends(input: {
       }
     }
 
-    // --- stalled-dossier nudge (one-time) ---
-    if (
-      family.parent_id &&
-      !hasPaid &&
-      !family.dossier_submitted_at &&
-      !sent.has(`${family.id}|stall|nudge-1`)
-    ) {
+    // --- stalled-child nudge (one-time, R61: CHILD-aware) ---
+    // The family-level dossier_submitted_at gate is GONE: submitting child
+    // A's dossier must not silence the nudge for stalled child B (the
+    // plan's named edge). Per-child status already scopes to unsubmitted
+    // drafts; hasPaid still stops the whole sequence (they are a customer).
+    if (family.parent_id && !hasPaid) {
       const stalled = children
-        .filter((c) => c.status === "draft" && dossierCompleteness(c) > STALL_COMPLETENESS_MIN)
+        .filter(isStalledDraft)
         .map((c) => ({ child: c, quietSinceMs: ms(c.updated_at) }))
         .filter((x): x is { child: NurtureChildRow; quietSinceMs: number } => x.quietSinceMs !== null)
-        .sort((a, b) => dossierCompleteness(b.child) - dossierCompleteness(a.child));
+        // Deepest-in-the-funnel first: a project-no-application stall is
+        // worth more than a fresh add; ties break toward completeness.
+        .sort(
+          (a, b) =>
+            (b.child.applicant_state === "project_created" ? 1 : 0) -
+              (a.child.applicant_state === "project_created" ? 1 : 0) ||
+            dossierCompleteness(b.child) - dossierCompleteness(a.child)
+        );
       const top = stalled[0];
       if (top) {
+        const template = abandonmentTemplate(top.child);
+        // ONE nudge per ABANDONMENT POINT per family (not one ever): a
+        // child who stalls at 'added', gets nudged, builds a project, and
+        // stalls again at 'project_created' deserves the second point's
+        // nudge — a single lifetime key silenced exactly the sequence R61
+        // asks for (both reviewers).
+        const step =
+          template === "stall-child"
+            ? "nudge-child"
+            : template === "stall-project"
+              ? "nudge-project"
+              : "nudge-1";
         const dueAtMs = top.quietSinceMs + STALL_QUIET_DAYS * DAY_MS;
-        if (inWindow(nowMs, dueAtMs)) {
+        if (inWindow(nowMs, dueAtMs) && !sent.has(`${family.id}|stall|${step}`)) {
           candidates.push({
             familyId: family.id,
             email,
             firstName,
             sequence: "stall",
-            step: "nudge-1",
-            template: "stall-nudge",
+            step,
+            template,
             childFirstName: top.child.first_name.trim() || undefined,
             dueAtMs,
           });

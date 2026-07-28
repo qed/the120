@@ -1398,7 +1398,31 @@ answerable from one query.
 
 ---
 
-- [ ] **Unit 17: Nurture and retention**
+- [x] **Unit 17: Nurture and retention** — *landed 2026-07-28, the FINAL unit.
+  R61: the nurture engine is CHILD-aware — the family-level
+  dossier_submitted_at gate is gone (submitting child A no longer silences
+  stalled child B; positive sibling test), funnel children stalled at
+  added/project_created get point-specific templates (stall-child /
+  stall-project, one nudge per POINT per family, deepest-first), names
+  HTML-escaped in the html parts (the never-met plan scenario, now met with an
+  esc() helper + test). Deep links go to /start (the re-entry matrix derives
+  the resume point server-side — never a URL encoding it); one-click minted
+  resume tokens are a documented follow-up. R61 coverage documented per point:
+  captured-no-child = the account sequence; applied-but-no-deposit = DEFERRED
+  (carried item — needs an offer timestamp); project-name-in-subject =
+  deliberate privacy deviation, flagged. R55/R55a: the WRITTEN schedule
+  (retention-rules.ts, 365d inactivity + 14d STATEFUL grace — claims
+  registered for Peter incl. the inactivity DEFINITION) runs weekly via a GET
+  cron (the reviewers: the first draft exported POST, which Vercel cron would
+  have 405'd forever). Fail-closed in every direction: paged refusing reads on
+  ALL inputs incl. the deposits exemption source; inactivity = max(project,
+  child) writes; notice stamped durably (purge_noticed_at, migration
+  20260814120000, applied + verified) before anything irreversible; NaN dates
+  skipped; goal wiped BEFORE the marker so failures retry; purged rows flip to
+  'abandoned' so no active read (wizard prefill!) renders the marker back to a
+  family. Suite 135 files / 3,487 tests; tsc, build, lint clean. Verification
+  note: the full seeded nurture-cycle run and a staged retention rehearsal
+  remain for a keyed environment (Peter or CI with CRON_SECRET).*
 
 **Goal:** Recover abandoned families, and delete what should not be kept.
 

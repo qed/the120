@@ -703,6 +703,187 @@ export function fwOpsCohortAffordances(input: { archived: boolean }): {
   };
 }
 
+/* ═══════════════════════════════════════════════ the section nav's chips ══ */
+
+/**
+ * Mirrors `FwBoardTokenStatus` in `fw-ops-core.ts` STRUCTURALLY, on purpose:
+ * this module is free of Next/Supabase imports (its header's doctrine), and
+ * `fw-ops-core` imports the Supabase client. The page passes the core's value
+ * straight through; TypeScript checks the union member-for-member, so a status
+ * added to one side without the other is a compile error at the call site.
+ */
+export type FwOpsBoardChipStatus = "never_minted" | "live" | "expired" | "revoked";
+
+/** The credential facts the guide chip needs — a structural subset of
+ *  `FwOpsGuide` (same no-Supabase-import reasoning as the board status). */
+export type FwOpsGuideChipRow = {
+  credential: "no_invite" | "invited" | "claimed" | "expired";
+  /** Staff grant-holders sit OUTSIDE the "all guides claimed" line (ops
+   *  redesign Unit 5): they have no credential to claim, so they count toward
+   *  the total but never toward "unclaimed". */
+  isStaff: boolean;
+};
+
+/** The three tones are the page's existing chip vocabulary (`FwGuideRoster`'s
+ *  CREDENTIAL map): `verified` = green "done", `not-yet` = amber "needs a
+ *  human", `neutral` = plain information. */
+export type FwOpsSectionChipTone = "verified" | "not-yet" | "neutral";
+
+export type FwOpsSectionKey =
+  | "window"
+  | "board"
+  | "guides"
+  | "replays"
+  | "match"
+  | "exceptions"
+  | "students"
+  | "retire";
+
+export type FwOpsSectionNavEntry = {
+  key: FwOpsSectionKey;
+  /** Compact on purpose — the nav is a horizontal strip that must survive
+   *  375px; the full sentence lives on the section heading it jumps to. */
+  label: string;
+  /** Absent when there is nothing to say — a "0 open" chip on every quiet
+   *  section would bury the one chip that matters. */
+  chip?: { text: string; tone: FwOpsSectionChipTone };
+};
+
+/** The truthful chip for a section whose read failed: the section itself
+ *  renders "couldn't load — not the same thing as none", and a nav that showed
+ *  "0" over that would be the lie the section's copy exists to avoid. */
+const UNAVAILABLE_CHIP = { text: "Unavailable", tone: "neutral" as const };
+
+/**
+ * The section nav's entries with their at-a-glance chips (ops redesign Unit 6;
+ * R16) — ONE pure derivation over the data the page ALREADY loaded in its
+ * single `loadOpsCohortPage` pass. R16's constraint is structural: the signal
+ * derives from the same full-page load the sections render from, never from a
+ * second read and never from a lazily-mounted form — so a chip can only
+ * disagree with its section if this function disagrees with the section's own
+ * rendering, which is exactly what the tests pin.
+ *
+ * Entries track PRESENCE, not just possibility: the archived page does not
+ * render "Weekend window", "Find a returning student", or "Retire this
+ * weekend" (they are `!banner` / `show.matchResolver` sections), so their nav
+ * entries are omitted rather than rendered as anchors to nowhere. The wiring
+ * test holds the two lists in parity by scanning the page source for
+ * `id="fw-ops-…"` against this function's keys.
+ *
+ * Each `{ok:false}` input is a section whose read failed — the chip says
+ * "Unavailable" because the section says "couldn't load", and both refuse to
+ * present a failed read as an empty list.
+ */
+export function fwOpsSectionChips(input: {
+  archived: boolean;
+  board: { ok: true; status: FwOpsBoardChipStatus } | { ok: false };
+  guides: { ok: true; guides: readonly FwOpsGuideChipRow[] } | { ok: false };
+  /** Unresolved replay rejects — the page's default read is already open-only. */
+  replays: { ok: true; openCount: number } | { ok: false };
+  /** Pending import exceptions — likewise open-only at the read. */
+  importExceptions: { ok: true; openCount: number } | { ok: false };
+  students: { ok: true; count: number } | { ok: false };
+}): FwOpsSectionNavEntry[] {
+  const entries: FwOpsSectionNavEntry[] = [];
+
+  if (!input.archived) {
+    // No chip: the window has no "state" worth a glance — it is always
+    // editable when the section renders at all.
+    entries.push({ key: "window", label: "Window" });
+  }
+
+  entries.push({ key: "board", label: "Board", chip: boardChip(input.board) });
+  entries.push({ key: "guides", label: "Guides", chip: guidesChip(input.guides) });
+  entries.push({
+    key: "replays",
+    label: "Replays",
+    chip: openCountChip(input.replays),
+  });
+
+  if (!input.archived) {
+    // No chip: the resolver is a lookup form, not a queue — there is no count
+    // of "matches waiting" loaded on this page to be honest about.
+    entries.push({ key: "match", label: "Returning" });
+  }
+
+  entries.push({
+    key: "exceptions",
+    label: "Exceptions",
+    chip: openCountChip(input.importExceptions),
+  });
+  entries.push({
+    key: "students",
+    label: "Students",
+    chip: input.students.ok
+      ? { text: String(input.students.count), tone: "neutral" }
+      : UNAVAILABLE_CHIP,
+  });
+
+  if (!input.archived) {
+    entries.push({ key: "retire", label: "Retire" });
+  }
+
+  return entries;
+}
+
+/** Board: the four `FwBoardTokenStatus` states, each with the tone of its next
+ *  action — live is the only "nothing to do here" state. */
+function boardChip(
+  board: { ok: true; status: FwOpsBoardChipStatus } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } {
+  if (!board.ok) return UNAVAILABLE_CHIP;
+  switch (board.status) {
+    case "live":
+      return { text: "Live", tone: "verified" };
+    case "expired":
+      return { text: "Expired", tone: "not-yet" };
+    case "revoked":
+      return { text: "Revoked", tone: "not-yet" };
+    case "never_minted":
+      // Neutral, not amber: a weekend that has not minted yet is a normal
+      // pre-event state, not a fault — the checklist pressure comes from the
+      // window, not from this chip.
+      return { text: "No link", tone: "neutral" };
+    default: {
+      const _exhaustive: never = board.status;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Guides: the "all guides claimed" checklist line as a chip. Total counts every
+ * grant-holder (staff included — they can check students in); "unclaimed"
+ * counts only NON-STAFF guides whose credential is not `claimed`, because a
+ * staff row has no credential to claim (Unit 5's roster discriminator).
+ *
+ * Zero guides is amber, not neutral: a weekend nobody can guide is the first
+ * thing this page exists to catch.
+ */
+function guidesChip(
+  guides: { ok: true; guides: readonly FwOpsGuideChipRow[] } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } {
+  if (!guides.ok) return UNAVAILABLE_CHIP;
+  const total = guides.guides.length;
+  if (total === 0) return { text: "0", tone: "not-yet" };
+  const unclaimed = guides.guides.filter((g) => !g.isStaff && g.credential !== "claimed").length;
+  if (unclaimed > 0) {
+    return { text: `${total} · ${unclaimed} unclaimed`, tone: "not-yet" };
+  }
+  return { text: String(total), tone: "verified" };
+}
+
+/** Replays and import exceptions share one shape: n open items is amber work,
+ *  zero is silence (no chip — see `FwOpsSectionNavEntry.chip`), a failed read
+ *  is "Unavailable". */
+function openCountChip(
+  source: { ok: true; openCount: number } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } | undefined {
+  if (!source.ok) return UNAVAILABLE_CHIP;
+  if (source.openCount === 0) return undefined;
+  return { text: `${source.openCount} open`, tone: "not-yet" };
+}
+
 /**
  * The archive confirm gate (Unit 9; upgraded in ops redesign Unit 2) — typed-slug
  * confirmation, same shape as the anonymize confirm: archiving darkens a public

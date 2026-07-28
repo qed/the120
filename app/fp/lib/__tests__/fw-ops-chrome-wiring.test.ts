@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { fwOpsSectionChips } from "../fw-ops-rules";
+
 /**
  * The ops tab row's WIRING (ops redesign Unit 1) — properties of the source that
  * no behavioural test in this repo can reach. `environment: "node"` with no
@@ -34,6 +36,8 @@ const MENU = stripComments(read("../../fw/components/FwOpsRowMenu.tsx"));
 const ARCHIVE_CONTROL = stripComments(read("../../fw/components/FwArchiveControl.tsx"));
 const LAYOUT = stripComments(read("../../fw/(app)/ops/layout.tsx"));
 const PAGE = stripComments(read("../../fw/(app)/ops/page.tsx"));
+const COHORT_PAGE = stripComments(read("../../fw/(app)/ops/cohort/[cohortId]/page.tsx"));
+const SECTION_NAV = stripComments(read("../../fw/components/FwOpsSectionNav.tsx"));
 
 describe("the row keeps the sticky-offset contract it inherited from the old header", () => {
   it("is sticky under the bar's published height, with the 0px fallback", () => {
@@ -165,5 +169,84 @@ describe("the ops layout renders the chrome and keeps its gate", () => {
     // `notFound()` is the refusal shape: to a guide, /fp/fw/ops is not a page.
     expect(LAYOUT).toMatch(/resolveFwStaffGate\(\)/);
     expect(LAYOUT).toMatch(/notFound\(\)/);
+  });
+});
+
+describe("the cohort page's section nav (redesign Unit 6, R16)", () => {
+  /** Every `id="fw-ops-…"` the page's SOURCE carries — the archived page
+   *  renders a subset of these, which the derivation (not the source) decides. */
+  const pageIds = [...COHORT_PAGE.matchAll(/id="fw-ops-([a-z]+)"/g)].map((m) => m[1]);
+
+  /** All-ok fixture: presence is decided by `archived` alone, so healthy inputs
+   *  are enough for parity — chips are the rules suite's business. */
+  const entriesFor = (archived: boolean) =>
+    fwOpsSectionChips({
+      archived,
+      board: { ok: true, status: "live" },
+      guides: { ok: true, guides: [] },
+      replays: { ok: true, openCount: 0 },
+      importExceptions: { ok: true, openCount: 0 },
+      students: { ok: true, count: 0 },
+    });
+
+  it("every section id on the page has a nav entry, and vice versa (parity)", () => {
+    // THE pin that reddens when someone adds a ninth section without a nav
+    // entry — or a nav entry without a section. The page's source ids are the
+    // full (active-weekend) set; the derivation's active output must equal it.
+    expect(pageIds.length).toBe(8);
+    expect(new Set(pageIds)).toEqual(new Set(entriesFor(false).map((e) => e.key)));
+  });
+
+  it("the archived nav is a strict subset of the page's ids — no anchor to nowhere", () => {
+    for (const entry of entriesFor(true)) {
+      expect(pageIds).toContain(entry.key);
+    }
+  });
+
+  it("the nav's anchors and focus lookups both target the same fw-ops- ids", () => {
+    // The component builds hrefs and its getElementById from one prefix +
+    // entry.key — a drifted spelling on either side breaks the jump silently.
+    expect(SECTION_NAV).toMatch(/const ID_PREFIX = "fw-ops-"/);
+    expect(SECTION_NAV).toMatch(/href=\{`#\$\{ID_PREFIX\}\$\{entry\.key\}`\}/);
+    expect(SECTION_NAV).toMatch(/getElementById\(`\$\{ID_PREFIX\}\$\{key\}`\)/);
+  });
+
+  it("the page mounts the nav with the derived entries", () => {
+    expect(COHORT_PAGE).toMatch(/<FwOpsSectionNav\s+entries=\{navEntries\}/);
+    expect(COHORT_PAGE).toMatch(/fwOpsSectionChips\(\{/);
+  });
+
+  it("the nav is sticky under the staff-bar + tab-row stack", () => {
+    // The offset must ride a sticky element (top on a static one is inert) and
+    // must clear BOTH layers above: the bar's published var (with its 0px
+    // rollback fallback) plus the tab row's documented 61px constant.
+    expect(SECTION_NAV).toMatch(/className="sticky /);
+    expect(SECTION_NAV).toMatch(/const TAB_ROW_H = 61/);
+    expect(SECTION_NAV).toMatch(
+      /top: `calc\(var\(--staff-bar-h, 0px\) \+ \$\{TAB_ROW_H\}px\)`/
+    );
+  });
+
+  it("jumps move FOCUS to the heading, and the headings can take it", () => {
+    // The a11y half of R16's one-interaction requirement: a plain anchor
+    // scrolls but leaves focus behind, so Tab lands back at the top. The nav
+    // focuses the target; the page's h2s carry tabIndex={-1} to accept it.
+    expect(SECTION_NAV).toMatch(/target\.focus\(\{ preventScroll: true \}\)/);
+    expect(COHORT_PAGE).toMatch(/tabIndex=\{-1\}/);
+  });
+
+  it("sections carry scroll-margin-top so a jumped-to heading clears the sticky chrome", () => {
+    expect(COHORT_PAGE).toMatch(/scroll-mt-\[calc\(var\(--staff-bar-h,0px\)\+112px\)\]/);
+  });
+
+  it("sections stay fully rendered — no accordion, tabs, or lazy mounts (R16's constraint)", () => {
+    // The chips' honesty depends on the nav and the sections rendering from one
+    // load; an accordion or lazy mount would reintroduce the second read R16
+    // forbids. `force-dynamic` is rendering-mode config, not a lazy mount, and
+    // is excluded by matching the import forms specifically.
+    expect(COHORT_PAGE).not.toMatch(/<details|<Tabs|Accordion/);
+    expect(COHORT_PAGE).not.toMatch(/next\/dynamic|React\.lazy|import\(/);
+    // The nav itself holds no open/closed state — it is a strip, not a menu.
+    expect(SECTION_NAV).not.toMatch(/useState/);
   });
 });

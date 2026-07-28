@@ -59,7 +59,7 @@ export default function FwCohortPicker({
               </span>
               {lastUsed === cohort.id && (
                 <span className="mt-0.5 block font-path-mono text-[11px] uppercase tracking-[0.12em] text-hq-ink-muted">
-                  Last used on this iPad
+                  Last used
                 </span>
               )}
             </span>

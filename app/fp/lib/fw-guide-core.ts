@@ -134,9 +134,10 @@ export async function listFwCohortsForActor(
     isStaff: boolean;
     /**
      * Unit 9. The CALLERS decide (the plan's settled read-carries-callers-decide
-     * rule): the cohort LAYOUT takes everything (its one list feeds the header name
-     * AND `canSwitch`, and filtering would strand a guide inside an archived cohort
-     * with no Switch link); the GUIDE picker takes everything (a guide's archived
+     * rule): the cohort LAYOUT takes everything (its one list feeds the header's
+     * weekend name, which must resolve for an archived cohort the actor has open —
+     * filtering would paint "This weekend" over the wrong stamp); the GUIDE picker
+     * takes everything (a guide's archived
      * weekend is still theirs to open); the STAFF picker excludes archived (staff
      * default visibility is the point of archiving).
      */

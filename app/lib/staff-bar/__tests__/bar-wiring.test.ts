@@ -614,6 +614,26 @@ describe("R16 — one sign-out control, and the other two are GONE not merely un
   });
 });
 
+describe("the cohort header duplicates no application label (3.18.10)", () => {
+  it("renders no 'Founders Weekend' text beneath the bar — the bar names the application", () => {
+    // The bar's own doc comment settles the split: "the bar never names a weekend,
+    // only the application" — and the cohort header keeps the context only IT can
+    // carry, which is the weekend name. An application label here was therefore the
+    // same label twice, stacked, on every cohort surface. The `· Staff` marker went
+    // with it: staff identity is the bar's, and a dangling marker reads broken.
+    //
+    // Comment-stripped (the layout's comments legitimately discuss the label they
+    // removed) and whitespace-tolerant (a formatter wrapping the words must not
+    // change the verdict). Not pinned to JSX shape: ANY reappearance of the literal
+    // in code — string, expression, ternary arm — is the regression.
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).not.toMatch(/Founders\s+Weekend/);
+    // Guard against the vacuous cousin of this pass: the header itself must still
+    // exist and still carry the weekend name (also pinned structurally below).
+    expect(layout).toMatch(/This weekend/);
+  });
+});
+
 describe("Unit 9 — who includes archived cohorts is a WIRING decision, pinned", () => {
   it("the cohort LAYOUT takes everything; the PICKER splits by role", () => {
     // The plan's settled split, asserted where it lives. The layout's one list

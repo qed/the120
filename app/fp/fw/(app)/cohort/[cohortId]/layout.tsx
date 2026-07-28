@@ -77,14 +77,15 @@ export default async function FwCohortLayout({
       {active && <FwCohortMemory id={active.id} slug={active.slug} />}
 
       <header className="sticky top-[var(--staff-bar-h,0px)] z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
-        <div className="min-w-0">
-          <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
-            {isStaff ? "Founders Weekend · Staff" : "Founders Weekend"}
-          </p>
-          <p className="truncate font-path-display text-base font-semibold text-hq-ink">
-            {active?.slug ?? "This weekend"}
-          </p>
-        </div>
+        {/* The cohort name ONLY — no application label. The StaffBar above already
+            names the application (its doc comment: "the bar never names a weekend,
+            only the application"), so a "Founders Weekend" line here was the same
+            label twice on every cohort surface. Staff identity is the bar's job
+            too, so the `· Staff` marker went with it. This header keeps the
+            context only it can carry: which weekend is active. */}
+        <p className="min-w-0 truncate font-path-display text-base font-semibold text-hq-ink">
+          {active?.slug ?? "This weekend"}
+        </p>
 
         <div className="flex shrink-0 items-center gap-4">
           {/* Staff only, and the visibility is purely a way IN — the ops pages

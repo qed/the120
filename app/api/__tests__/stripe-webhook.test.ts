@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -127,7 +128,12 @@ describe("applyStripeEvent", () => {
       type: "checkout.session.completed",
       session: session(),
     });
-    expect(out).toEqual({ kind: "ok" });
+    // U16: a WRITTEN fulfilment carries the ids the c3_deposit emit needs;
+    // replays (below) stay bare ok so the conversion never double-counts.
+    expect(out).toEqual({
+      kind: "ok",
+      fulfilled: { childId: "child-1", parentId: "parent-1", sessionId: "cs_1" },
+    });
     expect(h.writes).toEqual(["cs_1:paid"]);
     expect(h.linked).toEqual(["attempt-1"]);
   });
@@ -227,19 +233,19 @@ describe("applyStripeEvent", () => {
   });
 
   it("the route forwards only FULL refunds — a partial refund never flips status (source pin)", async () => {
-    const src = require("node:fs").readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
     expect(src).toContain("charge.refunded !== true");
     expect(src).toContain("PARTIAL refund");
   });
 
   it("the fulfil write is conditional IN SQL — the deposit_fulfil RPC refuses over refunded rows atomically (migration pin)", () => {
-    const sql = require("node:fs").readFileSync(
+    const sql = readFileSync(
       "supabase/migrations/20260812120000_funnel_deposit_fulfil.sql",
       "utf8"
     );
     expect(sql).toContain("deposits.refunded_at is null");
     expect(sql).toContain("when unique_violation then");
-    const route = require("node:fs").readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    const route = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
     expect(route).toContain('rpc("deposit_fulfil"');
   });
 

@@ -1328,7 +1328,31 @@ real send.
 
 ### Phase 4 — Instruments
 
-- [ ] **Unit 16: Event stream, CRM stages, and live dossiers**
+- [x] **Unit 16: Event stream, CRM stages, and live dossiers** — *landed
+  2026-07-28. funnel_events (migration 20260813120000, applied + verified):
+  18-name CHECK, denormalized tuple (entry_source/band/group), no PII in
+  properties (executable sanitizer + adversarial sweep), RLS zero policies
+  service-role-only, no FKs (purge-survival). 12 of 18 names EMIT server-side
+  (c1 capture, child_added, door_confirmed, quiz_start, project_created/
+  regenerated, reveal_viewed, faq_opened via the U11 seam, c2, c3, start_view,
+  share_card); six RESERVED with documented reasons (lp_view/explainer_start →
+  bot-resistance item; application_started → U17; project_switched → later
+  product op; student_account_created → U15; c4_tuition → post-launch). R59:
+  FUNNEL_STAGES + stageFromEvents (furthest stage, earliest stamp) surfaced in
+  the dossier detail with time-in-stage; R60: the funnel project + quiz answers
+  render in the CRM dossier. REVIEW (both agents, converging): c2 emitted
+  BEFORE auth/claim (unauthenticated conversion forgery — moved inside the won
+  claim, order pinned by test, awaited); tuple columns dodged the property
+  sanitizer (raw ?src= and raw capture source stored verbatim — readCtaSource
+  at every call site now); the 5000-row stage read was DEAD against the
+  documented max-rows=1000 (silent truncation to the oldest events — now
+  paged in 1000 windows filtered to queue children with a refusing ceiling);
+  door_confirmed is SERVER truth (child's prior group; re-confirms emit
+  nothing); Stripe session ids survived the sanitizer only after testing with
+  a real 66-char id; texture events attribute childId via the caller's RLS
+  read. Verification: the ads question is one query over funnel_events
+  (count by name grouped by entry_source — tuple denormalized, no joins).
+  Suite 134 files / 3,472 tests; tsc, build, lint clean.*
 
 **Goal:** Answer the question the whole build exists to answer.
 

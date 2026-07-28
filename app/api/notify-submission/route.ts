@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -66,6 +67,15 @@ export async function POST(req: Request) {
     if (!claimed || claimed.length === 0) {
       return NextResponse.json({ ok: true, already: true });
     }
+
+    // R56/R58: C2 — emitted ONLY inside the won claim, which sits behind
+    // auth, the RLS ownership read, and the non-draft check. The claim's
+    // null→now() flip is the "exactly once per transition" boundary; the
+    // first version emitted before all four gates and both reviewers
+    // caught it (unauthenticated conversion forgery + once-per-call
+    // counting). AWAITED: a serverless freeze after the response must not
+    // eat the conversion the ads math divides by.
+    await emitFunnelEvent("c2_applied", { childId });
 
     // Child and parent names are parent-controlled text: bracketed, truncated
     // (guard-hardening precedent), newlines stripped from the subject — and

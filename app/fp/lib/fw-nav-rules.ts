@@ -746,6 +746,66 @@ export function buildFwTaskTree(input: {
   });
 }
 
+/* ══════════════════ the phase nav + the retired task route (redesign R19, R21) ══ */
+
+/** A phase's `?phase=` slug — the URL vocabulary the student page's phase nav
+ *  round-trips through. Lowercase because it is user-visible in the address bar. */
+export function fwPhaseSlug(key: PhaseKey): string {
+  return key.toLowerCase();
+}
+
+/** The single-word nav entry (R19): "Sell", "Build", "Validate", "Grow", "Scale".
+ *  Derived from the key rather than a second hand-written list, so a program
+ *  version can never render a phase the nav has no word for. */
+export function fwPhaseLabel(key: PhaseKey): string {
+  return key.charAt(0) + key.slice(1).toLowerCase();
+}
+
+/**
+ * The leading component of a task id names its phase — "2.3.1" is a BUILD task.
+ *
+ * STATIC, deliberately: the retired task route's redirect (Unit 8) derives the
+ * landing phase from nothing but the URL, so it must not load a program version
+ * (which would need the student row, a DB read, on a route whose only job is to
+ * bounce a stale SW-cached shell). The id scheme is the generated content's own
+ * (`N.criterion.task`, phases seq 1–5), stable across versions by construction.
+ */
+const FW_PHASE_BY_LEADING_NUMBER: Readonly<Record<string, PhaseKey>> = {
+  "1": "SELL",
+  "2": "BUILD",
+  "3": "VALIDATE",
+  "4": "GROW",
+  "5": "SCALE",
+};
+
+/** `"2.3.1"` → `"build"`; anything unparseable or out of range → null (the
+ *  redirect lands phase-less and the student page falls back to its first
+ *  phase — never an error on a URL only an old cached shell still holds). */
+export function fwPhaseParamForTaskId(taskId: string): string | null {
+  const parts = parseFwTaskId(taskId);
+  if (!parts) return null;
+  const key = FW_PHASE_BY_LEADING_NUMBER[String(parts[0])];
+  return key ? fwPhaseSlug(key) : null;
+}
+
+/**
+ * Resolve a raw `?phase=` value against the phases actually in this student's
+ * pinned program. Case-insensitive; anything unmatched — absent, stale,
+ * fabricated — falls back to the FIRST phase rather than erroring, because the
+ * param arrives from reloads, redirects off retired task URLs, and SW-cached
+ * shells, none of which may take the page down. `null` only for a program with
+ * no phases at all (unreachable for real content; total anyway).
+ */
+export function fwSelectedPhaseKey(
+  phases: readonly { key: PhaseKey }[],
+  param: string | null | undefined
+): PhaseKey | null {
+  if (phases.length === 0) return null;
+  const wanted = (param ?? "").trim().toLowerCase();
+  const hit = phases.find((p) => p.key.toLowerCase() === wanted);
+  return (hit ?? phases[0]).key;
+}
+
 /* ═════════════════════════════════════════════════════════════ the batch picker ══ */
 
 export type FwBatchToggle =

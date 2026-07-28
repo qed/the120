@@ -7,8 +7,12 @@ import {
   fwDuplicateNameStudentIds,
   fwPickerHeadline,
   fwPickerRedirectsToSingleCohort,
+  fwPhaseLabel,
+  fwPhaseParamForTaskId,
+  fwPhaseSlug,
   fwPickerZeroState,
   fwSearchDistanceBudget,
+  fwSelectedPhaseKey,
   fwSidebarNames,
   fwUnfinishedStudents,
   FW_BRAND_SUFFIX,
@@ -497,6 +501,86 @@ describe("buildFwTaskTree", () => {
       "9.9.9"
     );
     expect(tree[0].verified).toBe(0);
+  });
+});
+
+/* ═════════════════════ the phase nav + the retired task route (Unit 8, R19/R21) ══ */
+
+describe("fwPhaseSlug / fwPhaseLabel", () => {
+  it("derives the URL slug and the single-word nav entry from the key — one source", () => {
+    expect(fwPhaseSlug("SELL")).toBe("sell");
+    expect(fwPhaseSlug("VALIDATE")).toBe("validate");
+    expect(fwPhaseLabel("SELL")).toBe("Sell");
+    expect(fwPhaseLabel("BUILD")).toBe("Build");
+    expect(fwPhaseLabel("VALIDATE")).toBe("Validate");
+    expect(fwPhaseLabel("GROW")).toBe("Grow");
+    expect(fwPhaseLabel("SCALE")).toBe("Scale");
+  });
+});
+
+describe("fwPhaseParamForTaskId — the retired task route's landing phase", () => {
+  it("maps the leading component to the phase slug", () => {
+    expect(fwPhaseParamForTaskId("1.1.1")).toBe("sell");
+    expect(fwPhaseParamForTaskId("2.3.1")).toBe("build");
+    expect(fwPhaseParamForTaskId("3.1.2")).toBe("validate");
+    expect(fwPhaseParamForTaskId("4.5.5")).toBe("grow");
+    expect(fwPhaseParamForTaskId("5.2.1")).toBe("scale");
+  });
+
+  it("returns null — never a throw — for anything that is not a real task id", () => {
+    // The redirect runs on URLs only stale SW shells and bookmarks still hold;
+    // a garbage id lands phase-less rather than erroring the bounce.
+    expect(fwPhaseParamForTaskId("banana")).toBeNull();
+    expect(fwPhaseParamForTaskId("9.1.1")).toBeNull();
+    expect(fwPhaseParamForTaskId("0.1.1")).toBeNull();
+    expect(fwPhaseParamForTaskId("1.2")).toBeNull();
+    expect(fwPhaseParamForTaskId("")).toBeNull();
+  });
+});
+
+describe("fwSelectedPhaseKey — ?phase= resolution", () => {
+  const PHASES = [{ key: "SELL" as const }, { key: "BUILD" as const }];
+
+  it("matches case-insensitively against the pinned program's own phases", () => {
+    expect(fwSelectedPhaseKey(PHASES, "build")).toBe("BUILD");
+    expect(fwSelectedPhaseKey(PHASES, "BUILD")).toBe("BUILD");
+    expect(fwSelectedPhaseKey(PHASES, " sell ")).toBe("SELL");
+  });
+
+  it("falls back to the FIRST phase for absent, stale, or fabricated values", () => {
+    // The param arrives from reloads, SW-cached shells, and redirects off the
+    // retired task route — none of which may take the page down or land nowhere.
+    expect(fwSelectedPhaseKey(PHASES, null)).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, undefined)).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "")).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "scale")).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "<script>")).toBe("SELL");
+  });
+
+  it("is null only for an empty program (total, never throws)", () => {
+    expect(fwSelectedPhaseKey([], "sell")).toBeNull();
+  });
+
+  it("agrees with the redirect: a task's derived param round-trips to its phase", () => {
+    // The retired route computes ?phase= via fwPhaseParamForTaskId; the student
+    // page resolves it via fwSelectedPhaseKey. If the two ever disagree, a
+    // redirected task URL lands on the wrong phase silently — pinned here.
+    const fiveKeys = [
+      { key: "SELL" as const },
+      { key: "BUILD" as const },
+      { key: "VALIDATE" as const },
+      { key: "GROW" as const },
+      { key: "SCALE" as const },
+    ];
+    for (const [taskId, key] of [
+      ["1.1.1", "SELL"],
+      ["2.1.1", "BUILD"],
+      ["3.1.1", "VALIDATE"],
+      ["4.1.1", "GROW"],
+      ["5.1.1", "SCALE"],
+    ] as const) {
+      expect(fwSelectedPhaseKey(fiveKeys, fwPhaseParamForTaskId(taskId))).toBe(key);
+    }
   });
 });
 

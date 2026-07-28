@@ -89,8 +89,14 @@ export const FW_OPS_PREFIX = "/fp/fw/ops";
 /** The SW cache holding the FW app-shell navigations — the single cache the
  *  never-cache-navigations exception writes to, swept on activate and cleared with
  *  the queue on sign-out (so a shared iPad keeps no authed shell for the next
- *  guide). `sw-discipline.test.ts` pins this string to `public/sw.js`. */
-export const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v1";
+ *  guide). `sw-discipline.test.ts` pins this string to `public/sw.js`.
+ *
+ *  `-v1` → `-v2` (ops-guide redesign Unit 8): the guide check-in redesign retired
+ *  the per-task page, and v1 shells hold its URLs plus Server Action ids the same
+ *  deploy removes. Bumping the name makes activate() sweep every v1 entry, so an
+ *  online device refetches fresh HTML instead of posting dead action ids. The
+ *  `path-sw-` prefix is a deliberately-kept identifier — never rename it. */
+export const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v2";
 
 /**
  * Whether a navigation path is a cacheable FW app-shell route — the single

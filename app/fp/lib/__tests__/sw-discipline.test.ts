@@ -86,6 +86,26 @@ describe("sw.js discipline", () => {
 });
 
 describe("the FW app-shell caching exception (Unit 8, Decision 15) — deliberately narrow", () => {
+  it("the shell cache name is the -v2 generation (ops-guide redesign Unit 8) — by VALUE", () => {
+    // The redesign retired the per-task page; v1 shells hold its URLs plus Server
+    // Action ids that deploy removed. The bump makes activate() sweep every v1
+    // entry, so no v1 content lingers past the deploy — which also re-affirms the
+    // PII posture of the DENSER v2 shell (roster sidebar + full task detail in
+    // every cached entry). Pinned by value, not just parity: a revert to -v1 in
+    // BOTH files would keep the parity test green while resurrecting dead action
+    // ids on installed iPads. The `path-sw-` prefix is a kept identifier.
+    expect(FW_SHELL_CACHE_NAME).toBe("path-sw-fw-shell-v2");
+  });
+
+  it("the identity-clear invariant still sweeps the shell cache (load-bearing for the denser v2 shell)", () => {
+    // fw-sync-client's residue clear must delete the FW shell cache by its shared
+    // constant — with the v2 shell carrying the roster sidebar and all task detail
+    // in every entry, this clear is what keeps a handed-over iPad from serving the
+    // previous guide's cohort to the next one.
+    const client = stripComments(readFileSync(resolve(__dirname, "../fw-sync-client.ts"), "utf8"));
+    expect(client).toContain("caches.delete(FW_SHELL_CACHE_NAME)");
+  });
+
   it("the SW's constants match the app's (parity with fw-sync-rules)", () => {
     expect(swSource).toContain(`const FW_SHELL_CACHE_NAME = "${FW_SHELL_CACHE_NAME}"`);
     expect(swSource).toContain(`const FW_APP_SHELL_PREFIX = "${FW_APP_SHELL_PREFIX}"`);

@@ -1,101 +1,48 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { supabaseAdmin } from "@/app/lib/supabase/admin";
-// Side-effect: registers every generated program module so getProgram resolves
-// this student's PINNED version in THIS module graph.
-import "@/app/fp/content/registry";
-import { getProgram } from "@/app/fp/content/manifest";
-import { resolveVariant } from "@/app/fp/content/parse-curriculum";
-import FwTaskView from "@/app/fp/fw/components/FwTaskView";
-import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { loadFwRosterNames, loadFwStudentDrilldown } from "@/app/fp/lib/fw-loader";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
-import { resolveTaskInProgram } from "@/app/fp/lib/now-card-rules";
+import { redirect } from "next/navigation";
+import { fwPhaseParamForTaskId, FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 
-/**
- * The task view's page (FW Unit 4; FW-R15, FW-D5).
- *
- * NO GATING ON THE TASK. Any of the 125 tasks is reachable for any student —
- * the only thing that can 404 here is a task id that does not exist in this
- * student's PINNED program version, which is a broken URL rather than a rule.
- *
- * The band-resolved line comes from `resolveVariant`, the same function the
- * Path's own task surface uses, against the band on the FW profile (the Path
- * derives its band from `children(grade)`; an FW student has no roster row, so
- * the profile's own column is authoritative — that asymmetry is FW-D8).
- *
- * The roster is loaded for the batch picker, which is why it is ROSTER-SCOPED by
- * construction: there is nobody in the picker who is not a member of this
- * cohort, so `planFwBatch`'s membership filter has nothing to catch from this
- * surface — it stays as the server-side backstop for a forged request.
- */
-
-export const dynamic = "force-dynamic";
-
+// Never rendered (the page body is a redirect) — declared because the D1 brand
+// scan requires every /fp/fw page to carry a titled construct, and an exemption
+// hole in that scan would outlive this route's retirement.
 export const metadata: Metadata = {
-  title: `Task · Founders Weekend${FW_BRAND_SUFFIX}`,
+  title: `Student · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 
+/**
+ * RETIRED (ops-guide redesign Unit 8; R21) — the per-task page's job moved into
+ * the student view: detail behind the (i) modal, decisions inline (Unit 9, same
+ * release).
+ *
+ * A REDIRECT, deliberately never a 404 (learning 2026-07-24): installed service
+ * workers hold this route's URLs in the FW shell cache, and a guide iPad that
+ * revisits one mid-weekend must land on the student it was about — with
+ * `?phase=` carrying the task's phase so the view opens where the tap was
+ * headed. The `-v1`→`-v2` shell-cache bump ships in this same deploy, so online
+ * devices stop holding these URLs; the redirect covers the offline tail and any
+ * bookmark.
+ *
+ * NO GATE AND NO DB HERE, on purpose: this route reveals nothing (the phase
+ * mapping is static — `fwPhaseParamForTaskId`), and the student page it lands
+ * on runs both of its own gates on every request. Gating the bounce would just
+ * slow the recovery path down.
+ *
+ * `FwTaskView` and its actions are NOT deleted in this unit — Unit 9 salvages
+ * the engine wiring, and deleting `"use server"` exports mid-stream is the
+ * deploy-skew hazard the plan calls out. This redirect already makes them
+ * unreachable.
+ */
 export default async function FwTaskPage({
   params,
 }: {
   params: Promise<{ cohortId: string; studentId: string; taskId: string }>;
 }) {
   const { cohortId, studentId, taskId } = await params;
-  const { verdict, session } = await resolveFwActorForCohort(cohortId);
-  if (!verdict.ok) notFound();
-
-  const db = supabaseAdmin();
-  // CONCURRENT: the roster needs only `cohortId`, which is known before the
-  // drill-down starts, so awaiting the drill-down first stacked an avoidable
-  // waterfall onto the most time-pressured screen in the product (performance
-  // review). A roster read failure costs the batch picker, not the tap.
-  const [loaded, roster] = await Promise.all([
-    loadFwStudentDrilldown(db, { cohortId, studentId }),
-    loadFwRosterNames(db, cohortId),
-  ]);
-  if (!loaded.ok && loaded.reason === "not_found") notFound();
-  if (!loaded.ok) {
-    return (
-      <main className="mx-auto w-full max-w-2xl px-5 py-6">
-        <p
-          role="alert"
-          className="rounded-xl border border-not-yet/40 bg-not-yet/10 p-4 font-path-body text-sm leading-6 text-hq-ink"
-        >
-          We couldn&apos;t load this task just now. Reload the page — if it keeps happening, tell
-          The 120 staff.
-        </p>
-      </main>
-    );
-  }
-
-  const { student, programVersionId, states } = loaded.value;
-  const hit = resolveTaskInProgram(getProgram(programVersionId), taskId);
-  if (!hit) notFound();
-
-  return (
-    <main className="mx-auto w-full max-w-2xl px-5 py-6">
-      <FwTaskView
-        cohortId={cohortId}
-        // The AUTHORITATIVE session id, stamped on an offline capture as the
-        // capturing guide — the same-actor undo guard's subject at drain (Unit 8).
-        actorUserId={session.userId}
-        student={student}
-        roster={roster.ok ? roster.students : []}
-        taskId={taskId}
-        taskTitle={hit.task.title}
-        taskBody={hit.task.body}
-        doneWhen={hit.task.doneWhen}
-        variant={resolveVariant(hit.task, student.band) ?? null}
-        allBandsNote={hit.task.allBandsNote ?? null}
-        // Absent means `locked` — which is what an untouched FW row is. A row
-        // that is genuinely missing still taps through to the RPC's truthful
-        // `missing` outcome rather than being hidden behind a grey control.
-        initialState={states[taskId] ?? "locked"}
-        treeHref={`/fp/fw/cohort/${cohortId}/student/${studentId}`}
-        rosterHref={`/fp/fw/cohort/${cohortId}`}
-      />
-    </main>
+  const phase = fwPhaseParamForTaskId(taskId);
+  redirect(
+    `/fp/fw/cohort/${cohortId}/student/${studentId}${
+      phase ? `?phase=${encodeURIComponent(phase)}` : ""
+    }`
   );
 }

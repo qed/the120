@@ -46,7 +46,10 @@
 // zero user value. The route-bearing constants (FW_*_PREFIX) DID move to /fp.
 const PRECACHE_NAME = "path-sw-precache-v1";
 const RUNTIME_CACHE_NAME = "path-sw-runtime-v1";
-const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v1";
+// -v2 (ops-guide redesign Unit 8): the task page was retired in the same deploy;
+// v1 shells hold its URLs and dead Server Action ids, so the bump lets activate()
+// sweep them and online devices refetch fresh HTML. Prefix stays `path-sw-`.
+const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v2";
 const OFFLINE_URL = "/offline";
 const STATIC_PREFIX = "/_next/static/";
 /** The FW guide shell — cacheable navigations (Unit 8). */

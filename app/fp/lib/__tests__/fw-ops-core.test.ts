@@ -70,6 +70,9 @@ type Failure = {
 
 type Seed = {
   cohorts?: Row[];
+  /** Live-staff rows for Unit 5's roster discriminator (empty by default —
+   *  grant-holders are ordinary guides unless a test says otherwise). */
+  staff?: Row[];
   grants?: Row[];
   invites?: Row[];
   tokens?: Row[];
@@ -120,6 +123,7 @@ function makeFakeDb(seed: Seed) {
         { id: PATH_COHORT, slug: "sept-2026", kind: "path", created_at: "2026-05-01T00:00:00Z" },
       ]),
     ],
+    staff: [...(seed.staff ?? [])],
     path_role_grants: [...(seed.grants ?? [])],
     path_fw_guide_invites: [...(seed.invites ?? [])],
     path_fw_board_tokens: [...(seed.tokens ?? [])],
@@ -929,6 +933,7 @@ describe("listFwCohortGuides", () => {
         credential: "claimed",
         invitedAt: "2026-08-10T00:00:00Z",
         claimedAt: "2026-08-15T00:00:00Z",
+        isStaff: false,
       },
       {
         userId: DANA,
@@ -936,6 +941,7 @@ describe("listFwCohortGuides", () => {
         credential: "invited",
         invitedAt: "2026-08-10T00:00:00Z",
         claimedAt: null,
+        isStaff: false,
       },
     ]);
   });
@@ -1002,6 +1008,54 @@ describe("listFwCohortGuides", () => {
     });
     expect(await listFwCohortGuides(db, { cohortId: BOSTON, now: NOW })).toEqual({ ok: false });
   });
+
+  /* ── the staff discriminator (ops redesign Unit 5) ── */
+
+  it("marks a LIVE-staff grant-holder isStaff — never a credential lie", async () => {
+    // A staff grant-holder has no invite row EVER (the grant path skips
+    // issuance). Without the flag they'd read as `no_invite` ("No link") and
+    // the roster would offer a re-send that structurally cannot work.
+    const { db } = makeFakeDb({
+      staff: [{ id: STAFF, is_active: true }],
+      grants: [
+        { id: "g1", user_id: STAFF, role: "guide", scope_type: "cohort", scope_id: BOSTON, created_at: "1" },
+        GRANTS[0],
+      ],
+      invites: [],
+      authUsers: [
+        { id: STAFF, email: "cedric@the120.school", app_metadata: { role: "admin" } },
+        { id: RAVI, email: "ravi@example.com", app_metadata: { role: "guide" } },
+      ],
+    });
+    const res = await listFwCohortGuides(db, { cohortId: BOSTON, now: NOW });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const staffRow = res.guides.find((g) => g.userId === STAFF);
+    const guideRow = res.guides.find((g) => g.userId === RAVI);
+    expect(staffRow).toMatchObject({ isStaff: true, email: "cedric@the120.school" });
+    // A REAL guide whose invite issuance failed still reads no_invite with
+    // isStaff false — the discriminator separates the two, it doesn't blur them.
+    expect(guideRow).toMatchObject({ isStaff: false, credential: "no_invite" });
+  });
+
+  it("a DEACTIVATED staff row does not mark isStaff — same liveness rule as the bridge", async () => {
+    const { db } = makeFakeDb({
+      staff: [{ id: RAVI, is_active: false }],
+      grants: [GRANTS[0]],
+      invites: [],
+    });
+    const res = await listFwCohortGuides(db, { cohortId: BOSTON, now: NOW });
+    expect(res.ok && res.guides[0].isStaff).toBe(false);
+  });
+
+  it("a staff-probe failure fails the LIST — never silently paints staff as credential-less", async () => {
+    const { db } = makeFakeDb({
+      staff: [{ id: STAFF, is_active: true }],
+      grants: GRANTS,
+      failTable: { table: "staff", op: "select", message: "boom" },
+    });
+    expect(await listFwCohortGuides(db, { cohortId: BOSTON, now: NOW })).toEqual({ ok: false });
+  });
 });
 
 /* ══════════════════════════════════════════════════════════ grant revocation ══ */
@@ -1040,6 +1094,29 @@ describe("revokeFwGuideGrant", () => {
     await revokeFwGuideGrant(db, { cohortId: BOSTON, userId: RAVI, actorUserId: STAFF });
     expect(authUsers.find((u) => u.id === RAVI)).toBeDefined();
     expect(tables.path_fw_guide_invites).toHaveLength(1);
+  });
+
+  it("revoking a STAFF member's guide grant removes only the grant row (ops redesign Unit 5)", async () => {
+    // The staff branch grants without an invite; revoke must be the mirror
+    // image — the guide grant goes, and the staff row, the account, and its
+    // credentials are untouchable from here.
+    const CEDRIC = "user-cedric";
+    const { db, tables, authUsers } = makeFakeDb({
+      staff: [{ id: CEDRIC, is_active: true }],
+      grants: [
+        { id: "g-staff", user_id: CEDRIC, role: "guide", scope_type: "cohort", scope_id: BOSTON },
+      ],
+      authUsers: [
+        { id: CEDRIC, email: "cedric@the120.school", app_metadata: { role: "admin" } },
+      ],
+    });
+    expect(
+      await revokeFwGuideGrant(db, { cohortId: BOSTON, userId: CEDRIC, actorUserId: STAFF })
+    ).toEqual({ ok: true, audited: true });
+
+    expect(tables.path_role_grants).toEqual([]);
+    expect(tables.staff).toEqual([{ id: CEDRIC, is_active: true }]);
+    expect(authUsers.find((u) => u.id === CEDRIC)).toBeDefined();
   });
 
   it("reports grant_not_found rather than success over nothing", async () => {
@@ -1295,6 +1372,7 @@ describe("listFwCohortGuides — the Admin fallback's other half", () => {
         credential: "no_invite",
         invitedAt: null,
         claimedAt: null,
+        isStaff: false,
       },
     ]);
   });

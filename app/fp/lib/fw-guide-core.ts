@@ -209,6 +209,11 @@ export type ProvisionFwGuideResult =
       userId: string;
       email: string;
       created: boolean;
+      /** Ops redesign Unit 5 (R15): the address resolved to a LIVE 120 staff
+       *  account and was granted as-is. No invite row exists for it and none may
+       *  ever be issued (the action skips issuance on this flag;
+       *  `issueFwGuideInvite`'s isGuideAccount gate is the structural backstop). */
+      staff: boolean;
       /** Whether THIS call actually inserted the grant row. False on a re-run
        *  for a cohort the guide already holds — which is the common case, since
        *  the whole function is idempotent by design. */
@@ -230,7 +235,8 @@ export type ProvisionFwGuideResult =
  *
  * Idempotent by design, because staff will re-run it: an `email_exists` on
  * createUser adopts the existing account IF AND ONLY IF it is already a guide
- * account, and the grant upsert ignores duplicates. Adding a second cohort's
+ * account — or a LIVE 120 staff account (ops redesign Unit 5), which is granted
+ * WITHOUT an invite ever being issued — and the grant upsert ignores duplicates. Adding a second cohort's
  * grant to an existing guide is therefore just calling this again — which is
  * what "a guide works Boston and Hamptons" means.
  *
@@ -285,6 +291,7 @@ export async function provisionFwGuide(
 
   let user: User;
   let created = false;
+  let staff = false;
   const attempt = await db.auth.admin.createUser(payload);
   if (attempt.error || !attempt.data?.user) {
     const emailExists =
@@ -302,13 +309,24 @@ export async function provisionFwGuide(
       return { ok: false, reason: "unavailable" };
     }
     // The escalation guard: an invite issued against this account can SET ITS
-    // PASSWORD. Adopting a staff/parent/student account would turn "add a guide"
-    // into "mail a credential for that person's account to whoever staff typed".
+    // PASSWORD. Adopting a parent/student account would turn "add a guide" into
+    // "mail a credential for that person's account to whoever staff typed".
+    //
+    // Ops redesign Unit 5 (R15) carves out exactly one exception: a LIVE 120
+    // staff account, and only as a GRANT — the action skips invite issuance on
+    // `staff: true`, so the escalation the guard exists for (a password-setting
+    // link for someone else's account) stays unreachable. Staff-ness is the SAME
+    // read the bridge uses (`loadStaffRowActive`): fresh, revocation-aware, and
+    // fail-closed — a read outage lands on the pre-existing `address_in_use`
+    // refusal, never on a grant.
     if (!isGuideAccount(found)) {
-      console.error(
-        `[fw/guide] refusing to adopt non-guide account for ${email} (role=${String(found.app_metadata?.role)})`
-      );
-      return { ok: false, reason: "address_in_use" };
+      if (!(await loadStaffRowActive(db, found.id))) {
+        console.error(
+          `[fw/guide] refusing to adopt non-guide account for ${email} (role=${String(found.app_metadata?.role)})`
+        );
+        return { ok: false, reason: "address_in_use" };
+      }
+      staff = true;
     }
     user = found;
   } else {
@@ -369,13 +387,19 @@ export async function provisionFwGuide(
         action: "guide_grant_added",
         subjectUserId: user.id,
         cohortId: cohort.id,
-        metadata: { email, accountCreated: created, recoveredFromReportedFailure: true },
+        metadata: {
+          email,
+          accountCreated: created,
+          recoveredFromReportedFailure: true,
+          ...(staff ? { staffAccount: true } : {}),
+        },
       });
       return {
         ok: true,
         userId: user.id,
         email: user.email ?? email,
         created,
+        staff,
         grantAdded: true,
         audited: auditedAnyway,
       };
@@ -440,11 +464,19 @@ export async function provisionFwGuide(
         action: "guide_grant_added",
         subjectUserId: user.id,
         cohortId: cohort.id,
-        metadata: { email, accountCreated: created },
+        metadata: { email, accountCreated: created, ...(staff ? { staffAccount: true } : {}) },
       })
     : true;
 
-  return { ok: true, userId: user.id, email: user.email ?? email, created, grantAdded, audited };
+  return {
+    ok: true,
+    userId: user.id,
+    email: user.email ?? email,
+    created,
+    staff,
+    grantAdded,
+    audited,
+  };
 }
 
 /* ──────────────────────────────────────────────────── invite issue / re-issue ── */

@@ -66,6 +66,16 @@ const CREDENTIAL: Record<FwGuideCredentialStatus, { label: string; cls: string }
   },
 };
 
+/** Ops redesign Unit 5: a staff grant-holder has no credential STATE — they sign
+ *  in with their staff login, no invite exists, and none can be issued (issuance
+ *  refuses non-guide accounts). So the row shows "Staff" instead of a credential
+ *  chip, hides Re-send, and sits outside the "all guides claimed" line the
+ *  credential column carries. Revoke stays — it removes only the guide grant. */
+const STAFF_CHIP = {
+  label: "Staff",
+  cls: "border-hq-border-strong bg-hq-sunken text-hq-ink",
+};
+
 export default function FwGuideRoster({
   cohortId,
   guides,
@@ -107,16 +117,28 @@ export default function FwGuideRoster({
       const res = await provisionGuideAction({ email: email.trim(), cohortId });
       if (res.success) {
         setEmail("");
+        // The staff branch first (Unit 5): no email was sent and none is
+        // missing, so neither of the invite sentences below may render — "use
+        // Re-send" would point at a button staff rows don't have.
         setNotice(
-          [
-            res.created ? `Created ${res.email}.` : `Added ${res.email} to this weekend.`,
-            res.invited
-              ? "They can set a password from the link in their inbox."
-              : "The invite email did NOT send — use Re-send below.",
-            res.audited ? "" : "⚠ The audit record didn't save — tell an engineer.",
-          ]
-            .filter(Boolean)
-            .join(" ")
+          res.staff
+            ? [
+                res.grantAdded
+                  ? `Added ${res.email} using their existing 120 staff account — no email sent. They sign in with the password they already have.`
+                  : `${res.email} is already a guide on this weekend — nothing changed, no email sent.`,
+                res.audited ? "" : "⚠ The audit record didn't save — tell an engineer.",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : [
+                res.created ? `Created ${res.email}.` : `Added ${res.email} to this weekend.`,
+                res.invited
+                  ? "They can set a password from the link in their inbox."
+                  : "The invite email did NOT send — use Re-send below.",
+                res.audited ? "" : "⚠ The audit record didn't save — tell an engineer.",
+              ]
+                .filter(Boolean)
+                .join(" ")
         );
         router.refresh();
         return; // finally still clears the flag
@@ -179,7 +201,7 @@ export default function FwGuideRoster({
       ) : (
         <ul className="space-y-3">
           {guides.map((guide) => {
-            const chip = CREDENTIAL[guide.credential];
+            const chip = guide.isStaff ? STAFF_CHIP : CREDENTIAL[guide.credential];
             const rowBusy = busy === guide.userId;
             return (
               <li
@@ -212,16 +234,20 @@ export default function FwGuideRoster({
                 )}
 
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <Button
-                    type="button"
-                    skin="hq"
-                    variant="secondary"
-                    size="md"
-                    onClick={() => handleReissue(guide.userId)}
-                    disabled={anyBusy}
-                  >
-                    {rowBusy ? "Working…" : "Re-send link"}
-                  </Button>
+                  {/* No Re-send for staff: issuance refuses non-guide accounts,
+                      so the button could only ever produce an error. */}
+                  {!guide.isStaff && (
+                    <Button
+                      type="button"
+                      skin="hq"
+                      variant="secondary"
+                      size="md"
+                      onClick={() => handleReissue(guide.userId)}
+                      disabled={anyBusy}
+                    >
+                      {rowBusy ? "Working…" : "Re-send link"}
+                    </Button>
+                  )}
 
                   {confirmingRevoke === guide.userId ? (
                     <>

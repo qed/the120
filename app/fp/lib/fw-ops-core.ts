@@ -896,13 +896,21 @@ export type FwOpsGuide = {
   credential: FwGuideCredentialStatus;
   invitedAt: string | null;
   claimedAt: string | null;
+  /** Ops redesign Unit 5: the grant-holder is LIVE 120 staff. Staff have no
+   *  invite row EVER (the grant path skips issuance), so without this flag they
+   *  are indistinguishable from a guide whose invite issuance failed
+   *  (`no_invite`) — and the roster would offer a re-send that can never work.
+   *  Staff rows carry no credential state and sit outside the "all guides
+   *  claimed" line. */
+  isStaff: boolean;
 };
 
 /**
  * Every guide granted into one cohort, with their credential state.
  *
- * TWO reads, not N+1: the grants, then every invite row for those user ids in
- * one `.in(...)`. The invite row also carries the guide's EMAIL, which is what
+ * THREE reads, not N+1: the grants, then every invite row for those user ids in
+ * one `.in(...)`, then one batched staff probe for the same ids (Unit 5's
+ * roster discriminator). The invite row also carries the guide's EMAIL, which is what
  * staff recognise them by — so the common path never touches the Admin API at
  * all. Only a grant with no invite row falls back to `getUserById`, and that set
  * is normally empty (provisioning always ensures an invite).
@@ -950,6 +958,28 @@ export async function listFwCohortGuides(
   );
   if (!invites.ok) return { ok: false };
 
+  // The staff discriminator (ops redesign Unit 5) — the SAME table and liveness
+  // rule the bridge reads (`loadStaffRowActive`: a row with `is_active = true`),
+  // batched over the grant-holders instead of probed per row. Fail posture
+  // matches the other two reads: a probe outage fails the whole list rather
+  // than silently painting a staff grant-holder as credential-less (`no_invite`
+  // would invite a re-send that structurally cannot work).
+  const staffRows = await fetchAllRows<Record<string, unknown>>(
+    `guide staff probe (${input.cohortId})`,
+    (from, to) =>
+      db
+        .from("staff")
+        .select("id, is_active")
+        .in("id", userIds)
+        .order("id", { ascending: true })
+        .range(from, to)
+  );
+  if (!staffRows.ok) return { ok: false };
+  const staffIds = new Set<string>();
+  for (const row of staffRows.rows) {
+    if (typeof row.id === "string" && row.is_active === true) staffIds.add(row.id);
+  }
+
   const byUser = new Map<string, Record<string, unknown>>();
   for (const row of invites.rows) {
     if (typeof row.user_id === "string") byUser.set(row.user_id, row);
@@ -976,6 +1006,7 @@ export async function listFwCohortGuides(
       credential,
       invitedAt: invite && typeof invite.issued_at === "string" ? invite.issued_at : null,
       claimedAt,
+      isStaff: staffIds.has(userId),
     };
   });
 

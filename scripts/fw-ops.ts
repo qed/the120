@@ -496,13 +496,19 @@ async function main() {
     // when they still cannot sign in.
     emit({ ...res, inviteEmailed: false }, () => {
       console.log(`\n${res.email} (${res.userId})`);
-      console.log(`  account ${res.created ? "created" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`);
+      console.log(
+        `  account ${res.created ? "created" : res.staff ? "staff (granted as-is)" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`
+      );
       if (!res.audited) console.log("  ⚠  the audit record did NOT save");
       // Deliberately does NOT mail the invite: the invite email is the ACTION
       // layer's step (provisionGuideAction), and a script that silently mailed a
       // password-setting link would be a second, untested mail path. Use the ops
       // surface, or `issueFwGuideInvite` directly, when a link is wanted.
-      console.log("  no invite emailed — use the ops surface to send their link");
+      console.log(
+        res.staff
+          ? "  no invite exists for a staff account — they sign in with their staff login"
+          : "  no invite emailed — use the ops surface to send their link"
+      );
     });
     return;
   }

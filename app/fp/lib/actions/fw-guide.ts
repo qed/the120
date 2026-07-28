@@ -164,6 +164,13 @@ export type ProvisionGuideActionResult =
       email: string;
       created: boolean;
       invited: boolean;
+      /** Ops redesign Unit 5: the address belonged to a LIVE 120 staff account,
+       *  granted as-is — no invite exists and none may be issued, so the roster
+       *  suppresses re-send for these rows. Mirrors the core's flag; the shape
+       *  stays additive so older client bundles keep working (deploy skew). */
+      staff: boolean;
+      /** False on the idempotent re-add — the calm "already a guide here" case. */
+      grantAdded: boolean;
       /** False when the grant landed but its liability record did not — surfaced
        *  rather than swallowed, so the ops copy can tell staff to raise it
        *  instead of the record simply going missing (FW Unit 5). */
@@ -200,6 +207,23 @@ export async function provisionGuideAction(
     return { success: false, error: provisionFailureMessage(provisioned.reason) };
   }
 
+  // Ops redesign Unit 5: a staff grant-holder signs in with their STAFF
+  // credential, so issuance is skipped ENTIRELY — no invite row, no email.
+  // Not an optimisation: issueFwGuideInvite would refuse the account anyway
+  // (not_a_guide_account), and reporting that refusal as "the email didn't
+  // send — re-send below" would point staff at a button that can never work.
+  if (provisioned.staff) {
+    return {
+      success: true,
+      email: provisioned.email,
+      created: false,
+      invited: false,
+      staff: true,
+      grantAdded: provisioned.grantAdded,
+      audited: provisioned.audited,
+    };
+  }
+
   // "ensure", NOT "reissue" (merged correctness + adversarial P1). Provisioning
   // is idempotent by design so that adding a guide to a SECOND weekend is just
   // calling it again — and a blind re-issue there would un-mark an actively
@@ -219,6 +243,8 @@ export async function provisionGuideAction(
       email: provisioned.email,
       created: provisioned.created,
       invited: false,
+      staff: false,
+      grantAdded: provisioned.grantAdded,
       audited: provisioned.audited,
     };
   }
@@ -231,6 +257,8 @@ export async function provisionGuideAction(
       email: provisioned.email,
       created: provisioned.created,
       invited: true,
+      staff: false,
+      grantAdded: provisioned.grantAdded,
       audited: provisioned.audited,
     };
   }
@@ -241,6 +269,8 @@ export async function provisionGuideAction(
     email: provisioned.email,
     created: provisioned.created,
     invited: sent.ok,
+    staff: false,
+    grantAdded: provisioned.grantAdded,
     audited: provisioned.audited,
   };
 }

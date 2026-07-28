@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import { BOOKING_URL, groups } from "@/app/lib/site";
-import { sanitizeWorkshopSelection } from "../wizard-rules";
 import { StepSection, focusRing, type StepProps } from "./shared";
 
 /**
@@ -15,34 +13,18 @@ import { StepSection, focusRing, type StepProps } from "./shared";
  * per-group caps, only the global 120 pool.
  */
 export default function StepGroup({ child, set, n }: StepProps) {
-  // Switch-away-from-Scholars confirm (R6): nothing mutates until confirmed.
-  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
-
-  // Confirm against the SANITIZED count — the picks the parent has actually
-  // seen as selected in the workshops step. A legacy row holding only retired
-  // ids shows zero selections there, so warning about clearing them would
-  // read as nonsense (the clear still wipes the whole stored array either way).
-  const visiblePicks = sanitizeWorkshopSelection(child.workshopIds).length;
-
+  // Switching is a plain pick since the Workshops removal (funnel U12) —
+  // the confirm existed only to warn about clearing workshop selections.
+  // Leaving Scholars still clears legacy picks (no checklist counts them
+  // any more, but a Makers dossier carrying workshop rows would render
+  // stale picks in the CRM detail forever).
   const pick = (slug: string) => {
-    if (slug === child.groupSlug) {
-      // Re-affirming the current group cancels any pending switch.
-      setPendingSwitch(null);
-      return;
-    }
-    if (child.groupSlug === "scholars" && visiblePicks > 0) {
-      setPendingSwitch(slug);
-      return;
-    }
-    setPendingSwitch(null);
-    set({ groupSlug: slug });
-  };
-
-  const confirmSwitch = () => {
-    if (!pendingSwitch) return;
-    // One update: the new group AND the cleared workshop picks together.
-    set({ groupSlug: pendingSwitch, workshopIds: [] });
-    setPendingSwitch(null);
+    if (slug === child.groupSlug) return;
+    set(
+      child.groupSlug === "scholars"
+        ? { groupSlug: slug, workshopIds: [] }
+        : { groupSlug: slug }
+    );
   };
 
   return (
@@ -104,35 +86,6 @@ export default function StepGroup({ child, set, n }: StepProps) {
           );
         })}
       </div>
-
-      {pendingSwitch && (
-        <div className="mt-4 rounded-xl border border-red bg-red/5 p-4">
-          <p className="text-sm font-semibold text-ink">
-            Switching from The Scholars clears {visiblePicks} workshop selection
-            {visiblePicks === 1 ? "" : "s"}.
-          </p>
-          <p className="mt-1 text-xs leading-5 text-ink-soft">
-            Workshops belong to The Scholars — you can always switch back later, but the picks
-            start fresh.
-          </p>
-          <div className="mt-3 flex gap-3">
-            <button
-              type="button"
-              onClick={confirmSwitch}
-              className={`inline-flex h-9 items-center justify-center rounded-full bg-red px-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-white hover:bg-red-dark ${focusRing}`}
-            >
-              Switch &amp; clear picks
-            </button>
-            <button
-              type="button"
-              onClick={() => setPendingSwitch(null)}
-              className={`inline-flex h-9 items-center justify-center rounded-full border border-line-strong px-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink-soft hover:border-ink ${focusRing}`}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Undecided affordance (R17) */}
       <div className="mt-5 rounded-xl border border-dashed border-line-strong bg-paper-2 p-4">

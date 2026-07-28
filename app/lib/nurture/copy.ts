@@ -53,7 +53,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
         text: [
           hi,
           "",
-          "Quick nudge: your child's dossier is the application, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, the workshops they'd pick. That's it.",
+          "Quick nudge: your child's dossier is the application, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, and their group. That's it.",
           "",
           "Once it's submitted, we review it and invite you to a qualifying assessment and a call.",
           "",
@@ -62,7 +62,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
         html: layout(
           p(hi) +
             p(
-              "Quick nudge: <strong>your child's dossier is the application</strong>, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, the workshops they'd pick. That's it."
+              "Quick nudge: <strong>your child's dossier is the application</strong>, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, and their group. That's it."
             ) +
             p("Once it's submitted, we review it and invite you to a qualifying assessment and a call."),
           { label: "Finish the dossier", url: DASHBOARD_URL }

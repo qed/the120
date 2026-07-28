@@ -2,6 +2,7 @@
 
 import { GRADES } from "../data";
 import { Label, TextField, inputCls } from "../ui";
+import { birthYearForGrade, childEmailPatch } from "../wizard-rules";
 import { StepSection, focusRing, type StepProps } from "./shared";
 
 export default function StepBasics({ child, set, n }: StepProps) {
@@ -21,7 +22,16 @@ export default function StepBasics({ child, set, n }: StepProps) {
           <Label>Grade (Fall 2026)</Label>
           <select
             value={child.grade}
-            onChange={(e) => set({ grade: e.target.value ? Number(e.target.value) : "" })}
+            onChange={(e) => {
+              const grade = e.target.value ? Number(e.target.value) : "";
+              // R47: birth year auto-calculates from the grade and stays
+              // editable — only an EMPTY field is filled, never a typed one.
+              set(
+                child.birthYear.trim() === "" && grade !== ""
+                  ? { grade, birthYear: birthYearForGrade(grade) }
+                  : { grade }
+              );
+            }}
             className={inputCls}
           >
             <option value="">Select…</option>
@@ -45,6 +55,25 @@ export default function StepBasics({ child, set, n }: StepProps) {
             onChange={(v) => set({ currentSchool: v })}
             placeholder="Where they go today"
           />
+        </div>
+        {/* R48: the child's email, with "Don't have one" recording the flag
+            without an address. Deliberately not a checklist item. */}
+        <div className="sm:col-span-2">
+          <TextField
+            label="Child's email (optional)"
+            value={child.childEmail}
+            onChange={(v) => set(childEmailPatch({ email: v }, child))}
+            placeholder="Their own address, if they have one"
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm text-ink-soft">
+            <input
+              type="checkbox"
+              checked={child.childEmailNone}
+              onChange={(e) => set(childEmailPatch({ none: e.target.checked }, child))}
+              className="h-4 w-4 accent-red"
+            />
+            Don&apos;t have one
+          </label>
         </div>
       </div>
 

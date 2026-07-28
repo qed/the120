@@ -10,6 +10,8 @@ import {
   planLabel,
 } from "../data";
 import { type ChildRow, childToRow, rowToChild, submitStatusPatch } from "../store";
+import { dossierChecklist, dossierCompleteness as crmCompleteness } from "@/app/crm/lib/reviews-rules";
+import { dossierCompleteness as nurtureCompleteness } from "@/app/lib/nurture/rules";
 
 /** A complete non-Scholars child — every checklist item satisfied. */
 const child = (overrides: Partial<Child> = {}): Child => ({
@@ -32,7 +34,7 @@ const scholarsChild = (overrides: Partial<Child> = {}): Child =>
 const labels = (c: Child) => checklist(c).map((i) => i.label);
 const item = (c: Child, label: string) => checklist(c).find((i) => i.label === label)!;
 
-describe("checklist (group-aware, R14)", () => {
+describe("checklist (EIGHT items for every group since the Workshops removal, U12/R46)", () => {
   it("a complete non-Scholars child is 8/8 items, 100%", () => {
     const c = child();
     expect(checklist(c)).toHaveLength(8);
@@ -40,25 +42,35 @@ describe("checklist (group-aware, R14)", () => {
     expect(completeness(c)).toBe(100);
   });
 
-  it("a complete Scholars child (with a workshop) is 9/9 items, 100%", () => {
-    const c = scholarsChild();
-    expect(checklist(c)).toHaveLength(9);
-    expect(checklist(c).every((i) => i.done)).toBe(true);
+  it("a Scholars child reaches 100% WITHOUT any workshop pick — the plan's named trap, closed", () => {
+    // Pre-U12: 9 items, stranded at 8/9 = 89 with canSubmit requiring 100.
+    const c = scholarsChild({ workshopIds: [] });
+    expect(checklist(c)).toHaveLength(8);
     expect(completeness(c)).toBe(100);
   });
 
-  it("orders items: workshops (Scholars only) slots between academics and interests", () => {
-    expect(labels(child())).toEqual([
-      "Name",
-      "Grade",
-      "Birth year",
-      "Current school",
-      "A group",
-      "Academics (a subject + plan)",
-      "The kid's interests",
-      "A project pitch",
-    ]);
-    expect(labels(scholarsChild())[6]).toBe("A workshop of interest");
+  it("every group reaches 100% on the same 8 labels — characterized across the whole set", () => {
+    for (const slug of ["athletes", "founders", "givers", "makers", "scholars"]) {
+      const c = child({ groupSlug: slug });
+      expect(labels(c), slug).toEqual([
+        "Name",
+        "Grade",
+        "Birth year",
+        "Current school",
+        "A group",
+        "Academics (a subject + plan)",
+        "The kid's interests",
+        "A project pitch",
+      ]);
+      expect(completeness(c), slug).toBe(100);
+    }
+  });
+
+  it("a LEGACY Scholars row with stored workshop_ids (raw shape) still computes 8 items — picks ignored, not crashed on", () => {
+    const c = scholarsChild({ workshopIds: ["the-peace-table", "competitive-chess"] });
+    expect(checklist(c)).toHaveLength(8);
+    expect(labels(c)).not.toContain("A workshop of interest");
+    expect(completeness(c)).toBe(100);
   });
 
   it("an academics entry with subject+plan satisfies the academics item", () => {
@@ -86,22 +98,14 @@ describe("checklist (group-aware, R14)", () => {
 });
 
 describe("completeness at the >80% stall-nudge boundary", () => {
-  it("Scholars missing only the workshop → 8/9 = 89 (eligible)", () => {
-    const c = scholarsChild({ workshopIds: [] });
-    expect(completeness(c)).toBe(89);
-    expect(completeness(c)).toBeGreaterThan(80);
-  });
-
-  it("Scholars missing two items → 7/9 = 78 (not eligible)", () => {
-    const c = scholarsChild({ workshopIds: [], projectPitch: "" });
-    expect(completeness(c)).toBe(78);
-    expect(completeness(c)).toBeLessThan(80);
-  });
-
-  it("non-Scholars missing one item → 7/8 = 88 (eligible)", () => {
-    const c = child({ projectPitch: "" });
-    expect(completeness(c)).toBe(88);
-    expect(completeness(c)).toBeGreaterThan(80);
+  it("any group missing one item → 7/8 = 88 (eligible); missing two → 75 (not eligible)", () => {
+    for (const slug of ["makers", "scholars"]) {
+      expect(completeness(child({ groupSlug: slug, projectPitch: "" })), slug).toBe(88);
+      expect(
+        completeness(child({ groupSlug: slug, projectPitch: "", interests: "" })),
+        slug
+      ).toBe(75);
+    }
   });
 });
 
@@ -121,6 +125,8 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     interests: "robots",
     project_pitch: "Build a difference engine.",
     portfolio_links: "",
+    child_email: null,
+    child_email_none: null,
     status: "draft",
     submitted_at: null,
     ...overrides,
@@ -166,12 +172,20 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     expect(rowToChild(row({ group_slug: undefined as unknown as string })).groupSlug).toBe("");
   });
 
-  it("a hand-built child round-trips preserving group + academics", () => {
-    const original = scholarsChild();
+  it("a hand-built child round-trips preserving group + academics + the child email pair (R48)", () => {
+    const original = scholarsChild({ childEmail: "kid@example.com", childEmailNone: false });
     const back = rowToChild({ ...row(), ...childToRow(original, "parent-1") } as ChildRow);
     expect(back.groupSlug).toBe(original.groupSlug);
     expect(back.academics).toEqual(original.academics);
     expect(back.workshopIds).toEqual(original.workshopIds);
+    expect(back.childEmail).toBe("kid@example.com");
+    expect(back.childEmailNone).toBe(false);
+  });
+
+  it("rowToChild tolerates rows fetched WITHOUT the R48 columns (old select) — empty, not crashed", () => {
+    const c = rowToChild(row({ child_email: null, child_email_none: null }));
+    expect(c.childEmail).toBe("");
+    expect(c.childEmailNone).toBe(false);
   });
 });
 
@@ -227,5 +241,106 @@ describe("planLabel", () => {
   it("unknown and empty ids → ''", () => {
     expect(planLabel("world-domination")).toBe("");
     expect(planLabel("")).toBe("");
+  });
+});
+
+describe("the three lockstep mirrors agree (R14 — compared directly, no renderer)", () => {
+  /** One child, three shapes: the dashboard Child, the CRM DossierFields,
+   *  and the nurture raw row. Same facts, three functions, one percentage.
+   *  Fixtures include a LEGACY stored workshop pick (raw shape) — ignored
+   *  identically by all three since the removal. */
+  const cases: { label: string; c: Child }[] = [
+    { label: "complete scholars, legacy picks", c: scholarsChild({ workshopIds: ["the-peace-table"] }) },
+    { label: "complete makers", c: child() },
+    { label: "scholars missing pitch", c: scholarsChild({ projectPitch: "" }) },
+    { label: "no group, nothing else", c: child({ groupSlug: "", academics: [], subjects: [], interests: "", projectPitch: "" }) },
+    { label: "legacy subjects fallback", c: child({ academics: [], subjects: ["Math"] }) },
+  ];
+
+  for (const { label, c } of cases) {
+    it(`${label}: parent meter, CRM queue, and stall nudge report the same number`, () => {
+      const parentPct = completeness(c);
+      const crmItems = dossierChecklist({
+        firstName: c.firstName,
+        lastName: c.lastName,
+        grade: c.grade === "" ? null : c.grade,
+        birthYear: c.birthYear,
+        currentSchool: c.currentSchool,
+        groupSlug: c.groupSlug,
+        academics: c.academics,
+        subjects: c.subjects,
+        workshopIds: c.workshopIds,
+        interests: c.interests,
+        projectPitch: c.projectPitch,
+      });
+      const crmPct = crmCompleteness({
+        firstName: c.firstName,
+        lastName: c.lastName,
+        grade: c.grade === "" ? null : c.grade,
+        birthYear: c.birthYear,
+        currentSchool: c.currentSchool,
+        groupSlug: c.groupSlug,
+        academics: c.academics,
+        subjects: c.subjects,
+        workshopIds: c.workshopIds,
+        interests: c.interests,
+        projectPitch: c.projectPitch,
+      });
+      const nurturePct = nurtureCompleteness({
+        parent_id: "p1",
+        first_name: c.firstName,
+        last_name: c.lastName,
+        grade: c.grade === "" ? null : c.grade,
+        birth_year: c.birthYear,
+        current_school: c.currentSchool,
+        group_slug: c.groupSlug,
+        academics: c.academics,
+        subjects: c.subjects,
+        workshop_ids: c.workshopIds,
+        interests: c.interests,
+        project_pitch: c.projectPitch,
+        status: "draft",
+        updated_at: "2026-07-28T00:00:00Z",
+      });
+      expect(crmPct, "crm vs parent").toBe(parentPct);
+      expect(nurturePct, "nurture vs parent").toBe(parentPct);
+      expect(crmItems.map((i) => i.label)).toEqual(checklist(c).map((i) => i.label));
+    });
+  }
+});
+
+describe("raw-shape parity: the fixtures the plan demanded (not the sanitizer's output)", () => {
+  it("an out-of-vocabulary plan string is INCOMPLETE in all three mirrors", () => {
+    // Pre-fix, by execution: parent (via parseAcademics' clamp) said 88
+    // while CRM and nurture accepted any non-empty plan and said 100.
+    const rawAcademics = [{ subject: "Math", plan: "world-domination", goal: "" }];
+    const base = child({ subjects: [] });
+
+    const parentPct = completeness(
+      rowToChild({
+        id: base.id, first_name: base.firstName, last_name: base.lastName,
+        grade: 5, birth_year: base.birthYear, current_school: base.currentSchool,
+        photo: null, group_slug: base.groupSlug, academics: rawAcademics,
+        subjects: [], workshop_ids: [], interests: base.interests,
+        project_pitch: base.projectPitch, portfolio_links: "",
+        child_email: null, child_email_none: null, status: "draft", submitted_at: null,
+      })
+    );
+    const crmPct = crmCompleteness({
+      firstName: base.firstName, lastName: base.lastName, grade: 5,
+      birthYear: base.birthYear, currentSchool: base.currentSchool,
+      groupSlug: base.groupSlug, academics: rawAcademics, subjects: [],
+      workshopIds: [], interests: base.interests, projectPitch: base.projectPitch,
+    });
+    const nurturePct = nurtureCompleteness({
+      parent_id: "p1", first_name: base.firstName, last_name: base.lastName,
+      grade: 5, birth_year: base.birthYear, current_school: base.currentSchool,
+      group_slug: base.groupSlug, academics: rawAcademics, subjects: [],
+      workshop_ids: [], interests: base.interests, project_pitch: base.projectPitch,
+      status: "draft", updated_at: "2026-07-28T00:00:00Z",
+    });
+    expect(parentPct).toBe(88);
+    expect(crmPct).toBe(88);
+    expect(nurturePct).toBe(88);
   });
 });

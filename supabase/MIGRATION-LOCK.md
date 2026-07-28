@@ -1,10 +1,31 @@
 # Migration lock
 
-**Current holder: Lane B — First Profit funnel, and currently the only lane running.**
+**Current holder: Lane B — First Profit funnel.**
 
-The Staff Front Door plan completed 2026-07-27 (Units 1–12, PRs #59–#77), so Lane A
-is no longer active. Lane B holds the lock by default until a second lane starts
-again — at which point the transfer discipline below applies from the first migration.
+The Staff Front Door plan completed 2026-07-27 (Units 1–12, PRs #59–#77). Lane B
+holds the lock by default. **A second lane became active again on 2026-07-28**
+(fieldwork tooling, PR #86) — the transfer discipline below applies from the next
+migration either lane authors.
+
+## The second breach and the version collision, recorded (2026-07-28)
+
+While Lane B held the lock, PR #86 (Lane A, fieldwork) authored and applied
+`20260808120000_fw_intended_cohort.sql` without a transfer — the SAME version
+prefix Lane B's `20260808120000_funnel_projects_policies.sql` (PR #85) already
+held. Both DDLs are live in production; `schema_migrations` kept only the funnel
+row (version is the primary key), so Lane A's bookkeeping insert was lost and two
+files on main shared one version — the state that silently corrupts every future
+`db push` diff for both lanes.
+
+**Repair (U12, mechanical, zero production DDL):** the fw file was renamed to
+`20260808130000_fw_intended_cohort.sql` (its content already applied and
+idempotent) and the version row `20260808130000 / fw_intended_cohort` inserted.
+Verified against production.
+
+The tripwire this file promised after a second breach is now due: a test that
+reddens when (a) an added migration's lane prefix does not match the holder named
+above, or (b) two migration files share a version prefix. (b) ships with U12;
+(a) still needs the lanes to agree on transfer mechanics — flag to Peter.
 
 ## The one breach, recorded
 

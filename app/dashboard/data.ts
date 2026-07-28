@@ -618,14 +618,6 @@ export const RETIRED_WORKSHOPS: Workshop[] = [
 export const workshopById = (id: string) =>
   WORKSHOPS.find((w) => w.id === id) ?? RETIRED_WORKSHOPS.find((w) => w.id === id);
 
-/** A stored selection satisfies the Scholars checklist item only when at
- *  least one pick is still in the LIVE catalog — retired K–2 ids must not
- *  count, or the meter would read 100% while the wizard's sanitized view
- *  shows zero selections. Shared by all three lockstep completeness mirrors
- *  (this checklist, nurture rules, CRM reviews-rules) so they can't drift. */
-export const hasLiveWorkshopPick = (ids: string[]) =>
-  ids.some((id) => WORKSHOPS.some((w) => w.id === id));
-
 export type Child = {
   id: string;
   // Basics
@@ -647,6 +639,10 @@ export type Child = {
   interests: string;
   projectPitch: string;
   portfolioLinks: string;
+  // Child email (funnel U12, R48). NOT a checklist item — asked, never
+  // required. `childEmailNone` records "Don't have one" without an address.
+  childEmail: string;
+  childEmailNone: boolean;
   // Dossier status
   status: SeatStatus;
   submittedAt?: string;
@@ -678,15 +674,22 @@ export function emptyChild(id: string): Child {
     interests: "",
     projectPitch: "",
     portfolioLinks: "",
+    childEmail: "",
+    childEmailNone: false,
     status: "draft",
   };
 }
 
 /**
  * Dossier checklist drives the per-child completeness meter (§13.3.2).
- * Group-aware (R14): 8 items for everyone, plus a Scholars-only workshops
- * item (9 total). The academics item keeps a legacy fallback on `subjects`
- * so pre-cutover drafts don't lose credit.
+ * EIGHT items for EVERY group since the Workshops removal (funnel U12,
+ * R46): the Scholars-only workshops item is gone — leaving it would strand
+ * every Scholars child at 8/9 = 89% with `canSubmit` requiring 100, making
+ * C2 unreachable for a fifth of applicants (the plan's named trap). Legacy
+ * `workshopIds` on stored rows are simply ignored here; the catalog and
+ * `workshopById` stay for read-only display of old picks. The academics
+ * item keeps a legacy fallback on `subjects` so pre-cutover drafts don't
+ * lose credit. Child email (R48) is deliberately NOT a checklist item.
  *
  * LOCKSTEP MIRRORS (R14): this definition is duplicated in
  * `app/lib/nurture/rules.ts` (dossierCompleteness — stall nudge) and
@@ -694,7 +697,7 @@ export function emptyChild(id: string): Child {
  * all three together or the parent meter, nudge, and queue % disagree.
  */
 export function checklist(c: Child): { label: string; done: boolean }[] {
-  const items = [
+  return [
     { label: "Name", done: !!c.firstName.trim() && !!c.lastName.trim() },
     { label: "Grade", done: c.grade !== "" },
     { label: "Birth year", done: /^\d{4}$/.test(c.birthYear.trim()) },
@@ -704,15 +707,9 @@ export function checklist(c: Child): { label: string; done: boolean }[] {
       label: "Academics (a subject + plan)",
       done: c.academics.some(academicComplete) || c.subjects.length >= 1,
     },
-  ];
-  if (c.groupSlug === "scholars") {
-    items.push({ label: "A workshop of interest", done: hasLiveWorkshopPick(c.workshopIds) });
-  }
-  items.push(
     { label: "The kid's interests", done: c.interests.trim().length >= 3 },
-    { label: "A project pitch", done: c.projectPitch.trim().length >= 10 }
-  );
-  return items;
+    { label: "A project pitch", done: c.projectPitch.trim().length >= 10 },
+  ];
 }
 
 export function completeness(c: Child): number {

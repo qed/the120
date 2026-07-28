@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import { hasLiveWorkshopPick } from "@/app/dashboard/data";
 import { GROUPS, REVIEW_STATUSES, type ReviewStatus } from "./constants";
 
 /* ---------------------------------------------------------------- schemas */
@@ -116,11 +115,11 @@ export function queueCounts(items: { reviewStatus: ReviewStatus }[]): {
 /**
  * The dossier fields completeness counts — a 1:1 mirror of the parent
  * dashboard's checklist (`app/dashboard/data.ts` `checklist()`), so both
- * sides of the product report the same number. Group-aware (R14): name
- * (first+last), grade, birth year (4 digits), current school, a group,
- * academics (an entry with subject+plan, or legacy ≥1 subject), a workshop
- * (Scholars only), interests (≥3 chars), project pitch (≥10 chars) —
- * 8 items (9 for Scholars), equal weight.
+ * sides of the product report the same number. EIGHT items for EVERY group
+ * since the Workshops removal (funnel U12, R46): name (first+last), grade,
+ * birth year (4 digits), current school, a group, academics (an entry with
+ * subject+plan, or legacy ≥1 subject), interests (≥3 chars), project pitch
+ * (≥10 chars) — equal weight. Legacy stored workshop picks are ignored.
  *
  * LOCKSTEP MIRRORS (R14): this definition is duplicated in
  * `app/dashboard/data.ts` (checklist — parent meter) and
@@ -162,15 +161,22 @@ export function asAcademics(value: unknown): DossierAcademic[] {
     }));
 }
 
-/** An academics entry counts toward completeness when subject AND plan are set. */
+/** The plan vocabulary, mirrored from the dashboard's ACADEMIC_PLANS. An
+ *  entry counts only when its plan is a KNOWN id — the dashboard's
+ *  tolerant parse clamps unknown plans to "" (item undone), and a mirror
+ *  accepting any non-empty string would report 100% for a row the parent
+ *  meter calls incomplete (the U12 review, by execution). */
+const KNOWN_PLANS = ["catch-up", "reach-ahead", "get-solid"];
+
+/** An academics entry counts toward completeness when subject AND a KNOWN plan are set. */
 const academicEntryComplete = (a: DossierAcademic): boolean =>
-  a.subject.trim() !== "" && a.plan.trim() !== "";
+  a.subject.trim() !== "" && KNOWN_PLANS.includes(a.plan.trim());
 
 export function dossierChecklist(
   f: DossierFields
 ): { label: string; done: boolean }[] {
   const groupSlug = f.groupSlug ?? "";
-  const items = [
+  return [
     { label: "Name", done: !!f.firstName.trim() && !!f.lastName.trim() },
     { label: "Grade", done: f.grade !== null },
     { label: "Birth year", done: /^\d{4}$/.test(f.birthYear.trim()) },
@@ -182,15 +188,9 @@ export function dossierChecklist(
         asAcademics(f.academics).some(academicEntryComplete) ||
         f.subjects.length >= 1,
     },
-  ];
-  if (groupSlug === "scholars") {
-    items.push({ label: "A workshop of interest", done: hasLiveWorkshopPick(f.workshopIds) });
-  }
-  items.push(
     { label: "The kid's interests", done: f.interests.trim().length >= 3 },
-    { label: "A project pitch", done: f.projectPitch.trim().length >= 10 }
-  );
-  return items;
+    { label: "A project pitch", done: f.projectPitch.trim().length >= 10 },
+  ];
 }
 
 /** 0–100, rounded — same math as the parent dashboard's meter. */

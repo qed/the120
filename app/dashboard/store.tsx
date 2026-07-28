@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Session } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { type Child, type Parent, emptyChild, parseAcademics } from "./data";
+import { prefillDraft } from "./wizard-rules";
 
 /**
  * S1/S2: Supabase-backed dashboard store (replaces localStorage V1).
@@ -55,6 +56,8 @@ export type ChildRow = {
   interests: string;
   project_pitch: string;
   portfolio_links: string;
+  child_email: string | null;
+  child_email_none: boolean | null;
   status: Child["status"];
   submitted_at: string | null;
 };
@@ -75,6 +78,8 @@ export function rowToChild(r: ChildRow): Child {
     interests: r.interests,
     projectPitch: r.project_pitch,
     portfolioLinks: r.portfolio_links,
+    childEmail: r.child_email ?? "",
+    childEmailNone: r.child_email_none ?? false,
     status: r.status,
     submittedAt: r.submitted_at ?? undefined,
   };
@@ -101,6 +106,8 @@ export function childToRow(c: Child, parentId: string) {
     interests: c.interests,
     project_pitch: c.projectPitch,
     portfolio_links: c.portfolioLinks,
+    child_email: c.childEmail,
+    child_email_none: c.childEmailNone,
     // status/submitted_at are NEVER serialized into an upsert row. A
     // PostgREST upsert is INSERT ... ON CONFLICT DO UPDATE; the status
     // guard's BEFORE INSERT branch coerces any non-draft status on the
@@ -166,78 +173,6 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     childrenRef.current = next;
     setChildren(next);
   }, []);
-
-  const loadFamily = useCallback(async (activeSession: Session) => {
-    const supabase = getSupabase();
-    const user = activeSession.user;
-    const [parentRes, { data: childRows }, { data: depositRows }] = await Promise.all([
-      supabase.from("parents").select("first_name,last_name,email").eq("id", user.id).maybeSingle(),
-      supabase.from("children").select("*").order("created_at"),
-      supabase.from("deposits").select("child_id,status"),
-    ]);
-    let parentRow = parentRes.data;
-    if (!parentRow && user.user_metadata?.first_name) {
-      // Confirm-email signup flow: the profile was captured in auth metadata
-      // because no session existed at signup (RLS blocks anonymous writes).
-      // Create the parents row on the first signed-in visit, then fire
-      // welcome email #1 (the route is idempotent).
-      const m = user.user_metadata;
-      const { error } = await supabase.from("parents").upsert({
-        id: user.id,
-        first_name: m.first_name ?? "",
-        last_name: m.last_name ?? "",
-        email: user.email ?? "",
-        phone: m.phone ?? "",
-        postal_code: m.postal_code ?? "",
-        casl_consent: Boolean(m.casl_consent),
-        casl_consent_at: m.casl_consent_at ?? new Date().toISOString(),
-        heard_about: m.heard_about ?? "",
-        referral_code: m.referral_code ?? "",
-      });
-      if (error) {
-        console.error("[dashboard] profile create failed:", error.message);
-      } else {
-        parentRow = { first_name: m.first_name ?? "", last_name: m.last_name ?? "", email: user.email ?? "" };
-        void fetch("/api/welcome", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${activeSession.access_token}` },
-        }).catch(() => {});
-      }
-    }
-    setParent(
-      parentRow
-        ? { firstName: parentRow.first_name, lastName: parentRow.last_name, email: parentRow.email }
-        : null
-    );
-    applyChildren(((childRows as ChildRow[]) ?? []).map(rowToChild));
-    setDeposits(
-      ((depositRows as { child_id: string; status: string }[]) ?? []).map((d) => ({
-        childId: d.child_id,
-        status: d.status,
-      }))
-    );
-  }, [applyChildren]);
-
-  useEffect(() => {
-    const supabase = getSupabase();
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      if (session) await loadFamily(session);
-      setReady(true);
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      setSession(newSession);
-      if (newSession) await loadFamily(newSession);
-      else {
-        setParent(null);
-        applyChildren([]);
-        setDeposits([]);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [loadFamily, applyChildren]);
 
   /**
    * Enqueue one child's upsert onto its per-child write chain. The row
@@ -343,6 +278,100 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     },
     [applyChildren]
   );
+
+  const loadFamily = useCallback(async (activeSession: Session) => {
+    const supabase = getSupabase();
+    const user = activeSession.user;
+    const [parentRes, { data: childRows }, { data: depositRows }, { data: projectRows }] =
+      await Promise.all([
+        supabase.from("parents").select("first_name,last_name,email").eq("id", user.id).maybeSingle(),
+        supabase.from("children").select("*").order("created_at"),
+        supabase.from("deposits").select("child_id,status"),
+        // R46: the funnel's projects pre-fill the Project step. RLS scopes
+        // the read to this family's children (the U10 policy).
+        supabase.from("projects").select("child_id,name,description").eq("status", "active"),
+      ]);
+    let parentRow = parentRes.data;
+    if (!parentRow && user.user_metadata?.first_name) {
+      // Confirm-email signup flow: the profile was captured in auth metadata
+      // because no session existed at signup (RLS blocks anonymous writes).
+      // Create the parents row on the first signed-in visit, then fire
+      // welcome email #1 (the route is idempotent).
+      const m = user.user_metadata;
+      const { error } = await supabase.from("parents").upsert({
+        id: user.id,
+        first_name: m.first_name ?? "",
+        last_name: m.last_name ?? "",
+        email: user.email ?? "",
+        phone: m.phone ?? "",
+        postal_code: m.postal_code ?? "",
+        casl_consent: Boolean(m.casl_consent),
+        casl_consent_at: m.casl_consent_at ?? new Date().toISOString(),
+        heard_about: m.heard_about ?? "",
+        referral_code: m.referral_code ?? "",
+      });
+      if (error) {
+        console.error("[dashboard] profile create failed:", error.message);
+      } else {
+        parentRow = { first_name: m.first_name ?? "", last_name: m.last_name ?? "", email: user.email ?? "" };
+        void fetch("/api/welcome", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${activeSession.access_token}` },
+        }).catch(() => {});
+      }
+    }
+    setParent(
+      parentRow
+        ? { firstName: parentRow.first_name, lastName: parentRow.last_name, email: parentRow.email }
+        : null
+    );
+    // R46/R47: prefill at load, then PERSIST what changed through the normal
+    // per-child write chain (status-free upsert). In-memory-only prefill made
+    // the parent meter disagree with the CRM queue and the stall nudge —
+    // whose cron reads the RAW row — for exactly the families the nudge
+    // targets (the U12 adversarial finding: "finish your dossier" mailed to
+    // a dashboard showing 100%). The write is additive, idempotent, and only
+    // fires for drafts whose prefill actually changed something.
+    const projectByChild = new Map(
+      ((projectRows as { child_id: string; name: string; description: string }[]) ?? []).map(
+        (row) => [String(row.child_id), { name: row.name ?? "", description: row.description ?? "" }]
+      )
+    );
+    const loaded = ((childRows as ChildRow[]) ?? []).map(rowToChild);
+    const prefilled = loaded.map((c) => prefillDraft(c, projectByChild.get(c.id) ?? null));
+    applyChildren(prefilled);
+    prefilled.forEach((c, i) => {
+      if (c !== loaded[i] && c.status === "draft") void enqueueWrite(c.id);
+    });
+    setDeposits(
+      ((depositRows as { child_id: string; status: string }[]) ?? []).map((d) => ({
+        childId: d.child_id,
+        status: d.status,
+      }))
+    );
+  }, [applyChildren, enqueueWrite]);
+
+  useEffect(() => {
+    const supabase = getSupabase();
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      if (session) await loadFamily(session);
+      setReady(true);
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      setSession(newSession);
+      if (newSession) await loadFamily(newSession);
+      else {
+        setParent(null);
+        applyChildren([]);
+        setDeposits([]);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [loadFamily, applyChildren]);
+
 
   /** Persist one child row soon (fire-and-forget; RLS scopes to this parent). */
   const persistChild = useCallback(

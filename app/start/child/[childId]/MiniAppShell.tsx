@@ -23,6 +23,14 @@ import {
   CUSTOMER_ASK_AGAIN_PLACEHOLDER,
   type ComposedProject,
 } from "@/app/lib/funnel/compose-rules";
+import {
+  APPLICATION_REGISTER_CLASSES,
+  FAQ_OPEN_EVENT,
+  REVEAL_UI_COPY,
+  firstTasks,
+  revealModel,
+  shareCardSvg,
+} from "@/app/lib/funnel/reveal-rules";
 import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import {
   BUILT_STEPS,
@@ -35,7 +43,7 @@ import {
   stepNeighbour,
   type MiniAppStep,
 } from "@/app/lib/funnel/miniapp-rules";
-import { DOOR_CLASSES } from "@/app/lib/site";
+import { DOOR_CLASSES, GROUP_SLUGS } from "@/app/lib/site";
 import type { GroupSlug } from "@/app/lib/site";
 import {
   OWN_IDEA,
@@ -57,9 +65,14 @@ import {
 export function MiniAppShell({
   child,
   hintSlug,
+  initialProject,
 }: {
   child: MiniAppChild;
   hintSlug: string | null;
+  /** The child's active draft, loaded server-side, so compose/tasks/reveal
+   *  survive a refresh. Null = not composed yet (or the read failed and the
+   *  compose action re-loads on demand). */
+  initialProject: ProjectView | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -93,8 +106,10 @@ export function MiniAppShell({
   // DRAFT is the family's working copy of those fields. Refresh loses only
   // the unsaved working copy — re-entering compose finds the persisted row
   // (`exists`) and the counter is server-side (R40).
-  const [composeView, setComposeView] = useState<ProjectView | null>(null);
-  const [composeDraft, setComposeDraft] = useState<ComposedProject | null>(null);
+  const [composeView, setComposeView] = useState<ProjectView | null>(initialProject);
+  const [composeDraft, setComposeDraft] = useState<ComposedProject | null>(
+    initialProject?.project ?? null
+  );
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
   const [composeDegraded, setComposeDegraded] = useState(false);
 
@@ -168,7 +183,7 @@ export function MiniAppShell({
       }
       setNotice(
         result.kind === "unauthenticated"
-          ? "Your session expired — start again and we'll pick this up."
+          ? "Your session expired. Start again and we'll pick this up."
           : "That didn't save. Give it a second and tap again."
       );
     });
@@ -195,15 +210,15 @@ export function MiniAppShell({
       }
       if (result.kind === "input_rejected") {
         // Never "failed": the answer needs another look, that's all.
-        setQuizNotice("A couple of answers need another look — finish them and try again.");
+        setQuizNotice("A couple of answers need another look. Finish them and try again.");
         go("quiz");
         return;
       }
       setComposeNotice(
         result.kind === "unauthenticated"
-          ? "Your session expired — start again and we'll pick this up."
+          ? "Your session expired. Start again and we'll pick this up."
           : result.kind === "project_cap"
-            ? "This builder already has five projects — plenty. Talk to us if one should make room."
+            ? "This builder already has five projects, which is plenty. Talk to us if one should make room."
             : "That didn't work. Give it a second and tap again."
       );
     });
@@ -222,9 +237,9 @@ export function MiniAppShell({
       }
       setComposeNotice(
         result.kind === "limit"
-          ? "That's both redos used — every word below is still yours to change by hand."
+          ? "That's both redos used. Every word below is still yours to change by hand."
           : result.kind === "conflict"
-            ? "Another tab got there first — refresh to see the newest version."
+            ? "Another tab got there first. Refresh to see the newest version."
             : "That didn't work. Give it a second and tap again."
       );
     });
@@ -242,7 +257,7 @@ export function MiniAppShell({
           project: composeDraft,
         });
         if (saved.kind !== "saved") {
-          setComposeNotice("Saving your edits didn't work — try again.");
+          setComposeNotice("Saving your edits didn't work. Try again.");
           return;
         }
         setComposeView({ ...composeView, project: saved.project });
@@ -302,7 +317,7 @@ export function MiniAppShell({
                           // R35: one line of band-register copy under the hint.
                           <span className="mt-0.5 text-[12px] opacity-70">
                             {skin === "trail"
-                              ? "This looked like your door — tap again if it is."
+                              ? "This looked like your door. Tap again if it is."
                               : "Your door, if you want it. Or pick another."}
                           </span>
                         )}
@@ -329,8 +344,8 @@ export function MiniAppShell({
           <section>
             <h1 className="font-display text-3xl leading-tight">Pick a starting point.</h1>
             <p className="mt-3 text-base leading-7 opacity-80">
-              Two ready-made starts, or your own idea. You can change everything later —
-              this is a starting line, not a contract.
+              Two ready-made starts, or your own idea. You can change everything later.
+              This is a starting line, not a contract.
             </p>
             <ul className="mt-7 flex flex-col gap-2.5">
               {templatesForGroup(confirmedSlug as GroupSlug).map((t) => (
@@ -521,7 +536,7 @@ export function MiniAppShell({
             <h1 className="font-display text-3xl leading-tight">Here&apos;s your first draft.</h1>
             {composeDegraded && (
               <p className="mt-2 text-[13px] leading-5 opacity-70">
-                We started you with the classic version — every word below is yours
+                We started you with the classic version. Every word below is yours
                 to change.
               </p>
             )}
@@ -619,14 +634,183 @@ export function MiniAppShell({
           </section>
         )}
 
+        {(step === "tasks" || step === "reveal") && !composeView && (
+          <section>
+            <p className="text-base leading-7 opacity-80">{REVEAL_UI_COPY.gateLine}</p>
+            <button
+              onClick={() => go("compose")}
+              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
+            >
+              {REVEAL_UI_COPY.gateButton}
+            </button>
+          </section>
+        )}
+
+        {step === "tasks" && composeView && (
+          <section>
+            <h1 className="font-display text-3xl leading-tight">{REVEAL_UI_COPY.tasksHeading}</h1>
+            <p className="mt-3 text-base leading-7 opacity-80">{REVEAL_UI_COPY.tasksIntro}</p>
+            <ul className="mt-7 flex flex-col gap-2.5">
+              {firstTasks(composeView.project).map((t) => (
+                <li
+                  key={t.id}
+                  className="flex flex-col gap-1 rounded-2xl border border-black/15 bg-white/60 px-5 py-4"
+                >
+                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.14em] opacity-60">
+                    {t.id}
+                  </span>
+                  <span className="text-[16px] font-semibold">{t.title}</span>
+                  <span className="text-[13px] leading-5 opacity-75">{t.line}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => go(stepNeighbour("tasks", "next"))}
+              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+            >
+              {REVEAL_UI_COPY.tasksNext}
+            </button>
+          </section>
+        )}
+
+        {step === "reveal" && composeView && confirmedSlug && (() => {
+          // The PROJECT's own group labels the reveal and the card. A door
+          // switch racing a failed state advance could relabel group X's
+          // project as group Y's if this read the child's door instead.
+          const projectGroup = (GROUP_SLUGS as readonly string[]).includes(
+            composeView.groupSlug
+          )
+            ? (composeView.groupSlug as GroupSlug)
+            : (confirmedSlug as GroupSlug);
+          const model = revealModel({
+            project: composeView.project,
+            band: quizBandForGrade(child.grade),
+            skin,
+            group: projectGroup,
+          });
+          if (model.kind !== "ok") return null;
+          return (
+            <section>
+              <h1 className="font-display text-3xl leading-tight">
+                {composeView.project.name}
+              </h1>
+              <p className="mt-2 text-[15px] leading-6 opacity-80">
+                {composeView.project.description}
+              </p>
+
+              {/* R43: the five-phase climb, above the fold, dashed where projected. */}
+              <div className="mt-8 flex items-end gap-2" aria-hidden>
+                {model.climb.map((phase) => (
+                  <div key={phase.key} className="flex flex-1 flex-col items-center gap-1.5">
+                    <div className="flex h-28 w-full items-end">
+                      <div
+                        className={`w-full rounded-t-md ${
+                          phase.state === "complete"
+                            ? "bg-red"
+                            : phase.state === "partial"
+                              ? "bg-red/60"
+                              : "border-2 border-dashed border-current bg-transparent opacity-40"
+                        }`}
+                        style={{ height: `${phase.percent}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-[0.5rem] uppercase tracking-[0.1em] opacity-70">
+                      {phase.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 font-mono text-[0.6rem] uppercase tracking-[0.1em] opacity-60">
+                {model.projectionLabel}
+              </p>
+
+              {/* R43: the stat strip — every number is a real pass criterion. */}
+              <div className="mt-6 flex gap-4">
+                {model.stats.map((s) => (
+                  <div key={s.label} className="flex flex-col">
+                    <span className="font-display text-2xl">{s.value}</span>
+                    <span className="text-[11px] leading-4 opacity-70">{s.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* R45: the share card, parent-only. */}
+              <button
+                onClick={() => {
+                  const svg = shareCardSvg(model.shareCard);
+                  const url = URL.createObjectURL(
+                    new Blob([svg], { type: "image/svg+xml" })
+                  );
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "first-profit-card.svg";
+                  // WebKit needs the anchor in the document, and revoking on
+                  // the same tick as click() races the download to a
+                  // zero-byte file. Defer the revoke.
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}
+                className="mt-6 inline-flex h-10 items-center justify-center rounded-full border border-current px-5 font-mono text-[0.65rem] uppercase tracking-[0.12em]"
+              >
+                {REVEAL_UI_COPY.downloadLabel}
+              </button>
+
+              {/* R44: the close — the ONLY nested register swap in the funnel.
+                  Application register inside the child's skin subtree. */}
+              <div className={`mt-10 -mx-6 px-6 py-8 ${APPLICATION_REGISTER_CLASSES}`}>
+                <p className="text-[14px] italic leading-6 opacity-80">{model.parentLine}</p>
+                <a
+                  href="/dashboard"
+                  className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+                >
+                  {model.cta}
+                </a>
+                <div className="mt-7 flex flex-col divide-y divide-line border-y border-line">
+                  {model.faq.map((row) => (
+                    <details
+                      key={row.q}
+                      className="group py-3"
+                      onToggle={(e) => {
+                        // R44: opening a row emits an event. U16 ships the
+                        // pipe; until then this is its named call site.
+                        if ((e.target as HTMLDetailsElement).open) {
+                          console.debug(`[funnel/event] ${FAQ_OPEN_EVENT}`, row.q);
+                        }
+                      }}
+                    >
+                      <summary className="cursor-pointer list-none text-[14px] font-semibold">
+                        {row.q}
+                      </summary>
+                      <p className="mt-2 text-[13px] leading-5 opacity-75">{row.a}</p>
+                    </details>
+                  ))}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
+
+        {step === "reveal" && composeView && !confirmedSlug && (
+          <section>
+            <p className="text-base leading-7 opacity-80">Pick a door first.</p>
+            <button
+              onClick={() => go("doors")}
+              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
+            >
+              ← To the doors
+            </button>
+          </section>
+        )}
+
         {!BUILT_STEPS.includes(step) && (
           <section>
             <h1 className="font-display text-3xl leading-tight">
               {child.firstName ? `Nice pick, ${child.firstName}.` : "Nice pick."}
             </h1>
             <p className="mt-3 text-base leading-7 opacity-80">
-              The next part — where your answers become a real project — is
-              landing here shortly. Your door is saved.
+              This part is landing shortly. Everything you did is saved.
             </p>
             <button
               onClick={() => go(stepNeighbour(step, "back"))}

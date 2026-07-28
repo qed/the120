@@ -1007,7 +1007,26 @@ a first draft.
 
 ---
 
-- [ ] **Unit 11: First three tasks, the Reveal, and the share card**
+- [x] **Unit 11: First three tasks, the Reveal, and the share card** — *landed
+  2026-07-28. `reveal-rules.ts` pure: five-phase climb sourced from the published
+  `pathSteps` (SELL/BUILD complete, VALIDATE partial, GROW/SCALE dashed),
+  projection label per band, stat strip cited against the real 25 pass criteria
+  by `statCiteVerdict` (word-boundary matching after the adversarial reviewer
+  defeated the substring version by execution: "one" ⊂ "money"), R42's three
+  bubbles with the name-punctuation edge handled, four-row FAQ closed by default
+  with `FAQ_OPEN_EVENT` wired to a named no-op call site for U16, and the R45
+  share card WITH the heraldic crests (shield/chevron/numeral template from
+  `Crest.tsx`), name capped + excerpt wrapped for the 600px canvas, XML control
+  characters stripped, WebKit-safe blob download. The reveal renders the
+  PROJECT's own group (ProjectView now carries groupSlug) so a door switch
+  racing a failed state advance cannot mislabel the card. Step chrome copy moved
+  into swept `REVEAL_UI_COPY` — JSX literals had dodged the R63 sweep, em dash
+  included; funnel-surface notices de-em-dashed throughout the shell. All seven
+  mini-app steps now BUILT; the active project loads server-side in page.tsx so
+  tasks/reveal survive refresh. Nested register swap: `APPLICATION_REGISTER_CLASSES`
+  ("bg-paper text-ink") inside the skin subtree. Suite 129 files / 3,367 tests;
+  tsc, build, lint clean. By-eye screenshot pass against the design handoff
+  remains for Peter (no screenshots directory in-repo, as the plan notes).*
 
 **Goal:** The emotional close of the mini-app.
 

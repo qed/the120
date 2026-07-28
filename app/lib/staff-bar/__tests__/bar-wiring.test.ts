@@ -331,6 +331,19 @@ const NESTED_FW_LAYOUTS = [
   "../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx",
 ] as const;
 
+/**
+ * The sticky FW chrome that must offset under the bar. Not the same list as
+ * NESTED_FW_LAYOUTS any more: the ops redesign (Unit 1) moved the ops header's
+ * sticky markup out of `ops/layout.tsx` into `FwOpsTabRow`, which that layout
+ * renders — so the offset contract is now a property of the component file.
+ * `fw-ops-chrome-wiring.test.ts` pins the rest of that row's contract; THIS
+ * list stays the one place the `--staff-bar-h` offset itself is enforced.
+ */
+const STICKY_FW_CHROME = [
+  "../../../fp/fw/components/FwOpsTabRow.tsx",
+  "../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx",
+] as const;
+
 describe("the bar mounts exactly once per page (R15, R18)", () => {
   it("is mounted in each of the three outermost guarded layouts", () => {
     // stripComments, like every sibling assertion: a reviewer commented the mount out
@@ -423,7 +436,7 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
       "the height publish must run in useLayoutEffect, before paint"
     ).toMatch(/^useLayoutEffect\(/);
 
-    for (const relative of NESTED_FW_LAYOUTS) {
+    for (const relative of STICKY_FW_CHROME) {
       const header = stripComments(read(relative));
       // The offset must be on a STICKY element: `top` on a statically-positioned
       // header is inert, which is the shape of the mistake worth catching.

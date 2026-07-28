@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
+import FwOpsTabRow from "@/app/fp/fw/components/FwOpsTabRow";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 
 /**
- * The staff ops shell (FW Unit 5) — chrome for the surfaces guides never see.
+ * The staff ops shell — chrome for the surfaces guides never see. The chrome
+ * itself is `FwOpsTabRow` (ops redesign Unit 1): the sticky pill row carrying
+ * Weekends / Guide view / the ADMIN chip / the archived toggle / the + control,
+ * and with it the `--staff-bar-h` sticky-offset contract that used to live in
+ * this file's header markup.
  *
  * Deliberately NOT nested under `cohort/[cohortId]/layout.tsx`. That shell is
  * the GUIDE's working header (weekend name, switcher, sign out) and is scoped to
@@ -33,11 +36,6 @@ import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
  * persistent staff bar in `../layout.tsx` is the single control now, and the action
  * itself is deleted rather than merely unlinked: a `"use server"` export stays
  * POST-addressable whether or not anything renders a form for it.
- *
- * STICKY OFFSET: `--staff-bar-h`, published by the bar. Two sticky headers both
- * claiming `top: 0` do not stack — the one with the higher z-index simply covers the
- * other. The fallback of `0px` keeps this header behaving exactly as it does today
- * if the bar is ever unmounted (the plan's named rollback for this slice).
  */
 export default async function FwOpsLayout({ children }: { children: ReactNode }) {
   const gate = await resolveFwStaffGate();
@@ -45,30 +43,7 @@ export default async function FwOpsLayout({ children }: { children: ReactNode })
 
   return (
     <>
-      <header className="sticky top-[var(--staff-bar-h,0px)] z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
-        <div className="min-w-0">
-          <p className="font-path-mono text-[11px] uppercase tracking-[0.14em] text-hq-ink-muted">
-            Founders Weekend · Staff ops
-          </p>
-          <Link
-            href="/fp/fw/ops"
-            className="truncate font-path-display text-base font-semibold text-hq-ink"
-          >
-            Weekends
-          </Link>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-4">
-          <Link
-            href="/fp/fw"
-            className="inline-flex min-h-[44px] items-center gap-1.5 font-path-body text-sm text-hq-ink-soft hover:text-hq-ink"
-          >
-            <Icon name="arrow-right" size={16} />
-            Guide view
-          </Link>
-        </div>
-      </header>
-
+      <FwOpsTabRow />
       {children}
     </>
   );

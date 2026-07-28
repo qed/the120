@@ -68,6 +68,8 @@ export default async function FwOpsPage({
   // Unit 9: archived hidden by default — staff visibility is the point of
   // archiving — with `?archived=1` as the explicit "show archived too" view. A
   // query param, not state: the view is shareable and survives a reload.
+  // The toggle itself lives in the tab row (`FwOpsTabRow`, Unit 1) — this page
+  // only READS the param the row's Link flips.
   const { archived } = await searchParams;
   const includeArchived = archived === "1";
   const listed = await loadOpsCohorts(includeArchived);
@@ -95,15 +97,6 @@ export default async function FwOpsPage({
                 : "No active weekends. Create one below — or show the archived list."
               : "Open a weekend to manage its guides and its board link."}
           </p>
-          <p className="mt-1 font-path-body text-sm leading-6">
-            <Link
-              href={includeArchived ? "/fp/fw/ops" : "/fp/fw/ops?archived=1"}
-              className="text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
-            >
-              {includeArchived ? "Hide archived weekends" : "Show archived weekends"}
-            </Link>
-          </p>
-
           {listed.cohorts.length > 0 && (
             <ul className="mt-5 space-y-3">
               {listed.cohorts.map((cohort) => {
@@ -151,7 +144,13 @@ export default async function FwOpsPage({
         </>
       )}
 
-      <section className="mt-10">
+      {/* `id`: the tab row's + control links here until Unit 2 wires the inline
+          create panel. `scroll-mt` clears the two rows of sticky chrome so the
+          anchored heading is not painted under them. */}
+      <section
+        id="new-weekend"
+        className="mt-10 scroll-mt-[calc(var(--staff-bar-h,0px)+64px)]"
+      >
         <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
           New weekend
         </h2>

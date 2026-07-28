@@ -1,11 +1,13 @@
 # Migration lock
 
-**Current holder: Lane A — fieldwork (FW ops/guide redesign).**
+**Current holder: Lane B — First Profit funnel.**
 
-Transferred from Lane B 2026-07-28 with Peter's approval, in the same PR as the
-two migrations it covers (`20260811120000_fw_window_edit_attribution.sql`,
-`20260811130000_fw_notice_stamp_comment.sql`) — the documented transfer
-mechanism. Lane B completed the funnel migrations through `20260810120000`.
+Lane A (fieldwork, FW ops/guide redesign) briefly took the lock on 2026-07-28
+with Peter's approval for exactly two migrations — now complete
+(`20260811130000_fw_notice_stamp_comment.sql`,
+`20260811140000_fw_window_edit_attribution.sql`) — and returned it. Lane A
+needs no further authoring; Lane B is actively authoring and completed the
+funnel migrations through `20260810120000`.
 
 The Staff Front Door plan completed 2026-07-27 (Units 1–12, PRs #59–#77). **A
 second lane became active again on 2026-07-28** (fieldwork tooling, PR #86) — the

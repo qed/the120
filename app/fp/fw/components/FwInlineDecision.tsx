@@ -332,15 +332,19 @@ export default function FwInlineDecision({
 
   const runFlip = async () => {
     begin("not_yet");
+    // BOTH leg ids held before anything is attempted (Key Decision): leg 2
+    // must never ride leg 1's id, or the RPC's replay probe swallows it as
+    // `replayed`. `fwTapKey` already keys per action, so the ledger hands the
+    // two legs distinct, retry-stable ids with no key change. Derived OUTSIDE
+    // the try, because the catch must reuse these exact ids: after leg 1's
+    // settle() releases the undo key, a fresh idsFor there would mint a NEW
+    // undo id, and the drain would reject the backstopped pair — losing the
+    // not_yet.
+    const undoId = ledger.idsFor({ taskId, action: "undo", studentIds: [studentId] })[studentId];
+    const notYetId = ledger.idsFor({ taskId, action: "not_yet", studentIds: [studentId] })[
+      studentId
+    ];
     try {
-      // BOTH leg ids held before anything is attempted (Key Decision): leg 2
-      // must never ride leg 1's id, or the RPC's replay probe swallows it as
-      // `replayed`. `fwTapKey` already keys per action, so the ledger hands the
-      // two legs distinct, retry-stable ids with no key change.
-      const undoId = ledger.idsFor({ taskId, action: "undo", studentIds: [studentId] })[studentId];
-      const notYetId = ledger.idsFor({ taskId, action: "not_yet", studentIds: [studentId] })[
-        studentId
-      ];
       const legs = (): FwFlipLeg[] => [
         // Fresh actionIds per enqueue are fine — the exactly-once key is the
         // clientId; the actionId only groups a board celebration per action.
@@ -467,11 +471,8 @@ export default function FwInlineDecision({
       router.refresh();
     } catch {
       // A rejection anywhere in the sequence: both legs to the queue, each with
-      // its own held id (minted above; `ledger.idsFor` re-holds unsettled ones).
-      const undoId = ledger.idsFor({ taskId, action: "undo", studentIds: [studentId] })[studentId];
-      const notYetId = ledger.idsFor({ taskId, action: "not_yet", studentIds: [studentId] })[
-        studentId
-      ];
+      // the SAME id hoisted above the try — never re-derived here, because a
+      // post-settle idsFor mints a new key the drain would reject.
       const enq = await enqueueFwFlip({
         cohortId,
         taskId,

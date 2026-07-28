@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Icon } from "@/app/fp/components/system/Icon";
 import { StatusChip } from "@/app/fp/components/system/StatusChip";
 import FwTaskDetailModal, { type FwTaskDetail } from "./FwTaskDetailModal";
@@ -164,6 +164,10 @@ export default function FwTaskTree({
 }) {
   const [detailTask, setDetailTask] = useState<FwTreeTask | null>(null);
   const openDetail = detailTask ? details[detailTask.id] : undefined;
+  // Stable across re-renders — belt-and-braces with the focus trap's own
+  // ref-held escape handler, so a queue-driven parent re-render can never
+  // re-fire the modal's trap through a fresh closure identity.
+  const closeDetail = useCallback(() => setDetailTask(null), []);
 
   return (
     <section className="overflow-hidden rounded-xl border border-hq-border bg-hq-surface shadow-hq">
@@ -196,7 +200,7 @@ export default function FwTaskTree({
           taskId={detailTask.id}
           title={detailTask.title}
           detail={openDetail}
-          onClose={() => setDetailTask(null)}
+          onClose={closeDetail}
         />
       )}
     </section>

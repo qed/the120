@@ -645,6 +645,28 @@ describe("the cohort header duplicates no application label (3.18.10)", () => {
     // exist and still carry the weekend name (also pinned structurally below).
     expect(layout).toMatch(/This weekend/);
   });
+
+  it("the weekend name IS the way back to the picker — a Link to /fp/fw (R25)", () => {
+    // Ops-guide redesign Unit 11 retired the explicit Switch control; since
+    // then the weekend name in this header is the ONLY route from a cohort
+    // surface back to the picker. A revert to a static span strands guides in
+    // whichever weekend they opened first. Pinned as the name INSIDE the link,
+    // not the link's mere existence — a /fp/fw link elsewhere in the header
+    // would not carry the affordance the name does.
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).toMatch(/<Link\s[^>]*href="\/fp\/fw"[\s\S]{0,300}?active\?\.slug/);
+  });
+
+  it("the retired Switch control stays retired — no Switch link markup survives", () => {
+    // The Unit 11 deletion, held: two controls for one destination is how the
+    // pair drifts, and the Switch variant carried its own visibility flag. Both
+    // the rendered label and the identifier are asserted absent, over
+    // comment-stripped source (the layout's comments legitimately discuss the
+    // control they removed).
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).not.toMatch(/>Switch</);
+    expect(layout).not.toMatch(/\bcanSwitch\b/);
+  });
 });
 
 describe("Unit 9 — who includes archived cohorts is a WIRING decision, pinned", () => {

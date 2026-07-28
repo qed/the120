@@ -38,6 +38,8 @@ const LAYOUT = stripComments(read("../../fw/(app)/ops/layout.tsx"));
 const PAGE = stripComments(read("../../fw/(app)/ops/page.tsx"));
 const COHORT_PAGE = stripComments(read("../../fw/(app)/ops/cohort/[cohortId]/page.tsx"));
 const SECTION_NAV = stripComments(read("../../fw/components/FwOpsSectionNav.tsx"));
+const INLINE_DECISION = stripComments(read("../../fw/components/FwInlineDecision.tsx"));
+const WINDOW_EDIT = stripComments(read("../../fw/components/FwWindowEdit.tsx"));
 
 describe("the row keeps the sticky-offset contract it inherited from the old header", () => {
   it("is sticky under the bar's published height, with the 0px fallback", () => {
@@ -248,5 +250,53 @@ describe("the cohort page's section nav (redesign Unit 6, R16)", () => {
     expect(COHORT_PAGE).not.toMatch(/next\/dynamic|React\.lazy|import\(/);
     // The nav itself holds no open/closed state — it is a strip, not a menu.
     expect(SECTION_NAV).not.toMatch(/useState/);
+  });
+});
+
+describe("the composed flip's client ids survive a leg-1 settle (redesign Unit 9)", () => {
+  /** runFlip's whole body, bounded by the neighbouring declarations — the flip
+   *  is the only place both leg ids and both enqueue paths live. */
+  const runFlip = INLINE_DECISION.slice(
+    INLINE_DECISION.indexOf("const runFlip"),
+    INLINE_DECISION.indexOf("const onTap")
+  );
+
+  it("derives BOTH per-leg ids before the try, and the catch never re-derives one", () => {
+    // Leg 1's settle() releases the undo key. A catch that calls
+    // `ledger.idsFor` after that mints a NEW undo id, so the backstop-enqueued
+    // pair carries a key the drain has never seen for the landed undo — the
+    // pair is rejected and the not_yet is lost. The ids must be held ONCE,
+    // above the try, and the catch must reuse those exact ids.
+    expect(runFlip.length).toBeGreaterThan(0);
+    const tryAt = runFlip.indexOf("try {");
+    expect(tryAt).toBeGreaterThan(0);
+    const derivations = [...runFlip.matchAll(/ledger\.idsFor\(/g)].map((m) => m.index ?? -1);
+    expect(derivations.length).toBe(2);
+    for (const at of derivations) expect(at).toBeLessThan(tryAt);
+    const catchAt = runFlip.indexOf("} catch");
+    expect(catchAt).toBeGreaterThan(tryAt);
+    expect(runFlip.slice(catchAt)).not.toContain("idsFor");
+  });
+
+  it("every flip enqueue goes through the per-leg-tuple entry point", () => {
+    // `enqueueFwFlip` is the ordered two-leg tuple the drain replays with
+    // halt-on-first-non-settle; `enqueueFwCheckIns` enqueues independent
+    // singles with no ordering, which for a flip can land the not_yet without
+    // its undo. The flip path must never reach for the single-action door.
+    expect(runFlip).toMatch(/enqueueFwFlip\(\{/);
+    expect(runFlip).not.toMatch(/enqueueFwCheckIns\(/);
+  });
+});
+
+describe("the window editor's re-mint names the token it means to replace (Unit 4)", () => {
+  it("passes expectedTokenId from the live-token prop into the action call", () => {
+    // The CAS the core threads through the mint sequence: naming the token the
+    // page was LOOKING AT is what turns a concurrent re-mint into a
+    // `stale_view` refusal instead of a blind revoke of somebody else's fresh
+    // link. Dropping the field — or wiring anything but the live-token prop
+    // into it — silently degrades the re-mint to exactly that blind revoke.
+    expect(WINDOW_EDIT).toMatch(
+      /remintBoardTokenForWindowAction\(\{[\s\S]{0,160}?expectedTokenId:\s*liveTokenId/
+    );
   });
 });

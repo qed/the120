@@ -16,7 +16,12 @@
  *                               --start 2026-08-21 --start-time 09:00 \
  *                               --end   2026-08-23 --end-time   17:00 \
  *                               --tz    America/New_York [--json]
+ *   npm run fw -- window-edit   --cohort <uuid> \
+ *                               --start 2026-08-21 --start-time 09:00 \
+ *                               --end   2026-08-23 --end-time   17:00 \
+ *                               --tz    America/New_York [--json]
  *   npm run fw -- token-mint    --cohort <uuid> [--force] [--json]
+ *   npm run fw -- token-remint  --cohort <uuid> --expected-token-id <uuid> [--json]
  *   npm run fw -- token-revoke  --cohort <uuid> [--json]
  *   npm run fw -- board         --cohort <uuid> [--json]
  *   npm run fw -- guides        --cohort <uuid> [--json]
@@ -101,16 +106,20 @@ import {
   loadFwMatchResolution,
   loadFwOpsBoardToken,
   mintFwBoardToken,
+  remintFwBoardTokenForWindow,
   resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   archiveFwCohort,
   unarchiveFwCohort,
+  updateFwCohortWindow,
 } from "../app/fp/lib/fw-ops-core";
 import {
   fwCohortWindowFromLocal,
   fwReplayRejectReasonCopy,
   normalizeFwCohortSlug,
+  remintFwBoardTokenFailureCopy,
+  updateFwCohortWindowFailureCopy,
 } from "../app/fp/lib/fw-ops-rules";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
@@ -146,7 +155,9 @@ const COMMANDS = [
   "create",
   "cohorts",
   "cohort-create",
+  "window-edit",
   "token-mint",
+  "token-remint",
   "token-revoke",
   "archive",
   "unarchive",
@@ -190,7 +201,16 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   create: ["--cohort", "--first", "--last", "--band"],
   cohorts: [],
   "cohort-create": ["--slug", "--start", "--start-time", "--end", "--end-time", "--tz"],
+  // Redesign Unit 4's window edit, CLI front door: same core as the ops
+  // surface (updateFwCohortWindow), same refusal copy, same always-both-bounds
+  // write — the live board token is deliberately untouched (token-remint is
+  // the explicit follow-up).
+  "window-edit": ["--cohort", "--start", "--start-time", "--end", "--end-time", "--tz"],
   "token-mint": ["--cohort", "--force"],
+  // Redesign Unit 4's revoke + re-mint for a corrected window. Requires the
+  // live token's id (the CAS): a stale id refuses with nothing revoked, so
+  // this can never blind-kill a link somebody else just minted.
+  "token-remint": ["--cohort", "--expected-token-id"],
   "token-revoke": ["--cohort"],
   board: ["--cohort"],
   guides: ["--cohort"],
@@ -422,6 +442,55 @@ async function main() {
     return;
   }
 
+  if (command === "window-edit") {
+    const cohortId = required("cohort");
+    // The SAME local-window conversion cohort-create runs, up front, so a
+    // malformed window fails with the same `window: <reason>` shape before the
+    // core is called. The core re-runs it (its callers include the browser),
+    // which also means the invalid_* members of its refusal union cannot reach
+    // the copy branch below.
+    const window = fwCohortWindowFromLocal({
+      startDate: required("start"),
+      startTime: required("start-time"),
+      endDate: required("end"),
+      endTime: required("end-time"),
+      timeZone: required("tz"),
+    });
+    if (!window.ok) throw new Error(`window: ${window.reason}`);
+
+    const res = await updateFwCohortWindow(db, {
+      cohortId,
+      startDate: required("start"),
+      startTime: required("start-time"),
+      endDate: required("end"),
+      endTime: required("end-time"),
+      timeZone: required("tz"),
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    emit(res, () => {
+      if (res.ok) {
+        console.log(`\nwindow saved for ${cohortId}\n  ${res.startsAt} → ${res.endsAt}`);
+        console.log(
+          "  the live board link (if any) keeps its stored expiry — run token-remint if it should follow this edit"
+        );
+      } else {
+        console.log(
+          `window-edit refused: ${
+            res.reason === "cohort_not_found" ||
+            res.reason === "cohort_not_fw" ||
+            res.reason === "cohort_archived" ||
+            res.reason === "unavailable"
+              ? updateFwCohortWindowFailureCopy(res.reason)
+              : `window: ${res.reason}`
+          }`
+        );
+      }
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
   if (command === "token-mint") {
     const cohortId = required("cohort");
     // The ops surface makes staff confirm before replacing a LIVE link, because
@@ -453,6 +522,36 @@ async function main() {
         console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
       }
       console.log(`\n${boardUrl}\n  expires ${res.expiresAt}`);
+      console.log("  Only a hash is stored — this cannot be shown again.");
+    });
+    return;
+  }
+
+  if (command === "token-remint") {
+    const cohortId = required("cohort");
+    const res = await remintFwBoardTokenForWindow(db, {
+      cohortId,
+      // The CAS: the live token this caller believes it is replacing. A stale
+      // id refuses (`stale_view`) with nothing revoked — no --force here,
+      // because naming the token IS the deliberate act.
+      expectedTokenId: required("expected-token-id"),
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    if (!res.ok) {
+      emit(res, () => console.log(`token-remint refused: ${remintFwBoardTokenFailureCopy(res.reason)}`));
+      process.exitCode = 1;
+      return;
+    }
+    // The raw token is printed ONCE and never stored — token-mint's contract,
+    // URL assembled the same way so an agent can paste it without knowing the
+    // route shape.
+    const remintUrl = `${SITE_URL}/fp/fw/board/${res.token}`;
+    emit({ ...res, url: remintUrl }, () => {
+      if (res.revokedPrior) {
+        console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
+      }
+      console.log(`\n${remintUrl}\n  expires ${res.expiresAt}`);
       console.log("  Only a hash is stored — this cannot be shown again.");
     });
     return;

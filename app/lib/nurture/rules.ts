@@ -48,6 +48,7 @@ export type NurtureFamilyRow = {
 };
 
 export type NurtureChildRow = {
+  id: string;
   parent_id: string;
   first_name: string;
   last_name: string;
@@ -76,6 +77,11 @@ export type NurtureChildRow = {
 
 export type NurtureDepositRow = {
   parent_id: string;
+  /** W8: the offer nudge gates per CHILD — a deposited sibling must not
+   *  silence a freshly-offered one. Every deposits row has it (NOT NULL
+   *  since the initial schema); a child no longer in the engine's map
+   *  (deleted/merged) simply matches nothing. */
+  child_id: string;
   status: string;
   refunded_at: string | null;
   created_at: string;
@@ -175,15 +181,13 @@ export function dossierCompleteness(c: NurtureChildRow): number {
  * - child-but-no-project → stall-child (here).
  * - project-but-no-application → stall-project (here).
  * - applied-but-no-deposit → the OFFER sequence (offer-nudge below),
- *   anchored on child_reviews.offer_email_sent_at, gated off hasPaid.
- *   KNOWN deviation: the gate is FAMILY-wide (any child's live deposit
- *   silences it) because NurtureDepositRow carries parent_id only — a
- *   per-child gate needs deposits.child_id in the engine's select. A
- *   family with one deposited child and one freshly-offered child gets
- *   no reminder; the offer email itself remains their touch. Flagged.
- * - R61 also asks for the PROJECT name in the subject; the engine has no
- *   project data and the build's privacy posture is "no child data beyond
- *   a first name" — the deviation is deliberate, flagged to Peter.
+ *   anchored on child_reviews.offer_email_sent_at. W8 (2026-07-28, Peter):
+ *   the gate and the one-time key are both PER CHILD, so a family that
+ *   deposited for one child still gets the reminder for a later-offered
+ *   sibling. The pre-W8 family-wide deviation is retired.
+ * - R61 asked for the PROJECT name in the subject. Confirmed 2026-07-28
+ *   (Peter): subjects carry nothing beyond a first name — the privacy
+ *   posture IS the requirement, and R61's text is amended to match.
  */
 export function abandonmentTemplate(c: NurtureChildRow): NurtureTemplate {
   if (c.applicant_state === "added") return "stall-child";
@@ -207,6 +211,16 @@ export function firstNameOf(parentName: string): string {
 /** A step is sendable only inside [dueAt, dueAt + catch-up window]. */
 function inWindow(nowMs: number, dueAtMs: number): boolean {
   return nowMs >= dueAtMs && nowMs - dueAtMs <= CATCH_UP_DAYS * DAY_MS;
+}
+
+/** W8: the offer nudge's one-time key, scoped to the CHILD. The
+ *  `nurture_sends` unique constraint is (family_id, sequence, step), so
+ *  putting the child id in the step is what makes the claim per-child —
+ *  a key scoped wider than the operation it names silently swallows
+ *  distinct sends. The bare `o3` step is the pre-W8 family-wide key and
+ *  is never minted again (see the legacy note in computeDueSends). */
+export function offerStepFor(childId: string): string {
+  return `o3:${childId}`;
 }
 
 export function computeDueSends(input: {
@@ -236,6 +250,10 @@ export function computeDueSends(input: {
     const deposits = family.parent_id ? (depositsByParent.get(family.parent_id) ?? []) : [];
     const paid = deposits.filter((d) => d.status === "paid" && !d.refunded_at);
     const hasPaid = paid.length > 0;
+    // W8: which CHILD holds a live paid deposit. The account and stall
+    // sequences deliberately keep the family-wide `hasPaid` stop (they are
+    // a customer); only the offer nudge gates per child.
+    const paidChildIds = new Set(paid.map((d) => d.child_id));
     const children = family.parent_id ? (childrenByParent.get(family.parent_id) ?? []) : [];
     const firstName = firstNameOf(family.parent_name);
 
@@ -337,19 +355,33 @@ export function computeDueSends(input: {
     }
 
     // --- offer sequence (R61's fourth point: applied-but-no-deposit) ---
-    // Anchored on the EARLIEST offer email among the family's children;
-    // stops the moment any deposit is paid. One-time: the offer email
-    // itself was touch one, this is touch two, staff own touch three.
-    if (family.parent_id && !hasPaid && !sent.has(`${family.id}|offer|o3`)) {
+    // W8, per CHILD: the gate AND the one-time key are child-scoped, so a
+    // family that deposited for child A still gets the reminder for a
+    // later-offered child B. Both halves were needed — a per-child gate
+    // under a family-wide `o3` key would still have silenced B whenever A
+    // had already been nudged (a real ordering: A offered → nudged → paid
+    // → B offered).
+    //
+    // LEGACY: rows written before this change carry the family-wide key
+    // `offer|o3`. They suppress the whole family, deliberately: the key
+    // has no child column and the offer stamp it would have to be
+    // reconstructed from is rewritten by the resend CAS, so there is no
+    // sound way to attribute one. Never double-nudging beats guessing.
+    const legacyFamilyNudge = sent.has(`${family.id}|offer|o3`);
+    if (family.parent_id && !legacyFamilyNudge) {
       // Earliest offer WHOSE WINDOW IS STILL OPEN — a stale June offer that
       // never nudged (outage, consent gap) must not permanently block a
-      // fresh sibling's reminder (reviewer). The lifetime o3 key remains
-      // the one-per-family limiter.
+      // fresh sibling's reminder (reviewer).
       const offered = children
         .map((c) => ({ c, offerMs: ms(c.offer_email_sent_at ?? null) }))
         .filter((x): x is { c: NurtureChildRow; offerMs: number } => x.offerMs !== null)
+        .filter((x) => !paidChildIds.has(x.c.id))
+        .filter((x) => !sent.has(`${family.id}|offer|${offerStepFor(x.c.id)}`))
         .filter((x) => inWindow(nowMs, x.offerMs + OFFER_NUDGE_DAYS * DAY_MS))
         .sort((a, b) => a.offerMs - b.offerMs);
+      // One per run, earliest-due wins (the engine's standing rule); a
+      // second simultaneously-due sibling sends on the next run, still
+      // inside the catch-up window.
       const first = offered[0];
       if (first) {
         const dueAtMs = first.offerMs + OFFER_NUDGE_DAYS * DAY_MS;
@@ -359,7 +391,7 @@ export function computeDueSends(input: {
             email,
             firstName,
             sequence: "offer",
-            step: "o3",
+            step: offerStepFor(first.c.id),
             template: "offer-nudge",
             childFirstName: first.c.first_name.trim() || undefined,
             dueAtMs,

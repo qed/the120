@@ -6,6 +6,7 @@ import {
   computeDueSends,
   dossierCompleteness,
   firstNameOf,
+  offerStepFor,
   type NurtureChildRow,
   type NurtureDepositRow,
   type NurtureFamilyRow,
@@ -32,11 +33,13 @@ function family(overrides: Partial<NurtureFamilyRow> = {}): NurtureFamilyRow {
   };
 }
 
+let childSeq = 0;
 function child(overrides: Partial<NurtureChildRow> = {}): NurtureChildRow {
   // A Scholars child, complete on all 8 checklist items unless overridden
   // (8 for EVERY group since the Workshops removal, funnel U12)
   // (post-cutover shape: structured academics, legacy subjects unwritten).
   return {
+    id: `kid-${++childSeq}`,
     parent_id: "par-1",
     first_name: "Ada",
     last_name: "Verne",
@@ -57,7 +60,14 @@ function child(overrides: Partial<NurtureChildRow> = {}): NurtureChildRow {
 }
 
 function deposit(overrides: Partial<NurtureDepositRow> = {}): NurtureDepositRow {
-  return { parent_id: "par-1", status: "paid", refunded_at: null, created_at: iso(0), ...overrides };
+  return {
+    parent_id: "par-1",
+    child_id: "kid-1",
+    status: "paid",
+    refunded_at: null,
+    created_at: iso(0),
+    ...overrides,
+  };
 }
 
 function run(input: {
@@ -456,29 +466,32 @@ describe("R61: abandonment points (funnel U17)", () => {
 });
 
 describe("offer sequence (R61's fourth point: applied-but-no-deposit)", () => {
-  it("fires offer-nudge 3 days after the offer email, for the family without a paid deposit", () => {
-    const due = run({
-      families: [family()],
-      children: [child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" })],
-    });
+  it("fires offer-nudge 3 days after the offer email, keyed to the CHILD, for a family without a paid deposit", () => {
+    const kid = child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" });
+    const due = run({ families: [family()], children: [kid] });
     expect(due).toHaveLength(1);
-    expect(due[0]).toMatchObject({ sequence: "offer", step: "o3", template: "offer-nudge" });
+    expect(due[0]).toMatchObject({
+      sequence: "offer",
+      step: offerStepFor(kid.id),
+      template: "offer-nudge",
+    });
     expect(due[0].childFirstName).toBe("Ada");
   });
 
-  it("a paid deposit silences it; a prior send never repeats; before day 3 nothing fires", () => {
+  it("THAT child's paid deposit silences it; that child's prior send never repeats; before day 3 nothing fires", () => {
+    const kid = child({ status: "offered", offer_email_sent_at: iso(-3.5) });
     expect(
       run({
         families: [family()],
-        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
-        deposits: [deposit({ created_at: iso(-1) })],
+        children: [kid],
+        deposits: [deposit({ child_id: kid.id, created_at: iso(-1) })],
       }).filter((s) => s.sequence === "offer")
     ).toHaveLength(0);
     expect(
       run({
         families: [family()],
-        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
-        priorSends: [{ family_id: "fam-1", sequence: "offer", step: "o3" }],
+        children: [kid],
+        priorSends: [{ family_id: "fam-1", sequence: "offer", step: offerStepFor(kid.id) }],
       })
     ).toHaveLength(0);
     expect(
@@ -489,7 +502,76 @@ describe("offer sequence (R61's fourth point: applied-but-no-deposit)", () => {
     ).toHaveLength(0);
   });
 
-  it("anchors on the EARLIEST offer among siblings and goes stale past the catch-up window", () => {
+  it("W8: a deposited sibling no longer silences a freshly-offered child", () => {
+    const paidKid = child({ status: "offered", offer_email_sent_at: iso(-20), first_name: "Ada" });
+    const offeredKid = child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Bo" });
+    const due = run({
+      families: [family()],
+      children: [paidKid, offeredKid],
+      deposits: [deposit({ child_id: paidKid.id, created_at: iso(-15) })],
+    }).filter((s) => s.sequence === "offer");
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("Bo");
+    expect(due[0].step).toBe(offerStepFor(offeredKid.id));
+  });
+
+  it("W8: the ordering the per-child KEY exists for — A nudged, A paid, B offered later, B still nudges", () => {
+    const a = child({ status: "offered", offer_email_sent_at: iso(-20), first_name: "Ada" });
+    const b = child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Bo" });
+    const due = run({
+      families: [family()],
+      children: [a, b],
+      deposits: [deposit({ child_id: a.id, created_at: iso(-15) })],
+      // A's nudge already went out under A's own key.
+      priorSends: [{ family_id: "fam-1", sequence: "offer", step: offerStepFor(a.id) }],
+    }).filter((s) => s.sequence === "offer");
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("Bo");
+  });
+
+  it("W8 legacy: a pre-cutover family-wide o3 row suppresses every child — never a double nudge", () => {
+    const due = run({
+      families: [family()],
+      children: [
+        child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" }),
+        child({ status: "offered", offer_email_sent_at: iso(-3.2), first_name: "Bo" }),
+      ],
+      priorSends: [{ family_id: "fam-1", sequence: "offer", step: "o3" }],
+    }).filter((s) => s.sequence === "offer");
+    expect(due).toEqual([]);
+  });
+
+  it("W8: two simultaneously-due siblings — earliest wins this run, the other is still pending (not dropped)", () => {
+    const a = child({ status: "offered", offer_email_sent_at: iso(-4), first_name: "Ada" });
+    const b = child({ status: "offered", offer_email_sent_at: iso(-3.2), first_name: "Bo" });
+    const first = run({ families: [family()], children: [a, b] }).filter((s) => s.sequence === "offer");
+    expect(first).toHaveLength(1);
+    expect(first[0].childFirstName).toBe("Ada");
+    // Next run, with Ada's claim recorded, Bo sends — inside the catch-up window.
+    const second = run({
+      families: [family()],
+      children: [a, b],
+      priorSends: [{ family_id: "fam-1", sequence: "offer", step: offerStepFor(a.id) }],
+    }).filter((s) => s.sequence === "offer");
+    expect(second).toHaveLength(1);
+    expect(second[0].childFirstName).toBe("Bo");
+  });
+
+  it("W8: a paid deposit for a child the engine cannot see (deleted/merged) never gates a visible child", () => {
+    const kid = child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" });
+    const due = run({
+      families: [family()],
+      children: [kid],
+      // Old enough that the DEPOSIT sequence is stale — otherwise it wins
+      // the one-email-per-family-per-run sort and masks what we're testing.
+      deposits: [deposit({ child_id: "kid-vanished", created_at: iso(-400) })],
+    }).filter((s) => s.sequence === "offer");
+    // The vanished child's deposit gates nothing here; Ada still nudges.
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("Ada");
+  });
+
+  it("anchors on the EARLIEST still-open offer among siblings and goes stale past the catch-up window", () => {
     const due = run({
       families: [family()],
       children: [

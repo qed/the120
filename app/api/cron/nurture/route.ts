@@ -52,7 +52,7 @@ export async function GET(req: Request) {
       .select(
         "id,parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,applicant_state,workshop_ids,interests,project_pitch,status,updated_at"
       ),
-    db.from("deposits").select("parent_id,status,refunded_at,created_at"),
+    db.from("deposits").select("parent_id,child_id,status,refunded_at,created_at"),
     db.from("nurture_sends").select("family_id,sequence,step"),
     db
       .from("child_reviews")

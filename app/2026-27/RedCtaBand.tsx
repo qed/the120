@@ -1,11 +1,9 @@
 "use client";
 
-import JoinButton from "@/app/components/JoinButton";
-import Cta from "@/app/components/Cta";
+import StartCta from "@/app/components/StartCta";
 import SeatsDot from "@/app/components/SeatsDot";
-import { BOOKING_URL } from "@/app/lib/site";
 import { COPY } from "./data";
-import { attributedBookingUrl, ctaLabels, seatsDisplay, type Audience } from "./cta-source";
+import { ctaLabels, seatsDisplay, type Audience } from "./cta-source";
 
 /**
  * Red CTA band (§CTA) — mirrors the shared `CtaBand` structure/classes but with
@@ -23,8 +21,7 @@ export default function RedCtaBand({
   seatsRemaining: number;
 }) {
   const t = COPY[audience];
-  const { join, book } = ctaLabels(audience);
-  const bookingHref = attributedBookingUrl(BOOKING_URL);
+  const { join } = ctaLabels(audience); // `book` retired from marketing by R18
   const soldOut = seatsRemaining <= 0;
 
   return (
@@ -44,12 +41,10 @@ export default function RedCtaBand({
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-[18px]">
-        <JoinButton variant="white" className="px-[30px] py-4 text-sm">
+        <StartCta source={"2026-27"} variant="white" className="px-[30px] py-4 text-sm">
           {join}
-        </JoinButton>
-        <Cta href={bookingHref} variant="ghostLight" className="px-7 py-[14.5px] text-sm">
-          {book}
-        </Cta>
+        </StartCta>
+        {/* R18: no "Book a call" before C1. */}
       </div>
 
       <div className="mt-1">

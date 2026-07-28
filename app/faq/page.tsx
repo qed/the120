@@ -61,7 +61,7 @@ const faqs = [
   },
   {
     q: "We're outside Toronto. Can we still join?",
-    a: "Yes — the weekly rhythm is virtual, so anywhere in Ontario works. The four intensive weekends are in Toronto; most member families drive in. Farther afield? Book a call and we'll talk it through.",
+    a: "Yes — the weekly rhythm is virtual, so anywhere in Ontario works. The four intensive weekends are in Toronto; most member families drive in. Farther afield? Start an application and we'll talk it through together.",
   },
   {
     q: "How is my family's information handled?",
@@ -97,7 +97,7 @@ export default function FaqPage() {
           </div>
         </div>
 
-        <CtaBand />
+        <CtaBand source="faq" />
       </main>
       <Footer />
     </>

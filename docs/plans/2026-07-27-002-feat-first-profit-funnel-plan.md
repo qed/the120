@@ -639,7 +639,51 @@ dynamic — compare the build output route table before and after.
 
 ---
 
-- [ ] **Unit 6: `/start` — explainer, capture, and consent**
+- [x] **Unit 6: `/start` — explainer, capture, and consent** *(landed 2026-07-28,
+  and discharges Unit 4's carried-forward CTA swap)*
+
+  **What landed:** `/start` — three explainer swipes then capture, the only route
+  that reads `?src=`/`?g=` (Decision 4). `capture-rules.ts` (pure: R32's whole
+  percentage ladder, field validation, the versioned CASL record),
+  `capture-core.ts` (server-only, deps seam) + a thin `"use server"` wrapper.
+  **Consent is never granted at capture** — the checkbox records intent plus the
+  exact disclosure text and version; the grant belongs to U3's verified click.
+  `families-rules.ts` gains `entrySource` and consent `text`/`version`;
+  `entry_source` rides `buildLeadInsert` only, so `buildMatchUpdate`'s silence is
+  what makes it immutable. **Verified against production** (probe, cleaned up):
+  the fields survive the closed literal row, `consent_given` is false, and a
+  second capture from a different source matches without rewriting attribution.
+
+  **Unit 4's deferred swap, discharged:** 10 marketing `JoinButton` sites →
+  `StartCta` (a `<Link>`, not a modal button — crawlable, works pre-hydration,
+  and drops the modal provider from every marketing page's critical path); the
+  three preserved sites (`SignIn.tsx`, Gauntlet ×2) asserted **by count**; R18's
+  "Book a call" gone from every logged-out surface, including prose on
+  `/faq`, `/tuition` and `HowItWorks`, whose three steps described a process that
+  no longer runs.
+
+  **Review (4 agents) fixed:** `CtaBand` hardcoded `source="home"` for all seven
+  pages it mounts on — caught independently by two reviewers, and it would have
+  credited `/faq` and `/parents` conversions to the home page permanently
+  (`entry_source` is immutable) while leaving those two markers unreachable;
+  `source` is now a required prop. Capture's rate limits were *looser* than
+  resume's while the comment claimed tighter, on the endpoint that mints
+  accounts. A CRM ingest **throw** (matchOrCreateLead throws, never returns null)
+  took the outer catch and reported `failed` to a family whose session was
+  already live — now caught locally and non-fatal. Capture landed on
+  `/start/children`, which U7 builds — **Peter's call: land on `/dashboard`**,
+  which is real and theirs; U7 changes one line. Added 16 behavioral tests for
+  `captureCore` (it had the seam and no tests), plus aliased-import and
+  `useAccountModal` evasion checks, and narrowed R18's scan so `SignIn.tsx` — a
+  logged-out surface living under `app/dashboard/` — is no longer excluded by
+  path prefix. Suite **119 files / 3152 tests**; `tsc`, build, lint clean.
+
+  **Carried forward:** a signed-in visitor clicking a page-level CTA can capture
+  under a different email and silently swap their own session — `StartCta` is
+  session-unaware by design (only `Nav` checks); needs a product decision with
+  U7's active-child work. Bot resistance in front of account creation before ad
+  traffic arrives (`clientIp` trusts a client-supplied header, so the per-IP
+  bound is a speed bump). Alerting on `[funnel/capture] lead ingest THREW`.
 
 **Goal:** Conversion 1, lawfully.
 

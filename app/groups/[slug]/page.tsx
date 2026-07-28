@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Wordmark from "@/app/components/Wordmark";
-import Cta from "@/app/components/Cta";
-import JoinButton from "@/app/components/JoinButton";
-import { BOOKING_URL, groupBySlug, groups } from "@/app/lib/site";
+import StartCta from "@/app/components/StartCta";
+import { groupCtaSource } from "@/app/lib/cta-source";
+import { groupBySlug, groups } from "@/app/lib/site";
 
 // The Scholars have their own program page at /scholars, so only the four network groups render here.
 const NETWORK_GROUPS = groups.filter((g) => g.slug !== "scholars");
@@ -75,10 +75,13 @@ export default async function GroupPage({
           {group.body}
         </p>
         <div className="mt-2 flex flex-wrap gap-3.5">
-          <Cta href={BOOKING_URL} variant="white" className="px-7 py-4 text-sm">
-            Book a call
-          </Cta>
-          <JoinButton className="px-7 py-4 text-sm">Join the 120</JoinButton>
+          {/* R18: no "Book a call" on the logged-out marketing site. The call
+              is offered after C1, on the dashboard and in nurture. */}
+          <StartCta
+            source={groupCtaSource(group.slug)}
+            group={group.slug}
+            className="px-7 py-4 text-sm"
+          />
         </div>
         <span className="font-mono text-[11px] tracking-[0.06em] text-white/60">
           TIN CAN + ADDRESS BOOK INCLUDED · 3–5 HRS/WEEK · ALONGSIDE ANY SCHOOL

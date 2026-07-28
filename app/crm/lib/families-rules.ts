@@ -501,6 +501,19 @@ export interface LeadConsentInput {
   at?: string | null;
   source?: string | null;
   expiresAt?: string | null;
+  /**
+   * The CASL disclosure the person was SHOWN, and its version (funnel R30a,
+   * F6). Recorded whenever supplied — deliberately NOT gated on `given`.
+   *
+   * "Here is the exact text we displayed, and which revision it was" is a
+   * fact about our own UI; `given` is a claim about their action. The funnel
+   * captures intent at C1 but does not grant consent until the first verified
+   * click (Decision 2), so there is a real window where the text is known and
+   * the grant is not — and losing the text in that window would leave the
+   * eventual grant undefendable, which is the whole point of storing it.
+   */
+  text?: string | null;
+  version?: string | null;
 }
 
 /** Input to `matchOrCreateLead` (lead-ingest.ts). `email` is optional — on a
@@ -513,6 +526,14 @@ export interface MatchOrCreateInput {
   signals: string[];
   consent?: LeadConsentInput;
   identity: LeadIdentity;
+  /**
+   * First-touch funnel attribution (funnel R58). Written on INSERT only —
+   * `buildMatchUpdate` never emits it, so a returning family's original
+   * attribution survives every later capture from a different source. That
+   * immutability is the requirement, and it is a property of which builder
+   * emits the field, not of a guard someone has to remember.
+   */
+  entrySource?: string | null;
 }
 
 /** The consent columns the match-merge reads (subset of a live family row). */
@@ -571,6 +592,18 @@ export function buildLeadInsert(
   if (consentGiven && input.consent?.expiresAt) {
     row.consent_expires_at = input.consent.expiresAt;
   }
+
+  // The disclosure text/version go in whenever supplied, NOT only when consent
+  // was granted — see LeadConsentInput. The funnel records them at C1 while
+  // `consent_given` is still false, and the verified click later flips the
+  // grant against text we can still produce.
+  if (input.consent?.text) row.consent_text = input.consent.text;
+  if (input.consent?.version) row.consent_version = input.consent.version;
+
+  // INSERT only. There is no matching line in buildMatchUpdate, and that
+  // absence is what makes entry_source immutable (funnel R58).
+  if (input.entrySource) row.entry_source = input.entrySource;
+
   return row;
 }
 

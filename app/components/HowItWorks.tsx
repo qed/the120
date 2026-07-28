@@ -1,13 +1,23 @@
+/**
+ * The three steps, restated for the funnel (R18, and the U1 applicant ladder:
+ * added → project_created → submitted → in_review → offered → deposited).
+ *
+ * The old step 02 was "Book a call", which R18 removes from the logged-out
+ * site — and which described a process that no longer runs: a family now
+ * starts by building, and admissions review happens on the dossier the
+ * building produced. Copy is Peter's call; this keeps it truthful in the
+ * meantime rather than advertising a step that is gone.
+ */
 const steps = [
   {
     n: "STEP 01",
-    strong: "Create an account and build the dossier.",
-    rest: "Your child's profile for the 120: their group, their interests, a project pitch in their own words.",
+    strong: "Your child builds something real.",
+    rest: "Ten minutes: they pick a direction, design a business around it, and end up with a project that's theirs.",
   },
   {
     n: "STEP 02",
-    strong: "Book a call.",
-    rest: "We review the dossier together and qualify the fit, group by group.",
+    strong: "Finish the dossier together.",
+    rest: "Their group, their interests, and the project they just built — in their own words. Then admissions reviews it.",
   },
   {
     n: "STEP 03",
@@ -25,8 +35,8 @@ export default function HowItWorks() {
           <span className="font-mono text-xs tracking-[0.1em] text-red">HOW IT WORKS</span>
           <h2 className="display text-3xl sm:text-[40px] sm:leading-[1.12]">Joining the 120</h2>
           <p className="text-[15px] leading-[1.65] text-ink-soft">
-            Book a call and join the group. That&rsquo;s the heart of it. Each group qualifies
-            its members its own way.
+            Build something, then join the group. That&rsquo;s the heart of it. Each group
+            qualifies its members its own way.
           </p>
         </div>
         <div className="flex flex-col">

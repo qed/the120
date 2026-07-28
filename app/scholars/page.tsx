@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Wordmark from "@/app/components/Wordmark";
-import Cta from "@/app/components/Cta";
-import JoinButton from "@/app/components/JoinButton";
+import StartCta from "@/app/components/StartCta";
 import ProductPillars from "@/app/components/ProductPillars";
 import PaceSimulator from "@/app/components/PaceSimulator";
 import KeyDates from "@/app/components/KeyDates";
@@ -11,7 +10,6 @@ import Promises from "@/app/components/Promises";
 import ScholarsTuition from "@/app/components/ScholarsTuition";
 import Faq from "@/app/components/Faq";
 import CtaBand from "@/app/components/CtaBand";
-import { BOOKING_URL } from "@/app/lib/site";
 import { getSeatsRemaining } from "@/app/lib/seats";
 
 export const metadata: Metadata = {
@@ -96,10 +94,8 @@ export default async function ScholarsPage() {
         {/* CTA row — closes the pillars section (the old stats-box slot) */}
         <section className="border-b border-line bg-paper">
           <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-4 px-6 pb-20">
-            <JoinButton className="px-[30px] py-4 text-sm">Join the 120</JoinButton>
-            <Cta href={BOOKING_URL} variant="ghost" className="px-7 py-[14.5px] text-sm">
-              Book a call
-            </Cta>
+            {/* R18: no "Book a call" before C1. */}
+            <StartCta source={"scholars-legacy"} className="px-[30px] py-4 text-sm" />
           </div>
         </section>
 
@@ -110,7 +106,7 @@ export default async function ScholarsPage() {
         <Promises />
         <ScholarsTuition seatsRemaining={seatsRemaining} />
         <Faq />
-        <CtaBand />
+        <CtaBand source="scholars-legacy" />
       </main>
 
       {/* Footer row (sibling group-page chrome) */}

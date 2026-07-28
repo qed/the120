@@ -3,9 +3,8 @@ import Nav from "@/app/components/Nav";
 import Footer from "@/app/components/Footer";
 import CtaBand from "@/app/components/CtaBand";
 import Cta from "@/app/components/Cta";
-import JoinButton from "@/app/components/JoinButton";
+import StartCta from "@/app/components/StartCta";
 import SeatsDot from "@/app/components/SeatsDot";
-import { BOOKING_URL } from "@/app/lib/site";
 import { getSeatsRemaining } from "@/app/lib/seats";
 
 export const metadata: Metadata = {
@@ -93,11 +92,9 @@ export default async function TuitionPage() {
                 </span>
               ))}
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Cta href={BOOKING_URL} variant="white" className="py-4">
-                Book a call
-              </Cta>
-              <JoinButton className="py-4">Join the 120</JoinButton>
+            {/* R18: no "Book a call" before C1. One CTA, full width. */}
+            <div className="grid grid-cols-1 gap-3">
+              <StartCta source={"tuition"} className="py-4" />
             </div>
             <SeatsDot tone="onDark" className="justify-center" remaining={seatsRemaining} />
           </div>
@@ -127,7 +124,7 @@ export default async function TuitionPage() {
               See the full program
             </Cta>
             <span className="text-center text-[13px] text-muted">
-              Offered on your call. Book a Call to talk it through.
+              Offered once we&rsquo;ve reviewed the application together.
             </span>
           </div>
         </div>
@@ -145,6 +142,7 @@ export default async function TuitionPage() {
         </div>
 
         <CtaBand
+          source="tuition"
           headline="Claim your child's seat for"
           accent="Fall 2026"
           subline="Ages 8–17 · Toronto · All five groups enrolling"

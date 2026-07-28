@@ -878,14 +878,23 @@ describe("FW_BOARD_PHASE_PRESENTATION — one table for pill AND panel", () => {
     expect(FW_BOARD_PHASE_PRESENTATION.dead_link.bodyMessage).toBe(FW_BOARD_DEAD_LINK_MESSAGE);
   });
 
-  it("builds no class or label by interpolation — every value is a complete literal", () => {
+  it("builds no class or label by interpolation — every value sits verbatim in the source", () => {
     // Same constraint as the cell table below (skin-tokens.ts CLASS_TABLE): a
-    // class assembled at runtime is one the Tailwind scanner never saw.
+    // class assembled at runtime is one the Tailwind scanner never saw, and it
+    // renders as no styling at all. Asserting the VALUE lacks "${" is vacuous —
+    // an interpolated template has already resolved by the time this test reads
+    // it — so, like the cell table's scan, each value must appear in the module
+    // source as one complete quoted literal.
+    const source = readFileSync(
+      fileURLToPath(new URL("../fw-board-rules.ts", import.meta.url)),
+      "utf8"
+    );
     for (const p of phases) {
       const { label, dotClass, textClass } = FW_BOARD_PHASE_PRESENTATION[p];
-      expect(label).not.toContain("${");
-      expect(dotClass).not.toContain("${");
-      expect(textClass).not.toContain("${");
+      for (const value of [label, dotClass, textClass]) {
+        expect(value).not.toContain("${");
+        expect(source).toContain(`"${value}"`);
+      }
     }
   });
 });

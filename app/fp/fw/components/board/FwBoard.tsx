@@ -110,6 +110,11 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
   // slow-then-fast pair cannot deliver responses out of order and regress the
   // board to older numbers (reliability + correctness reviews).
   const pollInFlightRef = useRef<boolean>(false);
+  // The in-flight poll's abort handle and its timeout timer, so the effect
+  // CLEANUP can cancel a fetch that outlives the component (an unmount or a
+  // token change) instead of leaving it — and its timer — running detached.
+  const pollControllerRef = useRef<AbortController | null>(null);
+  const pollAbortTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rungKeysRef = useRef<Set<string>>(new Set());
   // The first successful poll is the BASELINE — its celebrations are adopted as
   // already-rung rather than fired (the room already rang them). With one poll in
@@ -160,6 +165,8 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
       pollInFlightRef.current = true;
       const controller = new AbortController();
       const abortTimer = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS);
+      pollControllerRef.current = controller;
+      pollAbortTimerRef.current = abortTimer;
       try {
         const res = await fetch(feedUrl, { cache: "no-store", signal: controller.signal });
         if (cancelled) return;
@@ -170,8 +177,19 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
           // mark them stale. Clear the frame (security review). Distinct from a 503.
           // Whether this 404 is TERMINAL is the reducer's call (two in a row), not
           // ours — but the frame comes off on the very first one.
+          //
+          // "Every name" includes the celebration machinery: a queued or ACTIVE
+          // First Dollar overlay carries student names too, and it renders on top
+          // of the cleared frame. Flush the queue and drop the active overlay —
+          // `setActive(null)` also retires the CELEBRATION_MS hold timer (its
+          // effect keys on `active`, so the cleanup clears the timeout), and with
+          // both refs emptied a stale `pump()` finds nothing to re-raise. A
+          // celebration dropped on a transient 404 is the accepted cost.
           setFeed(null);
           hasFrameRef.current = false;
+          queueRef.current = [];
+          activeRef.current = null;
+          setActive(null);
           dispatchOutcome({
             httpStatus: 404,
             fetchThrew: false,
@@ -258,6 +276,8 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
         }
       } finally {
         clearTimeout(abortTimer);
+        pollControllerRef.current = null;
+        pollAbortTimerRef.current = null;
         pollInFlightRef.current = false;
       }
     }
@@ -287,6 +307,13 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
     return () => {
       cancelled = true;
       clearInterval(id);
+      // Cancel an in-flight poll rather than leave it running detached. The
+      // aborted fetch rejects into the catch above, where `cancelled` (set
+      // first) suppresses the outcome — same as any post-teardown settle — and
+      // clearing the timeout here means no POLL_TIMEOUT_MS timer outlives the
+      // effect even briefly.
+      if (pollAbortTimerRef.current !== null) clearTimeout(pollAbortTimerRef.current);
+      pollControllerRef.current?.abort();
     };
   }, [token, pump, dispatchOutcome]);
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/app/fp/components/system/Button";
 import { Icon } from "@/app/fp/components/system/Icon";
 import { BANDS } from "@/app/fp/content/types";
@@ -9,6 +8,7 @@ import type { Band } from "@/app/fp/content/types";
 import { lookupFwStudentMatch, quickCreateFwStudent } from "@/app/fp/lib/actions/fw-student";
 import type { FwMatchVerdict } from "@/app/fp/lib/fw-match-rules";
 import { FW_BAND_LABEL } from "@/app/fp/lib/fw-nav-rules";
+import { isNextRedirect } from "@/app/fp/lib/next-redirect";
 import type { FwQuickCreateActionResult } from "@/app/fp/lib/fw-student-core";
 
 /**
@@ -88,7 +88,6 @@ export default function FwQuickCreate({
   cohortId: string;
   onCancel: () => void;
 }) {
-  const router = useRouter();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [band, setBand] = useState<Band | "">("");
@@ -161,17 +160,22 @@ export default function FwQuickCreate({
         noticeAttested: attested,
         ...(retryProfileId ? { existingProfileId: retryProfileId } : {}),
       });
-      if (res.ok) {
-        // Every leg verified — only now is it safe to route into the tree.
-        router.push(`/fp/fw/cohort/${cohortId}/student/${res.studentId}`);
-        router.refresh();
-        return; // finally still clears busy
+      // Only a refusal ever RESOLVES: on success the action revalidates the
+      // roster paths and redirects, so this promise REJECTS with NEXT_REDIRECT
+      // (handled below) while the router navigates. The `ok` arm is narrowed
+      // away for the compiler, not handled — it is unreachable.
+      if (!res.ok) {
+        setError(failureMessage(res));
+        // Keep the handle so the next submit finishes this child rather than
+        // minting a second account with a suffixed permanent address.
+        if (res.retryProfileId) setRetryProfileId(res.retryProfileId);
       }
-      setError(failureMessage(res));
-      // Keep the handle so the next submit finishes this child rather than
-      // minting a second account with a suffixed permanent address.
-      if (res.retryProfileId) setRetryProfileId(res.retryProfileId);
-    } catch {
+    } catch (e) {
+      // Every leg verified — only now is it safe to route into the tree. The
+      // action's redirect IS that routing, and it surfaces here as a
+      // NEXT_REDIRECT rejection the router is already acting on: let it pass,
+      // never paint it as a failure over a student that was just created.
+      if (isNextRedirect(e)) return; // finally still clears busy
       setError("That didn't go through. Try again.");
     } finally {
       setBusy(false);

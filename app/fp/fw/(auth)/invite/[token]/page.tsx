@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { fwGuideInviteVerdict } from "@/app/fp/lib/fw-access-rules";
 import { hashGuideInviteToken } from "@/app/fp/lib/fw-guide-core";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import ClaimGuideInviteForm from "./ClaimGuideInviteForm";
 
 /**
@@ -34,7 +35,7 @@ import ClaimGuideInviteForm from "./ClaimGuideInviteForm";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Guide access — Founders Weekend",
+  title: `Guide access · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

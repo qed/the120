@@ -678,3 +678,271 @@ export function shapeFwBoardModel(input: {
     celebrations,
   };
 }
+
+/* ═══════════════════════════════════════════ the board CONNECTION machine ══ */
+/*
+ * RC-2 (FP bug work order 2026-07-28; checks 3.5.3 / 3.18.2). What the polling
+ * client should SAY about its link to the feed — live, catching up, connecting,
+ * or dead — as one reducer, so the header pill and the full-screen panel read
+ * from a single disposition and can never disagree, and so terminal stickiness
+ * is a tested property of this module rather than untested control flow in
+ * `FwBoard.tsx`. The component reports facts (status, threw, frame on screen)
+ * and renders the machine's answer; every decision lives here.
+ */
+
+/** The four things the board can honestly say about its feed. `dead_link` is
+ *  TERMINAL: the token behind the URL is gone (revoked, expired, or never
+ *  real — deliberately one state, mirroring the feed's collapsed 404), and the
+ *  only recovery is a fresh link in a fresh tab. */
+export type FwBoardConnectionPhase = "live" | "catching_up" | "connecting" | "dead_link";
+
+export type FwBoardConnectionState = {
+  phase: FwBoardConnectionPhase;
+  /** The current run of consecutive ANSWERED 404s — carried here, not in the
+   *  component, so the whole dead-link decision (including its memory) is under
+   *  test in this module. */
+  consecutive404: number;
+};
+
+/** Where every board starts: no frame, no answer yet. */
+export const FW_BOARD_CONNECTION_INITIAL: FwBoardConnectionState = {
+  phase: "connecting",
+  consecutive404: 0,
+};
+
+/**
+ * How many consecutive 404 answers it takes to declare the link dead.
+ *
+ * Two, not one — the number is doing real work. A single 404 is NOT proof of
+ * revocation: the token resolver maps a transient DB read failure to the same
+ * bare 404 the anti-enumeration contract requires (`fw-board-loader.ts:87` —
+ * `if (res.error) return { ok: false }`), and venue middleboxes have been known
+ * to answer for the origin. One blip must not kill a healthy board mid-event;
+ * two answers in a row is a fact about the token, not the weather.
+ */
+export const FW_BOARD_DEAD_LINK_404S = 2;
+
+/**
+ * A last success older than this with no fresher answer means the board is not
+ * live — a throttled background tab or a suspended machine stops polling
+ * silently, and the pill must say so rather than lie. (Moved here from
+ * `FwBoard.tsx` when the connection machine took over the decision.)
+ */
+export const FW_BOARD_STALE_AFTER_MS = 12000;
+
+/**
+ * The dead-link panel's copy, locked. One generic message for revoked, expired,
+ * and never-existed alike — distinguishing them on an unauthenticated surface
+ * would leak what the feed's collapsed 404 exists to hide (see
+ * `fwBoardTokenVerdict`'s doc) — and it names the one recovery a non-technical
+ * operator can actually perform: staff re-mint, operator loads the new URL.
+ */
+export const FW_BOARD_DEAD_LINK_MESSAGE =
+  "This board link is no longer active. Ask The 120 staff for a fresh link.";
+
+/** What one poll cycle reported — facts only, no conclusions. */
+export type FwBoardPollOutcome = {
+  /** HTTP status of an ANSWERED poll; null when no answer arrived at all (a
+   *  thrown fetch, the abort timer, or a plain interval tick between polls). */
+  httpStatus: number | null;
+  /** True when the fetch itself threw — network error or abort. Never terminal:
+   *  a refusal we could not hear is not a refusal (tri-state disposition, per
+   *  the 2026-07-24 offline-drain solution doc). */
+  fetchThrew: boolean;
+  /** True when this cycle delivered a renderable frame (200 + valid payload).
+   *  Distinct from `httpStatus === 200`: a malformed 200 body lands no frame. */
+  frameLanded: boolean;
+  /** Whether a good frame is on screen after this cycle's side effects (the
+   *  component clears it on 404 — security: names come off the projector). */
+  hasFrame: boolean;
+  /** ms since the last successful poll; Infinity when none has landed yet. */
+  lastOkAgeMs: number;
+};
+
+/**
+ * Fold one poll outcome into the connection state.
+ *
+ * The rules, in order:
+ *
+ *   1. **`dead_link` is sticky.** Once declared, every later event — a 200, a
+ *      throw, anything — maps back to `dead_link`. The interval has stopped and
+ *      the frame is gone; a state that could flicker back to "connecting" would
+ *      re-promise a recovery this tab cannot deliver.
+ *   2. **A 404 extends the run; the run's length decides.** At
+ *      `FW_BOARD_DEAD_LINK_404S` consecutive answered 404s the link is dead
+ *      (see that constant for why one is not enough). Below the threshold the
+ *      phase is `connecting` — the component has already cleared the frame for
+ *      security, so there is nothing to be "catching up" TO.
+ *   3. **Any non-404 answer resets the run** — a 200 or even a 503 proves the
+ *      token still resolves, refuting the dead-token hypothesis. A thrown fetch
+ *      or a bare tick is NO answer and leaves the run untouched (it neither
+ *      confirms nor denies, so two 404s straddling a network blip still count
+ *      as consecutive answers).
+ *   4. **A landed frame is `live`**, and everything short of one degrades
+ *      honestly: with a frame on screen, `catching_up`; with none,
+ *      `connecting`. A bare tick demotes a live board only once the last
+ *      success has aged past `FW_BOARD_STALE_AFTER_MS`.
+ */
+export function fwBoardConnectionState({
+  prev,
+  outcome,
+}: {
+  prev: FwBoardConnectionState;
+  outcome: FwBoardPollOutcome;
+}): FwBoardConnectionState {
+  if (prev.phase === "dead_link") return prev;
+
+  if (outcome.httpStatus === 404) {
+    const consecutive404 = prev.consecutive404 + 1;
+    return consecutive404 >= FW_BOARD_DEAD_LINK_404S
+      ? { phase: "dead_link", consecutive404 }
+      : { phase: "connecting", consecutive404 };
+  }
+
+  const consecutive404 = outcome.httpStatus === null ? prev.consecutive404 : 0;
+
+  if (outcome.frameLanded) return { phase: "live", consecutive404: 0 };
+
+  // A bare tick (no answer, nothing thrown) carries no news: keep the current
+  // phase until the last success ages out, then say "catching up" honestly.
+  const bareTick = outcome.httpStatus === null && !outcome.fetchThrew;
+  if (bareTick && outcome.lastOkAgeMs <= FW_BOARD_STALE_AFTER_MS) return prev;
+
+  return { phase: outcome.hasFrame ? "catching_up" : "connecting", consecutive404 };
+}
+
+/** What one connection phase renders as, everywhere the board mentions it. */
+export type FwBoardPhasePresentation = {
+  /** The header pill's word. */
+  label: string;
+  /** The pill's status dot — a COMPLETE class-string literal. */
+  dotClass: string;
+  /** The pill's text colour — a COMPLETE class-string literal. */
+  textClass: string;
+  /** The line the full-screen interim panel shows while no frame is on screen. */
+  bodyMessage: string;
+};
+
+/**
+ * The phase presentation table — pill label, pill classes, AND the interim
+ * panel's body line, keyed by the one connection phase.
+ *
+ * The mapping lives HERE, not in `FwBoard.tsx`, so the header and the panel
+ * derive from ONE table and can never disagree; the renderer is a lookup. The
+ * failure this closes (adversarial review): the component's hardcoded interim
+ * body said "Catching up with the room…" for EVERY frameless phase, so the
+ * first 404 of a revocation showed a header pill reading "connecting" over a
+ * body claiming to catch up — two surfaces narrating the same moment
+ * differently.
+ *
+ * Every class value is a COMPLETE class-string literal (the skin-token rule,
+ * `skin-tokens.ts` CLASS_TABLE): Tailwind v4's scanner reads this source file
+ * and emits exactly the utilities spelled out here, so a concatenated or
+ * interpolated class would render as nothing at all.
+ *
+ * `live.bodyMessage` matches `catching_up`'s: the body only renders while no
+ * frame is on screen, and a frameless `live` (unreachable today — a landed
+ * frame is what makes a board live) should read as still fetching, not as a
+ * blank. `dead_link.bodyMessage` REFERENCES `FW_BOARD_DEAD_LINK_MESSAGE` rather
+ * than respelling it — the dead-link panel renders that constant directly, and
+ * two spellings of locked copy is how they drift.
+ */
+export const FW_BOARD_PHASE_PRESENTATION: Record<
+  FwBoardConnectionPhase,
+  FwBoardPhasePresentation
+> = {
+  live: {
+    label: "live",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-verified",
+    textClass: "text-hq-ink-soft",
+    bodyMessage: "Catching up with the room…",
+  },
+  catching_up: {
+    label: "catching up",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-not-yet",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: "Catching up with the room…",
+  },
+  connecting: {
+    label: "connecting",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-not-yet",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: "Connecting to the room…",
+  },
+  dead_link: {
+    label: "link inactive",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-hq-sunken",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: FW_BOARD_DEAD_LINK_MESSAGE,
+  },
+};
+
+/* ═══════════════════════════════════════════════ the board CELL presentation ══ */
+/*
+ * B7 (FP bug work order 2026-07-28; check 3.18.5 / WCAG 1.4.1). A grid cell's
+ * state must be readable without colour — a colour-blind parent at the back of
+ * the room sees green and amber as the same warm grey — so each state gets a
+ * SHAPE channel too: verified is the only SOLID square, not-yet is the only
+ * DASHED outline, untouched is a hairline ghost. The mapping lives here, not in
+ * `FwBoard.tsx`, so the treatment is a tested decision table and the renderer
+ * stays a lookup.
+ */
+
+/** What one grid cell renders as: its complete class string and the
+ *  human-readable state word its accessible name carries. */
+export type FwBoardCellPresentation = {
+  className: string;
+  stateLabel: string;
+};
+
+/**
+ * The three cell treatments, keyed by state (`never_attempted` is the absent
+ * cell — see `FwBoardCellState`).
+ *
+ * Every `className` is a COMPLETE class-string literal, sizing included — the
+ * skin-token rule (`skin-tokens.ts` CLASS_TABLE): Tailwind v4's scanner reads
+ * this source file and emits exactly the utilities spelled out here, so a
+ * concatenated or interpolated class would render as nothing at all. The
+ * verbosity is load-bearing; do not "simplify" by factoring out the shared
+ * sizing prefix.
+ *
+ * The non-colour channel, at 10px on a projector:
+ *   - **verified** — solid fill + solid border, the only filled square.
+ *   - **not_yet** — empty fill + 2px DASHED border, the only broken outline.
+ *   - **untouched** — empty fill + hairline neutral border, a ghost of a cell.
+ */
+export const FW_BOARD_CELL_PRESENTATION: Record<
+  FwBoardCellState | "never_attempted",
+  FwBoardCellPresentation
+> = {
+  verified: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border border-solid border-verified bg-verified",
+    stateLabel: "verified",
+  },
+  not_yet: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border-2 border-dashed border-not-yet bg-transparent",
+    stateLabel: "not yet",
+  },
+  never_attempted: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border border-solid border-hq-border bg-transparent",
+    stateLabel: "untouched",
+  },
+};
+
+/** The table lookup with the grid's real input shape: an undecided task is the
+ *  ABSENCE of a cell (`row.cells[taskId]` is `undefined`), which is
+ *  `never_attempted` by construction. */
+export function fwBoardCellPresentation(
+  state: FwBoardCellState | undefined
+): FwBoardCellPresentation {
+  return FW_BOARD_CELL_PRESENTATION[state ?? "never_attempted"];
+}
+
+/**
+ * A cell's programmatic name — "1.2.4 — verified" — used for BOTH `title` and
+ * `aria-label` so sighted-hover and screen-reader users hear the same thing.
+ * One formatter, so the two attributes cannot drift apart.
+ */
+export function fwBoardCellLabel(taskId: string, state: FwBoardCellState | undefined): string {
+  return `${taskId} — ${fwBoardCellPresentation(state).stateLabel}`;
+}

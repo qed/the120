@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
+  FW_BOARD_CELL_PRESENTATION,
+  FW_BOARD_CONNECTION_INITIAL,
+  FW_BOARD_DEAD_LINK_MESSAGE,
+  FW_BOARD_PHASE_PRESENTATION,
+  FW_BOARD_STALE_AFTER_MS,
   FW_BOARD_TICKER_LIMIT,
   FW_BOARD_TOKEN_GRACE_MS,
   FW_FIRST_DOLLAR_FRESHNESS_MS,
+  fwBoardCellLabel,
+  fwBoardCellPresentation,
+  fwBoardConnectionState,
   fwBoardDisplayNames,
   fwBoardTokenExpiry,
   fwBoardTokenMintVerdict,
@@ -12,8 +23,10 @@ import {
   fwTaskPhaseWeight,
   pickFwCurrentBoardToken,
   shapeFwBoardModel,
+  type FwBoardConnectionState,
   type FwBoardEvent,
   type FwBoardMember,
+  type FwBoardPollOutcome,
   type FwBoardProgressRow,
 } from "../fw-board-rules";
 import type { Band } from "@/app/fp/content/types";
@@ -166,6 +179,15 @@ describe("fwBoardTokenVerdict", () => {
     expect(
       fwBoardTokenVerdict({ token: { ...live, expiresAt: "2026-08-21T13:59:59Z" }, now: NOW })
     ).toEqual({ ok: false, reason: "expired" });
+  });
+
+  it("keeps a token live 1ms before its expiry", () => {
+    // The live side of the boundary (check 3.5.5). Grace was applied at mint
+    // time — it is already inside expiresAt — so this is the ONLY boundary the
+    // verdict owns; testing expiresAt + grace here would double-count it.
+    expect(
+      fwBoardTokenVerdict({ token: { ...live, expiresAt: new Date(NOW + 1).toISOString() }, now: NOW })
+    ).toEqual({ ok: true });
   });
 
   it("treats the exact expiry instant as expired, not as live", () => {
@@ -694,5 +716,242 @@ describe("shapeFwBoardModel — anonymized members (Decision 10)", () => {
     expect(model.celebrations).toEqual([]);
     // rollups.students counts only the name-bearing roster.
     expect(model.rollups.students).toBe(1);
+  });
+});
+
+/* ═══════════════════════════════════════════ the board CONNECTION machine ══ */
+/*
+ * RC-2 (checks 3.5.3 / 3.18.2). The dead-link decision — including its
+ * consecutive-404 memory and its terminal stickiness — lives entirely in the
+ * reducer, so it is pinned here as a decision table. No wall clock anywhere:
+ * `lastOkAgeMs` is an age the caller hands over, so these pass every day of the
+ * week, not just on a quiet network.
+ */
+
+/** One outcome with quiet defaults — override only what the scenario is about. */
+function out(o: Partial<FwBoardPollOutcome> = {}): FwBoardPollOutcome {
+  return {
+    httpStatus: null,
+    fetchThrew: false,
+    frameLanded: false,
+    hasFrame: false,
+    lastOkAgeMs: Number.POSITIVE_INFINITY,
+    ...o,
+  };
+}
+
+const step = (prev: FwBoardConnectionState, o: Partial<FwBoardPollOutcome>) =>
+  fwBoardConnectionState({ prev, outcome: out(o) });
+
+/** A landed frame — the 200-with-valid-payload outcome. */
+const ok200: Partial<FwBoardPollOutcome> = {
+  httpStatus: 200,
+  frameLanded: true,
+  hasFrame: true,
+  lastOkAgeMs: 0,
+};
+
+const LIVE: FwBoardConnectionState = { phase: "live", consecutive404: 0 };
+
+describe("fwBoardConnectionState — the dead-link machine (RC-2)", () => {
+  it("goes live on a 200 that lands a frame, from a cold start", () => {
+    expect(step(FW_BOARD_CONNECTION_INITIAL, ok200)).toEqual(LIVE);
+  });
+
+  it("stays connecting while nothing has ever arrived", () => {
+    // A bare tick on a board that has never heard back is not news.
+    expect(step(FW_BOARD_CONNECTION_INITIAL, {})).toEqual(FW_BOARD_CONNECTION_INITIAL);
+  });
+
+  it("degrades a live board to catching_up on a network throw, keeping the frame's story", () => {
+    expect(step(LIVE, { fetchThrew: true, hasFrame: true, lastOkAgeMs: 4000 })).toEqual({
+      phase: "catching_up",
+      consecutive404: 0,
+    });
+  });
+
+  it("reports connecting, not catching_up, when a failure hits with no frame to keep", () => {
+    expect(step(FW_BOARD_CONNECTION_INITIAL, { fetchThrew: true })).toEqual({
+      phase: "connecting",
+      consecutive404: 0,
+    });
+  });
+
+  it("treats a SINGLE 404 as non-terminal — the frame comes off, but the board keeps polling", () => {
+    // fw-board-loader.ts:87 maps a transient DB read failure to the same bare
+    // 404 the anti-enumeration contract requires, and venue middleboxes exist.
+    // One blip must not kill a healthy board mid-event.
+    const after = step(LIVE, { httpStatus: 404 });
+    expect(after).toEqual({ phase: "connecting", consecutive404: 1 });
+  });
+
+  it("declares dead_link on the SECOND consecutive 404, regardless of prior frame state", () => {
+    const withFrame = step(step(LIVE, { httpStatus: 404 }), { httpStatus: 404 });
+    expect(withFrame).toEqual({ phase: "dead_link", consecutive404: 2 });
+
+    const neverHadFrame = step(step(FW_BOARD_CONNECTION_INITIAL, { httpStatus: 404 }), {
+      httpStatus: 404,
+    });
+    expect(neverHadFrame).toEqual({ phase: "dead_link", consecutive404: 2 });
+  });
+
+  it("resets the 404 run on a 200, so a later lone 404 is again non-terminal", () => {
+    const recovered = step(step(LIVE, { httpStatus: 404 }), ok200);
+    expect(recovered).toEqual(LIVE);
+    expect(step(recovered, { httpStatus: 404 })).toEqual({
+      phase: "connecting",
+      consecutive404: 1,
+    });
+  });
+
+  it("resets the 404 run on a 503 too — any answered non-404 proves the token still resolves", () => {
+    const after503 = step(step(LIVE, { httpStatus: 404 }), { httpStatus: 503, hasFrame: false });
+    expect(after503).toEqual({ phase: "connecting", consecutive404: 0 });
+  });
+
+  it("never reaches dead_link from network throws, however many, while a frame stands", () => {
+    // Tri-state guarantee (2026-07-24 solution doc): a refusal we could not
+    // hear is not a refusal. Throws also leave the 404 run UNTOUCHED — two 404
+    // answers straddling a wifi blip still count as consecutive answers.
+    let s = step(LIVE, { fetchThrew: true, hasFrame: true });
+    for (let i = 0; i < 10; i += 1) s = step(s, { fetchThrew: true, hasFrame: true });
+    expect(s).toEqual({ phase: "catching_up", consecutive404: 0 });
+
+    const blipBetween404s = step(
+      step(step(LIVE, { httpStatus: 404 }), { fetchThrew: true }),
+      { httpStatus: 404 }
+    );
+    expect(blipBetween404s.phase).toBe("dead_link");
+  });
+
+  it("treats a 503 as non-terminal — the feed emits it for a good token whose read failed", () => {
+    expect(step(LIVE, { httpStatus: 503, hasFrame: true })).toEqual({
+      phase: "catching_up",
+      consecutive404: 0,
+    });
+  });
+
+  it("is STICKY once dead — a 200, a throw, and a 503 all stay dead_link", () => {
+    const dead = step(step(LIVE, { httpStatus: 404 }), { httpStatus: 404 });
+    expect(step(dead, ok200).phase).toBe("dead_link");
+    expect(step(dead, { fetchThrew: true, hasFrame: false }).phase).toBe("dead_link");
+    expect(step(dead, { httpStatus: 503 }).phase).toBe("dead_link");
+    expect(step(dead, { httpStatus: 404 }).phase).toBe("dead_link");
+  });
+
+  it("holds live through a bare tick until the last success ages past the stale threshold", () => {
+    // A throttled tab stops polling silently; the tick is what notices.
+    expect(step(LIVE, { hasFrame: true, lastOkAgeMs: FW_BOARD_STALE_AFTER_MS })).toEqual(LIVE);
+    expect(
+      step(LIVE, { hasFrame: true, lastOkAgeMs: FW_BOARD_STALE_AFTER_MS + 1 })
+    ).toEqual({ phase: "catching_up", consecutive404: 0 });
+  });
+
+  it("names the recovery actor in the locked dead-link copy", () => {
+    // Structural, not an exact-spelling pin (2026-07-27 source-scan lesson):
+    // the copy must point a non-technical operator at STAFF for a fresh link,
+    // whatever its exact phrasing becomes.
+    expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/staff/i);
+    expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/link/i);
+  });
+});
+
+describe("FW_BOARD_PHASE_PRESENTATION — one table for pill AND panel", () => {
+  const phases = ["live", "catching_up", "connecting", "dead_link"] as const;
+
+  it("gives the four phases four DISTINCT pill labels", () => {
+    const labels = phases.map((p) => FW_BOARD_PHASE_PRESENTATION[p].label);
+    expect(new Set(labels).size).toBe(4);
+  });
+
+  it("gives the four phases distinct dot classes where the phases differ", () => {
+    // live / degraded / dead are visually distinct dots; catching_up and
+    // connecting deliberately share the amber dot (both are "not live yet").
+    const dots = phases.map((p) => FW_BOARD_PHASE_PRESENTATION[p].dotClass);
+    expect(new Set(dots).size).toBeGreaterThanOrEqual(3);
+    expect(FW_BOARD_PHASE_PRESENTATION.live.dotClass).not.toBe(
+      FW_BOARD_PHASE_PRESENTATION.dead_link.dotClass
+    );
+  });
+
+  it("the dead_link body IS the locked dead-link constant, not a respelling", () => {
+    expect(FW_BOARD_PHASE_PRESENTATION.dead_link.bodyMessage).toBe(FW_BOARD_DEAD_LINK_MESSAGE);
+  });
+
+  it("builds no class or label by interpolation — every value sits verbatim in the source", () => {
+    // Same constraint as the cell table below (skin-tokens.ts CLASS_TABLE): a
+    // class assembled at runtime is one the Tailwind scanner never saw, and it
+    // renders as no styling at all. Asserting the VALUE lacks "${" is vacuous —
+    // an interpolated template has already resolved by the time this test reads
+    // it — so, like the cell table's scan, each value must appear in the module
+    // source as one complete quoted literal.
+    const source = readFileSync(
+      fileURLToPath(new URL("../fw-board-rules.ts", import.meta.url)),
+      "utf8"
+    );
+    for (const p of phases) {
+      const { label, dotClass, textClass } = FW_BOARD_PHASE_PRESENTATION[p];
+      for (const value of [label, dotClass, textClass]) {
+        expect(value).not.toContain("${");
+        expect(source).toContain(`"${value}"`);
+      }
+    }
+  });
+});
+
+describe("fwBoardCellPresentation — the non-colour cell channel (B7 / 3.18.5)", () => {
+  const states = ["verified", "not_yet", "never_attempted"] as const;
+
+  it("gives the three states three DISTINCT complete class strings", () => {
+    const classes = states.map((s) => FW_BOARD_CELL_PRESENTATION[s].className);
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  it("gives the three states three distinct human-readable state words", () => {
+    const labels = states.map((s) => FW_BOARD_CELL_PRESENTATION[s].stateLabel);
+    expect(new Set(labels).size).toBe(3);
+    // Human words, not machine tokens: no underscores, nothing empty.
+    for (const label of labels) expect(label).toMatch(/^[a-z][a-z ]*[a-z]$/);
+  });
+
+  it("distinguishes by SHAPE, not just colour: only verified is filled, only not_yet is dashed", () => {
+    // The channel WCAG 1.4.1 asks for. Structural, not exact-spelling: the
+    // solid square must be unique, and the broken outline must be unique.
+    const filled = states.filter(
+      (s) => !FW_BOARD_CELL_PRESENTATION[s].className.includes("bg-transparent")
+    );
+    expect(filled).toEqual(["verified"]);
+    const dashed = states.filter((s) =>
+      FW_BOARD_CELL_PRESENTATION[s].className.includes("border-dashed")
+    );
+    expect(dashed).toEqual(["not_yet"]);
+  });
+
+  it("maps the grid's real inputs: a decided state to its row, undefined to never_attempted", () => {
+    expect(fwBoardCellPresentation("verified")).toBe(FW_BOARD_CELL_PRESENTATION.verified);
+    expect(fwBoardCellPresentation("not_yet")).toBe(FW_BOARD_CELL_PRESENTATION.not_yet);
+    expect(fwBoardCellPresentation(undefined)).toBe(FW_BOARD_CELL_PRESENTATION.never_attempted);
+  });
+
+  it("labels a cell as 'taskId — state' for title AND aria-label alike", () => {
+    expect(fwBoardCellLabel("1.2.4", "verified")).toBe("1.2.4 — verified");
+    expect(fwBoardCellLabel("2.1.3", "not_yet")).toBe("2.1.3 — not yet");
+    expect(fwBoardCellLabel("3.1.1", undefined)).toBe("3.1.1 — untouched");
+  });
+
+  it("builds no class string by interpolation — every mapping value sits verbatim in the source", () => {
+    // The Tailwind v4 scanner constraint (skin-tokens.ts CLASS_TABLE): a class
+    // assembled at runtime is one the scanner never saw, and it renders as no
+    // styling at all. Mutation check: each table value must appear in the
+    // module source as one complete literal, and none may carry a template hole.
+    const source = readFileSync(
+      fileURLToPath(new URL("../fw-board-rules.ts", import.meta.url)),
+      "utf8"
+    );
+    for (const s of states) {
+      const { className } = FW_BOARD_CELL_PRESENTATION[s];
+      expect(className).not.toContain("${");
+      expect(source).toContain(`"${className}"`);
+    }
   });
 });

@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwCohortCreate from "@/app/fp/fw/components/FwCohortCreate";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/fp/lib/fw-ops-core";
 
 /**
@@ -22,7 +23,7 @@ import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/fp/lib/fw-ops-c
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Founders Weekend — staff ops",
+  title: `Staff ops · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

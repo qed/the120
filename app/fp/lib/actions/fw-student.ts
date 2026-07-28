@@ -21,7 +21,9 @@
  * result types from `fw-student-core.ts`.
  */
 
+import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -129,8 +131,12 @@ export async function lookupFwStudentMatch(input: unknown): Promise<FwMatchLooku
 }
 
 /**
- * Create a walk-in student and verify every leg before the caller routes into
- * the tree (Decision 13).
+ * Create a walk-in student, verify every leg, and only then route into the
+ * tree (Decision 13) — the routing now happens HERE, via `redirect`, so the
+ * mutation, the cache invalidation and the navigation are one round trip.
+ * On success this action never resolves: callers see a NEXT_REDIRECT
+ * rejection while the router navigates. Every `!ok` shape still returns the
+ * typed result unchanged.
  *
  * The `headers()` call is what keeps this action out of any static render path;
  * it is also why this file cannot be unit-tested, which is why it does nothing
@@ -170,7 +176,7 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
     };
   }
 
-  return runFwQuickCreate(supabaseAdmin(), {
+  const created = await runFwQuickCreate(supabaseAdmin(), {
     firstName,
     lastName,
     band,
@@ -182,4 +188,17 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
     noticeAttested: true,
     existingProfileId: existingProfileId ?? null,
   });
+  if (!created.ok) return created;
+
+  // Success navigates FROM HERE, not from the client (2026-07-28 work order,
+  // RC-1): the old client-side `router.push` + `router.refresh` pair raced —
+  // the push painted the destination from the client cache before the refresh
+  // landed, and the roster/search never saw the new student without a reload.
+  // `revalidatePath` invalidates both surfaces that list students, and the
+  // redirect's 303 carries fresh RSC for the destination in the same round
+  // trip. `redirect()` throws NEXT_REDIRECT by design, so it sits OUTSIDE any
+  // try/catch (canon: app/start/page.tsx, funnel-child-rules.test.ts:341).
+  revalidatePath(`/fp/fw/cohort/${cohortId}`);
+  revalidatePath(`/fp/fw/ops/cohort/${cohortId}`);
+  redirect(`/fp/fw/cohort/${cohortId}/student/${created.studentId}`);
 }

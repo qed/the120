@@ -14,6 +14,7 @@ import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { listFwImportExceptions } from "@/app/fp/lib/fw-import-core";
 import { withFwTimeout } from "@/app/fp/lib/fw-call";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import { fwArchivedBanner, fwOpsCohortAffordances } from "@/app/fp/lib/fw-ops-rules";
 import {
   listFwCohortGuides,
@@ -43,7 +44,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Founders Weekend — weekend ops",
+  title: `Weekend ops · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

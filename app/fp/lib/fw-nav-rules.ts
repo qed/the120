@@ -43,6 +43,24 @@ import type { TaskState } from "./transition-table";
 export const FW_OPS_CREATE_PATH = "/fp/fw/ops";
 
 /**
+ * The First Profit brand suffix every guide-facing Founders Weekend title carries
+ * (D1 Option A, Peter 2026-07-28: Founders Weekend is a SUB-BRAND of First
+ * Profit, not a peer product — checks 1.1.4 / 3.1.6).
+ *
+ * ONE constant rather than ten spellings, because the drift this closes was
+ * exactly ten tab titles that named the weekend and never the product. Pages
+ * append it to their `metadata.title`; the drift-guard scan in
+ * `__tests__/fw-brand-title.test.ts` imports it and fails any `/fp/fw` page
+ * whose title lacks it. The em-dash separator is part of the constant so a page
+ * cannot half-carry the brand with its own punctuation.
+ *
+ * Deliberately NOT applied to the projector-visible on-screen board header
+ * (`FwBoard.tsx`) — the brand lives in the tab title; on-screen hierarchy at
+ * projector distance stays clean (Peter, 2026-07-28).
+ */
+export const FW_BRAND_SUFFIX = " — First Profit";
+
+/**
  * Does `/fp/fw` redirect straight into the only cohort it can see? (R14)
  *
  * The redirect is a GUIDE affordance and stays exactly as Decision 3 shipped it: one

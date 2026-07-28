@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { loadFwBoardShell, resolveFwBoardToken } from "@/app/fp/lib/fw-board-loader";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import FwBoard from "@/app/fp/fw/components/board/FwBoard";
 
 /**
@@ -34,7 +35,7 @@ import FwBoard from "@/app/fp/fw/components/board/FwBoard";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Founders Weekend",
+  title: `Founders Weekend${FW_BRAND_SUFFIX}`,
   // A search engine must never surface a minor's first-name-plus-initial from a
   // projected board. Reinforced by the X-Robots-Tag header on the subtree.
   robots: { index: false, follow: false },

@@ -18,6 +18,7 @@
 
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { SITE_URL } from "@/app/lib/site";
+import { FW_BRAND_SUFFIX } from "./fw-nav-rules";
 
 export type FwGuideInviteEmail = { subject: string; html: string; text: string };
 
@@ -37,9 +38,12 @@ export type FwGuideInviteEmail = { subject: string; html: string; text: string }
 export function buildFwGuideInviteEmail({ token }: { token: string }): FwGuideInviteEmail {
   const url = `${SITE_URL}/fp/fw/invite/${token}`;
   return {
-    subject: "Your Founders Weekend guide access",
+    // D1 Option A: Founders Weekend is a sub-brand of First Profit, and this
+    // email is a guide's first contact with either name — so both appear, in
+    // the same relationship every guide-facing tab title carries.
+    subject: `Your Founders Weekend guide access${FW_BRAND_SUFFIX}`,
     text: [
-      "You're set up as a guide for Founders Weekend.",
+      "You're set up as a guide for Founders Weekend, part of the First Profit program.",
       "",
       "Open the link below to choose a password. You'll use it to sign in on the check-in iPads.",
       "",
@@ -48,7 +52,7 @@ export function buildFwGuideInviteEmail({ token }: { token: string }): FwGuideIn
       "If the link has expired, ask The 120 staff to send a fresh one — there's no self-service reset.",
     ].join("\n"),
     html: `
-  <p style="margin:0 0 16px;">You're set up as a guide for <strong>Founders Weekend</strong>.</p>
+  <p style="margin:0 0 16px;">You're set up as a guide for <strong>Founders Weekend</strong>, part of the <strong>First Profit</strong> program.</p>
   <p style="margin:0 0 16px;">Open the link below to choose a password. You'll use it to sign in on the check-in iPads.</p>
   <p style="margin:0 0 24px;"><a href="${escapeHtml(url)}" style="background:#16233b;color:#ffffff;text-decoration:none;padding:12px 22px;font-size:15px;">Set your password</a></p>
   <p style="margin:0 0 16px;color:#667;">The link is valid for 14 days. If it has expired, ask The 120 staff to send a fresh one — there's no self-service reset.</p>`,

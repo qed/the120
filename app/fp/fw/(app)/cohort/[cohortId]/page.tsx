@@ -6,6 +6,7 @@ import { FwRosterCache } from "@/app/fp/fw/components/FwRosterCache";
 import { FwOfflineRoster } from "@/app/fp/fw/components/FwOfflineRoster";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { loadFwCohortRoster } from "@/app/fp/lib/fw-loader";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 
 /** Informational stamp on the offline roster cache — a deploy changes it, but only
  *  a schema-version bump invalidates the cache (Decision 15). */
@@ -28,7 +29,7 @@ const BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA ?? "dev";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Roster · Founders Weekend",
+  title: `Roster · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

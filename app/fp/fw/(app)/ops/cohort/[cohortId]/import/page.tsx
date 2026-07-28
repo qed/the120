@@ -6,6 +6,7 @@ import { Icon } from "@/app/fp/components/system/Icon";
 import FwImport from "@/app/fp/fw/components/FwImport";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import { loadFwOpsCohort } from "@/app/fp/lib/fw-ops-core";
 
 /**
@@ -30,7 +31,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export const metadata: Metadata = {
-  title: "Founders Weekend — import roster",
+  title: `Import roster · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

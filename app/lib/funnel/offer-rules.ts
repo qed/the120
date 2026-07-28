@@ -83,24 +83,32 @@ export const CAPACITY_UNKNOWN: OfferCapacityDisplay = {
 /** An offer is OUTSTANDING when it is out the door (email sent, or the
  *  child moved to offered-or-later) and no paid deposit has landed — a
  *  promise against a seat nothing is holding. */
-export function countOutstandingOffers(
-  items: {
-    offerSentAt: string | null;
-    reviewStatus: string;
-    deposits: { status: string; refunded_at?: string | null }[];
-  }[]
-): number {
-  // The CRM's ReviewStatus vocabulary, offered-or-later: 'invited' is an
-  // ASSESSMENT invite (pre-offer — counting it fired the over-commit
-  // warning early and trained staff to click through it), and 'member' is
-  // the post-offer rung whose refunded-deposit case is exactly an
-  // un-retired promise (both reviewers, by the CRM's own constants).
-  const OFFERED_OR_LATER = ["offered", "member"];
-  return items.filter((item) => {
-    const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
-    if (paid) return false;
-    return item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
-  }).length;
+export type OfferQueueItem = {
+  offerSentAt: string | null;
+  reviewStatus: string;
+  deposits: { status: string; refunded_at?: string | null }[];
+};
+
+// The CRM's ReviewStatus vocabulary, offered-or-later: 'invited' is an
+// ASSESSMENT invite (pre-offer — counting it fired the over-commit
+// warning early and trained staff to click through it), and 'member' is
+// the post-offer rung whose refunded-deposit case is exactly an
+// un-retired promise (both reviewers, by the CRM's own constants).
+const OFFERED_OR_LATER = ["offered", "member"];
+
+/** THE predicate. countOutstandingOffers and categorizeOutstanding both
+ *  call this — never their own copy. Two hand-synchronized copies is a
+ *  drift waiting to happen: editing one list would silently break the
+ *  sum invariant for any status combination the fixtures miss (U2
+ *  review). Sharing it makes the invariant structural. */
+export function isOutstandingOffer(item: OfferQueueItem): boolean {
+  const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
+  if (paid) return false;
+  return item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
+}
+
+export function countOutstandingOffers(items: OfferQueueItem[]): number {
+  return items.filter(isOutstandingOffer).length;
 }
 
 /** W6: the SPLIT of the outstanding count — money in flight vs a bare
@@ -111,21 +119,11 @@ export function countOutstandingOffers(
  *  not move. */
 export type OutstandingSplit = { clearingDebits: number; unansweredOffers: number };
 
-export function categorizeOutstanding(
-  items: {
-    offerSentAt: string | null;
-    reviewStatus: string;
-    deposits: { status: string; refunded_at?: string | null }[];
-  }[]
-): OutstandingSplit {
-  const OFFERED_OR_LATER = ["offered", "member"];
+export function categorizeOutstanding(items: OfferQueueItem[]): OutstandingSplit {
   let clearingDebits = 0;
   let unansweredOffers = 0;
   for (const item of items) {
-    const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
-    if (paid) continue;
-    const outstanding = item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
-    if (!outstanding) continue;
+    if (!isOutstandingOffer(item)) continue;
     // Only a LIVE pending row is money in flight. A refunded, failed, or
     // expired row is a debit that will never clear — the family is back to
     // an unanswered offer, and calling it "clearing" would hold a seat

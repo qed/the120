@@ -78,6 +78,37 @@ describe("offerHeadroom — offers do not reserve seats (the over-offer trap)", 
     expect(split.clearingDebits + split.unansweredOffers).toBe(countOutstandingOffers(items));
   });
 
+  it("W6: the sum invariant holds across the FULL status × deposit-state space, not hand-picked cases", () => {
+    // Both functions call isOutstandingOffer, so the invariant is
+    // structural — this sweeps the space that would have caught a drift
+    // back when they were two hand-synchronized predicates (U2 review).
+    const statuses = ["draft", "submitted", "in_review", "invited", "offered", "member", "waitlisted"];
+    const depositSets: { status: string; refunded_at?: string | null }[][] = [
+      [],
+      [{ status: "pending" }],
+      [{ status: "pending", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "paid", refunded_at: null }],
+      [{ status: "paid", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "refunded", refunded_at: "2026-07-29T00:00:00Z" }],
+      [{ status: "failed" }],
+      [{ status: "expired" }],
+      [{ status: "expired" }, { status: "pending" }],
+      [{ status: "pending" }, { status: "paid", refunded_at: null }],
+    ];
+    for (const reviewStatus of statuses) {
+      for (const offerSentAt of [null, "2026-07-28T00:00:00Z"]) {
+        for (const deposits of depositSets) {
+          const items = [{ offerSentAt, reviewStatus, deposits }];
+          const s = categorizeOutstanding(items);
+          expect(
+            s.clearingDebits + s.unansweredOffers,
+            `${reviewStatus} / offerSentAt=${offerSentAt} / ${JSON.stringify(deposits)}`
+          ).toBe(countOutstandingOffers(items));
+        }
+      }
+    }
+  });
+
   it("W6: a refunded or downgraded row is never 'clearing money'", () => {
     const child = (deposits: { status: string; refunded_at?: string | null }[]) => ({
       offerSentAt: "2026-07-28T00:00:00Z",

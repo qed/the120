@@ -805,6 +805,15 @@ never someone else's.
 - Test: `app/lib/__tests__/funnel-provision-core.test.ts`,
   `app/api/__tests__/stripe-webhook.test.ts`
 
+**Carried from U2 review (do it in this unit):** add a standing
+**capacity reconciliation** to the same retention-cron sweep — compare
+`seats_claimed()` to sellable and page ops if over, independent of any
+single webhook invocation. U2's inline alert is best-effort: if the
+handler is killed between the fulfil write and the 200, Stripe's retry is
+a `replay_noop` that can never re-alert. Today the only healing is that
+the NEXT fulfilment past capacity pages again (documented in
+`alertIfAtCapacity`); the cron makes it durable.
+
 **Approach:** The refund-side writes are ONE SQL transaction via a new
 `deposit_refund_release()`-style RPC (this makes Unit 8 a **third
 migration-authoring unit** — full MIGRATION-LOCK ritual applies):

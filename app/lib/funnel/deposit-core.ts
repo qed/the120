@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import {
   DEPOSIT_AMOUNT_CENTS,
   REFUND_POLICY,
+  capacityAlarm,
   downgradeAllowed,
   fulfilVerdict,
   webhookPlan,
@@ -53,6 +54,59 @@ export type WebhookOutcome =
   | { kind: "ok"; fulfilled?: { childId: string; parentId: string; sessionId: string } }
   | { kind: "double_paid" }
   | { kind: "failed" };
+
+/* ─────────────────── W6a: the over-capacity page ─────────────────── */
+
+export type CapacityAlertDeps = {
+  /** seats_claimed() read AFTER the fulfilment write. null = unreadable. */
+  readSeatsClaimed: () => Promise<number | null>;
+  notify: (subject: string, body: string) => Promise<void>;
+};
+
+export type CapacityAlertResult = "alerted" | "below" | "not_fulfilled" | "skipped";
+
+/**
+ * A cleared bank debit is honoured even past capacity (W6a) — so the
+ * over-allocation must be VISIBLE. Takes the whole outcome, not just the
+ * payload, so the replay suppression is a BEHAVIOUR of this function and
+ * testable without the route: a replayed `completed` is `replay_noop`,
+ * which carries no `fulfilled`, so it never reads seats and never pages.
+ *
+ * Best-effort by construction: any failure returns "skipped" and is
+ * swallowed. An alert must never take down the thing it alerts about, and
+ * a seats read must never turn a good fulfilment into a 500 Stripe retries.
+ *
+ * KNOWN, and deliberate (the DOUBLE PAID precedent in this file's route):
+ * once claimed is past capacity EVERY later fulfilment pages again. That
+ * repetition is not noise to suppress — it is the only backstop for the
+ * case where this call is lost to a serverless timeout between the write
+ * and the 200 (the retry is a replay_noop and can never re-alert). A
+ * standing reconciliation sweep is the durable fix; until it lands, the
+ * repeat is what heals a lost page.
+ */
+export async function alertIfAtCapacity(
+  deps: CapacityAlertDeps,
+  outcome: WebhookOutcome,
+  seatsTotal: number,
+  foundingCommitments: number
+): Promise<CapacityAlertResult> {
+  if (outcome.kind !== "ok" || !outcome.fulfilled) return "not_fulfilled";
+  try {
+    const claimed = await deps.readSeatsClaimed();
+    if (!capacityAlarm(claimed, seatsTotal, foundingCommitments)) return "below";
+    const sellable = Math.max(0, seatsTotal - foundingCommitments);
+    await deps.notify(
+      "Deposit fulfilled at capacity — seats over-allocated",
+      `child=${outcome.fulfilled.childId ?? "?"}\nsession=${outcome.fulfilled.sessionId}\n` +
+        `seats_claimed=${claimed} of ${sellable} sellable\n` +
+        `The payment stands (W6a). Review the offer queue and waitlist before offering again.`
+    );
+    return "alerted";
+  } catch (err) {
+    console.error("[deposit] capacity alert skipped:", err);
+    return "skipped";
+  }
+}
 
 /**
  * Apply one verified Stripe event. The dedupe story: fulfilment is

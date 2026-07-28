@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { applyStripeEvent, type WebhookDeps } from "@/app/lib/funnel/deposit-core";
+import { capacityAlarm } from "@/app/lib/funnel/deposit-rules";
+import { SEATS_TOTAL } from "@/app/lib/site";
+import { FOUNDING_COMMITMENTS } from "@/app/lib/seats";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { notifyOps } from "@/app/lib/ops-alert";
 
@@ -161,6 +164,27 @@ export async function POST(req: Request) {
       { childId: outcome.fulfilled.childId, parentId: outcome.fulfilled.parentId },
       { session: outcome.fulfilled.sessionId }
     );
+    // W6a: a cleared bank debit is honoured unconditionally — including
+    // the one that lands after the last seat sold. Staff absorb the
+    // over-allocation, so it must be VISIBLE: read the post-write count
+    // and page ops at-or-past capacity. Inside the fulfilled branch, so a
+    // replayed completed (replay_noop, no payload) never re-alerts.
+    // Try/caught end to end: an alert must never take down the thing it
+    // alerts about, and a seats read failure must not turn a good
+    // fulfilment into a 500 that Stripe retries forever.
+    try {
+      const { data: claimed } = await supabaseAdmin().rpc("seats_claimed");
+      if (capacityAlarm(typeof claimed === "number" ? claimed : null, SEATS_TOTAL, FOUNDING_COMMITMENTS)) {
+        await notifyOps(
+          "Deposit fulfilled at capacity — seats over-allocated",
+          `child=${outcome.fulfilled.childId ?? "?"}\nsession=${outcome.fulfilled.sessionId}\n` +
+            `seats_claimed=${claimed} of ${SEATS_TOTAL - FOUNDING_COMMITMENTS} sellable\n` +
+            `The payment stands (W6a). Review the offer queue and waitlist before offering again.`
+        );
+      }
+    } catch (err) {
+      console.error("[stripe-webhook] capacity alarm skipped:", err);
+    }
   }
   if (outcome.kind === "double_paid" && session) {
     // A family paid twice for one seat: a refund is owed and only a human

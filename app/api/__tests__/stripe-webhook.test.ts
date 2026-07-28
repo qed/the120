@@ -1,11 +1,16 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  capacityAlarm,
   downgradeAllowed,
   fulfilVerdict,
   webhookPlan,
 } from "@/app/lib/funnel/deposit-rules";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 import {
   applyStripeEvent,
   type DepositRow,
@@ -230,6 +235,31 @@ describe("applyStripeEvent", () => {
       refundPaymentIntent: "pi_early",
     });
     expect(out).toEqual({ kind: "failed" });
+  });
+
+  it("W6a: the over-capacity alert lives INSIDE the once-per-fulfilment branch, awaited and try/caught (source pin)", () => {
+    const src = readFileSync(
+      path.resolve(REPO_ROOT, "app/api/stripe/webhook/route.ts"),
+      "utf8"
+    );
+    // The capacity read + notifyOps must sit inside the outcome.fulfilled
+    // branch: a replayed completed is replay_noop (no fulfilled payload),
+    // so a replay can never re-alert. Awaited (serverless freeze), and
+    // try/caught (an alert must never fail the fulfilment 200).
+    const fulfilBranch = src.slice(src.indexOf("outcome.fulfilled"));
+    expect(fulfilBranch).toContain('rpc("seats_claimed")');
+    expect(fulfilBranch).toContain("capacityAlarm(");
+    const alertIdx = fulfilBranch.indexOf("at capacity");
+    expect(alertIdx).toBeGreaterThan(-1);
+    // The alert is awaited and wrapped: a seats read failure logs, never 500s.
+    expect(fulfilBranch).toMatch(/try\s*\{[\s\S]*?seats_claimed[\s\S]*?catch/);
+  });
+
+  it("W6a: capacityAlarm fires at-or-past capacity, never below, and fails closed on an unreadable count", () => {
+    expect(capacityAlarm(112, 120, 7)).toBe(false); // 113 sellable, 112 claimed
+    expect(capacityAlarm(113, 120, 7)).toBe(true); // exactly at capacity
+    expect(capacityAlarm(114, 120, 7)).toBe(true); // past (over-allocation)
+    expect(capacityAlarm(null, 120, 7)).toBe(false); // unreadable → no alert, no crash
   });
 
   it("the route forwards only FULL refunds — a partial refund never flips status (source pin)", async () => {

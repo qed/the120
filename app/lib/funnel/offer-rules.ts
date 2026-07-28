@@ -27,6 +27,12 @@ export type OfferCapacityInput = {
    *  `offered`): promises against seats nothing is holding. */
   outstandingOffers: number;
   seatsTotal?: number;
+  /** W6: OF the outstanding offers, how many have a bank debit clearing.
+   *  A display distinction ONLY — the subset is already inside
+   *  `outstandingOffers` and must never be added to the headroom math
+   *  (double-counting fires the over-commit warning early: the
+   *  trained-to-click-through failure). */
+  clearingDebits?: number;
 };
 
 export type OfferHeadroom = {
@@ -50,10 +56,17 @@ export function offerHeadroom(input: OfferCapacityInput): OfferHeadroom {
  *  must not silently downgrade the warning to grey). */
 export type OfferCapacityDisplay = { line: string; warn: boolean };
 
-/** Remaining MINUS outstanding — what this offer actually draws on. */
+/** Remaining MINUS outstanding — what this offer actually draws on. With
+ *  `clearingDebits` (W6) the outstanding count splits into money-in-flight
+ *  vs unanswered promises; totals and warn semantics are identical. */
 export function offerCapacityDisplay(input: OfferCapacityInput): OfferCapacityDisplay {
   const h = offerHeadroom(input);
-  const base = `${h.unclaimed} seats unclaimed · ${Math.max(0, input.outstandingOffers)} offers outstanding · ${Math.max(0, h.afterOutstanding)} truly free`;
+  const outstanding = Math.max(0, input.outstandingOffers);
+  const middle =
+    input.clearingDebits === undefined
+      ? `${outstanding} offers outstanding`
+      : `${Math.min(outstanding, Math.max(0, input.clearingDebits))} clearing bank debits · ${Math.max(0, outstanding - Math.max(0, input.clearingDebits))} offers unanswered`;
+  const base = `${h.unclaimed} seats unclaimed · ${middle} · ${Math.max(0, h.afterOutstanding)} truly free`;
   return h.overCommitted
     ? { line: `${base} — this offer promises a seat that is not there. Waitlist instead?`, warn: true }
     : { line: base, warn: false };
@@ -88,6 +101,40 @@ export function countOutstandingOffers(
     if (paid) return false;
     return item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
   }).length;
+}
+
+/** W6: the SPLIT of the outstanding count — money in flight vs a bare
+ *  promise. A pending bank debit already counts as outstanding (no paid
+ *  row yet), so this reclassifies rather than adds: clearingDebits +
+ *  unansweredOffers === countOutstandingOffers(items), pinned by test.
+ *  Staff need the difference at the point of offer; the arithmetic must
+ *  not move. */
+export type OutstandingSplit = { clearingDebits: number; unansweredOffers: number };
+
+export function categorizeOutstanding(
+  items: {
+    offerSentAt: string | null;
+    reviewStatus: string;
+    deposits: { status: string; refunded_at?: string | null }[];
+  }[]
+): OutstandingSplit {
+  const OFFERED_OR_LATER = ["offered", "member"];
+  let clearingDebits = 0;
+  let unansweredOffers = 0;
+  for (const item of items) {
+    const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
+    if (paid) continue;
+    const outstanding = item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
+    if (!outstanding) continue;
+    // Only a LIVE pending row is money in flight. A refunded, failed, or
+    // expired row is a debit that will never clear — the family is back to
+    // an unanswered offer, and calling it "clearing" would hold a seat
+    // open against nothing (the refund-resurrection lesson, in display form).
+    const clearing = item.deposits.some((d) => d.status === "pending" && !d.refunded_at);
+    if (clearing) clearingDebits += 1;
+    else unansweredOffers += 1;
+  }
+  return { clearingDebits, unansweredOffers };
 }
 
 /* ─────────────────── family routing after C2 (F7) ─────────────────── */

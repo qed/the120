@@ -55,6 +55,7 @@
  */
 
 import { BANDS, type Band } from "@/app/fp/content/types";
+import { assertAuthMailAllowed } from "@/app/lib/auth-mail-guard";
 import type { InitialProgressRow, SeedTaskRow } from "./progress-core";
 
 /* ------------------------------------------------------------------- bands */
@@ -281,6 +282,13 @@ export function assertNoAuthMailToFwStudent(email: string, context: string): voi
         `FW accounts are password-less and dormant; no auth or notification mail may ever reach them.`
     );
   }
+  // W12: since funnel students carry BARE `first.last@the120.school`, shape
+  // no longer separates a child from a colleague. The domain-wide
+  // default-deny guard is the real decision now; this FW-specific check
+  // survives as a fast path with its own message. Delegating keeps a single
+  // source of truth — an address this call permits is one the domain guard
+  // permits too.
+  assertAuthMailAllowed(email, context);
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
+import { requestStaffPasswordResetAction } from "@/app/lib/auth/actions/reset";
 
 /**
  * Staff sign-in form (brief §3/§11): email + password, plus a self-serve
@@ -42,13 +43,10 @@ export default function LoginForm() {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
+    // W12: server-side now, so the no-auth-mail guard sits in the path.
     // Fire-and-forget from the UI's perspective: the confirmation copy is the
     // same whether or not the address exists (no account enumeration).
-    await supabaseBrowser()
-      .auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/crm/reset`,
-      })
-      .catch(() => {});
+    await requestStaffPasswordResetAction(email).catch(() => {});
     setResetSent(true);
     setBusy(false);
   };

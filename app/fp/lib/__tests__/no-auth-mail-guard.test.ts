@@ -28,7 +28,11 @@ import { assertNoAuthMailToFwStudent, isFwStudentAddress } from "../fw-provision
 const APP_DIR = path.resolve(process.cwd(), "app");
 
 /** Supabase Auth surfaces that cause an email to be sent to a recipient. */
-const MAIL_CAPABLE = /\b(resetPasswordForEmail|inviteUserByEmail|generateLink|signInWithOtp|reauthenticate)\s*\(/;
+const MAIL_CAPABLE =
+  /\b(resetPasswordForEmail|inviteUserByEmail|generateLink|signInWithOtp|reauthenticate|signUp)\s*\(/;
+
+/** Any of the guard's entry points satisfies the scan. */
+const GUARD_CALL = /\b(assertNoAuthMailToFwStudent|assertAuthMailAllowed|authMailVerdict)\s*\(/;
 
 /**
  * Reviewed call sites, with the reason each is not routed through the guard.
@@ -42,14 +46,42 @@ const MAIL_CAPABLE = /\b(resetPasswordForEmail|inviteUserByEmail|generateLink|si
  * closing them then requires a Server Action or a project-level Supabase Auth
  * send-email hook. Tracked in the plan's Operational Notes.
  */
-const REVIEWED_CALL_SITES: readonly { file: string; why: string }[] = [
+const REVIEWED_CALL_SITES: readonly {
+  file: string;
+  why: string;
+  /** The property that keeps this exemption honest. If it stops holding,
+   *  the reason above no longer describes the code and the entry must be
+   *  re-justified or removed. */
+  mustContain: RegExp;
+}[] = [
+  // The two client-side reset forms are GONE from this list (funnel U15 /
+  // W12). They were exempt only because "no server hop exists to guard",
+  // and that reason expired when they moved behind Server Actions.
   {
-    file: "app/dashboard/SignIn.tsx",
-    why: "client-side parent password reset; browser→Supabase, no server hop exists to guard",
+    file: "app/lib/auth/actions/reset.ts",
+    why:
+      "the Supabase call lives in this file's DEPS CLOSURE, not on the request path: " +
+      "requestPasswordReset (app/lib/auth/reset-core.ts) runs the recipient through " +
+      "authMailVerdict and returns before deps.sendReset is ever invoked. The ordering " +
+      "is pinned mechanically by 'the reset core runs every recipient through the guard " +
+      "before Supabase' below, and by the deps-injected tests in " +
+      "app/lib/__tests__/auth-mail-guard.test.ts which prove a refused address reaches " +
+      "no mailer.",
+    mustContain: /requestPasswordReset\s*\(/,
   },
   {
-    file: "app/crm/login/LoginForm.tsx",
-    why: "client-side staff password reset; browser→Supabase, no server hop exists to guard",
+    file: "app/components/account/AccountModal.tsx",
+    why:
+      "public parent signup. `signUp` joined MAIL_CAPABLE in U15 after review found this " +
+      "door open: typing a student's address here made Supabase mail a confirmation into " +
+      "a child's inbox. The form now refuses the school domain using authMailVerdict — " +
+      "the SAME verdict function the server-side guard uses, so the two cannot drift. " +
+      "RESIDUAL, stated plainly: this is a browser-side call with the public anon key, so " +
+      "a crafted request straight to Supabase still bypasses it. No app-side code can " +
+      "close that; it needs a project-level Supabase auth hook or an email-domain deny " +
+      "list, which pairs with the standing 'no catch-all is armed' ops invariant. Moving " +
+      "signup server-side would NOT close it either — the anon key is public by design.",
+    mustContain: /authMailVerdict\s*\(/,
   },
 ];
 
@@ -96,6 +128,26 @@ function relative(full: string): string {
   return path.relative(process.cwd(), full).split(path.sep).join("/");
 }
 
+/**
+ * Drop comment-ONLY lines before scanning. A doc comment that merely names
+ * `signUp()` is not a call site, and flagging it would push a real file
+ * onto the reviewed allowlist for no reason — which is how an allowlist
+ * stops meaning anything.
+ *
+ * Deliberately conservative: only lines whose first non-space character
+ * starts a comment are removed. Stripping `//` anywhere would eat the tail
+ * of any line holding a URL, and could hide a real call sharing that line.
+ */
+function withoutCommentLines(source: string): string {
+  return source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const t = line.trimStart();
+      return !(t.startsWith("//") || t.startsWith("*") || t.startsWith("/*"));
+    })
+    .join("\n");
+}
+
 describe("no-auth-mail invariant — enforcement, not intention", () => {
   const files = walk(APP_DIR);
 
@@ -104,21 +156,23 @@ describe("no-auth-mail invariant — enforcement, not intention", () => {
     const unreviewed: string[] = [];
 
     for (const full of files) {
-      const source = readFileSync(full, "utf8");
+      const source = withoutCommentLines(readFileSync(full, "utf8"));
       if (!MAIL_CAPABLE.test(source)) continue;
       const rel = relative(full);
       if (reviewed.has(rel)) continue;
       // A new call site is fine — as long as it passes the recipient through
-      // the guard in the same file.
-      if (source.includes("assertNoAuthMailToFwStudent")) continue;
+      // a guard in the same file. Either name counts: the FW fast path or
+      // the domain-wide default-deny it delegates to (W12).
+      if (GUARD_CALL.test(source)) continue;
       unreviewed.push(rel);
     }
 
     expect(
       unreviewed,
-      `These files send Supabase Auth mail without calling assertNoAuthMailToFwStudent. ` +
-        `Route the recipient through the guard, or add the file to REVIEWED_CALL_SITES with a reason. ` +
-        `FW addresses are guessable and belong to children.`
+      `These files send Supabase Auth mail without routing the recipient through the ` +
+        `auth-mail guard (assertAuthMailAllowed / authMailVerdict / assertNoAuthMailToFwStudent). ` +
+        `Route it through the guard, or add the file to REVIEWED_CALL_SITES with a reason. ` +
+        `Student addresses are bare first.last@the120.school — guessable, and they belong to children.`
     ).toEqual([]);
   });
 
@@ -149,19 +203,42 @@ describe("no-auth-mail invariant — enforcement, not intention", () => {
     expect(source).toMatch(/updateUserById\([^)]*email:[^)]*email_confirm:\s*true/);
   });
 
-  it("the reviewed call sites still exist and still look the way the review assumed", () => {
-    // If one of these is deleted or refactored server-side, this test fails and
-    // the allowlist entry — which exists only because the call is unreachable
-    // from server code — has to be re-justified or removed.
+  it("the reviewed call sites still exist and still hold the property their reason rests on", () => {
+    // An exemption is only as good as the fact it cites. If that fact stops
+    // being true, this fails and the entry has to be re-justified or removed.
     for (const site of REVIEWED_CALL_SITES) {
       const source = readFileSync(path.resolve(process.cwd(), site.file), "utf8");
       expect(MAIL_CAPABLE.test(source), `${site.file} no longer sends auth mail`).toBe(true);
       expect(
-        source.includes("supabaseBrowser("),
-        `${site.file} no longer calls Supabase from the browser — it may now be guardable server-side, ` +
-          `so remove it from REVIEWED_CALL_SITES and route the recipient through assertNoAuthMailToFwStudent`
+        site.mustContain.test(source),
+        `${site.file} no longer matches ${site.mustContain} — the reason recorded in ` +
+          `REVIEWED_CALL_SITES ("${site.why}") no longer describes this file. Re-justify it or ` +
+          `route the recipient through the auth-mail guard directly.`
       ).toBe(true);
     }
+  });
+
+  it("W12: NEITHER reset form calls Supabase auth mail from the browser any more", () => {
+    // The regression this unit exists to prevent: putting either form back
+    // on supabaseBrowser().auth.resetPasswordForEmail re-opens a path that
+    // can mail a child, and no server-side guard can see it.
+    for (const file of ["app/dashboard/SignIn.tsx", "app/crm/login/LoginForm.tsx"]) {
+      const source = readFileSync(path.resolve(process.cwd(), file), "utf8");
+      expect(source, `${file} still calls a mail-capable Supabase Auth method client-side`).not.toMatch(
+        MAIL_CAPABLE
+      );
+      expect(source, `${file} should call the reset Server Action`).toMatch(
+        /request(Parent|Staff)PasswordResetAction\s*\(/
+      );
+    }
+  });
+
+  it("W12: the reset core runs every recipient through the guard before Supabase", () => {
+    const core = readFileSync(path.resolve(process.cwd(), "app/lib/auth/reset-core.ts"), "utf8");
+    const guardIdx = core.indexOf("authMailVerdict(");
+    const sendIdx = core.indexOf("deps.sendReset(");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(sendIdx).toBeGreaterThan(guardIdx);
   });
 
   it("no server-side code sends mail to an address it built with the FW email builder", () => {

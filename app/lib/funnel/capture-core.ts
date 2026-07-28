@@ -1,4 +1,5 @@
 import "server-only";
+import { notifyOps } from "@/app/lib/ops-alert";
 
 /**
  * Capture — Conversion 1 (funnel U6; R28–R30a, R32, F6).
@@ -206,6 +207,17 @@ export async function captureCore(
       console.error(
         `[funnel/capture] lead ingest THREW for ${provisioned.userId} — account exists, CRM row does not, reconcile:`,
         err
+      );
+      // The carried alerting item: a half-created family (account without
+      // a CRM row) needs a human reconcile, not just a log line. AWAITED:
+      // an unawaited send in a serverless request path is killed with the
+      // lambda — silently losing the one alert this path exists to send
+      // (reviewer). notifyOps never throws; the mail fetch caps at 8s.
+      await notifyOps(
+        "capture lead ingest THREW — reconcile needed",
+        `Account ${provisioned.userId} exists but the CRM family row failed to write.
+
+${err instanceof Error ? err.message : String(err)}`
       );
     }
 

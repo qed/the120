@@ -271,5 +271,29 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
         ),
       };
     }
+
+    // R61's fourth point (follow-ups pass): applied-but-no-deposit. The
+    // offer email was touch one; this is the single reminder, and the
+    // deposit CTA lives on the dashboard.
+    case "offer-nudge": {
+      const kid = child ?? "your child";
+      return {
+        subject: child ? `${child}'s seat is being held` : "The seat is being held",
+        text: [
+          hi,
+          "",
+          `A seat was offered to ${kid} and it's still open. Reserving it takes about two minutes from your dashboard, and the deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
+          "",
+          `Reserve the seat: ${DASHBOARD_URL}`,
+        ].join("\n"),
+        html: layout(
+          p(esc(hi)) +
+            p(
+              `<strong>A seat was offered to ${esc(kid)}</strong> and it's still open. Reserving it takes about two minutes from your dashboard, and the deposit stays fully refundable until ${DEADLINE_NBSP}.`
+            ),
+          { label: "Reserve the seat", url: DASHBOARD_URL }
+        ),
+      };
+    }
   }
 }

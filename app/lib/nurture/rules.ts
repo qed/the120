@@ -26,6 +26,8 @@
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const CATCH_UP_DAYS = 3;
 export const STALL_QUIET_DAYS = 3;
+/** Days after the offer email before the seat-reminder nudge. */
+export const OFFER_NUDGE_DAYS = 3;
 export const STALL_COMPLETENESS_MIN = 80; // strict: completeness must exceed this
 
 export type NurtureFamilyRow = {
@@ -59,6 +61,10 @@ export type NurtureChildRow = {
   /** The funnel ladder rung (NULL = pre-funnel child) — R61's abandonment
    *  point derives from it. */
   applicant_state: string | null;
+  /** Stitched by the cron from child_reviews: when the offer email went
+   *  out. Anchors the applied-but-no-deposit sequence (R61's fourth point,
+   *  covered since the follow-ups pass). */
+  offer_email_sent_at?: string | null;
   /** Legacy picks: kept on the row shape for old data, ignored by
    *  completeness since the Workshops removal (funnel U12). */
   workshop_ids: string[] | null;
@@ -86,7 +92,8 @@ export type NurtureTemplate =
   | "deposit-referral"
   | "stall-nudge"
   | "stall-child"
-  | "stall-project";
+  | "stall-project"
+  | "offer-nudge";
 
 export type DueSend = {
   familyId: string;
@@ -167,9 +174,13 @@ export function dossierCompleteness(c: NurtureChildRow): number {
  * - captured-but-no-child → the ACCOUNT sequence (d2/d5) is its cover.
  * - child-but-no-project → stall-child (here).
  * - project-but-no-application → stall-project (here).
- * - applied-but-no-deposit → DEFERRED, carried item: the offer email is
- *   the current touch; a post-offer nudge needs an offer timestamp this
- *   engine does not load yet. Registered in the build's closing note.
+ * - applied-but-no-deposit → the OFFER sequence (offer-nudge below),
+ *   anchored on child_reviews.offer_email_sent_at, gated off hasPaid.
+ *   KNOWN deviation: the gate is FAMILY-wide (any child's live deposit
+ *   silences it) because NurtureDepositRow carries parent_id only — a
+ *   per-child gate needs deposits.child_id in the engine's select. A
+ *   family with one deposited child and one freshly-offered child gets
+ *   no reminder; the offer email itself remains their touch. Flagged.
  * - R61 also asks for the PROJECT name in the subject; the engine has no
  *   project data and the build's privacy posture is "no child data beyond
  *   a first name" — the deviation is deliberate, flagged to Peter.
@@ -319,6 +330,38 @@ export function computeDueSends(input: {
             step,
             template,
             childFirstName: top.child.first_name.trim() || undefined,
+            dueAtMs,
+          });
+        }
+      }
+    }
+
+    // --- offer sequence (R61's fourth point: applied-but-no-deposit) ---
+    // Anchored on the EARLIEST offer email among the family's children;
+    // stops the moment any deposit is paid. One-time: the offer email
+    // itself was touch one, this is touch two, staff own touch three.
+    if (family.parent_id && !hasPaid && !sent.has(`${family.id}|offer|o3`)) {
+      // Earliest offer WHOSE WINDOW IS STILL OPEN — a stale June offer that
+      // never nudged (outage, consent gap) must not permanently block a
+      // fresh sibling's reminder (reviewer). The lifetime o3 key remains
+      // the one-per-family limiter.
+      const offered = children
+        .map((c) => ({ c, offerMs: ms(c.offer_email_sent_at ?? null) }))
+        .filter((x): x is { c: NurtureChildRow; offerMs: number } => x.offerMs !== null)
+        .filter((x) => inWindow(nowMs, x.offerMs + OFFER_NUDGE_DAYS * DAY_MS))
+        .sort((a, b) => a.offerMs - b.offerMs);
+      const first = offered[0];
+      if (first) {
+        const dueAtMs = first.offerMs + OFFER_NUDGE_DAYS * DAY_MS;
+        if (inWindow(nowMs, dueAtMs)) {
+          candidates.push({
+            familyId: family.id,
+            email,
+            firstName,
+            sequence: "offer",
+            step: "o3",
+            template: "offer-nudge",
+            childFirstName: first.c.first_name.trim() || undefined,
             dueAtMs,
           });
         }

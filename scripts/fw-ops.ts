@@ -1093,10 +1093,10 @@ fresh link emailed to ${issued.email}`);
     lastName: required("last"),
     band,
     cohortId: required("cohort"),
+    // Lands in `notice_attested_by` — since 2026-07-28 a silent provenance
+    // stamp of who quick-created the row (the program notice is covered by
+    // online registration), exactly as a guide's session id does at the table.
     actorUserId: await resolveActor(),
-    // The operator running this IS asserting the notice was seen, exactly as a
-    // guide does at the table — the column records who said so.
-    noticeAttested: true,
   });
   if (!res.ok) {
     throw new Error(

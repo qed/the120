@@ -69,17 +69,13 @@ const quickCreateSchema = matchLookupSchema.extend({
     }
     return band;
   }),
-  /**
-   * Decision 13. Parsed as a LITERAL true rather than a boolean, so an unticked
-   * attestation is refused at the schema — a form that posts `false` is not a
-   * submission with a missing field, it is a submission that must not happen.
-   * `runFwQuickCreate` re-checks anyway; two refusals, neither load-bearing
-   * alone.
-   */
-  noticeAttested: z.literal(true),
   /** Retry-in-place handle from a previously failed leg. */
   existingProfileId: z.uuid().optional(),
 });
+// No `noticeAttested` field and deliberately NOT `.strict()` (2026-07-28,
+// ops-guide redesign R17): the attestation checkbox is retired, and an old
+// cached client that still posts `noticeAttested: true` mid-deploy must keep
+// succeeding — zod's default unknown-key stripping is the skew tolerance.
 
 /**
  * PROPOSED-1: does a student by this name already exist?
@@ -144,12 +140,7 @@ export async function lookupFwStudentMatch(input: unknown): Promise<FwMatchLooku
  */
 export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreateActionResult> {
   const parsed = quickCreateSchema.safeParse(input);
-  if (!parsed.success) {
-    // An unticked attestation lands here (schema `literal(true)`), and it gets
-    // its own reason rather than a generic one — the form has copy for it.
-    const attestationMissing = parsed.error.issues.some((i) => i.path[0] === "noticeAttested");
-    return { ok: false, reason: attestationMissing ? "notice_not_attested" : "invalid_input" };
-  }
+  if (!parsed.success) return { ok: false, reason: "invalid_input" };
   const { cohortId, firstName, lastName, band, existingProfileId } = parsed.data;
 
   await headers(); // force dynamic; never prerendered
@@ -182,10 +173,10 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
     band,
     cohortId,
     // The AUTHORITATIVE session id, never a client field: it is what lands in
-    // `notice_attested_by`, which is the record of who said the family saw the
-    // program notice.
+    // `notice_attested_by` — since 2026-07-28 a silent provenance stamp of the
+    // guide who quick-created the row (the notice itself is covered by online
+    // registration), and the discriminator the unfinished-student banner keys on.
     actorUserId: session.userId,
-    noticeAttested: true,
     existingProfileId: existingProfileId ?? null,
   });
   if (!created.ok) {

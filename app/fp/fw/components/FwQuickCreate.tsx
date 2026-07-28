@@ -13,15 +13,20 @@ import type { FwQuickCreateActionResult } from "@/app/fp/lib/fw-student-core";
 
 /**
  * Quick-create (FW Unit 4; FW-R7, Decision 13, PROPOSED-1, gaps G6/G10) — three
- * fields and an attestation, fast enough to do with a kid standing there.
+ * fields, fast enough to do with a kid standing there.
  *
  * Four properties this component exists to hold, each of which is a decision the
  * plan made rather than an interaction choice:
  *
- *   1. THE ATTESTATION BLOCKS SUBMIT and is persisted. The checkbox disables the
- *      button; the action's schema refuses anything but a literal `true`; the
- *      core re-checks; the column records who said it. Four layers, because it
- *      is the only record that a family saw the program notice.
+ *   1. NO ATTESTATION CHECKBOX (retired 2026-07-28, ops-guide redesign R17).
+ *      The program notice is covered by online registration, and quick-create
+ *      is the backup path for a family that already registered — so the old
+ *      "family has seen the notice" checkbox (and the schema/core refusals
+ *      behind it) gated nothing real and is gone. `notice_attested_by/at` is
+ *      now a SILENT PROVENANCE STAMP of the submitting guide, written
+ *      server-side from the authenticated session — never from this form — and
+ *      it stays load-bearing: the roster's unfinished-student banner
+ *      discriminates quick-created rows on it being non-null.
  *
  *   2. PROPOSED-1 RUNS BEFORE THE MINT. A same-cohort match offers to OPEN that
  *      student rather than create a second one — the child is standing here, and
@@ -66,8 +71,6 @@ function failureMessage(
   resumed: boolean
 ): string {
   switch (result.reason) {
-    case "notice_not_attested":
-      return "Tick the notice box first.";
     case "invalid_name":
       return "That name can't be used as-is — retype it in plain letters.";
     case "cohort_not_found":
@@ -113,16 +116,13 @@ export default function FwQuickCreate({
    * next submit rides the EXISTING retry-in-place path and completes the SAME
    * half-created child instead of minting a duplicate. Seeds are initial state
    * only, so the parent keys this component on the profile id when switching
-   * targets. The attestation checkbox is deliberately NOT seeded: it is a legal
-   * attestation (property 1 above, four layers deep), and a resumed submit must
-   * re-attest like any other.
+   * targets.
    */
   resume?: { profileId: string; firstName: string; lastName: string; band: Band } | null;
 }) {
   const [firstName, setFirstName] = useState(resume?.firstName ?? "");
   const [lastName, setLastName] = useState(resume?.lastName ?? "");
   const [band, setBand] = useState<Band | "">(resume?.band ?? "");
-  const [attested, setAttested] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<FwMatchVerdict | null>(null);
@@ -134,7 +134,7 @@ export default function FwQuickCreate({
   );
 
   const nameReady = firstName.trim().length > 0 && lastName.trim().length > 0;
-  const canSubmit = nameReady && band !== "" && attested && !busy;
+  const canSubmit = nameReady && band !== "" && !busy;
 
   /**
    * PROPOSED-1's lookup, on leaving a name field. Never blocking: a failed
@@ -190,7 +190,6 @@ export default function FwQuickCreate({
         firstName,
         lastName,
         band,
-        noticeAttested: attested,
         ...(retryProfileId ? { existingProfileId: retryProfileId } : {}),
       });
       // Only a refusal ever RESOLVES: on success the action revalidates the
@@ -317,19 +316,6 @@ export default function FwQuickCreate({
         cohortId={cohortId}
         onOpen={() => onCancel()}
       />
-
-      <label className="mt-4 flex items-start gap-3" htmlFor="fw-attest">
-        <input
-          id="fw-attest"
-          type="checkbox"
-          checked={attested}
-          onChange={(e) => setAttested(e.target.checked)}
-          className="mt-1 h-6 w-6 shrink-0 rounded border-hq-border-strong accent-hq-ink"
-        />
-        <span className="font-path-body text-sm leading-6 text-hq-ink">
-          Their family has seen The 120 program notice.
-        </span>
-      </label>
 
       {error && (
         <p

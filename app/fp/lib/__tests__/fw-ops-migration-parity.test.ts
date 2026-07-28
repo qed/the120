@@ -25,6 +25,8 @@ const AUDIT_MIGRATION = "supabase/migrations/20260801120000_fw_ops_audit.sql";
 const TZ_MIGRATION = "supabase/migrations/20260801130000_fw_cohort_time_zone.sql";
 const ANONYMIZE_MIGRATION = "supabase/migrations/20260801150000_fw_anonymize_action.sql";
 const INDEX_MIGRATION = "supabase/migrations/20260801160000_fw_ops_5b_indexes.sql";
+const WINDOW_EDIT_MIGRATION =
+  "supabase/migrations/20260811140000_fw_window_edit_attribution.sql";
 
 /** The two actions the CREATE-TABLE migration (20260801120000) shipped with — a
  *  frozen historical fact, because that file's text never changes. The LIVE
@@ -42,6 +44,7 @@ const auditSql = strip(read(AUDIT_MIGRATION));
 const tzSql = strip(read(TZ_MIGRATION));
 const anonymizeSql = strip(read(ANONYMIZE_MIGRATION));
 const indexSql = strip(read(INDEX_MIGRATION));
+const windowEditSql = strip(read(WINDOW_EDIT_MIGRATION));
 
 /** Pull the values out of the FIRST `check (action in (…))` in a chunk of SQL.
  *  Callers pass a chunk already SCOPED to path_fw_ops_audit — an unscoped
@@ -320,5 +323,44 @@ describe("the Unit 5b supporting indexes (20260801160000)", () => {
     expect(indexSql).not.toMatch(/create or replace function/i);
     // Not CONCURRENTLY — incompatible with the single-transaction apply path.
     expect(indexSql).not.toMatch(/concurrently/i);
+  });
+});
+
+describe("the window-edit attribution columns (ops redesign Unit 4, 20260811140000)", () => {
+  // Statement-scoped like the created_by/revoked_by assertions above: each pin
+  // runs against the single `alter table` statement that adds its column, so a
+  // refactor pointing an assertion's substring at prose or at a different
+  // statement reddens rather than passing incidentally. (`strip` already
+  // removed the header comments, which discuss both columns in English.)
+  const statementFor = (column: string) =>
+    windowEditSql
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.includes("path_cohorts") && s.includes(column));
+
+  it("adds path_cohorts.window_edited_at, idempotently, as nullable timestamptz", () => {
+    const statement = statementFor("window_edited_at");
+    expect(statement, "no statement adds window_edited_at").toBeDefined();
+    expect(statement).toMatch(/add column if not exists window_edited_at timestamptz/);
+    // Nullable is load-bearing: every existing row, and every never-edited
+    // row, carries null — the columns are attribution, not an edit history.
+    expect(statement).not.toMatch(/not null/i);
+  });
+
+  it("adds path_cohorts.window_edited_by, idempotently, FK'd RESTRICT to auth.users", () => {
+    // The created_by/revoked_by per-row pattern: the actor row must outlive
+    // the account relationship (RESTRICT, never CASCADE), and the column is
+    // nullable for the same reason as window_edited_at.
+    const statement = statementFor("window_edited_by");
+    expect(statement, "no statement adds window_edited_by").toBeDefined();
+    expect(statement).toMatch(/add column if not exists window_edited_by uuid/);
+    expect(statement).toMatch(/references auth\.users \(id\) on delete restrict/);
+    expect(statement).not.toMatch(/cascade/i);
+    expect(statement).not.toMatch(/not null/i);
+  });
+
+  it("seeds and backfills nothing — schema-only phase", () => {
+    expect(windowEditSql).not.toMatch(/\binsert\s+into\b/i);
+    expect(windowEditSql).not.toMatch(/\bupdate\s+public\./i);
   });
 });

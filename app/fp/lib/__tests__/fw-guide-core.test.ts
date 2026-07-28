@@ -411,6 +411,7 @@ describe("provisionFwGuide — the mint path", () => {
       userId: authUsers[0].id,
       email: "ravi@example.com",
       created: true,
+      staff: false,
       grantAdded: true,
       audited: true,
     });
@@ -483,6 +484,7 @@ describe("provisionFwGuide — the mint path", () => {
       userId: "user-ravi",
       email: "ravi@example.com",
       created: false,
+      staff: false,
       grantAdded: true,
       audited: true,
     });
@@ -503,6 +505,7 @@ describe("provisionFwGuide — adoption and idempotency", () => {
       userId: authUsers[0].id,
       email: "ravi@example.com",
       created: false,
+      staff: false,
       grantAdded: true,
       audited: true,
     });
@@ -517,6 +520,140 @@ describe("provisionFwGuide — adoption and idempotency", () => {
     await provisionFwGuide(db, RAVI);
     await provisionFwGuide(db, RAVI);
     expect(tables.path_role_grants).toHaveLength(1);
+  });
+});
+
+/* ═══════════════════ staff-as-guide grant-only branch (ops redesign Unit 5) ══ */
+
+const CEDRIC = "user-cedric";
+const ADD_CEDRIC = { email: "cedric@the120.school", cohortId: BOSTON, createdBy: STAFF };
+/** A live 120 staff account: an auth user (non-guide role) PLUS a live `staff`
+ *  row — the row is what qualifies, exactly like the bridge. */
+const cedricSeed = (over: Seed = {}): Seed => ({
+  authUsers: [
+    { id: CEDRIC, email: "cedric@the120.school", app_metadata: { role: "admin" } },
+  ],
+  staff: [
+    { id: STAFF, is_active: true },
+    { id: CEDRIC, is_active: true },
+  ],
+  ...over,
+});
+
+describe("provisionFwGuide — the staff grant-only branch", () => {
+  it("grants a LIVE staff account: grant + audit written, NO invite row, no mint", async () => {
+    const { db, tables, authUsers, calls } = makeFakeDb(cedricSeed());
+    const res = await provisionFwGuide(db, ADD_CEDRIC);
+
+    expect(res).toEqual({
+      ok: true,
+      userId: CEDRIC,
+      email: "cedric@the120.school",
+      created: false,
+      staff: true,
+      grantAdded: true,
+      audited: true,
+    });
+    expect(tables.path_role_grants).toHaveLength(1);
+    expect(tables.path_role_grants[0]).toMatchObject({
+      user_id: CEDRIC,
+      role: "guide",
+      scope_type: "cohort",
+      scope_id: BOSTON,
+    });
+    // The whole point of the branch: NOTHING on the credential side moves. No
+    // invite row, no second account, and the staff login is untouched.
+    expect(tables.path_fw_guide_invites).toEqual([]);
+    expect(authUsers).toHaveLength(1);
+    expect(calls.deleteUser).toBe(0);
+    // The liability row is legible as the staff branch.
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_ops_audit[0]).toMatchObject({
+      actor: STAFF,
+      action: "guide_grant_added",
+      subject_user_id: CEDRIC,
+      cohort_id: BOSTON,
+    });
+    expect((tables.path_fw_ops_audit[0].metadata as Row).staffAccount).toBe(true);
+    expect((tables.path_fw_ops_audit[0].metadata as Row).accountCreated).toBe(false);
+  });
+
+  it("adding the same staff member twice is calm idempotent success — one grant, one audit", async () => {
+    const { db, tables } = makeFakeDb(cedricSeed());
+    await provisionFwGuide(db, ADD_CEDRIC);
+    const second = await provisionFwGuide(db, ADD_CEDRIC);
+
+    expect(second).toMatchObject({ ok: true, staff: true, grantAdded: false, audited: true });
+    expect(tables.path_role_grants).toHaveLength(1);
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_guide_invites).toEqual([]);
+  });
+
+  it("a DEACTIVATED staff row keeps the address_in_use refusal — liveness is the rule", async () => {
+    const { db, tables } = makeFakeDb(
+      cedricSeed({ staff: [{ id: STAFF, is_active: true }, { id: CEDRIC, is_active: false }] })
+    );
+    expect(await provisionFwGuide(db, ADD_CEDRIC)).toEqual({
+      ok: false,
+      reason: "address_in_use",
+    });
+    expect(tables.path_role_grants).toEqual([]);
+  });
+
+  it("a staff-probe OUTAGE refuses rather than granting — fail closed", async () => {
+    // loadStaffRowActive collapses a read error to false, so the branch lands on
+    // the pre-existing refusal. An outage must never widen who can be granted.
+    const { db, tables } = makeFakeDb(
+      cedricSeed({ failTable: { table: "staff", op: "select", message: "staff read down" } })
+    );
+    expect(await provisionFwGuide(db, ADD_CEDRIC)).toEqual({
+      ok: false,
+      reason: "address_in_use",
+    });
+    expect(tables.path_role_grants).toEqual([]);
+  });
+
+  it("an ARCHIVED cohort still refuses first — cohort gates outrank the staff branch", async () => {
+    const { db, tables } = makeFakeDb(
+      cedricSeed({
+        cohorts: [
+          { id: BOSTON, slug: "boston-2026-08", kind: "fw", archived_at: "2026-08-24T00:00:00Z" },
+        ],
+      })
+    );
+    expect(await provisionFwGuide(db, ADD_CEDRIC)).toEqual({
+      ok: false,
+      reason: "cohort_archived",
+    });
+    expect(tables.path_role_grants).toEqual([]);
+  });
+
+  it("a grant write that LANDED but reported an error audits the staff branch; the retry is idempotent", async () => {
+    const { db, tables, arm } = makeFakeDb(
+      cedricSeed({
+        failTable: {
+          table: "path_role_grants",
+          op: "upsert",
+          message: "connection reset",
+          applyAnyway: true,
+        },
+      })
+    );
+    const first = await provisionFwGuide(db, ADD_CEDRIC);
+    expect(first).toMatchObject({ ok: true, staff: true, grantAdded: true, audited: true });
+    expect((tables.path_fw_ops_audit[0].metadata as Row)).toMatchObject({
+      staffAccount: true,
+      recoveredFromReportedFailure: true,
+    });
+
+    // The staffer retries after the scary-looking response: no duplicate grant,
+    // no invented audit event, still the staff branch.
+    arm({ failTable: null });
+    const retry = await provisionFwGuide(db, ADD_CEDRIC);
+    expect(retry).toMatchObject({ ok: true, staff: true, grantAdded: false, audited: true });
+    expect(tables.path_role_grants).toHaveLength(1);
+    expect(tables.path_fw_ops_audit).toHaveLength(1);
+    expect(tables.path_fw_guide_invites).toEqual([]);
   });
 });
 
@@ -580,9 +717,13 @@ describe("provisionFwGuide — the audit row", () => {
     expect(tables.path_fw_ops_audit).toHaveLength(0);
   });
 
-  it("REFUSES to adopt a staff account — the escalation guard", async () => {
-    // The invite this issues can set the account's password. Adopting a staff
-    // account would mail a credential for it to whoever staff typed in the form.
+  it("REFUSES to adopt an admin-role account with NO live staff row — the escalation guard", async () => {
+    // The invite this issues can set the account's password. Adopting a
+    // non-guide account would mail a credential for it to whoever staff typed
+    // in the form. Since ops redesign Unit 5 the one exception is a LIVE
+    // `staff` table row (grant-only, no invite) — an app_metadata role alone
+    // never qualifies, because the bridge's revocation read is the `staff`
+    // row, not the JWT claim.
     const { db, tables } = makeFakeDb({
       authUsers: [{ id: "user-admin", email: "ravi@example.com", app_metadata: { role: "admin" } }],
     });

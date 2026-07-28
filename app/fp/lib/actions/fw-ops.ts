@@ -36,28 +36,37 @@ import {
   anonymizeFwStudent,
   archiveFwCohort,
   createFwCohort,
+  deleteFwCohort,
   linkFwStudentToCohort,
   loadFwMatchResolution,
   mintFwBoardToken,
+  remintFwBoardTokenForWindow,
   resolveFwReplayReject,
   unarchiveFwCohort,
+  updateFwCohortWindow,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   type AnonymizeStudentActionResult,
   type CreateFwCohortActionResult,
+  type DeleteCohortActionResult,
   type LinkStudentActionResult,
   type MatchLookupActionResult,
   type MintBoardTokenActionResult,
+  type RemintBoardTokenForWindowActionResult,
   type ResolveReplayRejectActionResult,
+  type UpdateCohortWindowActionResult,
   type RevokeBoardTokenActionResult,
   type RevokeGuideGrantActionResult,
 } from "@/app/fp/lib/fw-ops-core";
 import {
   archiveFwCohortFailureCopy,
+  deleteFwCohortFailureCopy,
   fwCohortWindowFromLocal,
   fwSlugTakenCopy,
   normalizeFwCohortSlug,
+  remintFwBoardTokenFailureCopy,
   unarchiveFwCohortFailureCopy,
+  updateFwCohortWindowFailureCopy,
 } from "@/app/fp/lib/fw-ops-rules";
 
 const GENERIC_ERROR = "Something went wrong — please try again.";
@@ -246,6 +255,131 @@ function windowFailureMessage(
   }
 }
 
+/* ═══════════════════════════════════ redesign Unit 4 — window edit + re-mint ══ */
+
+const updateWindowSchema = z.object({
+  cohortId: z.uuid(),
+  startDate: z.string().min(1).max(20),
+  startTime: z.string().min(1).max(10),
+  endDate: z.string().min(1).max(20),
+  endTime: z.string().min(1).max(10),
+  timeZone: z.string().min(1).max(60),
+});
+
+/**
+ * Correct a weekend's start/end/timezone (R14). Gated per-cohort
+ * (`requireCohortStaff`) like every mutation on the cohort page — not the
+ * cohort-free create gate, because here there IS a cohort to resolve against.
+ *
+ * The conversion, the archived gate, and the always-both-bounds write all live
+ * in `updateFwCohortWindow`; this layer is gate → zod → core → copy. The live
+ * board token is deliberately untouched (stored-expiry truth) — re-minting is
+ * `remintBoardTokenForWindowAction`, a separate explicit act.
+ */
+export async function updateCohortWindowAction(
+  input: unknown
+): Promise<UpdateCohortWindowActionResult> {
+  const parsed = updateWindowSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Fill in every field." };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const updated = await updateFwCohortWindow(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    startDate: parsed.data.startDate,
+    startTime: parsed.data.startTime,
+    endDate: parsed.data.endDate,
+    endTime: parsed.data.endTime,
+    timeZone: parsed.data.timeZone,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!updated.ok) {
+    return { success: false, error: updateWindowFailureMessage(updated.reason) };
+  }
+
+  // The ops LIST renders every weekend's window, and the cohort page renders
+  // this one's. NOT /fp/fw: the picker's cohort SET did not change (the
+  // revalidate-tier canon in this file's header).
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  return { success: true, startsAt: updated.startsAt, endsAt: updated.endsAt };
+}
+
+/** The edit's full refusal union is the six window-rules reasons plus the
+ *  edit-specific members — composed from the two existing switches so each
+ *  sentence has exactly one home, and still default-less end to end. */
+function updateWindowFailureMessage(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "cohort_archived"
+    | "invalid_time_zone"
+    | "invalid_start"
+    | "invalid_end"
+    | "nonexistent_start"
+    | "nonexistent_end"
+    | "window_not_ordered"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "invalid_time_zone":
+    case "invalid_start":
+    case "invalid_end":
+    case "nonexistent_start":
+    case "nonexistent_end":
+    case "window_not_ordered":
+      return windowFailureMessage(reason);
+    case "cohort_not_found":
+    case "cohort_not_fw":
+    case "cohort_archived":
+    case "unavailable":
+      return updateFwCohortWindowFailureCopy(reason);
+  }
+}
+
+/** Re-mint NAMES the live token it means to replace — the CAS the core
+ *  threads through the mint sequence. */
+const remintForWindowSchema = z.object({
+  cohortId: z.uuid(),
+  expectedTokenId: z.uuid(),
+});
+
+/**
+ * Revoke + re-mint the board for the corrected window (R14a) — verdict-first:
+ * a corrected window the mint verdict refuses (already over, archived) leaves
+ * the old token live and nothing revoked. The raw token in the success result
+ * has the same shown-once contract as `mintBoardTokenAction`'s.
+ */
+export async function remintBoardTokenForWindowAction(
+  input: unknown
+): Promise<RemintBoardTokenForWindowActionResult> {
+  const parsed = remintForWindowSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const minted = await remintFwBoardTokenForWindow(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    expectedTokenId: parsed.data.expectedTokenId,
+    actorUserId: gate.actorUserId,
+    now: Date.now(),
+  });
+  if (!minted.ok) {
+    return { success: false, error: remintFwBoardTokenFailureCopy(minted.reason) };
+  }
+
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  return {
+    success: true,
+    token: minted.token,
+    expiresAt: minted.expiresAt,
+    revokedPrior: minted.revokedPrior,
+  };
+}
+
 /* ═════════════════════════════════════════════════════════════ board tokens ══ */
 
 const cohortSchema = z.object({ cohortId: z.uuid() });
@@ -309,20 +443,30 @@ export async function revokeBoardTokenAction(
   return { success: true };
 }
 
-const archiveCohortSchema = z.object({ cohortId: z.uuid() });
+/**
+ * `confirmSlug` REQUIRED (ops redesign Unit 2): the slug staff typed into the
+ * confirm field travels with the request and is re-verified IN THE CORE against
+ * the stored slug — the anonymize posture. The client's disabled-until-match
+ * button is convenience; this schema plus the core check is the boundary.
+ */
+const archiveCohortSchema = z.object({
+  cohortId: z.uuid(),
+  confirmSlug: z.string().min(1).max(120),
+});
 
 export type ArchiveCohortActionResult =
   | { success: true }
   | { success: false; error: string };
 
 /**
- * Archive one weekend (Unit 7; R19/R20).
+ * Archive one weekend (Unit 7; R19/R20; typed confirm server-verified in the
+ * ops redesign's Unit 2).
  *
- * The SEQUENCE — revoke the board, then set archive state, with a failed revoke
- * stopping everything — lives in `archiveFwCohort`, the core the CLI drives too.
- * This layer is only gate → zod → core → copy, per the file's canon. The copy
- * functions live in `fw-ops-rules.ts` (pure, tested), not here — a sentence in a
- * "use server" file is a sentence CI cannot read.
+ * The SEQUENCE — verify the typed slug, revoke the board, then set archive
+ * state, with a failed revoke stopping everything — lives in `archiveFwCohort`,
+ * the core the CLI drives too. This layer is only gate → zod → core → copy, per
+ * the file's canon. The copy functions live in `fw-ops-rules.ts` (pure, tested),
+ * not here — a sentence in a "use server" file is a sentence CI cannot read.
  *
  * The revalidate set (plan, deferred item, resolved here): the ops LIST (the
  * cohort disappears from the default view), the cohort's own ops page (the
@@ -343,6 +487,7 @@ export async function archiveCohortAction(
     cohortId: parsed.data.cohortId,
     actorUserId: gate.actorUserId,
     now: Date.now(),
+    confirmSlug: parsed.data.confirmSlug,
   });
   if (!archived.ok) {
     return { success: false, error: archiveFwCohortFailureCopy(archived.reason) };
@@ -354,15 +499,63 @@ export async function archiveCohortAction(
   return { success: true };
 }
 
+/**
+ * Same confirm shape as archive — one slug, one match rule
+ * (`fwArchiveConfirmMatches`), re-verified in the core. The DELETE-specific
+ * guards (the untouched classifier, the FK backstop, the grant sweep) all live
+ * in `deleteFwCohort`; this layer stays gate → zod → core → copy.
+ */
+const deleteCohortSchema = z.object({
+  cohortId: z.uuid(),
+  confirmSlug: z.string().min(1).max(120),
+});
+
+/**
+ * Hard-delete a truly-untouched weekend (ops redesign Unit 3; R7/R8/R8a).
+ *
+ * Gated per-cohort (`requireCohortStaff`) like archive. Writes NO audit row —
+ * `path_fw_ops_audit.cohort_id` cannot anchor to a deleted cohort (the core's
+ * docblock carries the full reasoning). The revalidate set matches archive's:
+ * the ops list (the row disappears), the cohort's own ops page (now a 404), and
+ * the guide picker at /fp/fw (its role-derived list may have shown the weekend
+ * to staff).
+ */
+export async function deleteCohortAction(input: unknown): Promise<DeleteCohortActionResult> {
+  const parsed = deleteCohortSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const deleted = await deleteFwCohort(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    confirmSlug: parsed.data.confirmSlug,
+    actorUserId: gate.actorUserId,
+  });
+  if (!deleted.ok) {
+    return { success: false, error: deleteFwCohortFailureCopy(deleted.reason) };
+  }
+
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  revalidatePath("/fp/fw");
+  return { success: true, grantSweep: deleted.grantSweep };
+}
+
 export type UnarchiveCohortActionResult =
   | { success: true }
   | { success: false; error: string };
 
-/** The reverse door. Same gate, same layering, same revalidate set. */
+/**
+ * The reverse door. Same gate, same layering, same revalidate set — but NO typed
+ * confirm: restoring makes a weekend visible again, which is calm and reversible,
+ * and a confirm on a non-destructive action teaches staff to type through
+ * confirms (ops redesign Unit 2 decision).
+ */
 export async function unarchiveCohortAction(
   input: unknown
 ): Promise<UnarchiveCohortActionResult> {
-  const parsed = archiveCohortSchema.safeParse(input);
+  const parsed = cohortSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);
@@ -388,6 +581,8 @@ function mintFailureMessage(
     | "cohort_archived"
     | "no_event_window"
     | "window_passed"
+    | "stale_view"
+    | "no_active_token"
     | "unavailable"
 ): string {
   switch (reason) {
@@ -401,6 +596,12 @@ function mintFailureMessage(
       return "This weekend has no end date yet — the board's expiry comes from it.";
     case "window_passed":
       return "This weekend has already finished, so a new board link would be dead on arrival.";
+    case "stale_view":
+    case "no_active_token":
+      // Reachable only through the expectedTokenId CAS, which this plain-mint
+      // action never sends — typed here because the result union carries them,
+      // and the re-mint sentences are the truthful ones if they ever surface.
+      return remintFwBoardTokenFailureCopy(reason);
     case "unavailable":
       return GENERIC_ERROR;
   }

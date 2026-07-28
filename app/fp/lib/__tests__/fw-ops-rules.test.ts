@@ -14,11 +14,17 @@ import {
   narrowFwEventTimeZone,
   normalizeFwCohortSlug,
   archiveFwCohortFailureCopy,
+  deleteFwCohortFailureCopy,
+  remintFwBoardTokenFailureCopy,
   unarchiveFwCohortFailureCopy,
+  updateFwCohortWindowFailureCopy,
   fwArchivedBanner,
   fwArchiveConfirmMatches,
   fwSlugTakenCopy,
   fwOpsCohortAffordances,
+  fwOpsSectionChips,
+  type FwOpsGuideChipRow,
+  type FwOpsSectionNavEntry,
 } from "../fw-ops-rules";
 
 /**
@@ -467,6 +473,15 @@ describe("archive/unarchive failure copy (Unit 7)", () => {
     }
   });
 
+  it("confirm_mismatch says the typed name is wrong, without blame or jargon (Unit 2)", () => {
+    // The server-verified confirm's refusal. Staff normally never meet it — the
+    // button is disabled until the client-side match — so it exists for the
+    // caller that skipped the browser, and still speaks the house voice.
+    const copy = archiveFwCohortFailureCopy("confirm_mismatch");
+    expect(copy).toBe("The name you typed doesn't match this weekend.");
+    expect(copy).not.toMatch(/error|invalid|slug/i);
+  });
+
   it("unavailable claims nothing was changed and names the retry", () => {
     for (const c of [
       archiveFwCohortFailureCopy("unavailable"),
@@ -475,6 +490,95 @@ describe("archive/unarchive failure copy (Unit 7)", () => {
       expect(c).toMatch(/nothing was changed/i);
       expect(c).toMatch(/try again/i);
     }
+  });
+});
+
+describe("delete failure copy (redesign Unit 3) — its OWN switch, exhaustively", () => {
+  it("collapses the id-probing reasons to the staff-only sentence, like archive", () => {
+    expect(deleteFwCohortFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(deleteFwCohortFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("confirm_mismatch speaks the same fact as archive's, from its own function", () => {
+    // The FACT is identical (one slug, one match rule) but the sentence is owned
+    // here — sharing the archive switch would let one surface's copy edit
+    // silently reword the other's.
+    const copy = deleteFwCohortFailureCopy("confirm_mismatch");
+    expect(copy).toBe("The name you typed doesn't match this weekend.");
+    expect(copy).not.toMatch(/error|invalid|slug/i);
+  });
+
+  it("not_untouched says the weekend has history, points at archive, and claims no delete", () => {
+    // Covers BOTH the classifier's refusal and the 23503 backstop — the same
+    // fact learned at different moments, so one sentence: it stopped qualifying.
+    const copy = deleteFwCohortFailureCopy("not_untouched");
+    expect(copy).toMatch(/history/i);
+    expect(copy).toMatch(/archive it instead/i);
+    expect(copy).toMatch(/nothing was deleted/i);
+    expect(copy).not.toMatch(/error|constraint|foreign key|23503/i);
+  });
+
+  it("unavailable claims nothing was changed and names the retry", () => {
+    const copy = deleteFwCohortFailureCopy("unavailable");
+    expect(copy).toMatch(/nothing was changed/i);
+    expect(copy).toMatch(/try again/i);
+  });
+});
+
+describe("window-edit failure copy (redesign Unit 4)", () => {
+  it("collapses the id-probing reasons to the staff-only sentence, like its siblings", () => {
+    expect(updateFwCohortWindowFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(updateFwCohortWindowFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("cohort_archived points at restore and claims nothing changed", () => {
+    const copy = updateFwCohortWindowFailureCopy("cohort_archived");
+    expect(copy).toMatch(/archived/i);
+    expect(copy).toMatch(/restore/i);
+    expect(copy).toMatch(/nothing was changed/i);
+  });
+
+  it("unavailable claims nothing was changed and names the retry", () => {
+    const copy = updateFwCohortWindowFailureCopy("unavailable");
+    expect(copy).toMatch(/nothing was changed/i);
+    expect(copy).toMatch(/try again/i);
+  });
+});
+
+describe("re-mint failure copy (redesign Unit 4) — every refusal states the old link's fate", () => {
+  it("collapses the id-probing reasons to the staff-only sentence", () => {
+    expect(remintFwBoardTokenFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(remintFwBoardTokenFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("window_passed says the corrected window is over and the current link survives", () => {
+    // The verdict-first sequence's user-facing half: a refusal revokes nothing,
+    // and the copy says so — otherwise a refused re-mint reads as a dead board.
+    const copy = remintFwBoardTokenFailureCopy("window_passed");
+    expect(copy).toMatch(/corrected window is already over/i);
+    expect(copy).toMatch(/can't be re-minted/i);
+    expect(copy).toMatch(/current link keeps working/i);
+  });
+
+  it("stale_view says nothing was revoked and names the reload", () => {
+    const copy = remintFwBoardTokenFailureCopy("stale_view");
+    expect(copy).toMatch(/out of date/i);
+    expect(copy).toMatch(/nothing was revoked/i);
+    expect(copy).toMatch(/reload/i);
+  });
+
+  it("no_active_token sends staff to the board panel for a fresh mint", () => {
+    const copy = remintFwBoardTokenFailureCopy("no_active_token");
+    expect(copy).toMatch(/no live board link/i);
+    expect(copy).toMatch(/board panel/i);
+  });
+
+  it("cohort_archived, no_event_window, and unavailable each claim the current link untouched", () => {
+    for (const reason of ["cohort_archived", "no_event_window", "unavailable"] as const) {
+      expect(remintFwBoardTokenFailureCopy(reason)).toMatch(/not touched/i);
+    }
+    expect(remintFwBoardTokenFailureCopy("cohort_archived")).toMatch(/restore/i);
+    expect(remintFwBoardTokenFailureCopy("unavailable")).toMatch(/try again/i);
   });
 });
 
@@ -562,5 +666,197 @@ describe("fwArchiveConfirmMatches", () => {
     expect(fwArchiveConfirmMatches("boston", "boston-2026-08")).toBe(false);
     expect(fwArchiveConfirmMatches("BOSTON-2026-08", "boston-2026-08")).toBe(false);
     expect(fwArchiveConfirmMatches("", "boston-2026-08")).toBe(false);
+  });
+});
+
+/* ═══════════════════════════════════════════ the section nav's chips (Unit 6) ══ */
+
+/** Every read healthy and quiet — the baseline each scenario perturbs one
+ *  section of. Plain data, because the function is pure (R16: the chips derive
+ *  from the page's one full load, so this input IS that load's shape). */
+const quietChipsInput = () => ({
+  archived: false,
+  board: { ok: true, status: "live" } as const,
+  guides: {
+    ok: true as const,
+    guides: [
+      { credential: "claimed", isStaff: false },
+      { credential: "claimed", isStaff: false },
+    ] satisfies FwOpsGuideChipRow[],
+  },
+  replays: { ok: true as const, openCount: 0 },
+  importExceptions: { ok: true as const, openCount: 0 },
+  students: { ok: true as const, count: 12 },
+});
+
+const entryFor = (entries: FwOpsSectionNavEntry[], key: FwOpsSectionNavEntry["key"]) => {
+  const hit = entries.find((e) => e.key === key);
+  expect(hit).toBeDefined();
+  return hit!;
+};
+
+describe("fwOpsSectionChips — section presence tracks the page's own rendering", () => {
+  it("active weekend: all eight sections, in the page's order", () => {
+    expect(fwOpsSectionChips(quietChipsInput()).map((e) => e.key)).toEqual([
+      "window",
+      "board",
+      "guides",
+      "replays",
+      "match",
+      "exceptions",
+      "students",
+      "retire",
+    ]);
+  });
+
+  it("archived weekend: window, match, and retire are OMITTED — the page does not render them", () => {
+    // An anchor to a section that is not on the page is a dead control; the
+    // archived page swaps window/retire for the banner and hides the resolver
+    // (roster-building, per fwOpsCohortAffordances).
+    expect(fwOpsSectionChips({ ...quietChipsInput(), archived: true }).map((e) => e.key)).toEqual([
+      "board",
+      "guides",
+      "replays",
+      "exceptions",
+      "students",
+    ]);
+  });
+
+  it("window, match, and retire carry no chip — they have no glanceable state", () => {
+    const entries = fwOpsSectionChips(quietChipsInput());
+    for (const key of ["window", "match", "retire"] as const) {
+      expect(entryFor(entries, key).chip).toBeUndefined();
+    }
+  });
+});
+
+describe("fwOpsSectionChips — the board chip, one per FwBoardTokenStatus", () => {
+  const boardChipFor = (board: Parameters<typeof fwOpsSectionChips>[0]["board"]) =>
+    entryFor(fwOpsSectionChips({ ...quietChipsInput(), board }), "board").chip;
+
+  it("live → verified", () => {
+    expect(boardChipFor({ ok: true, status: "live" })).toEqual({ text: "Live", tone: "verified" });
+  });
+
+  it("expired → not-yet (the projector is dark and staff must act)", () => {
+    expect(boardChipFor({ ok: true, status: "expired" })).toEqual({
+      text: "Expired",
+      tone: "not-yet",
+    });
+  });
+
+  it("revoked → not-yet", () => {
+    expect(boardChipFor({ ok: true, status: "revoked" })).toEqual({
+      text: "Revoked",
+      tone: "not-yet",
+    });
+  });
+
+  it("never_minted → neutral: pre-event normalcy, not a fault", () => {
+    expect(boardChipFor({ ok: true, status: "never_minted" })).toEqual({
+      text: "No link",
+      tone: "neutral",
+    });
+  });
+
+  it("read failure → 'Unavailable', never a state guess", () => {
+    // The panel renders its own read-failure state; a chip claiming "No link"
+    // over it would invite a mint on top of a possibly-live token.
+    expect(boardChipFor({ ok: false })).toEqual({ text: "Unavailable", tone: "neutral" });
+  });
+});
+
+describe("fwOpsSectionChips — the guides chip is the 'all guides claimed' line", () => {
+  const guidesChipFor = (guides: Parameters<typeof fwOpsSectionChips>[0]["guides"]) =>
+    entryFor(fwOpsSectionChips({ ...quietChipsInput(), guides }), "guides").chip;
+
+  it("all claimed → total count, verified", () => {
+    expect(guidesChipFor(quietChipsInput().guides)).toEqual({ text: "2", tone: "verified" });
+  });
+
+  it("unclaimed guides → 'n · m unclaimed', not-yet — every non-claimed credential counts", () => {
+    expect(
+      guidesChipFor({
+        ok: true,
+        guides: [
+          { credential: "claimed", isStaff: false },
+          { credential: "invited", isStaff: false },
+          { credential: "expired", isStaff: false },
+          { credential: "no_invite", isStaff: false },
+        ],
+      })
+    ).toEqual({ text: "4 · 3 unclaimed", tone: "not-yet" });
+  });
+
+  it("staff rows count toward the total but NEVER toward unclaimed (Unit 5's discriminator)", () => {
+    // A staff grant-holder has no credential to claim — counting them unclaimed
+    // would show amber forever on a weekend that is actually ready.
+    expect(
+      guidesChipFor({
+        ok: true,
+        guides: [
+          { credential: "claimed", isStaff: false },
+          { credential: "no_invite", isStaff: true },
+        ],
+      })
+    ).toEqual({ text: "2", tone: "verified" });
+  });
+
+  it("zero guides → not-yet: a weekend nobody can guide is the first thing to catch", () => {
+    expect(guidesChipFor({ ok: true, guides: [] })).toEqual({ text: "0", tone: "not-yet" });
+  });
+
+  it("read failure → 'Unavailable'", () => {
+    expect(guidesChipFor({ ok: false })).toEqual({ text: "Unavailable", tone: "neutral" });
+  });
+});
+
+describe("fwOpsSectionChips — open-count chips (replays, import exceptions)", () => {
+  it("n open → 'n open', not-yet", () => {
+    const entries = fwOpsSectionChips({
+      ...quietChipsInput(),
+      replays: { ok: true, openCount: 2 },
+      importExceptions: { ok: true, openCount: 5 },
+    });
+    expect(entryFor(entries, "replays").chip).toEqual({ text: "2 open", tone: "not-yet" });
+    expect(entryFor(entries, "exceptions").chip).toEqual({ text: "5 open", tone: "not-yet" });
+  });
+
+  it("zero open → NO chip: silence, so the one chip that matters is the one you see", () => {
+    const entries = fwOpsSectionChips(quietChipsInput());
+    expect(entryFor(entries, "replays").chip).toBeUndefined();
+    expect(entryFor(entries, "exceptions").chip).toBeUndefined();
+  });
+
+  it("read failure → 'Unavailable' — a failed read is not zero", () => {
+    const entries = fwOpsSectionChips({
+      ...quietChipsInput(),
+      replays: { ok: false },
+      importExceptions: { ok: false },
+    });
+    expect(entryFor(entries, "replays").chip).toEqual({ text: "Unavailable", tone: "neutral" });
+    expect(entryFor(entries, "exceptions").chip).toEqual({ text: "Unavailable", tone: "neutral" });
+  });
+});
+
+describe("fwOpsSectionChips — the students chip", () => {
+  it("counts are neutral information, including zero", () => {
+    expect(entryFor(fwOpsSectionChips(quietChipsInput()), "students").chip).toEqual({
+      text: "12",
+      tone: "neutral",
+    });
+    expect(
+      entryFor(
+        fwOpsSectionChips({ ...quietChipsInput(), students: { ok: true, count: 0 } }),
+        "students"
+      ).chip
+    ).toEqual({ text: "0", tone: "neutral" });
+  });
+
+  it("read failure → 'Unavailable'", () => {
+    expect(
+      entryFor(fwOpsSectionChips({ ...quietChipsInput(), students: { ok: false } }), "students")
+        .chip
+    ).toEqual({ text: "Unavailable", tone: "neutral" });
   });
 });

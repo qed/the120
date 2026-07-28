@@ -466,12 +466,23 @@ export function fwReplayRejectReasonCopy(reason: string): string {
  * Explicit never-return, matching `fwStaffGateCopy`.
  */
 export function archiveFwCohortFailureCopy(
-  reason: "cohort_not_found" | "cohort_not_fw" | "already_archived" | "revoke_failed" | "unavailable"
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "already_archived"
+    | "confirm_mismatch"
+    | "revoke_failed"
+    | "unavailable"
 ): string {
   switch (reason) {
     case "cohort_not_found":
     case "cohort_not_fw":
       return "That action is staff-only.";
+    case "confirm_mismatch":
+      // The server-verified typed confirm (ops redesign Unit 2). The client
+      // disables the button until the slug matches, so staff normally never meet
+      // this — it exists for the caller that skipped the browser.
+      return "The name you typed doesn't match this weekend.";
     case "already_archived":
       return "Already archived — someone got there first. Refresh to see the current state.";
     case "revoke_failed":
@@ -481,6 +492,111 @@ export function archiveFwCohortFailureCopy(
       return "Couldn't shut off the projector board, so the weekend was NOT archived. Try again.";
     case "unavailable":
       return "Couldn't archive just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * The delete refusals (ops redesign Unit 3) — its OWN function, not members
+ * grafted onto the archive switch: delete's `not_untouched` has no archive twin,
+ * and sharing a switch would let one surface's copy edit silently reword the
+ * other's. The two overlap only where the FACT is identical (the staff-only
+ * collapse, the typed-confirm mismatch), and even those are separate sentences
+ * owned here.
+ *
+ * `not_untouched` covers both the classifier's refusal AND the DELETE's 23503
+ * backstop — the same fact learned at different moments: something now
+ * references the weekend, so it stopped qualifying for deletion. The sentence
+ * points at archive, which is the path that exists for weekends with history.
+ */
+export function deleteFwCohortFailureCopy(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "confirm_mismatch"
+    | "not_untouched"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "confirm_mismatch":
+      return "The name you typed doesn't match this weekend.";
+    case "not_untouched":
+      return "This weekend has history now — archive it instead. Nothing was deleted.";
+    case "unavailable":
+      return "Couldn't delete just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * The window-edit refusals that are NOT window-rules refusals (ops redesign
+ * Unit 4). The six `fwCohortWindowFromLocal` reasons keep their existing
+ * field-naming sentences (the create form's `windowFailureMessage`, reused by
+ * the edit action) — this switch owns only the members the EDIT adds. Same
+ * enumeration collapse, same never-return as its siblings above.
+ */
+export function updateFwCohortWindowFailureCopy(
+  reason: "cohort_not_found" | "cohort_not_fw" | "cohort_archived" | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before editing its window. Nothing was changed.";
+    case "unavailable":
+      return "Couldn't save the new window just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * The re-mint refusals (ops redesign Unit 4) — its OWN switch, not the mint's:
+ * the same reason can need DIFFERENT copy here, because the staffer just
+ * corrected the window and the sentence must speak to that act. Every refusal
+ * truthfully states the old link's fate: the verdict-first sequence revokes
+ * nothing on any refusal, so "the current link still works" is a fact, and
+ * saying it is what keeps a refused re-mint from reading as a dead projector.
+ */
+export function remintFwBoardTokenFailureCopy(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "cohort_archived"
+    | "no_event_window"
+    | "window_passed"
+    | "stale_view"
+    | "no_active_token"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "cohort_archived":
+      return "This weekend is archived — restore it before re-minting the board. The current link was not touched.";
+    case "no_event_window":
+      return "This weekend has no end date, so there's no expiry to issue a board link for. The current link was not touched.";
+    case "window_passed":
+      return "The corrected window is already over — the board can't be re-minted for it. The current link keeps working until its own expiry.";
+    case "stale_view":
+      return "This page is out of date — a different board link is live now. Nothing was revoked; reload, then re-mint.";
+    case "no_active_token":
+      return "There's no live board link to replace any more. Reload, then mint a fresh one from the board panel.";
+    case "unavailable":
+      return "Couldn't re-mint just now — the current link was not touched. Try again.";
     default: {
       const _exhaustive: never = reason;
       return _exhaustive;
@@ -587,11 +703,197 @@ export function fwOpsCohortAffordances(input: { archived: boolean }): {
   };
 }
 
+/* ═══════════════════════════════════════════════ the section nav's chips ══ */
+
 /**
- * The archive confirm gate (Unit 9) — typed-slug confirmation, same shape as the
- * anonymize confirm: archiving darkens a public URL and hides a weekend from the
- * default list, so a mis-tap must not do it. Pure so the match rule is tested;
- * the component only compares through this.
+ * Mirrors `FwBoardTokenStatus` in `fw-ops-core.ts` STRUCTURALLY, on purpose:
+ * this module is free of Next/Supabase imports (its header's doctrine), and
+ * `fw-ops-core` imports the Supabase client. The page passes the core's value
+ * straight through; TypeScript checks the union member-for-member, so a status
+ * added to one side without the other is a compile error at the call site.
+ */
+export type FwOpsBoardChipStatus = "never_minted" | "live" | "expired" | "revoked";
+
+/** The credential facts the guide chip needs — a structural subset of
+ *  `FwOpsGuide` (same no-Supabase-import reasoning as the board status). */
+export type FwOpsGuideChipRow = {
+  credential: "no_invite" | "invited" | "claimed" | "expired";
+  /** Staff grant-holders sit OUTSIDE the "all guides claimed" line (ops
+   *  redesign Unit 5): they have no credential to claim, so they count toward
+   *  the total but never toward "unclaimed". */
+  isStaff: boolean;
+};
+
+/** The three tones are the page's existing chip vocabulary (`FwGuideRoster`'s
+ *  CREDENTIAL map): `verified` = green "done", `not-yet` = amber "needs a
+ *  human", `neutral` = plain information. */
+export type FwOpsSectionChipTone = "verified" | "not-yet" | "neutral";
+
+export type FwOpsSectionKey =
+  | "window"
+  | "board"
+  | "guides"
+  | "replays"
+  | "match"
+  | "exceptions"
+  | "students"
+  | "retire";
+
+export type FwOpsSectionNavEntry = {
+  key: FwOpsSectionKey;
+  /** Compact on purpose — the nav is a horizontal strip that must survive
+   *  375px; the full sentence lives on the section heading it jumps to. */
+  label: string;
+  /** Absent when there is nothing to say — a "0 open" chip on every quiet
+   *  section would bury the one chip that matters. */
+  chip?: { text: string; tone: FwOpsSectionChipTone };
+};
+
+/** The truthful chip for a section whose read failed: the section itself
+ *  renders "couldn't load — not the same thing as none", and a nav that showed
+ *  "0" over that would be the lie the section's copy exists to avoid. */
+const UNAVAILABLE_CHIP = { text: "Unavailable", tone: "neutral" as const };
+
+/**
+ * The section nav's entries with their at-a-glance chips (ops redesign Unit 6;
+ * R16) — ONE pure derivation over the data the page ALREADY loaded in its
+ * single `loadOpsCohortPage` pass. R16's constraint is structural: the signal
+ * derives from the same full-page load the sections render from, never from a
+ * second read and never from a lazily-mounted form — so a chip can only
+ * disagree with its section if this function disagrees with the section's own
+ * rendering, which is exactly what the tests pin.
+ *
+ * Entries track PRESENCE, not just possibility: the archived page does not
+ * render "Weekend window", "Find a returning student", or "Retire this
+ * weekend" (they are `!banner` / `show.matchResolver` sections), so their nav
+ * entries are omitted rather than rendered as anchors to nowhere. The wiring
+ * test holds the two lists in parity by scanning the page source for
+ * `id="fw-ops-…"` against this function's keys.
+ *
+ * Each `{ok:false}` input is a section whose read failed — the chip says
+ * "Unavailable" because the section says "couldn't load", and both refuse to
+ * present a failed read as an empty list.
+ */
+export function fwOpsSectionChips(input: {
+  archived: boolean;
+  board: { ok: true; status: FwOpsBoardChipStatus } | { ok: false };
+  guides: { ok: true; guides: readonly FwOpsGuideChipRow[] } | { ok: false };
+  /** Unresolved replay rejects — the page's default read is already open-only. */
+  replays: { ok: true; openCount: number } | { ok: false };
+  /** Pending import exceptions — likewise open-only at the read. */
+  importExceptions: { ok: true; openCount: number } | { ok: false };
+  students: { ok: true; count: number } | { ok: false };
+}): FwOpsSectionNavEntry[] {
+  const entries: FwOpsSectionNavEntry[] = [];
+
+  if (!input.archived) {
+    // No chip: the window has no "state" worth a glance — it is always
+    // editable when the section renders at all.
+    entries.push({ key: "window", label: "Window" });
+  }
+
+  entries.push({ key: "board", label: "Board", chip: boardChip(input.board) });
+  entries.push({ key: "guides", label: "Guides", chip: guidesChip(input.guides) });
+  entries.push({
+    key: "replays",
+    label: "Replays",
+    chip: openCountChip(input.replays),
+  });
+
+  if (!input.archived) {
+    // No chip: the resolver is a lookup form, not a queue — there is no count
+    // of "matches waiting" loaded on this page to be honest about.
+    entries.push({ key: "match", label: "Returning" });
+  }
+
+  entries.push({
+    key: "exceptions",
+    label: "Exceptions",
+    chip: openCountChip(input.importExceptions),
+  });
+  entries.push({
+    key: "students",
+    label: "Students",
+    chip: input.students.ok
+      ? { text: String(input.students.count), tone: "neutral" }
+      : UNAVAILABLE_CHIP,
+  });
+
+  if (!input.archived) {
+    entries.push({ key: "retire", label: "Retire" });
+  }
+
+  return entries;
+}
+
+/** Board: the four `FwBoardTokenStatus` states, each with the tone of its next
+ *  action — live is the only "nothing to do here" state. */
+function boardChip(
+  board: { ok: true; status: FwOpsBoardChipStatus } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } {
+  if (!board.ok) return UNAVAILABLE_CHIP;
+  switch (board.status) {
+    case "live":
+      return { text: "Live", tone: "verified" };
+    case "expired":
+      return { text: "Expired", tone: "not-yet" };
+    case "revoked":
+      return { text: "Revoked", tone: "not-yet" };
+    case "never_minted":
+      // Neutral, not amber: a weekend that has not minted yet is a normal
+      // pre-event state, not a fault — the checklist pressure comes from the
+      // window, not from this chip.
+      return { text: "No link", tone: "neutral" };
+    default: {
+      const _exhaustive: never = board.status;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Guides: the "all guides claimed" checklist line as a chip. Total counts every
+ * grant-holder (staff included — they can check students in); "unclaimed"
+ * counts only NON-STAFF guides whose credential is not `claimed`, because a
+ * staff row has no credential to claim (Unit 5's roster discriminator).
+ *
+ * Zero guides is amber, not neutral: a weekend nobody can guide is the first
+ * thing this page exists to catch.
+ */
+function guidesChip(
+  guides: { ok: true; guides: readonly FwOpsGuideChipRow[] } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } {
+  if (!guides.ok) return UNAVAILABLE_CHIP;
+  const total = guides.guides.length;
+  if (total === 0) return { text: "0", tone: "not-yet" };
+  const unclaimed = guides.guides.filter((g) => !g.isStaff && g.credential !== "claimed").length;
+  if (unclaimed > 0) {
+    return { text: `${total} · ${unclaimed} unclaimed`, tone: "not-yet" };
+  }
+  return { text: String(total), tone: "verified" };
+}
+
+/** Replays and import exceptions share one shape: n open items is amber work,
+ *  zero is silence (no chip — see `FwOpsSectionNavEntry.chip`), a failed read
+ *  is "Unavailable". */
+function openCountChip(
+  source: { ok: true; openCount: number } | { ok: false }
+): { text: string; tone: FwOpsSectionChipTone } | undefined {
+  if (!source.ok) return UNAVAILABLE_CHIP;
+  if (source.openCount === 0) return undefined;
+  return { text: `${source.openCount} open`, tone: "not-yet" };
+}
+
+/**
+ * The archive confirm gate (Unit 9; upgraded in ops redesign Unit 2) — typed-slug
+ * confirmation, same shape as the anonymize confirm: archiving darkens a public
+ * URL and hides a weekend from the default list, so a mis-tap must not do it.
+ *
+ * VERIFIED SERVER-SIDE: `archiveFwCohort` (the core) re-runs this against the
+ * STORED slug before the revoke-then-archive sequence — a typed confirm only the
+ * browser checks is not a confirm (the anonymize posture). The components still
+ * call it too, but only as UX: the button stays disabled until the match, so the
+ * refusal is met before the round trip rather than after.
  */
 export function fwArchiveConfirmMatches(typed: string, slug: string): boolean {
   return typed.trim() === slug;

@@ -2,15 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import FwCohortCreate from "@/app/fp/fw/components/FwCohortCreate";
+import FwOpsCreatePanel from "@/app/fp/fw/components/FwOpsCreatePanel";
+import FwOpsRowMenu from "@/app/fp/fw/components/FwOpsRowMenu";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/fp/lib/fw-ops-core";
 
 /**
- * /fp/fw/ops — every Founders Weekend, and the form that makes a new one
- * (FW Unit 5; FW-R23, Decision 4).
+ * /fp/fw/ops — every Founders Weekend, and the way a new one is made
+ * (FW Unit 5; ops redesign Units 1–2; FW-R23, Decision 4).
  *
  * The page's own gate runs BEFORE anything is read. The layout gates too, but
  * Next 16 layouts do not re-render on navigation, so a page that leaned on the
@@ -18,6 +19,22 @@ import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/fp/lib/fw-ops-c
  *
  * Force-dynamic: it reads the service-role client per request, and the env-less
  * build must never try to prerender it.
+ *
+ * ── The row is a CARD with two interactive regions (Unit 2)
+ *
+ * The weekend's name, window and counts are one Link to its ops page; the ⋯
+ * menu (`FwOpsRowMenu`) is a sibling — a whole-card `<Link>` cannot legally
+ * nest a button. The Link IS the card body (block, full padding, the top-right
+ * corner reserved via `pr-14`), so the whole visual card stays tappable except
+ * the menu's own 44px corner; the menu's confirm panel expands BELOW the card
+ * content because it follows the Link in the DOM.
+ *
+ * ── Creation is behind the + (Unit 2)
+ *
+ * The always-visible "New weekend" section is gone; `FwOpsCreatePanel` renders
+ * at the top of the list area and opens when the tab row's + is clicked (the
+ * `FwOpsChrome` shell carries the flag between them). The old `#new-weekend`
+ * anchor went with it — there is no Link fallback left to land on it.
  */
 
 export const dynamic = "force-dynamic";
@@ -68,6 +85,8 @@ export default async function FwOpsPage({
   // Unit 9: archived hidden by default — staff visibility is the point of
   // archiving — with `?archived=1` as the explicit "show archived too" view. A
   // query param, not state: the view is shareable and survives a reload.
+  // The toggle itself lives in the tab row (`FwOpsTabRow`, Unit 1) — this page
+  // only READS the param the row's Link flips.
   const { archived } = await searchParams;
   const includeArchived = archived === "1";
   const listed = await loadOpsCohorts(includeArchived);
@@ -91,28 +110,25 @@ export default async function FwOpsPage({
           <p className="mt-2 font-path-body text-sm leading-6 text-hq-ink-soft">
             {listed.cohorts.length === 0
               ? includeArchived
-                ? "No weekends at all yet. Create the first one below."
-                : "No active weekends. Create one below — or show the archived list."
+                ? "No weekends at all yet. Use + to create the first one."
+                : "No active weekends. Use + to create one — or show the archived list."
               : "Open a weekend to manage its guides and its board link."}
           </p>
-          <p className="mt-1 font-path-body text-sm leading-6">
-            <Link
-              href={includeArchived ? "/fp/fw/ops" : "/fp/fw/ops?archived=1"}
-              className="text-hq-ink-soft underline underline-offset-2 hover:text-hq-ink"
-            >
-              {includeArchived ? "Hide archived weekends" : "Show archived weekends"}
-            </Link>
-          </p>
+
+          <FwOpsCreatePanel />
 
           {listed.cohorts.length > 0 && (
             <ul className="mt-5 space-y-3">
               {listed.cohorts.map((cohort) => {
                 const chip = TOKEN_CHIP[cohort.boardTokenStatus];
                 return (
-                  <li key={cohort.id}>
+                  <li
+                    key={cohort.id}
+                    className="relative rounded-xl border border-hq-border bg-hq-surface shadow-hq transition-colors hover:border-hq-border-strong"
+                  >
                     <Link
                       href={`/fp/fw/ops/cohort/${cohort.id}`}
-                      className="block rounded-xl border border-hq-border bg-hq-surface p-4 shadow-hq transition-colors hover:border-hq-border-strong"
+                      className="block rounded-xl p-4 pr-14 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink"
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                         <p className="font-path-display text-base font-semibold text-hq-ink">
@@ -143,6 +159,12 @@ export default async function FwOpsPage({
                         {cohort.guideCount} guide{cohort.guideCount === 1 ? "" : "s"}
                       </p>
                     </Link>
+                    <FwOpsRowMenu
+                      cohortId={cohort.id}
+                      slug={cohort.slug}
+                      archived={cohort.archivedAt !== null}
+                      untouched={cohort.untouched}
+                    />
                   </li>
                 );
               })}
@@ -150,17 +172,6 @@ export default async function FwOpsPage({
           )}
         </>
       )}
-
-      <section className="mt-10">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
-          New weekend
-        </h2>
-        <p className="mt-1.5 mb-4 font-path-body text-sm leading-6 text-hq-ink-soft">
-          The end date and time set when the projected board&apos;s link expires — six hours
-          after the weekend ends. Enter them in the host city&apos;s own clock.
-        </p>
-        <FwCohortCreate />
-      </section>
     </main>
   );
 }

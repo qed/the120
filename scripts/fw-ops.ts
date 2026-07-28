@@ -16,7 +16,12 @@
  *                               --start 2026-08-21 --start-time 09:00 \
  *                               --end   2026-08-23 --end-time   17:00 \
  *                               --tz    America/New_York [--json]
+ *   npm run fw -- window-edit   --cohort <uuid> \
+ *                               --start 2026-08-21 --start-time 09:00 \
+ *                               --end   2026-08-23 --end-time   17:00 \
+ *                               --tz    America/New_York [--json]
  *   npm run fw -- token-mint    --cohort <uuid> [--force] [--json]
+ *   npm run fw -- token-remint  --cohort <uuid> --expected-token-id <uuid> [--json]
  *   npm run fw -- token-revoke  --cohort <uuid> [--json]
  *   npm run fw -- board         --cohort <uuid> [--json]
  *   npm run fw -- guides        --cohort <uuid> [--json]
@@ -92,6 +97,7 @@ import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/fp/lib/fw-loa
 import {
   anonymizeFwStudent,
   createFwCohort,
+  deleteFwCohort,
   linkFwStudentToCohort,
   listFwCohortGuides,
   listFwOpsCohorts,
@@ -100,16 +106,20 @@ import {
   loadFwMatchResolution,
   loadFwOpsBoardToken,
   mintFwBoardToken,
+  remintFwBoardTokenForWindow,
   resolveFwReplayReject,
   revokeFwBoardToken,
   revokeFwGuideGrant,
   archiveFwCohort,
   unarchiveFwCohort,
+  updateFwCohortWindow,
 } from "../app/fp/lib/fw-ops-core";
 import {
   fwCohortWindowFromLocal,
   fwReplayRejectReasonCopy,
   normalizeFwCohortSlug,
+  remintFwBoardTokenFailureCopy,
+  updateFwCohortWindowFailureCopy,
 } from "../app/fp/lib/fw-ops-rules";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
@@ -145,10 +155,13 @@ const COMMANDS = [
   "create",
   "cohorts",
   "cohort-create",
+  "window-edit",
   "token-mint",
+  "token-remint",
   "token-revoke",
   "archive",
   "unarchive",
+  "delete",
   "board",
   "guides",
   "guide-add",
@@ -188,7 +201,16 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   create: ["--cohort", "--first", "--last", "--band"],
   cohorts: [],
   "cohort-create": ["--slug", "--start", "--start-time", "--end", "--end-time", "--tz"],
+  // Redesign Unit 4's window edit, CLI front door: same core as the ops
+  // surface (updateFwCohortWindow), same refusal copy, same always-both-bounds
+  // write — the live board token is deliberately untouched (token-remint is
+  // the explicit follow-up).
+  "window-edit": ["--cohort", "--start", "--start-time", "--end", "--end-time", "--tz"],
   "token-mint": ["--cohort", "--force"],
+  // Redesign Unit 4's revoke + re-mint for a corrected window. Requires the
+  // live token's id (the CAS): a stale id refuses with nothing revoked, so
+  // this can never blind-kill a link somebody else just minted.
+  "token-remint": ["--cohort", "--expected-token-id"],
   "token-revoke": ["--cohort"],
   board: ["--cohort"],
   guides: ["--cohort"],
@@ -210,8 +232,14 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   // Unit 7: retire a weekend / bring it back. Same cores as the ops surface —
   // the revoke-then-archive ordering and every guard live in archiveFwCohort,
   // so this front door cannot skip them.
-  archive: ["--cohort", "--actor"],
+  archive: ["--cohort", "--actor", "--confirm-slug"],
   unarchive: ["--cohort"],
+  // Redesign Unit 3: hard delete for truly-untouched weekends. Same core as the
+  // ops surface — the untouched classifier, the typed-confirm verification, the
+  // FK backstop and the post-delete grant sweep all live in deleteFwCohort, so
+  // this front door cannot skip any of them. No --actor: delete writes no audit
+  // row (nothing survives to anchor one) and no attribution column.
+  delete: ["--cohort", "--confirm-slug"],
 };
 
 function arg(name: string): string | null {
@@ -301,10 +329,15 @@ async function main() {
     // user-visible attribution; the resolveActor convenience would silently pin an
     // arbitrary active staff row's NAME on an archive they never made. Wrong
     // attribution is worse than the schema's own honest "unrecorded" state.
+    // The typed confirm the core now requires (ops redesign Unit 2) — the
+    // weekend's own slug, same shape as anonymize's --confirm-name. Verified
+    // server-side against the stored slug; a wrong id typed with a wrong slug
+    // refuses instead of archiving the wrong weekend.
     const res = await archiveFwCohort(db, {
       cohortId,
       actorUserId: required("actor"),
       now: Date.now(),
+      confirmSlug: required("confirm-slug"),
     });
     emit(res, () => {
       if (res.ok) console.log(`archived ${cohortId} (board revoked or already dark)`);
@@ -334,6 +367,32 @@ async function main() {
           `unarchived ${cohortId} — the board stays dark; mint a new token if it should be live`
         );
       else console.log(`unarchive refused: ${res.reason}`);
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "delete") {
+    const cohortId = required("cohort");
+    // Typed confirm mirrors archive's --confirm-slug: the weekend's own slug,
+    // re-verified in the core against the stored one — a wrong id typed with a
+    // wrong slug refuses instead of deleting the wrong weekend.
+    const res = await deleteFwCohort(db, {
+      cohortId,
+      confirmSlug: required("confirm-slug"),
+    });
+    emit(res, () => {
+      if (res.ok && res.grantSweep) console.log(`deleted ${cohortId} — it never held anything`);
+      else if (res.ok)
+        // Success-with-fact, the audited:false convention: the cohort IS gone,
+        // but the guide-grant sweep failed and an orphan may remain.
+        console.log(
+          `deleted ${cohortId}, but the guide-grant sweep FAILED — check path_role_grants ` +
+            `for role='guide', scope_type='cohort', scope_id='${cohortId}' and delete by hand`
+        );
+      else if (res.reason === "not_untouched")
+        console.log(`delete refused: this weekend has history — archive it instead`);
+      else console.log(`delete refused: ${res.reason}`);
     });
     if (!res.ok) process.exitCode = 1;
     return;
@@ -383,6 +442,55 @@ async function main() {
     return;
   }
 
+  if (command === "window-edit") {
+    const cohortId = required("cohort");
+    // The SAME local-window conversion cohort-create runs, up front, so a
+    // malformed window fails with the same `window: <reason>` shape before the
+    // core is called. The core re-runs it (its callers include the browser),
+    // which also means the invalid_* members of its refusal union cannot reach
+    // the copy branch below.
+    const window = fwCohortWindowFromLocal({
+      startDate: required("start"),
+      startTime: required("start-time"),
+      endDate: required("end"),
+      endTime: required("end-time"),
+      timeZone: required("tz"),
+    });
+    if (!window.ok) throw new Error(`window: ${window.reason}`);
+
+    const res = await updateFwCohortWindow(db, {
+      cohortId,
+      startDate: required("start"),
+      startTime: required("start-time"),
+      endDate: required("end"),
+      endTime: required("end-time"),
+      timeZone: required("tz"),
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    emit(res, () => {
+      if (res.ok) {
+        console.log(`\nwindow saved for ${cohortId}\n  ${res.startsAt} → ${res.endsAt}`);
+        console.log(
+          "  the live board link (if any) keeps its stored expiry — run token-remint if it should follow this edit"
+        );
+      } else {
+        console.log(
+          `window-edit refused: ${
+            res.reason === "cohort_not_found" ||
+            res.reason === "cohort_not_fw" ||
+            res.reason === "cohort_archived" ||
+            res.reason === "unavailable"
+              ? updateFwCohortWindowFailureCopy(res.reason)
+              : `window: ${res.reason}`
+          }`
+        );
+      }
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
   if (command === "token-mint") {
     const cohortId = required("cohort");
     // The ops surface makes staff confirm before replacing a LIVE link, because
@@ -414,6 +522,36 @@ async function main() {
         console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
       }
       console.log(`\n${boardUrl}\n  expires ${res.expiresAt}`);
+      console.log("  Only a hash is stored — this cannot be shown again.");
+    });
+    return;
+  }
+
+  if (command === "token-remint") {
+    const cohortId = required("cohort");
+    const res = await remintFwBoardTokenForWindow(db, {
+      cohortId,
+      // The CAS: the live token this caller believes it is replacing. A stale
+      // id refuses (`stale_view`) with nothing revoked — no --force here,
+      // because naming the token IS the deliberate act.
+      expectedTokenId: required("expected-token-id"),
+      actorUserId: await resolveActor(),
+      now: Date.now(),
+    });
+    if (!res.ok) {
+      emit(res, () => console.log(`token-remint refused: ${remintFwBoardTokenFailureCopy(res.reason)}`));
+      process.exitCode = 1;
+      return;
+    }
+    // The raw token is printed ONCE and never stored — token-mint's contract,
+    // URL assembled the same way so an agent can paste it without knowing the
+    // route shape.
+    const remintUrl = `${SITE_URL}/fp/fw/board/${res.token}`;
+    emit({ ...res, url: remintUrl }, () => {
+      if (res.revokedPrior) {
+        console.log("\n⚠  The previous board link is now DEAD. Any projector showing it is blank.");
+      }
+      console.log(`\n${remintUrl}\n  expires ${res.expiresAt}`);
       console.log("  Only a hash is stored — this cannot be shown again.");
     });
     return;
@@ -496,13 +634,19 @@ async function main() {
     // when they still cannot sign in.
     emit({ ...res, inviteEmailed: false }, () => {
       console.log(`\n${res.email} (${res.userId})`);
-      console.log(`  account ${res.created ? "created" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`);
+      console.log(
+        `  account ${res.created ? "created" : res.staff ? "staff (granted as-is)" : "adopted"}, grant ${res.grantAdded ? "added" : "already present"}`
+      );
       if (!res.audited) console.log("  ⚠  the audit record did NOT save");
       // Deliberately does NOT mail the invite: the invite email is the ACTION
       // layer's step (provisionGuideAction), and a script that silently mailed a
       // password-setting link would be a second, untested mail path. Use the ops
       // surface, or `issueFwGuideInvite` directly, when a link is wanted.
-      console.log("  no invite emailed — use the ops surface to send their link");
+      console.log(
+        res.staff
+          ? "  no invite exists for a staff account — they sign in with their staff login"
+          : "  no invite emailed — use the ops surface to send their link"
+      );
     });
     return;
   }
@@ -1093,10 +1237,10 @@ fresh link emailed to ${issued.email}`);
     lastName: required("last"),
     band,
     cohortId: required("cohort"),
+    // Lands in `notice_attested_by` — since 2026-07-28 a silent provenance
+    // stamp of who quick-created the row (the program notice is covered by
+    // online registration), exactly as a guide's session id does at the table.
     actorUserId: await resolveActor(),
-    // The operator running this IS asserting the notice was seen, exactly as a
-    // guide does at the table — the column records who said so.
-    noticeAttested: true,
   });
   if (!res.ok) {
     throw new Error(

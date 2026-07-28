@@ -715,10 +715,12 @@ export type ProvisionFwStudentInput = {
   /** Must be a `kind='fw'` cohort — verified here, not assumed. */
   cohortId: string;
   /**
-   * Decision 13: the adult who attested the family has seen the program notice.
-   * Persisted on the profile, not merely a form gate. Null for paths that have
-   * not attested yet (the PROPOSED-3 importer stamps it when its notice sequence
-   * completes).
+   * The adult who quick-created this student — a silent PROVENANCE stamp since
+   * 2026-07-28 (ops-guide redesign R17; the program notice itself is covered by
+   * online registration), not a consent record. Persisted on the profile, and
+   * load-bearing as the quick-create discriminator: the unfinished-student
+   * banner keys on it being non-null. Null for the bulk-import path by
+   * decision (PROPOSED-3 rejected).
    */
   noticeAttestedBy?: string | null;
   /**

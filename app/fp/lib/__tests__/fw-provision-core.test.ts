@@ -270,22 +270,25 @@ describe("provisionFwStudent — the mint path", () => {
     expect(tables.path_task_events).toHaveLength(0);
   });
 
-  it("records the consent attestation when an attesting adult is supplied", async () => {
+  it("stamps the provenance columns when a quick-creating adult is supplied", async () => {
+    // Since 2026-07-28 `notice_attested_by/at` is a silent provenance stamp of
+    // who quick-created the row (not a consent record — the program notice is
+    // covered by online registration).
     const { db, tables } = makeFakeDb({});
     await provisionFwStudent(db, { ...MAYA, noticeAttestedBy: "guide-1" });
     const profile = tables.path_student_profiles[0];
     expect(profile.notice_attested_by).toBe("guide-1");
     expect(typeof profile.notice_attested_at).toBe("string");
-    // The attested (quick-create) path also stamps WHERE the walk-in was being
+    // The stamped (quick-create) path also records WHERE the walk-in was being
     // added — the scope of the roster's unfinished-student banner (2026-07-28).
     expect(profile.intended_cohort_id).toBe(COHORT);
   });
 
-  it("leaves the attestation null when nobody attested", async () => {
+  it("leaves the stamp null on the import path (deliberate — PROPOSED-3 rejected)", async () => {
     const { db, tables } = makeFakeDb({});
     await provisionFwStudent(db, MAYA);
     expect(tables.path_student_profiles[0].notice_attested_at).toBeNull();
-    // The unattested (bulk-import) path stamps NO intended cohort — the same
+    // The unstamped (bulk-import) path records NO intended cohort — the same
     // discriminator that keeps a half-imported row off a guide's banner.
     expect(tables.path_student_profiles[0].intended_cohort_id).toBeNull();
   });

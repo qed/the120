@@ -35,8 +35,13 @@ import {
   type FwSignOutRefusal,
   type FwRosterCache,
   type FwServerRow,
+  createFwEnqueueClock,
+  fwFlipLeg1Verdict,
+  fwPendingMarker,
+  planFwFlipEntries,
+  type FwFlipLeg,
 } from "../fw-sync-rules";
-import type { FwStudentResult } from "../fw-rules";
+import { createFwClientIdLedger, fwTapKey, type FwStudentResult } from "../fw-rules";
 import type { TaskState } from "../transition-table";
 
 /**
@@ -1444,5 +1449,274 @@ describe("Unit 6: an orderly sign-out over preserved work now beacons (Peter, 20
     }).then((outcome) => {
       expect(outcome).toEqual({ kind: "clear_failed" });
     });
+  });
+});
+
+/* ══════════════════════════════ the composed flip (ops-guide redesign Unit 9) ══ */
+
+describe("createFwEnqueueClock — strictly increasing enqueuedAt, document-wide", () => {
+  it("take(2) on a frozen wall clock yields strictly increasing stamps (the flip's legs)", () => {
+    const clock = createFwEnqueueClock(() => Date.parse("2026-08-22T14:00:00.000Z"));
+    const [a, b] = clock.take(2);
+    expect(Date.parse(b)).toBeGreaterThan(Date.parse(a));
+    expect(Date.parse(b) - Date.parse(a)).toBe(1); // stamp-and-increment: +1ms
+  });
+
+  it("a THIRD real tap in the same wall millisecond stamps strictly AFTER both legs — it can never interleave between them", () => {
+    // The hazard stamp-and-increment alone leaves open: a same-ms third entry
+    // would TIE with leg 1 and could sort between the legs on the random-UUID
+    // tiebreak. The shared clock closes it: the tap's stamp is
+    // max(now, last + 1) = leg2 + 1.
+    const clock = createFwEnqueueClock(() => Date.parse("2026-08-22T14:00:00.000Z"));
+    const [leg1, leg2] = clock.take(2);
+    const tap = clock.next();
+    expect(Date.parse(tap)).toBeGreaterThan(Date.parse(leg2));
+    expect(Date.parse(leg2)).toBeGreaterThan(Date.parse(leg1));
+  });
+
+  it("never goes backwards even when the wall clock does (NTP step)", () => {
+    let now = Date.parse("2026-08-22T14:00:00.000Z");
+    const clock = createFwEnqueueClock(() => now);
+    const a = clock.next();
+    now -= 60_000; // the device clock steps back a minute
+    const b = clock.next();
+    expect(Date.parse(b)).toBeGreaterThan(Date.parse(a));
+  });
+
+  it("tracks a moving wall clock rather than creeping by 1ms forever", () => {
+    let now = Date.parse("2026-08-22T14:00:00.000Z");
+    const clock = createFwEnqueueClock(() => now);
+    clock.next();
+    now += 5_000;
+    expect(clock.next()).toBe(new Date(now).toISOString());
+  });
+});
+
+describe("planFwFlipEntries — two ORDINARY entries, client-sequenced", () => {
+  const FLIP_NOW = Date.parse("2026-08-22T14:00:00.000Z");
+  const flipLegs = (): FwFlipLeg[] => [
+    { action: "undo", actionId: "action-undo", clientId: "cid-undo" },
+    { action: "not_yet", actionId: "action-notyet", clientId: "cid-notyet" },
+  ];
+  const plan = (legs = flipLegs(), stamps?: readonly string[]) =>
+    planFwFlipEntries({
+      cohortId: COHORT,
+      studentId: STUDENT_A,
+      taskId: TASK,
+      actorUserId: GUIDE,
+      capturedAt: new Date(FLIP_NOW).toISOString(),
+      legs,
+      enqueuedAts: stamps ?? createFwEnqueueClock(() => FLIP_NOW).take(legs.length),
+    });
+
+  it("builds two recognized, ordinary FwQueueEntry records — no new op kind, no shape change", () => {
+    const [undoLeg, notYetLeg] = plan();
+    expect(undoLeg.action).toBe("undo");
+    expect(notYetLeg.action).toBe("not_yet");
+    // Ordinary entries: the cross-deploy reader recognizes them as-is, so
+    // FW_QUEUE_ENTRY_SCHEMA_VERSION stays 1.
+    expect(isRecognizedFwEntry(undoLeg)).toBe(true);
+    expect(isRecognizedFwEntry(notYetLeg)).toBe(true);
+    expect(undoLeg.schemaVersion).toBe(FW_QUEUE_ENTRY_SCHEMA_VERSION);
+    // id === clientId, one entry per leg (the queue's own construction rule).
+    expect(undoLeg.id).toBe("cid-undo");
+    expect(notYetLeg.id).toBe("cid-notyet");
+    // Legs never share an action id (board celebration grouping is per action).
+    expect(undoLeg.actionId).not.toBe(notYetLeg.actionId);
+    // Strictly increasing enqueuedAt.
+    expect(Date.parse(notYetLeg.enqueuedAt)).toBeGreaterThan(Date.parse(undoLeg.enqueuedAt));
+  });
+
+  it("flip legs NEVER reduce as a cancel pair — replay order undo → not_yet, however the queue is read back", () => {
+    const [undoLeg, notYetLeg] = plan();
+    // Fed in both orders: enqueuedAt (not input order, not the random-UUID
+    // tiebreak) decides, so the pair survives as the ordered correction.
+    expect(reduceFwOps([undoLeg, notYetLeg]).map((o) => o.action)).toEqual(["undo", "not_yet"]);
+    expect(reduceFwOps([notYetLeg, undoLeg]).map((o) => o.action)).toEqual(["undo", "not_yet"]);
+  });
+
+  it("same-millisecond stamps are REFUSED — they would fall to the random-UUID tiebreak and could cancel the flip", () => {
+    const stamp = new Date(FLIP_NOW).toISOString();
+    expect(() => plan(flipLegs(), [stamp, stamp])).toThrow(/strictly increasing/);
+  });
+
+  it("legs sharing a clientId are REFUSED — the RPC's replay probe would swallow leg 2 as `replayed`", () => {
+    // THE NEGATIVE PIN (Key Decision, pin 2): the replay probe dedupes on the
+    // client id. If the not_yet leg rode the undo leg's id, the undo's landing
+    // would make leg 2 echo `replayed` — "already recorded" — and the flip's
+    // second half would never be written.
+    const legs = flipLegs().map((l) => ({ ...l, clientId: "cid-shared" }));
+    expect(() => plan(legs)).toThrow(/distinct clientIds/);
+  });
+
+  it("legs sharing an actionId are REFUSED", () => {
+    const legs = flipLegs().map((l) => ({ ...l, actionId: "action-shared" }));
+    expect(() => plan(legs)).toThrow(/distinct actionIds/);
+  });
+
+  it("a flip followed by a real undo tap reduces [undo, not_yet, undo] → [undo] (cancel-pair logic composes)", () => {
+    const [undoLeg, notYetLeg] = plan();
+    const clock = createFwEnqueueClock(() => FLIP_NOW);
+    clock.take(2); // the flip's reservation
+    const laterUndo = entry("undo", { enqueuedAt: clock.next(), clientId: "cid-later-undo" });
+    const reduced = reduceFwOps([undoLeg, notYetLeg, laterUndo]);
+    expect(reduced.map((o) => o.action)).toEqual(["undo"]);
+    // The SURVIVOR is the flip's own leading undo — the not_yet and its undo
+    // cancelled; the pre-outage decision still gets reverted.
+    expect(reduced[0].clientId).toBe("cid-undo");
+  });
+
+  it("a same-ms third tap from the shared clock orders after BOTH legs (never interleaves)", () => {
+    const clock = createFwEnqueueClock(() => FLIP_NOW);
+    const [undoLeg, notYetLeg] = plan(flipLegs(), clock.take(2));
+    const tap = entry("checkmark", { enqueuedAt: clock.next(), clientId: "cid-tap" });
+    const ordered = orderFwEntries([tap, notYetLeg, undoLeg]);
+    expect(ordered.map((o) => o.clientId)).toEqual(["cid-undo", "cid-notyet", "cid-tap"]);
+  });
+
+  it("a cross-actor flip rejects AS A UNIT — cross_actor_undo on both legs, no lone not_yet", () => {
+    const [undoLeg, notYetLeg] = plan();
+    const result = planFwStudentTask({
+      ops: [undoLeg, notYetLeg],
+      server: { state: "verified", verifiedBy: OTHER_GUIDE },
+    });
+    expect(result.replay).toEqual([]);
+    expect(result.reject.map((r) => r.entry.clientId)).toEqual(["cid-undo", "cid-notyet"]);
+    expect(result.reject.every((r) => r.reason === "cross_actor_undo")).toBe(true);
+  });
+
+  it("a SAME-actor flip replays whole, in order", () => {
+    const [undoLeg, notYetLeg] = plan();
+    const result = planFwStudentTask({
+      ops: [undoLeg, notYetLeg],
+      server: { state: "verified", verifiedBy: GUIDE },
+    });
+    expect(result.reject).toEqual([]);
+    expect(result.replay.map((o) => o.action)).toEqual(["undo", "not_yet"]);
+  });
+});
+
+describe("fwPendingMarker + projectFwPendingState — the pending-flip row", () => {
+  it("a pending flip projects the server state UNCHANGED and marks pending_flip — never a premature not_yet paint", () => {
+    const clock = createFwEnqueueClock(() => Date.parse("2026-08-22T14:00:00.000Z"));
+    const legs = planFwFlipEntries({
+      cohortId: COHORT,
+      studentId: STUDENT_A,
+      taskId: TASK,
+      actorUserId: GUIDE,
+      capturedAt: "2026-08-22T14:00:00.000Z",
+      legs: [
+        { action: "undo", actionId: "a1", clientId: "c1" },
+        { action: "not_yet", actionId: "a2", clientId: "c2" },
+      ],
+      enqueuedAts: clock.take(2),
+    });
+    // The existing conservatism: author-blind, the leading undo might be held
+    // at drain (cross_actor_undo), so the projection must not move.
+    expect(projectFwPendingState("verified", legs)).toBe("verified");
+    // ...and the marker is what tells the row to say "pending flip".
+    expect(fwPendingMarker(legs)).toBe("pending_flip");
+  });
+
+  it("a lone queued undo is also pending_flip (same conservatism)", () => {
+    expect(fwPendingMarker([entry("undo")])).toBe("pending_flip");
+  });
+
+  it("a decision-led pending sequence is plain `pending` (the projection moves)", () => {
+    const ops = [entry("checkmark")];
+    expect(fwPendingMarker(ops)).toBe("pending");
+    expect(projectFwPendingState("locked", ops)).toBe("verified");
+  });
+
+  it("nothing pending — or a fully-cancelled pair — is `none`", () => {
+    expect(fwPendingMarker([])).toBe("none");
+    expect(fwPendingMarker([entry("checkmark"), entry("undo")])).toBe("none");
+  });
+});
+
+describe("fwFlipLeg1Verdict — the online leg-2 gate", () => {
+  const rs = (kind: "applied" | "already_done" | "replayed" | "re_attempt"): FwStudentResult => ({
+    studentId: STUDENT_A,
+    kind,
+    state: "locked",
+  });
+
+  it("applied / already_done / REPLAYED release leg 2 (replayed = leg-success)", () => {
+    expect(fwFlipLeg1Verdict(rs("applied"))).toBe("proceed");
+    expect(fwFlipLeg1Verdict(rs("already_done"))).toBe("proceed");
+    // A landed-but-unanswered undo from an earlier attempt still releases the
+    // flip's second half — the Key Decision's third pin.
+    expect(fwFlipLeg1Verdict(rs("replayed"))).toBe("proceed");
+  });
+
+  it("refused: not_a_decision releases leg 2 (not_yet is legal from work states)", () => {
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "refused", reason: "not_a_decision", state: "locked" })
+    ).toBe("proceed");
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "refused", reason: "undo_first", state: "verified" })
+    ).toBe("halt");
+  });
+
+  it("unavailable — or a response silent about the student — backstops BOTH legs", () => {
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "failed", reason: "unavailable" })
+    ).toBe("backstop");
+    expect(fwFlipLeg1Verdict(undefined)).toBe("backstop");
+  });
+
+  it("definite failures and skips halt the flip", () => {
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "failed", reason: "missing_progress" })
+    ).toBe("halt");
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "failed", reason: "cohort_invalid" })
+    ).toBe("halt");
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "failed", reason: "cross_actor_undo" })
+    ).toBe("halt");
+    expect(
+      fwFlipLeg1Verdict({ studentId: STUDENT_A, kind: "skipped", reason: "not_in_cohort" })
+    ).toBe("halt");
+    expect(fwFlipLeg1Verdict(rs("re_attempt"))).toBe("halt"); // unreachable for undo — fail closed
+  });
+});
+
+describe("the flip's per-leg client ids — distinct, and stable across retries", () => {
+  it("the ledger keys per (task, student, ACTION), so the two legs hold distinct ids that survive re-minting", () => {
+    let n = 0;
+    const ledger = createFwClientIdLedger(() => `mint-${(n += 1)}`);
+    const intentUndo = { taskId: TASK, action: "undo" as const, studentIds: [STUDENT_A] };
+    const intentNotYet = { taskId: TASK, action: "not_yet" as const, studentIds: [STUDENT_A] };
+
+    const undoId = ledger.idsFor(intentUndo)[STUDENT_A];
+    const notYetId = ledger.idsFor(intentNotYet)[STUDENT_A];
+    // Distinct per leg: fwTapKey carries the action, so no key change was needed.
+    // (A SHARED id is the swallowed-leg-2 hazard planFwFlipEntries refuses.)
+    expect(undoId).not.toBe(notYetId);
+    expect(fwTapKey(TASK, STUDENT_A, "undo")).not.toBe(fwTapKey(TASK, STUDENT_A, "not_yet"));
+    // Stable across a retry of the same flip — the exactly-once contract.
+    expect(ledger.idsFor(intentUndo)[STUDENT_A]).toBe(undoId);
+    expect(ledger.idsFor(intentNotYet)[STUDENT_A]).toBe(notYetId);
+  });
+
+  it("a settled leg releases its id; the ambiguous leg keeps its own", () => {
+    let n = 0;
+    const ledger = createFwClientIdLedger(() => `mint-${(n += 1)}`);
+    const undoId = ledger.idsFor({ taskId: TASK, action: "undo", studentIds: [STUDENT_A] })[STUDENT_A];
+    const notYetId = ledger.idsFor({ taskId: TASK, action: "not_yet", studentIds: [STUDENT_A] })[
+      STUDENT_A
+    ];
+    ledger.settle({ taskId: TASK, action: "undo" }, [
+      { studentId: STUDENT_A, kind: "applied", state: "locked" },
+    ]);
+    // The undo settled → a NEW undo tap mints fresh; the unsettled not_yet
+    // still holds its key for the retry.
+    expect(
+      ledger.idsFor({ taskId: TASK, action: "undo", studentIds: [STUDENT_A] })[STUDENT_A]
+    ).not.toBe(undoId);
+    expect(
+      ledger.idsFor({ taskId: TASK, action: "not_yet", studentIds: [STUDENT_A] })[STUDENT_A]
+    ).toBe(notYetId);
   });
 });

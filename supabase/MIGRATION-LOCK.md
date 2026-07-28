@@ -2,10 +2,37 @@
 
 **Current holder: Lane B — First Profit funnel.**
 
-The Staff Front Door plan completed 2026-07-27 (Units 1–12, PRs #59–#77). Lane B
-holds the lock by default. **A second lane became active again on 2026-07-28**
-(fieldwork tooling, PR #86) — the transfer discipline below applies from the next
-migration either lane authors.
+Lane A (fieldwork, FW ops/guide redesign) briefly took the lock on 2026-07-28
+with Peter's approval for exactly two migrations — now complete
+(`20260811130000_fw_notice_stamp_comment.sql`,
+`20260811140000_fw_window_edit_attribution.sql`) — and returned it. Lane A
+needs no further authoring; Lane B is actively authoring and completed the
+funnel migrations through `20260810120000`.
+
+The Staff Front Door plan completed 2026-07-27 (Units 1–12, PRs #59–#77). **A
+second lane became active again on 2026-07-28** (fieldwork tooling, PR #86) — the
+transfer discipline below applies from the next migration either lane authors.
+
+## The third collision, caught same-session and repaired (2026-07-28, later)
+
+Lane A (fieldwork, FW ops/guide redesign) authored and applied two migrations
+with Peter's explicit approval while Lane B was concurrently active:
+`fw_notice_stamp_comment` (clean at `20260811130000`) and
+`fw_window_edit_attribution`, first authored as `20260811120000` — a version
+Lane B's `funnel_deposit_attempts` had already claimed in production
+bookkeeping. The collision surfaced immediately (the version-row insert's
+`on conflict` reported the funnel name back) and was repaired in the same
+session per the U12 mechanic: file renamed to
+`20260811140000_fw_window_edit_attribution.sql` (DDL already applied and
+idempotent), version row inserted, verified against production. Both lanes'
+rows are correct. Lane B retains the holder line; Lane A's two migrations are
+done and it needs no further authoring.
+
+Lesson, again and sharper: **query `schema_migrations` for the next free
+version immediately before authoring** — the repo's file listing is not the
+truth when the other lane's work is applied-but-unmerged. The (b) tripwire
+catches same-repo collisions; nothing catches applied-but-unmerged ones except
+that query.
 
 ## The second breach and the version collision, recorded (2026-07-28)
 

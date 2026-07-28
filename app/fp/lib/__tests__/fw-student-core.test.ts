@@ -217,20 +217,13 @@ describe("runFwQuickCreate", () => {
     band: "g6_8" as const,
     cohortId: BOSTON,
     actorUserId: GUIDE,
-    noticeAttested: true,
   };
 
-  it("refuses an unattested submission BEFORE it writes anything (Decision 13)", async () => {
-    const { db } = makeFakeDb({ tables: complete() });
-    expect(await runFwQuickCreate(db, { ...base, noticeAttested: false })).toEqual({
-      ok: false,
-      reason: "notice_not_attested",
-    });
-    // The checkbox is a client-side fact; the column it writes is the record.
-    expect(provisionMock).not.toHaveBeenCalled();
-  });
-
-  it("stamps the attesting adult from the caller, never from the form", async () => {
+  it("stamps the actor as provenance with NO attestation input at all (2026-07-28)", async () => {
+    // The checkbox is retired (ops-guide redesign R17: the notice is covered by
+    // online registration). The stamp is now unconditional and comes from the
+    // authenticated caller, never from a form field — it is the discriminator
+    // the unfinished-student banner keys on, so it must always land.
     provisionMock.mockResolvedValue({
       ok: true,
       profileId: "p-maya",
@@ -241,6 +234,37 @@ describe("runFwQuickCreate", () => {
     const { db } = makeFakeDb({ tables: complete() });
     await runFwQuickCreate(db, base);
     expect(provisionMock.mock.calls[0][1]).toMatchObject({ noticeAttestedBy: GUIDE });
+  });
+
+  it("still succeeds on an old-client payload carrying noticeAttested: true (deploy skew)", async () => {
+    // A cached client from before the 2026-07-28 deploy still posts the retired
+    // field. The action schema strips unknown keys (pinned below); this core's
+    // input no longer names it, and an extra property must change nothing.
+    provisionMock.mockResolvedValue({
+      ok: true,
+      profileId: "p-maya",
+      userId: "u-maya",
+      email: "maya.chen.fw@the120.school",
+      adopted: false,
+    });
+    const { db } = makeFakeDb({ tables: complete() });
+    const oldClientPayload = { ...base, noticeAttested: true };
+    expect(await runFwQuickCreate(db, oldClientPayload)).toEqual({
+      ok: true,
+      studentId: "p-maya",
+      adopted: false,
+    });
+    expect(provisionMock.mock.calls[0][1]).toMatchObject({ noticeAttestedBy: GUIDE });
+  });
+
+  it("pinned: the action schema tolerates the retired field rather than going strict", () => {
+    // zod objects strip unknown keys by default; `.strict()` would refuse the
+    // old-client payload above at the schema, mid-deploy. And no code path may
+    // reintroduce a `noticeAttested` consent field — the column is provenance.
+    const src = readFileSync(new URL("../actions/fw-student.ts", import.meta.url), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code).not.toContain("noticeAttested");
+    expect(code).not.toContain(".strict(");
   });
 
   it("reports success only after all three legs verify", async () => {

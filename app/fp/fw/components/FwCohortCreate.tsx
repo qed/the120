@@ -26,7 +26,17 @@ const inputCls =
 const labelCls =
   "mb-1.5 block font-path-mono text-[11px] uppercase tracking-[0.12em] text-hq-ink-muted";
 
-export default function FwCohortCreate() {
+export default function FwCohortCreate({
+  onCreated,
+}: {
+  /**
+   * Success seam (ops redesign Unit 2): when a host owns the success rendering —
+   * `FwOpsCreatePanel` collapses and shows a note linking to the new cohort —
+   * it takes the created ids here and this form suppresses its own inline note.
+   * Without it (any standalone mount) the form's own note renders as before.
+   */
+  onCreated?: (created: { cohortId: string; slug: string }) => void;
+}) {
   const router = useRouter();
   const [slug, setSlug] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -67,7 +77,8 @@ export default function FwCohortCreate() {
         // in their header and it may not be exactly what was typed
         // ("Boston 2026 08" → boston-2026-08). A silent transformation of a
         // unique key is a key staff cannot search for later.
-        setCreated(res.slug);
+        if (onCreated) onCreated({ cohortId: res.cohortId, slug: res.slug });
+        else setCreated(res.slug);
         setSlug("");
         setStartDate("");
         setEndDate("");

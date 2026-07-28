@@ -207,14 +207,16 @@ export type FwQuickCreateInput = {
   lastName: string;
   band: Band;
   cohortId: string;
-  /** The guide (or staff) at the table. Stamped as `notice_attested_by`. */
-  actorUserId: string;
   /**
-   * Decision 13: the attestation BLOCKS submission and is PERSISTED. Re-checked
-   * here rather than trusted from the form, because a checkbox is a client-side
-   * fact and the column it writes is the record that the family saw the notice.
+   * The guide (or staff) at the table. Stamped UNCONDITIONALLY as
+   * `notice_attested_by/at` on the insert — since 2026-07-28 (ops-guide
+   * redesign R17) a silent PROVENANCE marker of who quick-created the row, not
+   * a consent record: the program notice is covered by online registration,
+   * and quick-create is the backup path. The stamp stays load-bearing — it is
+   * the discriminator `fwUnfinishedStudents` uses to tell quick-created rows
+   * from import-minted ones (the importer stamps null by decision).
    */
-  noticeAttested: boolean;
+  actorUserId: string;
   /**
    * Retry-in-place handle, echoed back from a previous failed leg. Used ONLY for
    * resuming this same submission — never for linking a matched student. A
@@ -225,9 +227,6 @@ export type FwQuickCreateInput = {
 };
 
 export type FwQuickCreateFailure =
-  /** The attestation was not ticked. Server-side, so a bypassed form cannot
-   *  mint an account whose family never saw the notice. */
-  | "notice_not_attested"
   | ProvisionFwStudentFailure
   /** Every write reported success and a leg is still not observable. */
   | "legs_unverified";
@@ -257,8 +256,6 @@ export async function runFwQuickCreate(
   db: SupabaseClient,
   input: FwQuickCreateInput
 ): Promise<FwQuickCreateResult> {
-  if (!input.noticeAttested) return { ok: false, reason: "notice_not_attested" };
-
   // ── The resume handle is scoped to THIS cohort. ──
   //
   // `provisionFwStudent` authorizes a resume by NAME MATCH alone, and names are
@@ -368,7 +365,7 @@ export type FwQuickCreateActionResult =
   | FwQuickCreateResult
   | {
       ok: false;
-      reason: "invalid_input" | "notice_not_attested" | "no_session" | "forbidden";
+      reason: "invalid_input" | "no_session" | "forbidden";
       /** `never`, not omitted: it keeps `result.retryProfileId` readable across
        *  the whole union without a narrowing dance at the call site, AND says
        *  the true thing — a refusal at the gate wrote nothing, so there is

@@ -331,6 +331,19 @@ const NESTED_FW_LAYOUTS = [
   "../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx",
 ] as const;
 
+/**
+ * The sticky FW chrome that must offset under the bar. Not the same list as
+ * NESTED_FW_LAYOUTS any more: the ops redesign (Unit 1) moved the ops header's
+ * sticky markup out of `ops/layout.tsx` into `FwOpsTabRow`, which that layout
+ * renders — so the offset contract is now a property of the component file.
+ * `fw-ops-chrome-wiring.test.ts` pins the rest of that row's contract; THIS
+ * list stays the one place the `--staff-bar-h` offset itself is enforced.
+ */
+const STICKY_FW_CHROME = [
+  "../../../fp/fw/components/FwOpsTabRow.tsx",
+  "../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx",
+] as const;
+
 describe("the bar mounts exactly once per page (R15, R18)", () => {
   it("is mounted in each of the three outermost guarded layouts", () => {
     // stripComments, like every sibling assertion: a reviewer commented the mount out
@@ -423,7 +436,7 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
       "the height publish must run in useLayoutEffect, before paint"
     ).toMatch(/^useLayoutEffect\(/);
 
-    for (const relative of NESTED_FW_LAYOUTS) {
+    for (const relative of STICKY_FW_CHROME) {
       const header = stripComments(read(relative));
       // The offset must be on a STICKY element: `top` on a statically-positioned
       // header is inert, which is the shape of the mistake worth catching.
@@ -632,23 +645,47 @@ describe("the cohort header duplicates no application label (3.18.10)", () => {
     // exist and still carry the weekend name (also pinned structurally below).
     expect(layout).toMatch(/This weekend/);
   });
+
+  it("the weekend name IS the way back to the picker — a Link to /fp/fw (R25)", () => {
+    // Ops-guide redesign Unit 11 retired the explicit Switch control; since
+    // then the weekend name in this header is the ONLY route from a cohort
+    // surface back to the picker. A revert to a static span strands guides in
+    // whichever weekend they opened first. Pinned as the name INSIDE the link,
+    // not the link's mere existence — a /fp/fw link elsewhere in the header
+    // would not carry the affordance the name does.
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).toMatch(/<Link\s[^>]*href="\/fp\/fw"[\s\S]{0,300}?active\?\.slug/);
+  });
+
+  it("the retired Switch control stays retired — no Switch link markup survives", () => {
+    // The Unit 11 deletion, held: two controls for one destination is how the
+    // pair drifts, and the Switch variant carried its own visibility flag. Both
+    // the rendered label and the identifier are asserted absent, over
+    // comment-stripped source (the layout's comments legitimately discuss the
+    // control they removed).
+    const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
+    expect(layout).not.toMatch(/>Switch</);
+    expect(layout).not.toMatch(/\bcanSwitch\b/);
+  });
 });
 
 describe("Unit 9 — who includes archived cohorts is a WIRING decision, pinned", () => {
   it("the cohort LAYOUT takes everything; the PICKER splits by role", () => {
     // The plan's settled split, asserted where it lives. The layout's one list
-    // feeds the header name AND canSwitch, so filtering there strands a guide
-    // inside an archived cohort; the picker includes archived for GUIDES (theirs
-    // to open — a guide holding only an archived cohort is redirected into it)
-    // and excludes for STAFF (default visibility is the point of archiving).
+    // feeds the header's weekend NAME: it must resolve for an archived cohort a
+    // staff member (or a guide holding only an archived weekend) opens, so
+    // filtering there paints "This weekend" over the wrong stamp. (The Switch
+    // link this list also used to feed retired in ops-guide redesign Unit 11 —
+    // the weekend-name link is the way back to the picker now.) The picker
+    // includes archived for GUIDES (theirs to open — a guide holding only an
+    // archived cohort is redirected into it) and excludes for STAFF (default
+    // visibility is the point of archiving).
     const layout = stripComments(read("../../../fp/fw/(app)/cohort/[cohortId]/layout.tsx"));
     expect(layout).toMatch(/includeArchived:\s*true/);
     // …and the CONSUMPTION is pinned too, not just the fetch (testing review, 0.8):
-    // the header resolves by ID over the unfiltered list, and canSwitch is a strict
-    // more-than-one. A `cohorts[0]` header or a `>= 1` canSwitch would have walked
-    // through the fetch-argument pin alone.
+    // the header resolves by ID over the unfiltered list. A `cohorts[0]` header
+    // would have walked through the fetch-argument pin alone.
     expect(layout).toMatch(/cohorts\.find\(\(c\) => c\.id === cohortId\)/);
-    expect(layout).toMatch(/cohorts\.length > 1/);
     const picker = stripComments(read("../../../fp/fw/(app)/page.tsx"));
     expect(picker).toMatch(/includeArchived:\s*!isStaff/);
   });

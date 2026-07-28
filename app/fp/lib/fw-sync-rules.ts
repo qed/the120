@@ -89,8 +89,14 @@ export const FW_OPS_PREFIX = "/fp/fw/ops";
 /** The SW cache holding the FW app-shell navigations — the single cache the
  *  never-cache-navigations exception writes to, swept on activate and cleared with
  *  the queue on sign-out (so a shared iPad keeps no authed shell for the next
- *  guide). `sw-discipline.test.ts` pins this string to `public/sw.js`. */
-export const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v1";
+ *  guide). `sw-discipline.test.ts` pins this string to `public/sw.js`.
+ *
+ *  `-v1` → `-v2` (ops-guide redesign Unit 8): the guide check-in redesign retired
+ *  the per-task page, and v1 shells hold its URLs plus Server Action ids the same
+ *  deploy removes. Bumping the name makes activate() sweep every v1 entry, so an
+ *  online device refetches fresh HTML instead of posting dead action ids. The
+ *  `path-sw-` prefix is a deliberately-kept identifier — never rename it. */
+export const FW_SHELL_CACHE_NAME = "path-sw-fw-shell-v2";
 
 /**
  * Whether a navigation path is a cacheable FW app-shell route — the single
@@ -276,6 +282,189 @@ export function projectFwPendingState(server: TaskState, ops: readonly FwQueueEn
     // re_attempt / already_done / refused leave the state where it is.
   }
   return state;
+}
+
+/* ══════════════════════════════════ the composed flip (ops-guide redesign Unit 9) ══ */
+
+/**
+ * What a task row should SAY about this guide's own pending queue for it — the
+ * derivation the inline decision row renders (Unit 9's pending-flip marker).
+ *
+ *   - `none`          nothing pending — render the server state, no marker.
+ *   - `pending`       a decision-led pending sequence — `projectFwPendingState`
+ *                     projects the target, and the row shows it WITH the queued
+ *                     marker (visibly distinct from a recorded state).
+ *   - `pending_flip`  the reduced sequence LEADS with an undo (a flip, or a lone
+ *                     queued undo). `projectFwPendingState` deliberately projects
+ *                     the server state UNCHANGED for these — the author-blind
+ *                     conservatism documented on that function — so the row must
+ *                     show the server state plus a distinct "pending" marker,
+ *                     never a premature not_yet paint.
+ *
+ * Callers pass this guide's own NON-BLOCKED ops for one (student, task) — the
+ * same list they hand `projectFwPendingState` — so the two derivations can never
+ * disagree about which case a row is in.
+ */
+export type FwPendingMarker = "none" | "pending" | "pending_flip";
+
+export function fwPendingMarker(ops: readonly FwQueueEntry[]): FwPendingMarker {
+  const reduced = reduceFwOps(ops);
+  if (reduced.length === 0) return "none";
+  return reduced[0].action === "undo" ? "pending_flip" : "pending";
+}
+
+/**
+ * A monotonic `enqueuedAt` allocator — the mechanism behind the flip pins, and
+ * the reason a same-millisecond hazard cannot reach `orderFwEntries`.
+ *
+ * THE HAZARD (Key Decision, flow gap 5): `orderFwEntries` tiebreaks
+ * same-millisecond entries by id — a RANDOM UUID — and a flip's two legs
+ * mis-ordered as `[not_yet, undo]` reduce as a cancel pair, silently losing the
+ * flip. Worse, stamp-and-increment on the flip call ALONE is not enough: a
+ * third real tap enqueued in the same wall-clock millisecond as leg 1 would tie
+ * with it and could sort BETWEEN the legs on the random tiebreak.
+ *
+ * So the clock is shared by EVERY enqueue on the document, not just the flip:
+ * each stamp is `max(now, last + 1)`, which makes every enqueued entry's
+ * `enqueuedAt` strictly greater than the previous one's regardless of how fast
+ * taps arrive or what the wall clock does (an NTP step backwards cannot reorder
+ * the queue — enqueue order IS the invariant, per `reduceFwOps`' docblock). The
+ * tiebreak in `orderFwEntries` then never fires for entries this document wrote.
+ * No `FwQueueEntry` shape change, so `FW_QUEUE_ENTRY_SCHEMA_VERSION` stays 1.
+ *
+ * Cross-document ties remain theoretically possible and acceptably rare: the
+ * drain scopes to one actor, whose taps for one (student, task) come from the
+ * surface's busy-guarded controls on one page.
+ */
+export type FwEnqueueClock = {
+  /** One stamp, strictly after every stamp this clock has issued. */
+  next(): string;
+  /** `count` strictly-increasing stamps in one reservation (the flip's legs). */
+  take(count: number): string[];
+};
+
+export function createFwEnqueueClock(now: () => number): FwEnqueueClock {
+  let last = 0;
+  const nextMs = () => {
+    const ms = Math.max(now(), last + 1);
+    last = ms;
+    return ms;
+  };
+  return {
+    next: () => new Date(nextMs()).toISOString(),
+    take: (count) => Array.from({ length: count }, () => new Date(nextMs()).toISOString()),
+  };
+}
+
+/** One leg of a composed flip: an ordinary action with its own board-grouping
+ *  `actionId` and its own exactly-once `clientId`. Ordered by the caller. */
+export type FwFlipLeg = {
+  action: FwAction;
+  actionId: string;
+  clientId: string;
+};
+
+/**
+ * Plan a composed flip's queue entries — two ORDINARY `FwQueueEntry` records for
+ * ONE (cohort, student, task), client-sequenced (Key Decision: NOT a new op
+ * kind — `FwQueueEntry.action` feeds the `path_fw_replay_rejects.action` CHECK,
+ * and the engine's ordered replay with halt-on-first-non-settle already provides
+ * leg-2-conditional-on-leg-1).
+ *
+ * The three flip pins, enforced structurally rather than by convention:
+ *
+ *   1. `enqueuedAts` must be STRICTLY INCREASING (from `createFwEnqueueClock`) —
+ *      same-millisecond legs would fall to `orderFwEntries`' random-UUID
+ *      tiebreak, and a mis-ordered `[not_yet, undo]` reduces as a cancel pair.
+ *   2. Legs must carry DISTINCT `clientId`s: the RPC's replay probe dedupes on
+ *      the client id, so a shared id makes leg 2 echo `replayed` — swallowed as
+ *      "already recorded" without the not_yet ever landing.
+ *   3. Legs must carry DISTINCT `actionId`s: an action id groups ONE action's
+ *      board celebration; two different actions sharing one would fold an undo
+ *      and a not_yet into a single celebration group.
+ *
+ * A violation THROWS — every one is a caller programming error on the capture
+ * path, and enqueueing a flip that will silently lose itself is strictly worse
+ * than surfacing the tap's failure.
+ */
+export function planFwFlipEntries(input: {
+  cohortId: string;
+  studentId: string;
+  taskId: string;
+  actorUserId: string;
+  capturedAt: string;
+  /** Ordered per-leg tuples — for the flip: `[undo, not_yet]`. */
+  legs: readonly FwFlipLeg[];
+  /** One stamp per leg, strictly increasing — `createFwEnqueueClock().take(n)`. */
+  enqueuedAts: readonly string[];
+}): FwQueueEntry[] {
+  const { legs, enqueuedAts } = input;
+  if (enqueuedAts.length !== legs.length) {
+    throw new Error(`fw flip: ${legs.length} legs but ${enqueuedAts.length} stamps`);
+  }
+  for (let i = 1; i < enqueuedAts.length; i += 1) {
+    if (Date.parse(enqueuedAts[i]) <= Date.parse(enqueuedAts[i - 1])) {
+      throw new Error("fw flip: enqueuedAt stamps must be strictly increasing");
+    }
+  }
+  if (new Set(legs.map((l) => l.clientId)).size !== legs.length) {
+    throw new Error("fw flip: legs must carry distinct clientIds");
+  }
+  if (new Set(legs.map((l) => l.actionId)).size !== legs.length) {
+    throw new Error("fw flip: legs must carry distinct actionIds");
+  }
+  return legs.map((leg, i) => ({
+    id: leg.clientId,
+    schemaVersion: FW_QUEUE_ENTRY_SCHEMA_VERSION,
+    clientId: leg.clientId,
+    actionId: leg.actionId,
+    studentId: input.studentId,
+    taskId: input.taskId,
+    action: leg.action,
+    cohortId: input.cohortId,
+    capturedAt: input.capturedAt,
+    actorUserId: input.actorUserId,
+    enqueuedAt: enqueuedAts[i],
+    attempts: 0,
+    lastAttemptAt: null,
+    blocked: null,
+  }));
+}
+
+/**
+ * The ONLINE flip's leg-2 gate: what leg 1's per-student result releases.
+ *
+ *   - `proceed`  the undo's effect stands — `applied`, `already_done` (the row
+ *     already held no decision... impossible for undo's own target but kept for
+ *     the echo's vocabulary), `replayed` (a landed-but-unanswered undo from an
+ *     earlier attempt — REPLAYED IS LEG-SUCCESS, the Key Decision's third pin),
+ *     or `refused: not_a_decision` (nothing to undo — not_yet is legal from the
+ *     work states, so the flip's second half may still fire).
+ *   - `backstop` no answer (`unavailable` / no per-student result) — enqueue
+ *     BOTH legs, each with its own held client id, and let the drain's ordered
+ *     replay be the conditionality.
+ *   - `halt`     a definite server verdict that ends the flip: leg 2 must not
+ *     fire, and the guide sees the leg's own copy. `re_attempt` is unreachable
+ *     for undo and fails closed here rather than releasing a leg on an echo
+ *     that makes no sense.
+ */
+export type FwFlipLeg1Verdict = "proceed" | "backstop" | "halt";
+
+export function fwFlipLeg1Verdict(result: FwStudentResult | undefined): FwFlipLeg1Verdict {
+  if (result === undefined) return "backstop"; // the response said nothing about the student
+  switch (result.kind) {
+    case "applied":
+    case "already_done":
+    case "replayed":
+      return "proceed";
+    case "refused":
+      return result.reason === "not_a_decision" ? "proceed" : "halt";
+    case "re_attempt":
+    case "skipped":
+      return "halt";
+    case "failed":
+      return result.reason === "unavailable" ? "backstop" : "halt";
+  }
 }
 
 /* ═══════════════════════════════════════════════════ the same-actor undo guard ══ */

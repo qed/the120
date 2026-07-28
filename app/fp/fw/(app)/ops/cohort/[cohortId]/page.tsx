@@ -6,16 +6,22 @@ import FwBoardToken from "@/app/fp/fw/components/FwBoardToken";
 import FwGuideRoster from "@/app/fp/fw/components/FwGuideRoster";
 import FwImportExceptions from "@/app/fp/fw/components/FwImportExceptions";
 import FwMatchResolver from "@/app/fp/fw/components/FwMatchResolver";
+import FwOpsSectionNav from "@/app/fp/fw/components/FwOpsSectionNav";
 import FwReplayRejects from "@/app/fp/fw/components/FwReplayRejects";
 import FwStudentRoster from "@/app/fp/fw/components/FwStudentRoster";
 import FwArchiveControl from "@/app/fp/fw/components/FwArchiveControl";
+import FwWindowEdit from "@/app/fp/fw/components/FwWindowEdit";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
 import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { listFwImportExceptions } from "@/app/fp/lib/fw-import-core";
 import { withFwTimeout } from "@/app/fp/lib/fw-call";
 import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
-import { fwArchivedBanner, fwOpsCohortAffordances } from "@/app/fp/lib/fw-ops-rules";
+import {
+  fwArchivedBanner,
+  fwOpsCohortAffordances,
+  fwOpsSectionChips,
+} from "@/app/fp/lib/fw-ops-rules";
 import {
   listFwCohortGuides,
   listFwOpsStudents,
@@ -42,6 +48,19 @@ import {
  */
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Every section h2 shares this class (ops redesign Unit 6; R16): the
+ * `scroll-margin-top` is what lets an anchor jump land the heading BELOW the
+ * sticky chrome instead of underneath it. The offset is the whole stack the
+ * heading must clear: the staff bar's published `--staff-bar-h` (0px rollback
+ * fallback, as everywhere), plus FwOpsTabRow's 61px (h-11 control + py-2 +
+ * border — the documented constant `FwOpsSectionNav` explains), plus the nav
+ * strip's own ~45px and a little breathing room = 112px. The wiring test pins
+ * that the margin exists; the constant pairs with `FwOpsSectionNav.TAB_ROW_H`.
+ */
+const SECTION_H2 =
+  "scroll-mt-[calc(var(--staff-bar-h,0px)+112px)] font-path-display text-lg font-semibold tracking-tight text-hq-ink";
 
 export const metadata: Metadata = {
   title: `Weekend ops · Founders Weekend${FW_BRAND_SUFFIX}`,
@@ -133,6 +152,24 @@ export default async function FwOpsCohortPage({
       ? fwArchivedBanner({ archivedAt: cohort.archivedAt, archivedBy })
       : null;
 
+  // The section nav's chips (Unit 6; R16) derive from the SAME single-pass load
+  // the sections render from — never a second read, never a lazily-mounted
+  // form. The replay/exception reads are already open-only at the query, so
+  // their lengths ARE the open counts; the rejects filter re-states that fact
+  // rather than trusting it at a distance.
+  const navEntries = fwOpsSectionChips({
+    archived: cohort.archivedAt !== null,
+    board: token.ok ? { ok: true, status: token.token.status } : { ok: false },
+    guides: guides.ok ? { ok: true, guides: guides.guides } : { ok: false },
+    replays: rejects.ok
+      ? { ok: true, openCount: rejects.rejects.filter((r) => r.resolvedAt === null).length }
+      : { ok: false },
+    importExceptions: importExceptions.ok
+      ? { ok: true, openCount: importExceptions.exceptions.length }
+      : { ok: false },
+    students: students.ok ? { ok: true, count: students.students.length } : { ok: false },
+  });
+
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
       {banner && (
@@ -164,8 +201,41 @@ export default async function FwOpsCohortPage({
         Open the guide view for this weekend
       </Link>
 
+      {/* Unit 6 (R16): the sticky jump nav. Every section below stays FULLY
+          rendered — no accordion, no tabs, no lazy mounts — because the chips'
+          honesty depends on the sections and the nav rendering from one load,
+          and because an offline-capable ops page must not hide work behind a
+          fetch-on-open. */}
+      <FwOpsSectionNav entries={navEntries} />
+
+      {/* Redesign Unit 4 (R14/R14a): the window edit sits between the header and
+          the Projected board — the section order Unit 6's nav will index. Hidden
+          when archived (an archived weekend edits after restore; the core refuses
+          regardless — hiding is honesty, per fwOpsCohortAffordances' doctrine). */}
+      {!banner && (
+        <section className="mt-8">
+          <h2 id="fw-ops-window" tabIndex={-1} className={SECTION_H2}>
+            Weekend window
+          </h2>
+          <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
+            Fix the dates, times, or the host city&apos;s clock. A live board link keeps the
+            expiry it was minted with — re-mint it below after saving if the board should
+            follow the corrected window.
+          </p>
+          <FwWindowEdit
+            cohortId={cohort.id}
+            startsAt={cohort.startsAt}
+            endsAt={cohort.endsAt}
+            timeZone={cohort.timeZone}
+            liveTokenId={
+              token.ok && token.token.status === "live" ? token.token.tokenId : null
+            }
+          />
+        </section>
+      )}
+
       <section className="mt-8">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+        <h2 id="fw-ops-board" tabIndex={-1} className={SECTION_H2}>
           Projected board
         </h2>
         {/* UNCONDITIONAL, and that is a fix rather than a simplification
@@ -179,7 +249,7 @@ export default async function FwOpsCohortPage({
       </section>
 
       <section className="mt-10">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+        <h2 id="fw-ops-guides" tabIndex={-1} className={SECTION_H2}>
           Guides
         </h2>
         {guides.ok ? (
@@ -200,7 +270,7 @@ export default async function FwOpsCohortPage({
       </section>
 
       <section className="mt-10">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+        <h2 id="fw-ops-replays" tabIndex={-1} className={SECTION_H2}>
           Offline replays that didn&apos;t apply
         </h2>
         <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
@@ -223,7 +293,7 @@ export default async function FwOpsCohortPage({
 
       {show.matchResolver && (
       <section className="mt-10">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+        <h2 id="fw-ops-match" tabIndex={-1} className={SECTION_H2}>
           Find a returning student
         </h2>
         <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
@@ -236,7 +306,7 @@ export default async function FwOpsCohortPage({
       )}
 
       <section className="mt-10">
-        <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+        <h2 id="fw-ops-exceptions" tabIndex={-1} className={SECTION_H2}>
           Import exceptions
         </h2>
         <p className="mt-1.5 mb-1 font-path-body text-sm leading-6 text-hq-ink-soft">
@@ -259,7 +329,7 @@ export default async function FwOpsCohortPage({
 
       <section className="mt-10">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+          <h2 id="fw-ops-students" tabIndex={-1} className={SECTION_H2}>
             Students
           </h2>
           {show.csvImportLink && (
@@ -290,7 +360,7 @@ export default async function FwOpsCohortPage({
 
       {!banner && (
         <section className="mt-12 border-t border-hq-border pt-6">
-          <h2 className="font-path-display text-lg font-semibold tracking-tight text-hq-ink">
+          <h2 id="fw-ops-retire" tabIndex={-1} className={SECTION_H2}>
             Retire this weekend
           </h2>
           <FwArchiveControl cohortId={cohort.id} slug={cohort.slug} archived={false} />

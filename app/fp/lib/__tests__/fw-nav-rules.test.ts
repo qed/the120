@@ -3,23 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   buildFwTaskTree,
   compareFwTaskIds,
-  fwBatchStudentIds,
   fwDuplicateNameStudentIds,
   fwPickerHeadline,
   fwPickerRedirectsToSingleCohort,
+  fwPhaseLabel,
+  fwPhaseParamForTaskId,
+  fwPhaseSlug,
   fwPickerZeroState,
   fwSearchDistanceBudget,
+  fwSelectedPhaseKey,
+  fwSidebarNames,
   fwUnfinishedStudents,
   FW_BRAND_SUFFIX,
   FW_OPS_CREATE_PATH,
   normalizeFwSearchTerm,
   searchFwRoster,
   summarizeFwResume,
-  toggleFwBatchExtra,
   type FwRosterStudent,
   type FwUnfinishedCandidateRow,
 } from "../fw-nav-rules";
-import { FW_BATCH_MAX } from "../fw-rules";
 import { parseFwActiveCohort, FW_PREF_UNKNOWN } from "../fw-device";
 import type { ProgramContent, UnitTask } from "@/app/fp/content/types";
 import type { TaskState } from "../transition-table";
@@ -222,6 +224,119 @@ describe("fwDuplicateNameStudentIds", () => {
   });
 });
 
+/* ═══════════════════════════════════ the student sidebar (redesign Unit 7, R18) ══ */
+
+describe("fwSidebarNames", () => {
+  const labels = (rs: readonly FwRosterStudent[]) => fwSidebarNames(rs).map((n) => n.label);
+
+  it("formats First + last initial with a period", () => {
+    expect(labels([student({ firstName: "Maya", lastName: "Rodriguez" })])).toEqual(["Maya R."]);
+  });
+
+  it("sorts alphabetically — locale-aware and case-folded, id as the final tiebreak", () => {
+    const roster = [
+      student({ studentId: "s-b", firstName: "bella", lastName: "Ng" }),
+      student({ studentId: "s-e", firstName: "Élodie", lastName: "Fournier" }),
+      student({ studentId: "s-a", firstName: "Aaron", lastName: "Zeta" }),
+    ];
+    // "bella" (lowercase) between Aaron and Élodie; é folds to e so Élodie is
+    // not exiled past Z the way a raw code-point sort would put it.
+    expect(labels(roster)).toEqual(["Aaron Z.", "bella N.", "Élodie F."]);
+  });
+
+  it("carries the caller's richer entry type through un-narrowed", () => {
+    const entries = [{ ...student({ firstName: "Maya", lastName: "Chen" }), extra: 7 }];
+    expect(fwSidebarNames(entries)[0].student.extra).toBe(7);
+  });
+
+  it("extends colliding surnames until distinct — Maya Ro. / Maya Ru.", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Ro.", "Maya Ru."]);
+  });
+
+  it("is deterministic and stable — input order never changes anyone's label or position", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+      student({ studentId: "s-3", firstName: "Aaron", lastName: "Zeta" }),
+    ];
+    const forward = fwSidebarNames(roster);
+    const reversed = fwSidebarNames([...roster].reverse());
+    expect(reversed).toEqual(forward);
+    expect(forward.map((n) => n.student.studentId)).toEqual(["s-3", "s-1", "s-2"]);
+  });
+
+  it("collides case- and accent-insensitively, the same folding as the duplicate chip", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "maya", lastName: "rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+    ];
+    // "maya r." and "Maya R." are one pair to a guide's eye — both must extend.
+    expect(labels(roster)).toEqual(["maya ro.", "Maya Ru."]);
+  });
+
+  it("does NOT extend across different initials or different first names", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Chen" }),
+      student({ studentId: "s-3", firstName: "Mia", lastName: "Ruiz" }),
+    ];
+    expect(labels(roster).sort()).toEqual(["Maya C.", "Maya R.", "Mia R."]);
+  });
+
+  it("falls back to the FULL last name when no strictly-shorter prefix distinguishes", () => {
+    // "Ro" is a prefix of "Rodriguez": any prefix short enough to abbreviate
+    // "Ro" cannot tell them apart, and "Maya Ro" next to "Maya Ro." would be a
+    // wrong-child trap. Both render whole, no period.
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Ro" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Rodriguez" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Ro", "Maya Rodriguez"]);
+  });
+
+  it("near-identical surnames fall back to full names too, not a nine-character 'prefix'", () => {
+    // Distinguishing "Rodrigo" from "Rodriguez" needs 7 characters — the whole
+    // of "Rodrigo" — so the strictly-shorter rule sends both to full names.
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Rodrigo" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Rodrigo", "Maya Rodriguez"]);
+  });
+
+  it("identical full names render identically — the band chip, not the label, disambiguates (G22)", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Chen" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Chen" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Chen", "Maya Chen"]);
+    // …and the id tiebreak keeps even the identical pair stably ordered.
+    expect(fwSidebarNames(roster).map((n) => n.student.studentId)).toEqual(["s-1", "s-2"]);
+  });
+
+  it("a missing last name renders the first name alone, and never throws", () => {
+    expect(labels([student({ firstName: "Cher", lastName: "" })])).toEqual(["Cher"]);
+    expect(labels([student({ firstName: "Cher", lastName: "   " })])).toEqual(["Cher"]);
+  });
+
+  it("returns an empty list for an empty roster", () => {
+    expect(fwSidebarNames([])).toEqual([]);
+  });
+
+  it("three-way collisions resolve as a group at one shared prefix length", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+      student({ studentId: "s-3", firstName: "Maya", lastName: "Reyes" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Re.", "Maya Ro.", "Maya Ru."]);
+  });
+});
+
 /* ══════════════════════════════════════════════════════════ the resume chip ══ */
 
 describe("compareFwTaskIds", () => {
@@ -386,53 +501,83 @@ describe("buildFwTaskTree", () => {
   });
 });
 
-/* ═══════════════════════════════════════════════════════════ the batch picker ══ */
+/* ═════════════════════ the phase nav + the retired task route (Unit 8, R19/R21) ══ */
 
-describe("toggleFwBatchExtra", () => {
-  const toggle = (extras: string[], studentId: string) =>
-    toggleFwBatchExtra({ extras, studentId, primaryStudentId: "s-primary" });
-
-  it("adds and removes a teammate", () => {
-    expect(toggle([], "s-a")).toEqual({ ok: true, extras: ["s-a"] });
-    expect(toggle(["s-a"], "s-a")).toEqual({ ok: true, extras: [] });
-  });
-
-  it("caps the whole selection at FW_BATCH_MAX, counting the primary", () => {
-    const full = Array.from({ length: FW_BATCH_MAX - 1 }, (_, i) => `s-${i}`);
-    expect(fwBatchStudentIds("s-primary", full)).toHaveLength(FW_BATCH_MAX);
-    const refused = toggle(full, "s-one-too-many");
-    expect(refused).toEqual({ ok: false, reason: "at_max", extras: full });
-  });
-
-  it("still allows REMOVING a teammate when the selection is full", () => {
-    const full = Array.from({ length: FW_BATCH_MAX - 1 }, (_, i) => `s-${i}`);
-    expect(toggle(full, "s-0")).toEqual({ ok: true, extras: full.slice(1) });
-  });
-
-  it("refuses to toggle the primary — they are the task view's own student", () => {
-    expect(toggle(["s-a"], "s-primary")).toEqual({
-      ok: false,
-      reason: "is_primary",
-      extras: ["s-a"],
-    });
-  });
-
-  it("does not read FW_BATCH_MAX as a literal — the cap tracks the shared constant", () => {
-    // Guards the exact thing the plan asked for ("do not retype 3"): if the
-    // shared constant moved and this module kept a hard-coded 3, the selection
-    // built from FW_BATCH_MAX below would be refused (or under-filled) here.
-    const oneShyOfFull = Array.from({ length: FW_BATCH_MAX - 2 }, (_, i) => `s-${i}`);
-    expect(toggle(oneShyOfFull, "s-last").ok).toBe(true);
+describe("fwPhaseSlug / fwPhaseLabel", () => {
+  it("derives the URL slug and the single-word nav entry from the key — one source", () => {
+    expect(fwPhaseSlug("SELL")).toBe("sell");
+    expect(fwPhaseSlug("VALIDATE")).toBe("validate");
+    expect(fwPhaseLabel("SELL")).toBe("Sell");
+    expect(fwPhaseLabel("BUILD")).toBe("Build");
+    expect(fwPhaseLabel("VALIDATE")).toBe("Validate");
+    expect(fwPhaseLabel("GROW")).toBe("Grow");
+    expect(fwPhaseLabel("SCALE")).toBe("Scale");
   });
 });
 
-describe("fwBatchStudentIds", () => {
-  it("puts the primary first — the result list reads like the picker", () => {
-    expect(fwBatchStudentIds("s-primary", ["s-a", "s-b"])).toEqual(["s-primary", "s-a", "s-b"]);
+describe("fwPhaseParamForTaskId — the retired task route's landing phase", () => {
+  it("maps the leading component to the phase slug", () => {
+    expect(fwPhaseParamForTaskId("1.1.1")).toBe("sell");
+    expect(fwPhaseParamForTaskId("2.3.1")).toBe("build");
+    expect(fwPhaseParamForTaskId("3.1.2")).toBe("validate");
+    expect(fwPhaseParamForTaskId("4.5.5")).toBe("grow");
+    expect(fwPhaseParamForTaskId("5.2.1")).toBe("scale");
   });
 
-  it("never lists the primary twice, even if it leaks into extras", () => {
-    expect(fwBatchStudentIds("s-primary", ["s-primary", "s-a"])).toEqual(["s-primary", "s-a"]);
+  it("returns null — never a throw — for anything that is not a real task id", () => {
+    // The redirect runs on URLs only stale SW shells and bookmarks still hold;
+    // a garbage id lands phase-less rather than erroring the bounce.
+    expect(fwPhaseParamForTaskId("banana")).toBeNull();
+    expect(fwPhaseParamForTaskId("9.1.1")).toBeNull();
+    expect(fwPhaseParamForTaskId("0.1.1")).toBeNull();
+    expect(fwPhaseParamForTaskId("1.2")).toBeNull();
+    expect(fwPhaseParamForTaskId("")).toBeNull();
+  });
+});
+
+describe("fwSelectedPhaseKey — ?phase= resolution", () => {
+  const PHASES = [{ key: "SELL" as const }, { key: "BUILD" as const }];
+
+  it("matches case-insensitively against the pinned program's own phases", () => {
+    expect(fwSelectedPhaseKey(PHASES, "build")).toBe("BUILD");
+    expect(fwSelectedPhaseKey(PHASES, "BUILD")).toBe("BUILD");
+    expect(fwSelectedPhaseKey(PHASES, " sell ")).toBe("SELL");
+  });
+
+  it("falls back to the FIRST phase for absent, stale, or fabricated values", () => {
+    // The param arrives from reloads, SW-cached shells, and redirects off the
+    // retired task route — none of which may take the page down or land nowhere.
+    expect(fwSelectedPhaseKey(PHASES, null)).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, undefined)).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "")).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "scale")).toBe("SELL");
+    expect(fwSelectedPhaseKey(PHASES, "<script>")).toBe("SELL");
+  });
+
+  it("is null only for an empty program (total, never throws)", () => {
+    expect(fwSelectedPhaseKey([], "sell")).toBeNull();
+  });
+
+  it("agrees with the redirect: a task's derived param round-trips to its phase", () => {
+    // The retired route computes ?phase= via fwPhaseParamForTaskId; the student
+    // page resolves it via fwSelectedPhaseKey. If the two ever disagree, a
+    // redirected task URL lands on the wrong phase silently — pinned here.
+    const fiveKeys = [
+      { key: "SELL" as const },
+      { key: "BUILD" as const },
+      { key: "VALIDATE" as const },
+      { key: "GROW" as const },
+      { key: "SCALE" as const },
+    ];
+    for (const [taskId, key] of [
+      ["1.1.1", "SELL"],
+      ["2.1.1", "BUILD"],
+      ["3.1.1", "VALIDATE"],
+      ["4.1.1", "GROW"],
+      ["5.1.1", "SCALE"],
+    ] as const) {
+      expect(fwSelectedPhaseKey(fiveKeys, fwPhaseParamForTaskId(taskId))).toBe(key);
+    }
   });
 });
 

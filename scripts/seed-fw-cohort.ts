@@ -238,13 +238,14 @@ async function main() {
   }
 
   // ── the students ─────────────────────────────────────────────────────────
-  // `notice_attested_by` needs a real auth user (FK to auth.users). The seeding
-  // operator is the honest answer: they are the adult asserting these rehearsal
-  // rows are legitimate, exactly as a guide asserts it at a table.
+  // `notice_attested_by` needs a real auth user (FK to auth.users). Since
+  // 2026-07-28 it is a silent provenance stamp of who quick-created the row
+  // (not a consent record); the seeding operator is the honest answer, exactly
+  // as a guide's session id is at a table.
   const staff = await db.from("staff").select("id").eq("is_active", true).limit(1).maybeSingle();
   const attester = typeof staff.data?.id === "string" ? staff.data.id : null;
   if (attester === null && !dryRun) {
-    throw new Error("no active staff row to attribute the notice attestation to");
+    throw new Error("no active staff row to stamp as the quick-create provenance");
   }
 
   let minted = 0;
@@ -304,7 +305,6 @@ async function main() {
       cohortId,
       // Narrowed by the guard above, not cast past it.
       actorUserId: attester ?? "",
-      noticeAttested: true,
     });
     if (res.ok) {
       minted += 1;

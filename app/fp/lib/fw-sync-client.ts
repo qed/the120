@@ -44,7 +44,10 @@ import {
 import {
   applyFwDrainOutcome,
   classifyFwSignOutQueue,
+  createFwEnqueueClock,
+  groupFwEntriesByStudentTask,
   hasFwDeviceEvidence,
+  planFwFlipEntries,
   summarizeFwDeviceQueue,
   FW_AUTO_RETRY_ATTEMPT_CEILING,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
@@ -59,6 +62,7 @@ import {
   summarizeFwQueue,
   type FwCachedRosterStudent,
   type FwDeviceEvidence,
+  type FwFlipLeg,
   type FwDeviceQueueState,
   type FwQuarantinedRecord,
   type FwQueueEntry,
@@ -101,6 +105,15 @@ function notify(): void {
 }
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * The document's single `enqueuedAt` allocator (ops-guide redesign Unit 9). EVERY
+ * enqueue path stamps through it — not just the flip — because the flip's ordering
+ * guarantee ("a third tap in the same millisecond never interleaves between the
+ * legs") only holds if the third tap's stamp comes from the same monotonic clock.
+ * See `createFwEnqueueClock` for the same-ms random-tiebreak hazard this closes.
+ */
+const enqueueClock = createFwEnqueueClock(() => Date.now());
 
 /* ══════════════════════════════════════════════════════════════ enqueue ══ */
 
@@ -150,7 +163,8 @@ export async function enqueueFwCheckIns(p: {
       ...input,
       id: clientId,
       schemaVersion: FW_QUEUE_ENTRY_SCHEMA_VERSION,
-      enqueuedAt: nowIso(),
+      // The monotonic allocator, NOT the raw wall clock — see `enqueueClock`.
+      enqueuedAt: enqueueClock.next(),
       attempts: 0,
       lastAttemptAt: null,
       blocked: null,
@@ -167,28 +181,94 @@ export async function enqueueFwCheckIns(p: {
   return { ok: true, ids };
 }
 
-/** This guide's own pending (non-blocked) captures for one (student, task) — the
- *  task view folds them onto the server state so a revisit mid-outage reflects the
- *  guide's own queued taps, not the stale cached shell (correctness review). */
-export async function readPendingFwOpsFor(input: {
+/**
+ * Queue a composed FLIP — two ORDINARY entries for ONE (cohort, student, task),
+ * written in one call (ops-guide redesign Unit 9; Key Decision, flow gap 5).
+ *
+ * The single new enqueue entry point the plan calls for: `enqueueFwCheckIns`
+ * cannot host this — its shape is one-action-many-students with one SHARED
+ * `actionId` (board celebration grouping), and the flip needs the inverse (one
+ * student, ordered per-leg tuples, an `actionId` and `clientId` PER leg).
+ *
+ * The pins live in `planFwFlipEntries` (strictly-increasing `enqueuedAt` from the
+ * document's monotonic clock; distinct per-leg client ids and action ids). The
+ * caller passes the ledger-held client ids — the SAME ids a failed online attempt
+ * already used — so the drain's replay lands on the RPC's idempotency key and a
+ * leg that had in fact landed replays as `replayed`, which the engine treats as
+ * leg-success.
+ */
+export async function enqueueFwFlip(p: {
+  cohortId: string;
+  taskId: string;
+  studentId: string;
+  actorUserId: string;
+  capturedAt: string;
+  /** Ordered per-leg tuples — for the flip: `[undo, not_yet]`. */
+  legs: readonly FwFlipLeg[];
+}): Promise<FwEnqueueResult> {
+  if (!isFwQueueSupported()) return { ok: false, reason: "unsupported" };
+  const entries = planFwFlipEntries({
+    cohortId: p.cohortId,
+    studentId: p.studentId,
+    taskId: p.taskId,
+    actorUserId: p.actorUserId,
+    capturedAt: p.capturedAt,
+    legs: p.legs,
+    enqueuedAts: enqueueClock.take(p.legs.length),
+  });
+  const ids: string[] = [];
+  for (const entry of entries) {
+    try {
+      await putFwEntry(entry);
+      ids.push(entry.id);
+    } catch (e) {
+      console.error("[fw/sync] flip enqueue persist failed:", e);
+      // A partial flip (leg 1 written, leg 2 lost) is reported, never silent: the
+      // caller surfaces the failure, and the surviving lone undo is still a legal
+      // queue (it reduces to an undo-of-pre-outage the guard will evaluate).
+      if (ids.length > 0) notify();
+      return { ok: false, reason: "storage_failed", ids };
+    }
+  }
+  notify();
+  return { ok: true, ids };
+}
+
+/**
+ * ALL of this guide's own pending (non-blocked) captures for one student, grouped
+ * per task in capture order — ONE queue scan for the whole student page (ops-guide
+ * redesign Unit 9), refreshed via `subscribeFwQueue`.
+ *
+ * Replaces the retired task view's per-(student, task) `readPendingFwOpsFor`: the
+ * inline decision rows each need their task's pending ops (for
+ * `projectFwPendingState` + `fwPendingMarker`), and N rows each running their own
+ * `getAll` scan would multiply an IndexedDB read by the size of the catalog.
+ * Grouping reuses `groupFwEntriesByStudentTask` (which orders within each group)
+ * rather than a second grouping rule; the keys are collapsed to `taskId` because
+ * the scan is already scoped to one (cohort, student).
+ */
+export async function readPendingFwOpsForStudent(input: {
   cohortId: string;
   studentId: string;
-  taskId: string;
   actorUserId: string;
-}): Promise<FwQueueEntry[]> {
-  if (!isFwQueueSupported()) return [];
+}): Promise<Map<string, FwQueueEntry[]>> {
+  if (!isFwQueueSupported()) return new Map();
   try {
     const { recognized } = await scanFwQueue();
-    return recognized.filter(
+    const mine = recognized.filter(
       (e) =>
         !e.blocked &&
         e.actorUserId === input.actorUserId &&
         e.cohortId === input.cohortId &&
-        e.studentId === input.studentId &&
-        e.taskId === input.taskId
+        e.studentId === input.studentId
     );
+    const byTask = new Map<string, FwQueueEntry[]>();
+    for (const ops of groupFwEntriesByStudentTask(mine).values()) {
+      byTask.set(ops[0].taskId, ops);
+    }
+    return byTask;
   } catch {
-    return [];
+    return new Map();
   }
 }
 

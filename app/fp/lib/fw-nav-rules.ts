@@ -28,7 +28,6 @@
 import type { DeepReadonly, PhaseKey, ProgramContent } from "@/app/fp/content/types";
 import type { Band } from "@/app/fp/content/types";
 import { isFwTombstoneName } from "./fw-ops-rules";
-import { FW_BATCH_MAX } from "./fw-rules";
 import type { TaskState } from "./transition-table";
 
 /* ═══════════════════════════ the /fp/fw picker, by role (Staff Front Door Unit 4) ══ */
@@ -356,6 +355,107 @@ export function fwDuplicateNameStudentIds(
   return dupes;
 }
 
+/* ═══════════════════════════════════════════ the student sidebar (redesign R18) ══ */
+
+/** The minimal shape the sidebar naming needs — generic below, so the roster's
+ *  richer entries (resume chip included) travel through labeling un-narrowed,
+ *  the same posture as `searchFwRoster`'s `Indexed<T>`. */
+export type FwSidebarStudent = {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+};
+
+export type FwSidebarName<T extends FwSidebarStudent> = {
+  student: T;
+  /** "Maya R." — or a longer surname prefix / the full surname when an initial
+   *  cannot tell two rows apart (see `fwSidebarNames`). */
+  label: string;
+};
+
+/**
+ * The sidebar's display names (ops-guide redesign R18): "First L.", sorted
+ * alphabetically, with a DETERMINISTIC collision rule.
+ *
+ * WHY NOT FULL NAMES: the sidebar is a ~236px rail a guide scans mid-loop;
+ * full names truncate unpredictably at that width, and a truncated surname is
+ * a wrong-child hazard. "First L." is scannable — but two students who'd both
+ * render "Maya R." need MORE surname, not a coin flip, so:
+ *
+ *   - Collision = same folded first name AND same folded surname initial
+ *     (folded via `normalizeFwSearchTerm`, the same case/accent leveling the
+ *     duplicate-name chip uses — "maya rodriguez" and "Maya Rodríguez" are one
+ *     row pair to a guide's eye and must collide here too).
+ *   - Extend the surname prefix one character at a time until every folded
+ *     prefix in the group is distinct: "Maya Ro." / "Maya Ru.".
+ *   - FALL BACK TO THE FULL LAST NAME (no period) when no strictly-shorter
+ *     prefix can distinguish the group — one surname a prefix of another
+ *     ("Ro" / "Rodriguez"), or surnames identical outright. Identical full
+ *     names stay identical; that is the roster's G22 case and the band chip,
+ *     not the label, is its disambiguator.
+ *
+ * Ordering is the fold-then-localeCompare sort the roster search already uses
+ * (first, then last, then studentId), so the sidebar and an empty-query search
+ * agree about what "alphabetical" means. Pure and total: no input throws.
+ */
+export function fwSidebarNames<T extends FwSidebarStudent>(
+  students: readonly T[]
+): FwSidebarName<T>[] {
+  const rows = students.map((student) => {
+    const first = student.firstName.trim();
+    const last = student.lastName.trim();
+    return {
+      student,
+      first,
+      last,
+      foldFirst: normalizeFwSearchTerm(first),
+      foldLast: normalizeFwSearchTerm(last),
+    };
+  });
+
+  type Row = (typeof rows)[number];
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    // NUL (escaped) as the joiner: it cannot appear in folded output, so a first name
+    // ending in the next row's initial can never merge two distinct groups.
+    const key = `${row.foldFirst}\u0000${row.foldLast.charAt(0)}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const labelOf = (row: Row, group: readonly Row[]): string => {
+    if (row.last.length === 0) return row.first;
+    if (group.length === 1) return `${row.first} ${row.last.charAt(0)}.`;
+
+    // Distinctness is judged on the FOLDED rendered prefix — the thing a guide
+    // reading at arm's length actually distinguishes — and the prefix must be
+    // STRICTLY shorter than every surname in the group, so "Ro." can never be
+    // both an abbreviation of one row and the whole of another.
+    const minLen = Math.min(...group.map((g) => g.last.length));
+    for (let k = 1; k < minLen; k += 1) {
+      const folded = group.map((g) => normalizeFwSearchTerm(g.last.slice(0, k)));
+      if (new Set(folded).size === group.length) {
+        return `${row.first} ${row.last.slice(0, k)}.`;
+      }
+    }
+    return `${row.first} ${row.last}`;
+  };
+
+  return rows
+    .map((row) => ({
+      row,
+      label: labelOf(row, groups.get(`${row.foldFirst}\u0000${row.foldLast.charAt(0)}`)!),
+    }))
+    .sort(
+      (a, b) =>
+        a.row.foldFirst.localeCompare(b.row.foldFirst) ||
+        a.row.foldLast.localeCompare(b.row.foldLast) ||
+        a.row.student.studentId.localeCompare(b.row.student.studentId)
+    )
+    .map(({ row, label }) => ({ student: row.student, label }));
+}
+
 /* ═════════════════════════════════════════════════════ unfinished quick-creates ══ */
 
 /**
@@ -645,59 +745,68 @@ export function buildFwTaskTree(input: {
   });
 }
 
-/* ═════════════════════════════════════════════════════════════ the batch picker ══ */
+/* ══════════════════ the phase nav + the retired task route (redesign R19, R21) ══ */
 
-export type FwBatchToggle =
-  | { ok: true; extras: string[] }
-  | { ok: false; reason: "at_max" | "is_primary"; extras: string[] };
+/** A phase's `?phase=` slug — the URL vocabulary the student page's phase nav
+ *  round-trips through. Lowercase because it is user-visible in the address bar. */
+export function fwPhaseSlug(key: PhaseKey): string {
+  return key.toLowerCase();
+}
 
-/**
- * Add or remove a teammate from the batch, honouring the shared cap.
- *
- * The cap is `FW_BATCH_MAX` COUNTING THE PRIMARY — the student whose task view
- * this is — so the picker holds at most `FW_BATCH_MAX - 1` extras. The constant
- * is imported, never retyped: `planFwBatch` re-enforces the same number
- * server-side and reports the overflow as a skip, and a picker that let four
- * through would turn a designed refusal into a line of copy nobody expects.
- *
- * REMOVING is always legal, including at the cap — a picker that locks up when
- * full is one the guide has to back out of.
- *
- * Refusals are typed and carry the unchanged list, so the caller can render
- * "three at a time is the maximum" without also having to remember what the
- * selection was.
- */
-export function toggleFwBatchExtra(input: {
-  extras: readonly string[];
-  studentId: string;
-  primaryStudentId: string;
-}): FwBatchToggle {
-  const { extras, studentId, primaryStudentId } = input;
-  if (studentId === primaryStudentId) {
-    return { ok: false, reason: "is_primary", extras: [...extras] };
-  }
-  if (extras.includes(studentId)) {
-    return { ok: true, extras: extras.filter((id) => id !== studentId) };
-  }
-  if (extras.length >= FW_BATCH_MAX - 1) {
-    return { ok: false, reason: "at_max", extras: [...extras] };
-  }
-  return { ok: true, extras: [...extras, studentId] };
+/** The single-word nav entry (R19): "Sell", "Build", "Validate", "Grow", "Scale".
+ *  Derived from the key rather than a second hand-written list, so a program
+ *  version can never render a phase the nav has no word for. */
+export function fwPhaseLabel(key: PhaseKey): string {
+  return key.charAt(0) + key.slice(1).toLowerCase();
 }
 
 /**
- * The student list one action is submitted for: the primary first, then the
- * teammates in the order they were picked.
+ * The leading component of a task id names its phase — "2.3.1" is a BUILD task.
  *
- * Primary-first matters downstream — `planFwBatch` preserves selection order and
- * `runFwCheckIn` reports outcomes in it, so the result list reads like the
- * picker. De-duplicated here as well as there, because a primary that leaked
- * into `extras` would otherwise produce two entries for one child and the second
- * would read as a replay.
+ * STATIC, deliberately: the retired task route's redirect (Unit 8) derives the
+ * landing phase from nothing but the URL, so it must not load a program version
+ * (which would need the student row, a DB read, on a route whose only job is to
+ * bounce a stale SW-cached shell). The id scheme is the generated content's own
+ * (`N.criterion.task`, phases seq 1–5), stable across versions by construction.
  */
-export function fwBatchStudentIds(
-  primaryStudentId: string,
-  extras: readonly string[]
-): string[] {
-  return [...new Set([primaryStudentId, ...extras])];
+const FW_PHASE_BY_LEADING_NUMBER: Readonly<Record<string, PhaseKey>> = {
+  "1": "SELL",
+  "2": "BUILD",
+  "3": "VALIDATE",
+  "4": "GROW",
+  "5": "SCALE",
+};
+
+/** `"2.3.1"` → `"build"`; anything unparseable or out of range → null (the
+ *  redirect lands phase-less and the student page falls back to its first
+ *  phase — never an error on a URL only an old cached shell still holds). */
+export function fwPhaseParamForTaskId(taskId: string): string | null {
+  const parts = parseFwTaskId(taskId);
+  if (!parts) return null;
+  const key = FW_PHASE_BY_LEADING_NUMBER[String(parts[0])];
+  return key ? fwPhaseSlug(key) : null;
 }
+
+/**
+ * Resolve a raw `?phase=` value against the phases actually in this student's
+ * pinned program. Case-insensitive; anything unmatched — absent, stale,
+ * fabricated — falls back to the FIRST phase rather than erroring, because the
+ * param arrives from reloads, redirects off retired task URLs, and SW-cached
+ * shells, none of which may take the page down. `null` only for a program with
+ * no phases at all (unreachable for real content; total anyway).
+ */
+export function fwSelectedPhaseKey(
+  phases: readonly { key: PhaseKey }[],
+  param: string | null | undefined
+): PhaseKey | null {
+  if (phases.length === 0) return null;
+  const wanted = (param ?? "").trim().toLowerCase();
+  const hit = phases.find((p) => p.key.toLowerCase() === wanted);
+  return (hit ?? phases[0]).key;
+}
+
+/* The batch picker helpers (toggleFwBatchExtra, fwBatchStudentIds, FwBatchToggle)
+   were retired with the batch-capture affordance (ops-guide redesign Unit 9):
+   each tap is now one student with its own actionId. `FW_BATCH_MAX` survives in
+   fw-rules.ts -- the server-side cap is unchanged. */
+

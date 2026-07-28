@@ -35,10 +35,14 @@ converts, C1→C2→C3 — is one query.
 **Product decisions:**
 6. Should PENDING (bank-debit) deposits hold a seat in `seats_claimed()`?
 7. The staff-side waitlist move: nothing writes `waitlisted` yet.
-8. `applied-but-no-deposit` nurture sequence (deferred; needs an offer
-   timestamp in the engine).
-9. Migration-lock tripwire (a): lane-prefix-vs-holder test (needs the lanes
-   to agree on transfer mechanics; tripwire (b) — version uniqueness — ships).
+8. ~~`applied-but-no-deposit` nurture sequence~~ — DONE (follow-ups pass,
+   2026-07-28): the offer-nudge fires 3 days after the offer email, anchored
+   on child_reviews.offer_email_sent_at. KNOWN deviation documented in the
+   engine: the gate is family-wide (any child's deposit silences it).
+9. ~~Migration-lock tripwire (a)~~ — DONE (follow-ups pass): migrations
+   newer than the cutoff must match the holder named in MIGRATION-LOCK.md;
+   a transfer in the same PR passes by construction. Tripwire (b) remains
+   the collision guard.
 
 **External/launch preconditions:**
 10. ZDR agreement with the compose model provider (U10; `FUNNEL_COMPOSE_MODEL`
@@ -56,11 +60,18 @@ converts, C1→C2→C3 — is one query.
 17. U11 by-eye screenshot pass against the design handoff.
 
 **Carried operational items:**
-18. Alerting on `[funnel/capture] lead ingest THREW` and on cron failures
-    (the retention cron's refusal posture is only as good as someone seeing
-    a failed Monday run).
+18. ~~Alerting~~ — DONE (follow-ups pass): `notifyOps` mails
+    admissions@the120.school on retention-cron failure, the weekly retention
+    summary, the webhook's DOUBLE-PAID case, and the capture-ingest
+    reconcile path. Awaited on serverless request paths.
 19. One-click minted resume tokens for nurture deep links (currently /start,
     resume point derived server-side).
+
+## Follow-ups pass (2026-07-28, PR #94)
+
+Items 8, 9, and 18 closed after the build completed (one adversarial review
+pass; its stale-anchor, unawaited-serverless-send, and test-env-mail findings
+fixed before merge). R61 is now covered point by point.
 
 ## How it was built
 

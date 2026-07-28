@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { applyStripeEvent, type WebhookDeps } from "@/app/lib/funnel/deposit-core";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
+import { notifyOps } from "@/app/lib/ops-alert";
 
 /**
  * S3 + funnel U14: the Stripe webhook, rebuilt over the deps-injected core.
@@ -159,6 +160,18 @@ export async function POST(req: Request) {
       "c3_deposit",
       { childId: outcome.fulfilled.childId, parentId: outcome.fulfilled.parentId },
       { session: outcome.fulfilled.sessionId }
+    );
+  }
+  if (outcome.kind === "double_paid" && session) {
+    // A family paid twice for one seat: a refund is owed and only a human
+    // can issue it. The console.error alone was the whole detection channel
+    // (closing-note carried item 18). KNOWN: a Stripe redelivery of the
+    // conflicting session repeats this alert (its row never lands, so no
+    // replay_noop) — duplicates of a rare, refund-owed event are the safe
+    // direction; a tombstone row can dedupe it if the noise ever matters.
+    await notifyOps(
+      "DOUBLE PAID deposit — refund required",
+      `child=${session.metadata?.child_id ?? "?"}\nsession=${session.id}\nRefund the second payment in the Stripe dashboard.`
     );
   }
   // "double_paid" is acknowledged (retrying cannot fix it) after the loud log.

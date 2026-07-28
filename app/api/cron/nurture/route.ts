@@ -40,7 +40,7 @@ export async function GET(req: Request) {
 
   const db = supabaseAdmin();
 
-  const [familiesRes, childrenRes, depositsRes, sendsRes] = await Promise.all([
+  const [familiesRes, childrenRes, depositsRes, sendsRes, reviewsRes] = await Promise.all([
     db
       .from("families")
       .select(
@@ -50,21 +50,40 @@ export async function GET(req: Request) {
     db
       .from("children")
       .select(
-        "parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,applicant_state,workshop_ids,interests,project_pitch,status,updated_at"
+        "id,parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,applicant_state,workshop_ids,interests,project_pitch,status,updated_at"
       ),
     db.from("deposits").select("parent_id,status,refunded_at,created_at"),
     db.from("nurture_sends").select("family_id,sequence,step"),
+    db
+      .from("child_reviews")
+      .select("child_id,offer_email_sent_at")
+      .not("offer_email_sent_at", "is", null),
   ]);
 
   const firstError =
-    familiesRes.error ?? childrenRes.error ?? depositsRes.error ?? sendsRes.error;
+    familiesRes.error ??
+    childrenRes.error ??
+    depositsRes.error ??
+    sendsRes.error ??
+    reviewsRes.error;
   if (firstError) {
     console.error("[nurture] read failed:", firstError.message);
     return NextResponse.json({ error: "Read failed" }, { status: 500 });
   }
 
+  // R61's fourth point: the offer timestamp rides each child row.
+  const offerByChild = new Map(
+    ((reviewsRes.data ?? []) as { child_id: string; offer_email_sent_at: string }[]).map((r) => [
+      String(r.child_id),
+      r.offer_email_sent_at,
+    ])
+  );
   const childrenByParent = new Map<string, NurtureChildRow[]>();
-  for (const row of (childrenRes.data ?? []) as NurtureChildRow[]) {
+  for (const raw of (childrenRes.data ?? []) as (NurtureChildRow & { id: string })[]) {
+    const row: NurtureChildRow = {
+      ...raw,
+      offer_email_sent_at: offerByChild.get(String(raw.id)) ?? null,
+    };
     const list = childrenByParent.get(row.parent_id) ?? [];
     list.push(row);
     childrenByParent.set(row.parent_id, list);

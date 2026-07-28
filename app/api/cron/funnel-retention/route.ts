@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { notifyOps } from "@/app/lib/ops-alert";
 import {
   PURGED_MARKER,
   retentionPlan,
@@ -163,6 +164,12 @@ export async function GET(req: Request) {
       purged += 1;
     }
 
+    if (purged > 0 || noticed > 0 || plan.skipped.length > 0) {
+      await notifyOps(
+        "retention pass summary",
+        `purged (irreversible): ${purged}\nnoticed (grace started): ${noticed}\nskipped (bad timestamps, fix by hand): ${plan.skipped.length}`
+      );
+    }
     return NextResponse.json({
       ok: true,
       purged,
@@ -171,6 +178,12 @@ export async function GET(req: Request) {
     });
   } catch (err) {
     console.error("[funnel/retention]", err);
+    // A failed weekly run means the written schedule is silently unmet —
+    // a human hears about it (closing-note carried item 18).
+    await notifyOps(
+      "retention cron FAILED",
+      `The weekly retention pass threw and did nothing.\n\n${err instanceof Error ? err.message : String(err)}`
+    );
     return NextResponse.json({ error: "retention run failed" }, { status: 500 });
   }
 }

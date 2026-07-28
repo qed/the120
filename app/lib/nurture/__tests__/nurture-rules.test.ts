@@ -454,3 +454,67 @@ describe("R61: abandonment points (funnel U17)", () => {
     expect(rendered.text).toContain("<img src=x>Ada");
   });
 });
+
+describe("offer sequence (R61's fourth point: applied-but-no-deposit)", () => {
+  it("fires offer-nudge 3 days after the offer email, for the family without a paid deposit", () => {
+    const due = run({
+      families: [family()],
+      children: [child({ status: "offered", offer_email_sent_at: iso(-3.5), first_name: "Ada" })],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ sequence: "offer", step: "o3", template: "offer-nudge" });
+    expect(due[0].childFirstName).toBe("Ada");
+  });
+
+  it("a paid deposit silences it; a prior send never repeats; before day 3 nothing fires", () => {
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
+        deposits: [deposit({ created_at: iso(-1) })],
+      }).filter((s) => s.sequence === "offer")
+    ).toHaveLength(0);
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-3.5) })],
+        priorSends: [{ family_id: "fam-1", sequence: "offer", step: "o3" }],
+      })
+    ).toHaveLength(0);
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-1) })],
+      })
+    ).toHaveLength(0);
+  });
+
+  it("anchors on the EARLIEST offer among siblings and goes stale past the catch-up window", () => {
+    const due = run({
+      families: [family()],
+      children: [
+        child({ status: "offered", offer_email_sent_at: iso(-4), first_name: "First" }),
+        child({ status: "offered", offer_email_sent_at: iso(-3.2), first_name: "Second" }),
+      ],
+    });
+    expect(due).toHaveLength(1);
+    expect(due[0].childFirstName).toBe("First");
+    expect(
+      run({
+        families: [family()],
+        children: [child({ status: "offered", offer_email_sent_at: iso(-30) })],
+      })
+    ).toHaveLength(0);
+  });
+
+  it("the offer-nudge html escapes the name and carries the dashboard CTA", () => {
+    const rendered = renderNurtureEmail("offer-nudge", {
+      firstName: "Dana",
+      childFirstName: "<b>Ada</b>",
+    });
+    expect(rendered.html).toContain("&lt;b&gt;Ada&lt;/b&gt;");
+    expect(rendered.html).not.toContain("<b>Ada</b>");
+    expect(rendered.text).toContain("/dashboard");
+    expect(rendered.subject).toContain("seat is being held");
+  });
+});

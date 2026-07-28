@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { loadMiniAppChild } from "@/app/lib/funnel/miniapp-core";
+import { loadActiveProjectViewCore } from "@/app/lib/funnel/compose-core";
 import { MiniAppShell } from "./MiniAppShell";
 
 /**
@@ -33,10 +34,17 @@ export default async function MiniAppPage({
 
   const rawHint = Array.isArray(query.g) ? query.g[0] : query.g;
 
+  // The active draft rides in server-side so compose/tasks/reveal survive a
+  // refresh; a read failure degrades to "no draft yet" (the shell re-loads
+  // through the compose action on demand).
+  const projectLoad = await loadActiveProjectViewCore(childId);
+  const initialProject = projectLoad.kind === "ok" ? projectLoad.view : null;
+
   return (
     <MiniAppShell
       child={loaded.child}
       hintSlug={rawHint ?? null}
+      initialProject={initialProject}
     />
   );
 }

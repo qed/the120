@@ -308,6 +308,11 @@ const composeInputSchema = z.object({
 export type ProjectView = {
   id: string;
   project: ComposedProject;
+  /** The group the PROJECT was born behind. The reveal renders THIS, not the
+   *  child's currently-confirmed door — a door switch racing a failed state
+   *  advance could otherwise label group X's project as group Y's (the U11
+   *  adversarial finding). The card must be self-consistent. */
+  groupSlug: string;
   regenerationsLeft: number;
 };
 
@@ -336,9 +341,15 @@ function moderatedCleanAnswers(
   return { ok: true, clean: clean as CleanAnswers };
 }
 
-const view = (id: string, project: ComposedProject, count: number): ProjectView => ({
+const view = (
+  id: string,
+  project: ComposedProject,
+  count: number,
+  groupSlug: string
+): ProjectView => ({
   id,
   project,
+  groupSlug,
   regenerationsLeft: Math.max(0, 2 - count),
 });
 
@@ -428,7 +439,7 @@ export async function composeProjectCore(
       await session.advanceToProjectCreated(childId);
       return {
         kind: "exists",
-        view: view(existing.id, rowToProject(existing), existing.aiRegenerationCount),
+        view: view(existing.id, rowToProject(existing), existing.aiRegenerationCount, existing.groupSlug),
       };
     }
 
@@ -466,7 +477,7 @@ export async function composeProjectCore(
       await session.advanceToProjectCreated(childId);
       return {
         kind: "exists",
-        view: view(raced.id, rowToProject(raced), raced.aiRegenerationCount),
+        view: view(raced.id, rowToProject(raced), raced.aiRegenerationCount, raced.groupSlug),
       };
     }
 
@@ -484,19 +495,50 @@ export async function composeProjectCore(
     if (run.outcome === "accept") {
       const saved = await session.saveDraft(inserted.id, run.project, deps.modelId());
       if (saved) {
-        return { kind: "composed", view: view(inserted.id, run.project, 0), degraded: null };
+        return { kind: "composed", view: view(inserted.id, run.project, 0, group), degraded: null };
       }
       // The model draft could not be persisted; the STORED row is the
       // fallback, and the view must say what the row says.
-      return { kind: "composed", view: view(inserted.id, fallback, 0), degraded: "error" };
+      return { kind: "composed", view: view(inserted.id, fallback, 0, group), degraded: "error" };
     }
     return {
       kind: "composed",
-      view: view(inserted.id, fallback, 0),
+      view: view(inserted.id, fallback, 0, group),
       degraded: run.reason,
     };
   } catch (err) {
     console.error("[funnel/compose] compose exception:", err);
+    return { kind: "failed" };
+  }
+}
+
+/* ─────────────────────────────── read (for the page) ─────────────────────────────── */
+
+export type ActiveProjectResult =
+  | { kind: "ok"; view: ProjectView | null }
+  | { kind: "unauthenticated" }
+  | { kind: "failed" };
+
+/**
+ * The page's server-side read: the child's active draft, if any, so the
+ * compose/tasks/reveal steps survive a refresh without a client round-trip.
+ * RLS scopes it; a child the session does not own reads as no project.
+ */
+export async function loadActiveProjectViewCore(
+  childId: string,
+  deps: ComposeDeps = realDeps()
+): Promise<ActiveProjectResult> {
+  try {
+    const session = await deps.session();
+    if (!session.userId) return { kind: "unauthenticated" };
+    const row = await session.loadActiveProject(childId);
+    if (row === "error") return { kind: "failed" };
+    return {
+      kind: "ok",
+      view: row ? view(row.id, rowToProject(row), row.aiRegenerationCount, row.groupSlug) : null,
+    };
+  } catch (err) {
+    console.error("[funnel/compose] project read exception:", err);
     return { kind: "failed" };
   }
 }
@@ -582,7 +624,7 @@ export async function regenerateProjectCore(
 
     return {
       kind: "regenerated",
-      view: view(project.id, draft, project.aiRegenerationCount + 1),
+      view: view(project.id, draft, project.aiRegenerationCount + 1, project.groupSlug),
       degraded: run.outcome === "fallback" ? run.reason : null,
     };
   } catch (err) {

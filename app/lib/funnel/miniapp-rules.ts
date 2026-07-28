@@ -74,6 +74,8 @@ export const BUILT_STEPS: readonly MiniAppStep[] = [
   "templates",
   "quiz",
   "compose",
+  "tasks",
+  "reveal",
 ];
 
 /* ─────────────────────────────── the doors (R34–R36) ─────────────────────────────── */

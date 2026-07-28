@@ -72,12 +72,11 @@ export function StartFlow({ source }: { source?: string }) {
     startTransition(async () => {
       const result = await captureAction({ ...fields, source });
       if (result.kind === "captured") {
-        // The session is live. Add a Child (`/start/children`) is U7's, and
-        // does not exist yet — so this lands on the dashboard, which is real,
-        // theirs, and holds the existing dossier wizard. Decision 2's whole
-        // point is that the pre-existing path is behind them, not deleted.
-        // U7 changes this one line.
-        window.location.assign("/dashboard");
+        // The session is live; Add a Child is next (U7). A full navigation
+        // rather than a router push: the session cookie was just set by the
+        // Server Action, and the destination is a server-rendered route that
+        // must read it.
+        window.location.assign("/start/children");
         return;
       }
       if (result.kind === "invalid") {

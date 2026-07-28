@@ -737,7 +737,41 @@ state, verified against production data.
 
 ---
 
-- [ ] **Unit 7: Add a Child**
+- [x] **Unit 7: Add a Child** *(landed 2026-07-28)*
+
+  **What landed:** `child-rules.ts` (pure: `gradeVerdict` — 3–5 Trail / 6–12 HQ
+  with band and skin kept as separate fields so a future divergence stays
+  expressible; out-of-range REFUSED with program-fact copy, never clamped;
+  `resolveActiveChild` with the same precedence and tie-break as
+  `resolveResumeChild` so the bar and the resume link cannot name different
+  children; `activeChildAfterAdd`; `seatsCopy`). `children-core.ts` +
+  `/start/children` — and Decision 2's payoff made literal: **no
+  `supabaseAdmin` import at all** (a test asserts the absence); every
+  read/write runs under the family's own session and RLS authorizes it.
+  Children insert at `status: "draft"` (the seeding trigger's early-return —
+  door switching cannot flood the review queue) on `applicant_state: "added"`.
+  The **explicit active-child selector the repo has never had**, durable via
+  `useSyncExternalStore` over localStorage (cross-tab coherent; private-mode
+  degrades to per-load, never crashes). **`/start` is now session-aware**: a
+  signed-in visitor is routed by `resolveReentry` instead of being offered
+  capture — closing U6's carried session-swap hole. Capture's redirect now
+  points at `/start/children` for real.
+
+  **Review (2 agents) fixed:** both independently caught the caller passing the
+  RAW stored selection where the RESOLVED active id was meant — on a fresh
+  device, adding a sibling would hand the new child the active slot and swing
+  the progress bar away from a mid-application child (R31's exact forbidden
+  outcome; the pure function's tests could not see it). Also `gradeVerdict`'s
+  `parseInt` accepted `"7abc"` as 7 and `"4.5"` as 4 — silent coercion, worse
+  than clamping; now strict-shape validation. Both compounded
+  (`raw-vs-resolved-*` in docs/solutions). Accepted + documented: the
+  child-cap's read-then-insert TOCTOU (soft cap by design) and the SSR
+  first-paint showing furthest-progressed before the stored selection hydrates.
+  Suite **120 files / 3184 tests**; `tsc`, build, lint clean.
+
+  **Decisions taken with Peter (2026-07-28):** U9 moderation = in-repo rules
+  module; U10 = provider-agnostic, model string from env, ZDR deferred; U13's
+  review-wait and waitlist screens = drafted by the build, revised by Peter.
 
 **Goal:** One or more children under one family, each with a band and a skin.
 

@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { StartFlow } from "./StartFlow";
+import { supabaseServer } from "@/app/lib/supabase/server";
+import { listChildrenCore } from "@/app/lib/funnel/children-core";
+import { resolveReentry, screenRoute } from "@/app/lib/funnel/session-rules";
+import { isApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
 
 /**
  * `/start` — the funnel spine (funnel U6; R28–R30a, R32).
@@ -29,8 +35,43 @@ export default async function StartPage({
   const src = params.src;
 
   // `?g=` is read here too — this is the only route that may read it — but no
-  // consumer exists until U7 pre-selects the door, so it is not threaded
+  // consumer exists until U8 pre-selects the door, so it is not threaded
   // further yet.
+
+  // ── A signed-in visitor never sees capture (U7; R10's "signed-in visitors
+  // see Dashboard instead", and the hole U6's review found) ──
+  // StartCta is session-unaware by design, so a family who is already signed
+  // in can reach this route from any marketing page. Without this, they would
+  // be offered the capture form — and typing a DIFFERENT email would provision
+  // a second account and silently swap the session in their own browser.
+  // The re-entry matrix already knows where they belong; ask it.
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    const listed = await listChildrenCore();
+    const children =
+      listed.kind === "ok"
+        ? listed.children.map((c) => ({
+            id: c.id,
+            applicantState: isApplicantState(c.applicantState) ? c.applicantState : null,
+            createdAt: c.createdAt,
+          }))
+        : [];
+    const dest = resolveReentry({
+      hasSession: true,
+      link: "none",
+      hasPassword: !isFunnelProvisioned(user.app_metadata),
+      enrolled: children.some(
+        (c) => c.applicantState === "deposited" || c.applicantState === "enrolled"
+      ),
+      children,
+    });
+    // redirect() throws NEXT_REDIRECT by design and must stay OUTSIDE a try —
+    // a caught one reports failure on success, which this repo has shipped once.
+    redirect(screenRoute(dest) ?? "/dashboard");
+  }
 
   return (
     <StartFlow

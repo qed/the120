@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
+import { requestParentPasswordResetAction } from "@/app/lib/auth/actions/reset";
 import JoinButton from "@/app/components/JoinButton";
 import Wordmark from "@/app/components/Wordmark";
 
@@ -37,12 +38,11 @@ export default function SignIn() {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    // Same copy either way — no account enumeration.
-    await supabaseBrowser()
-      .auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset`,
-      })
-      .catch(() => {});
+    // W12: server-side now, so the no-auth-mail guard is actually in the
+    // path — this form used to call Supabase straight from the browser,
+    // where nothing could stop a reset addressed to a student. Same copy
+    // either way: no account enumeration.
+    await requestParentPasswordResetAction(email).catch(() => {});
     setResetSent(true);
     setBusy(false);
   };

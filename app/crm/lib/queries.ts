@@ -1065,9 +1065,13 @@ const DOT = {
   nurture: "#7A5AF8",
 } as const;
 
-/** Human label for an automated nurture send, from its sequence + step. */
-function nurtureLabel(sequence: string, step: string): string {
-  const key = `${sequence}/${step}`;
+/** Human label for an automated nurture send, from its sequence + step.
+ *  W8: the offer nudge's step carries the child id (`o3:<uuid>`) so the
+ *  send claim is per-child — the id must be stripped here, or the raw
+ *  identifier lands in a staff-facing timeline row. */
+export function nurtureLabel(sequence: string, step: string): string {
+  const baseStep = step.split(":")[0];
+  const key = `${sequence}/${baseStep}`;
   const LABELS: Record<string, string> = {
     "account/d2": "Automated · Dossier nudge",
     "account/d5": "Automated · Founder story",
@@ -1076,8 +1080,9 @@ function nurtureLabel(sequence: string, step: string): string {
     "deposit/d3": "Automated · Intensive details",
     "deposit/d10": "Automated · T+10 referral ask",
     "stall/nudge-1": "Automated · Dossier stall nudge",
+    "offer/o3": "Automated · Seat reminder",
   };
-  return LABELS[key] ?? `Automated · ${sequence} ${step}`;
+  return LABELS[key] ?? `Automated · ${sequence} ${baseStep}`;
 }
 
 function stageLabel(value: string | null): string {

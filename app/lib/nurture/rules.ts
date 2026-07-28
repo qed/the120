@@ -367,6 +367,10 @@ export function computeDueSends(input: {
     // has no child column and the offer stamp it would have to be
     // reconstructed from is rewritten by the resend CAS, so there is no
     // sound way to attribute one. Never double-nudging beats guessing.
+    // Measured before shipping W8: production held ZERO `offer|o3` rows
+    // (the offer sequence had never sent), so this branch silences nobody
+    // today — it exists so a row written between measurement and deploy
+    // cannot cause a double nudge.
     const legacyFamilyNudge = sent.has(`${family.id}|offer|o3`);
     if (family.parent_id && !legacyFamilyNudge) {
       // Earliest offer WHOSE WINDOW IS STILL OPEN — a stale June offer that

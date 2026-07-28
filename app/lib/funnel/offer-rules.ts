@@ -9,10 +9,11 @@
  *    plan's over-offer trap, surfaced to staff at the point of offer);
  *  - the family-side routing after submission (review / dashboard /
  *    waitlist, F7);
- *  - the DRAFTED copy for the review-wait and waitlist screens. Neither
- *    screen exists in the design handoff — Peter revises. Every factual
- *    claim in the copy is registered in DRAFT_CLAIMS_FOR_PETER and pinned
- *    by test, so a claim cannot ship unflagged.
+ *  - the copy for the review-wait and waitlist screens, CONFIRMED as
+ *    written by Peter 2026-07-28 (neither screen exists in the design
+ *    handoff — the build drafted them, the decision batch approved them).
+ *    Every factual claim is registered in DRAFT_CLAIMS_FOR_PETER and
+ *    pinned by test, so a claim cannot ship unflagged.
  */
 
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_TOTAL } from "@/app/lib/site";

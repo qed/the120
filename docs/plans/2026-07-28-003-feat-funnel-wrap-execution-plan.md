@@ -683,6 +683,13 @@ legs, all verdict pairs) is the test surface, not just each primitive.
   and staff/`.fw` bases never re-minted.
 - Edge case: underivable name (non-Latin, folds to empty) → `exception`
   state, ops alert, webhook still 200s, arrival shows still-provisioning.
+- Edge case (pre-bump cohort): a fulfilled deposit whose acceptance
+  predates CONSENT_MIN_POLICY_VERSION parks at `pending` with a
+  staff-visible consent reason (never a silent failure); before the gate
+  deploys, run the query counting affected families and decide the
+  re-consent touch (dashboard banner rides the existing acceptance flow).
+  Comparison uses `policyVersionAtLeast` (structural, shipped in Unit 1)
+  — never lexicographic.
 - Error path: Workspace insert fails → state `identity_only`, compensation
   on next run; no dedupe stamp written (effect-first lesson).
 - Error path: 23505 on the local-part claim → retry with next candidate,

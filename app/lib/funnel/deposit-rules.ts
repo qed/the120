@@ -54,8 +54,29 @@ export const REFUND_POLICY = {
 } as const;
 
 /** The first policy version whose acceptance includes parental consent to
- *  provision the child's school account (U15 gates minting on this). */
+ *  provision the child's school account (U15 gates minting on this). A
+ *  fixed HISTORICAL ANCHOR — it does not move on later text bumps unless
+ *  the consent clause itself changes. */
 export const CONSENT_MIN_POLICY_VERSION = "2026-07-28.2";
+
+/**
+ * Structural "at-or-after" for policy versions ("YYYY-MM-DD.N"). NEVER
+ * compare these lexicographically: "2026-07-28.10" < "2026-07-28.2" as a
+ * string, but .10 is the LATER revision (U1 review). Malformed versions
+ * fail closed (false) — an unparsable acceptance is never treated as
+ * consenting.
+ */
+export function policyVersionAtLeast(version: string | null | undefined, min: string): boolean {
+  const parse = (v: string): { date: string; n: number } | null => {
+    const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(v);
+    return m ? { date: m[1], n: Number(m[2]) } : null;
+  };
+  const a = version ? parse(version) : null;
+  const b = parse(min);
+  if (!a || !b) return false;
+  if (a.date !== b.date) return a.date > b.date;
+  return a.n >= b.n;
+}
 
 /** Factual claims in the policy, registered (U13 pattern). Confirmed as
  *  written 2026-07-28 (Peter) except where flagged. */
@@ -164,8 +185,9 @@ export function nextStepsReachable(input: {
   return input.status === "offered" || input.status === "member";
 }
 
-/** ⚠ DRAFT copy, Peter revises. Swipe 2's goal input persists to the
- *  children row (family_goal) — editable, never required. */
+/** CONFIRMED as written 2026-07-28 (Peter, decision batch). Swipe 2's goal
+ *  input persists to the children row (family_goal) — editable, never
+ *  required. */
 export const NEXT_STEPS = {
   swipes: [
     {

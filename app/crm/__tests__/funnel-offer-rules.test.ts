@@ -213,7 +213,7 @@ describe("the three renderings carry the same deposit target", () => {
   });
 });
 
-describe("the drafted screens (Peter revises)", () => {
+describe("the confirmed screens (2026-07-28 decision batch)", () => {
   it("the review screen says what happens next AND WHEN", () => {
     const copy = draftedCopy().join(" ");
     expect(copy).toMatch(/within .* days/);

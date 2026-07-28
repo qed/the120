@@ -5,7 +5,7 @@ import { supabaseServer } from "@/app/lib/supabase/server";
 import { RESERVE_GATE_MESSAGE, canReserveSeatForChild, hasPaidDeposit } from "@/app/dashboard/data";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { getSeatsRemainingStrict } from "@/app/lib/seats";
-import { resolveOrigin } from "@/app/lib/funnel/deposit-rules";
+import { REFUND_POLICY, resolveOrigin } from "@/app/lib/funnel/deposit-rules";
 import { recordCheckoutAttempt } from "@/app/lib/funnel/deposit-core";
 
 /**
@@ -30,9 +30,10 @@ import { recordCheckoutAttempt } from "@/app/lib/funnel/deposit-core";
  */
 export async function POST(req: Request) {
   try {
-    const { childId, policyAccepted } = (await req.json()) as {
+    const { childId, policyAccepted, policyVersion } = (await req.json()) as {
       childId?: string;
       policyAccepted?: boolean;
+      policyVersion?: string;
     };
     if (!childId) return NextResponse.json({ error: "childId required" }, { status: 400 });
     // R51a: the full policy renders inline above an UNTICKED checkbox; the
@@ -42,6 +43,21 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Please read and accept the refund policy first." },
         { status: 400 }
+      );
+    }
+    // The acceptance record stamps the SERVER's current version — so the
+    // client must prove it rendered that same version. A stale tab (or a
+    // pre-bump bundle, which sends no version at all) is refused and told
+    // to refresh, instead of being silently recorded as consenting to text
+    // it never displayed (the record is dispute evidence AND the U15
+    // parental-consent artifact).
+    if (policyVersion !== REFUND_POLICY.version) {
+      return NextResponse.json(
+        {
+          error: "The policy text was updated. Refresh the page to review the current version.",
+          stalePolicy: true,
+        },
+        { status: 409 }
       );
     }
 

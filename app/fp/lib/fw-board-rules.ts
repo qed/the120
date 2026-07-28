@@ -810,3 +810,73 @@ export function fwBoardConnectionState({
 
   return { phase: outcome.hasFrame ? "catching_up" : "connecting", consecutive404 };
 }
+
+/* ═══════════════════════════════════════════════ the board CELL presentation ══ */
+/*
+ * B7 (FP bug work order 2026-07-28; check 3.18.5 / WCAG 1.4.1). A grid cell's
+ * state must be readable without colour — a colour-blind parent at the back of
+ * the room sees green and amber as the same warm grey — so each state gets a
+ * SHAPE channel too: verified is the only SOLID square, not-yet is the only
+ * DASHED outline, untouched is a hairline ghost. The mapping lives here, not in
+ * `FwBoard.tsx`, so the treatment is a tested decision table and the renderer
+ * stays a lookup.
+ */
+
+/** What one grid cell renders as: its complete class string and the
+ *  human-readable state word its accessible name carries. */
+export type FwBoardCellPresentation = {
+  className: string;
+  stateLabel: string;
+};
+
+/**
+ * The three cell treatments, keyed by state (`never_attempted` is the absent
+ * cell — see `FwBoardCellState`).
+ *
+ * Every `className` is a COMPLETE class-string literal, sizing included — the
+ * skin-token rule (`skin-tokens.ts` CLASS_TABLE): Tailwind v4's scanner reads
+ * this source file and emits exactly the utilities spelled out here, so a
+ * concatenated or interpolated class would render as nothing at all. The
+ * verbosity is load-bearing; do not "simplify" by factoring out the shared
+ * sizing prefix.
+ *
+ * The non-colour channel, at 10px on a projector:
+ *   - **verified** — solid fill + solid border, the only filled square.
+ *   - **not_yet** — empty fill + 2px DASHED border, the only broken outline.
+ *   - **untouched** — empty fill + hairline neutral border, a ghost of a cell.
+ */
+export const FW_BOARD_CELL_PRESENTATION: Record<
+  FwBoardCellState | "never_attempted",
+  FwBoardCellPresentation
+> = {
+  verified: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border border-solid border-verified bg-verified",
+    stateLabel: "verified",
+  },
+  not_yet: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border-2 border-dashed border-not-yet bg-transparent",
+    stateLabel: "not yet",
+  },
+  never_attempted: {
+    className: "inline-block h-2.5 w-2.5 rounded-[2px] border border-solid border-hq-border bg-transparent",
+    stateLabel: "untouched",
+  },
+};
+
+/** The table lookup with the grid's real input shape: an undecided task is the
+ *  ABSENCE of a cell (`row.cells[taskId]` is `undefined`), which is
+ *  `never_attempted` by construction. */
+export function fwBoardCellPresentation(
+  state: FwBoardCellState | undefined
+): FwBoardCellPresentation {
+  return FW_BOARD_CELL_PRESENTATION[state ?? "never_attempted"];
+}
+
+/**
+ * A cell's programmatic name — "1.2.4 — verified" — used for BOTH `title` and
+ * `aria-label` so sighted-hover and screen-reader users hear the same thing.
+ * One formatter, so the two attributes cannot drift apart.
+ */
+export function fwBoardCellLabel(taskId: string, state: FwBoardCellState | undefined): string {
+  return `${taskId} — ${fwBoardCellPresentation(state).stateLabel}`;
+}

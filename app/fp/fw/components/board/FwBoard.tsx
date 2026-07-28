@@ -6,6 +6,8 @@ import type { FwBoardColumnPhase, FwBoardShell } from "@/app/fp/lib/fw-board-loa
 import {
   FW_BOARD_CONNECTION_INITIAL,
   FW_BOARD_DEAD_LINK_MESSAGE,
+  fwBoardCellLabel,
+  fwBoardCellPresentation,
   fwBoardConnectionState,
   type FwBoardCellState,
   type FwBoardConnectionPhase,
@@ -426,14 +428,11 @@ function Rollups({ rollups }: { rollups: FwBoardRollups }) {
 
 /* ── grid ───────────────────────────────────────────────────────────────── */
 
-/** Cell colour by state — COMPLETE class-string literals only (the skin-token
- *  rule: Tailwind's scanner reads these spelled out; a concatenated class renders
- *  as no colour). `never_attempted` is the absence of a cell. */
-function cellClass(state: FwBoardCellState | undefined): string {
-  if (state === "verified") return "bg-verified";
-  if (state === "not_yet") return "bg-not-yet";
-  return "bg-hq-sunken";
-}
+/** Cell treatment by state — the pure table in fw-board-rules.ts (B7 / 3.18.5).
+ *  Each entry is one COMPLETE class-string literal, sizing included (the
+ *  skin-token rule: Tailwind's scanner reads those spelled out; a concatenated
+ *  class renders as no colour), plus the state word the accessible name carries.
+ *  `never_attempted` is the absence of a cell. */
 
 function Grid({ rows, columns }: { rows: FwBoardGridRow[]; columns: FwBoardColumnPhase[] }) {
   if (rows.length === 0) {
@@ -492,13 +491,25 @@ const GridRow = memo(
         {columns.map((phase) => (
           <td key={phase.phase} className="px-2 py-1.5">
             <div className="flex flex-wrap gap-0.5">
-              {phase.taskIds.map((taskId) => (
-                <span
-                  key={taskId}
-                  title={taskId}
-                  className={`inline-block h-2.5 w-2.5 rounded-[2px] ${cellClass(row.cells[taskId])}`}
-                />
-              ))}
+              {phase.taskIds.map((taskId) => {
+                // Derived AT RENDER, never stored on the row: the memo
+                // comparator below stays a value comparison over cell STATES,
+                // and the label/class lookups only run on rows that actually
+                // re-render.
+                const label = fwBoardCellLabel(taskId, row.cells[taskId]);
+                return (
+                  <span
+                    key={taskId}
+                    title={label}
+                    // `aria-label` on a bare span is ignored by most AT
+                    // mappings; `role="img"` is what makes the name land
+                    // (B7 / 3.18.5).
+                    role="img"
+                    aria-label={label}
+                    className={fwBoardCellPresentation(row.cells[taskId]).className}
+                  />
+                );
+              })}
             </div>
           </td>
         ))}

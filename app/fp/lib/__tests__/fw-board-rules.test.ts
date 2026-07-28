@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
+  FW_BOARD_CELL_PRESENTATION,
   FW_BOARD_CONNECTION_INITIAL,
   FW_BOARD_DEAD_LINK_MESSAGE,
   FW_BOARD_STALE_AFTER_MS,
   FW_BOARD_TICKER_LIMIT,
   FW_BOARD_TOKEN_GRACE_MS,
   FW_FIRST_DOLLAR_FRESHNESS_MS,
+  fwBoardCellLabel,
+  fwBoardCellPresentation,
   fwBoardConnectionState,
   fwBoardDisplayNames,
   fwBoardTokenExpiry,
@@ -837,5 +843,62 @@ describe("fwBoardConnectionState — the dead-link machine (RC-2)", () => {
     // whatever its exact phrasing becomes.
     expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/staff/i);
     expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/link/i);
+  });
+});
+
+describe("fwBoardCellPresentation — the non-colour cell channel (B7 / 3.18.5)", () => {
+  const states = ["verified", "not_yet", "never_attempted"] as const;
+
+  it("gives the three states three DISTINCT complete class strings", () => {
+    const classes = states.map((s) => FW_BOARD_CELL_PRESENTATION[s].className);
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  it("gives the three states three distinct human-readable state words", () => {
+    const labels = states.map((s) => FW_BOARD_CELL_PRESENTATION[s].stateLabel);
+    expect(new Set(labels).size).toBe(3);
+    // Human words, not machine tokens: no underscores, nothing empty.
+    for (const label of labels) expect(label).toMatch(/^[a-z][a-z ]*[a-z]$/);
+  });
+
+  it("distinguishes by SHAPE, not just colour: only verified is filled, only not_yet is dashed", () => {
+    // The channel WCAG 1.4.1 asks for. Structural, not exact-spelling: the
+    // solid square must be unique, and the broken outline must be unique.
+    const filled = states.filter(
+      (s) => !FW_BOARD_CELL_PRESENTATION[s].className.includes("bg-transparent")
+    );
+    expect(filled).toEqual(["verified"]);
+    const dashed = states.filter((s) =>
+      FW_BOARD_CELL_PRESENTATION[s].className.includes("border-dashed")
+    );
+    expect(dashed).toEqual(["not_yet"]);
+  });
+
+  it("maps the grid's real inputs: a decided state to its row, undefined to never_attempted", () => {
+    expect(fwBoardCellPresentation("verified")).toBe(FW_BOARD_CELL_PRESENTATION.verified);
+    expect(fwBoardCellPresentation("not_yet")).toBe(FW_BOARD_CELL_PRESENTATION.not_yet);
+    expect(fwBoardCellPresentation(undefined)).toBe(FW_BOARD_CELL_PRESENTATION.never_attempted);
+  });
+
+  it("labels a cell as 'taskId — state' for title AND aria-label alike", () => {
+    expect(fwBoardCellLabel("1.2.4", "verified")).toBe("1.2.4 — verified");
+    expect(fwBoardCellLabel("2.1.3", "not_yet")).toBe("2.1.3 — not yet");
+    expect(fwBoardCellLabel("3.1.1", undefined)).toBe("3.1.1 — untouched");
+  });
+
+  it("builds no class string by interpolation — every mapping value sits verbatim in the source", () => {
+    // The Tailwind v4 scanner constraint (skin-tokens.ts CLASS_TABLE): a class
+    // assembled at runtime is one the scanner never saw, and it renders as no
+    // styling at all. Mutation check: each table value must appear in the
+    // module source as one complete literal, and none may carry a template hole.
+    const source = readFileSync(
+      fileURLToPath(new URL("../fw-board-rules.ts", import.meta.url)),
+      "utf8"
+    );
+    for (const s of states) {
+      const { className } = FW_BOARD_CELL_PRESENTATION[s];
+      expect(className).not.toContain("${");
+      expect(source).toContain(`"${className}"`);
+    }
   });
 });

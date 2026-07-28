@@ -356,6 +356,107 @@ export function fwDuplicateNameStudentIds(
   return dupes;
 }
 
+/* ═══════════════════════════════════════════ the student sidebar (redesign R18) ══ */
+
+/** The minimal shape the sidebar naming needs — generic below, so the roster's
+ *  richer entries (resume chip included) travel through labeling un-narrowed,
+ *  the same posture as `searchFwRoster`'s `Indexed<T>`. */
+export type FwSidebarStudent = {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+};
+
+export type FwSidebarName<T extends FwSidebarStudent> = {
+  student: T;
+  /** "Maya R." — or a longer surname prefix / the full surname when an initial
+   *  cannot tell two rows apart (see `fwSidebarNames`). */
+  label: string;
+};
+
+/**
+ * The sidebar's display names (ops-guide redesign R18): "First L.", sorted
+ * alphabetically, with a DETERMINISTIC collision rule.
+ *
+ * WHY NOT FULL NAMES: the sidebar is a ~236px rail a guide scans mid-loop;
+ * full names truncate unpredictably at that width, and a truncated surname is
+ * a wrong-child hazard. "First L." is scannable — but two students who'd both
+ * render "Maya R." need MORE surname, not a coin flip, so:
+ *
+ *   - Collision = same folded first name AND same folded surname initial
+ *     (folded via `normalizeFwSearchTerm`, the same case/accent leveling the
+ *     duplicate-name chip uses — "maya rodriguez" and "Maya Rodríguez" are one
+ *     row pair to a guide's eye and must collide here too).
+ *   - Extend the surname prefix one character at a time until every folded
+ *     prefix in the group is distinct: "Maya Ro." / "Maya Ru.".
+ *   - FALL BACK TO THE FULL LAST NAME (no period) when no strictly-shorter
+ *     prefix can distinguish the group — one surname a prefix of another
+ *     ("Ro" / "Rodriguez"), or surnames identical outright. Identical full
+ *     names stay identical; that is the roster's G22 case and the band chip,
+ *     not the label, is its disambiguator.
+ *
+ * Ordering is the fold-then-localeCompare sort the roster search already uses
+ * (first, then last, then studentId), so the sidebar and an empty-query search
+ * agree about what "alphabetical" means. Pure and total: no input throws.
+ */
+export function fwSidebarNames<T extends FwSidebarStudent>(
+  students: readonly T[]
+): FwSidebarName<T>[] {
+  const rows = students.map((student) => {
+    const first = student.firstName.trim();
+    const last = student.lastName.trim();
+    return {
+      student,
+      first,
+      last,
+      foldFirst: normalizeFwSearchTerm(first),
+      foldLast: normalizeFwSearchTerm(last),
+    };
+  });
+
+  type Row = (typeof rows)[number];
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    // NUL (escaped) as the joiner: it cannot appear in folded output, so a first name
+    // ending in the next row's initial can never merge two distinct groups.
+    const key = `${row.foldFirst}\u0000${row.foldLast.charAt(0)}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const labelOf = (row: Row, group: readonly Row[]): string => {
+    if (row.last.length === 0) return row.first;
+    if (group.length === 1) return `${row.first} ${row.last.charAt(0)}.`;
+
+    // Distinctness is judged on the FOLDED rendered prefix — the thing a guide
+    // reading at arm's length actually distinguishes — and the prefix must be
+    // STRICTLY shorter than every surname in the group, so "Ro." can never be
+    // both an abbreviation of one row and the whole of another.
+    const minLen = Math.min(...group.map((g) => g.last.length));
+    for (let k = 1; k < minLen; k += 1) {
+      const folded = group.map((g) => normalizeFwSearchTerm(g.last.slice(0, k)));
+      if (new Set(folded).size === group.length) {
+        return `${row.first} ${row.last.slice(0, k)}.`;
+      }
+    }
+    return `${row.first} ${row.last}`;
+  };
+
+  return rows
+    .map((row) => ({
+      row,
+      label: labelOf(row, groups.get(`${row.foldFirst}\u0000${row.foldLast.charAt(0)}`)!),
+    }))
+    .sort(
+      (a, b) =>
+        a.row.foldFirst.localeCompare(b.row.foldFirst) ||
+        a.row.foldLast.localeCompare(b.row.foldLast) ||
+        a.row.student.studentId.localeCompare(b.row.student.studentId)
+    )
+    .map(({ row, label }) => ({ student: row.student, label }));
+}
+
 /* ═════════════════════════════════════════════════════ unfinished quick-creates ══ */
 
 /**

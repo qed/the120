@@ -27,7 +27,9 @@ import { listFwCohortsForActor } from "@/app/fp/lib/fw-guide-core";
  * THE SWITCHER IS HIDDEN FOR SINGLE-COHORT SESSIONS (Decision 3). Switching is a
  * plain link back to `/fp/fw`, which resets the drill-down by construction —
  * the roster, the tree, and the task view are all URL state under the cohort, so
- * there is no stale selection left to carry into the wrong weekend.
+ * there is no stale selection left to carry into the wrong weekend. The weekend
+ * NAME in the header is that same link too (redesign R25) — Unit 11 retires the
+ * explicit Switch control once this replacement path has shipped.
  *
  * SIGN-OUT MOVED UP (Staff Front Door Unit 4, R16). `FwSignOutButton` rendered here
  * and is retired: R16 makes the drain gate a property of the DEVICE AND SESSION
@@ -79,13 +81,22 @@ export default async function FwCohortLayout({
       <header className="sticky top-[var(--staff-bar-h,0px)] z-10 flex items-center justify-between gap-3 border-b border-hq-border bg-hq-canvas/95 px-5 py-3 backdrop-blur">
         {/* The cohort name ONLY — no application label. The StaffBar above already
             names the application (its doc comment: "the bar never names a weekend,
-            only the application"), so a "Founders Weekend" line here was the same
+            only the application"), so a repeated application line here was the same
             label twice on every cohort surface. Staff identity is the bar's job
             too, so the `· Staff` marker went with it. This header keeps the
-            context only it can carry: which weekend is active. */}
-        <p className="min-w-0 truncate font-path-display text-base font-semibold text-hq-ink">
+            context only it can carry: which weekend is active.
+
+            The name is a LINK to the picker (ops-guide redesign R25): the weekend
+            name is the natural "which weekend am I in / take me to the others"
+            affordance, and it is the replacement path Unit 11 requires before the
+            Switch link below can retire. Quietly styled — same type as the old
+            static name, no underline — and truncation stays on the link itself. */}
+        <Link
+          href="/fp/fw"
+          className="min-w-0 truncate font-path-display text-base font-semibold text-hq-ink hover:text-hq-ink-soft"
+        >
           {active?.slug ?? "This weekend"}
-        </p>
+        </Link>
 
         <div className="flex shrink-0 items-center gap-4">
           {/* Staff only, and the visibility is purely a way IN — the ops pages

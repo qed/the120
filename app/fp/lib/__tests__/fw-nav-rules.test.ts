@@ -9,6 +9,7 @@ import {
   fwPickerRedirectsToSingleCohort,
   fwPickerZeroState,
   fwSearchDistanceBudget,
+  fwSidebarNames,
   fwUnfinishedStudents,
   FW_BRAND_SUFFIX,
   FW_OPS_CREATE_PATH,
@@ -219,6 +220,119 @@ describe("fwDuplicateNameStudentIds", () => {
 
   it("returns an empty set for a roster with no collisions", () => {
     expect(fwDuplicateNameStudentIds(ROSTER).size).toBe(0);
+  });
+});
+
+/* ═══════════════════════════════════ the student sidebar (redesign Unit 7, R18) ══ */
+
+describe("fwSidebarNames", () => {
+  const labels = (rs: readonly FwRosterStudent[]) => fwSidebarNames(rs).map((n) => n.label);
+
+  it("formats First + last initial with a period", () => {
+    expect(labels([student({ firstName: "Maya", lastName: "Rodriguez" })])).toEqual(["Maya R."]);
+  });
+
+  it("sorts alphabetically — locale-aware and case-folded, id as the final tiebreak", () => {
+    const roster = [
+      student({ studentId: "s-b", firstName: "bella", lastName: "Ng" }),
+      student({ studentId: "s-e", firstName: "Élodie", lastName: "Fournier" }),
+      student({ studentId: "s-a", firstName: "Aaron", lastName: "Zeta" }),
+    ];
+    // "bella" (lowercase) between Aaron and Élodie; é folds to e so Élodie is
+    // not exiled past Z the way a raw code-point sort would put it.
+    expect(labels(roster)).toEqual(["Aaron Z.", "bella N.", "Élodie F."]);
+  });
+
+  it("carries the caller's richer entry type through un-narrowed", () => {
+    const entries = [{ ...student({ firstName: "Maya", lastName: "Chen" }), extra: 7 }];
+    expect(fwSidebarNames(entries)[0].student.extra).toBe(7);
+  });
+
+  it("extends colliding surnames until distinct — Maya Ro. / Maya Ru.", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Ro.", "Maya Ru."]);
+  });
+
+  it("is deterministic and stable — input order never changes anyone's label or position", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+      student({ studentId: "s-3", firstName: "Aaron", lastName: "Zeta" }),
+    ];
+    const forward = fwSidebarNames(roster);
+    const reversed = fwSidebarNames([...roster].reverse());
+    expect(reversed).toEqual(forward);
+    expect(forward.map((n) => n.student.studentId)).toEqual(["s-3", "s-1", "s-2"]);
+  });
+
+  it("collides case- and accent-insensitively, the same folding as the duplicate chip", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "maya", lastName: "rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+    ];
+    // "maya r." and "Maya R." are one pair to a guide's eye — both must extend.
+    expect(labels(roster)).toEqual(["maya ro.", "Maya Ru."]);
+  });
+
+  it("does NOT extend across different initials or different first names", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Chen" }),
+      student({ studentId: "s-3", firstName: "Mia", lastName: "Ruiz" }),
+    ];
+    expect(labels(roster).sort()).toEqual(["Maya C.", "Maya R.", "Mia R."]);
+  });
+
+  it("falls back to the FULL last name when no strictly-shorter prefix distinguishes", () => {
+    // "Ro" is a prefix of "Rodriguez": any prefix short enough to abbreviate
+    // "Ro" cannot tell them apart, and "Maya Ro" next to "Maya Ro." would be a
+    // wrong-child trap. Both render whole, no period.
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Ro" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Rodriguez" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Ro", "Maya Rodriguez"]);
+  });
+
+  it("near-identical surnames fall back to full names too, not a nine-character 'prefix'", () => {
+    // Distinguishing "Rodrigo" from "Rodriguez" needs 7 characters — the whole
+    // of "Rodrigo" — so the strictly-shorter rule sends both to full names.
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Rodrigo" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Rodrigo", "Maya Rodriguez"]);
+  });
+
+  it("identical full names render identically — the band chip, not the label, disambiguates (G22)", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Chen" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Chen" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Chen", "Maya Chen"]);
+    // …and the id tiebreak keeps even the identical pair stably ordered.
+    expect(fwSidebarNames(roster).map((n) => n.student.studentId)).toEqual(["s-1", "s-2"]);
+  });
+
+  it("a missing last name renders the first name alone, and never throws", () => {
+    expect(labels([student({ firstName: "Cher", lastName: "" })])).toEqual(["Cher"]);
+    expect(labels([student({ firstName: "Cher", lastName: "   " })])).toEqual(["Cher"]);
+  });
+
+  it("returns an empty list for an empty roster", () => {
+    expect(fwSidebarNames([])).toEqual([]);
+  });
+
+  it("three-way collisions resolve as a group at one shared prefix length", () => {
+    const roster = [
+      student({ studentId: "s-1", firstName: "Maya", lastName: "Rodriguez" }),
+      student({ studentId: "s-2", firstName: "Maya", lastName: "Ruiz" }),
+      student({ studentId: "s-3", firstName: "Maya", lastName: "Reyes" }),
+    ];
+    expect(labels(roster)).toEqual(["Maya Re.", "Maya Ro.", "Maya Ru."]);
   });
 });
 

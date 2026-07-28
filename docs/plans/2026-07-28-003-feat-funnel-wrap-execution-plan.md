@@ -311,7 +311,7 @@ sequenceDiagram
 
 ## Implementation Units
 
-- [ ] **Unit 1: Confirm the registers, fix the texts (W1–W4, W9 text)**
+- [x] **Unit 1: Confirm the registers, fix the texts (W1–W4, W9 text)** — merged PR #99
 
 **Goal:** Zero unapproved claims; requirement texts match reality.
 
@@ -356,7 +356,7 @@ threshold/formula against its range before flipping its annotation.
 counsel and consent entries; R47/R61 doc text matches implementation;
 checkout renders the bumped policy version.
 
-- [ ] **Unit 2: Offer-dialog pending split + over-capacity alert (W5, W6, W6a)**
+- [x] **Unit 2: Offer-dialog pending split + over-capacity alert (W5, W6, W6a)** — merged PR #100
 
 **Goal:** Staff distinguish clearing money from promises; over-capacity
 fulfilment is observable.
@@ -483,7 +483,7 @@ locally, watch it red, revert).
 **Verification:** Manual CRM pass on seeded children through all three
 transitions; parity + tripwire tests green.
 
-- [ ] **Unit 4: Per-child offer nudge (W8, W9 code)**
+- [x] **Unit 4: Per-child offer nudge (W8, W9 code)** — merged PR #101
 
 **Goal:** A deposited sibling no longer silences another child's seat
 reminder — in any event ordering.
@@ -535,7 +535,7 @@ comments; keep `hasPaid` family-wide for account/stall sequences
 **Verification:** Engine suite covers both orderings; cron dry-run against
 seeded data sends exactly the expected set.
 
-- [ ] **Unit 5: Guard inversion + server-side resets (W12, W12a–c, W13 part)**
+- [x] **Unit 5: Guard inversion + server-side resets (W12, W12a–c, W13 part)** — merged PR #102
 
 **Goal:** No platform auth mail can reach a student address; the guard is
 in every path.

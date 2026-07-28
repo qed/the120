@@ -92,6 +92,7 @@ import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/fp/lib/fw-loa
 import {
   anonymizeFwStudent,
   createFwCohort,
+  deleteFwCohort,
   linkFwStudentToCohort,
   listFwCohortGuides,
   listFwOpsCohorts,
@@ -149,6 +150,7 @@ const COMMANDS = [
   "token-revoke",
   "archive",
   "unarchive",
+  "delete",
   "board",
   "guides",
   "guide-add",
@@ -212,6 +214,12 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   // so this front door cannot skip them.
   archive: ["--cohort", "--actor", "--confirm-slug"],
   unarchive: ["--cohort"],
+  // Redesign Unit 3: hard delete for truly-untouched weekends. Same core as the
+  // ops surface — the untouched classifier, the typed-confirm verification, the
+  // FK backstop and the post-delete grant sweep all live in deleteFwCohort, so
+  // this front door cannot skip any of them. No --actor: delete writes no audit
+  // row (nothing survives to anchor one) and no attribution column.
+  delete: ["--cohort", "--confirm-slug"],
 };
 
 function arg(name: string): string | null {
@@ -339,6 +347,32 @@ async function main() {
           `unarchived ${cohortId} — the board stays dark; mint a new token if it should be live`
         );
       else console.log(`unarchive refused: ${res.reason}`);
+    });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "delete") {
+    const cohortId = required("cohort");
+    // Typed confirm mirrors archive's --confirm-slug: the weekend's own slug,
+    // re-verified in the core against the stored one — a wrong id typed with a
+    // wrong slug refuses instead of deleting the wrong weekend.
+    const res = await deleteFwCohort(db, {
+      cohortId,
+      confirmSlug: required("confirm-slug"),
+    });
+    emit(res, () => {
+      if (res.ok && res.grantSweep) console.log(`deleted ${cohortId} — it never held anything`);
+      else if (res.ok)
+        // Success-with-fact, the audited:false convention: the cohort IS gone,
+        // but the guide-grant sweep failed and an orphan may remain.
+        console.log(
+          `deleted ${cohortId}, but the guide-grant sweep FAILED — check path_role_grants ` +
+            `for role='guide', scope_type='cohort', scope_id='${cohortId}' and delete by hand`
+        );
+      else if (res.reason === "not_untouched")
+        console.log(`delete refused: this weekend has history — archive it instead`);
+      else console.log(`delete refused: ${res.reason}`);
     });
     if (!res.ok) process.exitCode = 1;
     return;

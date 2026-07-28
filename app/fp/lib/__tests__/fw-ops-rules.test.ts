@@ -14,6 +14,7 @@ import {
   narrowFwEventTimeZone,
   normalizeFwCohortSlug,
   archiveFwCohortFailureCopy,
+  deleteFwCohortFailureCopy,
   unarchiveFwCohortFailureCopy,
   fwArchivedBanner,
   fwArchiveConfirmMatches,
@@ -484,6 +485,38 @@ describe("archive/unarchive failure copy (Unit 7)", () => {
       expect(c).toMatch(/nothing was changed/i);
       expect(c).toMatch(/try again/i);
     }
+  });
+});
+
+describe("delete failure copy (redesign Unit 3) — its OWN switch, exhaustively", () => {
+  it("collapses the id-probing reasons to the staff-only sentence, like archive", () => {
+    expect(deleteFwCohortFailureCopy("cohort_not_found")).toBe("That action is staff-only.");
+    expect(deleteFwCohortFailureCopy("cohort_not_fw")).toBe("That action is staff-only.");
+  });
+
+  it("confirm_mismatch speaks the same fact as archive's, from its own function", () => {
+    // The FACT is identical (one slug, one match rule) but the sentence is owned
+    // here — sharing the archive switch would let one surface's copy edit
+    // silently reword the other's.
+    const copy = deleteFwCohortFailureCopy("confirm_mismatch");
+    expect(copy).toBe("The name you typed doesn't match this weekend.");
+    expect(copy).not.toMatch(/error|invalid|slug/i);
+  });
+
+  it("not_untouched says the weekend has history, points at archive, and claims no delete", () => {
+    // Covers BOTH the classifier's refusal and the 23503 backstop — the same
+    // fact learned at different moments, so one sentence: it stopped qualifying.
+    const copy = deleteFwCohortFailureCopy("not_untouched");
+    expect(copy).toMatch(/history/i);
+    expect(copy).toMatch(/archive it instead/i);
+    expect(copy).toMatch(/nothing was deleted/i);
+    expect(copy).not.toMatch(/error|constraint|foreign key|23503/i);
+  });
+
+  it("unavailable claims nothing was changed and names the retry", () => {
+    const copy = deleteFwCohortFailureCopy("unavailable");
+    expect(copy).toMatch(/nothing was changed/i);
+    expect(copy).toMatch(/try again/i);
   });
 });
 

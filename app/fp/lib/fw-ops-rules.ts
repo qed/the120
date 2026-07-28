@@ -499,6 +499,44 @@ export function archiveFwCohortFailureCopy(
   }
 }
 
+/**
+ * The delete refusals (ops redesign Unit 3) — its OWN function, not members
+ * grafted onto the archive switch: delete's `not_untouched` has no archive twin,
+ * and sharing a switch would let one surface's copy edit silently reword the
+ * other's. The two overlap only where the FACT is identical (the staff-only
+ * collapse, the typed-confirm mismatch), and even those are separate sentences
+ * owned here.
+ *
+ * `not_untouched` covers both the classifier's refusal AND the DELETE's 23503
+ * backstop — the same fact learned at different moments: something now
+ * references the weekend, so it stopped qualifying for deletion. The sentence
+ * points at archive, which is the path that exists for weekends with history.
+ */
+export function deleteFwCohortFailureCopy(
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "confirm_mismatch"
+    | "not_untouched"
+    | "unavailable"
+): string {
+  switch (reason) {
+    case "cohort_not_found":
+    case "cohort_not_fw":
+      return "That action is staff-only.";
+    case "confirm_mismatch":
+      return "The name you typed doesn't match this weekend.";
+    case "not_untouched":
+      return "This weekend has history now — archive it instead. Nothing was deleted.";
+    case "unavailable":
+      return "Couldn't delete just now — nothing was changed. Try again.";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
+}
+
 /** The unarchive twin. Same collapse, same never-return. */
 export function unarchiveFwCohortFailureCopy(
   reason: "cohort_not_found" | "cohort_not_fw" | "already_active" | "unavailable"

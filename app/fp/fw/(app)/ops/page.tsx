@@ -163,6 +163,7 @@ export default async function FwOpsPage({
                       cohortId={cohort.id}
                       slug={cohort.slug}
                       archived={cohort.archivedAt !== null}
+                      untouched={cohort.untouched}
                     />
                   </li>
                 );

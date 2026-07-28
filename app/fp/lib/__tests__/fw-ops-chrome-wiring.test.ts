@@ -138,6 +138,15 @@ describe("the typed archive confirm travels to the server (Unit 2)", () => {
   it("restore stays confirm-free — it is not destructive", () => {
     expect(MENU).toMatch(/unarchiveCohortAction\(\{\s*cohortId\s*\}\)/);
   });
+
+  it("delete sends the SAME typed confirm (Unit 3) and is gated on the untouched flag", () => {
+    // The delete confirm shares archive's rule and posture: typed slug sent to
+    // the action, re-verified in the core. The menu item itself only renders
+    // when the row's `untouched` flag — the shared classifier's verdict — is
+    // true, so the affordance and the act cannot drift.
+    expect(MENU).toMatch(/deleteCohortAction\(\{\s*cohortId,\s*confirmSlug:\s*typed\s*\}\)/);
+    expect(MENU).toMatch(/\{untouched\s*&&/);
+  });
 });
 
 describe("the ops layout renders the chrome and keeps its gate", () => {

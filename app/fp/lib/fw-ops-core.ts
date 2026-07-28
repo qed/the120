@@ -93,9 +93,9 @@ export type FwOpsCohort = {
   /**
    * Archive state (Unit 7; columns from Unit 6's migration). The READ carries it
    * and callers decide — the plan's settled decision, because the one cohort list
-   * feeds both the header's weekend name (which must render for an archived cohort
-   * a staff member opens) and `canSwitch` (which must count archived cohorts or a
-   * guide is stranded inside one with no way back).
+   * feeds surfaces with opposite filters: the header's weekend name must render
+   * for an archived cohort a staff member opens, while the guide picker hides
+   * archived cohorts from its default view.
    */
   archivedAt: string | null;
   archivedBy: string | null;
@@ -766,12 +766,315 @@ export async function unarchiveFwCohort(
   return { ok: true };
 }
 
+/* ═══════════════════════════════════ truly-untouched delete (redesign Unit 3) ══ */
+
+/**
+ * Postgres foreign-key violation (SQLSTATE 23503), checked by CODE like
+ * `isUniqueViolation` and for the same reason: messages are unstable. A timed-out
+ * write's synthetic `{ message }` has no `code`, so this returns false for it —
+ * routing it to the post-write verify rather than to the FK backstop.
+ */
+function isFkViolation(error: { code?: string } | { message: string } | null): boolean {
+  return error !== null && "code" in error && error.code === "23503";
+}
+
+export type FwCohortUntouchedVerdict =
+  | { ok: true; untouched: true }
+  | { ok: true; untouched: false; touchedBy: string }
+  | /** A probe failed — could not tell. Fail CLOSED: no delete on partial
+     *  knowledge, and no Delete affordance either. */
+    { ok: false };
+
+/**
+ * ONE classifier for "has anything ever referenced this weekend?" — the plan's
+ * settled decision (Key Technical Decisions; learning 2026-07-27): the list
+ * affordance (whether the ⋯ menu offers Delete) and `deleteFwCohort` itself BOTH
+ * call this, and there is no second hand-written predicate anywhere. Two
+ * predicates is how a menu shows Delete on a weekend the core refuses forever.
+ *
+ * NINE surfaces, every table that can point at a `path_cohorts` row:
+ *
+ *   1. path_cohort_members            — anyone ever enrolled
+ *   2. path_task_events               — any check-in ever captured
+ *   3. path_fw_board_tokens           — ANY row ever, REVOKED INCLUDED: a
+ *                                       minted-then-revoked board is history
+ *                                       (origin decision), not a clean slate
+ *   4. path_fw_replay_rejects         — any offline capture ever refused
+ *   5. path_fw_ops_audit              — any liability action ever recorded
+ *   6. path_fw_import_exceptions      — any CSV import ever stumbled
+ *   7. path_student_profiles.intended_cohort_id — any unfinished quick-create
+ *   8. path_student_profiles.cohort_id — the Path-side column (its RESTRICT FK
+ *                                       exists even though FW never sets it)
+ *   9. path_role_grants (role='guide', scope_type='cohort') — any guide ever
+ *                                       granted. THIS PROBE IS LOAD-BEARING in a
+ *                                       way the others are not: `scope_id` is
+ *                                       deliberately polymorphic with NO foreign
+ *                                       key, so the DELETE's 23503 backstop
+ *                                       cannot catch a grant. This probe (plus
+ *                                       the post-delete sweep in
+ *                                       `deleteFwCohort`) is the ONLY guard
+ *                                       against orphaning one.
+ *
+ * Surfaces 1–8 are ALSO defended by the schema (every FK into `path_cohorts` is
+ * RESTRICT, or NO ACTION on `intended_cohort_id` — equivalent for non-deferrable
+ * constraints), so a row landing between this probe and the DELETE surfaces as a
+ * 23503 the delete maps to `not_untouched`. The probes still run first because
+ * the same answer gates the AFFORDANCE, where there is no write to backstop.
+ *
+ * ── Probe shape: nine parallel `.limit(1)` existence reads
+ *
+ * NOT `head:true` count probes — the repo has a documented false positive from a
+ * HEAD count probe (docs/solutions/integration-issues/postgrest-head-count-probe-
+ * false-positive-existence-check-2026-07-21.md) — and not full paginated scans
+ * either: existence is the question, and `.limit(1).maybeSingle()` is the same
+ * probe shape `ensureAnonymizeAudit` uses. All nine fire in one `Promise.all`.
+ *
+ * ANY probe error → `{ok:false}` (fail closed). A verdict built on eight answers
+ * and one guess is exactly the partial knowledge a hard delete must never act on.
+ */
+export async function fwCohortUntouchedVerdict(
+  db: SupabaseClient,
+  cohortId: string
+): Promise<FwCohortUntouchedVerdict> {
+  const probes: [surface: string, call: () => PromiseLike<{ data: unknown; error: { message: string } | null }>][] = [
+    [
+      "path_cohort_members",
+      () => db.from("path_cohort_members").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_task_events",
+      () => db.from("path_task_events").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      // No `.is("revoked_at", null)` — any token EVER, revoked included.
+      "path_fw_board_tokens",
+      () => db.from("path_fw_board_tokens").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_fw_replay_rejects",
+      () => db.from("path_fw_replay_rejects").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_fw_ops_audit",
+      () => db.from("path_fw_ops_audit").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_fw_import_exceptions",
+      () => db.from("path_fw_import_exceptions").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_student_profiles.intended_cohort_id",
+      () =>
+        db.from("path_student_profiles").select("id").eq("intended_cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      "path_student_profiles.cohort_id",
+      () => db.from("path_student_profiles").select("id").eq("cohort_id", cohortId).limit(1).maybeSingle(),
+    ],
+    [
+      // Served by `path_role_grants_scope_idx` (20260801140000).
+      "path_role_grants",
+      () =>
+        db
+          .from("path_role_grants")
+          .select("id")
+          .eq("role", "guide")
+          .eq("scope_type", "cohort")
+          .eq("scope_id", cohortId)
+          .limit(1)
+          .maybeSingle(),
+    ],
+  ];
+
+  const results = await Promise.all(
+    probes.map(async ([surface, call]) => ({
+      surface,
+      res: await fwRead(call, `untouched probe ${surface} (${cohortId})`),
+    }))
+  );
+
+  // Errors decide FIRST: an "untouched" verdict is only trustworthy when all
+  // nine probes answered, however many of the others found rows.
+  let touchedBy: string | null = null;
+  for (const { surface, res } of results) {
+    if (res.error) {
+      console.error(
+        `[fw/ops] untouched probe ${surface} failed for ${cohortId}: ${res.error.message} — verdict unavailable (fail closed)`
+      );
+      return { ok: false };
+    }
+    if (res.data !== null && touchedBy === null) touchedBy = surface;
+  }
+  return touchedBy === null
+    ? { ok: true, untouched: true }
+    : { ok: true, untouched: false, touchedBy };
+}
+
+export type DeleteFwCohortResult =
+  | {
+      ok: true;
+      /** The post-delete guide-grant sweep confirmed clean. `false` = the cohort
+       *  row IS gone (the delete succeeded) but the sweep write failed, so an
+       *  orphaned guide grant MAY remain in `path_role_grants` — surfaced as a
+       *  fact rather than swallowed, the `audited: false` convention. The log
+       *  names the manual fix. */
+      grantSweep: boolean;
+    }
+  | {
+      ok: false;
+      reason:
+        | "cohort_not_found"
+        | "cohort_not_fw"
+        /** The typed confirm did not match the STORED slug — same rule and same
+         *  in-core posture as the archive confirm. */
+        | "confirm_mismatch"
+        /** Something references this weekend — from the re-run classifier OR
+         *  from the DELETE's own 23503 (a row landed between check and delete).
+         *  The copy says the weekend stopped qualifying; archive is the path. */
+        | "not_untouched"
+        | "unavailable";
+    };
+
+/**
+ * Hard-delete a truly-untouched weekend (ops redesign Unit 3; R7/R8/R8a) — the
+ * ONE row-removal path in the FW ops surface, offered only for cohorts nothing
+ * has ever referenced (a slug typo caught seconds after creation, a duplicate).
+ * Anything with history archives instead; that boundary is the classifier above.
+ *
+ * Sequence: load (not_found / not_fw collapse per the enumeration canon) →
+ * verify the typed confirm IN-CORE (`fwArchiveConfirmMatches`, the same rule the
+ * archive uses — one slug, one match rule) → RE-RUN the classifier (the list's
+ * verdict is stale by definition) → DELETE with the schema as backstop → verify
+ * → sweep grants.
+ *
+ * ── The 23503 backstop and its one hole
+ *
+ * Every FK'd table self-defends: a member/event/token/reject/audit/exception/
+ * profile row landing between the classifier and the DELETE turns the DELETE
+ * into a 23503, mapped to `not_untouched`. `path_role_grants` has NO FK (its
+ * scope_id is polymorphic), so a grant landing in that window would be silently
+ * orphaned — hence the POST-delete sweep: once the cohort row is verified gone,
+ * cohort-scoped guide grants are deleted unconditionally. The sweep is safe at
+ * any time (the cohort no longer exists; a grant on it authorizes nothing that
+ * resolves) and closes the probe→delete race for the one non-FK table.
+ *
+ * ── Post-write verify (the multi-step-write canon, 2026-07-22)
+ *
+ * `fwWrite`'s contract: a timed-out DELETE may still have landed. The error
+ * branch re-reads the row; GONE after a reported error is SUCCESS (the caller
+ * asked for the row to not exist, and it doesn't), and the sweep still runs.
+ *
+ * ── NO audit row, deliberately
+ *
+ * `path_fw_ops_audit.cohort_id` is a NOT NULL RESTRICT FK into `path_cohorts` —
+ * an audit row cannot anchor to a cohort that no longer exists, and writing it
+ * BEFORE the delete would make the cohort non-deletable (the audit row is
+ * surface #5). The origin decision accepts this: only truly-untouched weekends
+ * reach here, so what is lost is a record that a record-less thing was removed.
+ *
+ * `actorUserId` is accepted for call-site symmetry with the other destructive
+ * cores but is UNUSED — there is no audit row and no surviving column to
+ * attribute to. Kept in the signature so a future attribution home (e.g. an
+ * app-level log table) is a body change, not a caller change.
+ */
+export async function deleteFwCohort(
+  db: SupabaseClient,
+  input: { cohortId: string; confirmSlug: string; actorUserId?: string }
+): Promise<DeleteFwCohortResult> {
+  const cohort = await loadFwOpsCohort(db, input.cohortId);
+  if (!cohort) return { ok: false, reason: "cohort_not_found" };
+  if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  // The typed confirm, verified against the STORED slug before anything else is
+  // even probed — the archive's posture, with the archive's rule.
+  if (!fwArchiveConfirmMatches(input.confirmSlug, cohort.slug)) {
+    return { ok: false, reason: "confirm_mismatch" };
+  }
+
+  // Re-run the classifier HERE, inside the sequence: the verdict that made the
+  // menu show Delete is however old the page is.
+  const verdict = await fwCohortUntouchedVerdict(db, input.cohortId);
+  if (!verdict.ok) return { ok: false, reason: "unavailable" };
+  if (!verdict.untouched) {
+    console.warn(
+      `[fw/ops] delete of ${input.cohortId} refused: touched via ${verdict.touchedBy}`
+    );
+    return { ok: false, reason: "not_untouched" };
+  }
+
+  // `.eq("kind", …)` as a belt over the pre-read: even a stale read can never
+  // turn this statement into a Path-cohort delete.
+  const deleted = await fwWrite(
+    () =>
+      db.from("path_cohorts").delete().eq("id", input.cohortId).eq("kind", FW_COHORT_KIND).select("id"),
+    `cohort delete (${input.cohortId})`
+  );
+  if (deleted.error) {
+    if (isFkViolation(deleted.error)) {
+      // The DB backstop fired: a referencing row landed between the classifier
+      // and the DELETE. The weekend stopped qualifying — same refusal as the
+      // classifier's, because it is the same fact learned later.
+      console.warn(
+        `[fw/ops] delete of ${input.cohortId} hit the FK backstop (23503) — it stopped being untouched mid-flight`
+      );
+      return { ok: false, reason: "not_untouched" };
+    }
+    // POST-WRITE VERIFY: a timed-out delete may have landed. A row that is GONE
+    // after a reported error is success; still-there (or unreadable) is not.
+    const still = await fwRead(
+      () => db.from("path_cohorts").select("id").eq("id", input.cohortId).maybeSingle(),
+      `cohort delete verify (${input.cohortId})`
+    );
+    if (still.error || still.data) {
+      console.error(
+        `[fw/ops] cohort delete failed for ${input.cohortId}: ${deleted.error.message}`
+      );
+      return { ok: false, reason: "unavailable" };
+    }
+    console.warn(
+      `[fw/ops] cohort delete for ${input.cohortId} reported an error but LANDED — continuing to the grant sweep`
+    );
+  }
+
+  // THE POST-DELETE GRANT SWEEP — the close of the one race the schema cannot
+  // referee (see the docblock). Runs unconditionally: normally it deletes zero
+  // rows (the classifier saw none), and when a grant slipped in between probe
+  // and delete it removes the orphan instead of leaving it.
+  const sweep = await fwWrite(
+    () =>
+      db
+        .from("path_role_grants")
+        .delete()
+        .eq("role", "guide")
+        .eq("scope_type", "cohort")
+        .eq("scope_id", input.cohortId)
+        .select("id"),
+    `post-delete grant sweep (${input.cohortId})`
+  );
+  if (sweep.error) {
+    // The cohort is gone — that part of the truth is settled and reported as
+    // success. The sweep failing means an orphaned guide grant MAY remain;
+    // surfaced as `grantSweep: false` (the `audited: false` convention) with
+    // the manual fix named here, never swallowed into a clean success.
+    console.error(
+      `[fw/ops] post-delete grant sweep failed for ${input.cohortId}: ${sweep.error.message} — ` +
+        `check path_role_grants for role='guide', scope_type='cohort', scope_id='${input.cohortId}' and delete by hand`
+    );
+    return { ok: true, grantSweep: false };
+  }
+  return { ok: true, grantSweep: true };
+}
+
 /* ═══════════════════════════════════════════════════════════ the cohort list ══ */
 
 export type FwOpsCohortSummary = FwOpsCohort & {
   studentCount: number;
   guideCount: number;
   boardTokenStatus: FwBoardTokenStatus;
+  /** The ⋯ menu's Delete affordance gate (redesign Unit 3): true only when
+   *  `fwCohortUntouchedVerdict` — the SAME classifier the delete re-runs —
+   *  answered `untouched` for this row. An unavailable verdict reads as `false`
+   *  (fail closed: no affordance on partial knowledge; the list still renders). */
+  untouched: boolean;
 };
 
 /**
@@ -825,7 +1128,17 @@ export async function listFwOpsCohorts(
   if (cohorts.length === 0) return { ok: true, cohorts: [] };
 
   const ids = cohorts.map((c) => c.id);
-  const [members, grants, tokens] = await Promise.all([
+  // The untouched flag runs the SHARED classifier per cohort — nine `.limit(1)`
+  // probes each — rather than a hand-batched `.in(...)` variant. Documented
+  // choice (plan, Unit 3): a cross-cohort batch would have to fetch every
+  // referencing row per surface (PostgREST has no DISTINCT), which is the
+  // expensive direction exactly when a cohort is touched; the list is genuinely
+  // small (a season is single-digit weekends), so N × 9 tiny existence reads is
+  // the cheap side AND keeps one classifier instead of a drifting twin. An
+  // unavailable verdict degrades to `untouched: false` for that row (no Delete
+  // affordance) without failing the list — the affordance fails closed; the
+  // delete core re-runs the classifier itself, so nothing downstream trusts this.
+  const [members, grants, tokens, verdicts] = await Promise.all([
     fetchAllRows<Record<string, unknown>>("ops member counts", (from, to) =>
       db
         .from("path_cohort_members")
@@ -852,8 +1165,19 @@ export async function listFwOpsCohorts(
         .order("id", { ascending: true })
         .range(from, to)
     ),
+    Promise.all(
+      cohorts.map(async (c) => ({
+        id: c.id,
+        verdict: await fwCohortUntouchedVerdict(db, c.id),
+      }))
+    ),
   ]);
   if (!members.ok || !grants.ok || !tokens.ok) return { ok: false };
+
+  const untouchedById = new Map<string, boolean>();
+  for (const { id, verdict } of verdicts) {
+    untouchedById.set(id, verdict.ok && verdict.untouched);
+  }
 
   const tally = (rows: Record<string, unknown>[], key: string): Map<string, number> => {
     const counts = new Map<string, number>();
@@ -893,6 +1217,7 @@ export async function listFwOpsCohorts(
       studentCount: studentCounts.get(c.id) ?? 0,
       guideCount: guideCounts.get(c.id) ?? 0,
       boardTokenStatus: tokenStatus(currentToken.get(c.id) ?? null, input.now),
+      untouched: untouchedById.get(c.id) ?? false,
     })),
   };
 }
@@ -2152,6 +2477,15 @@ export type AnonymizeStudentActionResult =
 
 export type LinkStudentActionResult =
   | { success: true; alreadyMember: boolean }
+  | { success: false; error: string };
+
+export type DeleteCohortActionResult =
+  | {
+      success: true;
+      /** See `DeleteFwCohortResult` — `false` means the weekend IS deleted but
+       *  an orphaned guide grant may remain (sweep failed). */
+      grantSweep: boolean;
+    }
   | { success: false; error: string };
 
 export type MatchLookupActionResult =

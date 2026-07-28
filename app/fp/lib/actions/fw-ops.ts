@@ -36,6 +36,7 @@ import {
   anonymizeFwStudent,
   archiveFwCohort,
   createFwCohort,
+  deleteFwCohort,
   linkFwStudentToCohort,
   loadFwMatchResolution,
   mintFwBoardToken,
@@ -45,6 +46,7 @@ import {
   revokeFwGuideGrant,
   type AnonymizeStudentActionResult,
   type CreateFwCohortActionResult,
+  type DeleteCohortActionResult,
   type LinkStudentActionResult,
   type MatchLookupActionResult,
   type MintBoardTokenActionResult,
@@ -54,6 +56,7 @@ import {
 } from "@/app/fp/lib/fw-ops-core";
 import {
   archiveFwCohortFailureCopy,
+  deleteFwCohortFailureCopy,
   fwCohortWindowFromLocal,
   fwSlugTakenCopy,
   normalizeFwCohortSlug,
@@ -363,6 +366,49 @@ export async function archiveCohortAction(
   revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
   revalidatePath("/fp/fw");
   return { success: true };
+}
+
+/**
+ * Same confirm shape as archive — one slug, one match rule
+ * (`fwArchiveConfirmMatches`), re-verified in the core. The DELETE-specific
+ * guards (the untouched classifier, the FK backstop, the grant sweep) all live
+ * in `deleteFwCohort`; this layer stays gate → zod → core → copy.
+ */
+const deleteCohortSchema = z.object({
+  cohortId: z.uuid(),
+  confirmSlug: z.string().min(1).max(120),
+});
+
+/**
+ * Hard-delete a truly-untouched weekend (ops redesign Unit 3; R7/R8/R8a).
+ *
+ * Gated per-cohort (`requireCohortStaff`) like archive. Writes NO audit row —
+ * `path_fw_ops_audit.cohort_id` cannot anchor to a deleted cohort (the core's
+ * docblock carries the full reasoning). The revalidate set matches archive's:
+ * the ops list (the row disappears), the cohort's own ops page (now a 404), and
+ * the guide picker at /fp/fw (its role-derived list may have shown the weekend
+ * to staff).
+ */
+export async function deleteCohortAction(input: unknown): Promise<DeleteCohortActionResult> {
+  const parsed = deleteCohortSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: GENERIC_ERROR };
+
+  const gate = await requireCohortStaff(parsed.data.cohortId);
+  if (!gate.ok) return { success: false, error: fwStaffGateCopy(gate.reason) };
+
+  const deleted = await deleteFwCohort(supabaseAdmin(), {
+    cohortId: parsed.data.cohortId,
+    confirmSlug: parsed.data.confirmSlug,
+    actorUserId: gate.actorUserId,
+  });
+  if (!deleted.ok) {
+    return { success: false, error: deleteFwCohortFailureCopy(deleted.reason) };
+  }
+
+  revalidatePath("/fp/fw/ops");
+  revalidatePath(`/fp/fw/ops/cohort/${parsed.data.cohortId}`);
+  revalidatePath("/fp/fw");
+  return { success: true, grantSweep: deleted.grantSweep };
 }
 
 export type UnarchiveCohortActionResult =

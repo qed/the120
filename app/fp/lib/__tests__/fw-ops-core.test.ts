@@ -4,6 +4,8 @@ import {
   anonymizeFwStudent,
   archiveFwCohort,
   createFwCohort,
+  deleteFwCohort,
+  fwCohortUntouchedVerdict,
   hashFwBoardToken,
   linkFwStudentToCohort,
   listFwCohortGuides,
@@ -84,6 +86,12 @@ type Seed = {
   rejects?: Row[];
   releasedAliases?: Row[];
   events?: Row[];
+  /** Redesign Unit 3: the untouched classifier probes this table too. */
+  importExceptions?: Row[];
+  /** Redesign Unit 3: mutate the tables IMMEDIATELY BEFORE a matching delete op
+   *  executes (consumed once) — the only way to model a row landing between the
+   *  classifier's probe and the DELETE inside one core call. */
+  beforeDelete?: { table: string; run: (tables: Record<string, Row[]>) => void }[];
   /** Force one table+op to error, to exercise the compensation branches. */
   failTable?: Failure | null;
   /** SEVERAL injected failures, for the sequences that must fail twice — the
@@ -133,6 +141,7 @@ function makeFakeDb(seed: Seed) {
     path_fw_replay_rejects: [...(seed.rejects ?? [])],
     path_fw_released_aliases: [...(seed.releasedAliases ?? [])],
     path_task_events: [...(seed.events ?? [])],
+    path_fw_import_exceptions: [...(seed.importExceptions ?? [])],
   };
   // Deep-copy each seeded row so writes (which mutate rows in place, e.g. the
   // anonymize tombstone via Object.assign) can never leak across tests that
@@ -416,6 +425,17 @@ function makeFakeDb(seed: Seed) {
       delete() {
         const eqs3: [string, unknown][] = [];
         const run = () => {
+          // beforeDelete hooks (redesign Unit 3): a row landing between the
+          // classifier's probes and the DELETE, modelled by mutating the tables
+          // just before this op executes. Consumed once each.
+          if (seed.beforeDelete) {
+            for (let i = seed.beforeDelete.length - 1; i >= 0; i -= 1) {
+              if (seed.beforeDelete[i].table === table) {
+                seed.beforeDelete[i].run(tables);
+                seed.beforeDelete.splice(i, 1);
+              }
+            }
+          }
           const fail = failing("delete");
           if (fail) return { data: null, error: fail };
           const hits = tables[table].filter((r) => eqs3.every(([c, v]) => r[c] === v));
@@ -2809,5 +2829,373 @@ describe("Unit 9 — archive-aware lists", () => {
       failTable: { table: "path_cohorts", op: "select", message: "blip" },
     });
     expect(await listFwActiveWeekends(db)).toEqual({ ok: false });
+  });
+});
+
+/* ══════════════════════════ redesign Unit 3 — the truly-untouched hard delete ══ */
+
+describe("fwCohortUntouchedVerdict — the ONE classifier", () => {
+  it("a cohort nothing ever referenced is untouched", async () => {
+    const { db } = makeFakeDb({});
+    expect(await fwCohortUntouchedVerdict(db, BOSTON)).toEqual({ ok: true, untouched: true });
+  });
+
+  // EACH of the nine surfaces individually flips the verdict. One row on one
+  // surface is enough — the plan's per-surface scenarios, driven as a table so a
+  // tenth surface added to the classifier without a row here is a visible gap.
+  const SURFACES: [name: string, expectTouchedBy: string, seed: Seed][] = [
+    [
+      "a cohort member",
+      "path_cohort_members",
+      { members: [{ student_id: "s1", cohort_id: BOSTON }] },
+    ],
+    [
+      "a captured task event",
+      "path_task_events",
+      { events: [{ id: "e1", cohort_id: BOSTON, task_id: "t1" }] },
+    ],
+    [
+      // Minted-then-revoked is TOUCHED (origin decision): the probe carries no
+      // revoked_at filter, so a dead token still counts as history.
+      "a REVOKED board token",
+      "path_fw_board_tokens",
+      {
+        tokens: [
+          {
+            id: "tok-1",
+            cohort_id: BOSTON,
+            token_hash: "h",
+            expires_at: BOSTON_TOKEN_EXPIRY,
+            revoked_at: "2026-08-22T00:00:00Z",
+          },
+        ],
+      },
+    ],
+    [
+      "a replay reject",
+      "path_fw_replay_rejects",
+      { rejects: [{ id: "r1", cohort_id: BOSTON, student_id: "s1" }] },
+    ],
+    [
+      "an ops audit row",
+      "path_fw_ops_audit",
+      {
+        audit: [
+          {
+            id: "a1",
+            actor: STAFF,
+            action: "guide_grant_added",
+            subject_user_id: RAVI,
+            cohort_id: BOSTON,
+          },
+        ],
+      },
+    ],
+    [
+      "an import exception",
+      "path_fw_import_exceptions",
+      { importExceptions: [{ id: "x1", cohort_id: BOSTON, state: "pending" }] },
+    ],
+    [
+      // The PR #86 unfinished-student seam: a quick-create that never finished
+      // still points at the weekend it intended.
+      "an intended_cohort reference",
+      "path_student_profiles.intended_cohort_id",
+      { profiles: [{ id: "p1", intended_cohort_id: BOSTON }] },
+    ],
+    [
+      // The Path-side column FW never sets — its RESTRICT FK exists regardless.
+      "a profile cohort_id reference",
+      "path_student_profiles.cohort_id",
+      { profiles: [{ id: "p1", cohort_id: BOSTON }] },
+    ],
+    [
+      // The ONE surface with no FK — this probe is its only guard.
+      "a guide grant",
+      "path_role_grants",
+      { grants: [{ id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON }] },
+    ],
+  ];
+  for (const [name, touchedBy, seed] of SURFACES) {
+    it(`flips to not-untouched on ${name}`, async () => {
+      const { db } = makeFakeDb(seed);
+      expect(await fwCohortUntouchedVerdict(db, BOSTON)).toEqual({
+        ok: true,
+        untouched: false,
+        touchedBy,
+      });
+    });
+  }
+
+  it("ANOTHER cohort's rows do not touch this one — every probe is scoped", async () => {
+    const { db } = makeFakeDb({
+      members: [{ student_id: "s1", cohort_id: HAMPTONS }],
+      grants: [
+        { id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: HAMPTONS },
+        // A non-guide grant that happens to carry this cohort's id in scope_id
+        // (polymorphic column) must not count either — role and scope_type filter.
+        { id: "g2", user_id: DANA, role: "parent", scope_type: "family", scope_id: BOSTON },
+      ],
+      tokens: [
+        {
+          id: "tok-h",
+          cohort_id: HAMPTONS,
+          token_hash: "h",
+          expires_at: BOSTON_TOKEN_EXPIRY,
+          revoked_at: null,
+        },
+      ],
+    });
+    expect(await fwCohortUntouchedVerdict(db, BOSTON)).toEqual({ ok: true, untouched: true });
+  });
+
+  it("a probe failure is UNAVAILABLE — never an untouched verdict on partial knowledge", async () => {
+    const { db } = makeFakeDb({
+      failTable: { table: "path_fw_import_exceptions", op: "select", message: "down" },
+    });
+    expect(await fwCohortUntouchedVerdict(db, BOSTON)).toEqual({ ok: false });
+  });
+});
+
+describe("deleteFwCohort — the sequence", () => {
+  const CONFIRM = "boston-2026-08";
+
+  it("deletes an untouched weekend, and the grant sweep confirms clean", async () => {
+    const { db, tables } = makeFakeDb({});
+    const res = await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM, actorUserId: STAFF });
+    expect(res).toEqual({ ok: true, grantSweep: true });
+    // The row is gone; the OTHER cohorts are not.
+    expect(tables.path_cohorts.map((c) => c.id).sort()).toEqual([HAMPTONS, PATH_COHORT].sort());
+  });
+
+  it("a MISMATCHED confirmSlug refuses with confirm_mismatch and attempts NOTHING", async () => {
+    const { db, tables } = makeFakeDb({});
+    expect(
+      await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: "hamptons-2026-08" })
+    ).toEqual({ ok: false, reason: "confirm_mismatch" });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("a touched weekend refuses not_untouched — an audit row alone is history", async () => {
+    const { db, tables } = makeFakeDb({
+      audit: [
+        {
+          id: "a1",
+          actor: STAFF,
+          action: "guide_grant_added",
+          subject_user_id: RAVI,
+          cohort_id: BOSTON,
+        },
+      ],
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: false,
+      reason: "not_untouched",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("a cohort with ONLY a guide grant refuses via the direct probe — the no-FK surface", async () => {
+    // The reachable grant-without-audit state (Unit 5's untransacted pair):
+    // nothing else references the cohort, so ONLY the grant probe stands
+    // between this weekend and a delete that would orphan the grant.
+    const { db, tables } = makeFakeDb({
+      grants: [{ id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON }],
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: false,
+      reason: "not_untouched",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+    expect(tables.path_role_grants).toHaveLength(1);
+  });
+
+  it("classifier passes, then the DELETE hits 23503 → not_untouched (the DB backstop)", async () => {
+    // A referencing row landed between the probes and the DELETE; the schema
+    // refuses and the core maps the refusal to the same reason the classifier
+    // would have given — the copy says the weekend stopped qualifying.
+    const { db, tables } = makeFakeDb({
+      failTable: {
+        table: "path_cohorts",
+        op: "delete",
+        message: "violates foreign key constraint",
+        code: "23503",
+      },
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: false,
+      reason: "not_untouched",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("a DELETE that landed but reported an error is SUCCESS after the post-write verify", async () => {
+    // fwWrite's contract: a timed-out delete may still land. Gone-after-error is
+    // what the caller asked for; the sweep still runs.
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "delete", message: "response lost", applyAnyway: true },
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: true,
+      grantSweep: true,
+    });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)).toBeUndefined();
+  });
+
+  it("a genuine delete failure (row still there) is unavailable", async () => {
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_cohorts", op: "delete", message: "down" },
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("a grant landing BETWEEN probe and delete is removed by the post-delete sweep", async () => {
+    // The one race the schema cannot referee: path_role_grants has no FK, so a
+    // grant written after the classifier's probe would be silently orphaned by
+    // the DELETE. The sweep closes it.
+    const { db, tables } = makeFakeDb({
+      beforeDelete: [
+        {
+          table: "path_cohorts",
+          run: (t) =>
+            t.path_role_grants.push({
+              id: "g-race",
+              user_id: RAVI,
+              role: "guide",
+              scope_type: "cohort",
+              scope_id: BOSTON,
+            }),
+        },
+      ],
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: true,
+      grantSweep: true,
+    });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)).toBeUndefined();
+    // The orphan is GONE, not left pointing at a deleted cohort.
+    expect(tables.path_role_grants).toHaveLength(0);
+  });
+
+  it("the sweep only removes THIS cohort's guide grants", async () => {
+    const { db, tables } = makeFakeDb({
+      grants: [
+        { id: "g-h", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: HAMPTONS },
+      ],
+      beforeDelete: [
+        {
+          table: "path_cohorts",
+          run: (t) =>
+            t.path_role_grants.push({
+              id: "g-race",
+              user_id: DANA,
+              role: "guide",
+              scope_type: "cohort",
+              scope_id: BOSTON,
+            }),
+        },
+      ],
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: true,
+      grantSweep: true,
+    });
+    expect(tables.path_role_grants.map((g) => g.id)).toEqual(["g-h"]);
+  });
+
+  it("a FAILED sweep is success-with-fact: grantSweep false, the cohort still gone", async () => {
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_role_grants", op: "delete", message: "down" },
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: true,
+      grantSweep: false,
+    });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)).toBeUndefined();
+  });
+
+  it("a probe outage refuses unavailable and deletes NOTHING — fail closed", async () => {
+    const { db, tables } = makeFakeDb({
+      failTable: { table: "path_task_events", op: "select", message: "down" },
+    });
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("a kind='path' id is refused BY THE CORE — the CLI has no action-layer gate", async () => {
+    const { db, tables } = makeFakeDb({});
+    expect(await deleteFwCohort(db, { cohortId: PATH_COHORT, confirmSlug: "sept-2026" })).toEqual({
+      ok: false,
+      reason: "cohort_not_fw",
+    });
+    expect(tables.path_cohorts).toHaveLength(3);
+  });
+
+  it("an unknown id is cohort_not_found", async () => {
+    const { db } = makeFakeDb({});
+    expect(await deleteFwCohort(db, { cohortId: "nope", confirmSlug: "nope" })).toEqual({
+      ok: false,
+      reason: "cohort_not_found",
+    });
+  });
+
+  it("an ARCHIVED untouched weekend deletes too — untouched is orthogonal to archive state", async () => {
+    // Archiving writes only the cohort row's own columns (the board revoke on an
+    // untouched cohort folds no_active_token to success without a token row), so
+    // an archived weekend nothing referenced still qualifies. R7's boundary is
+    // history, not visibility.
+    const { db, tables } = makeFakeDb({});
+    const archived = await archiveFwCohort(db, {
+      cohortId: BOSTON,
+      actorUserId: STAFF,
+      now: NOW,
+      confirmSlug: "boston-2026-08",
+    });
+    expect(archived.ok).toBe(true);
+    expect(await deleteFwCohort(db, { cohortId: BOSTON, confirmSlug: CONFIRM })).toEqual({
+      ok: true,
+      grantSweep: true,
+    });
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)).toBeUndefined();
+  });
+});
+
+describe("listFwOpsCohorts — the per-row untouched flag (the Delete affordance gate)", () => {
+  it("carries the SHARED classifier's verdict per row", async () => {
+    const { db } = makeFakeDb({
+      members: [{ student_id: "s1", cohort_id: BOSTON }],
+    });
+    const listed = await listFwOpsCohorts(db, { now: NOW });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(listed.cohorts.find((c) => c.id === BOSTON)!.untouched).toBe(false);
+    expect(listed.cohorts.find((c) => c.id === HAMPTONS)!.untouched).toBe(true);
+  });
+
+  it("an unavailable verdict degrades to untouched:false WITHOUT failing the list", async () => {
+    // The probe table is one the list's own reads never touch, so the list
+    // renders; the affordance fails closed (no Delete on partial knowledge).
+    const { db } = makeFakeDb({
+      failTable: { table: "path_fw_import_exceptions", op: "select", message: "down" },
+    });
+    const listed = await listFwOpsCohorts(db, { now: NOW });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(listed.cohorts.length).toBeGreaterThan(0);
+    expect(listed.cohorts.every((c) => c.untouched === false)).toBe(true);
+  });
+
+  it("a minted-then-revoked board makes the row NOT untouched on the list too", async () => {
+    const { db } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await revokeFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    const listed = await listFwOpsCohorts(db, { now: NOW });
+    if (!listed.ok) throw new Error("unreachable");
+    expect(listed.cohorts.find((c) => c.id === BOSTON)!.untouched).toBe(false);
   });
 });

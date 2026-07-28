@@ -122,7 +122,10 @@ describe("Decision 4 — the landings EMIT params and never READ them", () => {
     // endpoint HANGING", which fails slow and now sits in the build path of
     // six static pages (adversarial review).
     const seats = stripComments(read("app/lib/seats.ts"));
-    expect(seats).toMatch(/if \(!url \|\| !key\) return SEATS_REMAINING/);
+    // Since U13 the guard THROWS inside the shared live read and the
+    // marketing wrapper catches to the constant (the CRM wrapper must not).
+    expect(seats).toMatch(/if \(!url \|\| !key\) throw/);
+    expect(seats).toMatch(/return SEATS_REMAINING/);
     expect(seats).toMatch(/AbortSignal\.timeout\(/);
   });
 

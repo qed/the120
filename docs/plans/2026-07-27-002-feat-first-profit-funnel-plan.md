@@ -1135,7 +1135,29 @@ querying before and after.
 
 ---
 
-- [ ] **Unit 13: Review state and the offer bridge**
+- [x] **Unit 13: Review state and the offer bridge** — *landed 2026-07-28. The
+  review-wait and waitlist screens exist (⚠ DRAFTED copy, Peter revises —
+  every factual claim registered in DRAFT_CLAIMS_FOR_PETER and pinned by test;
+  "five business days" and the waitlist-ordering policy are UNVERIFIED).
+  offer-rules.ts: offerHeadroom/offerCapacityDisplay (offers do not reserve
+  seats — remaining-minus-outstanding surfaced in the offer confirm dialog,
+  red keyed on a BOOLEAN, and CAPACITY_UNKNOWN when the live count fails: the
+  marketing seats fallback would have shown a calm stale number exactly when
+  the over-commit warning mattered). countOutstandingOffers uses the CRM's
+  real vocabulary (offered/member; NOT the pre-offer "invited"). THE CRITICAL,
+  found by both reviewers tracing every writer of applicant_state: nothing
+  ever advanced it past project_created — the offer email pointed families at
+  a Reserve button whose server gate refused them. Fixed at the DB layer:
+  migration 20260810120000 ships children_applicant_state_sync (status →
+  applicant_state, forward-only, funnel children only, pre-funnel NULLs
+  untouched), applied to production + verified; routing is two-column
+  (children.status too) for pre-funnel families. Seats-exhausted no longer
+  parks in-review families on the waitlist wall (its membership copy would be
+  a lie that flaps with refunds) — the review screen carries a truthful
+  seats-full note. Existing staff offer flow unchanged (capacity prop is
+  additive; predicates untouched). Suite 131 files / 3,412 tests; tsc, build,
+  lint clean. NOTE for U14+: nothing writes "waitlisted" yet — the staff-side
+  waitlist move is future work.*
 
 **Goal:** The F5 rung. The family sees a real admissions process; staff open the deposit
 through the path that already exists.

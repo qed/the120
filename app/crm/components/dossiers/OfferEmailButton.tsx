@@ -63,6 +63,7 @@ export default function OfferEmailButton({
   sentAtOverlay,
   onSentAtChange,
   onSendingChange,
+  capacity,
 }: {
   item: DossierItem;
   /** e.g. while a status move is in flight — the two header actions never race. */
@@ -71,6 +72,10 @@ export default function OfferEmailButton({
   sentAtOverlay: string | null;
   onSentAtChange: (sentAt: string | null) => void;
   onSendingChange?: (sending: boolean) => void;
+  /** U13: offers do not reserve seats — remaining-minus-outstanding, shown
+   *  at the exact moment staff commit to a promise. The red styling keys on
+   *  `warn`, never on the prose. */
+  capacity?: { line: string; warn: boolean };
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -236,6 +241,15 @@ export default function OfferEmailButton({
               {isResend && sentAt && (
                 <p className="font-mono text-[10.5px] tracking-[0.04em] text-crm-amber">
                   Already sent {fmtDay(sentAt)} — this sends it again.
+                </p>
+              )}
+              {capacity && (
+                <p
+                  className={`font-mono text-[10.5px] tracking-[0.04em] ${
+                    capacity.warn ? "text-crm-red" : "text-crm-muted"
+                  }`}
+                >
+                  {capacity.line}
                 </p>
               )}
             </div>

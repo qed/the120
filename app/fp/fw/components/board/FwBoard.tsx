@@ -6,6 +6,7 @@ import type { FwBoardColumnPhase, FwBoardShell } from "@/app/fp/lib/fw-board-loa
 import {
   FW_BOARD_CONNECTION_INITIAL,
   FW_BOARD_DEAD_LINK_MESSAGE,
+  FW_BOARD_PHASE_PRESENTATION,
   fwBoardCellLabel,
   fwBoardCellPresentation,
   fwBoardConnectionState,
@@ -299,8 +300,12 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
       {connection.phase === "dead_link" ? (
         <DeadLinkPanel />
       ) : model === null ? (
+        // The interim panel and the header pill read the SAME phase row of
+        // FW_BOARD_PHASE_PRESENTATION, so they narrate this moment identically
+        // (previously a hardcoded "Catching up…" here contradicted a
+        // "connecting" pill on the first 404 of a revocation).
         <div className="mt-24 text-center font-path-body text-2xl text-hq-ink-soft">
-          Catching up with the room…
+          {FW_BOARD_PHASE_PRESENTATION[connection.phase].bodyMessage}
         </div>
       ) : (
         <>
@@ -320,30 +325,11 @@ export default function FwBoard({ token, shell }: { token: string; shell: FwBoar
 
 /* ── header ─────────────────────────────────────────────────────────────── */
 
-/** Pure lookups from the connection machine's phase — no inline disposition
- *  logic here, so the pill can never say something the panel contradicts. */
-const PHASE_LABEL: Record<FwBoardConnectionPhase, string> = {
-  live: "live",
-  catching_up: "catching up",
-  connecting: "connecting",
-  dead_link: "link inactive",
-};
-
-const PHASE_DOT_CLASS: Record<FwBoardConnectionPhase, string> = {
-  live: "inline-block h-3 w-3 rounded-full bg-verified",
-  catching_up: "inline-block h-3 w-3 rounded-full bg-not-yet",
-  connecting: "inline-block h-3 w-3 rounded-full bg-not-yet",
-  dead_link: "inline-block h-3 w-3 rounded-full bg-hq-sunken",
-};
-
-const PHASE_TEXT_CLASS: Record<FwBoardConnectionPhase, string> = {
-  live: "text-hq-ink-soft",
-  catching_up: "text-hq-ink-muted",
-  connecting: "text-hq-ink-muted",
-  dead_link: "text-hq-ink-muted",
-};
-
+/** Pure lookups from the shared phase table in fw-board-rules.ts — no inline
+ *  disposition logic here, so the pill can never say something the panel
+ *  contradicts. */
 function BoardHeader({ title, phase }: { title: string; phase: FwBoardConnectionPhase }) {
+  const presentation = FW_BOARD_PHASE_PRESENTATION[phase];
   return (
     <header className="flex items-baseline justify-between border-b border-hq-border pb-4">
       <div>
@@ -355,8 +341,8 @@ function BoardHeader({ title, phase }: { title: string; phase: FwBoardConnection
         </h1>
       </div>
       <div className="flex items-center gap-2 font-path-mono text-sm">
-        <span aria-hidden className={PHASE_DOT_CLASS[phase]} />
-        <span className={PHASE_TEXT_CLASS[phase]}>{PHASE_LABEL[phase]}</span>
+        <span aria-hidden className={presentation.dotClass} />
+        <span className={presentation.textClass}>{presentation.label}</span>
       </div>
     </header>
   );
@@ -428,12 +414,6 @@ function Rollups({ rollups }: { rollups: FwBoardRollups }) {
 
 /* ── grid ───────────────────────────────────────────────────────────────── */
 
-/** Cell treatment by state — the pure table in fw-board-rules.ts (B7 / 3.18.5).
- *  Each entry is one COMPLETE class-string literal, sizing included (the
- *  skin-token rule: Tailwind's scanner reads those spelled out; a concatenated
- *  class renders as no colour), plus the state word the accessible name carries.
- *  `never_attempted` is the absence of a cell. */
-
 function Grid({ rows, columns }: { rows: FwBoardGridRow[]; columns: FwBoardColumnPhase[] }) {
   if (rows.length === 0) {
     return (
@@ -492,6 +472,12 @@ const GridRow = memo(
           <td key={phase.phase} className="px-2 py-1.5">
             <div className="flex flex-wrap gap-0.5">
               {phase.taskIds.map((taskId) => {
+                // Cell treatment by state — the pure table in fw-board-rules.ts
+                // (B7 / 3.18.5): each entry is one COMPLETE class-string
+                // literal, sizing included (the skin-token rule: Tailwind's
+                // scanner reads those spelled out; a concatenated class renders
+                // as no colour), plus the state word the accessible name
+                // carries. `never_attempted` is the absence of a cell.
                 // Derived AT RENDER, never stored on the row: the memo
                 // comparator below stays a value comparison over cell STATES,
                 // and the label/class lookups only run on rows that actually

@@ -1,7 +1,7 @@
 ---
 title: "fix: FP bug work order — 7 blockers + should-fix items"
 type: fix
-status: active
+status: completed
 date: 2026-07-28
 origin: docs/FP-BUGS-2026-07-28.md
 ---

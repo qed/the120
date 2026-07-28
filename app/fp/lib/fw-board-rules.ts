@@ -811,6 +811,72 @@ export function fwBoardConnectionState({
   return { phase: outcome.hasFrame ? "catching_up" : "connecting", consecutive404 };
 }
 
+/** What one connection phase renders as, everywhere the board mentions it. */
+export type FwBoardPhasePresentation = {
+  /** The header pill's word. */
+  label: string;
+  /** The pill's status dot — a COMPLETE class-string literal. */
+  dotClass: string;
+  /** The pill's text colour — a COMPLETE class-string literal. */
+  textClass: string;
+  /** The line the full-screen interim panel shows while no frame is on screen. */
+  bodyMessage: string;
+};
+
+/**
+ * The phase presentation table — pill label, pill classes, AND the interim
+ * panel's body line, keyed by the one connection phase.
+ *
+ * The mapping lives HERE, not in `FwBoard.tsx`, so the header and the panel
+ * derive from ONE table and can never disagree; the renderer is a lookup. The
+ * failure this closes (adversarial review): the component's hardcoded interim
+ * body said "Catching up with the room…" for EVERY frameless phase, so the
+ * first 404 of a revocation showed a header pill reading "connecting" over a
+ * body claiming to catch up — two surfaces narrating the same moment
+ * differently.
+ *
+ * Every class value is a COMPLETE class-string literal (the skin-token rule,
+ * `skin-tokens.ts` CLASS_TABLE): Tailwind v4's scanner reads this source file
+ * and emits exactly the utilities spelled out here, so a concatenated or
+ * interpolated class would render as nothing at all.
+ *
+ * `live.bodyMessage` matches `catching_up`'s: the body only renders while no
+ * frame is on screen, and a frameless `live` (unreachable today — a landed
+ * frame is what makes a board live) should read as still fetching, not as a
+ * blank. `dead_link.bodyMessage` REFERENCES `FW_BOARD_DEAD_LINK_MESSAGE` rather
+ * than respelling it — the dead-link panel renders that constant directly, and
+ * two spellings of locked copy is how they drift.
+ */
+export const FW_BOARD_PHASE_PRESENTATION: Record<
+  FwBoardConnectionPhase,
+  FwBoardPhasePresentation
+> = {
+  live: {
+    label: "live",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-verified",
+    textClass: "text-hq-ink-soft",
+    bodyMessage: "Catching up with the room…",
+  },
+  catching_up: {
+    label: "catching up",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-not-yet",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: "Catching up with the room…",
+  },
+  connecting: {
+    label: "connecting",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-not-yet",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: "Connecting to the room…",
+  },
+  dead_link: {
+    label: "link inactive",
+    dotClass: "inline-block h-3 w-3 rounded-full bg-hq-sunken",
+    textClass: "text-hq-ink-muted",
+    bodyMessage: FW_BOARD_DEAD_LINK_MESSAGE,
+  },
+};
+
 /* ═══════════════════════════════════════════════ the board CELL presentation ══ */
 /*
  * B7 (FP bug work order 2026-07-28; check 3.18.5 / WCAG 1.4.1). A grid cell's

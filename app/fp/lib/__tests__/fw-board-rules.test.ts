@@ -7,6 +7,7 @@ import {
   FW_BOARD_CELL_PRESENTATION,
   FW_BOARD_CONNECTION_INITIAL,
   FW_BOARD_DEAD_LINK_MESSAGE,
+  FW_BOARD_PHASE_PRESENTATION,
   FW_BOARD_STALE_AFTER_MS,
   FW_BOARD_TICKER_LIMIT,
   FW_BOARD_TOKEN_GRACE_MS,
@@ -852,6 +853,40 @@ describe("fwBoardConnectionState — the dead-link machine (RC-2)", () => {
     // whatever its exact phrasing becomes.
     expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/staff/i);
     expect(FW_BOARD_DEAD_LINK_MESSAGE).toMatch(/link/i);
+  });
+});
+
+describe("FW_BOARD_PHASE_PRESENTATION — one table for pill AND panel", () => {
+  const phases = ["live", "catching_up", "connecting", "dead_link"] as const;
+
+  it("gives the four phases four DISTINCT pill labels", () => {
+    const labels = phases.map((p) => FW_BOARD_PHASE_PRESENTATION[p].label);
+    expect(new Set(labels).size).toBe(4);
+  });
+
+  it("gives the four phases distinct dot classes where the phases differ", () => {
+    // live / degraded / dead are visually distinct dots; catching_up and
+    // connecting deliberately share the amber dot (both are "not live yet").
+    const dots = phases.map((p) => FW_BOARD_PHASE_PRESENTATION[p].dotClass);
+    expect(new Set(dots).size).toBeGreaterThanOrEqual(3);
+    expect(FW_BOARD_PHASE_PRESENTATION.live.dotClass).not.toBe(
+      FW_BOARD_PHASE_PRESENTATION.dead_link.dotClass
+    );
+  });
+
+  it("the dead_link body IS the locked dead-link constant, not a respelling", () => {
+    expect(FW_BOARD_PHASE_PRESENTATION.dead_link.bodyMessage).toBe(FW_BOARD_DEAD_LINK_MESSAGE);
+  });
+
+  it("builds no class or label by interpolation — every value is a complete literal", () => {
+    // Same constraint as the cell table below (skin-tokens.ts CLASS_TABLE): a
+    // class assembled at runtime is one the Tailwind scanner never saw.
+    for (const p of phases) {
+      const { label, dotClass, textClass } = FW_BOARD_PHASE_PRESENTATION[p];
+      expect(label).not.toContain("${");
+      expect(dotClass).not.toContain("${");
+      expect(textClass).not.toContain("${");
+    }
   });
 });
 

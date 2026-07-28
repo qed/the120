@@ -74,6 +74,10 @@ const signInSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/** The `success: true` arm is unreachable at runtime — the action `redirect()`s
+ *  on full success (RC-1), so only refusals ever resolve. The arm is kept so the
+ *  exported type shape stays stable across a rolling deploy (a client bundle one
+ *  version behind may still expect it). */
 export type SignInGuideResult = { success: true } | { success: false; error: string };
 
 /**
@@ -358,6 +362,11 @@ const claimSchema = z.object({
   password: z.string().max(200),
 });
 
+/** The `success: true` arm is unreachable at runtime — the action `redirect()`s
+ *  on full success (RC-1); only refusals and the partial-success "password set,
+ *  sign-in hiccuped" case resolve, all as `success: false`. The arm is kept so
+ *  the exported type shape stays stable across a rolling deploy (a client
+ *  bundle one version behind may still expect it). */
 export type ClaimGuideInviteActionResult =
   | { success: true }
   | { success: false; error: string };

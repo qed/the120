@@ -56,6 +56,17 @@ const TITLE_VALUE = /title:\s*(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/;
 const carriesBrand = (rawTitle: string) =>
   rawTitle.endsWith("${FW_BRAND_SUFFIX}") || rawTitle.endsWith(FW_BRAND_SUFFIX);
 
+/** The scan's title read over RAW source: comments come OFF first, then the
+ *  `title:` match. One helper shared by the file scan and the fixture
+ *  regression below, so the fixture exercises exactly the code path the scan
+ *  uses — a doc comment that merely MENTIONS the suffix must never satisfy (or
+ *  shadow) the page's actual title. */
+const readStrippedTitle = (rawSource: string): string | null => {
+  const title = stripComments(rawSource).match(TITLE_VALUE);
+  return title ? title[2] : null;
+};
+
+/** RAW page sources — stripping happens per check, via the shared helpers. */
 const fwPages = async (): Promise<Map<string, string>> => {
   const files = await glob(["app/fp/fw/**/page.tsx"], {
     cwd: REPO_ROOT,
@@ -66,10 +77,7 @@ const fwPages = async (): Promise<Map<string, string>> => {
   // vacuously — the one failure mode a scan like this must not have.
   expect(files.length).toBeGreaterThan(0);
   return new Map(
-    files.map((f) => [
-      f.replace(/\\/g, "/"),
-      stripComments(readFileSync(`${REPO_ROOT}${f}`, "utf8")),
-    ])
+    files.map((f) => [f.replace(/\\/g, "/"), readFileSync(`${REPO_ROOT}${f}`, "utf8")])
   );
 };
 
@@ -82,7 +90,8 @@ describe("every /fp/fw page title carries the First Profit brand (D1 Option A)",
   });
 
   it("each page declares exactly one recognised title construct, suffixed", async () => {
-    for (const [path, code] of await fwPages()) {
+    for (const [path, raw] of await fwPages()) {
+      const code = stripComments(raw);
       const constructs =
         (code.match(STATIC_METADATA)?.length ?? 0) +
         (code.match(GENERATE_METADATA)?.length ?? 0);
@@ -100,13 +109,41 @@ describe("every /fp/fw page title carries the First Profit brand (D1 Option A)",
         continue;
       }
 
-      const title = code.match(TITLE_VALUE);
+      const title = readStrippedTitle(raw);
       expect(title, `${path}: metadata must declare a string title`).not.toBeNull();
       expect(
-        carriesBrand(title![2]),
-        `${path}: title ${JSON.stringify(title![2])} must end on FW_BRAND_SUFFIX`
+        carriesBrand(title!),
+        `${path}: title ${JSON.stringify(title)} must end on FW_BRAND_SUFFIX`
       ).toBe(true);
     }
+  });
+});
+
+describe("comments are stripped before title matching (the scan's own hygiene)", () => {
+  // The regression this pins (2026-07-27 scan lesson, persisted 2026-07-28):
+  // several real pages DISCUSS the brand in their doc blocks. A scan that
+  // matched raw source could read the comment's mention of the suffix as
+  // satisfying the requirement — so the fixture puts the suffix in a comment
+  // and leaves it OFF the actual title, and must FAIL.
+  const pageWith = (title: string) =>
+    [
+      "/** the title must say — First Profit */",
+      `export const metadata = { title: "${title}" };`,
+      "",
+    ].join("\n");
+
+  it("a suffix-bearing comment cannot rescue an unsuffixed title", () => {
+    const title = readStrippedTitle(pageWith("Founders Weekend"));
+    // The match found the REAL title, not the comment's text…
+    expect(title).toBe("Founders Weekend");
+    // …and that title fails the suffix requirement.
+    expect(carriesBrand(title!)).toBe(false);
+  });
+
+  it("…while the same fixture with a suffixed title passes", () => {
+    const title = readStrippedTitle(pageWith(`Founders Weekend${FW_BRAND_SUFFIX}`));
+    expect(title).toBe(`Founders Weekend${FW_BRAND_SUFFIX}`);
+    expect(carriesBrand(title!)).toBe(true);
   });
 });
 

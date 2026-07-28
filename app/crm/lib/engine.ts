@@ -5,6 +5,7 @@
  * copilot-engine posture, re-plumbed for The 120's derived pipeline).
  */
 
+import { DEPOSIT_REFUND_DEADLINE_LABEL } from "@/app/lib/site";
 import {
   CONCERN_LABELS,
   isConcern,
@@ -185,7 +186,7 @@ export function deriveNextMove(
   // 3. Call held, no deposit (implied by derived stage), T+1 (GTM nurture).
   if (stage === "call_held" && days >= 1) {
     return {
-      message: "Send the T+1 recap + deposit link. Refundable until Sept 30.",
+      message: `Send the T+1 recap + deposit link. Refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
       ruleId: 3,
     };
   }

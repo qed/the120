@@ -1201,7 +1201,35 @@ through the path that already exists.
 
 ---
 
-- [ ] **Unit 14: Next Steps, checkout, and deposit integrity**
+- [x] **Unit 14: Next Steps, checkout, and deposit integrity** — *landed
+  2026-07-28. Both Stripe routes rebuilt over deposit-rules (pure taxonomy) +
+  deposit-core (deps-injected), with their first tests. Webhook: completed
+  paid/unpaid, async_payment_succeeded/failed, expired, charge.refunded; the
+  carried refund-resurrection bug closed ATOMICALLY (migration 20260812120000:
+  deposit_fulfil RPC — conditional paid write in SQL, 23505 caught inside);
+  the carried one-live-paid 23505 discharged (double_paid: loud log + 200).
+  THE REVIEW'S CRITICAL: a refund delivered before its completed matched zero
+  rows, answered 200, and was lost forever — zero-row refund updates now fail
+  → 500 → Stripe retries until the row exists. Partial refunds never flip
+  status (charge.refunded boolean gates). Checkout: R51a full policy inline
+  above an unticked per-child checkbox, acceptance (version/hash/timestamp/IP)
+  persisted on deposit_attempts (migration 20260811120000, also
+  children.family_goal); CHILD-scoped idempotency key with stable params (the
+  per-attempt key un-deduped checkout: two clicks = two payable sessions);
+  expires_at 30 min; origin allowlisted (localhost dev-only); pending deposits
+  close the gate for their multi-day clearing window; zero seats → 409 +
+  waitlist redirect honored client-side. R50: /start/next-steps three swipes
+  with per-child ?child= and persisted editable family_goal (zero-row saves
+  fail honestly); the offer email is Next Steps' front door (all three
+  renderings retargeted + tests); dashboard links it and renders a
+  payment-processing state. R51: last "Sept 30" literal collapsed; carve-out
+  removed. Suite 133 files / 3,442 tests; tsc, build, lint clean.
+  NOTES FOR PETER: refund-policy claims registered (POLICY_CLAIMS_FOR_PETER,
+  two UNVERIFIED); whether PENDING deposits should hold a seat in
+  seats_claimed() is an open product question; the oversell window (multiple
+  open sessions at 1 seat left) is narrowed to 30 min, residual documented —
+  the verification's test-mode e2e deposit remains for a Stripe test key
+  session (Peter or a keyed environment).*
 
 **Goal:** Conversion 3, without double-charging or double-selling a seat.
 

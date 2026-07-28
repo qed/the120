@@ -40,7 +40,9 @@ export function offerEmailTemplate(opts: {
 }): OfferEmailContent {
   const child = opts.childFirstName.trim() || "your child";
   const parent = opts.parentName.trim() || "there";
-  const link = `${SITE_URL}/dashboard`;
+  // R50 (funnel U14): the offer email is Next Steps' front door — the
+  // three swipes end at the dashboard's deposit CTA.
+  const link = `${SITE_URL}/start/next-steps`;
 
   const subject = `${headerSafe(child)} has been offered a seat at The 120`;
 
@@ -49,7 +51,7 @@ export function offerEmailTemplate(opts: {
     `Great news: ${child} has been offered a seat in The 120's founding cohort.\n\n` +
     `The next step is yours. Sign in to your dashboard and reserve ${child}'s seat ` +
     `with the $250 deposit — fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.\n\n` +
-    `Reserve the seat: ${link}\n\n` +
+    `See the next steps: ${link}\n\n` +
     `Questions? Just reply to this email.\n\n` +
     `— The 120 Admissions`;
 
@@ -60,7 +62,7 @@ export function offerEmailTemplate(opts: {
     `<p style="${P_STYLE}">Great news: <strong>${c}</strong> has been offered a seat in The 120&#39;s founding cohort.</p>` +
     `<p style="${P_STYLE}">The next step is yours. Sign in to your dashboard and reserve ${c}&#39;s seat ` +
     `with the $250 deposit — fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.</p>` +
-    `<p style="${P_STYLE}"><a href="${link}" style="color:#0300ED">Reserve the seat at ${SITE_URL.replace("https://", "")}/dashboard</a></p>` +
+    `<p style="${P_STYLE}"><a href="${link}" style="color:#0300ED">See the next steps at ${SITE_URL.replace("https://", "")}/start/next-steps</a></p>` +
     `<p style="${P_STYLE}">Questions? Just reply to this email.</p>` +
     `<p style="${P_STYLE}">— The 120 Admissions</p>`;
 

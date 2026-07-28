@@ -188,10 +188,10 @@ describe("the deposit gate (R49a: refused server-side before an offer)", () => {
 });
 
 describe("the three renderings carry the same deposit target", () => {
-  it("text and html both point at ${SITE_URL}/dashboard", () => {
+  it("text and html both point at ${SITE_URL}/start/next-steps (R50: the offer email is Next Steps' front door)", () => {
     const t = offerEmailTemplate({ childFirstName: "Maya", parentName: "Sam" });
-    expect(t.text).toContain(`${SITE_URL}/dashboard`);
-    expect(t.html).toContain(`${SITE_URL}/dashboard`);
+    expect(t.text).toContain(`${SITE_URL}/start/next-steps`);
+    expect(t.html).toContain(`${SITE_URL}/start/next-steps`);
   });
 
   it("the confirm-dialog preview renders the SAME template function (wiring scan)", () => {
@@ -201,7 +201,7 @@ describe("the three renderings carry the same deposit target", () => {
     // No second link literal (any quote style) that could drift from the
     // template's target: the single-quote-only check was dead in a
     // double-quoted TSX file (reviewer).
-    expect(src).not.toMatch(/["'`]\/dashboard/);
+    expect(src).not.toMatch(/["'`]\/(dashboard|start\/next-steps)/);
   });
 
   it("the capacity display is threaded to the dialog (wiring scan)", () => {

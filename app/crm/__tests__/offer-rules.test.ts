@@ -28,10 +28,10 @@ describe("offerEmailTemplate", () => {
     expect(out.html).toContain("Clay");
   });
 
-  it("greets the parent and links the dashboard via SITE_URL", () => {
+  it("greets the parent and links Next Steps via SITE_URL (R50, funnel U14)", () => {
     expect(out.text).toContain("Kevin");
-    expect(out.text).toContain(`${SITE_URL}/dashboard`);
-    expect(out.html).toContain(`${SITE_URL}/dashboard`);
+    expect(out.text).toContain(`${SITE_URL}/start/next-steps`);
+    expect(out.html).toContain(`${SITE_URL}/start/next-steps`);
   });
 
   it("reads the refund deadline from the shared constant in text and html", () => {

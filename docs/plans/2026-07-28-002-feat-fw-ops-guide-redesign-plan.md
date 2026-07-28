@@ -1,7 +1,7 @@
 ---
 title: "feat: FW ops redesign, weekend editing, staff-as-guide, and the fast guide check-in loop"
 type: feat
-status: active
+status: completed
 date: 2026-07-28
 origin: docs/brainstorms/2026-07-28-fw-ops-redesign-requirements.md
 deepened: 2026-07-28
@@ -154,7 +154,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 ### Phase A — /fp/fw/ops list redesign (R1–R13)
 
-- [ ] **Unit 1: Sticky ops tab row + layout chrome**
+- [x] **Unit 1: Sticky ops tab row + layout chrome**
 
 **Goal:** Replace the ops header with the CRM-style sticky pill row: Weekends (active), Guide view link, ADMIN chip, archived toggle, pinned +.
 
@@ -178,7 +178,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** `/fp/fw/ops` shows StaffBar + one sticky tab row + list; archived toggle round-trips via URL; chrome scrolls correctly under the bar at 375px.
 
-- [ ] **Unit 2: Weekend rows with overflow menu; archive/restore from the list; inline create**
+- [x] **Unit 2: Weekend rows with overflow menu; archive/restore from the list; inline create**
 
 **Goal:** Clean list rows with a ⋯ menu (Archive/Restore, Delete when eligible), typed-slug confirm, and the + expanding `FwCohortCreate` inline.
 
@@ -204,7 +204,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** Archive/restore work from the list with inline confirm and inline failure copy; create appears only after +, collapses on success with a link to the new weekend.
 
-- [ ] **Unit 3: Truly-untouched hard delete**
+- [x] **Unit 3: Truly-untouched hard delete**
 
 **Goal:** `deleteFwCohort` core + action + menu wiring: Delete offered only for never-touched weekends, typed-slug server-verified, RESTRICT as backstop.
 
@@ -232,7 +232,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 ### Phase B — Weekend page: edit, staff-as-guide, section nav (R14–R16)
 
-- [ ] **Unit 4: Window/timezone edit + safe re-mint**
+- [x] **Unit 4: Window/timezone edit + safe re-mint**
 
 **Goal:** Edit start/end/timezone on the weekend page; when a live board token exists, offer verdict-first revoke+re-mint.
 
@@ -258,7 +258,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** The mis-zoned weekend corrects to Central from its page; a live board link is never revoked without a replacement mintable; audit trail records the edit.
 
-- [ ] **Unit 5: Staff-as-guide grant-only path + roster discriminator**
+- [x] **Unit 5: Staff-as-guide grant-only path + roster discriminator**
 
 **Goal:** Adding a staff email grants guide access (no invite, no email); roster renders staff grant-holders distinctly.
 
@@ -282,7 +282,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** pkuperman@gmail.com is addable as a guide with no email sent; roster shows the staff badge; checklist math ignores staff rows.
 
-- [ ] **Unit 6: Ops weekend page section navigation**
+- [x] **Unit 6: Ops weekend page section navigation**
 
 **Goal:** Sticky in-page jump nav for the seven sections with at-a-glance possibility signals.
 
@@ -305,7 +305,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 ### Phase C — Guide check-in redesign (R18–R23)
 
-- [ ] **Unit 7: Two-pane guide layout — student sidebar**
+- [x] **Unit 7: Two-pane guide layout — student sidebar**
 
 **Goal:** Cohort view becomes sidebar (first name + last initial, alphabetical, scrollable) + content pane; quick-create and the PR #86 banner keep homes; weekend name links to picker.
 
@@ -328,7 +328,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** Tap a name → that student's view loads in the pane; quick-create and banner still reachable; weekend name navigates to `/fp/fw`.
 
-- [ ] **Unit 8: Student view — phase nav, accordion with inline detail, task-page retirement**
+- [x] **Unit 8: Student view — phase nav, accordion with inline detail, task-page retirement**
 
 **Goal:** Second left nav (Sell/Build/Validate/Grow/Scale), steps accordion with server-rendered detail behind (i) modals, `task/[taskId]` redirected away, SW shell cache bumped.
 
@@ -351,7 +351,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** A phase's steps render with detail available offline via (i); old task URLs land on the student page; no reference to the retired route survives outside the allowlist.
 
-- [ ] **Unit 9: Inline icon decisions over the capture engine**
+- [x] **Unit 9: Inline icon decisions over the capture engine**
 
 **Goal:** Icon-only Check/Not-yet/Undo inline per step: honest optimistic state, composed flips, removals (Same-tap, Recorded, Next student, First Dollar confirm).
 
@@ -386,7 +386,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 ### Phase D — Small items (R17, R24, R25)
 
-- [ ] **Unit 10: Quick-create attestation removal + silent stamp**
+- [x] **Unit 10: Quick-create attestation removal + silent stamp**
 
 **Goal:** Checkbox and enforcement layers removed; column silently stamped as provenance; banner untouched.
 
@@ -408,7 +408,7 @@ Phases A–D are dependency-ordered; units within a phase are mostly independent
 
 **Verification:** Three-field submit, no checkbox; PR #86 banner still surfaces a half-created student.
 
-- [ ] **Unit 11: Copy + Switch removal**
+- [x] **Unit 11: Copy + Switch removal**
 
 **Goal:** "Last used" label; Switch link removed with pins updated.
 

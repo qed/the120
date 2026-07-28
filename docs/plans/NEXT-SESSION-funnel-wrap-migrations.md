@@ -24,6 +24,23 @@ agent should take on the strength of a plan approval.
 **Unit 7 is not blocked by credentials** — it is blocked by Unit 6, which
 it depends on for the provisioning state it renders.
 
+## Unit 3 is BUILT and waiting — PR #104 (draft)
+
+Everything except applying the SQL is done: the migration authored, the
+RPC rewritten, the CRM vocabulary + move menu + queue filter wired, the
+parked-promise rule, the stepper fallback, and 14 new tests. Suite 3,729
+green on that branch.
+
+**To land it:**
+1. `select version, name from supabase_migrations.schema_migrations order by
+   version desc limit 5;` — the file is named `20260815120000` on a guess
+   from the repo listing, which the lock file says is not the truth in a
+   two-lane repo. Rename if that slot is taken.
+2. Apply `supabase/migrations/20260815120000_funnel_waitlist_move.sql`
+   (transactional; every statement idempotent).
+3. Mark PR #104 ready and merge. **Not before** — the code offers staff a
+   waitlist button the DB CHECK would reject.
+
 ## What Peter needs to decide or supply
 
 1. **A Management API token** (or run the migrations himself from the

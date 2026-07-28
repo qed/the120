@@ -9,6 +9,7 @@ import {
   fwPickerRedirectsToSingleCohort,
   fwPickerZeroState,
   fwSearchDistanceBudget,
+  FW_BRAND_SUFFIX,
   FW_OPS_CREATE_PATH,
   normalizeFwSearchTerm,
   searchFwRoster,
@@ -46,6 +47,23 @@ const ROSTER: FwRosterStudent[] = [
 ];
 
 const ids = (rs: readonly FwRosterStudent[]) => rs.map((r) => r.studentId);
+
+/* ══════════════════════════════════════════════ the brand suffix (D1 Option A) ══ */
+
+describe("FW_BRAND_SUFFIX", () => {
+  it("names First Profit — the parent brand every guide-facing title must carry", () => {
+    expect(FW_BRAND_SUFFIX).toContain("First Profit");
+  });
+
+  it("starts with a separator, so a page appends it to a title without supplying one", () => {
+    // The separator travels WITH the constant: a page that concatenates
+    // `${title}${FW_BRAND_SUFFIX}` must never produce "Founders WeekendFirst
+    // Profit". Asserted as "leading non-word characters", not as one exact
+    // spelling — the em-dash choice is the constant's to make.
+    expect(FW_BRAND_SUFFIX).toMatch(/^\s*[^\w\s]/u);
+    expect(FW_BRAND_SUFFIX.trimEnd()).toBe(FW_BRAND_SUFFIX);
+  });
+});
 
 /* ══════════════════════════════════════════════════════════════ normalization ══ */
 

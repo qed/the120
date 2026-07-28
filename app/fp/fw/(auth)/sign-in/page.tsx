@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import FwSignInForm from "./FwSignInForm";
 
 /**
@@ -23,7 +24,7 @@ import FwSignInForm from "./FwSignInForm";
  */
 
 export const metadata: Metadata = {
-  title: "Guide sign-in — Founders Weekend",
+  title: `Guide sign-in · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

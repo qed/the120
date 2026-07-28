@@ -11,7 +11,12 @@ import FwReadingRule from "@/app/fp/fw/components/FwReadingRule";
 import FwTaskTree from "@/app/fp/fw/components/FwTaskTree";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { loadFwStudentDrilldown } from "@/app/fp/lib/fw-loader";
-import { buildFwTaskTree, FW_BAND_LABEL, summarizeFwResume } from "@/app/fp/lib/fw-nav-rules";
+import {
+  buildFwTaskTree,
+  FW_BAND_LABEL,
+  FW_BRAND_SUFFIX,
+  summarizeFwResume,
+} from "@/app/fp/lib/fw-nav-rules";
 
 /**
  * /fp/fw/cohort/[cohortId]/student/[studentId] — one student's whole catalog
@@ -32,7 +37,7 @@ import { buildFwTaskTree, FW_BAND_LABEL, summarizeFwResume } from "@/app/fp/lib/
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Student · Founders Weekend",
+  title: `Student · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

@@ -6,6 +6,7 @@ import FwCohortPicker from "@/app/fp/fw/components/FwCohortPicker";
 import { grantedCohortIds, requireFwSession } from "@/app/fp/lib/fw-auth";
 import { listFwCohortsForActor, loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
 import {
+  FW_BRAND_SUFFIX,
   fwPickerHeadline,
   fwPickerRedirectsToSingleCohort,
   fwPickerZeroState,
@@ -49,7 +50,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Founders Weekend",
+  title: `Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

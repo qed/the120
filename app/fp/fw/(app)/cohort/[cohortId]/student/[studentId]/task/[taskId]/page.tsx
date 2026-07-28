@@ -9,6 +9,7 @@ import { resolveVariant } from "@/app/fp/content/parse-curriculum";
 import FwTaskView from "@/app/fp/fw/components/FwTaskView";
 import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
 import { loadFwRosterNames, loadFwStudentDrilldown } from "@/app/fp/lib/fw-loader";
+import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
 import { resolveTaskInProgram } from "@/app/fp/lib/now-card-rules";
 
 /**
@@ -32,7 +33,7 @@ import { resolveTaskInProgram } from "@/app/fp/lib/now-card-rules";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Task · Founders Weekend",
+  title: `Task · Founders Weekend${FW_BRAND_SUFFIX}`,
   robots: { index: false, follow: false },
 };
 

@@ -33,10 +33,7 @@ export default async function StartPage({
 }) {
   const params = await searchParams;
   const src = params.src;
-
-  // `?g=` is read here too — this is the only route that may read it — but no
-  // consumer exists until U8 pre-selects the door, so it is not threaded
-  // further yet.
+  const query_g = params.g;
 
   // ── A signed-in visitor never sees capture (U7; R10's "signed-in visitors
   // see Dashboard instead", and the hole U6's review found) ──
@@ -75,10 +72,11 @@ export default async function StartPage({
 
   return (
     <StartFlow
-      // Normalized to a single string here; `readCtaSource` does the
-      // validation server-side at capture, so an unknown marker simply
-      // becomes unattributed rather than being rejected at the door.
+      // Normalized to single strings; readCtaSource validates the marker
+      // server-side at capture, and the g hint is validated by doorsModel
+      // when it finally lands (unknown → cold, R35).
       source={Array.isArray(src) ? src[0] : src}
+      group={Array.isArray(query_g) ? query_g[0] : query_g}
     />
   );
 }

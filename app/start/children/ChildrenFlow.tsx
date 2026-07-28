@@ -78,9 +78,13 @@ const activeChildStore = {
 export function ChildrenFlow({
   initialChildren,
   loadFailed,
+  hintSlug,
 }: {
   initialChildren: FunnelChild[];
   loadFailed: boolean;
+  /** The `?g=` door hint, forwarded into the mini-app for the FIRST child
+   *  only (R36) — siblings pick cold. */
+  hintSlug: string | null;
 }) {
   const [children, setChildren] = useState<FunnelChild[]>(initialChildren);
   const selectedId = useSyncExternalStore(
@@ -185,6 +189,27 @@ export function ChildrenFlow({
             );
           })}
         </ul>
+      )}
+
+      {active && (
+        // The forward path (U8): into the mini-app for the active child. The
+        // hint travels ONLY when this is the family's first child — R36 says
+        // siblings pick cold, and the grid is where first-ness is known.
+        <a
+          href={
+            // R36: first-child-only means FIRST-BORN, not only-child. The list
+            // arrives created_at-ordered from the core, so children[0] IS the
+            // first child — gating on length === 1 dropped the hint the moment
+            // a sibling was added, for the very child it was destined for
+            // (both reviewers, independently).
+            hintSlug && active.id === children[0]?.id
+              ? `/start/child/${active.id}?g=${encodeURIComponent(hintSlug)}`
+              : `/start/child/${active.id}`
+          }
+          className="mt-6 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+        >
+          {`Start building with ${active.firstName} →`}
+        </a>
       )}
 
       {seats && (

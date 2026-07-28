@@ -4,6 +4,7 @@ import {
   loadFwCohortRoster,
   loadFwMatchCandidates,
   loadFwStudentDrilldown,
+  loadFwUnfinishedStudents,
 } from "../fw-loader";
 import { matchFwStudent } from "../fw-match-rules";
 import { FW_TOMBSTONE_FIRST_NAME, FW_TOMBSTONE_LAST_NAME } from "../fw-ops-rules";
@@ -30,6 +31,8 @@ type Seed = {
   members?: { student_id: string; cohort_id: string }[];
   profiles?: Row[];
   progress?: Row[];
+  /** The task catalog — the unfinished probe's sentinel read walks it. */
+  unitTasks?: Row[];
   errors?: Partial<Record<string, string>>;
   /**
    * Rows returned VERBATIM for a table, bypassing the filters. Models the
@@ -61,6 +64,7 @@ function makeFakeDb(seed: Seed) {
     path_cohort_members: (seed.members ?? []).map((m) => ({ ...m })),
     path_student_profiles: (seed.profiles ?? []).map((p) => ({ ...p })),
     path_task_progress: (seed.progress ?? []).map((p) => ({ ...p })),
+    path_unit_tasks: (seed.unitTasks ?? []).map((t) => ({ ...t })),
   };
   const queries: {
     table: string;
@@ -72,8 +76,12 @@ function makeFakeDb(seed: Seed) {
   const db = {
     from(table: string) {
       const eqs: [string, unknown][] = [];
+      // `.not(col, "is", null)` — the only negation this module uses.
+      const notNulls: string[] = [];
       const ins: [string, unknown[]][] = [];
       let range: [number, number] | null = null;
+      let orderBy: [string, boolean] | null = null;
+      let limitN: number | null = null;
       const rows = () => {
         queries.push({ table, eqs: [...eqs], ins: [...ins], range });
         if (seed.throws?.includes(table)) throw new TypeError("fetch failed");
@@ -81,10 +89,21 @@ function makeFakeDb(seed: Seed) {
         if (err) return { data: null, error: { message: err } };
         const raw = seed.rawRows?.[table];
         if (raw) return { data: raw.map((r) => ({ ...r })), error: null };
-        const matched = (tables[table] ?? []).filter(
+        // A column the fixture omitted reads as SQL null — `.is(col, null)` must
+        // match it, exactly as the real database would.
+        let matched = (tables[table] ?? []).filter(
           (r) =>
-            eqs.every(([c, v]) => r[c] === v) && ins.every(([c, vs]) => vs.includes(r[c] as never))
+            eqs.every(([c, v]) => (r[c] ?? null) === v) &&
+            notNulls.every((c) => (r[c] ?? null) !== null) &&
+            ins.every(([c, vs]) => vs.includes(r[c] as never))
         );
+        if (orderBy) {
+          const [col, asc] = orderBy;
+          matched = [...matched].sort(
+            (a, b) => String(a[col]).localeCompare(String(b[col])) * (asc ? 1 : -1)
+          );
+        }
+        if (limitN !== null) matched = matched.slice(0, limitN);
         const from = range ? range[0] : 0;
         // `to` is inclusive in PostgREST; the server cap applies regardless.
         const to = range ? Math.min(range[1], from + SERVER_MAX_ROWS - 1) : SERVER_MAX_ROWS - 1;
@@ -96,8 +115,25 @@ function makeFakeDb(seed: Seed) {
           eqs.push([c, v]);
           return builder;
         },
+        is: (c: string, v: unknown) => {
+          eqs.push([c, v]);
+          return builder;
+        },
+        not: (c: string, op: string, v: unknown) => {
+          if (op === "is" && v === null) notNulls.push(c);
+          else throw new Error(`fake db: unsupported not(${c}, ${op}, ${String(v)})`);
+          return builder;
+        },
         in: (c: string, vs: unknown[]) => {
           ins.push([c, vs]);
+          return builder;
+        },
+        order: (c: string, opts?: { ascending?: boolean }) => {
+          orderBy = [c, opts?.ascending !== false];
+          return builder;
+        },
+        limit: (n: number) => {
+          limitN = n;
           return builder;
         },
         range: (from: number, to: number) => {
@@ -616,5 +652,168 @@ describe("malformed rows the review found untested", () => {
       verified: 1,
       notYet: 0,
     });
+  });
+});
+
+/* ═════════════════════════════════════════════════ unfinished quick-creates ══ */
+
+describe("loadFwUnfinishedStudents", () => {
+  /**
+   * The roster banner's read (todo 001), driven end to end: candidate query
+   * (scoped by `intended_cohort_id` since 2026-07-28), membership probe,
+   * per-version sentinel fan-out, materialization probe, classifier. The
+   * classifier's own arms are pinned in fw-nav-rules.test.ts; what lives here
+   * is the COMPOSITION — the same blind spot both Unit 2 and Unit 3 shipped a
+   * P1 in.
+   */
+  const VERSION = "2026-27";
+
+  /** A quick-create-minted candidate row: FW-shaped (no child), attested at
+   *  insert, stamped for Boston. Every field the loader narrows is present. */
+  const unfinishedProfile = (over: Row = {}): Row => ({
+    id: "p-maya",
+    first_name: "Maya",
+    last_name: "Chen",
+    band: "g6_8",
+    child_id: null,
+    notice_attested_by: "guide-1",
+    intended_cohort_id: BOSTON,
+    program_version_id: VERSION,
+    ...over,
+  });
+
+  const SENTINEL_TASKS = [
+    // Deliberately seeded out of curriculum order: the sentinel is the version's
+    // FIRST task, which the loader must get from `.order(ascending)` + `limit(1)`
+    // rather than from seed order.
+    { program_version_id: VERSION, task_id: "1.1.2" },
+    { program_version_id: VERSION, task_id: "1.1.1" },
+  ];
+
+  it("surfaces both half-created shapes, scoped to THIS cohort's quick-creates", async () => {
+    const { db, queries } = makeFakeDb({
+      profiles: [
+        // Membership leg failed: no membership row anywhere.
+        unfinishedProfile({ id: "p-nomem", first_name: "Ana", last_name: "Ives" }),
+        // Materialization leg failed: member here, sentinel row absent.
+        unfinishedProfile({ id: "p-nomat", first_name: "Zoe", last_name: "Ade" }),
+        // Fully created: member here, sentinel row present — not flagged.
+        unfinishedProfile({ id: "p-done", first_name: "Ben", last_name: "Ody" }),
+        // Stamped for ANOTHER cohort — excluded by the candidate query itself,
+        // whatever its legs look like. The scoping decision (2026-07-28).
+        unfinishedProfile({ id: "p-elsewhere", first_name: "Eve", intended_cohort_id: HAMPTONS }),
+      ],
+      members: [
+        { student_id: "p-nomat", cohort_id: BOSTON },
+        { student_id: "p-done", cohort_id: BOSTON },
+      ],
+      progress: [{ student_id: "p-done", task_id: "1.1.1", state: "locked" }],
+      unitTasks: SENTINEL_TASKS,
+    });
+
+    const res = await loadFwUnfinishedStudents(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students).toEqual([
+      { profileId: "p-nomem", firstName: "Ana", lastName: "Ives", band: "g6_8" },
+      { profileId: "p-nomat", firstName: "Zoe", lastName: "Ade", band: "g6_8" },
+    ]);
+    // The scoping is IN THE QUERY, not just in memory — the filter the partial
+    // index serves, and the reason another cohort's orphan never even arrives.
+    const profileQuery = queries.find((q) => q.table === "path_student_profiles");
+    expect(profileQuery?.eqs).toContainEqual(["intended_cohort_id", BOSTON]);
+  });
+
+  it("drops a candidate the query filter would have excluded — scope is not a property of the query's shape", async () => {
+    // rawRows bypasses the fake's filters, modeling a widened select or relaxed
+    // filter drifting in later. The in-code re-check must still drop the row.
+    const { db } = makeFakeDb({
+      rawRows: {
+        path_student_profiles: [unfinishedProfile({ intended_cohort_id: HAMPTONS })],
+      },
+    });
+    expect(await loadFwUnfinishedStudents(db, BOSTON)).toEqual({ ok: true, students: [] });
+  });
+
+  it("drops a malformed candidate row rather than failing every recovery", async () => {
+    const { db } = makeFakeDb({
+      profiles: [unfinishedProfile(), unfinishedProfile({ id: "p-bad", band: null })],
+    });
+    const res = await loadFwUnfinishedStudents(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students.map((s) => s.profileId)).toEqual(["p-maya"]);
+  });
+
+  it("drops a malformed membership row — the candidate reads as membership-less, not lost", async () => {
+    const { db } = makeFakeDb({
+      profiles: [unfinishedProfile()],
+      rawRows: { path_cohort_members: [{ student_id: "p-maya", cohort_id: 42 }] },
+      unitTasks: SENTINEL_TASKS,
+    });
+    const res = await loadFwUnfinishedStudents(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    // Same disposition as the loader's other drop-and-log guards: the readable
+    // evidence (a candidate with no readable membership) still surfaces.
+    expect(res.students.map((s) => s.profileId)).toEqual(["p-maya"]);
+  });
+
+  it("a version with NO seeded sentinel task yields materialized:null — never flagged", async () => {
+    // A deployment fault, not a missing leg (verifyFwStudentLegs' `leg: null`
+    // posture): flagging here would put a fully-created child on the banner.
+    const { db } = makeFakeDb({
+      profiles: [unfinishedProfile()],
+      members: [{ student_id: "p-maya", cohort_id: BOSTON }],
+      unitTasks: [],
+    });
+    expect(await loadFwUnfinishedStudents(db, BOSTON)).toEqual({ ok: true, students: [] });
+  });
+
+  it("reports a read failure on each of its four queries — never an empty banner", async () => {
+    for (const table of [
+      "path_student_profiles",
+      "path_cohort_members",
+      "path_unit_tasks",
+      "path_task_progress",
+    ]) {
+      const { db } = makeFakeDb({
+        profiles: [unfinishedProfile()],
+        members: [{ student_id: "p-maya", cohort_id: BOSTON }],
+        unitTasks: SENTINEL_TASKS,
+        errors: { [table]: "boom" },
+      });
+      expect(await loadFwUnfinishedStudents(db, BOSTON)).toEqual({ ok: false });
+    }
+  });
+
+  it("fans the sentinel probe out PER pinned version — a wrong-version row is not materialization", async () => {
+    const OTHER_VERSION = "2027-28";
+    const { db, queries } = makeFakeDb({
+      profiles: [
+        unfinishedProfile({ id: "p-a", first_name: "Ana", last_name: "Ives" }),
+        unfinishedProfile({
+          id: "p-b",
+          first_name: "Zoe",
+          last_name: "Ade",
+          program_version_id: OTHER_VERSION,
+        }),
+      ],
+      members: [
+        { student_id: "p-a", cohort_id: BOSTON },
+        { student_id: "p-b", cohort_id: BOSTON },
+      ],
+      unitTasks: [...SENTINEL_TASKS, { program_version_id: OTHER_VERSION, task_id: "9.9.9" }],
+      progress: [
+        // p-a holds ITS version's sentinel — materialized, off the banner.
+        { student_id: "p-a", task_id: "1.1.1", state: "locked" },
+        // p-b holds the OTHER version's sentinel, which is not evidence its own
+        // catalog materialized — a per-version-keyed probe must still flag it.
+        { student_id: "p-b", task_id: "1.1.1", state: "locked" },
+      ],
+    });
+
+    const res = await loadFwUnfinishedStudents(db, BOSTON);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.students.map((s) => s.profileId)).toEqual(["p-b"]);
+    // One sentinel lookup per distinct pinned version among this cohort's members.
+    expect(queries.filter((q) => q.table === "path_unit_tasks")).toHaveLength(2);
   });
 });

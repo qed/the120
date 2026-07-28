@@ -45,10 +45,26 @@ import type { FwQuickCreateActionResult } from "@/app/fp/lib/fw-student-core";
 const inputCls =
   "h-14 w-full rounded-xl border border-hq-border bg-hq-canvas px-4 font-path-body text-base text-hq-ink outline-none transition-colors placeholder:text-hq-ink-muted focus:border-hq-border-strong focus:ring-2 focus:ring-hq-ink/10";
 
+/** The name fields in finish-setup mode: read-only and visually muted, so the
+ *  lock reads as a state of the form rather than a broken input. A complete
+ *  literal, per canon — never assembled from `inputCls` plus fragments. */
+const inputLockedCls =
+  "h-14 w-full rounded-xl border border-hq-border bg-hq-sunken px-4 font-path-body text-base text-hq-ink-soft outline-none";
+
 /** One message per failure the guide can act on. Everything the action can
  *  return has a line here — an unmapped reason would render as silence at the
- *  exact moment a guide needs to know what to do next. */
-function failureMessage(result: Extract<FwQuickCreateActionResult, { ok: false }>): string {
+ *  exact moment a guide needs to know what to do next.
+ *
+ *  `resumed` = this submit carried an `existingProfileId` (finish-setup mode or
+ *  a mid-session retry handle). It matters for exactly one reason: on a resumed
+ *  submit, `identity_mismatch` means "the name no longer matches the record
+ *  being finished" — with the name fields locked in resume mode this should be
+ *  unreachable from the UI, but the core still enforces it (belt and braces),
+ *  and the generic staff-escalation line would leave a guide with no move. */
+function failureMessage(
+  result: Extract<FwQuickCreateActionResult, { ok: false }>,
+  resumed: boolean
+): string {
   switch (result.reason) {
     case "notice_not_attested":
       return "Tick the notice box first.";
@@ -65,6 +81,9 @@ function failureMessage(result: Extract<FwQuickCreateActionResult, { ok: false }
     case "address_exhausted":
       return "Too many students share this name. Find The 120 staff.";
     case "identity_mismatch":
+      return resumed
+        ? "The name no longer matches the existing record — close this and use New student."
+        : "Something doesn't line up with an existing record. Find The 120 staff.";
     case "not_fw_profile":
     case "profile_not_found":
     case "account_missing":
@@ -84,21 +103,35 @@ function failureMessage(result: Extract<FwQuickCreateActionResult, { ok: false }
 export default function FwQuickCreate({
   cohortId,
   onCancel,
+  resume = null,
 }: {
   cohortId: string;
   onCancel: () => void;
+  /**
+   * Finish-setup mode (todo 001): the roster's unfinished-student banner opens
+   * this form PRE-ARMED — name and band seeded, `retryProfileId` set — so the
+   * next submit rides the EXISTING retry-in-place path and completes the SAME
+   * half-created child instead of minting a duplicate. Seeds are initial state
+   * only, so the parent keys this component on the profile id when switching
+   * targets. The attestation checkbox is deliberately NOT seeded: it is a legal
+   * attestation (property 1 above, four layers deep), and a resumed submit must
+   * re-attest like any other.
+   */
+  resume?: { profileId: string; firstName: string; lastName: string; band: Band } | null;
 }) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [band, setBand] = useState<Band | "">("");
+  const [firstName, setFirstName] = useState(resume?.firstName ?? "");
+  const [lastName, setLastName] = useState(resume?.lastName ?? "");
+  const [band, setBand] = useState<Band | "">(resume?.band ?? "");
   const [attested, setAttested] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<FwMatchVerdict | null>(null);
   const [lookupFailed, setLookupFailed] = useState(false);
-  /** Set by a failed leg. Its presence turns Create into Finish, and every
-   *  submit from then on completes THIS child. */
-  const [retryProfileId, setRetryProfileId] = useState<string | null>(null);
+  /** Set by a failed leg (or seeded by `resume`). Its presence turns Create into
+   *  Finish, and every submit from then on completes THIS child. */
+  const [retryProfileId, setRetryProfileId] = useState<string | null>(
+    resume?.profileId ?? null
+  );
 
   const nameReady = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canSubmit = nameReady && band !== "" && attested && !busy;
@@ -165,7 +198,13 @@ export default function FwQuickCreate({
       // (handled below) while the router navigates. The `ok` arm is narrowed
       // away for the compiler, not handled — it is unreachable.
       if (!res.ok) {
-        setError(failureMessage(res));
+        // The runLookup mounted-ref discipline, on the failure arm too (todo
+        // 001): the form can be dismissed while this await is pending, and a
+        // late refusal must not land state on a dead component. The RECOVERY
+        // does not die with the unmount — a retryable failure leaves a profile
+        // the roster's unfinished-student banner picks up server-side.
+        if (!mounted.current) return;
+        setError(failureMessage(res, retryProfileId !== null));
         // Keep the handle so the next submit finishes this child rather than
         // minting a second account with a suffixed permanent address.
         if (res.retryProfileId) setRetryProfileId(res.retryProfileId);
@@ -176,9 +215,10 @@ export default function FwQuickCreate({
       // NEXT_REDIRECT rejection the router is already acting on: let it pass,
       // never paint it as a failure over a student that was just created.
       if (isNextRedirect(e)) return; // finally still clears busy
+      if (!mounted.current) return;
       setError("That didn't go through. Try again.");
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -187,6 +227,17 @@ export default function FwQuickCreate({
       onSubmit={handleSubmit}
       className="rounded-xl border border-hq-border bg-hq-surface p-4 shadow-hq"
     >
+      {/* FINISH-SETUP LOCK. The core's resume arm re-derives identity from the
+          stored row and refuses a submitted name that differs (`identity_
+          mismatch`), so an editable name field here is a trap: the guide could
+          only ever change it into a refusal. Locked, not hidden — the guide is
+          confirming WHICH child they are finishing. */}
+      {resume && (
+        <p className="mb-3 rounded-lg border border-hq-border bg-hq-sunken p-3 font-path-body text-sm leading-5 text-hq-ink-soft">
+          Finishing setup for {resume.firstName} {resume.lastName} — the name is locked to the
+          existing record.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block" htmlFor="fw-first">
           <span className="mb-1.5 block font-path-mono text-[11px] uppercase tracking-[0.12em] text-hq-ink-muted">
@@ -194,10 +245,12 @@ export default function FwQuickCreate({
           </span>
           <input
             id="fw-first"
-            className={inputCls}
+            className={resume ? inputLockedCls : inputCls}
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
             onBlur={runLookup}
+            readOnly={resume !== null}
+            aria-readonly={resume !== null}
             autoComplete="off"
             spellCheck={false}
             required
@@ -209,10 +262,12 @@ export default function FwQuickCreate({
           </span>
           <input
             id="fw-last"
-            className={inputCls}
+            className={resume ? inputLockedCls : inputCls}
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
             onBlur={runLookup}
+            readOnly={resume !== null}
+            aria-readonly={resume !== null}
             autoComplete="off"
             spellCheck={false}
             required
@@ -225,7 +280,13 @@ export default function FwQuickCreate({
           Grade band
         </legend>
         {/* No default selection: a band is stamped onto the record and picks
-            which per-band instruction line a guide reads aloud. */}
+            which per-band instruction line a guide reads aloud.
+
+            LOCKED in finish-setup mode, like the name: the core's resume arm
+            never rewrites the stored profile (band is stamped identity, written
+            once on the mint insert), so a band changed here would be silently
+            ignored — the worst kind of control. The stored band renders
+            pressed; the rest are disabled. */}
         <div className="flex flex-wrap gap-2">
           {BANDS.map((b) => (
             <button
@@ -233,11 +294,16 @@ export default function FwQuickCreate({
               type="button"
               aria-pressed={band === b}
               onClick={() => setBand(b)}
-              className={`min-h-[48px] rounded-xl border px-4 font-path-body text-sm font-medium transition-colors ${
+              disabled={resume !== null}
+              className={
                 band === b
-                  ? "border-hq-ink bg-hq-ink text-white"
-                  : "border-hq-border bg-hq-canvas text-hq-ink active:bg-hq-sunken"
-              }`}
+                  ? resume
+                    ? "min-h-[48px] rounded-xl border border-hq-ink/60 bg-hq-ink/80 px-4 font-path-body text-sm font-medium text-white"
+                    : "min-h-[48px] rounded-xl border border-hq-ink bg-hq-ink px-4 font-path-body text-sm font-medium text-white transition-colors"
+                  : resume
+                    ? "min-h-[48px] rounded-xl border border-hq-border bg-hq-sunken px-4 font-path-body text-sm font-medium text-hq-ink-muted"
+                    : "min-h-[48px] rounded-xl border border-hq-border bg-hq-canvas px-4 font-path-body text-sm font-medium text-hq-ink transition-colors active:bg-hq-sunken"
+              }
             >
               {FW_BAND_LABEL[b]}
             </button>

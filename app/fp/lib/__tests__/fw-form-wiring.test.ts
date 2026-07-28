@@ -51,6 +51,49 @@ const FORMS = [
   },
 ] as const;
 
+describe("a late-resolving quick-create never lands state on a dead component", () => {
+  it("FwQuickCreate: both failure arms of handleSubmit sit behind the mounted-ref guard", () => {
+    // Todo 001: the form can be DISMISSED while the submit await is pending
+    // (Cancel, or the roster's New-student toggle), and the action resolves
+    // only on failure — success redirects. So every post-await state write in
+    // the handler must be mounted-guarded, the same discipline runLookup
+    // already holds. Pinned structurally (guard exists, and it comes before
+    // the report), not by spelling of the surrounding code; the recovery
+    // itself is covered by fwUnfinishedStudents' behavioural tests.
+    const code = stripComments(read("../../fw/components/FwQuickCreate.tsx"));
+    const handlerAt = code.indexOf("const handleSubmit");
+    expect(handlerAt, "FwQuickCreate declares its submit handler").toBeGreaterThanOrEqual(0);
+    const handler = code.slice(handlerAt);
+
+    const guardRe = /if\s*\(\s*!mounted\.current\s*\)\s*return\b/g;
+    const guards = handler.match(guardRe) ?? [];
+    expect(guards.length, "one guard per failure arm (resolved refusal + rejection)")
+      .toBeGreaterThanOrEqual(2);
+
+    // The resolved-refusal arm: the guard precedes the failure report.
+    const firstGuard = handler.search(/if\s*\(\s*!mounted\.current\s*\)\s*return\b/);
+    const refusalReport = handler.search(/setError\(failureMessage/);
+    expect(refusalReport, "the refusal arm reports at all").toBeGreaterThanOrEqual(0);
+    expect(refusalReport, "the refusal report comes after a mounted guard").toBeGreaterThan(
+      firstGuard
+    );
+
+    // The rejection arm: redirect guard first (the success path), THEN the
+    // mounted guard, THEN the report.
+    const catchAt = handler.indexOf("} catch (e) {");
+    expect(catchAt, "handleSubmit catches the action rejection").toBeGreaterThanOrEqual(0);
+    const catchBlock = handler.slice(catchAt);
+    const redirectGuard = catchBlock.search(/if\s*\(\s*isNextRedirect\(e\)\s*\)\s*return\b/);
+    const mountedGuard = catchBlock.search(/if\s*\(\s*!mounted\.current\s*\)\s*return\b/);
+    const catchReport = catchBlock.search(/setError\(/);
+    expect(redirectGuard, "the redirect digest is guarded first").toBeGreaterThanOrEqual(0);
+    expect(mountedGuard, "the mounted guard follows the redirect guard").toBeGreaterThan(
+      redirectGuard
+    );
+    expect(catchReport, "the report comes last").toBeGreaterThan(mountedGuard);
+  });
+});
+
 describe("the Server Action redirect is not painted as a failure", () => {
   for (const form of FORMS) {
     it(`${form.name}: checks isNextRedirect and returns before reporting any failure`, () => {

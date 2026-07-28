@@ -188,7 +188,15 @@ export async function quickCreateFwStudent(input: unknown): Promise<FwQuickCreat
     noticeAttested: true,
     existingProfileId: existingProfileId ?? null,
   });
-  if (!created.ok) return created;
+  if (!created.ok) {
+    // A retryable failure (the presence of `retryProfileId` is the one
+    // definition of that set) just left a half-created student behind — the
+    // roster's unfinished-student banner is derived server-side, so revalidate
+    // the roster now and the banner is there the moment the guide dismisses
+    // the form, not only after the next full load (todo 001).
+    if (created.retryProfileId) revalidatePath(`/fp/fw/cohort/${cohortId}`);
+    return created;
+  }
 
   // Success navigates FROM HERE, not from the client (2026-07-28 work order,
   // RC-1): the old client-side `router.push` + `router.refresh` pair raced —

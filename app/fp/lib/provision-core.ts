@@ -1074,6 +1074,15 @@ export async function provisionFwStudent(
             normalized_name: normalizedName,
             notice_attested_at: attestedBy ? new Date().toISOString() : null,
             notice_attested_by: attestedBy,
+            // Where this walk-in was BEING ADDED when provisioning began — the
+            // scope of the roster's unfinished-student banner (Peter,
+            // 2026-07-28). Keyed off the SAME discriminator as the banner's
+            // candidate query: quick-create is the only caller that passes an
+            // attesting adult (`runFwQuickCreate` → actor; the bulk importer
+            // passes null by decision — PROPOSED-3 rejected), so an import- or
+            // Path-minted row stays null here exactly as it does on
+            // `notice_attested_by`, and can never surface on a guide's banner.
+            intended_cohort_id: attestedBy ? cohortId : null,
           })
           .select("id")
           .single(),

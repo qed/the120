@@ -35,7 +35,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows, fwRead } from "./fw-call";
 import type { FwMatchCandidate, FwMatchSource } from "./fw-match-rules";
 import { isFwTombstoneName } from "./fw-ops-rules";
-import { summarizeFwResume, type FwResume, type FwRosterStudent } from "./fw-nav-rules";
+import {
+  fwUnfinishedStudents,
+  summarizeFwResume,
+  type FwResume,
+  type FwRosterStudent,
+  type FwUnfinishedCandidateRow,
+  type FwUnfinishedStudent,
+} from "./fw-nav-rules";
 import { narrowFwBand } from "./fw-provision-rules";
 import { narrowTaskState } from "./progress-core";
 import type { TaskState } from "./transition-table";
@@ -238,6 +245,202 @@ export async function loadFwRosterNames(
   if (!members.ok) return { ok: false };
   if (members.studentIds.length === 0) return { ok: true, students: [] };
   return loadFwProfiles(db, members.studentIds);
+}
+
+/* ══════════════════════════════════════════════════ unfinished quick-creates ══ */
+
+/**
+ * The half-created students this cohort's roster should offer to FINISH (todo
+ * 001) — the server-side recovery for a quick-create dismissed mid-submit,
+ * whose in-form retry-in-place state died with the unmount.
+ *
+ * The queryable signature comes from `provisionFwStudent`'s write order
+ * (profile → membership → materialization) plus one deliberate asymmetry
+ * between its two callers: quick-create stamps `notice_attested_by` ON the
+ * profile insert itself (the actor's attestation, Decision 13) while the bulk
+ * importer always passes null (PROPOSED-3 rejected). So:
+ *
+ *   candidate  = FW-shaped profile (`child_id` null) with `notice_attested_by`
+ *                set — i.e. minted by quick-create, whatever else happened;
+ *   unfinished = candidate with NO membership row anywhere (the membership leg
+ *                failed), or a member of THIS cohort with NO materialized
+ *                progress (the materialization leg failed).
+ *
+ * Materialization is probed with a SENTINEL TASK, not a full set comparison:
+ * `ensureFwStudentProgress` writes the whole catalog in ONE upsert statement,
+ * so a student has either zero rows or all of them — "has the version's first
+ * task row" is therefore equivalent to "materialized", at one small query
+ * instead of the 11k-row scan the leg verifier's set comparison would cost on
+ * every roster render. A version with no seeded tasks yields `materialized:
+ * null` (cannot determine), which the classifier refuses to flag — same
+ * posture as `verifyFwStudentLegs`' `leg: null`.
+ *
+ * The candidate query is SCOPED to this cohort via `intended_cohort_id`
+ * (Peter, 2026-07-28) — the cohort the quick-create was attempted in, stamped
+ * on the profile insert alongside the attestation. The earlier shape was
+ * global on the membership-less arm, which put a Boston half-create's NAME on
+ * every cohort's roster — crossing the same cross-cohort privacy line the
+ * PROPOSED-1 lookup redacts (actions/fw-student.ts's rate-limit note; the
+ * verdict's cross-cohort arm carries a count and nothing else). Legacy
+ * orphans minted before the column exists carry null and never surface again
+ * — accepted, prod has 0 active cohorts; the typed-name resume path still
+ * reaches them. The classifier keeps members of OTHER cohorts off the banner
+ * as a second line; the query-level filter is primary.
+ *
+ * Tri-state like every read here — but the CALLER may degrade `{ok:false}` to
+ * "no banner": this is a recovery affordance layered over the roster, and
+ * taking the roster page down over it would cost more than it protects.
+ */
+export async function loadFwUnfinishedStudents(
+  db: SupabaseClient,
+  cohortId: string
+): Promise<{ ok: true; students: FwUnfinishedStudent[] } | { ok: false }> {
+  const profiles = await fetchAllRows<Record<string, unknown>>(
+    "unfinished candidate load",
+    (from, to) =>
+      db
+        .from("path_student_profiles")
+        .select(
+          "id, first_name, last_name, band, child_id, notice_attested_by, intended_cohort_id, program_version_id"
+        )
+        .is("child_id", null)
+        .not("notice_attested_by", "is", null)
+        .eq("intended_cohort_id", cohortId)
+        .range(from, to)
+  );
+  if (!profiles.ok) return { ok: false };
+
+  type Candidate = FwUnfinishedCandidateRow & { programVersionId: string };
+  const candidates: Candidate[] = [];
+  for (const row of profiles.rows) {
+    const band = narrowFwBand(row.band);
+    if (
+      typeof row.id !== "string" ||
+      typeof row.first_name !== "string" ||
+      typeof row.last_name !== "string" ||
+      typeof row.notice_attested_by !== "string" ||
+      typeof row.program_version_id !== "string" ||
+      band === null
+    ) {
+      // Same call as the roster read above: drop and log. One unreadable row
+      // costs one banner entry; failing the load costs every recovery.
+      console.error(
+        `[fw/loader] dropped a non-FW-shaped unfinished candidate (id=${String(row.id)})`
+      );
+      continue;
+    }
+    // Re-checked in code even though the query filters on it — the match
+    // lookup's rule, for the match lookup's reason: making the cross-cohort
+    // scope a property of one query's shape leaves a fail-open path behind
+    // when the select is widened or the filter relaxed (security review).
+    if (row.intended_cohort_id !== cohortId) {
+      console.error(
+        `[fw/loader] dropped an unfinished candidate intended for another cohort (id=${row.id})`
+      );
+      continue;
+    }
+    candidates.push({
+      profileId: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      band,
+      childId: null,
+      noticeAttestedBy: row.notice_attested_by,
+      memberCohortIds: [],
+      materialized: null,
+      programVersionId: row.program_version_id,
+    });
+  }
+  if (candidates.length === 0) return { ok: true, students: [] };
+
+  const memberships = await fetchAllRows<Record<string, unknown>>(
+    "unfinished membership load",
+    (from, to) =>
+      db
+        .from("path_cohort_members")
+        .select("student_id, cohort_id")
+        .in("student_id", candidates.map((c) => c.profileId))
+        .range(from, to)
+  );
+  if (!memberships.ok) return { ok: false };
+  const cohortsByStudent = new Map<string, string[]>();
+  for (const m of memberships.rows) {
+    if (typeof m.student_id !== "string" || typeof m.cohort_id !== "string") {
+      console.error("[fw/loader] dropped an unreadable membership row in the unfinished probe");
+      continue;
+    }
+    const bucket = cohortsByStudent.get(m.student_id);
+    if (bucket) bucket.push(m.cohort_id);
+    else cohortsByStudent.set(m.student_id, [m.cohort_id]);
+  }
+  for (const c of candidates) {
+    c.memberCohortIds = cohortsByStudent.get(c.profileId) ?? [];
+  }
+
+  // The materialization probe runs only for candidates the classifier could
+  // flag on that arm: members of THIS cohort.
+  const membersHere = candidates.filter((c) => c.memberCohortIds.includes(cohortId));
+  if (membersHere.length > 0) {
+    const sentinelByVersion = new Map<string, string | null>();
+    for (const versionId of new Set(membersHere.map((c) => c.programVersionId))) {
+      const sentinel = await fwRead(
+        () =>
+          db
+            .from("path_unit_tasks")
+            .select("task_id")
+            .eq("program_version_id", versionId)
+            .order("task_id", { ascending: true })
+            .limit(1)
+            .maybeSingle(),
+        `unfinished sentinel task (${versionId})`
+      );
+      if (sentinel.error) {
+        console.error(
+          `[fw/loader] unfinished sentinel task load failed for ${versionId}: ${sentinel.error.message}`
+        );
+        return { ok: false };
+      }
+      sentinelByVersion.set(
+        versionId,
+        typeof sentinel.data?.task_id === "string" ? sentinel.data.task_id : null
+      );
+    }
+
+    const sentinelTaskIds = [...new Set([...sentinelByVersion.values()])].filter(
+      (id): id is string => id !== null
+    );
+    const materializedPairs = new Set<string>();
+    if (sentinelTaskIds.length > 0) {
+      const progress = await fetchAllRows<Record<string, unknown>>(
+        "unfinished materialization probe",
+        (from, to) =>
+          db
+            .from("path_task_progress")
+            .select("student_id, task_id")
+            .in("student_id", membersHere.map((c) => c.profileId))
+            .in("task_id", sentinelTaskIds)
+            .range(from, to)
+      );
+      if (!progress.ok) return { ok: false };
+      for (const p of progress.rows) {
+        if (typeof p.student_id === "string" && typeof p.task_id === "string") {
+          materializedPairs.add(`${p.student_id} ${p.task_id}`);
+        }
+      }
+    }
+
+    for (const c of membersHere) {
+      const sentinelTaskId = sentinelByVersion.get(c.programVersionId) ?? null;
+      // No sentinel = the pinned version has nothing seeded — a deployment
+      // fault, not a missing leg; `materialized` stays null and is never flagged.
+      c.materialized =
+        sentinelTaskId === null
+          ? null
+          : materializedPairs.has(`${c.profileId} ${sentinelTaskId}`);
+    }
+  }
+
+  return { ok: true, students: fwUnfinishedStudents({ cohortId, candidates }) };
 }
 
 /* ═══════════════════════════════════════════════════════ one student's tree ══ */

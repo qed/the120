@@ -4,7 +4,9 @@ import {
   STAFF_AUTH_MAIL_ALLOWLIST,
   assertAuthMailAllowed,
   authMailVerdict,
+  unallowlistedStaffAddresses,
 } from "@/app/lib/auth-mail-guard";
+import { isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
 import { requestPasswordReset, type ResetDeps } from "@/app/lib/auth/reset-core";
 
 /**
@@ -100,25 +102,61 @@ describe("authMailVerdict — default-deny on the student domain", () => {
   });
 });
 
+describe("unallowlistedStaffAddresses — the completeness check that belongs on a schedule", () => {
+  it("names domain accounts that are neither allowlisted nor a student namespace", () => {
+    const found = unallowlistedStaffAddresses(
+      [
+        "peter@the120.school", // allowlisted
+        "newhire@the120.school", // a human whose reset is being refused
+        "maya.chen.fw@the120.school", // student — refused on purpose
+        "parent@gmail.com", // not our domain
+        "", // junk
+      ],
+      isFwStudentAddress
+    );
+    expect(found).toEqual(["newhire@the120.school"]);
+  });
+
+  it("normalizes and de-duplicates, so casing cannot hide or double-report an address", () => {
+    const found = unallowlistedStaffAddresses(
+      ["NewHire@The120.School", "newhire@the120.school", "PETER@THE120.SCHOOL"],
+      isFwStudentAddress
+    );
+    expect(found).toEqual(["newhire@the120.school"]);
+  });
+
+  it("is silent when every domain account is allowlisted or a student", () => {
+    expect(
+      unallowlistedStaffAddresses(
+        [...STAFF_AUTH_MAIL_ALLOWLIST, "maya.chen.fw@the120.school", "parent@gmail.com"],
+        isFwStudentAddress
+      )
+    ).toEqual([]);
+  });
+
+  it("a future BARE student address is reported until its namespace is recognised — fail loud, not open", () => {
+    // Until U15's provisioning teaches the guard the funnel-student
+    // convention, a bare student address looks exactly like a staff
+    // address. Surfacing it to ops is the safe direction: someone looks.
+    const found = unallowlistedStaffAddresses(["maya.chen@the120.school"], isFwStudentAddress);
+    expect(found).toEqual(["maya.chen@the120.school"]);
+  });
+});
+
 /* ─────────────────── the reset flow over the guard ─────────────────── */
 
 function spyDeps(over: Partial<ResetDeps> = {}) {
   const sent: { email: string; redirectTo: string }[] = [];
-  const notified: { subject: string; body: string }[] = [];
   const logs: string[] = [];
   const deps: ResetDeps = {
     sendReset: async (email, redirectTo) => {
       sent.push({ email, redirectTo });
     },
-    userExists: async () => false,
-    notify: async (subject, body) => {
-      notified.push({ subject, body });
-    },
     log: (m) => logs.push(m),
     siteUrl: "https://the120.school",
     ...over,
   };
-  return { deps, sent, notified, logs };
+  return { deps, sent, logs };
 }
 
 describe("requestPasswordReset — the server hop that makes the guard real", () => {
@@ -144,32 +182,18 @@ describe("requestPasswordReset — the server hop that makes the guard real", ()
     expect(sent).toEqual([]);
   });
 
-  it("W12b: a refusal for an address with NO account is logged, never paged (bot noise)", async () => {
-    const { deps, notified, logs } = spyDeps({ userExists: async () => false });
-    await requestPasswordReset(deps, "parent", "guessed.name@the120.school");
-    expect(notified).toEqual([]);
-    expect(logs.join(" ")).toContain("refused reset");
-  });
-
-  it("W12b: a refusal for an EXISTING account pages ops — the missing-allowlist-entry signal", async () => {
-    const { deps, notified } = spyDeps({ userExists: async () => true });
-    await requestPasswordReset(deps, "staff", "newhire@the120.school");
-    expect(notified).toHaveLength(1);
-    expect(notified[0].subject).toContain("EXISTING account");
-    expect(notified[0].body).toContain("newhire@the120.school");
-    expect(notified[0].body).toContain("STAFF_AUTH_MAIL_ALLOWLIST");
-  });
-
-  it("the alerting lookup can fail without breaking the request", async () => {
-    const { deps, notified } = spyDeps({
-      userExists: async () => {
-        throw new Error("admin API down");
-      },
-    });
-    expect(await requestPasswordReset(deps, "parent", "maya.chen@the120.school")).toBe(
+  it("a refusal is logged and nothing else — no admin lookup, no mail, no extra awaited work", async () => {
+    // The request path is public and unauthenticated. Any per-branch extra
+    // work here is both a timing oracle and an abuse lever, and "does this
+    // account exist" is the wrong question anyway: student accounts DO
+    // exist (password-less), so it would page ops with a child's address
+    // on every guess. The deps type no longer even offers those tools.
+    const { deps, logs } = spyDeps();
+    expect(await requestPasswordReset(deps, "parent", "guessed.name@the120.school")).toBe(
       "refused_guard"
     );
-    expect(notified).toEqual([]);
+    expect(logs.join(" ")).toContain("refused reset");
+    expect(Object.keys(deps).sort()).toEqual(["log", "sendReset", "siteUrl"]);
   });
 
   it("a failed send is swallowed — an unknown address and a broken mailer look identical outside", async () => {

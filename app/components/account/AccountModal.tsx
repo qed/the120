@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
+import { authMailVerdict } from "@/app/lib/auth-mail-guard";
 
 /**
  * Account creation — the lead-capture step of the funnel (brief §13.2).
@@ -55,6 +56,15 @@ function validate(f: AccountForm): Errors {
   if (!f.firstName.trim()) e.firstName = "Required";
   if (!f.lastName.trim()) e.lastName = "Required";
   if (!EMAIL.test(f.email)) e.email = "Enter a valid email";
+  // W12: a parent account is never created on the school domain. Without
+  // this, typing a student's address here makes Supabase mail a signup
+  // confirmation straight into a child's inbox — the exact outcome the
+  // auth-mail guard exists to prevent, reached through a different door
+  // (adversarial review). Same verdict function as the server-side guard,
+  // so the two cannot drift apart.
+  else if (!authMailVerdict(f.email).allowed) {
+    e.email = "Use a personal email address — school addresses can't create a parent account.";
+  }
   if (f.password.length < 8) e.password = "At least 8 characters";
   if (f.phone.replace(/\D/g, "").length < 10) e.phone = "Enter a valid phone number";
   if (!POSTAL.test(f.postalCode.trim())) e.postalCode = "Enter a valid postal code (e.g. M5V 2T6)";

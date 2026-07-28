@@ -21,13 +21,11 @@ import { authMailVerdict } from "@/app/lib/auth-mail-guard";
 export type ResetSurface = "parent" | "staff";
 
 export type ResetDeps = {
-  /** Supabase `auth.resetPasswordForEmail`, service-side. */
+  /** Supabase `auth.resetPasswordForEmail`. Uses the ANON key even though
+   *  this runs server-side: the service-role client would bypass
+   *  Supabase's own per-IP reset throttling, and nothing here needs
+   *  elevated rights. */
   sendReset: (email: string, redirectTo: string) => Promise<void>;
-  /** Does an auth account exist for this address? Used ONLY to decide
-   *  whether a refusal is a locked-out human or bot noise — never
-   *  surfaced to the caller (that would be an enumeration oracle). */
-  userExists: (email: string) => Promise<boolean>;
-  notify: (subject: string, body: string) => Promise<void>;
   log: (message: string) => void;
   /** Our own origin. Server-side there is no `window.location`, and a
    *  wrong value mails a link pointing at the wrong host. */
@@ -59,36 +57,26 @@ export async function requestPasswordReset(
   const verdict = authMailVerdict(email);
 
   if (!verdict.allowed) {
-    // W12b: a refusal must be observable — but the reset form is public,
-    // so once these forms are server-side any visitor can generate
-    // refusals at will. Alerting on all of them would train ops to ignore
-    // the channel, which is the same failure the over-commit warning
-    // taught us. The discriminator: a refused address that HAS an auth
-    // account is a real person locked out (almost certainly a staff
-    // mailbox missing from the allowlist — the standing constraint's
-    // designed failure). One with no account is a bot guessing, and is
-    // logged only.
+    // W12b wants a refusal to be observable. It must NOT be observable
+    // from HERE, though — this path is public and unauthenticated:
+    //
+    //  - "does an account exist" is the wrong discriminator. Student
+    //    accounts ARE real Supabase auth users (password-less, created by
+    //    admin.createUser), so an existence check answers true for
+    //    essentially every enrolled child. Paging ops on it would mail a
+    //    child's address to the ops inbox on every guess — spam, a PII
+    //    leak confirming enrolment, and precisely the alert fatigue the
+    //    design was trying to avoid (security review).
+    //  - any extra awaited work on one branch is a timing oracle that
+    //    distinguishes a guarded address from an ordinary one.
+    //
+    // So the request path does exactly one thing on refusal: log, in a
+    // fixed shape, taking the same work either way. The allowlist's
+    // completeness is answered where it is cheap and exact instead — a
+    // scheduled reconciliation against the auth user list
+    // (`unallowlistedStaffAddresses`, run by the retention cron), which
+    // no visitor can trigger and which cannot leak anything.
     deps.log(`[auth-mail-guard] refused reset: ${verdict.reason}`);
-    let exists = false;
-    try {
-      exists = await deps.userExists(email);
-    } catch {
-      exists = false; // an alerting lookup must never break the request
-    }
-    if (exists) {
-      try {
-        await deps.notify(
-          "Password reset refused for an EXISTING account",
-          `${email} has an auth account but is not on STAFF_AUTH_MAIL_ALLOWLIST, ` +
-            `so its reset mail was refused.\n\n` +
-            `If this is a staff or role mailbox, add it to the allowlist in ` +
-            `app/lib/auth-mail-guard.ts. If it is a student address, this guard ` +
-            `did its job and no action is needed.`
-        );
-      } catch {
-        /* an alert must never take down the thing it alerts about */
-      }
-    }
     return "refused_guard";
   }
 

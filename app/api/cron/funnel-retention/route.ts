@@ -6,6 +6,24 @@ import {
   retentionPlan,
   type RetentionCandidate,
 } from "@/app/lib/funnel/retention-rules";
+import { unallowlistedStaffAddresses } from "@/app/lib/auth-mail-guard";
+import { isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
+
+/** Page-walk every auth user and ask which domain accounts the guard is
+ *  refusing that it should not be. perPage is explicit: the admin API
+ *  defaults to 50, which would silently inspect a fraction of the list. */
+async function auditAuthMailAllowlist(db: Db): Promise<string[]> {
+  const PER_PAGE = 1000;
+  const emails: string[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: PER_PAGE });
+    if (error) throw new Error(error.message);
+    const users = data?.users ?? [];
+    emails.push(...users.map((u) => u.email ?? ""));
+    if (users.length < PER_PAGE) break;
+  }
+  return unallowlistedStaffAddresses(emails, isFwStudentAddress);
+}
 
 /**
  * The automated retention pass (funnel U17; R55a). GET, because Vercel
@@ -170,11 +188,36 @@ export async function GET(req: Request) {
         `purged (irreversible): ${purged}\nnoticed (grace started): ${noticed}\nskipped (bad timestamps, fix by hand): ${plan.skipped.length}`
       );
     }
+
+    // W12b: the allowlist-completeness check, on a schedule rather than on
+    // the public reset path (where asking "does this account exist" would
+    // page ops with a child's address on every guess). Here the question is
+    // exact: which auth accounts on our domain are neither allowlisted nor
+    // a student namespace? Each one is a human whose password reset is
+    // being silently refused. Never fails the retention run.
+    let unallowlisted: string[] = [];
+    try {
+      unallowlisted = await auditAuthMailAllowlist(db);
+      if (unallowlisted.length > 0) {
+        await notifyOps(
+          "auth-mail allowlist is missing a staff address",
+          `These @the120.school accounts are neither on STAFF_AUTH_MAIL_ALLOWLIST nor in a ` +
+            `student namespace, so their password-reset mail is being refused:\n\n` +
+            unallowlisted.map((e) => `  ${e}`).join("\n") +
+            `\n\nIf each is staff or a role mailbox, add it to app/lib/auth-mail-guard.ts. ` +
+            `If any is a student, it needs a namespace the guard recognises.`
+        );
+      }
+    } catch (err) {
+      console.error("[funnel/retention] allowlist audit skipped:", err);
+    }
+
     return NextResponse.json({
       ok: true,
       purged,
       noticed,
       skipped: plan.skipped.length,
+      unallowlisted: unallowlisted.length,
     });
   } catch (err) {
     console.error("[funnel/retention]", err);

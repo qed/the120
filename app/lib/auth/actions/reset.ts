@@ -8,29 +8,31 @@
  *
  * Both surfaces answer `{ ok: true }` for every outcome — sent, refused by
  * the guard, or a downstream send failure. Any variation would confirm
- * whether an address has an account.
+ * whether an address has an account. The request path does no admin work
+ * and takes the same steps either way, so it leaks nothing by timing.
  */
 
-import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { notifyOps } from "@/app/lib/ops-alert";
+import { createClient } from "@supabase/supabase-js";
 import { SITE_URL } from "@/app/lib/site";
-import { requestPasswordReset, type ResetDeps, type ResetResult, type ResetSurface } from "@/app/lib/auth/reset-core";
+import { requestPasswordReset, type ResetDeps, type ResetSurface } from "@/app/lib/auth/reset-core";
+
+export type ResetResult = { ok: true };
 
 function deps(): ResetDeps {
   return {
     sendReset: async (email, redirectTo) => {
-      const { error } = await supabaseAdmin().auth.resetPasswordForEmail(email, { redirectTo });
+      // ANON key, deliberately, even though this runs server-side: reset
+      // needs no elevated rights, and the service-role client would step
+      // around Supabase's own per-IP reset throttling — the protection
+      // this flow used to get for free when it ran in the browser.
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { auth: { persistSession: false } }
+      );
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw new Error(error.message);
     },
-    userExists: async (email) => {
-      // Admin lookup, used only to decide whether a refusal deserves an
-      // ops page (see the core). Never influences the response.
-      const { data, error } = await supabaseAdmin().auth.admin.listUsers();
-      if (error || !data) return false;
-      const target = email.trim().toLowerCase();
-      return data.users.some((u) => (u.email ?? "").toLowerCase() === target);
-    },
-    notify: notifyOps,
     log: (message) => console.error(message),
     siteUrl: SITE_URL,
   };

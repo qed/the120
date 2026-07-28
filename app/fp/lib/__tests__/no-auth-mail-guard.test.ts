@@ -28,7 +28,8 @@ import { assertNoAuthMailToFwStudent, isFwStudentAddress } from "../fw-provision
 const APP_DIR = path.resolve(process.cwd(), "app");
 
 /** Supabase Auth surfaces that cause an email to be sent to a recipient. */
-const MAIL_CAPABLE = /\b(resetPasswordForEmail|inviteUserByEmail|generateLink|signInWithOtp|reauthenticate)\s*\(/;
+const MAIL_CAPABLE =
+  /\b(resetPasswordForEmail|inviteUserByEmail|generateLink|signInWithOtp|reauthenticate|signUp)\s*\(/;
 
 /** Any of the guard's entry points satisfies the scan. */
 const GUARD_CALL = /\b(assertNoAuthMailToFwStudent|assertAuthMailAllowed|authMailVerdict)\s*\(/;
@@ -67,6 +68,20 @@ const REVIEWED_CALL_SITES: readonly {
       "app/lib/__tests__/auth-mail-guard.test.ts which prove a refused address reaches " +
       "no mailer.",
     mustContain: /requestPasswordReset\s*\(/,
+  },
+  {
+    file: "app/components/account/AccountModal.tsx",
+    why:
+      "public parent signup. `signUp` joined MAIL_CAPABLE in U15 after review found this " +
+      "door open: typing a student's address here made Supabase mail a confirmation into " +
+      "a child's inbox. The form now refuses the school domain using authMailVerdict — " +
+      "the SAME verdict function the server-side guard uses, so the two cannot drift. " +
+      "RESIDUAL, stated plainly: this is a browser-side call with the public anon key, so " +
+      "a crafted request straight to Supabase still bypasses it. No app-side code can " +
+      "close that; it needs a project-level Supabase auth hook or an email-domain deny " +
+      "list, which pairs with the standing 'no catch-all is armed' ops invariant. Moving " +
+      "signup server-side would NOT close it either — the anon key is public by design.",
+    mustContain: /authMailVerdict\s*\(/,
   },
 ];
 
@@ -113,6 +128,26 @@ function relative(full: string): string {
   return path.relative(process.cwd(), full).split(path.sep).join("/");
 }
 
+/**
+ * Drop comment-ONLY lines before scanning. A doc comment that merely names
+ * `signUp()` is not a call site, and flagging it would push a real file
+ * onto the reviewed allowlist for no reason — which is how an allowlist
+ * stops meaning anything.
+ *
+ * Deliberately conservative: only lines whose first non-space character
+ * starts a comment are removed. Stripping `//` anywhere would eat the tail
+ * of any line holding a URL, and could hide a real call sharing that line.
+ */
+function withoutCommentLines(source: string): string {
+  return source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const t = line.trimStart();
+      return !(t.startsWith("//") || t.startsWith("*") || t.startsWith("/*"));
+    })
+    .join("\n");
+}
+
 describe("no-auth-mail invariant — enforcement, not intention", () => {
   const files = walk(APP_DIR);
 
@@ -121,7 +156,7 @@ describe("no-auth-mail invariant — enforcement, not intention", () => {
     const unreviewed: string[] = [];
 
     for (const full of files) {
-      const source = readFileSync(full, "utf8");
+      const source = withoutCommentLines(readFileSync(full, "utf8"));
       if (!MAIL_CAPABLE.test(source)) continue;
       const rel = relative(full);
       if (reviewed.has(rel)) continue;

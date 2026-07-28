@@ -86,6 +86,39 @@ export function authMailVerdict(email: string | null | undefined): AuthMailVerdi
  * not a branch to render (provisioning, ops tooling). Throws loudly so the
  * omission surfaces in a test rather than in a child's inbox.
  */
+/**
+ * W12b, done where it is actually answerable: which auth accounts on the
+ * student domain would have their auth mail refused, EXCLUDING the
+ * student namespaces that are supposed to be refused.
+ *
+ * This is the allowlist-completeness signal. It belongs on a schedule,
+ * not on the public reset path: a request-time check would have to ask
+ * "does this account exist", which is true for every enrolled child
+ * (their accounts are real, just password-less) — so it would page ops
+ * with a child's address on every guess, leak enrolment, and drown the
+ * channel. Run against the full auth user list, this asks the precise
+ * question instead, and no visitor can trigger it.
+ *
+ * `isStudentNamespace` is injected so the FW `.fw@` shape and any future
+ * student convention stay owned by their own modules.
+ */
+export function unallowlistedStaffAddresses(
+  authEmails: readonly string[],
+  isStudentNamespace: (email: string) => boolean
+): string[] {
+  const allowed = new Set(STAFF_AUTH_MAIL_ALLOWLIST.map(normalizeRecipient));
+  const out = new Set<string>();
+  for (const raw of authEmails) {
+    const email = normalizeRecipient(raw ?? "");
+    if (email.length === 0) continue;
+    if (!isStudentDomainAddress(email)) continue;
+    if (allowed.has(email)) continue;
+    if (isStudentNamespace(email)) continue; // refused on purpose
+    out.add(email);
+  }
+  return [...out].sort();
+}
+
 export function assertAuthMailAllowed(email: string, context: string): void {
   const verdict = authMailVerdict(email);
   if (!verdict.allowed) {

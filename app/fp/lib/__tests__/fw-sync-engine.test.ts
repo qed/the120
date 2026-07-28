@@ -6,6 +6,8 @@ import { runFwDrain, type FwDrainInput } from "../fw-sync-engine";
 import { runFwCheckIn } from "../fw-checkin-core";
 import { decideFwAction, type FwAction } from "../fw-rules";
 import {
+  createFwEnqueueClock,
+  planFwFlipEntries,
   FW_QUEUE_ENTRY_SCHEMA_VERSION,
   fwSignOutOutcomeCopy,
   isRecognizedFwEntry,
@@ -67,6 +69,9 @@ type Seed = {
    * author and the CAS refuses it.
    */
   concurrentSwap?: { student: string; task: string; verifiedBy: string | null };
+  /** Force the RPC itself to error for these `action:student` keys — a venue-wifi
+   *  blip on exactly one leg of an ordered group (Unit 9's halt scenarios). */
+  rpcUnavailableOn?: string[];
 };
 
 function makeFakeDb(seed: Seed) {
@@ -224,6 +229,10 @@ function makeFakeDb(seed: Seed) {
     },
     async rpc(name: string, params: Record<string, unknown>) {
       if (name !== "fw_move_task") return { data: null, error: { message: "unknown rpc" } };
+      const key = `${params.p_action as string}:${params.p_student_id as string}`;
+      if (seed.rpcUnavailableOn?.includes(key)) {
+        return { data: null, error: { message: "rpc blip" } };
+      }
       return { data: [fwMoveTask(params)], error: null };
     },
   };
@@ -1483,5 +1492,107 @@ describe("clearFwResidue reports a thrown queue clear as UNKNOWN, never as a cou
 
     expect(catchBlock).toMatch(/queueRemaining\s*=\s*null/);
     expect(catchBlock).not.toMatch(/queueRemaining\s*=\s*\d/);
+  });
+});
+
+/* ══════════════════════════════ the composed flip (ops-guide redesign Unit 9) ══ */
+
+/** A flip's two legs as `planFwFlipEntries` builds them: one enqueue reservation,
+ *  same-millisecond wall clock, strictly increasing stamps, per-leg ids. */
+function flipEntries(base: {
+  studentId: string;
+  wallMs?: number;
+  clientIds?: [string, string];
+}): [FwQueueEntry, FwQueueEntry] {
+  const clock = createFwEnqueueClock(() => base.wallMs ?? Date.parse("2026-08-22T14:30:00.000Z"));
+  const [cidUndo, cidNotYet] = base.clientIds ?? [`flip-undo-${++seq}`, `flip-notyet-${seq}`];
+  const [undoLeg, notYetLeg] = planFwFlipEntries({
+    cohortId: COHORT,
+    studentId: base.studentId,
+    taskId: TASK,
+    actorUserId: GUIDE,
+    capturedAt: "2026-08-22T14:30:00.000Z",
+    legs: [
+      { action: "undo", actionId: `flip-a1-${seq}`, clientId: cidUndo },
+      { action: "not_yet", actionId: `flip-a2-${seq}`, clientId: cidNotYet },
+    ],
+    enqueuedAts: clock.take(2),
+  });
+  return [undoLeg, notYetLeg];
+}
+
+describe("runFwDrain — the composed flip drains as an ordered pair", () => {
+  it("same-ms legs replay undo → not_yet in order; final state not_yet; ZERO re_attempt events", async () => {
+    const { db, progress, rejects, events, rpcCalls, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: GUIDE } },
+    });
+    const [u, n] = flipEntries({ studentId: "s1" });
+    // Fed to the drain out of order — enqueuedAt decides, never the tiebreak.
+    const { outcomes } = await drain(db, [n, u]);
+
+    expect(dispositionOf(outcomes, u.clientId)).toBe("settled");
+    expect(dispositionOf(outcomes, n.clientId)).toBe("settled");
+    expect(rpcCalls).toEqual(["undo:s1", "not_yet:s1"]);
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "not_yet", verified_by: GUIDE });
+    expect(rejects).toHaveLength(0);
+    // No spurious struggle signal: the not_yet leg APPLIED (undo landed first),
+    // so nothing appended a re_attempt event.
+    expect(events.map((e) => e.action)).toEqual(["undo", "not_yet"]);
+    // Legs never share an action id.
+    expect(new Set(events.map((e) => e.action_id)).size).toBe(2);
+  });
+
+  it("leg-1 RETRY halts leg 2 as retry (not reject) — the queue stays intact", async () => {
+    const { db, progress, rejects, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: GUIDE } },
+      rpcUnavailableOn: ["undo:s1"],
+    });
+    const [u, n] = flipEntries({ studentId: "s1" });
+    const { outcomes } = await drain(db, [u, n]);
+
+    expect(dispositionOf(outcomes, u.clientId)).toBe("retry");
+    // The follow-on decision must WAIT for the undo, never fire past it and
+    // never be tombstoned for a blip that was not its own.
+    expect(dispositionOf(outcomes, n.clientId)).toBe("retry");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "verified", verified_by: GUIDE });
+    expect(rejects).toHaveLength(0);
+  });
+
+  it("a landed-but-unanswered undo replays as `replayed` — which still releases leg 2 (idempotent backstop)", async () => {
+    // The online-backstop shape: leg 1's write landed but the response was lost,
+    // so BOTH legs were enqueued with their held client ids. The row already
+    // shows the undo's effect (locked), and the undo's client id is in the
+    // idempotency ledger.
+    const [u, n] = flipEntries({ studentId: "s1" });
+    const { db, progress, rejects, events, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "locked", verified_by: null } },
+      seenClientIds: [`s1|${TASK}|${u.clientId}`],
+    });
+    const { outcomes } = await drain(db, [u, n]);
+
+    expect(dispositionOf(outcomes, u.clientId)).toBe("settled"); // replayed = leg-success
+    expect(dispositionOf(outcomes, n.clientId)).toBe("settled");
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "not_yet", verified_by: GUIDE });
+    expect(rejects).toHaveLength(0);
+    // Only the not_yet wrote an event this time — the undo was a replay no-op.
+    expect(events.map((e) => e.action)).toEqual(["not_yet"]);
+  });
+
+  it("a cross-actor flip rejects AS A UNIT at drain — both legs, nothing applied", async () => {
+    const { db, progress, rejects, rpcCalls, pkey } = makeFakeDb({
+      members: ["s1"],
+      progress: { "s1|1.2.4": { state: "verified", verified_by: OTHER_GUIDE } },
+    });
+    const [u, n] = flipEntries({ studentId: "s1" });
+    const { outcomes } = await drain(db, [u, n]);
+
+    expect(dispositionOf(outcomes, u.clientId)).toBe("rejected");
+    expect(dispositionOf(outcomes, n.clientId)).toBe("rejected");
+    expect(rpcCalls).toHaveLength(0);
+    expect(progress.get(pkey("s1", TASK))).toEqual({ state: "verified", verified_by: OTHER_GUIDE });
+    expect(rejects.every((r) => r.reason === "cross_actor_undo")).toBe(true);
   });
 });

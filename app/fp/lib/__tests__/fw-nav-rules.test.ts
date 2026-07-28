@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildFwTaskTree,
   compareFwTaskIds,
-  fwBatchStudentIds,
   fwDuplicateNameStudentIds,
   fwPickerHeadline,
   fwPickerRedirectsToSingleCohort,
@@ -20,11 +19,9 @@ import {
   normalizeFwSearchTerm,
   searchFwRoster,
   summarizeFwResume,
-  toggleFwBatchExtra,
   type FwRosterStudent,
   type FwUnfinishedCandidateRow,
 } from "../fw-nav-rules";
-import { FW_BATCH_MAX } from "../fw-rules";
 import { parseFwActiveCohort, FW_PREF_UNKNOWN } from "../fw-device";
 import type { ProgramContent, UnitTask } from "@/app/fp/content/types";
 import type { TaskState } from "../transition-table";
@@ -581,56 +578,6 @@ describe("fwSelectedPhaseKey — ?phase= resolution", () => {
     ] as const) {
       expect(fwSelectedPhaseKey(fiveKeys, fwPhaseParamForTaskId(taskId))).toBe(key);
     }
-  });
-});
-
-/* ═══════════════════════════════════════════════════════════ the batch picker ══ */
-
-describe("toggleFwBatchExtra", () => {
-  const toggle = (extras: string[], studentId: string) =>
-    toggleFwBatchExtra({ extras, studentId, primaryStudentId: "s-primary" });
-
-  it("adds and removes a teammate", () => {
-    expect(toggle([], "s-a")).toEqual({ ok: true, extras: ["s-a"] });
-    expect(toggle(["s-a"], "s-a")).toEqual({ ok: true, extras: [] });
-  });
-
-  it("caps the whole selection at FW_BATCH_MAX, counting the primary", () => {
-    const full = Array.from({ length: FW_BATCH_MAX - 1 }, (_, i) => `s-${i}`);
-    expect(fwBatchStudentIds("s-primary", full)).toHaveLength(FW_BATCH_MAX);
-    const refused = toggle(full, "s-one-too-many");
-    expect(refused).toEqual({ ok: false, reason: "at_max", extras: full });
-  });
-
-  it("still allows REMOVING a teammate when the selection is full", () => {
-    const full = Array.from({ length: FW_BATCH_MAX - 1 }, (_, i) => `s-${i}`);
-    expect(toggle(full, "s-0")).toEqual({ ok: true, extras: full.slice(1) });
-  });
-
-  it("refuses to toggle the primary — they are the task view's own student", () => {
-    expect(toggle(["s-a"], "s-primary")).toEqual({
-      ok: false,
-      reason: "is_primary",
-      extras: ["s-a"],
-    });
-  });
-
-  it("does not read FW_BATCH_MAX as a literal — the cap tracks the shared constant", () => {
-    // Guards the exact thing the plan asked for ("do not retype 3"): if the
-    // shared constant moved and this module kept a hard-coded 3, the selection
-    // built from FW_BATCH_MAX below would be refused (or under-filled) here.
-    const oneShyOfFull = Array.from({ length: FW_BATCH_MAX - 2 }, (_, i) => `s-${i}`);
-    expect(toggle(oneShyOfFull, "s-last").ok).toBe(true);
-  });
-});
-
-describe("fwBatchStudentIds", () => {
-  it("puts the primary first — the result list reads like the picker", () => {
-    expect(fwBatchStudentIds("s-primary", ["s-a", "s-b"])).toEqual(["s-primary", "s-a", "s-b"]);
-  });
-
-  it("never lists the primary twice, even if it leaks into extras", () => {
-    expect(fwBatchStudentIds("s-primary", ["s-primary", "s-a"])).toEqual(["s-primary", "s-a"]);
   });
 });
 

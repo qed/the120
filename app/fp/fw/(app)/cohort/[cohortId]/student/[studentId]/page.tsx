@@ -60,7 +60,7 @@ export default async function FwStudentPage({
   searchParams: Promise<{ phase?: string | string[] }>;
 }) {
   const [{ cohortId, studentId }, sp] = await Promise.all([params, searchParams]);
-  const { verdict } = await resolveFwActorForCohort(cohortId);
+  const { verdict, session } = await resolveFwActorForCohort(cohortId);
   if (!verdict.ok) notFound();
 
   const db = supabaseAdmin();
@@ -125,6 +125,9 @@ export default async function FwStudentPage({
       <FwStudentView
         cohortId={cohortId}
         student={student}
+        // The AUTHORITATIVE session id (the gate above already passed) — what an
+        // offline capture stamps as its actor, and what scopes the pending read.
+        actorUserId={session.userId}
         roster={roster.ok ? roster.students : null}
         phases={phases}
         details={details}

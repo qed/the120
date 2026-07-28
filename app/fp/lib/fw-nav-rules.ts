@@ -28,7 +28,6 @@
 import type { DeepReadonly, PhaseKey, ProgramContent } from "@/app/fp/content/types";
 import type { Band } from "@/app/fp/content/types";
 import { isFwTombstoneName } from "./fw-ops-rules";
-import { FW_BATCH_MAX } from "./fw-rules";
 import type { TaskState } from "./transition-table";
 
 /* ═══════════════════════════ the /fp/fw picker, by role (Staff Front Door Unit 4) ══ */
@@ -806,59 +805,8 @@ export function fwSelectedPhaseKey(
   return (hit ?? phases[0]).key;
 }
 
-/* ═════════════════════════════════════════════════════════════ the batch picker ══ */
+/* The batch picker helpers (toggleFwBatchExtra, fwBatchStudentIds, FwBatchToggle)
+   were retired with the batch-capture affordance (ops-guide redesign Unit 9):
+   each tap is now one student with its own actionId. `FW_BATCH_MAX` survives in
+   fw-rules.ts -- the server-side cap is unchanged. */
 
-export type FwBatchToggle =
-  | { ok: true; extras: string[] }
-  | { ok: false; reason: "at_max" | "is_primary"; extras: string[] };
-
-/**
- * Add or remove a teammate from the batch, honouring the shared cap.
- *
- * The cap is `FW_BATCH_MAX` COUNTING THE PRIMARY — the student whose task view
- * this is — so the picker holds at most `FW_BATCH_MAX - 1` extras. The constant
- * is imported, never retyped: `planFwBatch` re-enforces the same number
- * server-side and reports the overflow as a skip, and a picker that let four
- * through would turn a designed refusal into a line of copy nobody expects.
- *
- * REMOVING is always legal, including at the cap — a picker that locks up when
- * full is one the guide has to back out of.
- *
- * Refusals are typed and carry the unchanged list, so the caller can render
- * "three at a time is the maximum" without also having to remember what the
- * selection was.
- */
-export function toggleFwBatchExtra(input: {
-  extras: readonly string[];
-  studentId: string;
-  primaryStudentId: string;
-}): FwBatchToggle {
-  const { extras, studentId, primaryStudentId } = input;
-  if (studentId === primaryStudentId) {
-    return { ok: false, reason: "is_primary", extras: [...extras] };
-  }
-  if (extras.includes(studentId)) {
-    return { ok: true, extras: extras.filter((id) => id !== studentId) };
-  }
-  if (extras.length >= FW_BATCH_MAX - 1) {
-    return { ok: false, reason: "at_max", extras: [...extras] };
-  }
-  return { ok: true, extras: [...extras, studentId] };
-}
-
-/**
- * The student list one action is submitted for: the primary first, then the
- * teammates in the order they were picked.
- *
- * Primary-first matters downstream — `planFwBatch` preserves selection order and
- * `runFwCheckIn` reports outcomes in it, so the result list reads like the
- * picker. De-duplicated here as well as there, because a primary that leaked
- * into `extras` would otherwise produce two entries for one child and the second
- * would read as a replay.
- */
-export function fwBatchStudentIds(
-  primaryStudentId: string,
-  extras: readonly string[]
-): string[] {
-  return [...new Set([primaryStudentId, ...extras])];
-}

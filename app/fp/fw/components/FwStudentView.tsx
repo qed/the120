@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Icon } from "@/app/fp/components/system/Icon";
+import FwInlineDecision from "./FwInlineDecision";
 import FwPhaseNav from "./FwPhaseNav";
 import FwQuickCreate from "./FwQuickCreate";
 import FwReadingRule from "./FwReadingRule";
@@ -18,7 +20,21 @@ import {
   type FwResume,
   type FwTreePhase,
 } from "@/app/fp/lib/fw-nav-rules";
+import {
+  createFwClientIdLedger,
+  foldFwSurfaceOutcome,
+  EMPTY_FW_SURFACE,
+  type FwClientIdLedger,
+  type FwStudentResult,
+  type FwSurfaceOutcome,
+} from "@/app/fp/lib/fw-rules";
+import { readPendingFwOpsForStudent, subscribeFwQueue } from "@/app/fp/lib/fw-sync-client";
+import type { FwQueueEntry } from "@/app/fp/lib/fw-sync-rules";
 import type { Band } from "@/app/fp/content/types";
+
+/** Stable empty list so an untouched row's `pendingOps` prop is referentially
+ *  constant across re-renders. */
+const NO_PENDING_OPS: readonly FwQueueEntry[] = [];
 
 /**
  * The student view (ops-guide redesign Unit 8; R19, R20-structure, R21, R23) —
@@ -50,10 +66,26 @@ import type { Band } from "@/app/fp/content/types";
  * for `FwQuickCreate`, exactly as `FwCohortView` does. No finish-setup seeding
  * here — the recovery banner lives on the cohort page and arrives via
  * `?finish=` there.
+ *
+ * ── UNIT 9: this component owns the capture seams, one of each per page ──────
+ *   - the CLIENT-ID LEDGER (`createFwClientIdLedger`) — shared by every inline
+ *     decision row, so an unsettled exactly-once key survives accordion
+ *     collapse/re-expand remounts (the ledger's whole point);
+ *   - the PENDING-QUEUE SUBSCRIPTION — ONE `readPendingFwOpsForStudent` scan,
+ *     refreshed on every `subscribeFwQueue` notify, grouped per task and handed
+ *     to each row. When a drain empties this student's pending set, the page
+ *     `router.refresh()`es once so the tree's server states catch up with what
+ *     the drain landed (the row must flip without user action);
+ *   - the FIRST-DOLLAR SURFACE (`foldFwSurfaceOutcome`) — the standing bell
+ *     banner, and the undo retraction that takes it down. Only first-dollar-task
+ *     responses are folded: on a single-student page any other task's fold would
+ *     wrongly retract the banner (the fold's submitted-minus rule is per
+ *     student, and every tap here is the same student).
  */
 export default function FwStudentView({
   cohortId,
   student,
+  actorUserId,
   roster,
   phases,
   details,
@@ -61,6 +93,9 @@ export default function FwStudentView({
   resume,
 }: {
   cohortId: string;
+  /** The signed-in guide — the offline queue's capturing actor, and the scope of
+   *  the pending-ops read. Server-known (the page's gate), never inferred. */
+  actorUserId: string;
   student: { studentId: string; firstName: string; lastName: string; band: Band };
   /** The cohort roster for the sidebar — `null` when the roster read failed,
    *  which degrades to the cached-name fallback (`FwOfflineRoster`), never a
@@ -74,8 +109,61 @@ export default function FwStudentView({
   initialPhaseKey: PhaseKey | null;
   resume: FwResume;
 }) {
+  const router = useRouter();
   const [phaseKey, setPhaseKey] = useState<PhaseKey | null>(initialPhaseKey);
   const [creating, setCreating] = useState(false);
+
+  // ONE ledger per student page (Unit 9), created once — `useRef`'s argument is
+  // evaluated every render, so the factory is called behind the null check.
+  const ledgerRef = useRef<FwClientIdLedger | null>(null);
+  if (ledgerRef.current === null) {
+    ledgerRef.current = createFwClientIdLedger(() => crypto.randomUUID());
+  }
+  const ledger = ledgerRef.current;
+
+  // This guide's own pending queue for this student, grouped per task — one scan
+  // per page, re-read on every queue mutation.
+  const [pendingByTask, setPendingByTask] = useState<ReadonlyMap<string, FwQueueEntry[]>>(
+    () => new Map()
+  );
+  const hadPending = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void readPendingFwOpsForStudent({ cohortId, studentId: student.studentId, actorUserId }).then(
+        (byTask) => {
+          if (cancelled) return;
+          // The drain just emptied this student's pending set: pull the
+          // authoritative tree states so the rows show what actually landed
+          // (settled OR tombstoned — either way the queue is no longer the
+          // truth, the server is).
+          if (hadPending.current && byTask.size === 0) router.refresh();
+          hadPending.current = byTask.size > 0;
+          setPendingByTask(byTask);
+        }
+      );
+    };
+    refresh();
+    const unsubscribe = subscribeFwQueue(refresh);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [cohortId, student.studentId, actorUserId, router]);
+
+  // The first-dollar surface: the standing bell banner + its undo retraction.
+  const [surface, setSurface] = useState<FwSurfaceOutcome>(EMPTY_FW_SURFACE);
+  const onFirstDollarFold = useCallback(
+    (
+      next: { outcomes: readonly FwStudentResult[]; firstDollar: readonly string[] },
+      submittedStudentIds: readonly string[]
+    ) => {
+      setSurface((prev) =>
+        foldFwSurfaceOutcome(prev, { outcomes: next.outcomes, firstDollar: next.firstDollar }, submittedStudentIds)
+      );
+    },
+    []
+  );
 
   const selectPhase = (key: PhaseKey) => {
     setPhaseKey(key);
@@ -130,6 +218,17 @@ export default function FwStudentView({
               <FwReadingRule />
             </div>
 
+            {/* The standing First Dollar banner (Unit 9). No confirm anywhere any
+                more — but an undo of the first-dollar checkmark still takes a
+                still-displayed banner down (`foldFwSurfaceOutcome`'s
+                submitted-minus rule). The fired celebratory moment on the board
+                cannot be recalled; this banner is what can. */}
+            {surface.firstDollar.length > 0 && (
+              <p className="mt-4 rounded-xl border border-verified/50 bg-verified/10 p-4 font-path-display text-lg font-semibold text-hq-ink">
+                First dollar — {student.firstName}. Ring the bell.
+              </p>
+            )}
+
             <div className="mt-4 lg:flex lg:items-start lg:gap-5">
               <FwPhaseNav phases={phases} activeKey={activePhase?.key ?? null} onSelect={selectPhase} />
               <div className="mt-3 min-w-0 flex-1 lg:mt-0">
@@ -137,9 +236,22 @@ export default function FwStudentView({
                   <FwTaskTree
                     phase={activePhase}
                     details={details}
-                    // UNIT 9 SEAM: pass renderDecision here — this component owns
-                    // the page-level client-id ledger and pending-queue
-                    // subscription when they land (one per student page).
+                    // UNIT 9: the inline decision controls, one per task row —
+                    // sharing this page's ledger and pending-queue subscription.
+                    renderDecision={(task) => (
+                      <FwInlineDecision
+                        cohortId={cohortId}
+                        taskId={task.id}
+                        taskTitle={task.title}
+                        studentId={student.studentId}
+                        studentFirstName={student.firstName}
+                        actorUserId={actorUserId}
+                        serverState={task.state}
+                        pendingOps={pendingByTask.get(task.id) ?? NO_PENDING_OPS}
+                        ledger={ledger}
+                        onFirstDollarFold={onFirstDollarFold}
+                      />
+                    )}
                   />
                 ) : (
                   <p className="rounded-xl border border-hq-border bg-hq-surface p-5 font-path-body text-sm leading-6 text-hq-ink-soft shadow-hq">

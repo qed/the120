@@ -359,6 +359,55 @@ export function stateForFwPrimary(
   return mine && "state" in mine ? mine.state : undefined;
 }
 
+/* ══════════════════════════════════════════ the per-result guide copy ══ */
+
+/**
+ * The one place a per-student result becomes a line of copy — salvaged from the
+ * retired `FwTaskView` (ops-guide redesign Unit 9) into the rules layer, where
+ * this repo's node-only tests can reach it and where copy belongs.
+ *
+ * An EXHAUSTIVE SWITCH, not a lookup table with a `?? result.kind` fallback: a
+ * new `FwStudentResult` kind without an arm is a compile error, never the raw
+ * internal enum text rendered to a guide.
+ *
+ * `refused` branches on its REASON — the two are reached by different actions
+ * (`undo_first` only by `not_yet`, `not_a_decision` only by `undo`), so one
+ * generic line was actively backwards for half of them (correctness review,
+ * FW Unit 4).
+ */
+export function fwStudentResultLine(result: FwStudentResult, who: string): string {
+  switch (result.kind) {
+    case "applied":
+      return `${who} — recorded`;
+    case "re_attempt":
+      return `${who} — not yet again, recorded`;
+    case "already_done":
+      return `${who} — was already done, nothing changed`;
+    case "replayed":
+      return `${who} — already recorded from an earlier tap`;
+    case "refused":
+      return result.reason === "undo_first"
+        ? `${who} — is already checked. Undo it first.`
+        : `${who} — had nothing to undo`;
+    case "skipped":
+      return result.reason === "not_in_cohort"
+        ? `${who} — isn't on this weekend's roster, so nothing was recorded`
+        : `${who} — not applied (only ${FW_BATCH_MAX} at a time)`;
+    case "failed":
+      switch (result.reason) {
+        case "missing_progress":
+          return `${who} — their task list isn't ready. Find The 120 staff.`;
+        case "cohort_invalid":
+          return `${who} — isn't on this weekend's roster, so nothing was recorded`;
+        case "cross_actor_undo":
+          // Terminal, NOT retryable: someone else's decision now stands.
+          return `${who} — another guide changed this, so your undo wasn't applied. Find The 120 staff.`;
+        case "unavailable":
+          return `${who} — didn't go through. Tap Retry.`;
+      }
+  }
+}
+
 /* ═══════════════════════════════════ what the surface is currently showing ══ */
 
 /** The displayed outcome of the guide's most recent work on one task. */

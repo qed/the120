@@ -5,6 +5,7 @@ import {
   createFwClientIdLedger,
   foldFwSurfaceOutcome,
   fwResultsForFailedAction,
+  fwStudentResultLine,
   stateForFwPrimary,
   EMPTY_FW_SURFACE,
   decideFwAction,
@@ -887,5 +888,43 @@ describe("fwResultsForFailedAction", () => {
   it("produces results that keep their client-id keys alive for the retry", () => {
     // `unavailable` is the one outcome `isFwResultSettled` refuses to settle.
     for (const r of fwResultsForFailedAction(["s-a"])) expect(isFwResultSettled(r)).toBe(false);
+  });
+});
+
+/* ═══════════════════ the per-result copy (salvaged from FwTaskView, Unit 9) ══ */
+
+describe("fwStudentResultLine — every result kind has a guide-readable sentence", () => {
+  const who = "Maya";
+  const line = (r: FwStudentResult) => fwStudentResultLine(r, who);
+
+  it("the four success shapes each read differently (bell safety depends on the guide seeing which)", () => {
+    expect(line({ studentId: "s", kind: "applied", state: "verified" })).toBe("Maya — recorded");
+    expect(line({ studentId: "s", kind: "re_attempt", state: "not_yet" })).toContain("not yet again");
+    expect(line({ studentId: "s", kind: "already_done", state: "verified" })).toContain(
+      "already done"
+    );
+    expect(line({ studentId: "s", kind: "replayed", state: "verified" })).toContain("earlier tap");
+  });
+
+  it("refused branches on its REASON — undo_first and not_a_decision are reached by different actions", () => {
+    expect(line({ studentId: "s", kind: "refused", reason: "undo_first", state: "verified" })).toContain(
+      "Undo it first"
+    );
+    expect(
+      line({ studentId: "s", kind: "refused", reason: "not_a_decision", state: "available" })
+    ).toContain("nothing to undo");
+  });
+
+  it("skips and failures name the recovery, not the rule", () => {
+    expect(line({ studentId: "s", kind: "skipped", reason: "not_in_cohort" })).toContain("roster");
+    expect(line({ studentId: "s", kind: "skipped", reason: "over_batch_max" })).toContain(
+      `${FW_BATCH_MAX}`
+    );
+    expect(line({ studentId: "s", kind: "failed", reason: "missing_progress" })).toContain("staff");
+    expect(line({ studentId: "s", kind: "failed", reason: "cohort_invalid" })).toContain("roster");
+    expect(line({ studentId: "s", kind: "failed", reason: "cross_actor_undo" })).toContain(
+      "another guide"
+    );
+    expect(line({ studentId: "s", kind: "failed", reason: "unavailable" })).toContain("Retry");
   });
 });

@@ -28,10 +28,10 @@ export const metadata: Metadata = {
  * on runs both of its own gates on every request. Gating the bounce would just
  * slow the recovery path down.
  *
- * `FwTaskView` and its actions are NOT deleted in this unit — Unit 9 salvages
- * the engine wiring, and deleting `"use server"` exports mid-stream is the
- * deploy-skew hazard the plan calls out. This redirect already makes them
- * unreachable.
+ * `FwTaskView` is retired (Unit 9): its engine wiring lives on in
+ * `FwInlineDecision`, and its per-result copy in `fwStudentResultLine`. The
+ * `applyFwCheckIn` Server Action was never deleted — the inline control calls
+ * the same action, so there is no deploy-skew seam to manage.
  */
 export default async function FwTaskPage({
   params,

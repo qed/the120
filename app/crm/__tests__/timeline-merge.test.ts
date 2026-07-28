@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTimeline,
+  nurtureLabel,
   type TimelineChildInput,
   type TimelineDepositInput,
   type TimelineFamilyInput,
@@ -57,6 +58,26 @@ const deposit = (
 });
 
 const children: TimelineChildInput[] = [{ id: "child-1", first_name: "Maya" }];
+
+describe("nurtureLabel — the automated-send row a staff member reads", () => {
+  it("W8: the per-child offer step never leaks the child id into the label", () => {
+    // The step is `o3:<uuid>` since the nudge key went per-child. Without
+    // stripping, the fallback interpolated a raw identifier into the
+    // family timeline.
+    expect(nurtureLabel("offer", "o3:3f9a1c22-9d51-4a77-b0e2-15c0e91b7a44")).toBe(
+      "Automated · Seat reminder"
+    );
+    expect(nurtureLabel("offer", "o3")).toBe("Automated · Seat reminder");
+  });
+
+  it("the known steps keep their labels, and an unknown step degrades without an id", () => {
+    expect(nurtureLabel("account", "d2")).toBe("Automated · Dossier nudge");
+    expect(nurtureLabel("deposit", "d10")).toBe("Automated · T+10 referral ask");
+    expect(nurtureLabel("stall", "nudge-1")).toBe("Automated · Dossier stall nudge");
+    expect(nurtureLabel("future", "x9:abc-123")).toBe("Automated · future x9");
+    expect(nurtureLabel("future", "x9:abc-123")).not.toContain("abc-123");
+  });
+});
 
 describe("buildTimeline", () => {
   it("returns an empty array for a family with no events (R34 empty state)", () => {

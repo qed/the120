@@ -41,15 +41,18 @@ import { Icon } from "@/app/fp/components/system/Icon";
  * create control that has scrolled off the right edge is a control that does
  * not exist. Pinned as a source property (no jsdom).
  *
- * UNIT 2 SEAM: `onCreateClick` — when a client host wires it, + expands the
- * inline create panel. Until then (and from this server layout, which cannot
- * pass a function) it falls back to a Link to the page's New-weekend section.
+ * `onCreateClick` IS REQUIRED (ops redesign Unit 2 closed the Unit 1 seam): the
+ * row is mounted by `FwOpsChrome`, the client shell the ops layout renders,
+ * which owns the inline create panel's open state. The Unit 1 Link fallback to a
+ * `#new-weekend` anchor is gone WITH its anchor — a fallback pointing at an id
+ * nobody renders is a dead button, so the prop went required instead of
+ * optional-with-a-lie.
  */
 
 const PILL =
   "flex-none whitespace-nowrap rounded-full px-3 py-1.5 font-path-mono text-[11px] uppercase tracking-[0.1em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink";
 
-export default function FwOpsTabRow({ onCreateClick }: { onCreateClick?: () => void }) {
+export default function FwOpsTabRow({ onCreateClick }: { onCreateClick: () => void }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -98,24 +101,14 @@ export default function FwOpsTabRow({ onCreateClick }: { onCreateClick?: () => v
         </Link>
       </nav>
 
-      {onCreateClick ? (
-        <button
-          type="button"
-          onClick={onCreateClick}
-          aria-label="New weekend"
-          className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-hq-ink-soft transition-colors hover:bg-hq-sunken hover:text-hq-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink"
-        >
-          <Icon name="plus" size={18} />
-        </button>
-      ) : (
-        <Link
-          href="/fp/fw/ops#new-weekend"
-          aria-label="New weekend"
-          className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-hq-ink-soft transition-colors hover:bg-hq-sunken hover:text-hq-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink"
-        >
-          <Icon name="plus" size={18} />
-        </Link>
-      )}
+      <button
+        type="button"
+        onClick={onCreateClick}
+        aria-label="New weekend"
+        className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-hq-ink-soft transition-colors hover:bg-hq-sunken hover:text-hq-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hq-ink"
+      >
+        <Icon name="plus" size={18} />
+      </button>
     </header>
   );
 }

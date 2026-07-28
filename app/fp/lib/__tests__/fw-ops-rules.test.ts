@@ -467,6 +467,15 @@ describe("archive/unarchive failure copy (Unit 7)", () => {
     }
   });
 
+  it("confirm_mismatch says the typed name is wrong, without blame or jargon (Unit 2)", () => {
+    // The server-verified confirm's refusal. Staff normally never meet it — the
+    // button is disabled until the client-side match — so it exists for the
+    // caller that skipped the browser, and still speaks the house voice.
+    const copy = archiveFwCohortFailureCopy("confirm_mismatch");
+    expect(copy).toBe("The name you typed doesn't match this weekend.");
+    expect(copy).not.toMatch(/error|invalid|slug/i);
+  });
+
   it("unavailable claims nothing was changed and names the retry", () => {
     for (const c of [
       archiveFwCohortFailureCopy("unavailable"),

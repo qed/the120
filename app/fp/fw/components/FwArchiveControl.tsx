@@ -10,7 +10,10 @@
  *
  * The ARCHIVE side confirms by typed slug, same gate as anonymize: it darkens a
  * public URL and hides the weekend from the default list, and both are a click's
- * worth of accident without the gate. The UNARCHIVE side is one button — its
+ * worth of accident without the gate. The typed slug is SENT with the action
+ * (`confirmSlug`) and re-verified in the core against the stored slug (ops
+ * redesign Unit 2) — the disabled-until-match button below is UX convenience;
+ * the server check is the boundary. The UNARCHIVE side is one button — its
  * consequence is visibility, not destruction, and the board deliberately stays
  * dark until an explicit re-mint (the server's contract; the copy says so).
  *
@@ -101,7 +104,7 @@ export default function FwArchiveControl({
         <button
           type="button"
           disabled={busy || !confirmed}
-          onClick={() => run(() => archiveCohortAction({ cohortId }))}
+          onClick={() => run(() => archiveCohortAction({ cohortId, confirmSlug: typed }))}
           className="inline-flex min-h-[44px] items-center rounded-xl border border-not-yet/60 px-4 font-path-body text-sm font-semibold text-hq-ink hover:bg-not-yet/10 disabled:opacity-50"
         >
           {busy ? "Archiving…" : "Archive this weekend"}

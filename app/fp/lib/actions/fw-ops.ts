@@ -309,20 +309,30 @@ export async function revokeBoardTokenAction(
   return { success: true };
 }
 
-const archiveCohortSchema = z.object({ cohortId: z.uuid() });
+/**
+ * `confirmSlug` REQUIRED (ops redesign Unit 2): the slug staff typed into the
+ * confirm field travels with the request and is re-verified IN THE CORE against
+ * the stored slug — the anonymize posture. The client's disabled-until-match
+ * button is convenience; this schema plus the core check is the boundary.
+ */
+const archiveCohortSchema = z.object({
+  cohortId: z.uuid(),
+  confirmSlug: z.string().min(1).max(120),
+});
 
 export type ArchiveCohortActionResult =
   | { success: true }
   | { success: false; error: string };
 
 /**
- * Archive one weekend (Unit 7; R19/R20).
+ * Archive one weekend (Unit 7; R19/R20; typed confirm server-verified in the
+ * ops redesign's Unit 2).
  *
- * The SEQUENCE — revoke the board, then set archive state, with a failed revoke
- * stopping everything — lives in `archiveFwCohort`, the core the CLI drives too.
- * This layer is only gate → zod → core → copy, per the file's canon. The copy
- * functions live in `fw-ops-rules.ts` (pure, tested), not here — a sentence in a
- * "use server" file is a sentence CI cannot read.
+ * The SEQUENCE — verify the typed slug, revoke the board, then set archive
+ * state, with a failed revoke stopping everything — lives in `archiveFwCohort`,
+ * the core the CLI drives too. This layer is only gate → zod → core → copy, per
+ * the file's canon. The copy functions live in `fw-ops-rules.ts` (pure, tested),
+ * not here — a sentence in a "use server" file is a sentence CI cannot read.
  *
  * The revalidate set (plan, deferred item, resolved here): the ops LIST (the
  * cohort disappears from the default view), the cohort's own ops page (the
@@ -343,6 +353,7 @@ export async function archiveCohortAction(
     cohortId: parsed.data.cohortId,
     actorUserId: gate.actorUserId,
     now: Date.now(),
+    confirmSlug: parsed.data.confirmSlug,
   });
   if (!archived.ok) {
     return { success: false, error: archiveFwCohortFailureCopy(archived.reason) };
@@ -358,11 +369,16 @@ export type UnarchiveCohortActionResult =
   | { success: true }
   | { success: false; error: string };
 
-/** The reverse door. Same gate, same layering, same revalidate set. */
+/**
+ * The reverse door. Same gate, same layering, same revalidate set — but NO typed
+ * confirm: restoring makes a weekend visible again, which is calm and reversible,
+ * and a confirm on a non-destructive action teaches staff to type through
+ * confirms (ops redesign Unit 2 decision).
+ */
 export async function unarchiveCohortAction(
   input: unknown
 ): Promise<UnarchiveCohortActionResult> {
-  const parsed = archiveCohortSchema.safeParse(input);
+  const parsed = cohortSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: GENERIC_ERROR };
 
   const gate = await requireCohortStaff(parsed.data.cohortId);

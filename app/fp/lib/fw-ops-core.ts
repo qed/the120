@@ -45,6 +45,7 @@ import {
   FW_TOMBSTONE_FIRST_NAME,
   FW_TOMBSTONE_LAST_NAME,
   fwAnonymizeConfirmMatches,
+  fwArchiveConfirmMatches,
   isFwTombstoneName,
   narrowFwEventTimeZone,
 } from "./fw-ops-rules";
@@ -609,6 +610,10 @@ export type ArchiveFwCohortResult =
         | "cohort_not_found"
         | "cohort_not_fw"
         | "already_archived"
+        /** The typed confirm did not match the STORED slug. Verified here, in
+         *  the core, before anything is touched (ops redesign Unit 2) — a typed
+         *  confirm only the browser checks is not a confirm. */
+        | "confirm_mismatch"
         /** The token revoke failed for a reason OTHER than "nothing was live".
          *  The archive did NOT proceed — see the ordering note below. */
         | "revoke_failed"
@@ -616,7 +621,15 @@ export type ArchiveFwCohortResult =
     };
 
 /**
- * Archive one FW cohort: revoke the live board token, THEN set archive state.
+ * Archive one FW cohort: verify the typed confirm, revoke the live board token,
+ * THEN set archive state.
+ *
+ * ── The confirm is server-verified (ops redesign Unit 2)
+ *
+ * `confirmSlug` is the slug staff TYPED, re-checked here against the stored slug
+ * via `fwArchiveConfirmMatches` before the sequence runs — the same posture as
+ * `anonymizeFwStudent`'s `confirmName`. Every front door supplies it: the two
+ * browser controls send what was typed, and the CLI takes `--confirm-slug`.
  *
  * ── The ordering is the decision (plan, Key Technical Decisions)
  *
@@ -648,11 +661,19 @@ export type ArchiveFwCohortResult =
  */
 export async function archiveFwCohort(
   db: SupabaseClient,
-  input: { cohortId: string; actorUserId: string; now: number }
+  input: { cohortId: string; actorUserId: string; now: number; confirmSlug: string }
 ): Promise<ArchiveFwCohortResult> {
   const cohort = await loadFwOpsCohort(db, input.cohortId);
   if (!cohort) return { ok: false, reason: "cohort_not_found" };
   if (cohort.kind !== FW_COHORT_KIND) return { ok: false, reason: "cohort_not_fw" };
+  // The typed confirm, verified against the STORED slug before anything is
+  // touched — including before the archived-state check, so a mismatched
+  // confirm learns nothing about the row beyond its existence (which the
+  // staff gate already grants). The anonymize posture (ops redesign Unit 2):
+  // the browser's disabled-until-match button is UX; THIS is the confirm.
+  if (!fwArchiveConfirmMatches(input.confirmSlug, cohort.slug)) {
+    return { ok: false, reason: "confirm_mismatch" };
+  }
   if (cohort.archivedAt !== null) return { ok: false, reason: "already_archived" };
 
   const revoked = await revokeFwBoardToken(db, {

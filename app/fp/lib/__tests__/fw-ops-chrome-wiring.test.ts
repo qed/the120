@@ -28,6 +28,10 @@ const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 const ROW = stripComments(read("../../fw/components/FwOpsTabRow.tsx"));
+const CHROME = stripComments(read("../../fw/components/FwOpsChrome.tsx"));
+const PANEL = stripComments(read("../../fw/components/FwOpsCreatePanel.tsx"));
+const MENU = stripComments(read("../../fw/components/FwOpsRowMenu.tsx"));
+const ARCHIVE_CONTROL = stripComments(read("../../fw/components/FwArchiveControl.tsx"));
 const LAYOUT = stripComments(read("../../fw/(app)/ops/layout.tsx"));
 const PAGE = stripComments(read("../../fw/(app)/ops/page.tsx"));
 
@@ -82,20 +86,67 @@ describe("the + control sits OUTSIDE the scrollable pill region", () => {
     expect(createControl).toBeGreaterThan(navClose);
   });
 
-  it("its Link fallback lands on an anchor the page actually declares", () => {
-    // The Unit 2 seam: `onCreateClick` will expand the inline create panel;
-    // until a client host passes it, + is a Link to the New-weekend section.
-    // Both halves of that seam are pinned so neither can be deleted alone —
-    // a fallback pointing at an id nobody renders is a dead button.
+  it("the + is a real client seam now — no Link fallback, no dead anchor (Unit 2)", () => {
+    // Unit 2 closed Unit 1's seam: the shell always passes `onCreateClick`, so
+    // the `#new-weekend` fallback Link was deleted WITH its anchor. A surviving
+    // reference on either side would be a link to nowhere.
     expect(ROW).toMatch(/onCreateClick/);
-    expect(ROW).toMatch(/#new-weekend/);
-    expect(PAGE).toMatch(/id="new-weekend"/);
+    expect(ROW).not.toMatch(/#new-weekend/);
+    expect(PAGE).not.toMatch(/new-weekend/);
   });
 });
 
-describe("the ops layout renders the row and keeps its gate", () => {
-  it("mounts FwOpsTabRow — the chrome moved, it did not disappear", () => {
-    expect(LAYOUT).toMatch(/<FwOpsTabRow[\s/>]/);
+describe("the +/create-panel seam (Unit 2)", () => {
+  it("the shell mounts the row WITH the handler and shares the flag via context", () => {
+    // The row and the panel need a common client parent; the shell is it. The
+    // row must receive the handler (its prop is required — a bare mount is a
+    // compile error, pinned here as source anyway) and the panel must consume
+    // the same context the shell provides.
+    expect(CHROME).toMatch(/<FwOpsTabRow\s+onCreateClick=/);
+    expect(CHROME).toMatch(/FwOpsCreateContext\.Provider/);
+    expect(PANEL).toMatch(/useFwOpsCreate\(\)/);
+  });
+
+  it("the page no longer renders an always-visible create form — the panel owns it", () => {
+    // The Unit 1 "New weekend" section is gone; `FwCohortCreate` mounts ONLY
+    // inside the collapsible panel. A second, always-visible mount would undo
+    // the redesign's point.
+    expect(PAGE).not.toMatch(/<FwCohortCreate/);
+    expect(PAGE).toMatch(/<FwOpsCreatePanel\s*\/>/);
+    expect(PANEL).toMatch(/<FwCohortCreate[\s/>]/);
+  });
+
+  it("on success the panel collapses and links to the new weekend", () => {
+    // `createFwCohortAction` returns the cohortId for exactly this: "created"
+    // is half the job, and the other half (guides, board link) lives on the
+    // cohort's ops page.
+    expect(PANEL).toMatch(/setOpen\(false\)/);
+    expect(PANEL).toMatch(/\/fp\/fw\/ops\/cohort\/\$\{created\.cohortId\}/);
+  });
+});
+
+describe("the typed archive confirm travels to the server (Unit 2)", () => {
+  it("both archive surfaces SEND confirmSlug — the client match is UX, not the boundary", () => {
+    // The action schema requires `confirmSlug` and the core re-verifies it
+    // against the stored slug. A surface that stops sending it does not
+    // quietly weaken the confirm — it breaks archive outright; this pin makes
+    // the breakage a red test naming the contract.
+    expect(ARCHIVE_CONTROL).toMatch(/archiveCohortAction\(\{\s*cohortId,\s*confirmSlug:\s*typed\s*\}\)/);
+    expect(MENU).toMatch(/archiveCohortAction\(\{\s*cohortId,\s*confirmSlug:\s*typed\s*\}\)/);
+  });
+
+  it("restore stays confirm-free — it is not destructive", () => {
+    expect(MENU).toMatch(/unarchiveCohortAction\(\{\s*cohortId\s*\}\)/);
+  });
+});
+
+describe("the ops layout renders the chrome and keeps its gate", () => {
+  it("mounts FwOpsChrome, which mounts the row — the chrome moved again, it did not disappear", () => {
+    // Unit 2: the layout renders the client shell (it cannot pass the + a
+    // function itself), and the shell renders the row. Both hops pinned so
+    // neither mount can be deleted alone.
+    expect(LAYOUT).toMatch(/<FwOpsChrome[\s>]/);
+    expect(CHROME).toMatch(/<FwOpsTabRow[\s/>]/);
   });
 
   it("still gates on the cohort-free staff resolver, refusing as a 404", () => {

@@ -210,7 +210,7 @@ const COMMAND_FLAGS: Record<Command, string[]> = {
   // Unit 7: retire a weekend / bring it back. Same cores as the ops surface —
   // the revoke-then-archive ordering and every guard live in archiveFwCohort,
   // so this front door cannot skip them.
-  archive: ["--cohort", "--actor"],
+  archive: ["--cohort", "--actor", "--confirm-slug"],
   unarchive: ["--cohort"],
 };
 
@@ -301,10 +301,15 @@ async function main() {
     // user-visible attribution; the resolveActor convenience would silently pin an
     // arbitrary active staff row's NAME on an archive they never made. Wrong
     // attribution is worse than the schema's own honest "unrecorded" state.
+    // The typed confirm the core now requires (ops redesign Unit 2) — the
+    // weekend's own slug, same shape as anonymize's --confirm-name. Verified
+    // server-side against the stored slug; a wrong id typed with a wrong slug
+    // refuses instead of archiving the wrong weekend.
     const res = await archiveFwCohort(db, {
       cohortId,
       actorUserId: required("actor"),
       now: Date.now(),
+      confirmSlug: required("confirm-slug"),
     });
     emit(res, () => {
       if (res.ok) console.log(`archived ${cohortId} (board revoked or already dark)`);

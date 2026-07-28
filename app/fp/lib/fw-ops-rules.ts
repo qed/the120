@@ -466,12 +466,23 @@ export function fwReplayRejectReasonCopy(reason: string): string {
  * Explicit never-return, matching `fwStaffGateCopy`.
  */
 export function archiveFwCohortFailureCopy(
-  reason: "cohort_not_found" | "cohort_not_fw" | "already_archived" | "revoke_failed" | "unavailable"
+  reason:
+    | "cohort_not_found"
+    | "cohort_not_fw"
+    | "already_archived"
+    | "confirm_mismatch"
+    | "revoke_failed"
+    | "unavailable"
 ): string {
   switch (reason) {
     case "cohort_not_found":
     case "cohort_not_fw":
       return "That action is staff-only.";
+    case "confirm_mismatch":
+      // The server-verified typed confirm (ops redesign Unit 2). The client
+      // disables the button until the slug matches, so staff normally never meet
+      // this — it exists for the caller that skipped the browser.
+      return "The name you typed doesn't match this weekend.";
     case "already_archived":
       return "Already archived — someone got there first. Refresh to see the current state.";
     case "revoke_failed":
@@ -588,10 +599,15 @@ export function fwOpsCohortAffordances(input: { archived: boolean }): {
 }
 
 /**
- * The archive confirm gate (Unit 9) — typed-slug confirmation, same shape as the
- * anonymize confirm: archiving darkens a public URL and hides a weekend from the
- * default list, so a mis-tap must not do it. Pure so the match rule is tested;
- * the component only compares through this.
+ * The archive confirm gate (Unit 9; upgraded in ops redesign Unit 2) — typed-slug
+ * confirmation, same shape as the anonymize confirm: archiving darkens a public
+ * URL and hides a weekend from the default list, so a mis-tap must not do it.
+ *
+ * VERIFIED SERVER-SIDE: `archiveFwCohort` (the core) re-runs this against the
+ * STORED slug before the revoke-then-archive sequence — a typed confirm only the
+ * browser checks is not a confirm (the anonymize posture). The components still
+ * call it too, but only as UX: the button stays disabled until the match, so the
+ * refusal is met before the round trip rather than after.
  */
 export function fwArchiveConfirmMatches(typed: string, slug: string): boolean {
   return typed.trim() === slug;

@@ -2286,7 +2286,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
     const { db, tables } = makeFakeDb({});
     await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: true });
     // Both halves landed…
     const token = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
@@ -2300,7 +2300,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
   it("with NO token ever minted: archives cleanly (no_active_token folds into success HERE)", async () => {
     const { db, tables } = makeFakeDb({});
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: true });
     expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(STAFF);
   });
@@ -2314,7 +2314,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
     });
     await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: false, reason: "revoke_failed" });
     // …and NOTHING was archived.
     expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at ?? null).toBeNull();
@@ -2331,10 +2331,10 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
     // reduces to.
     const { db, tables } = makeFakeDb({});
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: true });
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: RAVI, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: RAVI, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: false, reason: "already_archived" });
     expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(DANA);
   });
@@ -2347,7 +2347,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
     // it, not who clicked last. Node has no scheduler seam, so the stale read is
     // injected by wrapping the fake's first cohort read.
     const { db, tables } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" });
     const activeSnapshot = { ...tables.path_cohorts.find((c) => c.id === BOSTON)!, archived_at: null, archived_by: null };
     let cohortReads = 0;
     const staleDb = {
@@ -2391,15 +2391,42 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
       },
     };
     expect(
-      await archiveFwCohort(staleDb as never, { cohortId: BOSTON, actorUserId: RAVI, now: NOW })
+      await archiveFwCohort(staleDb as never, { cohortId: BOSTON, actorUserId: RAVI, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: false, reason: "already_archived" });
     expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_by).toBe(DANA);
+  });
+
+  it("a MISMATCHED confirmSlug refuses with confirm_mismatch and touches NOTHING", async () => {
+    // The server-verified typed confirm (ops redesign Unit 2): the check runs
+    // BEFORE the revoke-then-archive sequence, so a wrong slug leaves the board
+    // live and the cohort active — the browser's disabled-until-match button is
+    // convenience, this is the confirm.
+    const { db, tables } = makeFakeDb({});
+    await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    expect(
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston" })
+    ).toEqual({ ok: false, reason: "confirm_mismatch" });
+    const token = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
+    expect(token.revoked_at ?? null).toBeNull(); // board still live
+    expect(tables.path_cohorts.find((c) => c.id === BOSTON)!.archived_at ?? null).toBeNull();
+  });
+
+  it("the confirm rule is fwArchiveConfirmMatches — trimmed, case-sensitive", async () => {
+    const { db } = makeFakeDb({});
+    expect(
+      await archiveFwCohort(db, {
+        cohortId: BOSTON,
+        actorUserId: DANA,
+        now: NOW,
+        confirmSlug: "  boston-2026-08  ",
+      })
+    ).toEqual({ ok: true });
   });
 
   it("a kind='path' id is refused BY THE CORE — the CLI has no action-layer gate", async () => {
     const { db, tables } = makeFakeDb({});
     expect(
-      await archiveFwCohort(db, { cohortId: PATH_COHORT, actorUserId: STAFF, now: NOW })
+      await archiveFwCohort(db, { cohortId: PATH_COHORT, actorUserId: STAFF, now: NOW, confirmSlug: "sept-2026" })
     ).toEqual({ ok: false, reason: "cohort_not_fw" });
     expect(tables.path_cohorts.find((c) => c.id === PATH_COHORT)!.archived_at ?? null).toBeNull();
   });
@@ -2407,7 +2434,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
   it("an unknown id is cohort_not_found", async () => {
     const { db } = makeFakeDb({});
     expect(
-      await archiveFwCohort(db, { cohortId: "no-such", actorUserId: STAFF, now: NOW })
+      await archiveFwCohort(db, { cohortId: "no-such", actorUserId: STAFF, now: NOW, confirmSlug: "no-such" })
     ).toEqual({ ok: false, reason: "cohort_not_found" });
   });
 
@@ -2420,7 +2447,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
     });
     await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
     expect(
-      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW })
+      await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" })
     ).toEqual({ ok: false, reason: "unavailable" });
     const token = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
     expect(token.revoked_at).not.toBeNull(); // board dark
@@ -2431,7 +2458,7 @@ describe("archiveFwCohort — revoke first, then archive, or neither", () => {
 describe("unarchiveFwCohort — both columns null, board stays dark", () => {
   it("restores an archived cohort: BOTH columns null", async () => {
     const { db, tables } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" });
     expect(await unarchiveFwCohort(db, { cohortId: BOSTON })).toEqual({ ok: true });
     const cohort = tables.path_cohorts.find((c) => c.id === BOSTON)!;
     // Attribution describes CURRENT state — reversal genuinely loses who archived
@@ -2463,7 +2490,7 @@ describe("unarchiveFwCohort — both columns null, board stays dark", () => {
     const { db, tables } = makeFakeDb({});
     const minted0 = await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
     if (!minted0.ok) throw new Error("seed mint failed");
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     await unarchiveFwCohort(db, { cohortId: BOSTON });
     // Between unarchive and re-mint the board is DARK by design.
     const t0 = tables.path_fw_board_tokens.find((t) => t.cohort_id === BOSTON)!;
@@ -2481,7 +2508,7 @@ describe("unarchiveFwCohort — both columns null, board stays dark", () => {
     const { db, tables } = makeFakeDb({
       failTable: { table: "path_cohorts", op: "update", message: "sneeze", onCall: 2 },
     });
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW }); // update #1
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" }); // update #1
     expect(await unarchiveFwCohort(db, { cohortId: BOSTON })).toEqual({
       ok: false,
       reason: "unavailable",
@@ -2498,7 +2525,7 @@ describe("mint refuses an archived cohort — the guard pulled forward from Unit
   // reason attributable to the archive alone.
   it("pre-flight: an archived cohort with a future window is refused cohort_archived, and nothing is written", async () => {
     const { db, tables } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW, confirmSlug: "hamptons-2026-08" });
     const before = tables.path_fw_board_tokens.length;
     expect(
       await mintFwBoardToken(db, { cohortId: HAMPTONS, actorUserId: STAFF, now: NOW })
@@ -2513,7 +2540,7 @@ describe("mint refuses an archived cohort — the guard pulled forward from Unit
     // not window_passed (which staff cannot act on for a retired weekend anyway).
     const LATER = Date.parse("2026-09-15T12:00:00Z");
     const { db } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     expect(
       await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: LATER })
     ).toEqual({ ok: false, reason: "cohort_archived" });
@@ -2589,7 +2616,7 @@ describe("unarchiveFwCohort — the stale-read CAS, mirroring the archive's", ()
     // re-archiver's state and attribution. The CAS refusing is only observable with
     // an injected stale read — same sticky-proxy seam as the archive's test.
     const { db, tables } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" });
     const archivedSnapshot = { ...tables.path_cohorts.find((c) => c.id === BOSTON)! };
     // Underneath the stale reader: unarchived (both null) — the state the CAS meets.
     const row = tables.path_cohorts.find((c) => c.id === BOSTON)!;
@@ -2641,7 +2668,7 @@ describe("unarchiveFwCohort — the stale-read CAS, mirroring the archive's", ()
 describe("the widened cohort read", () => {
   it("loadFwOpsCohort carries archive state, fail-closed to visible", async () => {
     const { db } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" });
     const cohort = await loadFwOpsCohort(db, BOSTON);
     expect(cohort?.archivedAt).not.toBeNull();
     expect(cohort?.archivedBy).toBe(DANA);
@@ -2660,7 +2687,7 @@ describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (posi
   // as P1s and "fix" them.
   const archivedSeed = async () => {
     const made = makeFakeDb({});
-    await archiveFwCohort(made.db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(made.db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     return made;
   };
 
@@ -2688,7 +2715,7 @@ describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (posi
     // A parent's erasure request does not expire because staff retired the cohort;
     // blocking it would turn an archive into a compliance hole.
     const { db } = makeFakeDb(anonymizeSeed());
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     const res = await anonymizeFwStudent(db, {
       studentId: MAYA,
       cohortId: BOSTON,
@@ -2725,7 +2752,7 @@ describe("Unit 8 — the guard table's PROCEED rows, on an archived cohort (posi
 describe("Unit 9 — archive-aware lists", () => {
   it("the ops list EXCLUDES archived by default, and its counts describe the filtered set (R3)", async () => {
     const { db } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     const listed = await listFwOpsCohorts(db, { now: NOW });
     if (!listed.ok) throw new Error("unreachable");
     expect(listed.cohorts.map((c) => c.id)).toEqual([HAMPTONS]);
@@ -2734,7 +2761,7 @@ describe("Unit 9 — archive-aware lists", () => {
   it("includeArchived returns them, archive fields carried, board status honest ('revoked')", async () => {
     const { db } = makeFakeDb({});
     await mintFwBoardToken(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: DANA, now: NOW, confirmSlug: "boston-2026-08" });
     const listed = await listFwOpsCohorts(db, { now: NOW, includeArchived: true });
     if (!listed.ok) throw new Error("unreachable");
     const boston = listed.cohorts.find((c) => c.id === BOSTON)!;
@@ -2756,7 +2783,7 @@ describe("Unit 9 — archive-aware lists", () => {
         { id: "g1", user_id: RAVI, role: "guide", scope_type: "cohort", scope_id: BOSTON },
       ],
     });
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     const listed = await listFwOpsCohorts(db, { now: NOW, includeArchived: true });
     if (!listed.ok) throw new Error("unreachable");
     const boston = listed.cohorts.find((c) => c.id === BOSTON)!;
@@ -2766,7 +2793,7 @@ describe("Unit 9 — archive-aware lists", () => {
 
   it("listFwActiveWeekends: only non-archived, with the window dates, one narrow read", async () => {
     const { db } = makeFakeDb({});
-    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW });
+    await archiveFwCohort(db, { cohortId: BOSTON, actorUserId: STAFF, now: NOW, confirmSlug: "boston-2026-08" });
     const res = await listFwActiveWeekends(db);
     if (!res.ok) throw new Error("unreachable");
     expect(res.weekends.map((w) => w.id)).toEqual([HAMPTONS]);

@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import FwOpsTabRow from "@/app/fp/fw/components/FwOpsTabRow";
+import FwOpsChrome from "@/app/fp/fw/components/FwOpsChrome";
 import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
 
 /**
  * The staff ops shell — chrome for the surfaces guides never see. The chrome
- * itself is `FwOpsTabRow` (ops redesign Unit 1): the sticky pill row carrying
- * Weekends / Guide view / the ADMIN chip / the archived toggle / the + control,
- * and with it the `--staff-bar-h` sticky-offset contract that used to live in
- * this file's header markup.
+ * itself is `FwOpsTabRow` (ops redesign Unit 1), mounted through `FwOpsChrome`
+ * (Unit 2): the sticky pill row carrying Weekends / Guide view / the ADMIN chip
+ * / the archived toggle / the + control, and with it the `--staff-bar-h`
+ * sticky-offset contract that used to live in this file's header markup. The
+ * chrome is a CLIENT shell now because the + toggles the list page's inline
+ * create panel — the row and the panel share the shell's context, and a server
+ * layout cannot pass a function (see FwOpsChrome's header).
  *
  * Deliberately NOT nested under `cohort/[cohortId]/layout.tsx`. That shell is
  * the GUIDE's working header (weekend name, switcher, sign out) and is scoped to
@@ -41,10 +44,5 @@ export default async function FwOpsLayout({ children }: { children: ReactNode })
   const gate = await resolveFwStaffGate();
   if (!gate.ok) notFound();
 
-  return (
-    <>
-      <FwOpsTabRow />
-      {children}
-    </>
-  );
+  return <FwOpsChrome>{children}</FwOpsChrome>;
 }

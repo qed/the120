@@ -27,6 +27,8 @@ import {
   ShareIcon,
   CloudOffIcon,
   RefreshCwIcon,
+  EllipsisIcon,
+  InfoIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -73,6 +75,8 @@ const REGISTRY = {
   share: ShareIcon,
   "cloud-off": CloudOffIcon,
   refresh: RefreshCwIcon,
+  ellipsis: EllipsisIcon,
+  info: InfoIcon,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof REGISTRY;

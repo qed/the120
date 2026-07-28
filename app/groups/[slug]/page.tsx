@@ -1,16 +1,28 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import Wordmark from "@/app/components/Wordmark";
-import StartCta from "@/app/components/StartCta";
+import LandingPage from "@/app/components/landing/LandingPage";
 import { groupCtaSource } from "@/app/lib/cta-source";
+import { getSeatsRemaining } from "@/app/lib/seats";
 import { groupBySlug, groups } from "@/app/lib/site";
 
-// The Scholars have their own program page at /scholars, so only the four network groups render here.
-const NETWORK_GROUPS = groups.filter((g) => g.slug !== "scholars");
+/**
+ * The five group landings (funnel U5; R19–R27) — one template, instantiated
+ * from `app/lib/site.ts`. Only the hero, headline line 1 and subhead vary.
+ *
+ * SCHOLARS JOINS HERE, in the same change that moves its `href` in site.ts —
+ * never separately: `GroupsBand` renders `g.href` directly, so moving the
+ * href before this route serves the slug points a live home-page card at a
+ * 404 (the U1 note that deferred it to exactly this unit).
+ *
+ * Decision 4: this page EMITS `?g=`/`?src=` on its CTAs and reads no
+ * `searchParams` — a Server Component read would opt the whole route into
+ * dynamic rendering and cost all five pages their static generation. Seats
+ * come from `getSeatsRemaining`, whose 60s ISR keeps the page static.
+ */
 
 export function generateStaticParams() {
-  return NETWORK_GROUPS.map((g) => ({ slug: g.slug }));
+  // All five, scholars included (R27's reroute happens on /scholars itself).
+  return groups.map((g) => ({ slug: g.slug }));
 }
 
 export async function generateMetadata({
@@ -21,85 +33,31 @@ export async function generateMetadata({
   const group = groupBySlug((await params).slug);
   return {
     title: group ? `${group.name} — The 120` : "The 120",
-    description: group?.body,
+    description: group?.subhead,
   };
 }
 
-/**
- * Handoff group page: full-viewport #0300ED page with a full-bleed image slot
- * (blue until client photography lands), the shared hero gradient, top bar,
- * and bottom-anchored serif content.
- */
-export default async function GroupPage({
+export default async function GroupLandingPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
   const group = groupBySlug(slug);
-  if (!group || group.slug === "scholars") notFound();
+  if (!group) notFound();
+
+  const seatsRemaining = await getSeatsRemaining();
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-blue">
-      {/* Image slot: client photography drops in here; blue shows until then. */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(rgba(19,20,22,0.18) 0%, rgba(19,20,22,0) 30%, rgba(19,20,22,0.02) 55%, rgba(19,20,22,0.78) 100%)",
-        }}
-      />
-
-      {/* Top bar */}
-      <div className="relative z-10 flex items-center justify-between px-6 pt-7 sm:px-11">
-        <Link
-          href="/"
-          className="font-mono text-[11px] tracking-[0.08em] text-white/85 transition-colors hover:text-white"
-        >
-          ← THE 120
-        </Link>
-        <Link href="/" aria-label="The 120 home">
-          <Wordmark tone="light" />
-        </Link>
-      </div>
-
-      <div className="flex-1" />
-
-      {/* Bottom-anchored content */}
-      <div className="relative z-10 flex max-w-[760px] flex-col gap-5 px-6 pb-8 sm:px-11">
-        <span className="font-mono text-xs tracking-[0.1em] text-blush">{group.kicker}</span>
-        <h1 className="display text-5xl text-white sm:text-[72px] sm:leading-[1.02]">
-          The <span className="accent-blush">{group.accent}</span>
-        </h1>
-        <p className="max-w-[620px] text-[17px] leading-[1.65] text-white/85 sm:text-[19px]">
-          {group.body}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-3.5">
-          {/* R18: no "Book a call" on the logged-out marketing site. The call
-              is offered after C1, on the dashboard and in nurture. */}
-          <StartCta
-            source={groupCtaSource(group.slug)}
-            group={group.slug}
-            className="px-7 py-4 text-sm"
-          />
-        </div>
-        <span className="font-mono text-[11px] tracking-[0.06em] text-white/60">
-          TIN CAN + ADDRESS BOOK INCLUDED · 3–5 HRS/WEEK · ALONGSIDE ANY SCHOOL
-        </span>
-      </div>
-
-      {/* Footer row */}
-      <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-t border-white/25 px-6 py-5 sm:px-11">
-        <span className="text-[13px] text-white/75">
-          All five groups enrolling now ·{" "}
-          <Link href="/#groups" className="text-white underline underline-offset-2 hover:text-blush">
-            See the groups
-          </Link>
-        </span>
-        <span className="font-mono text-[11px] tracking-[0.08em] text-white/60">
-          FOUNDING COHORT · FALL 2026 · TORONTO
-        </span>
-      </div>
-    </div>
+    <LandingPage
+      content={{
+        headline: group.headline,
+        subhead: group.subhead,
+        hero: group.hero,
+        source: groupCtaSource(group.slug),
+        group: group.slug,
+      }}
+      seatsRemaining={seatsRemaining}
+    />
   );
 }

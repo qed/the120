@@ -4,7 +4,6 @@
 // stay thin. No "use server" — every export is an ordinary function/const.
 
 import { COPY } from "./data";
-import { seatsLabel } from "@/app/lib/site";
 
 /** The page's two voices. Mirrors the keys of the COPY dictionary. */
 export type Audience = "parents" | "kids";
@@ -18,8 +17,11 @@ export type Audience = "parents" | "kids";
  */
 export { SRC_MARKER, attributedBookingUrl } from "@/app/lib/cta-source";
 
-/** Shown in the red band / seat indicator once the founding cohort is full. */
-export const WAITLIST_LABEL = "Founding cohort full — join the waitlist";
+// WAITLIST_LABEL and seatsDisplay moved to app/lib/site.ts in U5 (the
+// landings need them; importing this module would drag the whole 2026-27
+// content file into six static pages for one string). Re-exported here for
+// this page's own importers.
+export { WAITLIST_LABEL, seatsDisplay } from "@/app/lib/site";
 
 export interface CtaLabels {
   /** Label for the account-modal ("Join") button. */
@@ -38,10 +40,3 @@ export function ctaLabels(audience: Audience): CtaLabels {
   return { join: COPY[audience].joinCta, book: COPY[audience].callCta };
 }
 
-/**
- * Seat-indicator text: the live "N OF 120 SEATS REMAIN" label while seats are
- * available, or the waitlist state once the cohort is full (`remaining <= 0`).
- */
-export function seatsDisplay(remaining: number): string {
-  return remaining <= 0 ? WAITLIST_LABEL : seatsLabel(remaining);
-}

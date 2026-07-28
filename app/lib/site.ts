@@ -12,6 +12,19 @@ export const SEATS_FILLED = SEATS_TOTAL - SEATS_REMAINING;
 export const seatsLabel = (remaining: number = SEATS_REMAINING) =>
   `${remaining} OF ${SEATS_TOTAL} SEATS REMAIN`;
 
+/**
+ * Shown wherever a seats line renders once the cohort is full. Moved here from
+ * `app/2026-27/cta-source.ts` in U5 (re-exported there): the landings need it,
+ * and importing that module would drag the whole 2026-27 content file into six
+ * static pages for one string.
+ */
+export const WAITLIST_LABEL = "Founding cohort full — join the waitlist";
+
+/** The one seats-line rule (R52b's marketing treatment, est. on /2026-27):
+ *  the live count while seats remain, the waitlist state at zero. */
+export const seatsDisplay = (remaining: number): string =>
+  remaining <= 0 ? WAITLIST_LABEL : seatsLabel(remaining);
+
 /** Two price points, one network (handoff Tuition). */
 export const TUITION_MEMBERSHIP_CAD = 3000;
 export const TUITION_FULL_CORE_CAD = 15000;
@@ -152,18 +165,15 @@ export const GROUP_CARD_CTA = "EXPLORE YOUR GROUP →";
  * hero asset, phase colour token — rather than a parallel content module, so
  * `/groups/[slug]`, `/first-profit` and the home cards keep one source.
  *
- * NOTE Scholars' `href` is deliberately still `/scholars`. R5 moves it to
- * `/groups/scholars`, but that move belongs to U5, in the same change that
- * admits scholars to `generateStaticParams` and drops the `notFound()`.
- * `app/components/GroupsBand.tsx` renders `href` directly, so moving it here
- * would point a live home-page card at a 404 for the length of Phase 1.
+ * Scholars' `href` moved to `/groups/scholars` in U5, in the same change that
+ * admitted scholars to `generateStaticParams` — the ordering the U1 deferral
+ * existed to protect. The invariant now (pinned by test): every `href` is a
+ * page the landing route actually generates.
  */
 export type Group = {
   slug: GroupSlug;
   name: string;
-  accent: string; // italic display word
   category: string;
-  kicker: string;
   blurb: string;
   body: string;
   href: string;
@@ -193,9 +203,7 @@ export const groups: Group[] = [
   {
     slug: "athletes",
     name: "The Athletes",
-    accent: "Athletes",
     category: "ATHLETES",
-    kicker: "GROUP 01 · ATHLETES · ENROLLING NOW",
     blurb: "Train seriously, compete seriously, and think like a pro.",
     body: "For kids who train seriously and want more than practice. A year-long athletic project: a season record, a training system, a documented climb. Mentored by people who have competed, and demoed to the whole network at the Toronto intensives.",
     href: "/groups/athletes",
@@ -207,9 +215,7 @@ export const groups: Group[] = [
   {
     slug: "founders",
     name: "The Founders",
-    accent: "Founders",
     category: "ENTREPRENEURS",
-    kicker: "GROUP 02 · ENTREPRENEURS · ENROLLING NOW",
     blurb: "Start something real. Customers, revenue, lessons learned.",
     body: "For kids who want to start something real. A year-long venture: customers, revenue, lessons learned. Mentored by people who have built companies, and pitched to the whole network at the Toronto intensives.",
     href: "/groups/founders",
@@ -221,9 +227,7 @@ export const groups: Group[] = [
   {
     slug: "makers",
     name: "The Makers",
-    accent: "Makers",
     category: "CREATIVE",
-    kicker: "GROUP 03 · CREATIVE · ENROLLING NOW",
     blurb: "Art, film, music, invention. A real body of work, shipped.",
     body: "For kids who need to make things. A year-long body of work: a film, an album, an invention, a portfolio. Mentored by working artists and builders, and shown to the whole network at the Toronto intensives.",
     href: "/groups/makers",
@@ -235,14 +239,14 @@ export const groups: Group[] = [
   {
     slug: "scholars",
     name: "The Scholars",
-    accent: "Scholars",
     category: "GIFTED & TALENTED",
-    kicker: "GROUP 04 · GIFTED & TALENTED · ENROLLING NOW",
     blurb: "Accelerated academics. Mastery with no ceiling.",
     body: "For gifted kids who love to learn. Accelerated, mastery-based academics with no ceiling.",
-    // Still /scholars, NOT /groups/scholars — R5 moves it in U5, with the route
-    // that will serve it. See the note on `Group`.
-    href: "/scholars",
+    // Moved in U5 (R5), in the SAME change that admits scholars to
+    // `generateStaticParams` and drops the notFound() — the ordering the U1
+    // note existed to protect. /scholars itself stays live and reachable by
+    // URL (R27), just unlinked from the cards.
+    href: "/groups/scholars",
     headline: "Your kid's ideas will earn real money this year.",
     subhead: `Thought leadership: teaching, writing, tutoring, a paid workshop of their own. ${LANDING_SUBHEAD_TAIL}`,
     hero: "/landing/heroes/scholars.jpg",
@@ -251,9 +255,7 @@ export const groups: Group[] = [
   {
     slug: "givers",
     name: "The Givers",
-    accent: "Givers",
     category: "SERVICE",
-    kicker: "GROUP 05 · SERVICE · ENROLLING NOW",
     blurb: "Lead real service. Projects that change a corner of the city.",
     body: "For kids who lead with service. A year-long service program that changes a corner of the city: planned, run, and measured by them. Mentored by people who have done it, and presented to the whole network at the Toronto intensives.",
     href: "/groups/givers",

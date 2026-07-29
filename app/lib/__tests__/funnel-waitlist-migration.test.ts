@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { REVIEW_STATUSES, REVIEW_STATUS_LABELS } from "@/app/crm/lib/constants";
+import { categorizeOutstanding, countOutstandingOffers } from "@/app/lib/funnel/offer-rules";
+import { demoteWarning } from "@/app/crm/lib/offer-rules";
 import { postSubmitDestination } from "@/app/lib/funnel/offer-rules";
 import { canReserveSeat, statusIndex, statusMeta } from "@/app/dashboard/data";
 
@@ -11,6 +13,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
 
 const WAITLIST_MIGRATION = "supabase/migrations/20260815120000_funnel_waitlist_move.sql";
+const DRAFT_ARM_MIGRATION = "supabase/migrations/20260816120000_funnel_waitlist_draft_arm.sql";
 const SYNC_MIGRATION = "supabase/migrations/20260810120000_funnel_applicant_state_sync.sql";
 
 /**
@@ -81,6 +84,36 @@ describe("the waitlist migration", () => {
     expect(rpc.waitlisted).toBe("waitlisted");
   });
 
+  it("EVERY review status the schema accepts has an applicant_state arm — the draft gap", () => {
+    // The original migration enumerated the arms the sync trigger had and
+    // missed `draft`, which moveCandidateSchema accepts (z.enum over the
+    // full REVIEW_STATUSES; the menu's narrower list is client-side only).
+    // A waitlisted child moved to draft kept applicant_state='waitlisted'
+    // and could never advance again — the exact divergence this unit
+    // exists to end.
+    const src = readFileSync(path.resolve(REPO_ROOT, DRAFT_ARM_MIGRATION), "utf8");
+    const caseBlock = /v_target_applicant_state := case p_review_status([\s\S]*?)end;/.exec(src);
+    expect(caseBlock, "CASE not found").not.toBeNull();
+    for (const status of REVIEW_STATUSES) {
+      expect(caseBlock![1], `no arm for '${status}'`).toContain(`when '${status}'`);
+    }
+  });
+
+  it("refuses loudly rather than stranding, if a future status arrives without an arm", () => {
+    const src = readFileSync(path.resolve(REPO_ROOT, DRAFT_ARM_MIGRATION), "utf8");
+    expect(src).toMatch(/if v_target_applicant_state is null then[\s\S]*?raise exception/);
+    expect(src).toContain("would strand the family");
+  });
+
+  it("draft lands BELOW submitted, so a resubmission can advance the ladder", () => {
+    const src = readFileSync(path.resolve(REPO_ROOT, DRAFT_ARM_MIGRATION), "utf8");
+    expect(src).toMatch(/when 'draft'\s+then 'project_created'/);
+    // project_created (1) < submitted (2) on the ladder in 20260805120000.
+    const ladder = readFileSync(path.resolve(REPO_ROOT, SYNC_MIGRATION), "utf8");
+    const order = /array\[([^\]]+)\]/.exec(ladder)![1];
+    expect(order.indexOf("'project_created'")).toBeLessThan(order.indexOf("'submitted'"));
+  });
+
   it("keeps the service-role-only grant posture", () => {
     const src = sql();
     expect(src).toMatch(/revoke all on function public\.move_candidate[\s\S]*?from public, anon, authenticated/);
@@ -121,6 +154,46 @@ describe("the waitlist vocabulary, in TypeScript", () => {
     const item = (reviewStatus: string) => ({ reviewStatus }) as never;
     const counts = queueCounts([item("in_review"), item("waitlisted"), item("offered")]);
     expect(counts.needsReview).toBe(1);
+  });
+
+  it("waitlisting retires a PROMISE but never MONEY — a clearing debit still holds its seat", () => {
+    // deposit_fulfil is deposit-blind and seats_claimed() counts every
+    // paid row with no join to children, so a debit that clears after the
+    // waitlist move consumes a real seat regardless. Dropping it from the
+    // count frees headroom a staff member then offers away: two families,
+    // one seat, nothing flagging it.
+    const wl = (deposits: { status: string; refunded_at?: string | null }[]) => ({
+      offerSentAt: "2026-07-28T00:00:00Z",
+      reviewStatus: "waitlisted",
+      deposits,
+    });
+    expect(countOutstandingOffers([wl([])])).toBe(0); // bare promise: retired
+    expect(countOutstandingOffers([wl([{ status: "pending" }])])).toBe(1); // money: kept
+    const split = categorizeOutstanding([wl([{ status: "pending" }])]);
+    expect(split.clearingDebits).toBe(1);
+    // A dead debit is not money in flight, so the promise retires again.
+    expect(countOutstandingOffers([wl([{ status: "expired" }])])).toBe(0);
+    expect(
+      countOutstandingOffers([wl([{ status: "pending", refunded_at: "2026-07-29T00:00:00Z" }])])
+    ).toBe(0);
+  });
+
+  it("waitlisting a PAID family warns — the loudest case, not the quietest", () => {
+    // demoteWarning returned false on any paid deposit, so moving a paid
+    // member to the waitlist had no confirmation at all: their dashboard
+    // flips to Waitlisted while their money sits with us.
+    const paid = [{ status: "paid" }];
+    expect(demoteWarning({ targetStatus: "waitlisted", offerSentAt: null, deposits: paid })).toBe(
+      true
+    );
+    // Ordinary demotions of a paid family still stay quiet — nothing to lose.
+    expect(demoteWarning({ targetStatus: "in_review", offerSentAt: "2026-07-28", deposits: paid })).toBe(
+      false
+    );
+    // And an unpaid waitlisting with an offer out still warns as before.
+    expect(
+      demoteWarning({ targetStatus: "waitlisted", offerSentAt: "2026-07-28", deposits: [] })
+    ).toBe(true);
   });
 
   it("family routing: waitlisted goes to the wall, and un-waitlisting or an offer brings them back", () => {

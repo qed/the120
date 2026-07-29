@@ -6,13 +6,27 @@
 
 import { applicantStateAllowsReserve } from "@/app/lib/funnel/applicant-rules";
 
+/**
+ * Every value `children.status` can actually hold — which since W7
+ * includes `waitlisted`. It is deliberately NOT a rung in STATUS_FLOW
+ * below (the waitlist is a branch off the ladder, not a step through it),
+ * so `statusIndex` returns -1 for it and every index comparison keeps
+ * failing closed.
+ *
+ * Listing it here is what makes the difference visible. While the type
+ * omitted a value the database could return, three render sites compared
+ * against it and TypeScript called the comparison unreachable — so a
+ * waitlisted family silently fell through to "we will review your
+ * submission" copy (adversarial review).
+ */
 export type SeatStatus =
   | "draft"
   | "submitted"
   | "in_review"
   | "invited"
   | "offered"
-  | "member";
+  | "member"
+  | "waitlisted";
 
 export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
   { id: "draft", label: "Draft", short: "Building the dossier" },

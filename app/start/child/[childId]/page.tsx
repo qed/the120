@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { loadMiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
-import { parseStep } from "@/app/lib/funnel/miniapp-rules";
+import {
+  initialStepForFacts,
+  isDoorConfirmed,
+  resolveStep,
+} from "@/app/lib/funnel/miniapp-rules";
 import { loadActiveProjectViewCore } from "@/app/lib/funnel/compose-core";
 import { MiniAppShell } from "./MiniAppShell";
 
@@ -36,24 +40,43 @@ export default async function MiniAppPage({
 
   const rawHint = Array.isArray(query.g) ? query.g[0] : query.g;
 
-  // R56: quiz_start / reveal_viewed emit per SERVER render of the step —
-  // the URL is the step state, so every step entry is a server request.
-  // Fire-and-forget; refresh duplicates are measurement's dedupe problem.
-  const step = parseStep(Array.isArray(query.step) ? query.step[0] : query.step);
-  if (step === "quiz") void emitFunnelEvent("quiz_start", { childId });
-  if (step === "reveal") void emitFunnelEvent("reveal_viewed", { childId });
-
   // The active draft rides in server-side so compose/tasks/reveal survive a
   // refresh; a read failure degrades to "no draft yet" (the shell re-loads
   // through the compose action on demand).
+  //
+  // DELIBERATE degrade: collapsing `{kind:"failed"}` to null means a flaky
+  // projects read lands the family in a wrong-but-recoverable earlier room
+  // instead of crashing the page — the same tradeoff resume-core made for
+  // its projects-read degrade (Unit 1). Unit 8's server-fact comparison must
+  // keep a re-walk of those earlier rooms non-destructive for this to stay
+  // safe.
   const projectLoad = await loadActiveProjectViewCore(childId);
   const initialProject = projectLoad.kind === "ok" ? projectLoad.view : null;
+
+  // Unit 5: with no `?step=` at all, land on the furthest step the server
+  // can PROVE (confirmed door → templates, composed project → compose)
+  // instead of always handoff. A `?step=` in the URL still wins — the
+  // server resolves the landing, the URL never carries a resume.
+  const serverInitialStep = initialStepForFacts({
+    doorConfirmed: isDoorConfirmed(loaded.child.groupSlug),
+    hasProject: initialProject !== null,
+  });
+
+  // R56: quiz_start / reveal_viewed emit per SERVER render of the step —
+  // the URL is the step state, so every step entry is a server request.
+  // Fire-and-forget; refresh duplicates are measurement's dedupe problem.
+  // Mirrors the shell's derivation so server and client agree on the step.
+  const rawStep = Array.isArray(query.step) ? query.step[0] : query.step;
+  const step = resolveStep(rawStep ?? null, serverInitialStep);
+  if (step === "quiz") void emitFunnelEvent("quiz_start", { childId });
+  if (step === "reveal") void emitFunnelEvent("reveal_viewed", { childId });
 
   return (
     <MiniAppShell
       child={loaded.child}
       hintSlug={rawHint ?? null}
       initialProject={initialProject}
+      serverInitialStep={serverInitialStep}
     />
   );
 }

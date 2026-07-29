@@ -63,6 +63,64 @@ export function parseStep(raw: unknown): MiniAppStep {
 export const miniAppProgress = (step: MiniAppStep): number => progressPercent(step);
 
 /**
+ * The ONE resolution rule for "what step is this request on": a URL with no
+ * `?step=` at all takes the server's fact-resolved landing; a present param —
+ * even an invalid one — still resolves through `parseStep`, fail-open intact.
+ * Both the page (event emission) and the shell (render) call THIS, so server
+ * and client can never disagree about the step a URL means.
+ */
+export function resolveStep(
+  rawStep: string | null,
+  serverInitialStep: MiniAppStep
+): MiniAppStep {
+  return rawStep == null ? serverInitialStep : parseStep(rawStep);
+}
+
+/**
+ * The door-gated steps: everything between the doors and the project needs a
+ * confirmed door to render its real content (templates seed from the group's
+ * copy, the quiz is the group's quiz, compose writes the group onto the
+ * project). `reveal` is NOT here — its door fallback only applies when a
+ * composed project exists (otherwise the no-project gate wins), so the shell
+ * composes `stepNeedsDoor(step) || (step === "reveal" && composeView !== null)`.
+ * ONE source for both the Back slot's "← TO THE DOORS" variant and the
+ * per-step "Pick a door first" fallback.
+ */
+export function stepNeedsDoor(step: MiniAppStep): boolean {
+  return step === "templates" || step === "quiz" || step === "compose";
+}
+
+/**
+ * Is this child's saved `group_slug` a CONFIRMED door? Membership in
+ * GROUP_SLUGS is the rule — null, empty, and garbage are all "no door yet",
+ * never a throw (a mangled row is a cold visitor, not an error).
+ */
+export function isDoorConfirmed(groupSlug: string | null | undefined): boolean {
+  return (GROUP_SLUGS as readonly string[]).includes(groupSlug ?? "");
+}
+
+/**
+ * The furthest step the SERVER can prove from persisted facts (dashboard
+ * reconnect U5): no confirmed door → `handoff`; a confirmed door with no
+ * composed project → `templates`; a composed project → `compose`. The
+ * project fact outranks the door fact — a project row implies the walk that
+ * created it, so a project with a somehow-missing door still lands on
+ * `compose` (the step's own gate copy handles the repair).
+ *
+ * This respects the no-`?step=`-resume rule: the server resolves the landing,
+ * the URL never carries it. A `?step=` in the URL still wins in the shell —
+ * this only fills the no-param case that used to hard-code `handoff`.
+ */
+export function initialStepForFacts(facts: {
+  doorConfirmed: boolean;
+  hasProject: boolean;
+}): MiniAppStep {
+  if (facts.hasProject) return "compose";
+  if (facts.doorConfirmed) return "templates";
+  return "handoff";
+}
+
+/**
  * The steps U8 ships live; everything later renders the coming-next stub
  * until its unit lands (U9 templates/quiz, U10 compose, U11 tasks/reveal).
  * In rules rather than in the component so the tests — and the later units —

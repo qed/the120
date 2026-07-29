@@ -11,9 +11,13 @@ import {
   doorConfirmOutcome,
   doorsModel,
   handoffCopy,
+  initialStepForFacts,
+  isDoorConfirmed,
   miniAppProgress,
   parseStep,
+  resolveStep,
   skinForGrade,
+  stepNeedsDoor,
   stepNeighbour,
 } from "@/app/lib/funnel/miniapp-rules";
 import {
@@ -59,6 +63,66 @@ describe("the step ladder", () => {
 
   it("BUILT_STEPS is a prefix of the ladder — the stub can never sit BEFORE a live step", () => {
     expect(BUILT_STEPS.every((s, i) => MINIAPP_STEPS[i] === s)).toBe(true);
+  });
+
+  it("resolveStep: no param takes the server landing; a present param resolves through parseStep", () => {
+    expect(resolveStep(null, "templates")).toBe("templates");
+    expect(resolveStep("quiz", "templates")).toBe("quiz");
+    // Invalid values fail open through parseStep — the server landing does
+    // NOT rescue a mangled param, only a missing one.
+    expect(resolveStep("nonsense", "templates")).toBe("handoff");
+    expect(resolveStep("", "templates")).toBe("handoff");
+  });
+
+  it("stepNeedsDoor: exactly templates/quiz/compose across all seven steps", () => {
+    const gated = Object.fromEntries(MINIAPP_STEPS.map((s) => [s, stepNeedsDoor(s)]));
+    expect(gated).toEqual({
+      handoff: false,
+      doors: false,
+      templates: true,
+      quiz: true,
+      compose: true,
+      tasks: false,
+      // Reveal's door fallback needs a composed project too — the shell
+      // composes that seam; the pure step set stays false here.
+      reveal: false,
+    });
+  });
+});
+
+describe("isDoorConfirmed — GROUP_SLUGS membership, junk-safe", () => {
+  it("accepts every legal door slug", () => {
+    for (const slug of GROUP_SLUGS) {
+      expect(isDoorConfirmed(slug), slug).toBe(true);
+    }
+  });
+
+  it("treats null, undefined, empty, and garbage as not confirmed", () => {
+    expect(isDoorConfirmed(null)).toBe(false);
+    expect(isDoorConfirmed(undefined)).toBe(false);
+    expect(isDoorConfirmed("")).toBe(false);
+    expect(isDoorConfirmed("not-a-door")).toBe(false);
+  });
+});
+
+describe("initialStepForFacts — the server-provable landing (Unit 5)", () => {
+  it("maps the three fact combos: no door → handoff; door only → templates; project → compose", () => {
+    expect(initialStepForFacts({ doorConfirmed: false, hasProject: false })).toBe("handoff");
+    expect(initialStepForFacts({ doorConfirmed: true, hasProject: false })).toBe("templates");
+    expect(initialStepForFacts({ doorConfirmed: true, hasProject: true })).toBe("compose");
+  });
+
+  it("is exhaustive over the fact space and always lands on a real ladder step", () => {
+    // The fourth cell (project without a door) is the project fact winning:
+    // a project row implies the walk that created it, so compose, where the
+    // step's own gate copy handles any repair.
+    expect(initialStepForFacts({ doorConfirmed: false, hasProject: true })).toBe("compose");
+    for (const doorConfirmed of [false, true]) {
+      for (const hasProject of [false, true]) {
+        const step = initialStepForFacts({ doorConfirmed, hasProject });
+        expect(MINIAPP_STEPS, JSON.stringify({ doorConfirmed, hasProject })).toContain(step);
+      }
+    }
   });
 });
 
@@ -312,9 +376,55 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
   it("derives the step from the URL, never from a one-shot useState(initialStep)", () => {
     // useState reads a prop once and ignores every later navigation: Back
     // would pop history while the mounted component kept the old step — the
-    // routing decision's whole justification, silently broken.
-    expect(shell).toMatch(/parseStep\(searchParams\.get\("step"\)\)/);
-    expect(shell).not.toMatch(/useState[^;]{0,40}initialStep/);
+    // routing decision's whole justification, silently broken. The ONE seam
+    // (Unit 5): a URL with NO ?step= takes the server's fact-resolved
+    // landing; a present param still resolves through parseStep, fail-open
+    // intact.
+    expect(shell).toMatch(/searchParams\.get\("step"\)/);
+    // The ONE resolution rule lives in miniapp-rules; the shell consumes it.
+    expect(shell).toMatch(/resolveStep\(rawStep, serverInitialStep\)/);
+    expect(shell).not.toMatch(/useState[^;]{0,40}initialStep/i);
+    // The replace-on-mount contract: a bare URL (no ?step=) is rewritten in
+    // place so the frozen-SSR-prop history entry never survives.
+    expect(shell).toMatch(/router\.replace\(/);
+  });
+
+  it("the page feeds the seam from server facts — door and project, through the rules", () => {
+    const page = stripComments(read("../../start/child/[childId]/page.tsx"));
+    expect(page).toMatch(/initialStepForFacts\(\{/);
+    expect(page).toMatch(/doorConfirmed: isDoorConfirmed\(/);
+    expect(page).toMatch(/hasProject: initialProject !== null/);
+    expect(page).toMatch(/serverInitialStep=\{serverInitialStep\}/);
+    // Event emission resolves the step through the SAME rule as the shell.
+    expect(page).toMatch(/resolveStep\(/);
+  });
+
+  it("every screen carries the ONE Back slot — stepNeighbour back, and the handoff seam exit", () => {
+    // The Unit 5 treatment: one small text control at the top of the step
+    // content. Back = one rung down the ladder; on handoff (first rung) it
+    // exits to the children grid instead — the parent still holds the device.
+    expect(shell).toMatch(/go\(stepNeighbour\(step, "back"\)\)/);
+    expect(shell).toMatch(/href="\/start\/children"/);
+    expect(shell).toContain("← BACK");
+    expect(shell).toContain("← ALL CHILDREN");
+    // Consolidation: the old per-gate "← To the doors" pills folded into the
+    // slot — no screen doubles the affordance.
+    expect(shell).not.toContain("← To the doors");
+    expect(shell).toContain("← TO THE DOORS");
+    // The door-gate step set is enumerated ONCE: both the Back slot's
+    // variant and the fallback section read `doorGated`, which reads
+    // `stepNeedsDoor` — never a second inline templates|quiz|compose list.
+    expect(shell).toMatch(/stepNeedsDoor\(step\)/);
+    expect((shell.match(/Pick a door first\./g) ?? []).length).toBe(1);
+  });
+
+  it("no pre-compose step links to /dashboard without ?stay=1 — the Unit 2 gate's loop guard", () => {
+    // The ONLY /dashboard link in the shell is the reveal close, which
+    // renders post-compose (outside the gate's redirect cohort), so it needs
+    // no stay parameter. Any NEW pre-compose dashboard link must carry
+    // ?stay=1; this pins the current count so adding one forces a decision.
+    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(1);
+    expect(shell).toMatch(/href="\/dashboard"/);
   });
 
   it("preserves the rest of the query when stepping — the g hint survives handoff→doors", () => {

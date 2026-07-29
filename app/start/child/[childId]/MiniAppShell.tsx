@@ -10,7 +10,7 @@
  * beyond `BUILT_STEPS` render the coming-next stub until their units land.
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
 import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
@@ -39,8 +39,9 @@ import {
   doorsModel,
   handoffCopy,
   miniAppProgress,
-  parseStep,
+  resolveStep,
   skinForGrade,
+  stepNeedsDoor,
   stepNeighbour,
   type MiniAppStep,
 } from "@/app/lib/funnel/miniapp-rules";
@@ -63,10 +64,39 @@ import {
   capWellFormed,
 } from "@/app/lib/funnel/moderation";
 
+/*
+ * ── Back affordance micro-spec (Unit 5) ──
+ * Pending Peter's design sign-off; audited in Unit 9.
+ *
+ * One treatment, both skin registers. All seven steps render inside the
+ * child's skin (there are no application-register screens in the mini-app),
+ * so the slot needs no per-register variants:
+ *
+ * - Placement: a small text control at the top of the step content, directly
+ *   under the progress card, left-aligned, on its own line (mb-6).
+ * - Style: the progress label's chrome idiom — font-mono text-[0.65rem]
+ *   uppercase tracking-[0.12em], current ink at opacity-60,
+ *   hover:opacity-100. Ink and canvas come from SKIN_ROOT_CLASSES at the
+ *   subtree root, so the same literal classes read correctly in hq and
+ *   trail; no skin-specific colour classes.
+ * - Copy: "← BACK", stepping one rung back via stepNeighbour(step, "back").
+ *   On handoff (the first rung) it reads "← ALL CHILDREN" and links to
+ *   /start/children — seam-safe, the parent still holds the device until
+ *   handoff's CTA hands it over.
+ * - Consolidation: the door-gated fallbacks (templates/quiz/compose/reveal
+ *   without a confirmed door) fold their old "← To the doors" pill into
+ *   this slot as "← TO THE DOORS" → doors, so no screen carries two back
+ *   affordances. The tasks/reveal no-project gate keeps its forward CTA
+ *   ("make your page first") — that is corrective, not a back.
+ */
+const BACK_CLASSES =
+  "inline-flex items-center font-mono text-[0.65rem] uppercase tracking-[0.12em] opacity-60 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:opacity-30";
+
 export function MiniAppShell({
   child,
   hintSlug,
   initialProject,
+  serverInitialStep,
 }: {
   child: MiniAppChild;
   hintSlug: string | null;
@@ -74,16 +104,43 @@ export function MiniAppShell({
    *  survive a refresh. Null = not composed yet (or the read failed and the
    *  compose action re-loads on demand). */
   initialProject: ProjectView | null;
+  /** Unit 5: the furthest step the server can PROVE from persisted facts
+   *  (`initialStepForFacts`). Only consulted when the URL carries no
+   *  `?step=` at all — a present param, even an invalid one, still resolves
+   *  through `parseStep`. */
+  serverInitialStep: MiniAppStep;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const skin = skinForGrade(child.grade);
-  // The step DERIVES from the URL — never `useState(initialStep)`, which
-  // reads the prop once and ignores every later navigation: the browser Back
-  // button would then pop history (new server render, new prop) while the
-  // mounted component kept showing the old step. The URL is the single
-  // source; `go()` only writes it (the raw-vs-resolved lesson, again).
-  const step: MiniAppStep = parseStep(searchParams.get("step"));
+  // The step DERIVES from the URL when a `?step=` is present — never
+  // `useState(initialStep)`, which reads the prop once and ignores every
+  // later navigation: the browser Back button would then pop history (new
+  // server render, new prop) while the mounted component kept showing the
+  // old step. The URL is the single source; `go()` only writes it (the
+  // raw-vs-resolved lesson, again). The ONE seam (Unit 5): a URL with no
+  // `?step=` at all takes the server's fact-resolved landing via
+  // `resolveStep` — but ONLY as the first-paint fallback. The replace-on-
+  // mount effect below immediately materializes that resolved step into the
+  // URL, so the bare-URL history entry never survives: browser Back can
+  // never land on a no-param entry whose `serverInitialStep` prop was frozen
+  // at an older SSR while the session's facts moved on. From then on every
+  // entry carries `?step=`, and `parseStep`'s invalid-value fail-open (inside
+  // `resolveStep`) is untouched.
+  const rawStep = searchParams.get("step");
+  const step: MiniAppStep = resolveStep(rawStep, serverInitialStep);
+
+  // The replace-on-mount contract (see the derivation comment above): a bare
+  // URL is rewritten in place — same history entry, rest of the query
+  // preserved exactly as `go()` builds it — so history only ever holds
+  // explicit `?step=` entries. Guarded: never replaces when a `?step=` is
+  // already present.
+  useEffect(() => {
+    if (rawStep != null) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("step", step);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [rawStep, step, router, searchParams]);
   const [confirmedSlug, setConfirmedSlug] = useState<string | null>(child.groupSlug);
   // A TAP is client state and nothing else (R35): switching is choosing.
   const [tappedSlug, setTappedSlug] = useState<GroupSlug | null>(null);
@@ -130,6 +187,15 @@ export function MiniAppShell({
       templatesForGroup(confirmedSlug as GroupSlug).some((t) => t.id === templateId))
       ? templateId
       : null;
+
+  // The door gate, computed ONCE: the Back slot's "← TO THE DOORS" variant
+  // and the "Pick a door first" fallback section both read this — the step
+  // set lives in `stepNeedsDoor` (miniapp-rules), never enumerated twice.
+  // Reveal joins the gate only when a composed project exists; without one
+  // the tasks/reveal no-project gate wins instead.
+  const doorGated =
+    !confirmedSlug &&
+    (stepNeedsDoor(step) || (step === "reveal" && composeView !== null));
 
   const doors = useMemo(
     () =>
@@ -292,6 +358,39 @@ export function MiniAppShell({
           </p>
         </div>
 
+        {/* The Back slot — one per screen, per the micro-spec above.
+            Disabled while an action is pending, like the forward CTAs: an
+            in-flight confirm/compose resolves with an unconditional go(),
+            which would silently override a Back the user just made. */}
+        <div className="mb-6">
+          {step === "handoff" ? (
+            <a
+              href="/start/children"
+              aria-disabled={pending || undefined}
+              tabIndex={pending ? -1 : undefined}
+              className={`${BACK_CLASSES} ${pending ? "pointer-events-none opacity-30" : ""}`}
+            >
+              ← ALL CHILDREN
+            </a>
+          ) : doorGated ? (
+            <button
+              onClick={() => go("doors")}
+              disabled={pending}
+              className={BACK_CLASSES}
+            >
+              ← TO THE DOORS
+            </button>
+          ) : (
+            <button
+              onClick={() => go(stepNeighbour(step, "back"))}
+              disabled={pending}
+              className={BACK_CLASSES}
+            >
+              ← BACK
+            </button>
+          )}
+        </div>
+
         {step === "handoff" && <Handoff child={child} skin={skin} onNext={() => go("doors")} />}
 
         {step === "doors" && (
@@ -439,15 +538,13 @@ export function MiniAppShell({
           </section>
         )}
 
-        {step === "templates" && !confirmedSlug && (
+        {/* The ONE door-gate fallback — `doorGated` names every step that
+            needs a confirmed door (templates/quiz/compose via stepNeedsDoor,
+            reveal when a project exists). The Back slot above carries
+            "← TO THE DOORS". */}
+        {doorGated && (
           <section>
             <p className="text-base leading-7 opacity-80">Pick a door first.</p>
-            <button
-              onClick={() => go("doors")}
-              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
-            >
-              ← To the doors
-            </button>
           </section>
         )}
 
@@ -506,18 +603,6 @@ export function MiniAppShell({
               className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
             >
               Shape my project →
-            </button>
-          </section>
-        )}
-
-        {step === "quiz" && !confirmedSlug && (
-          <section>
-            <p className="text-base leading-7 opacity-80">Pick a door first.</p>
-            <button
-              onClick={() => go("doors")}
-              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
-            >
-              ← To the doors
             </button>
           </section>
         )}
@@ -628,18 +713,6 @@ export function MiniAppShell({
                 Try another version ({composeView.regenerationsLeft} left)
               </button>
             </div>
-          </section>
-        )}
-
-        {step === "compose" && !confirmedSlug && (
-          <section>
-            <p className="text-base leading-7 opacity-80">Pick a door first.</p>
-            <button
-              onClick={() => go("doors")}
-              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
-            >
-              ← To the doors
-            </button>
           </section>
         )}
 
@@ -805,32 +878,16 @@ export function MiniAppShell({
           );
         })()}
 
-        {step === "reveal" && composeView && !confirmedSlug && (
-          <section>
-            <p className="text-base leading-7 opacity-80">Pick a door first.</p>
-            <button
-              onClick={() => go("doors")}
-              className="mt-5 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
-            >
-              ← To the doors
-            </button>
-          </section>
-        )}
-
         {!BUILT_STEPS.includes(step) && (
           <section>
             <h1 className="font-display text-3xl leading-tight">
               {child.firstName ? `Nice pick, ${child.firstName}.` : "Nice pick."}
             </h1>
+            {/* Consolidated: the Back slot above is the way back — no second
+                pill (the Unit 5 no-doubling rule). */}
             <p className="mt-3 text-base leading-7 opacity-80">
               This part is landing shortly. Everything you did is saved.
             </p>
-            <button
-              onClick={() => go(stepNeighbour(step, "back"))}
-              className="mt-7 inline-flex h-11 items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em]"
-            >
-              ← Back
-            </button>
           </section>
         )}
       </main>

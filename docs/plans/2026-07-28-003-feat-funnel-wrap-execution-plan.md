@@ -1,7 +1,7 @@
 ---
 title: "feat: Funnel wrap execution — decision batch + U15 arrival/provisioning"
 type: feat
-status: active
+status: completed
 date: 2026-07-28
 origin: docs/brainstorms/2026-07-28-funnel-wrap-decisions-requirements.md
 deepened: 2026-07-28
@@ -402,7 +402,7 @@ invariants (zero-row non-200, partial-refund gating, RPC atomicity).
 **Verification:** Dialog renders both categories in the CRM against
 seeded data; webhook suite pins one-alert-per-fulfil.
 
-- [ ] **Unit 3: CRM waitlist move (W7, W7a)**
+- [x] **Unit 3: CRM waitlist move (W7, W7a)** — merged and verified live 2026-07-29 (migrations `20260815120000`/`20260816120000`; verification note in PR #108's docs commit; the backfilled review's four holes closed in PR #111). Checkbox flipped late — the unit itself shipped before this wrap session.
 
 **Goal:** Staff can waitlist, un-waitlist, and offer-from-waitlist; family
 routing follows.
@@ -786,7 +786,7 @@ family ever visits — awaited, source-order pinned against that file.
 from checkout; event row present with correct tuple; copy passes the
 claims sweep.
 
-- [ ] **Unit 8: Mailbox lifecycle (W15)**
+- [x] **Unit 8: Mailbox lifecycle (W15)** — merged PR #117 (2026-07-29); migrations `20260821120000`/`20260822120000` applied, rehearsed (rollback-forced), verified. Review findings fixed pre-merge: hourly `/api/cron/funnel-lifecycle` (suspend latency ≤1h, not a week), child-deleted trigger writes the never-reissue ledger, identity-mint lease pre-flight, sweeps outside the retention try. U2's capacity reconciliation carried in. Open follow-ups recorded: staff forwarding re-send affordance (deferred until a real pending-verification exists post-prework), family-merge forwarding re-sync (W14 partial), Google admin-console prework (Peter), Ontario counsel wording.
 
 **Goal:** The relationship ending ends the mailbox, and the address is
 never someone else's.

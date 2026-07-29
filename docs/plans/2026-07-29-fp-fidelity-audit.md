@@ -352,3 +352,13 @@ Counts (screen/item entries above, including cross-cutting):
   direction flip, not just a wording change.
 - Em dashes are enforced-by-test on new copy and pervasive in older shipped copy, including a
   test-pinned landing paragraph — the rule's real scope was never settled (E4).
+
+## Escalation rulings (Peter, 2026-07-29)
+
+- E1: restore handoff proof-strip copy (no documented supersession found).
+- E2: adopt the FULL Path DS on the mini-app screens — wire the existing ported components from app/fp/components/system/.
+- E3: restore the FAQ dollar figures per handoff.
+- E4 (default recorded): the no-em-dash rule is enforced on new/redesigned surfaces; Unit 10 does not rewrite Peter-confirmed or test-pinned legacy copy.
+- E5: restore the arrival acceptance-letter ceremony around the existing W16 poll/forwarding mechanics (presentation only).
+
+Unit 10 executes: drift 1-16 + E1/E2/E3/E5, batched A (copy/tokens), B1 (progress nav card + display type), B2 (Path DS + arrival ceremony).

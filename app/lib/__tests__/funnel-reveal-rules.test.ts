@@ -167,7 +167,9 @@ describe("the close (R44) and the FAQ", () => {
     expect(model.kind).toBe("ok");
     if (model.kind !== "ok") return;
     expect(model.cta).toBe("Continue Application →");
-    expect(APPLICATION_REGISTER_CLASSES).toBe("bg-paper text-ink");
+    // Batch B2 (E2): the strip also flips the TYPE register back to the
+    // site body face, since the skin root now carries font-path-body.
+    expect(APPLICATION_REGISTER_CLASSES).toBe("bg-paper text-ink font-display");
   });
 });
 

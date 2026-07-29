@@ -21,6 +21,7 @@
  *     verdict.
  */
 
+import { DEPOSIT_REFUND_DEADLINE_LABEL } from "@/app/lib/site";
 import {
   isTerminalState,
   type ForwardingState,
@@ -178,6 +179,20 @@ export const ARRIVAL_SCREEN = {
   },
   ready: {
     title: "Your child's 120 address",
+    /* U10 fidelity, escalation E5 (Peter, 2026-07-29): the acceptance-letter
+     * ceremony returns around these facts — stamped logo tile, the "you're
+     * in." Georgia display, the YOUR KEYS card, the forwarding card, the
+     * calendar note, and the red dashboard CTA. PRESENTATION only: the
+     * facts below are unchanged and W16 still holds (no password exists, so
+     * the spec's password row and forced-reset note render as the honest
+     * no-password line instead). */
+    keysLabel: "YOUR KEYS",
+    // Not the prototype's row label: W16 forbids access-implying framing
+    // (this whole copy block is swept for it), so the row states the fact.
+    emailRowLabel: "Email",
+    forwardingCardLabel: "Mail forwarding",
+    calendarNote: `Your $250 seat deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
+    cta: "Go to my new dashboard →",
     body: "This address is your child's identity at The 120 — it belongs to them for their whole time here. It isn't an inbox anyone needs to check yet, and no password exists for it today.",
     forwardingPending:
       "We've asked Google to forward this mailbox to your email. Google has sent YOU a verification link — click it and anything sent to your child's address will reach you.",
@@ -190,6 +205,17 @@ export const ARRIVAL_SCREEN = {
     body: "Your seat is secure. A person is finishing your child's setup — we'll be in touch if we need anything from you.",
   },
 } as const;
+
+/**
+ * E5: the ceremony heading — "{name}, you're in." in the acceptance-letter
+ * register, applied to the READY state only (waiting/timeout keep their
+ * honest still-pending headings). Blank names fall back to the plain form,
+ * never a dangling comma.
+ */
+export function arrivalCeremonyTitle(firstName: string): string {
+  const name = firstName.trim();
+  return name ? `${name}, you're in.` : "You're in.";
+}
 
 /* ─────────────────── the forwarding-verification bound ─────────────────── */
 

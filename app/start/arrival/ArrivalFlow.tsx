@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ARRIVAL_POLL_INTERVAL_MS,
   ARRIVAL_SCREEN,
+  arrivalCeremonyTitle,
   pollStep,
   type ArrivalView,
 } from "@/app/lib/funnel/arrival-rules";
@@ -122,28 +124,63 @@ export function ArrivalFlow({
           </button>
         </>
       ) : view?.kind === "ready" ? (
+        /* E5 (Peter, 2026-07-29): the acceptance-letter ceremony, READY state
+           only — stamped logo tile, "{name}, you're in." in Georgia display,
+           the YOUR KEYS card, the mail-forwarding card, the calendar note,
+           and the red dashboard CTA. Presentation only: the facts (address +
+           forwarding state) and the poll/terminal logic are W16/wrap-U7's,
+           untouched. W16 still means no password exists, so the keys card
+           carries the address and the honest no-password body instead of the
+           prototype's fallback-password rows. */
         <>
-          <h1 className="mt-2 font-display text-3xl leading-tight">
-            {firstName ? `${firstName}'s 120 address` : ARRIVAL_SCREEN.ready.title}
-          </h1>
-          <div className="mt-6 rounded-2xl border border-line bg-paper-2 p-5">
-            <p className="font-mono text-lg" data-testid="student-email">
-              {view.email}
+          <div className="mt-4 text-center">
+            <span className="inline-flex h-16 w-16 items-center justify-center rounded-[18px] bg-ink">
+              <Image src="/path-logo.svg" alt="" width={34} height={32} unoptimized />
+            </span>
+            <h1 className="display mt-4 text-3xl text-ink">
+              {arrivalCeremonyTitle(firstName)}
+            </h1>
+          </div>
+          <div className="mt-6 rounded-2xl border border-line bg-white px-5 py-4">
+            <p className="font-mono text-[0.65rem] tracking-[0.14em] text-red">
+              {ARRIVAL_SCREEN.ready.keysLabel}
+            </p>
+            <div className="mt-3 flex items-baseline justify-between gap-3">
+              <span className="text-[13px] text-ink-soft">
+                {ARRIVAL_SCREEN.ready.emailRowLabel}
+              </span>
+              <span className="font-mono text-[13px] font-semibold" data-testid="student-email">
+                {view.email}
+              </span>
+            </div>
+            <p className="mt-3 text-[13px] leading-5 text-ink-soft">
+              {ARRIVAL_SCREEN.ready.body}
             </p>
           </div>
-          <p className="mt-4 text-base leading-7 text-ink-soft">{ARRIVAL_SCREEN.ready.body}</p>
-          <p className="mt-3 text-[13px] leading-5 text-ink-soft">
-            {view.forwarding === "active"
-              ? ARRIVAL_SCREEN.ready.forwardingActive
-              : view.forwarding === "pending_verification"
-                ? ARRIVAL_SCREEN.ready.forwardingPending
-                : ARRIVAL_SCREEN.ready.forwardingNone}
-          </p>
+          <div className="mt-4 overflow-hidden rounded-2xl border border-line bg-white">
+            <div className="border-b border-line bg-paper-2 px-4 py-2.5">
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-ink-soft">
+                {ARRIVAL_SCREEN.ready.forwardingCardLabel}
+              </p>
+            </div>
+            <p className="px-4 py-3 text-[13px] leading-5 text-ink-soft">
+              {view.forwarding === "active"
+                ? ARRIVAL_SCREEN.ready.forwardingActive
+                : view.forwarding === "pending_verification"
+                  ? ARRIVAL_SCREEN.ready.forwardingPending
+                  : ARRIVAL_SCREEN.ready.forwardingNone}
+            </p>
+          </div>
+          <div className="mt-4 rounded-[13px] bg-paper-2 px-4 py-3">
+            <p className="text-[13px] leading-5 text-ink">
+              {ARRIVAL_SCREEN.ready.calendarNote}
+            </p>
+          </div>
           <Link
             href="/dashboard"
-            className="mt-8 inline-flex h-11 items-center justify-center self-start rounded-full border border-line-strong px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-ink hover:border-ink"
+            className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
           >
-            ← Back to the dashboard
+            {ARRIVAL_SCREEN.ready.cta}
           </Link>
         </>
       ) : view?.kind === "setting_up" && phase.kind === "committed" ? (

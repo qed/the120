@@ -295,3 +295,31 @@ export const MAX_REGENERATIONS = 2;
 
 export const canRegenerate = (count: number): boolean =>
   Number.isInteger(count) && count >= 0 && count < MAX_REGENERATIONS;
+
+/* ─────────────────────── the compose screen's copy (U10 fidelity, drift 13 + E2) ─────────────────────── */
+
+/**
+ * The prototype's compose-screen chrome, verbatim, in the rules module so
+ * the copy sweep and the fidelity pins reach it (JSX literals dodge both).
+ * The screen is a project PAGE with an edit toggle, not a form: loading
+ * state, name-as-display heading, description paragraph, "The offer" and
+ * "First customers" cards, a controls row (Change anything / Shape it again
+ * ×2 / Start over), the gold founders-pivot note, and the (out of 25) CTA.
+ *
+ * "Start over" maps to the doors step — the existing door-change machinery
+ * IS the invalidation path (a different door retires the project through
+ * the confirm dialog; the same door keeps it). No new mutation.
+ */
+export const COMPOSE_UI_COPY = {
+  loadingTitle: "Shaping your project…",
+  loadingBody: "Your words are becoming a company page. A few seconds.",
+  eyebrow: "Your project",
+  offerLabel: "The offer",
+  customersLabel: "First customers",
+  editOn: "Change anything",
+  editOff: "Done editing",
+  startOver: "Start over",
+  goldNote:
+    "This project is yours. You can change it any time, and you can hold up to five. Founders pivot. That's normal here.",
+  cta: "See your first 3 tasks (out of 25) →",
+} as const;

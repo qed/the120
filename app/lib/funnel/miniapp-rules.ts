@@ -192,8 +192,60 @@ export type DoorModel = {
   /** "GROUP 01" … "GROUP 05" — position, not alphabet. */
   numeral: string;
   kicker: string;
+  /** U10 fidelity (drift 10): the bare digit the arch numeral chip carries. */
+  archNumeral: string;
   /** R35: rendered at full strength with the band-register line under it. */
   preselected: boolean;
+};
+
+/**
+ * U10 fidelity (audit drift 10, E2): the doors screen subhead, verbatim from
+ * the handoff prototype.
+ */
+export const DOORS_SUBHEAD =
+  "Every founder in The 120 belongs to one group. Behind your door: two ready-to-run starting points, and room for your own idea.";
+
+/**
+ * U10 fidelity (audit drift 10): the per-card band-register blurbs, verbatim
+ * from the prototype's GROUPS data. Trail reads the kid register, HQ the
+ * founder register — keyed by SKIN because that is the chrome the child is
+ * inside (the prototype keys them by the same g3_5 split).
+ */
+export const DOOR_BLURBS: Record<GroupSlug, Record<Skin, string>> = {
+  athletes: {
+    trail: "You train seriously. Turn your sport into a real season business.",
+    hq: "Train seriously, compete seriously, and think like a pro.",
+  },
+  founders: {
+    trail: "Start something real. Customers, money, lessons you keep.",
+    hq: "Start something real. Customers, revenue, lessons learned.",
+  },
+  givers: {
+    trail: "Lead real service. Raise real money for a cause you pick.",
+    hq: "Lead real service. Projects that change a corner of the city.",
+  },
+  makers: {
+    trail: "You already make things. Get paid for the things you make.",
+    hq: "Art, film, music, invention. A real body of work, shipped.",
+  },
+  scholars: {
+    trail: "You love big questions. Fund a real study and run it.",
+    hq: "Accelerated academics. Mastery with no ceiling.",
+  },
+};
+
+/**
+ * U10 fidelity (audit drift 10, E2): the arch numeral chip's phase-colour
+ * classes per door — complete literals (the Tailwind-scanner rule), one
+ * record so a new door cannot ship without its chip colours. The five phase
+ * colours map to the five doors by position, exactly as DOOR_CLASSES does.
+ */
+export const DOOR_ARCH_CLASSES: Record<GroupSlug, string> = {
+  athletes: "border-phase-sell text-phase-sell bg-phase-sell/15",
+  founders: "border-phase-build text-phase-build bg-phase-build/15",
+  givers: "border-phase-validate text-phase-validate bg-phase-validate/15",
+  makers: "border-phase-grow text-phase-grow bg-phase-grow/15",
+  scholars: "border-phase-scale text-phase-scale bg-phase-scale/15",
 };
 
 export type DoorsInput = {
@@ -227,6 +279,7 @@ export function doorsModel(input: DoorsInput): DoorModel[] {
     slug: door.slug,
     numeral: `GROUP 0${i + 1}`,
     kicker: `GROUP 0${i + 1} · ${door.category}`,
+    archNumeral: String(i + 1),
     preselected: selected === door.slug,
   }));
 }
@@ -272,8 +325,12 @@ export function doorConfirmOutcome(
  * exactly as shipped (the Tailwind-scanner rule).
  */
 export const SKIN_ROOT_CLASSES: Record<Skin, string> = {
-  hq: "bg-hq-canvas text-hq-ink",
-  trail: "bg-trail-canvas text-trail-ink",
+  // U10 fidelity (E2 ruling): the child's subtree speaks the FULL Path DS
+  // register, so the body face swaps to Inter (`font-path-body`) at the same
+  // root as the canvas and ink. The application-register islands inside
+  // (nav card, reveal close strip) carry `font-display` themselves.
+  hq: "bg-hq-canvas text-hq-ink font-path-body",
+  trail: "bg-trail-canvas text-trail-ink font-path-body",
 };
 
 export function skinForGrade(grade: number): Skin {

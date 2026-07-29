@@ -22,8 +22,11 @@ import { capWellFormed } from "@/app/lib/funnel/moderation";
 /* ────────────────── the nested register swap (design note) ────────────────── */
 
 /** The application-register strip INSIDE the skin subtree — the site's
- *  paper-and-ink voice. Complete literals (the Tailwind-scanner rule). */
-export const APPLICATION_REGISTER_CLASSES = "bg-paper text-ink";
+ *  paper-and-ink voice. Complete literals (the Tailwind-scanner rule).
+ *  `font-display` (Space Grotesk, the site body face) rides along since E2
+ *  put `font-path-body` on the skin root — the strip must flip the type
+ *  register back, not just the colours. */
+export const APPLICATION_REGISTER_CLASSES = "bg-paper text-ink font-display";
 
 /* ─────────────────── the five-phase climb (R43) ─────────────────── */
 
@@ -62,6 +65,44 @@ export function revealClimb(): ClimbPhase[] {
     };
   });
 }
+
+/**
+ * U10 fidelity (audit drift 11, E2): the climb's narrative bullets, verbatim
+ * from the prototype — heading, then one bullet per phase reached, the
+ * VALIDATE line looking forward. Structured (phase + before/after the bold
+ * phase name) so the component renders the phase-coloured dot and the bold
+ * name without string surgery.
+ */
+export const CLIMB_HEADING = "From first pitch to a live product.";
+
+export type ClimbBullet = {
+  /** The phase whose dot colours the bullet and whose name renders bold. */
+  phase: "SELL" | "BUILD" | "VALIDATE";
+  before: string;
+  after: string;
+};
+
+export const CLIMB_BULLETS: readonly ClimbBullet[] = [
+  { phase: "SELL", before: "In ", after: ", you learned to confidently sell anything." },
+  {
+    phase: "BUILD",
+    before: "In ",
+    after:
+      ", you built a real product, put it in front of real people, and used feedback to make it better.",
+  },
+  {
+    phase: "VALIDATE",
+    before: "Next, in ",
+    after:
+      ", you'll learn how to prove what customers really want, a timeless, transferable lifelong skill.",
+  },
+];
+
+/** U10 fidelity (audit drift 11): the mono unit-task caption under the
+ *  chart, verbatim ("unit tasks complete" is the R63-mandated idiom). It
+ *  sits inside the projection framing — the chart above it is labelled a
+ *  projection in the same breath. */
+export const CLIMB_CAPTION = "57 of 125 unit tasks complete, every one verified";
 
 /** R43: labelled a projection EVERYWHERE, never presented as achieved. One
  *  string per band so the register fits, all saying the same true thing. */
@@ -388,7 +429,12 @@ export const REVEAL_UI_COPY = {
 /** Every user-facing string the model emits, flattened — the copy-rules test
  *  (R63) sweeps THIS, so new copy cannot dodge the sweep. */
 export function emittedCopy(model: RevealModel): string[] {
-  const chrome = Object.values(REVEAL_UI_COPY);
+  const chrome = [
+    ...Object.values(REVEAL_UI_COPY),
+    CLIMB_HEADING,
+    CLIMB_CAPTION,
+    ...CLIMB_BULLETS.map((b) => `${b.before}${b.phase}${b.after}`),
+  ];
   if (model.kind !== "ok") return [...chrome];
   return [
     ...chrome,

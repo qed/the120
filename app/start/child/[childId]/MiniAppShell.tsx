@@ -22,11 +22,15 @@ import {
 } from "@/app/lib/funnel/actions/compose";
 import type { ProjectView } from "@/app/lib/funnel/compose-core";
 import {
+  COMPOSE_UI_COPY,
   CUSTOMER_ASK_AGAIN_PLACEHOLDER,
   type ComposedProject,
 } from "@/app/lib/funnel/compose-rules";
 import {
   APPLICATION_REGISTER_CLASSES,
+  CLIMB_BULLETS,
+  CLIMB_CAPTION,
+  CLIMB_HEADING,
   REVEAL_UI_COPY,
   firstTasks,
   revealModel,
@@ -35,6 +39,9 @@ import {
 import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import {
   BUILT_STEPS,
+  DOOR_ARCH_CLASSES,
+  DOOR_BLURBS,
+  DOORS_SUBHEAD,
   SKIN_ROOT_CLASSES,
   doorChangeNeedsConfirm,
   doorConfirmOutcome,
@@ -48,6 +55,12 @@ import {
   type MiniAppStep,
 } from "@/app/lib/funnel/miniapp-rules";
 import { DOOR_CLASSES, GROUP_SLUGS } from "@/app/lib/site";
+// E2 (Peter, 2026-07-29): the ported First Profit DS components — the
+// mini-app renders the FULL Path register, not a canvas-swap veneer.
+import { Button } from "@/app/fp/components/system/Button";
+import { Seal } from "@/app/fp/components/system/Seal";
+import { phaseColor, phaseColorAlpha } from "@/app/fp/components/system/phases";
+import type { PhaseKey } from "@/app/fp/content/types";
 import type { GroupSlug } from "@/app/lib/site";
 import {
   OWN_IDEA,
@@ -286,6 +299,10 @@ export function MiniAppShell({
   }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
   const [composeDegraded, setComposeDegraded] = useState(false);
+  // U10 fidelity (drift 13): compose is a project PAGE with an edit toggle
+  // ("Change anything" / "Done editing"), not a form of labelled textareas.
+  // Client state only — the draft itself already lives in composeDraft.
+  const [composeEditing, setComposeEditing] = useState(false);
 
   // What the current `answers` were seeded FROM. Re-advancing through the
   // templates step with the SAME choice must not re-seed — a child who edited
@@ -352,6 +369,7 @@ export function MiniAppShell({
     setComposeDraft(null);
     setComposeNotice(null);
     setComposeDegraded(false);
+    setComposeEditing(false);
   };
 
   /**
@@ -660,8 +678,12 @@ export function MiniAppShell({
 
         {step === "doors" && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">Five doors. Pick yours.</h1>
-            <ul className="mt-7 flex flex-col gap-2.5">
+            <h1 className="font-path-display text-3xl font-semibold leading-tight">
+              Five doors. Pick yours.
+            </h1>
+            {/* U10 fidelity (drift 10): the screen subhead, from the rules. */}
+            <p className="mt-2 text-[13px] leading-5 opacity-75">{DOORS_SUBHEAD}</p>
+            <ul className="mt-6 flex flex-col gap-2.5">
               {doors.map((door) => {
                 const isSelected = selected === door.slug;
                 return (
@@ -676,17 +698,26 @@ export function MiniAppShell({
                           : "border-black/15 bg-white/50 opacity-80 hover:opacity-100"
                       }`}
                     >
-                      {/* R34: the arch numeral chip in the door's phase colour. */}
+                      {/* R34 + drift 10: the ARCH numeral chip in the door's
+                          phase colour — rounded arch top, bare digit. */}
                       <span
-                        className={`font-mono text-[0.7rem] font-bold tracking-[0.1em] ${DOOR_CLASSES[door.slug].accent}`}
+                        className={`flex h-[46px] w-[38px] flex-none items-end justify-center rounded-t-[19px] rounded-b-[4px] border-2 pb-1 font-path-mono text-[13px] font-bold ${DOOR_ARCH_CLASSES[door.slug]}`}
                       >
-                        {door.numeral}
+                        {door.archNumeral}
                       </span>
                       <span className="flex flex-col">
-                        <span className="font-mono text-[0.55rem] uppercase tracking-[0.14em] opacity-60">
+                        <span
+                          className={`text-[0.6rem] font-bold uppercase tracking-[0.09em] ${DOOR_CLASSES[door.slug].accent}`}
+                        >
                           {door.kicker}
                         </span>
-                        <span className="text-[16px] capitalize">The {door.slug}</span>
+                        <span className="mt-0.5 font-path-display text-[17px] font-semibold capitalize">
+                          The {door.slug}
+                        </span>
+                        {/* Drift 10: the band-register blurb, every card. */}
+                        <span className="mt-0.5 text-[12px] leading-[1.45] opacity-75">
+                          {DOOR_BLURBS[door.slug][skin]}
+                        </span>
                         {door.preselected && isSelected && (
                           // R35: one line of band-register copy under the hint.
                           <span className="mt-0.5 text-[12px] opacity-70">
@@ -704,19 +735,23 @@ export function MiniAppShell({
 
             {notice && <p className="mt-4 text-sm opacity-80">{notice}</p>}
 
-            <button
+            <Button
+              skin={skin}
+              size="lg"
               onClick={confirm}
               disabled={!selected || pending || isLocked}
-              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-7 w-full"
             >
               {pending ? "Saving…" : "This one →"}
-            </button>
+            </Button>
           </section>
         )}
 
         {step === "templates" && confirmedSlug && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">Pick a starting point.</h1>
+            <h1 className="font-path-display text-3xl font-semibold leading-tight">
+              Pick a starting point.
+            </h1>
             <p className="mt-3 text-base leading-7 opacity-80">
               Two ready-made starts, or your own idea. You can change everything later.
               This is a starting line, not a contract.
@@ -734,20 +769,25 @@ export function MiniAppShell({
                         : "border-black/15 bg-white/50 hover:bg-white/80"
                     }`}
                   >
-                    <span className="text-[16px] font-semibold">{t.title}</span>
+                    <span className="font-path-display text-[17px] font-semibold">{t.title}</span>
                     <span className="text-[13px] leading-5 opacity-75">{t.pitch}</span>
-                    <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] opacity-60">
-                      First customers: {t.firstCustomers}
+                    {/* Spec (screen 6): the accent "First customers" line —
+                        the funnel's accent is SELL, per the prototype. */}
+                    <span className="mt-1 flex items-baseline gap-2">
+                      <span className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                        First customers
+                      </span>
+                      <span className="text-[12px]">{t.firstCustomers}</span>
                     </span>
                   </button>
                 </li>
               ))}
               <li>
+                {/* Spec (screen 6): the own-idea card is DASHED in the accent
+                    colour (SELL) — the open door beside the curated starts. */}
                 <div
-                  className={`flex w-full flex-col gap-2 rounded-2xl border px-5 py-4 ${
-                    templateId === OWN_IDEA.id
-                      ? "border-current bg-white shadow-sm"
-                      : "border-black/15 bg-white/50"
+                  className={`flex w-full flex-col gap-2 rounded-2xl border-2 border-dashed border-phase-sell px-5 py-4 ${
+                    templateId === OWN_IDEA.id ? "bg-white shadow-sm" : "bg-transparent"
                   }`}
                 >
                   <button
@@ -755,7 +795,9 @@ export function MiniAppShell({
                     disabled={isLocked}
                     className="flex flex-col gap-1 text-left"
                   >
-                    <span className="text-[16px] font-semibold">{OWN_IDEA.title}</span>
+                    <span className="font-path-display text-[17px] font-semibold">
+                      {OWN_IDEA.title}
+                    </span>
                     <span className="text-[13px] leading-5 opacity-75">{OWN_IDEA.pitch}</span>
                   </button>
                   {templateId === OWN_IDEA.id && (
@@ -772,7 +814,9 @@ export function MiniAppShell({
                 </div>
               </li>
             </ul>
-            <button
+            <Button
+              skin={skin}
+              size="lg"
               onClick={() => {
                 // The chosen template SEEDS the quiz's draft answers — but
                 // only when the choice CHANGED since the last seed: the same
@@ -800,10 +844,10 @@ export function MiniAppShell({
                 !validTemplateId ||
                 (validTemplateId === OWN_IDEA.id && ownIdea.trim() === "")
               }
-              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-7 w-full"
             >
               This one →
-            </button>
+            </Button>
           </section>
         )}
 
@@ -819,11 +863,18 @@ export function MiniAppShell({
 
         {step === "quiz" && confirmedSlug && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">Your four questions.</h1>
+            <h1 className="font-path-display text-3xl font-semibold leading-tight">
+              Your four questions.
+            </h1>
             {parentAssist(confirmedSlug as GroupSlug, quizBandForGrade(child.grade)) && (
-              <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] opacity-60">
-                {parentAssist(confirmedSlug as GroupSlug, quizBandForGrade(child.grade))}
-              </p>
+              // Spec (screen 7): the Trail parent-assist BANNER — a SELL-
+              // tinted card, not a bare caption. Copy stays parentAssist's
+              // (it names the group, per R38).
+              <div className="mt-3 rounded-xl border border-phase-sell/25 bg-phase-sell/10 px-3.5 py-2.5">
+                <p className="text-[12px] leading-5">
+                  {parentAssist(confirmedSlug as GroupSlug, quizBandForGrade(child.grade))}
+                </p>
+              </div>
             )}
             <div className="mt-7 flex flex-col gap-5">
               {quizForGroup(confirmedSlug as GroupSlug).map((q) => {
@@ -857,7 +908,9 @@ export function MiniAppShell({
               })}
             </div>
             {quizNotice && <p className="mt-4 text-sm opacity-80">{quizNotice}</p>}
-            <button
+            <Button
+              skin={skin}
+              size="lg"
               onClick={() => {
                 const blockers = quizBlockers(
                   answers,
@@ -870,123 +923,205 @@ export function MiniAppShell({
                 setQuizNotice(null);
                 go(stepNeighbour("quiz", "next"));
               }}
-              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+              className="mt-7 w-full"
             >
               Shape my project →
-            </button>
+            </Button>
           </section>
         )}
 
-        {step === "compose" && confirmedSlug && !composeView && (
+        {/* Drift 13: the LOADING state — pulsing logo tile while the first
+            compose is in flight, per the prototype. Regens keep the in-place
+            pending treatment (the page is already there to hold). */}
+        {step === "compose" && confirmedSlug && !composeView && pending && (
+          <section className="flex flex-col items-center py-16 text-center">
+            <span className="flex h-14 w-14 animate-pulse items-center justify-center rounded-2xl bg-current">
+              <Image src="/path-logo.svg" alt="" width={30} height={28} unoptimized />
+            </span>
+            <h1 className="mt-5 font-path-display text-2xl font-semibold leading-tight">
+              {COMPOSE_UI_COPY.loadingTitle}
+            </h1>
+            <p className="mt-2 max-w-xs text-[13px] leading-5 opacity-75">
+              {COMPOSE_UI_COPY.loadingBody}
+            </p>
+          </section>
+        )}
+
+        {step === "compose" && confirmedSlug && !composeView && !pending && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">Time to make it real.</h1>
+            <h1 className="font-path-display text-3xl font-semibold leading-tight">
+              Time to make it real.
+            </h1>
             <p className="mt-3 text-base leading-7 opacity-80">
               Your answers become your project&apos;s first page. Every word of it
               stays yours to change.
             </p>
             {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
-            <button
+            <Button
+              skin={skin}
+              size="lg"
               onClick={buildProject}
               disabled={pending || isLocked}
-              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-7 w-full"
             >
-              {pending ? "Building…" : "Make my page →"}
-            </button>
+              Make my page →
+            </Button>
           </section>
         )}
 
+        {/* Drift 13: the composed project renders as a PAGE — name as the
+            display heading, description as prose, "The offer" and "First
+            customers" as cards — with "Change anything" flipping the same
+            fields into edit mode. Every field stays editable (R40); the
+            edits are still recorded through keepProject on the way out. */}
         {step === "compose" && confirmedSlug && composeView && composeDraft && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">Here&apos;s your first draft.</h1>
+            <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+              {COMPOSE_UI_COPY.eyebrow}
+            </p>
             {composeDegraded && (
               <p className="mt-2 text-[13px] leading-5 opacity-70">
                 We started you with the classic version. Every word below is yours
                 to change.
               </p>
             )}
-            <div className="mt-7 flex flex-col gap-4">
-              <label className="flex flex-col gap-1.5">
-                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                  Project name
-                </span>
-                <input
-                  value={composeDraft.name}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
-                  }
-                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[16px] font-semibold outline-none focus:border-current"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                  What it is
-                </span>
-                <textarea
-                  value={composeDraft.description}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
-                  }
-                  rows={4}
-                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                  The offer
-                </span>
-                <textarea
-                  value={composeDraft.offerSketch}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
-                  }
-                  rows={2}
-                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                  First customers
-                </span>
-                <textarea
-                  value={composeDraft.firstCustomerHypothesis ?? ""}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    setComposeDraft({
-                      ...composeDraft,
-                      // R39b's null branch survives the edit box: empty = "we
-                      // don't know yet", stored as null, never a made-up name.
-                      firstCustomerHypothesis:
-                        e.target.value.trim().length === 0
-                          ? null
-                          : e.target.value.slice(0, 600),
-                    })
-                  }
-                  placeholder={CUSTOMER_ASK_AGAIN_PLACEHOLDER}
-                  rows={2}
-                  className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
-                />
-              </label>
-            </div>
-            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
-            <div className="mt-7 flex flex-col gap-2.5">
-              <button
-                onClick={keepProject}
-                disabled={pending}
-                className="inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+            {composeEditing ? (
+              <div className="mt-4 flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                    Project name
+                  </span>
+                  <input
+                    value={composeDraft.name}
+                    disabled={isLocked}
+                    onChange={(e) =>
+                      setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
+                    }
+                    className="rounded-xl border border-black/15 bg-white px-3 py-2 font-path-display text-[18px] font-semibold outline-none focus:border-current"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                    What it is
+                  </span>
+                  <textarea
+                    value={composeDraft.description}
+                    disabled={isLocked}
+                    onChange={(e) =>
+                      setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
+                    }
+                    rows={4}
+                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                    {COMPOSE_UI_COPY.offerLabel}
+                  </span>
+                  <textarea
+                    value={composeDraft.offerSketch}
+                    disabled={isLocked}
+                    onChange={(e) =>
+                      setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
+                    }
+                    rows={2}
+                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
+                    {COMPOSE_UI_COPY.customersLabel}
+                  </span>
+                  <textarea
+                    value={composeDraft.firstCustomerHypothesis ?? ""}
+                    disabled={isLocked}
+                    onChange={(e) =>
+                      setComposeDraft({
+                        ...composeDraft,
+                        // R39b's null branch survives the edit box: empty = "we
+                        // don't know yet", stored as null, never a made-up name.
+                        firstCustomerHypothesis:
+                          e.target.value.trim().length === 0
+                            ? null
+                            : e.target.value.slice(0, 600),
+                      })
+                    }
+                    placeholder={CUSTOMER_ASK_AGAIN_PLACEHOLDER}
+                    rows={2}
+                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                  />
+                </label>
+              </div>
+            ) : (
+              <>
+                <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
+                  {composeDraft.name}
+                </h1>
+                <p className="mt-3 text-[14px] leading-[1.65]">{composeDraft.description}</p>
+                <div className="mt-4 flex flex-col gap-2.5">
+                  <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                      {COMPOSE_UI_COPY.offerLabel}
+                    </p>
+                    <p className="mt-1 text-[13px] leading-5">{composeDraft.offerSketch}</p>
+                  </div>
+                  <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                      {COMPOSE_UI_COPY.customersLabel}
+                    </p>
+                    <p className="mt-1 text-[13px] leading-5">
+                      {composeDraft.firstCustomerHypothesis ?? CUSTOMER_ASK_AGAIN_PLACEHOLDER}
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+            {/* The controls row: Change anything / Shape it again ×2 / Start
+                over. "Start over" is the doors step — the existing door-
+                change machinery is the invalidation path; no new mutation. */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                skin={skin}
+                variant="secondary"
+                size="sm"
+                onClick={() => setComposeEditing((e) => !e)}
+                disabled={isLocked}
               >
-                {pending ? "Saving…" : "Keep it →"}
-              </button>
-              <button
+                {composeEditing ? COMPOSE_UI_COPY.editOff : COMPOSE_UI_COPY.editOn}
+              </Button>
+              <Button
+                skin={skin}
+                variant="secondary"
+                size="sm"
                 onClick={regenerate}
                 disabled={pending || isLocked || composeView.regenerationsLeft === 0}
-                className="inline-flex h-11 w-full items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Try another version ({composeView.regenerationsLeft} left)
-              </button>
+                Shape it again ({composeView.regenerationsLeft} left)
+              </Button>
+              <Button
+                skin={skin}
+                variant="secondary"
+                size="sm"
+                onClick={() => go("doors")}
+                disabled={pending}
+              >
+                {COMPOSE_UI_COPY.startOver}
+              </Button>
             </div>
+            {/* The gold founders-pivot note, verbatim. */}
+            <div className="mt-4 rounded-[13px] border border-gold-leaf/30 bg-gold-leaf/10 px-3.5 py-3">
+              <p className="text-[12px] leading-5">{COMPOSE_UI_COPY.goldNote}</p>
+            </div>
+            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
+            <Button
+              skin={skin}
+              size="lg"
+              onClick={keepProject}
+              disabled={pending}
+              className="mt-6 w-full"
+            >
+              {pending ? "Saving…" : COMPOSE_UI_COPY.cta}
+            </Button>
           </section>
         )}
 
@@ -1008,10 +1143,10 @@ export function MiniAppShell({
           // "Every founder starts the same way" intro, "Step n" chips, and
           // the italic 4–6-unit-tasks footer above the CTA.
           <section>
-            <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+            <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
               {REVEAL_UI_COPY.tasksEyebrow}
             </p>
-            <h1 className="mt-2 font-display text-3xl leading-tight">
+            <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
               {composeView.project.name}
             </h1>
             <p className="mt-3 text-base leading-7 opacity-80">{REVEAL_UI_COPY.tasksIntro}</p>
@@ -1021,10 +1156,10 @@ export function MiniAppShell({
                   key={t.id}
                   className="flex flex-col gap-1 rounded-2xl border border-black/15 bg-white/60 px-5 py-4"
                 >
-                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.14em] opacity-60">
+                  <span className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
                     Step {i + 1}
                   </span>
-                  <span className="text-[16px] font-semibold">{t.title}</span>
+                  <span className="font-path-display text-[17px] font-semibold">{t.title}</span>
                   <span className="text-[13px] leading-5 opacity-75">{t.line}</span>
                 </li>
               ))}
@@ -1032,12 +1167,14 @@ export function MiniAppShell({
             <p className="mt-4 text-[13px] italic leading-5 opacity-75">
               {REVEAL_UI_COPY.tasksFooter}
             </p>
-            <button
+            <Button
+              skin={skin}
+              size="lg"
               onClick={() => go(stepNeighbour("tasks", "next"))}
-              className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+              className="mt-7 w-full"
             >
               {REVEAL_UI_COPY.tasksNext}
-            </button>
+            </Button>
           </section>
         )}
 
@@ -1059,36 +1196,97 @@ export function MiniAppShell({
           if (model.kind !== "ok") return null;
           return (
             <section>
-              <h1 className="font-display text-3xl leading-tight">
+              <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+                {REVEAL_UI_COPY.tasksEyebrow}
+              </p>
+              <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
                 {composeView.project.name}
               </h1>
               <p className="mt-2 text-[15px] leading-6 opacity-80">
                 {composeView.project.description}
               </p>
 
-              {/* R43: the five-phase climb, above the fold, dashed where projected. */}
-              <div className="mt-8 flex items-end gap-2" aria-hidden>
-                {model.climb.map((phase) => (
-                  <div key={phase.key} className="flex flex-1 flex-col items-center gap-1.5">
-                    <div className="flex h-28 w-full items-end">
-                      <div
-                        className={`w-full rounded-t-md ${
-                          phase.state === "complete"
-                            ? "bg-red"
-                            : phase.state === "partial"
-                              ? "bg-red/60"
-                              : "border-2 border-dashed border-current bg-transparent opacity-40"
-                        }`}
-                        style={{ height: `${phase.percent}%` }}
+              {/* Drift 11 (E2): the climb's narrative — heading plus the
+                  three phase bullets, verbatim from the prototype. */}
+              <div className="mt-7">
+                <p className="font-path-display text-[18px] font-semibold leading-snug">
+                  {CLIMB_HEADING}
+                </p>
+                <ul className="mt-2.5 flex flex-col gap-1.5">
+                  {CLIMB_BULLETS.map((b) => (
+                    <li key={b.phase} className="flex items-start gap-2.5">
+                      <span
+                        className="mt-1.5 h-2 w-2 flex-none rounded-full"
+                        style={{ backgroundColor: phaseColor(b.phase) }}
                       />
-                    </div>
-                    <span className="font-mono text-[0.5rem] uppercase tracking-[0.1em] opacity-70">
-                      {phase.title}
-                    </span>
-                  </div>
-                ))}
+                      <span className="text-[13px] leading-5">
+                        {b.before}
+                        <b>{b.phase}</b>
+                        {b.after}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <p className="mt-3 font-mono text-[0.6rem] uppercase tracking-[0.1em] opacity-60">
+
+              {/* R43 + drift 11 (E2): the five-phase climb as the five-step
+                  logo staircase — phase-coloured bars, wax-seal "complete"
+                  marks (the DS Seal) on SELL and BUILD, VALIDATE's partial
+                  fill inside a solid faded outline, GROW and SCALE dashed.
+                  Stair silhouette is presentation; states come from rules. */}
+              <div className="mt-8 flex items-end gap-2" aria-hidden>
+                {model.climb.map((phase, i) => {
+                  const key = phase.key as PhaseKey;
+                  const stair = [36, 52, 68, 84, 100][i] ?? 100;
+                  return (
+                    <div key={phase.key} className="flex flex-1 flex-col items-center gap-1.5">
+                      {phase.state === "complete" && (
+                        <Seal phase={key} skin={skin} size={28} sealed className="-mb-0.5" />
+                      )}
+                      <div className="flex h-40 w-full items-end">
+                        {phase.state === "complete" ? (
+                          <div
+                            className="w-full rounded-t-[10px] rounded-b-[4px]"
+                            style={{
+                              height: `${stair}%`,
+                              backgroundColor: phaseColor(key),
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className={`relative w-full overflow-hidden rounded-t-[10px] rounded-b-[4px] border-2 ${
+                              phase.dashed ? "border-dashed opacity-60" : "opacity-90"
+                            }`}
+                            style={{
+                              height: `${stair}%`,
+                              borderColor: phaseColorAlpha(key, phase.dashed ? 0.4 : 0.55),
+                              backgroundColor: phaseColorAlpha(key, 0.07),
+                            }}
+                          >
+                            {phase.state === "partial" && (
+                              <div
+                                className="absolute inset-x-0 bottom-0"
+                                style={{
+                                  height: `${phase.percent}%`,
+                                  backgroundColor: phaseColor(key),
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <span className="font-path-mono text-[0.5rem] uppercase tracking-[0.1em] opacity-70">
+                        {phase.title}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Drift 11: the mono unit-task caption under the chart. */}
+              <p className="mt-2 text-center font-path-mono text-[0.65rem] opacity-70">
+                {CLIMB_CAPTION}
+              </p>
+              <p className="mt-3 font-path-mono text-[0.6rem] uppercase tracking-[0.1em] opacity-60">
                 {model.projectionLabel}
               </p>
 
@@ -1096,14 +1294,16 @@ export function MiniAppShell({
               <div className="mt-6 flex gap-4">
                 {model.stats.map((s) => (
                   <div key={s.label} className="flex flex-col">
-                    <span className="font-display text-2xl">{s.value}</span>
+                    <span className="font-path-display text-2xl font-semibold">{s.value}</span>
                     <span className="text-[11px] leading-4 opacity-70">{s.label}</span>
                   </div>
                 ))}
               </div>
 
               {/* R45: the share card, parent-only. */}
-              <button
+              <Button
+                skin={skin}
+                variant="secondary"
                 onClick={() => {
                   const svg = shareCardSvg(model.shareCard);
                   const url = URL.createObjectURL(
@@ -1121,10 +1321,10 @@ export function MiniAppShell({
                   setTimeout(() => URL.revokeObjectURL(url), 1000);
                   void emitShareCardAction({ childId: child.id });
                 }}
-                className="mt-6 inline-flex h-10 items-center justify-center rounded-full border border-current px-5 font-mono text-[0.65rem] uppercase tracking-[0.12em]"
+                className="mt-6"
               >
                 {REVEAL_UI_COPY.downloadLabel}
-              </button>
+              </Button>
 
               {/* R44: the close — the ONLY nested register swap in the funnel.
                   Application register inside the child's skin subtree. */}
@@ -1203,7 +1403,7 @@ export function MiniAppShell({
 
         {!BUILT_STEPS.includes(step) && (
           <section>
-            <h1 className="font-display text-3xl leading-tight">
+            <h1 className="font-path-display text-3xl font-semibold leading-tight">
               {child.firstName ? `Nice pick, ${child.firstName}.` : "Nice pick."}
             </h1>
             {/* Consolidated: the Back slot above is the way back — no second
@@ -1219,13 +1419,16 @@ export function MiniAppShell({
 }
 
 /**
- * U10 fidelity (audit drift 7): the handoff seam per the spec, a CENTERED
- * screen opening on the logo tile (the five-step First Profit mark on an
- * ink tile; `/path-logo.svg` is that mark's in-app asset, its path-* name
- * deliberately kept from the rename), then eyebrow / child-addressed title /
- * band body / parent line, closing on the spec's CTA label. All copy comes
- * from `handoffCopy` (miniapp-rules) so it stays sweepable. The CTA stays
- * the application-register red pill until E2's Path DS pass (batch B2).
+ * U10 fidelity (audit drift 7 + E2): the handoff seam per the spec, a
+ * CENTERED screen opening on the logo tile (the five-step First Profit mark
+ * on an ink tile; `/path-logo.svg` is that mark's in-app asset, its path-*
+ * name deliberately kept from the rename), then eyebrow / child-addressed
+ * title / band body / parent line, closing on the spec's CTA. The CTA is the
+ * Path DS Button rendered in the CHILD's skin — the register flip drift 7
+ * named: the red application pill never appears on this side of the seam.
+ * (The prototype's "accent" Button variant was not ported; the DS primary
+ * is the skin's action primitive.) All copy comes from `handoffCopy`
+ * (miniapp-rules) so it stays sweepable.
  */
 function Handoff({
   child,
@@ -1242,20 +1445,19 @@ function Handoff({
       <span className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-current">
         <Image src="/path-logo.svg" alt="" width={32} height={30} unoptimized />
       </span>
-      <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+      <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
         {copy.eyebrow}
       </p>
-      <h1 className="mt-2 font-display text-3xl leading-tight">{copy.title}</h1>
+      <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
+        {copy.title}
+      </h1>
       <p className="mx-auto mt-3 max-w-md text-base leading-7 opacity-80">{copy.body}</p>
       <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 opacity-70">
         {copy.parentLine}
       </p>
-      <button
-        onClick={onNext}
-        className="mt-8 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
-      >
+      <Button skin={skin} size="lg" onClick={onNext} className="mt-8">
         {copy.cta}
-      </button>
+      </Button>
     </section>
   );
 }

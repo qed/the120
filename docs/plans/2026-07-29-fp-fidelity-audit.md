@@ -362,3 +362,27 @@ Counts (screen/item entries above, including cross-cutting):
 - E5: restore the arrival acceptance-letter ceremony around the existing W16 poll/forwarding mechanics (presentation only).
 
 Unit 10 executes: drift 1-16 + E1/E2/E3/E5, batched A (copy/tokens), B1 (progress nav card + display type), B2 (Path DS + arrival ceremony).
+
+## Batch B2 execution addendum (2026-07-29)
+
+- **Compose "Start over" (drift 13):** wired to the doors step (`go("doors")`) — the
+  existing door-change machinery IS the invalidation path (a different door retires the
+  project through the U8 confirm dialog + one-transaction `changeDoorCore`; the same door
+  keeps it). No new mutation invented. **Open nuance for product:** the prototype's Start
+  over also resets a SAME-door run; today a same-door fresh compose has no server path
+  (compose returns the existing draft, `exists`). If same-door restart matters, it needs a
+  product decision and its own server semantic.
+- **"Path accent Button" (screens 4/8):** the ported `Button` has primary/secondary/ghost
+  only — the prototype's `variant="accent" phase="sell"` was never ported. B2 uses the DS
+  primary (the skin's action primitive) rather than growing the DS. If the phase-tinted
+  accent variant is wanted, port it into `app/fp/components/system/Button.tsx` deliberately.
+- **Arrival "Login email" row (screen 15):** renamed to "Email" — the W16 copy sweep
+  (funnel-arrival-rules) bans sign-in framing in `ARRIVAL_SCREEN`, and E5 is presentation
+  only. The password/forced-reset rows stay dead per W16; the card renders the address plus
+  the honest no-password line.
+- **Reveal climb silhouette:** the prototype's ascending stair heights (the five-step logo)
+  are presentation in the shell; `revealClimb()`'s states/percent semantics are unchanged
+  (VALIDATE partial fill stays 45, the audit's "cosmetic" note).
+- **Seal on the reveal:** rendered at 28px above SELL/BUILD only, `sealed`, no date — the
+  word "sealed" appears only inside the DS component's aria-label, not in funnel copy
+  (R63 sweeps stay green).

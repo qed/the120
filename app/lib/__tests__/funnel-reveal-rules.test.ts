@@ -106,6 +106,12 @@ describe("the first three tasks (R42)", () => {
     const tasks = firstTasks(project);
     expect(tasks).toHaveLength(3);
     expect(tasks.map((t) => t.id)).toEqual(["T1", "T2", "T3"]);
+    // U10 fidelity (drift 9): titles per the handoff CRIT list, byte for byte.
+    expect(tasks.map((t) => t.title)).toEqual([
+      "Pitch a product in 60 seconds",
+      "Make your first real sale",
+      'Hear "no" three times',
+    ]);
     for (const t of tasks) {
       expect(t.line).toContain(project.name);
       // One sentence is a property of the TEMPLATE, so judge it with the
@@ -140,6 +146,21 @@ describe("the close (R44) and the FAQ", () => {
     expect(REVEAL_FAQ).toHaveLength(4);
     for (const row of REVEAL_FAQ) expect(row.defaultOpen).toBe(false);
     expect(FAQ_OPEN_EVENT).toBe("reveal_faq_opened");
+  });
+
+  it("the FAQ carries the handoff's dollar figures (U10 fidelity, E3 ruling)", () => {
+    const cost = REVEAL_FAQ.find((r) => r.q === "What does it cost?");
+    expect(cost).toBeDefined();
+    expect(cost?.a).toBe(
+      "Membership is $3,000 for the year; the full core program is $15,000. " +
+        "The seat deposit is $250 and fully refundable until September 30, 2026. " +
+        "Those are the real numbers. A school tells you what it costs."
+    );
+    const tenK = REVEAL_FAQ.find((r) => r.q === "How long until $10K?");
+    expect(tenK).toBeDefined();
+    expect(tenK?.a).toContain("aspirational and open-ended");
+    expect(tenK?.a).toContain("90 days");
+    expect(tenK?.a).toContain("nobody's clock is compared to anybody else's");
   });
 
   it("the close renders in the application register — a nested swap with complete literal classes", () => {
@@ -234,6 +255,20 @@ describe("the share card (R45, R40b)", () => {
 });
 
 describe("the whole model", () => {
+  it("the tasks screen chrome is the handoff's (U10 fidelity, drift 9)", async () => {
+    const { REVEAL_UI_COPY } = await import("@/app/lib/funnel/reveal-rules");
+    expect(REVEAL_UI_COPY.tasksEyebrow).toBe("Your project");
+    expect(REVEAL_UI_COPY.tasksIntro).toBe(
+      "Every founder starts the same way: pitch it, sell it, learn from the no's."
+    );
+    // "4–6" is the spec's en dash, the same range idiom the shipped
+    // WHAT_IS_THE_120 uses ("3–5 hours"); the copy rule bans the em dash only.
+    expect(REVEAL_UI_COPY.tasksFooter).toBe(
+      "In the app, each step is broken down into 4–6 unit tasks. First Profit helps you win."
+    );
+    expect(REVEAL_UI_COPY.tasksNext).toBe("See where this leads →");
+  });
+
   it("refuses a child with no composed project rather than returning a partial model", () => {
     expect(revealModel({ project: null, band: "b68", skin: "hq", group: "athletes" })).toEqual({
       kind: "no_project",

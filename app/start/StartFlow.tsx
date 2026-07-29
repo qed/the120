@@ -20,21 +20,25 @@ import {
   type ProgressStep,
 } from "@/app/lib/funnel/capture-rules";
 
+/**
+ * U10 fidelity (audit items 1 + 4, drift 2a): the eyebrow is ALWAYS
+ * "HOW IT WORKS" (R29 and the handoff spec agree), and the titles and
+ * bodies are the handoff's EXP array, byte for byte (handoff copy is final).
+ */
+const EXPLAINER_EYEBROW = "HOW IT WORKS";
+
 const EXPLAINER_COPY = [
   {
-    kicker: "STEP ONE",
-    headline: "Your kid picks something they actually care about.",
-    body: "Sport, a company, art, ideas, service — whichever door they walk through, the work is theirs.",
+    headline: "Your child designs a real business.",
+    body: "A guided 10-minute project builder. You can do it together, or hand them the device.",
   },
   {
-    kicker: "STEP TWO",
-    headline: "They design a real business around it, in ten minutes.",
-    body: "Not a worksheet. A name, an offer, a first customer, and the first three things to do about it.",
+    headline: "You'll see exactly where it leads.",
+    body: "We'll show you their first phase complete, and every step between here and there.",
   },
   {
-    kicker: "STEP THREE",
-    headline: "You see where it goes.",
-    body: "A picture of the same child months from now, having sold something real to a stranger.",
+    headline: "This is the application.",
+    body: "What your child builds today carries into the program. Nothing is throwaway.",
   },
 ] as const;
 
@@ -106,7 +110,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
       {/* R32: the progress bar runs from the first explainer through submission. */}
       <div className="mb-10" aria-hidden>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-line">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-track">
           <div
             className="h-full rounded-full bg-red transition-[width] duration-300"
             style={{ width: `${percent}%` }}
@@ -141,7 +145,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
       {explainer ? (
         <section>
           <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
-            {explainer.kicker}
+            {EXPLAINER_EYEBROW}
           </p>
           <h1 className="mt-3 font-display text-3xl leading-tight text-ink">
             {explainer.headline}
@@ -151,7 +155,9 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
             onClick={() => setStage((s) => (s + 1) as Stage)}
             className="mt-8 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
           >
-            {stage === 2 ? "Start Here →" : "Next →"}
+            {/* Spec CTA labels (audit item 4): "Continue" on the first two
+                swipes, "Start Building →" into capture. */}
+            {stage === 2 ? "Start Building →" : "Continue"}
           </button>
         </section>
       ) : (
@@ -231,12 +237,15 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
             </p>
           )}
 
+          {/* Spec capture CTA "Next Step →" with the handoff's disabled
+              state: white on #d8d5cf (--color-line-strong), never a faded
+              red (audit items 2 + 4). */}
           <button
             onClick={submit}
             disabled={busy}
-            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
+            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:bg-line-strong disabled:hover:bg-line-strong"
           >
-            {pending ? "One moment…" : "Start Here →"}
+            {pending ? "One moment…" : "Next Step →"}
           </button>
         </section>
       )}

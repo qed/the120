@@ -6,6 +6,7 @@ import { globSync } from "tinyglobby";
 
 import {
   PROOF_POINTS,
+  PROOF_STRIP_HEADLINE,
   WHAT_IS_THE_120,
 } from "@/app/components/landing/LandingPage";
 import { generateStaticParams } from "@/app/groups/[slug]/page";
@@ -85,8 +86,35 @@ describe("R21/R22 — the shared content is shared by IDENTITY", () => {
     }
   });
 
-  it("the proof strip is shared and short", () => {
-    expect(PROOF_POINTS.length).toBe(3);
+  it("the proof strip is the handoff copy, restored (U10 fidelity, E1 ruling)", () => {
+    expect(PROOF_STRIP_HEADLINE).toBe("No simulations. No pretend points.");
+    expect(PROOF_POINTS.map((p) => p.title)).toEqual([
+      "Real customers",
+      "Real money",
+      "Verified by real adults",
+    ]);
+    expect(PROOF_POINTS[0].body).toBe(
+      "Strangers say yes at booths, doorsteps and games. Not classmates, not cousins."
+    );
+    expect(PROOF_POINTS[1].body).toBe(
+      "Cash in hand, logged sale by sale. Cost, price and profit your kid can explain."
+    );
+    expect(PROOF_POINTS[2].body).toBe(
+      "Every step checked against a written bar. It's never self-marked, never automated."
+    );
+    // Copy rule: no em dashes in the restored strip.
+    for (const p of PROOF_POINTS) {
+      expect(p.title).not.toContain("—");
+      expect(p.body).not.toContain("—");
+    }
+  });
+
+  it("the CTA band carries the handoff headline with its italic accent (U10 fidelity, drift 6)", () => {
+    const template = read("app/components/landing/LandingPage.tsx");
+    expect(template).toContain("The application is the first day of the business.");
+    expect(template).toMatch(/<span className="italic">Start it now\.<\/span>/);
+    // The pre-fidelity rewrite is gone.
+    expect(template).not.toContain("Ten minutes from now, this is");
   });
 });
 

@@ -10,7 +10,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { saveGoalAction } from "@/app/lib/funnel/actions/next-steps";
-import { GOAL_MAX_CHARS, NEXT_STEPS } from "@/app/lib/funnel/deposit-rules";
+import { GOAL_MAX_CHARS, NEXT_STEPS, holdSeatCta } from "@/app/lib/funnel/deposit-rules";
 import { capWellFormed } from "@/app/lib/funnel/moderation";
 
 export function NextStepsFlow({
@@ -101,7 +101,7 @@ export function NextStepsFlow({
             href="/dashboard"
             className="inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
           >
-            Reserve the seat →
+            {holdSeatCta(firstName)}
           </Link>
         )}
       </div>

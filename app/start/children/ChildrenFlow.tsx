@@ -138,7 +138,7 @@ export function ChildrenFlow({
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
       <div className="mb-10" aria-hidden>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-line">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-track">
           <div
             className="h-full rounded-full bg-red transition-[width] duration-300"
             style={{ width: `${progressPercent("add_child")}%` }}
@@ -269,10 +269,17 @@ export function ChildrenFlow({
 
         {notice && <p className="text-sm leading-6 text-ink-soft">{notice}</p>}
 
+        {/* U10 fidelity (audit item 8): once a child exists, the add
+            affordance goes SECONDARY (white with a red outline) so the
+            per-child CTAs keep the red (handoff addchild spec). */}
         <button
           onClick={submit}
           disabled={pending}
-          className="mt-1 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
+          className={`mt-1 inline-flex h-11 items-center justify-center rounded-full px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-colors disabled:cursor-wait disabled:opacity-60 ${
+            children.length === 0
+              ? "bg-red text-white hover:bg-red-dark"
+              : "border border-red bg-white text-red hover:bg-red/5"
+          }`}
         >
           {pending ? "Adding…" : children.length === 0 ? "Add my child →" : "Add another →"}
         </button>

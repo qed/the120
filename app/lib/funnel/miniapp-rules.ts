@@ -272,17 +272,40 @@ export function skinForGrade(grade: number): Skin {
   return v.ok ? v.skin : "hq";
 }
 
-/** R33: the handoff seam names the child. One template, so the copy cannot
- *  drift per call site; the device passes to the kid here. */
-export function handoffCopy(firstName: string, skin: Skin): { title: string; line: string } {
+/**
+ * R33: the handoff seam names the child. One template, so the copy cannot
+ * drift per call site; the device passes to the kid here.
+ *
+ * U10 fidelity (audit item 4/drift 7): the handoff spec's copy, byte for
+ * byte. It addresses the CHILD in both bands (the live Trail title had
+ * flipped to addressing the parent), with the band eyebrow, body, parent
+ * line, and CTA the prototype fixes. Straight apostrophes per this repo's
+ * shipped-spec-copy precedent (the prototype's curly ’ marks render
+ * identically; every previously shipped handoff string here is straight).
+ */
+export type HandoffCopy = {
+  eyebrow: string;
+  title: string;
+  body: string;
+  parentLine: string;
+  cta: string;
+};
+
+export function handoffCopy(firstName: string, skin: Skin): HandoffCopy {
   const name = firstName.trim() || "your kid";
   return skin === "trail"
     ? {
-        title: `Hand it to ${name}.`,
-        line: "The next part is theirs — you can help read, but they choose.",
+        eyebrow: "Do this together",
+        title: `${name}, this part is yours.`,
+        body: "A grown-up can read along and type. But the ideas have to be yours. You're the founder.",
+        parentLine: "Parents: sit beside them. You're the scribe; they're the boss.",
+        cta: "We're ready",
       }
     : {
-        title: `${name}, take it from here.`,
-        line: "Ten minutes. You design something real, and it's yours.",
+        eyebrow: "Hand the device over",
+        title: `${name}, from here it's you.`,
+        body: "Four questions, then we shape your project. Your words, your call, your company.",
+        parentLine: "Parents: you'll get the device back at the application.",
+        cta: "I've got it from here",
       };
 }

@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { changeDoorAction, confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
 import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
@@ -600,7 +601,7 @@ export function MiniAppShell({
       <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-6 py-14">
         {/* R32: the bar keeps running through the mini-app. */}
         <div className="mb-10" aria-hidden>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-black/10">
+          <div className="h-1 w-full overflow-hidden rounded-full bg-track">
             <div
               className="h-full rounded-full bg-red transition-[width] duration-300"
               style={{ width: `${miniAppProgress(step)}%` }}
@@ -1009,23 +1010,35 @@ export function MiniAppShell({
         )}
 
         {step === "tasks" && composeView && (
+          // U10 fidelity (audit drift 9): the spec's tasks screen, i.e. the
+          // compose header ("YOUR PROJECT" eyebrow + project name), the
+          // "Every founder starts the same way" intro, "Step n" chips, and
+          // the italic 4–6-unit-tasks footer above the CTA.
           <section>
-            <h1 className="font-display text-3xl leading-tight">{REVEAL_UI_COPY.tasksHeading}</h1>
+            <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+              {REVEAL_UI_COPY.tasksEyebrow}
+            </p>
+            <h1 className="mt-2 font-display text-3xl leading-tight">
+              {composeView.project.name}
+            </h1>
             <p className="mt-3 text-base leading-7 opacity-80">{REVEAL_UI_COPY.tasksIntro}</p>
             <ul className="mt-7 flex flex-col gap-2.5">
-              {firstTasks(composeView.project).map((t) => (
+              {firstTasks(composeView.project).map((t, i) => (
                 <li
                   key={t.id}
                   className="flex flex-col gap-1 rounded-2xl border border-black/15 bg-white/60 px-5 py-4"
                 >
                   <span className="font-mono text-[0.6rem] uppercase tracking-[0.14em] opacity-60">
-                    {t.id}
+                    Step {i + 1}
                   </span>
                   <span className="text-[16px] font-semibold">{t.title}</span>
                   <span className="text-[13px] leading-5 opacity-75">{t.line}</span>
                 </li>
               ))}
             </ul>
+            <p className="mt-4 text-[13px] italic leading-5 opacity-75">
+              {REVEAL_UI_COPY.tasksFooter}
+            </p>
             <button
               onClick={() => go(stepNeighbour("tasks", "next"))}
               className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
@@ -1212,6 +1225,15 @@ export function MiniAppShell({
   );
 }
 
+/**
+ * U10 fidelity (audit drift 7): the handoff seam per the spec, a CENTERED
+ * screen opening on the logo tile (the five-step First Profit mark on an
+ * ink tile; `/path-logo.svg` is that mark's in-app asset, its path-* name
+ * deliberately kept from the rename), then eyebrow / child-addressed title /
+ * band body / parent line, closing on the spec's CTA label. All copy comes
+ * from `handoffCopy` (miniapp-rules) so it stays sweepable. The CTA stays
+ * the application-register red pill until E2's Path DS pass (batch B2).
+ */
 function Handoff({
   child,
   skin,
@@ -1223,14 +1245,23 @@ function Handoff({
 }) {
   const copy = handoffCopy(child.firstName, skin);
   return (
-    <section>
-      <h1 className="font-display text-3xl leading-tight">{copy.title}</h1>
-      <p className="mt-3 text-base leading-7 opacity-80">{copy.line}</p>
+    <section className="text-center">
+      <span className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-current">
+        <Image src="/path-logo.svg" alt="" width={32} height={30} unoptimized />
+      </span>
+      <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+        {copy.eyebrow}
+      </p>
+      <h1 className="mt-2 font-display text-3xl leading-tight">{copy.title}</h1>
+      <p className="mx-auto mt-3 max-w-md text-base leading-7 opacity-80">{copy.body}</p>
+      <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 opacity-70">
+        {copy.parentLine}
+      </p>
       <button
         onClick={onNext}
         className="mt-8 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
       >
-        {skin === "trail" ? "I'm ready →" : "Let's go →"}
+        {copy.cta}
       </button>
     </section>
   );

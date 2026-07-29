@@ -218,6 +218,31 @@ describe("the skin swap", () => {
     expect(handoffCopy("  ", "hq").title).toContain("your kid");
     expect(handoffCopy("Maya", "trail").title).not.toBe(handoffCopy("Maya", "hq").title);
   });
+
+  it("the handoff addresses the CHILD, per the spec, byte for byte (U10 fidelity, drift 7)", () => {
+    const trail = handoffCopy("Maya", "trail");
+    expect(trail.title).toBe("Maya, this part is yours.");
+    expect(trail.eyebrow).toBe("Do this together");
+    expect(trail.body).toBe(
+      "A grown-up can read along and type. But the ideas have to be yours. You're the founder."
+    );
+    expect(trail.parentLine).toBe("Parents: sit beside them. You're the scribe; they're the boss.");
+    expect(trail.cta).toBe("We're ready");
+
+    const hq = handoffCopy("Theo", "hq");
+    expect(hq.title).toBe("Theo, from here it's you.");
+    expect(hq.eyebrow).toBe("Hand the device over");
+    expect(hq.body).toBe(
+      "Four questions, then we shape your project. Your words, your call, your company."
+    );
+    expect(hq.parentLine).toBe("Parents: you'll get the device back at the application.");
+    expect(hq.cta).toBe("I've got it from here");
+
+    // Copy rule: no em dashes anywhere in the seam copy.
+    for (const copy of [trail, hq]) {
+      for (const s of Object.values(copy)) expect(s).not.toContain("—");
+    }
+  });
 });
 
 /* ───────────────────────── the core, by execution ───────────────────────── */

@@ -13,7 +13,7 @@
  */
 
 import { pathSteps } from "@/app/2026-27/data";
-import type { GroupSlug } from "@/app/lib/site";
+import { DEPOSIT_REFUND_DEADLINE_LABEL, type GroupSlug } from "@/app/lib/site";
 import type { Skin } from "@/app/lib/funnel/child-rules";
 import type { QuizBand } from "@/app/lib/funnel/quiz-rules";
 import type { ComposedProject } from "@/app/lib/funnel/compose-rules";
@@ -138,8 +138,9 @@ export function firstTasks(project: ComposedProject): TaskBubble[] {
   const name = project.name.trim().replace(/[.!?]+$/, "") || "your project";
   return [
     {
+      // U10 fidelity (audit drift 9): titles per the handoff CRIT list.
       id: "T1",
-      title: "Pitch it in 60 seconds",
+      title: "Pitch a product in 60 seconds",
       line: `Pitch ${name} to an adult who isn't family, without notes.`,
     },
     {
@@ -173,6 +174,16 @@ export type FaqRow = {
   defaultOpen: false;
 };
 
+/**
+ * U10 fidelity, escalation E3 (Peter, 2026-07-29): the dollar figures come
+ * back per the handoff: the cost row states $3,000 membership · $15,000
+ * full core verbatim, and the "How long until $10K?" row is restored. The
+ * first two rows are the shipped post-rebrand copy the E4 ruling keeps
+ * (the spec's "What is The 120?" / task-gate rows describe the prototype's
+ * gate mechanics, not the shipped admissions review). The deadline rides
+ * `DEPOSIT_REFUND_DEADLINE_LABEL` so this file cannot disagree with
+ * site.ts about the date (spec text: "September 30, 2026").
+ */
 export const REVEAL_FAQ: readonly FaqRow[] = [
   {
     q: "Is this project locked in?",
@@ -185,13 +196,16 @@ export const REVEAL_FAQ: readonly FaqRow[] = [
     defaultOpen: false,
   },
   {
-    q: "How much time does the program take?",
-    a: "Saturday workshops plus the work the project needs during the week. Pacing is by mastery, not calendar.",
+    q: "How long until $10K?",
+    a: "The goal is aspirational and open-ended. Some founders hit it in 90 days; younger or busier kids may take a year or more. The goal doesn't expire, and nobody's clock is compared to anybody else's.",
     defaultOpen: false,
   },
   {
     q: "What does it cost?",
-    a: "Tuition is on the tuition page, and the deposit stays fully refundable until the published deadline. No surprises at checkout.",
+    a:
+      "Membership is $3,000 for the year; the full core program is $15,000. " +
+      `The seat deposit is $250 and fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}. ` +
+      "Those are the real numbers. A school tells you what it costs.",
     defaultOpen: false,
   },
 ];
@@ -359,9 +373,15 @@ export function revealModel(input: {
 export const REVEAL_UI_COPY = {
   gateLine: "Your project page comes first. One tap and it's built.",
   gateButton: "← Make my page",
-  tasksHeading: "Your first three moves.",
-  tasksIntro: "Every founder in the program starts with the same three. Yours look like this.",
-  tasksNext: "Show me the year →",
+  /* U10 fidelity (audit drift 9): the tasks screen carries the compose
+     header ("YOUR PROJECT" eyebrow + the project name), so the heading is
+     the project's, not a fixed line. Intro, footer, and CTA are the
+     handoff's, byte for byte ("4–6" is the spec's en dash, the same range
+     idiom WHAT_IS_THE_120 shipped with; the rule bans the em dash only). */
+  tasksEyebrow: "Your project",
+  tasksIntro: "Every founder starts the same way: pitch it, sell it, learn from the no's.",
+  tasksFooter: "In the app, each step is broken down into 4–6 unit tasks. First Profit helps you win.",
+  tasksNext: "See where this leads →",
   downloadLabel: "Parents: download the card",
 } as const;
 

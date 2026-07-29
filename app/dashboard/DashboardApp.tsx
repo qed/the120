@@ -232,9 +232,16 @@ export default function DashboardApp({
             <h2 className="font-display text-xl font-bold tracking-tight text-ink">
               Your children
             </h2>
+            {/* U10 fidelity (audit item 3d): the pill is red only while the
+                grid is empty; once ≥1 child exists it goes secondary
+                (white with a red outline) per the handoff addchild spec. */}
             <button
               onClick={onAdd}
-              className="inline-flex h-11 items-center justify-center rounded-full bg-red px-5 font-mono text-xs uppercase tracking-[0.12em] text-white hover:bg-red-dark"
+              className={`inline-flex h-11 items-center justify-center rounded-full px-5 font-mono text-xs uppercase tracking-[0.12em] ${
+                children.length > 0
+                  ? "border border-red bg-white text-red hover:bg-red/5"
+                  : "bg-red text-white hover:bg-red-dark"
+              }`}
             >
               + Add a child
             </button>

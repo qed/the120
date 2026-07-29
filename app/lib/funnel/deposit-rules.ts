@@ -249,3 +249,15 @@ export const NEXT_STEPS = {
 } as const;
 
 export const GOAL_MAX_CHARS = 280;
+
+/**
+ * U10 fidelity (audit drift 12-label): the final Next Steps CTA is the
+ * handoff's "Hold {name}'s seat · $250 →": the seat is held for a NAMED
+ * child, and the ask is stated on the button (R51's spirit). The routing
+ * (to the dashboard reserve block, where the R51a policy text lives) is the
+ * decided policy-at-payment shape and does not change with the label.
+ */
+export function holdSeatCta(firstName: string): string {
+  const name = firstName.trim() || "your builder";
+  return `Hold ${name}'s seat · $250 →`;
+}

@@ -17,6 +17,9 @@
   --color-line-strong: #d8d5cf;
   --color-red: #d92632;
   --color-red-dark: #b31d28;
+  /* Application progress track (FP handoff, U10 fidelity item 2): the 4px
+     red bar runs on #eceae5 on every funnel screen, explainer → submit. */
+  --color-track: #eceae5;
   --color-red-ink: #2a1215;
   --color-coral: #ff8a80;
   /* Handoff identity (design_handoff_the120). Marketing blue is unified to

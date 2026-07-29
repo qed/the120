@@ -38,11 +38,27 @@ export const WHAT_IS_THE_120 =
   "them: 3–5 hours a week, alongside any school, with four in-person " +
   "intensives in Toronto.";
 
-/** The proof strip — shared, factual, and short (R20). */
+/**
+ * The proof strip (R20; U10 fidelity, escalation E1, Peter's 2026-07-29 ruling:
+ * restore the handoff copy, no documented supersession found). The strip
+ * headline plus three white cards, byte for byte from the prototype's
+ * `proofBeats` (straight apostrophes per shipped-spec-copy precedent).
+ */
+export const PROOF_STRIP_HEADLINE = "No simulations. No pretend points.";
+
 export const PROOF_POINTS = [
-  "REAL CUSTOMERS, REAL REVENUE",
-  "MENTORS WHO HAVE DONE IT",
-  "DEMO DAYS ON A REAL STAGE",
+  {
+    title: "Real customers",
+    body: "Strangers say yes at booths, doorsteps and games. Not classmates, not cousins.",
+  },
+  {
+    title: "Real money",
+    body: "Cash in hand, logged sale by sale. Cost, price and profit your kid can explain.",
+  },
+  {
+    title: "Verified by real adults",
+    body: "Every step checked against a written bar. It's never self-marked, never automated.",
+  },
 ] as const;
 
 export type LandingContent = {
@@ -113,14 +129,21 @@ export default function LandingPage({
         </div>
       </section>
 
-      {/* Proof strip (R20) */}
-      <section className="border-b border-line bg-white">
-        <div className="mx-auto flex w-full max-w-[1080px] flex-wrap items-center justify-between gap-4 px-6 py-6 sm:px-8">
-          {PROOF_POINTS.map((p) => (
-            <span key={p} className="font-mono text-[10px] tracking-[0.14em] text-ink-soft">
-              {p}
-            </span>
-          ))}
+      {/* Proof strip (R20/E1): the mono-red headline over three white cards,
+          Georgia card titles on paper, the handoff treatment. */}
+      <section className="border-b border-line">
+        <div className="mx-auto w-full max-w-[1080px] px-6 py-8 sm:px-8">
+          <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-red">
+            {PROOF_STRIP_HEADLINE}
+          </p>
+          <div className="mt-3.5 grid gap-2.5 sm:grid-cols-3">
+            {PROOF_POINTS.map((p) => (
+              <div key={p.title} className="rounded-xl border border-line bg-white px-[15px] py-4">
+                <p className="display text-[19px] leading-[1.15] text-ink">{p.title}</p>
+                <p className="mt-1.5 text-[12.5px] leading-[1.5] text-ink-soft">{p.body}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -132,8 +155,11 @@ export default function LandingPage({
 
       {/* Red CTA band (R20): one exit, forward (R26). */}
       <section className="flex flex-col items-center gap-6 bg-red px-6 py-20 text-center sm:px-11">
+        {/* U10 fidelity (audit drift 6): the handoff band headline, with its
+            italic accent sentence. */}
         <h2 className="display max-w-[760px] text-3xl text-white sm:text-[44px] sm:leading-[1.1]">
-          Ten minutes from now, this is <span className="italic">their</span> business.
+          The application is the first day of the business.{" "}
+          <span className="italic">Start it now.</span>
         </h2>
         <StartCta source={content.source} group={content.group} variant="white" className="px-[30px] py-4 text-sm" />
       </section>

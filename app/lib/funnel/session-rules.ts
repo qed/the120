@@ -332,6 +332,70 @@ export function resolveReentry(ctx: ReentryContext): ReentryDestination {
   return { screen: "capture", reason: "cold" };
 }
 
+/* ──────────────── the dashboard gate (reconnect U2, R2) ──────────────── */
+
+/** One child as the dashboard gate reads it: a `ReentryChild` plus the legacy
+ *  `status` column, which only `deriveEnrolled` consults (the `"member"`
+ *  literal — see its docblock). */
+export type DashboardGateChild = ReentryChild & { status?: unknown };
+
+export type DashboardGateVerdict =
+  | { action: "render" }
+  | { action: "redirect"; childId: string; route: string };
+
+/**
+ * Should `/dashboard` render, or server-redirect this family into the
+ * mini-app? PURE — `app/dashboard/page.tsx` wires server-read facts in and
+ * calls `redirect()` on the verdict; the decision itself never touches a
+ * client or a cookie, so Vitest's node env covers every row.
+ *
+ * The redirect cohort is deliberately NARROW (reconnect R2): a
+ * funnel-provisioned (`hasPassword: false`), non-enrolled family whose
+ * RESOLVED child (`resolveResumeChild` — explicit active wins, else furthest
+ * rung, ties on earliest createdAt) yields a `mini_app` verdict from
+ * `childNextScreen` — i.e. `added`, or `project_created` still owing its
+ * compose (U8's invalidation manufactures that cell). Everyone else — signed
+ * out, password families, enrolled families, post-compose families — sees the
+ * dashboard exactly as today.
+ *
+ * Two escape hatches, both fail-OPEN to the hub:
+ *  - `stay` — an in-flow link to the dashboard carries an explicit stay
+ *    parameter; honoring it here is the loop prevention (a mini-app screen
+ *    linking "back to dashboard" must not bounce straight back in).
+ *  - `children: null` — ANY server read failure. A wrongly rendered dashboard
+ *    strands nobody; a broken redirect into the mini-app could.
+ */
+export function dashboardGateVerdict(facts: {
+  hasSession: boolean;
+  /** `!isFunnelProvisioned(user.app_metadata)` — same bit the matrix takes. */
+  hasPassword: boolean;
+  /** null = the read failed; the gate fails open and renders. */
+  children: readonly DashboardGateChild[] | null;
+  /** An explicit stay parameter was present on the URL (any value). */
+  stay: boolean;
+}): DashboardGateVerdict {
+  const { hasSession, hasPassword, children, stay } = facts;
+  if (!hasSession) return { action: "render" }; // SignIn swap stays client-side
+  if (stay) return { action: "render" };
+  if (children === null) return { action: "render" }; // read failed — fail open
+  if (hasPassword) return { action: "render" }; // matrix rule 2: R9 access unchanged
+  if (deriveEnrolled(children)) return { action: "render" }; // matrix rule 1: home
+  const child = resolveResumeChild(children);
+  if (!child) return { action: "render" };
+  const next = childNextScreen({
+    applicantState: child.applicantState,
+    // Unreachable for this cohort: any deposited/enrolled child makes
+    // `deriveEnrolled` true and the family rendered above, so no child the
+    // live-deposit axis could influence ever reaches this call — false is
+    // not a guess, same as rule 3's landing.
+    liveDeposit: false,
+    hasComposedProject: child.hasComposedProject ?? false,
+  });
+  return next.surface === "mini_app"
+    ? { action: "redirect", childId: child.id, route: `/start/child/${child.id}` }
+    : { action: "render" };
+}
+
 /**
  * Routes for the navigable screens. `link_expired` / `link_used` are states
  * the resume landing renders in place — asking for their route is a caller

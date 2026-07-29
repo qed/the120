@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   REENTRY_SCREENS,
   childNextScreen,
+  dashboardGateVerdict,
   deriveEnrolled,
   resolveReentry,
   resolveResumeChild,
@@ -401,6 +402,111 @@ describe("uniform landing — the resolved child's state picks the family's door
         "dashboard"
       );
     }
+  });
+});
+
+/* ──────────── dashboardGateVerdict — the /dashboard server gate (reconnect U2) ──────────── */
+
+describe("dashboardGateVerdict — the narrow redirect cohort, everyone else renders", () => {
+  const gate = (over: Partial<Parameters<typeof dashboardGateVerdict>[0]>) =>
+    dashboardGateVerdict({
+      hasSession: true,
+      hasPassword: false,
+      children: ONE_CHILD,
+      stay: false,
+      ...over,
+    });
+
+  it("a funnel-provisioned family with an `added` child is redirected into the mini-app", () => {
+    expect(gate({})).toEqual({
+      action: "redirect",
+      childId: "c1",
+      route: "/start/child/c1",
+    });
+  });
+
+  it("a project_created family WITH a composed project renders the dashboard", () => {
+    const composed = { ...child("c1", "project_created"), hasComposedProject: true };
+    expect(gate({ children: [composed] })).toEqual({ action: "render" });
+  });
+
+  it("a project_created family WITHOUT a composed project is redirected (compose owed — the U8 cell)", () => {
+    const owing = { ...child("c1", "project_created"), hasComposedProject: false };
+    expect(gate({ children: [owing] })).toEqual({
+      action: "redirect",
+      childId: "c1",
+      route: "/start/child/c1",
+    });
+  });
+
+  it("a password family with an `added` child renders — matrix rule 2 wins", () => {
+    expect(gate({ hasPassword: true })).toEqual({ action: "render" });
+  });
+
+  it("an enrolled family renders, whatever their other children's states", () => {
+    expect(
+      gate({ children: [child("c1", "added"), child("c2", "deposited")] })
+    ).toEqual({ action: "render" });
+    // The legacy-member half of deriveEnrolled counts too.
+    expect(
+      gate({ children: [child("c1", "added"), { ...child("c2", null), status: "member" }] })
+    ).toEqual({ action: "render" });
+  });
+
+  it("siblings: the RESOLVED child decides — added + submitted renders (submitted wins)", () => {
+    expect(
+      gate({
+        children: [
+          child("early", "added", "2026-07-01T00:00:00Z"),
+          child("far", "submitted", "2026-07-15T00:00:00Z"),
+        ],
+      })
+    ).toEqual({ action: "render" });
+  });
+
+  it("siblings: added + NULL sibling still redirects to the added child", () => {
+    expect(
+      gate({
+        children: [child("never", null, "2026-06-01T00:00:00Z"), child("c1", "added")],
+      })
+    ).toEqual({ action: "redirect", childId: "c1", route: "/start/child/c1" });
+  });
+
+  it("the stay parameter always renders, even for the redirect cohort", () => {
+    expect(gate({ stay: true })).toEqual({ action: "render" });
+  });
+
+  it("a failed read (children: null) fails OPEN to the hub — never a broken redirect", () => {
+    expect(gate({ children: null })).toEqual({ action: "render" });
+  });
+
+  it("signed out renders — the client SignIn swap is unchanged", () => {
+    expect(gate({ hasSession: false })).toEqual({ action: "render" });
+  });
+
+  it("a session with zero children renders (nothing to resume into)", () => {
+    expect(gate({ children: [] })).toEqual({ action: "render" });
+  });
+});
+
+describe("the dashboard gate's schema tripwire", () => {
+  it("parent-scoped policies exist for every table the gate reads — children and projects", () => {
+    // The gate reads `children` and (for project_created children) `projects`
+    // through PostgREST as the session user; RLS-enabled-with-zero-policies
+    // silently returns ZERO rows, which would send every family down the
+    // fail-open render path and quietly kill the redirect. `deposits` is NOT
+    // scanned because the gate never reads it — `enrolled` derives from
+    // `applicant_state` (deriveEnrolled), not the deposits table.
+    const dir = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../../supabase/migrations"
+    );
+    const all = readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .map((f) => readFileSync(path.join(dir, f), "utf8"))
+      .join("\n");
+    expect(all).toMatch(/create policy "children:/);
+    expect(all).toMatch(/create policy "projects:/);
   });
 });
 

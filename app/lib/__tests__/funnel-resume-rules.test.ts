@@ -120,6 +120,9 @@ function fakeDeps(
     mintFails?: boolean;
     childrenFail?: boolean;
     children?: { id: string; applicantState: unknown; createdAt: string; status: unknown }[];
+    /** Children holding an active project (reconnect U1's uniform landing). */
+    composedChildIds?: string[];
+    projectsReadFails?: boolean;
     appMetadata?: Record<string, unknown> | null;
     sendOk?: boolean;
     sendThrows?: boolean;
@@ -212,6 +215,11 @@ function fakeDeps(
     defer: (fn) => {
       deferred.push(fn);
     },
+    loadActiveProjectChildIds: async () => {
+      calls.push("loadProjects");
+      if (opts.projectsReadFails) return null;
+      return new Set(opts.composedChildIds ?? []);
+    },
   };
   /** Run whatever the core deferred, so assertions can see its effects. */
   const flush = async () => {
@@ -230,6 +238,44 @@ const EXPIRED: StoredResumeToken = { ...FRESH, expiresAt: iso(NOW - 1) };
 const TOKEN = "a".repeat(43);
 
 describe("requestResumeLinkCore", () => {
+  // U4: the dashboard sign-in screen's "email me a link" mode calls this
+  // core through requestResumeLinkAction with NO client-side branching —
+  // it renders whatever message resolves and shows one neutral error only
+  // if the promise rejects. That design is safe only while these hold:
+  // (a) known and unknown addresses resolve byte-identically, (b) a store
+  // throw still RESOLVES with the same message, (c) the mail send is off
+  // the response path, (d) both rate buckets record before either verdict.
+
+  it("known and unknown addresses resolve with BYTE-IDENTICAL payloads", async () => {
+    const known = await requestResumeLinkCore({ email: "family@example.com" }, fakeDeps().deps);
+    const unknown = await requestResumeLinkCore(
+      { email: "nobody@example.com" },
+      fakeDeps({ parentId: null }).deps
+    );
+    expect(JSON.stringify(known)).toBe(JSON.stringify(unknown));
+    expect(known.message).toBe(REQUEST_LINK_RESPONSE);
+  });
+
+  it("a store THROW still resolves with the constant — never rejects to the client", async () => {
+    // The sign-in form treats rejection as an error state; a branch that
+    // rejects while another resolves is a shape oracle (the learning's #2).
+    const lookupBoom = fakeDeps();
+    lookupBoom.deps.store.findParentIdByEmail = async () => {
+      throw new Error("supabase network throw");
+    };
+    await expect(
+      requestResumeLinkCore({ email: "family@example.com" }, lookupBoom.deps)
+    ).resolves.toEqual({ message: REQUEST_LINK_RESPONSE });
+
+    const recordBoom = fakeDeps();
+    recordBoom.deps.store.recordRateEvent = async () => {
+      throw new Error("rate store throw");
+    };
+    await expect(
+      requestResumeLinkCore({ email: "family@example.com" }, recordBoom.deps)
+    ).resolves.toEqual({ message: REQUEST_LINK_RESPONSE });
+  });
+
   it("happy path: records both buckets, mints, guards, and DEFERS the send", async () => {
     const { calls, deps, flush } = fakeDeps();
     const out = await requestResumeLinkCore({ email: " Family@Example.com " }, deps);

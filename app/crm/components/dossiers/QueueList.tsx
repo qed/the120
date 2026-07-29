@@ -19,13 +19,16 @@ import { fmtDay } from "@/app/crm/lib/dates";
 import type { DossierItem } from "@/app/crm/lib/queries";
 import { Chip } from "@/app/crm/components/pipeline/atoms";
 
-/** The queue's five filterable stages — drafts never reach the queue. */
+/** The queue's filterable stages — drafts never reach the queue. W7 adds
+ *  `waitlisted` so staff can find waitlisted children to offer a released
+ *  seat to; it sits last, off the pipeline order, like the move menu. */
 const QUEUE_STAGES: ReviewStatus[] = [
   "submitted",
   "in_review",
   "invited",
   "offered",
   "member",
+  "waitlisted",
 ];
 
 /**

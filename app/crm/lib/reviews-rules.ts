@@ -80,6 +80,10 @@ export function reviewPillColors(status: ReviewStatus): {
     return { bg: "#E0DDD7", text: "#55585E" };
   }
   if (status === "member") return { bg: "#D92632", text: "#FFFFFF" };
+  // W7: waitlisted is parked, not progressing. It takes the muted early
+  // treatment rather than the mid-review blue, so a queue skim does not
+  // read a waitlisted child as someone still moving through review.
+  if (status === "waitlisted") return { bg: "#E0DDD7", text: "#55585E" };
   return { bg: "#0300ED", text: "#FFFFFF" };
 }
 

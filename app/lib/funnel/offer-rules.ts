@@ -104,6 +104,12 @@ const OFFERED_OR_LATER = ["offered", "member"];
 export function isOutstandingOffer(item: OfferQueueItem): boolean {
   const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
   if (paid) return false;
+  // W7: waitlisting RETIRES the promise. `offer_email_sent_at` is never
+  // cleared, so without this a child moved to the waitlist would count as
+  // an outstanding offer forever — permanently depressing headroom and
+  // pinning the over-commit warning on, which trains staff to click
+  // through the one warning that matters.
+  if (item.reviewStatus === "waitlisted") return false;
   return item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
 }
 

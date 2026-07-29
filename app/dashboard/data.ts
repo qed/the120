@@ -24,7 +24,26 @@ export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
 ];
 
 export const statusIndex = (s: SeatStatus) => STATUS_FLOW.findIndex((x) => x.id === s);
-export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)];
+
+/**
+ * W7: `waitlisted` is deliberately NOT a SeatStatus rung. STATUS_FLOW is
+ * the parent-facing stepper — a linear path every family walks — and the
+ * waitlist is a branch off it, not a step through it. Keeping it out also
+ * preserves two properties for free: `canReserveSeat` refuses it (unknown
+ * → index -1, fails closed), and the applicant-rules sweep that pins
+ * exactly that stays true.
+ *
+ * What it does need is a rung that renders. `statusMeta` used to return
+ * undefined for any value outside the flow, so the first waitlisted child
+ * would have thrown at three render sites the moment staff moved them.
+ */
+const UNKNOWN_STATUS: (typeof STATUS_FLOW)[number] = {
+  id: "in_review",
+  label: "Waitlisted",
+  short: "Seats are full — you hold a place in line",
+};
+
+export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)] ?? UNKNOWN_STATUS;
 
 /** Gate-rejection copy shared by the checkout route and the dashboard client.
  *  The client renders the route's error verbatim, so this exact sentence (which

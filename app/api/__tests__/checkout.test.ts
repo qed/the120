@@ -162,6 +162,15 @@ describe("the server gates", () => {
   it("the deposit amount constant matches R51", () => {
     expect(DEPOSIT_AMOUNT_CENTS).toBe(25000);
   });
+
+  it("U7 (W13): success lands on the ARRIVAL page, child-scoped; cancel keeps the dashboard (wiring scan)", () => {
+    const src = read("app/api/checkout/route.ts");
+    // Without this the acceptance moment is unreachable — the whole of
+    // Unit 7 hangs off this one URL.
+    expect(src).toMatch(/success_url: `\$\{origin\}\/start\/arrival\?child=/);
+    expect(src).toContain("cancel_url: `${origin}/dashboard?deposit=cancelled`");
+    expect(src).not.toContain("dashboard?deposit=success");
+  });
 });
 
 describe("R50 — Next Steps reachability", () => {

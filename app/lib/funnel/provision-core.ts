@@ -50,6 +50,7 @@ import {
   MAX_LOCAL_PART_ATTEMPTS,
   pickStudentLocalPart,
   studentEmailForLocalPart,
+  type ForwardingState,
   type ProvisionState,
 } from "@/app/lib/funnel/provision-rules";
 
@@ -510,6 +511,134 @@ export async function driveProvisioning(
       didCreateMailbox,
     }
   );
+}
+
+/* ───────────────────── the forwarding leg (W14, U7) ───────────────────── */
+
+/**
+ * Forwarding is its OWN state machine, deliberately outside the
+ * provisioning lease: `complete` is terminal for provisioning, but the
+ * verified→active transition happens days later when the parent clicks
+ * Google's verification link. Concurrency is arbitrated by CAS on the
+ * forwarding columns instead (claim-then-send): the request slot is
+ * claimed in the DB BEFORE the Google call that triggers the verification
+ * mail, so two racing drives can never double-send.
+ *
+ * The target is the parent's CURRENT account email, re-read on every
+ * drive (W14): a changed address gets a NEW request; a matching pending
+ * one is never re-sent.
+ */
+
+export type ForwardingClaim = {
+  childId: string;
+  state: ProvisionState;
+  email: string | null;
+  forwardingState: ForwardingState;
+  forwardingTarget: string | null;
+};
+
+export type ForwardingDeps = {
+  /** DWD (gmail.settings.sharing) credential present. Absent = quiet. */
+  forwardingConfigured: boolean;
+  getForwardingClaim: (childId: string) => Promise<ForwardingClaim | null | "error">;
+  /** The parent's CURRENT account email — never a provision-time snapshot. */
+  getParentEmail: (childId: string) => Promise<string | null | "error">;
+  /** Google's view of the forwarding address for this exact target. */
+  getForwardingStatus: (
+    studentEmail: string,
+    target: string
+  ) => Promise<"none" | "pending" | "verified" | "unknown">;
+  /** forwardingAddresses.create — Google mails the parent the
+   *  verification link. THE priced call; runs only after the CAS. */
+  requestForwarding: (studentEmail: string, target: string) => Promise<boolean>;
+  /** updateAutoForwarding — requires the verified address. */
+  enableAutoForwarding: (studentEmail: string, target: string) => Promise<boolean>;
+  /** Compare-and-swap on (forwarding_state, forwarding_target). The
+   *  arbiter for every transition; `stampRequested` also writes
+   *  forwarding_requested_at and clears forwarding_alerted_at. */
+  casForwarding: (
+    childId: string,
+    expected: { state: ForwardingState; target: string | null },
+    next: { state: ForwardingState; target: string | null; stampRequested?: boolean }
+  ) => Promise<boolean>;
+};
+
+export type ForwardingOutcome =
+  | "noop"
+  | "not_ready"
+  | "unconfigured"
+  | "requested"
+  | "already_pending"
+  | "activated"
+  | "reset"
+  | "deferred";
+
+export async function driveForwarding(
+  deps: ForwardingDeps,
+  childId: string
+): Promise<ForwardingOutcome> {
+  const claim = await deps.getForwardingClaim(childId);
+  if (claim === "error") return "deferred";
+  if (claim === null) return "noop";
+  // Forwarding waits for a deliverable mailbox — and never touches a
+  // family on the way out (suspend/released land here as not_ready too).
+  if (claim.state !== "complete" || !claim.email) return "not_ready";
+  if (claim.forwardingState === "active") return "noop";
+  // "refused" is a human decision; a drive never overrides it.
+  if (claim.forwardingState === "refused") return "noop";
+  if (!deps.forwardingConfigured) return "unconfigured";
+
+  const target = await deps.getParentEmail(childId);
+  if (target === "error") return "deferred";
+  if (!target) return "noop"; // no deliverable parent — nothing to forward to
+
+  if (claim.forwardingState === "pending_verification" && claim.forwardingTarget === target) {
+    const status = await deps.getForwardingStatus(claim.email, target);
+    if (status === "pending") return "already_pending"; // NEVER re-send
+    if (status === "verified") {
+      const enabled = await deps.enableAutoForwarding(claim.email, target);
+      if (!enabled) return "deferred";
+      const swapped = await deps.casForwarding(
+        childId,
+        { state: "pending_verification", target },
+        { state: "active", target }
+      );
+      return swapped ? "activated" : "deferred";
+    }
+    if (status === "none") {
+      // The address vanished at Google (deleted by hand?). Reset so the
+      // next drive re-requests — resetting is a state write, so it goes
+      // through the CAS like everything else.
+      await deps.casForwarding(
+        childId,
+        { state: "pending_verification", target },
+        { state: "none", target }
+      );
+      return "reset";
+    }
+    return "deferred"; // unknown — refuse to guess
+  }
+
+  // Fresh request — or the parent's email CHANGED while an old request was
+  // pending (the old Google-side address is left behind, harmless).
+  // CLAIM-THEN-SEND: the CAS wins the slot before the mail-triggering call.
+  const claimed = await deps.casForwarding(
+    childId,
+    { state: claim.forwardingState, target: claim.forwardingTarget },
+    { state: "pending_verification", target, stampRequested: true }
+  );
+  if (!claimed) return "noop"; // someone else holds the slot
+  const sent = await deps.requestForwarding(claim.email, target);
+  if (!sent) {
+    // Un-claim (best effort) so a later drive can retry the request.
+    await deps.casForwarding(
+      childId,
+      { state: "pending_verification", target },
+      { state: claim.forwardingState, target: claim.forwardingTarget }
+    );
+    return "deferred";
+  }
+  return "requested";
 }
 
 /* ───────────────────── the stale-claim backstop ───────────────────── */

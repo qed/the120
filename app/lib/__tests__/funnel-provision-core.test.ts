@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   alertStaleClaims,
+  driveForwarding,
   driveProvisioning,
   STALE_CLAIM_ALERT_MINUTES,
+  type ForwardingClaim,
+  type ForwardingDeps,
   type ProvisionClaim,
   type ProvisionDeps,
   type StaleClaim,
@@ -495,6 +498,175 @@ describe("the adapter postures the core cannot see (source pins)", () => {
     expect(src).toMatch(/ops_alerted_at: null/);
     // The reassign RPC call carries the owner for in-RPC fencing.
     expect(src).toContain("p_owner: owner");
+  });
+});
+
+describe("driveForwarding — W14, the parent's CURRENT email, claim-then-send", () => {
+  const STUDENT = "maya.chen@the120.school";
+
+  type FHarness = {
+    deps: ForwardingDeps;
+    calls: string[];
+    casArgs: Array<{ expect: unknown; next: unknown }>;
+  };
+
+  function fharness(over: {
+    claim?: ForwardingClaim | null | "error";
+    parentEmail?: string | null | "error";
+    status?: "none" | "pending" | "verified" | "unknown";
+    configured?: boolean;
+    casResults?: boolean[];
+    requestResult?: boolean;
+    enableResult?: boolean;
+  } = {}): FHarness {
+    const calls: string[] = [];
+    const casArgs: FHarness["casArgs"] = [];
+    const casResults = [...(over.casResults ?? [true, true])];
+    const deps: ForwardingDeps = {
+      forwardingConfigured: over.configured ?? true,
+      getForwardingClaim: async () => {
+        calls.push("getClaim");
+        if (over.claim !== undefined) return over.claim;
+        return {
+          childId: CHILD,
+          state: "complete",
+          email: STUDENT,
+          forwardingState: "none",
+          forwardingTarget: null,
+        };
+      },
+      getParentEmail: async () => {
+        calls.push("getParentEmail");
+        return over.parentEmail === undefined ? "parent@example.com" : over.parentEmail;
+      },
+      getForwardingStatus: async () => {
+        calls.push("getStatus");
+        return over.status ?? "none";
+      },
+      requestForwarding: async (_e, target) => {
+        calls.push(`request:${target}`);
+        return over.requestResult ?? true;
+      },
+      enableAutoForwarding: async (_e, target) => {
+        calls.push(`enable:${target}`);
+        return over.enableResult ?? true;
+      },
+      casForwarding: async (_childId, expected, next) => {
+        calls.push(`cas:${(expected as { state: string }).state}->${(next as { state: string }).state}`);
+        casArgs.push({ expect: expected, next });
+        return casResults.shift() ?? true;
+      },
+    };
+    return { deps, calls, casArgs };
+  }
+
+  const fclaim = (over: Partial<ForwardingClaim> = {}): ForwardingClaim => ({
+    childId: CHILD,
+    state: "complete",
+    email: STUDENT,
+    forwardingState: "none",
+    forwardingTarget: null,
+    ...over,
+  });
+
+  it("fresh complete claim: CAS-claims the slot BEFORE the send, then requests to the parent's current email", async () => {
+    const h = fharness();
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("requested");
+    // claim-then-send: the CAS precedes the Google call.
+    expect(h.calls.indexOf("cas:none->pending_verification")).toBeLessThan(
+      h.calls.indexOf("request:parent@example.com")
+    );
+  });
+
+  it("a re-drive with the SAME pending target never re-sends the verification mail (pinned)", async () => {
+    const h = fharness({
+      claim: fclaim({
+        forwardingState: "pending_verification",
+        forwardingTarget: "parent@example.com",
+      }),
+      status: "pending",
+    });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("already_pending");
+    expect(h.calls.join(",")).not.toContain("request:");
+  });
+
+  it("a verified address activates auto-forwarding exactly once", async () => {
+    const h = fharness({
+      claim: fclaim({
+        forwardingState: "pending_verification",
+        forwardingTarget: "parent@example.com",
+      }),
+      status: "verified",
+    });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("activated");
+    expect(h.calls.filter((c) => c.startsWith("enable:"))).toEqual(["enable:parent@example.com"]);
+  });
+
+  it("the target is the parent's CURRENT email — a changed address gets a NEW request, not the stale pending one", async () => {
+    const h = fharness({
+      claim: fclaim({
+        forwardingState: "pending_verification",
+        forwardingTarget: "old-parent@example.com",
+      }),
+      parentEmail: "new-parent@example.com",
+    });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("requested");
+    expect(h.calls).toContain("request:new-parent@example.com");
+  });
+
+  it("a non-complete claim does nothing external — forwarding waits for the mailbox", async () => {
+    const h = fharness({ claim: fclaim({ state: "identity_only" }) });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("not_ready");
+    expect(h.calls).toEqual(["getClaim"]);
+  });
+
+  it("unconfigured DWD reads as quiet noop; active claims are done; a missing parent email skips", async () => {
+    const un = fharness({ configured: false });
+    expect(await driveForwarding(un.deps, CHILD)).toBe("unconfigured");
+    expect(un.calls).toEqual(["getClaim"]);
+
+    const active = fharness({ claim: fclaim({ forwardingState: "active" }) });
+    expect(await driveForwarding(active.deps, CHILD)).toBe("noop");
+
+    const noParent = fharness({ parentEmail: null });
+    expect(await driveForwarding(noParent.deps, CHILD)).toBe("noop");
+    expect(noParent.calls.join(",")).not.toContain("request:");
+  });
+
+  it("a lost CAS means someone else claimed the send — no mail goes out", async () => {
+    const h = fharness({ casResults: [false] });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("noop");
+    expect(h.calls.join(",")).not.toContain("request:");
+  });
+
+  it("a failed send rolls the claim back so a later drive can retry", async () => {
+    const h = fharness({ requestResult: false });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("deferred");
+    // Forward CAS then rollback CAS.
+    expect(h.calls.filter((c) => c.startsWith("cas:"))).toEqual([
+      "cas:none->pending_verification",
+      "cas:pending_verification->none",
+    ]);
+  });
+
+  it("a pending address that VANISHED at Google resets to none for the next drive", async () => {
+    const h = fharness({
+      claim: fclaim({
+        forwardingState: "pending_verification",
+        forwardingTarget: "parent@example.com",
+      }),
+      status: "none",
+    });
+    const out = await driveForwarding(h.deps, CHILD);
+    expect(out).toBe("reset");
+    expect(h.calls.join(",")).not.toContain("request:");
   });
 });
 

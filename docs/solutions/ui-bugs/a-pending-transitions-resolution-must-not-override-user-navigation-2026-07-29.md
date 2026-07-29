@@ -49,6 +49,7 @@ Both bugs are the same shape: **two writers of navigation state with no preceden
 ## Prevention
 
 - Any component that navigates on async completion (`go(...)` after an awaited action) must pending-guard *all* navigation affordances it renders, backward ones included — or check that the current step is still the one the transition started from before navigating.
+- **`pending` alone is not a sufficient guard around full-page navigation.** `useTransition`'s `pending` ends the moment the callback *returns* — which is before the browser finishes a `window.location.assign` the callback fired. In that gap every `disabled={pending}` control re-enables, and a second submit can double-fire the server action (and any funnel event it emits). Latch it: `setNavigating(true)` immediately before `assign()`, and gate controls on `pending || navigating` (see `app/start/StartFlow.tsx`, reconnect U6).
 - A server-computed "initial X" prop consumed by a client component is a snapshot, not a fact. If the component can outlive the snapshot (soft navigation, history), either materialize the resolved value into durable client state (URL) on mount, or re-derive from live client facts — never keep falling back to the prop.
 - Walk the history stack in review: for every entry the flow can create (including the entry URL itself), ask "what renders if the user Backs onto this after state moved on?"
 

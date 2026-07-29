@@ -227,7 +227,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 ### Phase 2 — Back navigation
 
-- [ ] **Unit 5: Visible ← Back in the mini-app + server-fact initial step**
+- [x] **Unit 5: Visible ← Back in the mini-app + server-fact initial step**
 
 **Goal:** Every built step shows ← Back (one treatment per register, existing DS slot); `/start/child/[id]` lands on the furthest server-provable step instead of always `handoff`.
 
@@ -253,7 +253,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 **Verification:** a returning family reaches their composed project in zero extra steps; every built step shows a working Back control.
 
-- [ ] **Unit 6: Explainer/capture back navigation**
+- [x] **Unit 6: Explainer/capture back navigation**
 
 **Goal:** Visible back between the `/start` explainer swipes and the capture form.
 

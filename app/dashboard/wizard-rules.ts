@@ -5,6 +5,7 @@
  */
 
 import { checklist, type Child } from "./data";
+import type { ProgressStep } from "@/app/lib/funnel/capture-rules";
 
 /* ---------- steps ---------- */
 
@@ -126,6 +127,31 @@ export function prefillDraft(c: Child, project: FunnelProjectSeed | null): Child
       : c.projectPitch;
   if (birthYear === c.birthYear && projectPitch === c.projectPitch) return c;
   return { ...c, birthYear, projectPitch };
+}
+
+/* ---------- nav card progress (U10 fidelity, X1/X2) ---------- */
+
+/**
+ * Which rung of R32's ladder the wizard's nav card shows (the 80/90/96/100
+ * values that were defined-but-unconsumed — audit item 11f/X2). The handoff's
+ * wizard was three steps (Basics → Academics → Review, Group + Project
+ * pre-done from the funnel); the live wizard visits five. Mapping: the two
+ * funnel-pre-done steps ride WITH their spec neighbour — basics/group → 80,
+ * academics/project → 90, review → 96 — so the bar stays monotone through a
+ * straight walk and submitted always reads 100.
+ */
+export function wizardProgressStep(step: WizardStepId, submitted: boolean): ProgressStep {
+  if (submitted) return "submitted";
+  switch (step) {
+    case "basics":
+    case "group":
+      return "wizard_1";
+    case "academics":
+    case "project":
+      return "wizard_2";
+    case "review":
+      return "wizard_3";
+  }
 }
 
 /* ---------- child email (U12, R48) ---------- */

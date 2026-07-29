@@ -15,10 +15,11 @@ import {
   CASL_CONSENT_TEXT,
   EXPLAINER_STEPS,
   captureFieldErrors,
-  progressPercent,
   type CaptureFieldError,
   type ProgressStep,
 } from "@/app/lib/funnel/capture-rules";
+import { navCardForStep } from "@/app/lib/funnel/nav-card-rules";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 
 /**
  * U10 fidelity (audit items 1 + 4, drift 2a): the eyebrow is ALWAYS
@@ -73,7 +74,6 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
   // genuinely exclusive to the compiler rather than by convention.
   const explainer = stage === 3 ? null : EXPLAINER_COPY[stage];
   const step: ProgressStep = stage === 3 ? "capture" : EXPLAINER_STEPS[stage];
-  const percent = progressPercent(step);
 
   const submit = () => {
     const found = captureFieldErrors(fields);
@@ -108,18 +108,9 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
-      {/* R32: the progress bar runs from the first explainer through submission. */}
-      <div className="mb-10" aria-hidden>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-track">
-          <div
-            className="h-full rounded-full bg-red transition-[width] duration-300"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-        <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted">
-          {percent}% · Application
-        </p>
-      </div>
+      {/* R32/X1: the floating nav card runs from the first explainer through
+          submission — the bar lives inside it, never bare in the column. */}
+      <ProgressNavCard model={navCardForStep(step, null)} />
 
       {/* R5 (reconnect): visible back between swipes. Disabled while a
           transition is pending — a resolving action must never race a
@@ -147,7 +138,10 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
             {EXPLAINER_EYEBROW}
           </p>
-          <h1 className="mt-3 font-display text-3xl leading-tight text-ink">
+          {/* U10 fidelity (audit drift 12): Georgia display for the funnel's
+              application-register headings — `.display`, never `font-display`
+              (that token is Space Grotesk, the site body face). */}
+          <h1 className="display mt-3 text-3xl text-ink">
             {explainer.headline}
           </h1>
           <p className="mt-4 text-base leading-7 text-ink-soft">{explainer.body}</p>
@@ -162,7 +156,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
         </section>
       ) : (
         <section>
-          <h1 className="font-display text-3xl leading-tight text-ink">
+          <h1 className="display text-3xl text-ink">
             Where should we send it?
           </h1>
           <p className="mt-3 text-base leading-7 text-ink-soft">

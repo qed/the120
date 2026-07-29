@@ -24,7 +24,8 @@ import {
   type FunnelChild,
 } from "@/app/lib/funnel/child-rules";
 import { GRADES } from "@/app/dashboard/data";
-import { progressPercent } from "@/app/lib/funnel/capture-rules";
+import { navCardForStep } from "@/app/lib/funnel/nav-card-rules";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 
 const ACTIVE_KEY = "the120.funnel.activeChild";
 
@@ -137,19 +138,11 @@ export function ChildrenFlow({
 
   return (
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
-      <div className="mb-10" aria-hidden>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-track">
-          <div
-            className="h-full rounded-full bg-red transition-[width] duration-300"
-            style={{ width: `${progressPercent("add_child")}%` }}
-          />
-        </div>
-        <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted">
-          {progressPercent("add_child")}% · Application
-        </p>
-      </div>
+      {/* R32/X1: the floating nav card carries the bar at add_child (20%). */}
+      <ProgressNavCard model={navCardForStep("add_child", null)} />
 
-      <h1 className="font-display text-3xl leading-tight text-ink">
+      {/* U10 fidelity (audit drift 12): Georgia display heading. */}
+      <h1 className="display text-3xl text-ink">
         {children.length === 0 ? "Who's applying?" : "Your children"}
       </h1>
       <p className="mt-3 text-base leading-7 text-ink-soft">

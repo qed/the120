@@ -17,6 +17,7 @@
 import { GROUP_SLUGS, type GroupSlug } from "@/app/lib/site";
 import { gradeVerdict, type Skin } from "@/app/lib/funnel/child-rules";
 import { progressPercent, type ProgressStep } from "@/app/lib/funnel/capture-rules";
+import { navCardForStep, type NavCardModel } from "@/app/lib/funnel/nav-card-rules";
 
 /* ─────────────────────────────── the step ladder ─────────────────────────────── */
 
@@ -61,6 +62,16 @@ export function parseStep(raw: unknown): MiniAppStep {
 }
 
 export const miniAppProgress = (step: MiniAppStep): number => progressPercent(step);
+
+/**
+ * The nav card model for a mini-app step (U10 fidelity, X1). The dc.html
+ * skinned scenes carry the SAME white application-register card the rest of
+ * the funnel floats (sticky, radius 14, bar + "APPLICATION · n%"), so the
+ * mini-app delegates rather than growing a per-skin variant. No identity:
+ * NAME · SIGN OUT starts at the wizard, per the handoff's interaction rule.
+ */
+export const miniAppNavCard = (step: MiniAppStep): NavCardModel =>
+  navCardForStep(step, null);
 
 /**
  * The ONE resolution rule for "what step is this request on": a URL with no

@@ -40,7 +40,7 @@ import {
   doorConfirmOutcome,
   doorsModel,
   handoffCopy,
-  miniAppProgress,
+  miniAppNavCard,
   resolveStep,
   skinForGrade,
   stepNeedsDoor,
@@ -65,6 +65,7 @@ import {
   OWN_IDEA_MAX_CHARS,
   capWellFormed,
 } from "@/app/lib/funnel/moderation";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 
 /*
  * ── Back affordance micro-spec (Unit 5) ──
@@ -599,18 +600,10 @@ export function MiniAppShell({
   return (
     <div className={`min-h-screen ${SKIN_ROOT_CLASSES[skin]}`}>
       <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-6 py-14">
-        {/* R32: the bar keeps running through the mini-app. */}
-        <div className="mb-10" aria-hidden>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-track">
-            <div
-              className="h-full rounded-full bg-red transition-[width] duration-300"
-              style={{ width: `${miniAppProgress(step)}%` }}
-            />
-          </div>
-          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-            {miniAppProgress(step)}% · {child.firstName}
-          </p>
-        </div>
+        {/* R32/X1: the floating nav card keeps running through the mini-app —
+            the dc.html skinned scenes carry the SAME white application-register
+            card over the child's canvas, so no per-skin variant exists here. */}
+        <ProgressNavCard model={miniAppNavCard(step)} />
 
         {/* The Back slot — one per screen, per the micro-spec above.
             Disabled while an action is pending, like the forward CTAs: an

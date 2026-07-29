@@ -68,15 +68,12 @@ describe("drift 2: tokens: capture disabled #d8d5cf, progress track #eceae5", ()
     expect(flow).not.toMatch(/Next Step[\s\S]{0,400}disabled:opacity-60/);
   });
 
-  it("every funnel progress bar runs on the track token", () => {
-    for (const f of [
-      "app/start/StartFlow.tsx",
-      "app/start/children/ChildrenFlow.tsx",
-      "app/start/child/[childId]/MiniAppShell.tsx",
-    ]) {
-      const src = stripComments(read(f));
-      expect(src, f).toMatch(/h-1 w-full overflow-hidden rounded-full bg-track/);
-    }
+  it("the funnel progress bar runs on the track token — in the ONE nav card (batch B1)", () => {
+    // Batch B1 moved the bare in-column bars into the shared floating nav
+    // card (X1); the track token now lives there, once. The mount scans live
+    // in funnel-fidelity-batch-b1.test.ts.
+    const card = stripComments(read("app/components/funnel/ProgressNavCard.tsx"));
+    expect(card).toContain("bg-track");
   });
 });
 

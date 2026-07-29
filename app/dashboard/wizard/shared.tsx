@@ -31,7 +31,9 @@ export function StepSection({
     <section className="rounded-2xl border border-line bg-white p-6 sm:p-7">
       <div className="flex items-baseline gap-3">
         <span className="font-mono text-xs text-red">{n}</span>
-        <h3 className="font-display text-lg font-bold tracking-tight text-ink">{title}</h3>
+        {/* U10 fidelity (audit drift 12): Georgia 400 display for wizard
+            step headers — `.display`, never `font-display` (Space Grotesk). */}
+        <h3 className="display text-lg text-ink">{title}</h3>
       </div>
       {hint && <p className="mt-1 text-sm text-ink-soft">{hint}</p>}
       <div className="mt-5">{children}</div>

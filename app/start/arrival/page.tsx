@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
+import { navCardIdentityName } from "@/app/lib/funnel/nav-card-rules";
 import { ArrivalFlow } from "./ArrivalFlow";
 
 /**
@@ -52,10 +53,22 @@ export default async function ArrivalPage({
     paidChildren.find((c) => String(c.id) === paidChildIds[0]) ??
     paidChildren[0];
 
+  // The nav card's identity line (X1) — the same parents read the dashboard
+  // store makes; a failed read degrades to null (SIGN OUT alone).
+  const { data: parentRow } = await supabase
+    .from("parents")
+    .select("first_name,last_name")
+    .eq("id", user.id)
+    .maybeSingle();
+
   return (
     <ArrivalFlow
       childId={String(child.id)}
       firstName={String(child.first_name ?? "").trim()}
+      parentName={navCardIdentityName(
+        String(parentRow?.first_name ?? ""),
+        String(parentRow?.last_name ?? "")
+      )}
     />
   );
 }

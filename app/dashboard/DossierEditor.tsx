@@ -16,8 +16,11 @@ import {
   firstIncompleteStep,
   resolveStep,
   stepsForGroup,
+  wizardProgressStep,
   type WizardStepId,
 } from "./wizard-rules";
+import { navCardForStep, navCardIdentityName } from "@/app/lib/funnel/nav-card-rules";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 import { focusRing } from "./wizard/shared";
 import StepBasics from "./wizard/StepBasics";
 import StepGroup from "./wizard/StepGroup";
@@ -117,7 +120,7 @@ export default function DossierEditor({
   onBack: () => void;
   onPreview: () => void;
 }) {
-  const { updateChild, removeChild, saveChildNow, deposits } = useDashboard();
+  const { updateChild, removeChild, saveChildNow, deposits, parent, signOut } = useDashboard();
 
   // Resume: land on the first incomplete step (complete draft → Review).
   const [currentId, setCurrentId] = useState<WizardStepId>(() => firstIncompleteStep(child));
@@ -250,6 +253,17 @@ export default function DossierEditor({
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      {/* U10 fidelity (audit X1/X2, item 11f): the wizard's top bar IS the
+          floating nav card — the 80/90/96/100 rungs finally consumed, plus
+          NAME · SIGN OUT from the wizard on. Replaces DashHeader in the
+          editor view (DashboardApp mounts one or the other, never both). */}
+      <ProgressNavCard
+        model={navCardForStep(
+          wizardProgressStep(step, child.status !== "draft"),
+          navCardIdentityName(parent?.firstName ?? "", parent?.lastName ?? "")
+        )}
+        onSignOut={signOut}
+      />
       <button
         onClick={onBack}
         className={`rounded font-mono text-xs uppercase tracking-[0.12em] text-muted hover:text-ink ${focusRing}`}
@@ -261,7 +275,8 @@ export default function DossierEditor({
       <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-line bg-paper-2 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="eyebrow">Dossier</p>
-          <h2 className="mt-1 font-display text-2xl font-bold tracking-tight text-ink">
+          {/* U10 fidelity (audit drift 12): Georgia display header. */}
+          <h2 className="display mt-1 text-2xl text-ink">
             {childName(child)}
           </h2>
           <p className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">

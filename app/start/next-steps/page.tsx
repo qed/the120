@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { nextStepsReachable } from "@/app/lib/funnel/deposit-rules";
+import { navCardIdentityName } from "@/app/lib/funnel/nav-card-rules";
 import { NextStepsFlow } from "./NextStepsFlow";
 
 /**
@@ -44,11 +45,25 @@ export default async function NextStepsPage({
   const params = await searchParams;
   const requested = typeof params.child === "string" ? params.child : null;
   const child = offered.find((c) => String(c.id) === requested) ?? offered[0];
+
+  // The nav card's identity line (X1) — the same parents read the dashboard
+  // store makes. A failed read degrades to null (SIGN OUT alone), never a
+  // blocked page.
+  const { data: parentRow } = await supabase
+    .from("parents")
+    .select("first_name,last_name")
+    .eq("id", user.id)
+    .maybeSingle();
+
   return (
     <NextStepsFlow
       childId={String(child.id)}
       firstName={String(child.first_name ?? "").trim()}
       initialGoal={String(child.family_goal ?? "")}
+      parentName={navCardIdentityName(
+        String(parentRow?.first_name ?? ""),
+        String(parentRow?.last_name ?? "")
+      )}
     />
   );
 }

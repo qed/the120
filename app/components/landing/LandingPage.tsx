@@ -61,6 +61,12 @@ export const PROOF_POINTS = [
   },
 ] as const;
 
+/**
+ * The lightbox's mono cohort line (U10 fidelity, drift 9 — README screen 1),
+ * byte for byte from the prototype's hero card.
+ */
+export const FOUNDING_COHORT_LINE = "FOUNDING COHORT · FALL 2026 · TORONTO";
+
 export type LandingContent = {
   headline: string;
   subhead: string;
@@ -101,30 +107,47 @@ export default function LandingPage({
           dependency — the slot ships, blue shows until the art lands, and the
           gradient guarantees the lightbox text survives either way. */}
       <section className="relative flex min-h-[92vh] flex-col justify-end bg-blue">
+        {/* U10 fidelity (audit drift 9/1b): the handoff's gradient stops,
+            byte for byte — .30 → .06 → .10 → .82. */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(rgba(19,20,22,0.18) 0%, rgba(19,20,22,0) 30%, rgba(19,20,22,0.02) 55%, rgba(19,20,22,0.82) 100%)",
+              "linear-gradient(rgba(19,20,22,0.30) 0%, rgba(19,20,22,0.06) 30%, rgba(19,20,22,0.10) 55%, rgba(19,20,22,0.82) 100%)",
           }}
         />
-        <div className="relative z-10 mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-6 pb-14 pt-40 sm:px-8">
-          <h1 className="display max-w-[820px] text-4xl text-white sm:text-[64px] sm:leading-[1.04]">
-            {content.headline}{" "}
-            <span className="accent-blush italic">{LANDING_HEADLINE_LINE_2}</span>
-          </h1>
-          <p className="max-w-[640px] text-[17px] leading-[1.65] text-white/85 sm:text-[19px]">
-            {content.subhead}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-5">
-            <StartCta source={content.source} group={content.group} className="px-7 py-4 text-sm" />
-            {/* The text lightbox carries the LIVE seats line (R23) — never the
+        <div className="relative z-10 mx-auto w-full max-w-[1080px] px-6 pb-10 pt-40 sm:px-8">
+          {/* The text lightbox (drift 9, README screen 1): rgba(19,20,22,.55),
+              14px radius, backdrop-blur 2px, padding 16/18 — seats line,
+              headline, divider, subhead + cohort line, CTA, in the
+              prototype's order. */}
+          <div
+            className="rounded-[14px] backdrop-blur-[2px]"
+            style={{ background: "rgba(19,20,22,0.55)", padding: "16px 18px" }}
+          >
+            {/* The lightbox opens on the LIVE seats line (R23) — never the
                 prototype's hardcoded scaffolding — through seatsDisplay, so
                 zero seats reads as the waitlist state (the /2026-27
                 treatment), never "0 OF 120 SEATS REMAIN". */}
-            <span className="font-mono text-[11px] tracking-[0.1em] text-white/75">
+            <p className="font-mono text-[11px] tracking-[0.1em] text-white/85">
               {seatsDisplay(seatsRemaining)}
-            </span>
+            </p>
+            <h1 className="display mt-3 max-w-[820px] text-4xl text-white sm:text-[64px] sm:leading-[1.04]">
+              {content.headline}{" "}
+              <span className="accent-blush italic">{LANDING_HEADLINE_LINE_2}</span>
+            </h1>
+            <div className="my-4 h-px max-w-[820px] bg-white/45" />
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <p className="max-w-[560px] text-[15px] leading-[1.6] text-white sm:text-[17px]">
+                {content.subhead}
+              </p>
+              <span className="whitespace-nowrap font-mono text-[10px] tracking-[0.08em] text-white/85">
+                {FOUNDING_COHORT_LINE}
+              </span>
+            </div>
+            <div className="mt-5">
+              <StartCta source={content.source} group={content.group} className="px-7 py-4 text-sm" />
+            </div>
           </div>
         </div>
       </section>

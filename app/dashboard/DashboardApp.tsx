@@ -172,7 +172,10 @@ export default function DashboardApp({
 
   return (
     <div className="min-h-screen bg-paper">
-      <DashHeader />
+      {/* U10 fidelity (audit 3c/X1): in the editor view the wizard's floating
+          nav card (progress + NAME · SIGN OUT, mounted by DossierEditor) IS
+          the top bar — DashHeader would double the brand and sign-out. */}
+      {!(ready && view === "editor" && selected) && <DashHeader />}
 
       {!ready ? (
         <div className="mx-auto max-w-5xl px-6 py-20 font-mono text-xs uppercase tracking-[0.14em] text-muted">

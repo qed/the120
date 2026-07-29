@@ -15,7 +15,10 @@ import {
   resolveStep,
   stepForChecklistLabel,
   stepsForGroup,
+  wizardProgressStep,
+  type WizardStepId,
 } from "../wizard-rules";
+import { progressPercent } from "@/app/lib/funnel/capture-rules";
 
 /** A complete draft — every checklist item satisfied. */
 const child = (overrides: Partial<Child> = {}): Child => ({
@@ -193,5 +196,37 @@ describe("childEmailPatch (R48)", () => {
   it("unticking the flag restores nothing but the ability to type", () => {
     expect(childEmailPatch({ none: false }, { childEmail: "", childEmailNone: true }))
       .toEqual({ childEmail: "", childEmailNone: false });
+  });
+});
+
+/* ---------- nav card progress (U10 fidelity, X1/X2) ---------- */
+
+describe("wizardProgressStep — the 80/90/96/100 rungs, finally consumed", () => {
+  it("maps the five live steps onto the spec's three wizard rungs, monotone", () => {
+    const expected: Record<WizardStepId, number> = {
+      basics: 80,
+      group: 80,
+      academics: 90,
+      project: 90,
+      review: 96,
+    };
+    for (const [step, pct] of Object.entries(expected)) {
+      expect(
+        progressPercent(wizardProgressStep(step as WizardStepId, false)),
+        step
+      ).toBe(pct);
+    }
+    // Monotone through a straight walk of the live step order.
+    const walk = stepsForGroup("makers").map((s) =>
+      progressPercent(wizardProgressStep(s, false))
+    );
+    expect([...walk].sort((a, b) => a - b)).toEqual(walk);
+  });
+
+  it("submitted always reads 100, whatever step is showing", () => {
+    for (const s of stepsForGroup("makers")) {
+      expect(wizardProgressStep(s, true)).toBe("submitted");
+    }
+    expect(progressPercent(wizardProgressStep("review", true))).toBe(100);
   });
 });

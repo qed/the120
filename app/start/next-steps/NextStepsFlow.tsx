@@ -12,15 +12,21 @@ import Link from "next/link";
 import { saveGoalAction } from "@/app/lib/funnel/actions/next-steps";
 import { GOAL_MAX_CHARS, NEXT_STEPS, holdSeatCta } from "@/app/lib/funnel/deposit-rules";
 import { capWellFormed } from "@/app/lib/funnel/moderation";
+import { navCardIdentityOnly } from "@/app/lib/funnel/nav-card-rules";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 
 export function NextStepsFlow({
   childId,
   firstName,
   initialGoal,
+  parentName,
 }: {
   childId: string;
   firstName: string;
   initialGoal: string;
+  /** The nav card's identity line (X1): uppercased full parent name, or
+   *  null when the read degraded — the card shows SIGN OUT alone. */
+  parentName: string | null;
 }) {
   const [index, setIndex] = useState(0);
   const [goal, setGoal] = useState(initialGoal);
@@ -51,10 +57,13 @@ export function NextStepsFlow({
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center bg-paper px-6 py-14 text-ink">
+      {/* X1: post-ladder, the card shows name + SIGN OUT only (no bar). */}
+      <ProgressNavCard model={navCardIdentityOnly(parentName)} />
       <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
         Next steps · {index + 1} of {NEXT_STEPS.swipes.length}
       </p>
-      <h1 className="mt-2 font-display text-3xl leading-tight">{swipe.title}</h1>
+      {/* U10 fidelity (audit drift 12): Georgia display titles. */}
+      <h1 className="display mt-2 text-3xl">{swipe.title}</h1>
       <p className="mt-3 text-base leading-7 text-ink-soft">
         {swipe.id === "progress" ? `${name}: ${swipe.body}` : swipe.body}
       </p>

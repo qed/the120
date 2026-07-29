@@ -8,6 +8,8 @@ import {
   pollStep,
   type ArrivalView,
 } from "@/app/lib/funnel/arrival-rules";
+import { navCardIdentityOnly } from "@/app/lib/funnel/nav-card-rules";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
 
 /**
  * The arrival poll shell (funnel wrap U7). Every decision — view mapping,
@@ -21,7 +23,17 @@ type Phase =
   | { kind: "committed"; view: ArrivalView }
   | { kind: "timeout" };
 
-export function ArrivalFlow({ childId, firstName }: { childId: string; firstName: string }) {
+export function ArrivalFlow({
+  childId,
+  firstName,
+  parentName,
+}: {
+  childId: string;
+  firstName: string;
+  /** The nav card's identity line (X1): uppercased full parent name, or
+   *  null when the read degraded — the card shows SIGN OUT alone. */
+  parentName: string | null;
+}) {
   const [phase, setPhase] = useState<Phase>({ kind: "polling", view: null });
   const runRef = useRef(0);
 
@@ -85,6 +97,9 @@ export function ArrivalFlow({ childId, firstName }: { childId: string; firstName
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center bg-paper px-6 py-14 text-ink">
+      {/* X1: post-ladder, the card shows name + SIGN OUT only (no bar). The
+          acceptance-letter ceremony around this screen is batch B2 (E5). */}
+      <ProgressNavCard model={navCardIdentityOnly(parentName)} />
       <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
         {ARRIVAL_SCREEN.kicker}
       </p>

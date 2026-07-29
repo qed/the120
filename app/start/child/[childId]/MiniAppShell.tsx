@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
+import { changeDoorAction, confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
 import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
 import {
   composeProjectAction,
@@ -35,6 +35,7 @@ import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 import {
   BUILT_STEPS,
   SKIN_ROOT_CLASSES,
+  doorChangeNeedsConfirm,
   doorConfirmOutcome,
   doorsModel,
   handoffCopy,
@@ -120,6 +121,39 @@ const BACK_CLASSES =
  */
 const LOCKED_NOTICE_LABEL = "APPLICATION SUBMITTED";
 
+/*
+ * ── Door-change confirm dialog micro-spec (reconnect Unit 8, R6) ──
+ * Pending Peter's design sign-off; audited in Unit 9 against this spec.
+ *
+ * Fires ONLY when the family confirms a door DIFFERENT from the
+ * server-persisted confirmed door AND a composed project exists
+ * (doorChangeNeedsConfirm, miniapp-rules) — a same-door re-walk never
+ * sees it, and pre-compose door switches keep the silent reset.
+ *
+ * - Treatment: a modal overlay (fixed inset, black/40 scrim) with ONE
+ *   card in the step's own register — the same rounded-2xl white card
+ *   chrome as the locked notice, mono uppercase label line, body in the
+ *   step's text register. Same literal classes in both skins (hq and
+ *   trail inherit ink/canvas from SKIN_ROOT_CLASSES); no per-skin
+ *   variants. role="alertdialog", aria-modal.
+ * - Copy (copy rules: no em dashes, nothing scary):
+ *   label "CHANGE DOORS?"; body: This will retire the current project
+ *   "<name>". Your child starts a fresh one behind the new door.
+ *   The <name> is the SNAPSHOT'S project name — what this dialog is
+ *   authorizing — never the live composeView (snapshot-vs-live, the
+ *   2026-07-24 confirmation-gate learning).
+ * - Buttons: accept "Change door" (the red pill CTA idiom); cancel
+ *   "Keep this door" (the border pill idiom). BOTH pending-guarded, like
+ *   every control in this shell (the 2026-07-29 pending-transitions
+ *   learning). Cancel writes NOTHING and only closes the dialog — the
+ *   family stays exactly where they were, on the doors step, selection
+ *   intact.
+ * - Accept submits the snapshot echo (project id + raw regen count) to
+ *   changeDoorAction; the server CASes on it and a stale echo rolls the
+ *   whole transaction back → the conflict notice ("refresh") renders,
+ *   never retry copy and never a partial change.
+ */
+
 export function MiniAppShell({
   child,
   hintSlug,
@@ -178,6 +212,18 @@ export function MiniAppShell({
   // A TAP is client state and nothing else (R35): switching is choosing.
   const [tappedSlug, setTappedSlug] = useState<GroupSlug | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Reconnect U8: the door-change confirm dialog's SNAPSHOT — captured when
+  // the dialog opens, rendered by it, and submitted by its accept. Never
+  // re-read from live state at resolution time: a dialog that re-derives
+  // its subject authorizes a decision it never showed (the 2026-07-24
+  // confirmation-gate learning).
+  const [doorConfirm, setDoorConfirm] = useState<{
+    slug: GroupSlug;
+    preselected: boolean;
+    projectId: string;
+    expectedRegenCount: number;
+    projectName: string;
+  } | null>(null);
   const [pending, startTransition] = useTransition();
   // Reconnect U7: a stale tab discovers the lock through a refused mutation
   // ({kind:"locked"}) — from then on this render is locked too, and the
@@ -206,6 +252,36 @@ export function MiniAppShell({
   const [composeDraft, setComposeDraft] = useState<ComposedProject | null>(
     initialProject?.project ?? null
   );
+  // Reconnect U8 conflict heal: after a door-change conflict the shell calls
+  // router.refresh(), and the server re-renders this SAME mounted component
+  // with fresh facts (initialProject/serverInitialStep). Client state never
+  // re-reads props on its own, so when the server's project FACT moves —
+  // keyed by the CAS identity (id + raw regen count), never object identity,
+  // because every navigation re-serializes the prop and identity alone would
+  // wipe unsaved draft edits on every step change — re-seed the compose
+  // state from it. This heals BOTH conflict shapes: the dialog's stale echo
+  // (composeView catches up to the regenerated row) and the stale
+  // composeView === null tab (the server's project appears, so the next
+  // door change can snapshot and dialog properly). The notice stays visible:
+  // same mounted component, state preserved. React's render-phase
+  // adjust-state-on-prop-change pattern — no effect, no extra paint.
+  const serverProjectKey = initialProject
+    ? `${initialProject.id}:${initialProject.aiRegenerationCount}`
+    : null;
+  const [seededProjectKey, setSeededProjectKey] = useState(serverProjectKey);
+  if (serverProjectKey !== seededProjectKey) {
+    setSeededProjectKey(serverProjectKey);
+    const clientKey = composeView
+      ? `${composeView.id}:${composeView.aiRegenerationCount}`
+      : null;
+    // Only re-seed when the client's belief actually disagrees — a server
+    // render that merely confirms what this tab already shows (the common
+    // step-navigation case) must not clobber the working draft copy.
+    if (clientKey !== serverProjectKey) {
+      setComposeView(initialProject);
+      setComposeDraft(initialProject?.project ?? null);
+    }
+  }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
   const [composeDegraded, setComposeDegraded] = useState(false);
 
@@ -257,39 +333,70 @@ export function MiniAppShell({
     router.push(`?${params.toString()}`, { scroll: true });
   };
 
-  const confirm = () => {
-    if (!selected || isLocked) return;
+  /**
+   * The door-keyed client wipe: a DIFFERENT door invalidates everything
+   * downstream of it — the old group's template and seeded answers are that
+   * group's copy, and a stale set would arm the templates advance button
+   * with nothing visibly selected (the 2026-07-28 scoped-state learning).
+   * One function, called by every door-write result path.
+   */
+  const resetDoorScopedState = () => {
+    setTemplateId(null);
+    setOwnIdea("");
+    setAnswers({});
+    setQuizNotice(null);
+    setSeededFrom(null);
+    setComposeView(null);
+    setComposeDraft(null);
+    setComposeNotice(null);
+    setComposeDegraded(false);
+  };
+
+  /**
+   * THE ONLY WAY A DOOR WRITE IS SUBMITTED — first confirms, silent
+   * pre-compose changes, and the dialog's accept all come through here
+   * (single-entry-point rule, 2026-07-24 learning). `echo` is the dialog's
+   * snapshot when a composed project is being retired; null otherwise.
+   */
+  const submitDoorWrite = (
+    slug: GroupSlug,
+    preselected: boolean,
+    echo: { projectId: string; expectedRegenCount: number } | null
+  ) => {
     setNotice(null);
     startTransition(async () => {
       // R57: only the HINT-match flag rides along (the ad hint is client
       // knowledge); switched_from and first-vs-re-confirm are SERVER truth
-      // derived from the child's prior group (U16 review).
-      const outcome = doorConfirmOutcome(selected, doors);
-      const result = await confirmDoorAction({
-        childId: child.id,
-        slug: selected,
-        preselected: outcome.preselected,
-      });
-      if (result.kind === "confirmed") {
-        // A DIFFERENT door invalidates everything downstream of it: the old
-        // group's template and seeded answers are that group's copy, and a
-        // stale set would arm the templates advance button with nothing
-        // visibly selected — one tap seeds the new group's quiz with the
-        // wrong group's project (both reviewers, the unit's top finding).
-        if (result.slug !== confirmedSlug) {
-          setTemplateId(null);
-          setOwnIdea("");
-          setAnswers({});
-          setQuizNotice(null);
-          setSeededFrom(null);
-          setComposeView(null);
-          setComposeDraft(null);
-          setComposeNotice(null);
-          setComposeDegraded(false);
-        }
+      // derived from the child's prior group (U16 review). First confirm
+      // (no persisted door) keeps the original action; a CHANGE goes
+      // through changeDoorAction so the server can bind door write and
+      // project retirement into one transaction when a project exists.
+      const result =
+        confirmedSlug === null && echo === null
+          ? await confirmDoorAction({ childId: child.id, slug, preselected })
+          : await changeDoorAction({
+              childId: child.id,
+              slug,
+              preselected,
+              ...(echo
+                ? {
+                    expectedProjectId: echo.projectId,
+                    expectedRegenCount: echo.expectedRegenCount,
+                  }
+                : {}),
+            });
+      if (result.kind === "confirmed" || result.kind === "changed") {
+        if (result.slug !== confirmedSlug) resetDoorScopedState();
         setConfirmedSlug(result.slug);
         // Clear the tap so a later re-entry to the doors shows the SAVED
         // fact, not a stale client selection shadowing it.
+        setTappedSlug(null);
+        go(stepNeighbour("doors", "next"));
+        return;
+      }
+      if (result.kind === "unchanged") {
+        // The core's same-door no-op guard (belt to confirm()'s brace):
+        // nothing was written, nothing resets — just move along.
         setTappedSlug(null);
         go(stepNeighbour("doors", "next"));
         return;
@@ -300,11 +407,74 @@ export function MiniAppShell({
         setLockDiscovered(true);
         return;
       }
+      if (result.kind === "conflict") {
+        // The snapshot went stale (another tab regenerated or already
+        // changed the door). NOTHING was applied — the transaction rolled
+        // back whole. Refresh guidance, never retry copy — AND the refresh
+        // itself: router.refresh() re-renders the server component with
+        // fresh facts, and the prop-keyed re-seed above folds them into
+        // composeView, so the family is never stranded behind a stale
+        // snapshot (or a stale composeView === null) with no way forward.
+        // Idempotent and pending-safe: refresh writes nothing, and the
+        // notice survives (same mounted component).
+        setNotice(
+          "Your project changed in another tab. Refresh this page to see the newest version, then pick again."
+        );
+        router.refresh();
+        return;
+      }
       setNotice(
         result.kind === "unauthenticated"
           ? "Your session expired. Start again and we'll pick this up."
           : "That didn't save. Give it a second and tap again."
       );
+    });
+  };
+
+  const confirm = () => {
+    if (!selected || pending || isLocked) return;
+    setNotice(null);
+    // Same door, compared against the SERVER-persisted fact: a re-walk
+    // that re-confirms the saved door is pure navigation — no write, no
+    // dialog, no reset (the compare-against-server-fact rule; the core's
+    // `unchanged` verdict backs this belt with a brace).
+    if (selected === confirmedSlug) {
+      setTappedSlug(null);
+      go(stepNeighbour("doors", "next"));
+      return;
+    }
+    const outcome = doorConfirmOutcome(selected, doors);
+    if (
+      composeView !== null &&
+      doorChangeNeedsConfirm({
+        tappedSlug: selected,
+        confirmedSlug,
+        hasComposedProject: composeView !== null,
+      })
+    ) {
+      // SNAPSHOT the subject (per the micro-spec above): the dialog names
+      // and, on accept, submits exactly these values — not whatever the
+      // live state says when the tap lands.
+      setDoorConfirm({
+        slug: selected,
+        preselected: outcome.preselected,
+        projectId: composeView.id,
+        expectedRegenCount: composeView.aiRegenerationCount,
+        projectName: composeView.project.name,
+      });
+      return;
+    }
+    // Cheap tier: no composed project at stake — the silent reset path.
+    submitDoorWrite(selected, outcome.preselected, null);
+  };
+
+  const acceptDoorChange = () => {
+    if (!doorConfirm || pending) return;
+    const snap = doorConfirm;
+    setDoorConfirm(null);
+    submitDoorWrite(snap.slug, snap.preselected, {
+      projectId: snap.projectId,
+      expectedRegenCount: snap.expectedRegenCount,
     });
   };
 
@@ -343,7 +513,11 @@ export function MiniAppShell({
           ? "Your session expired. Start again and we'll pick this up."
           : result.kind === "project_cap"
             ? "This builder already has five projects, which is plenty. Talk to us if one should make room."
-            : "That didn't work. Give it a second and tap again."
+            : result.kind === "conflict"
+              ? // Reconnect U8: the row was retired under this save (a door
+                // change in another tab). Refresh guidance, never retry copy.
+                "Your project changed in another tab. Refresh to see the newest version."
+              : "That didn't work. Give it a second and tap again."
       );
     });
   };
@@ -367,7 +541,11 @@ export function MiniAppShell({
         result.kind === "limit"
           ? "That's both redos used. Every word below is still yours to change by hand."
           : result.kind === "conflict"
-            ? "Another tab got there first. Refresh to see the newest version."
+            ? // Neutral copy on purpose (reconnect U8): the conflict now
+              // covers BOTH a racing regen and a row retired by a door
+              // change in another tab — "another tab got there first" only
+              // described the former.
+              "Your project changed in another tab. Refresh to see the newest version."
             : "That didn't work. Give it a second and tap again."
       );
     });
@@ -395,6 +573,15 @@ export function MiniAppShell({
         });
         if (saved.kind === "locked") {
           setLockDiscovered(true);
+          return;
+        }
+        if (saved.kind === "conflict") {
+          // Reconnect U8: the row was retired under this edit (a door
+          // change in another tab) — refresh guidance, never retry copy,
+          // and NEVER silent success (the words are still in the boxes).
+          setComposeNotice(
+            "Your project changed in another tab. Refresh to see the newest version."
+          );
           return;
         }
         if (saved.kind !== "saved") {
@@ -970,6 +1157,43 @@ export function MiniAppShell({
             </section>
           );
         })()}
+
+        {/* The door-change confirm dialog (reconnect U8) — see the
+            micro-spec above. Renders the SNAPSHOT, submits the SNAPSHOT. */}
+        {doorConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Change doors?"
+          >
+            <div className="w-full max-w-sm rounded-2xl border border-black/15 bg-white px-5 py-5">
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.14em] opacity-60">
+                CHANGE DOORS?
+              </p>
+              <p className="mt-2 text-[14px] leading-6 opacity-80">
+                This will retire the current project &quot;{doorConfirm.projectName}
+                &quot;. Your child starts a fresh one behind the new door.
+              </p>
+              <div className="mt-5 flex flex-col gap-2.5">
+                <button
+                  onClick={acceptDoorChange}
+                  disabled={pending}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Change door
+                </button>
+                <button
+                  onClick={() => setDoorConfirm(null)}
+                  disabled={pending}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Keep this door
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {!BUILT_STEPS.includes(step) && (
           <section>

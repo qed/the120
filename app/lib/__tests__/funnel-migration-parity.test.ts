@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   APPLICANT_STATES,
+  DOOR_CHANGE_CONFLICT_ERRCODE,
+  DOOR_CHANGE_CONFLICT_SIGNAL,
   EDIT_LOCKED_ERRCODE,
   EDIT_LOCKED_SIGNAL,
   PROJECT_CREATION_ROUTES,
@@ -255,5 +257,103 @@ describe("the edit-horizon guard (reconnect U7, R13) vs its TS mirrors", () => {
     );
     expect(sync).toMatch(/when 'submitted' then 'submitted'/);
     expect(sync).toMatch(/before update of status/);
+  });
+});
+
+describe("the door-change RPC (reconnect U8, R6) vs its TS mirrors", () => {
+  const file = readdirSync(MIGRATIONS_DIR).find((f) =>
+    f.endsWith("_funnel_door_invalidate_rpc.sql")
+  );
+  const src = file ? readFileSync(path.join(MIGRATIONS_DIR, file), "utf8") : "";
+  const sql = src.replace(/--.*$/gm, "");
+
+  it("exists and is SECURITY INVOKER — the family session's RLS is the ownership check", () => {
+    // Unlike the service-role RPCs (provision_lease et al.), this one runs
+    // AS the caller: an authenticated family reaches only its own children
+    // and projects rows, with no hand-written scope check to drift.
+    expect(file, "the Unit 8 migration file is missing").toBeTruthy();
+    expect(sql).toMatch(/create or replace function public\.change_door_and_invalidate_project/);
+    expect(sql).toMatch(/security invoker/);
+    expect(sql).not.toMatch(/security definer/);
+  });
+
+  it("embeds the Unit-7 edit-horizon condition in the children write — this path cannot bypass the lock", () => {
+    // The same allow-set as miniapp-core's writeGroup, inside the statement
+    // itself (never a read-then-check), with NULL deliberately absent.
+    expect(sql).toMatch(
+      /update public\.children\s+set group_slug = p_new_slug\s+where id = p_child_id\s+and applicant_state in \('added','project_created'\);/
+    );
+    // Zero rows on the children write is the locked verdict — RETURNED,
+    // not raised, because nothing has been written yet.
+    expect(sql).toMatch(/return 'locked';/);
+  });
+
+  it("CASes the project retirement on ai_regeneration_count, scoped to the ECHOED id on this child's ACTIVE row", () => {
+    // The UPDATE itself must carry the echoed project id — the CAS is
+    // meaningless if it can land on whichever row happens to be active.
+    expect(sql).toMatch(
+      /update public\.projects[\s\S]*?where id = p_expected_project_id/
+    );
+    expect(sql).toMatch(/and child_id = p_child_id/);
+    expect(sql).toMatch(/and status = 'active'/);
+    expect(sql).toMatch(/and ai_regeneration_count = p_expected_regen_count/);
+  });
+
+  it("locks the expected project row FIRST — the FOR UPDATE precedes the children write (the deadlock fix)", () => {
+    // Every single-statement projects writer takes the projects row lock,
+    // then its U7 trigger FOR-SHAREs the children row. This RPC must take
+    // the SAME first lock; the original children-then-projects order was
+    // the AB/BA half of a deadlock cycle (docs/solutions/database-issues/
+    // a-cross-table-trigger-guard-must-lock-the-row-it-reads-for-share-
+    // 2026-07-29.md).
+    expect(sql).toMatch(
+      /perform id\s+from public\.projects\s+where id = p_expected_project_id\s+and child_id = p_child_id\s+for update;/
+    );
+    const lock = sql.indexOf("for update");
+    const childrenWrite = sql.indexOf("update public.children");
+    expect(lock).toBeGreaterThan(-1);
+    expect(childrenWrite).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(childrenWrite);
+  });
+
+  it("retires into the EXISTING status vocabulary — 'abandoned' is a projects_status_check member", () => {
+    expect(sql).toMatch(/set status = 'abandoned'/);
+    expect(PROJECT_STATUSES).toContain("abandoned");
+    // And the whole write stays inside the vocabulary: every status literal
+    // this migration sets or matches is CHECK-legal.
+    const statuses = [...sql.matchAll(/status = '([^']+)'/g)].map((m) => m[1]);
+    for (const s of statuses) {
+      expect(PROJECT_STATUSES, s).toContain(s);
+    }
+  });
+
+  it("RAISES the conflict AFTER the children write — the raise is what rolls the door change back", () => {
+    // Atomicity is the ordering: children UPDATE, then projects UPDATE,
+    // then the zero-row RAISE. A returned (not raised) conflict here would
+    // commit a changed door over a live project — the half-applied state
+    // the RPC exists to make impossible.
+    const childrenWrite = sql.indexOf("update public.children");
+    const projectsWrite = sql.indexOf("update public.projects");
+    const conflictRaise = sql.indexOf(`raise exception '${DOOR_CHANGE_CONFLICT_SIGNAL}'`);
+    expect(childrenWrite).toBeGreaterThan(-1);
+    expect(projectsWrite).toBeGreaterThan(childrenWrite);
+    expect(conflictRaise).toBeGreaterThan(projectsWrite);
+  });
+
+  it("raises the exact conflict contract the TS recognizer pins — signal and errcode", () => {
+    expect(sql).toContain(`raise exception '${DOOR_CHANGE_CONFLICT_SIGNAL}'`);
+    expect(sql).toContain(`errcode = '${DOOR_CHANGE_CONFLICT_ERRCODE}'`);
+    // Distinct from the edit-lock contract: the two verdicts must never
+    // share a code, or the core would render the wrong explanation.
+    expect(DOOR_CHANGE_CONFLICT_ERRCODE).not.toBe(EDIT_LOCKED_ERRCODE);
+  });
+
+  it("narrows execution to authenticated — revoked from public and anon", () => {
+    expect(sql).toMatch(
+      /revoke execute on function public\.change_door_and_invalidate_project\(uuid, text, uuid, integer\) from public, anon;/
+    );
+    expect(sql).toMatch(
+      /grant execute on function public\.change_door_and_invalidate_project\(uuid, text, uuid, integer\) to authenticated;/
+    );
   });
 });

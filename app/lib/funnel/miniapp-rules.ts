@@ -121,6 +121,29 @@ export function initialStepForFacts(facts: {
 }
 
 /**
+ * Does confirming this door need the destructive-reset dialog?
+ * (dashboard reconnect U8, R6.)
+ *
+ * The comparison is against the SERVER-persisted fact (`confirmedSlug`
+ * mirrors `children.group_slug`), never a client draft — so a same-door
+ * re-walk (Back to the doors, re-confirm without switching) can NEVER
+ * threaten a reset, and only an actually-different door with a composed
+ * project at stake asks. Cheap pre-compose drafts (no composed project)
+ * keep the silent door-keyed reset; the dialog is reserved for the one
+ * change that retires persisted work.
+ */
+export function doorChangeNeedsConfirm(input: {
+  /** The door about to be confirmed (the live selection). */
+  tappedSlug: string;
+  /** The server-persisted confirmed door, null when none yet. */
+  confirmedSlug: string | null;
+  /** Does a composed (active) project exist for this child? */
+  hasComposedProject: boolean;
+}): boolean {
+  return input.hasComposedProject && input.tappedSlug !== input.confirmedSlug;
+}
+
+/**
  * The steps U8 ships live; everything later renders the coming-next stub
  * until its unit lands (U9 templates/quiz, U10 compose, U11 tasks/reveal).
  * In rules rather than in the component so the tests — and the later units —

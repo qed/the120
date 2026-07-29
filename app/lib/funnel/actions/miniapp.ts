@@ -7,7 +7,12 @@
  * `deps` parameter never reaches the wire.
  */
 
-import { confirmDoorCore, type ConfirmDoorResult } from "@/app/lib/funnel/miniapp-core";
+import {
+  changeDoorCore,
+  confirmDoorCore,
+  type ChangeDoorResult,
+  type ConfirmDoorResult,
+} from "@/app/lib/funnel/miniapp-core";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 
 export async function confirmDoorAction(input: unknown): Promise<ConfirmDoorResult> {
@@ -21,6 +26,31 @@ export async function confirmDoorAction(input: unknown): Promise<ConfirmDoorResu
   // hint?) is only meaningful on the FIRST confirm, and the hint is client
   // knowledge — accepted as a validated boolean there, ignored otherwise.
   if (result.kind === "confirmed" && result.previousSlug !== result.slug) {
+    const i = input as { childId?: unknown; preselected?: unknown };
+    void emitFunnelEvent(
+      "door_confirmed",
+      { childId: typeof i.childId === "string" ? i.childId : null, groupSlug: result.slug },
+      {
+        group: result.slug,
+        first: result.previousSlug === null,
+        preselected: result.previousSlug === null && i.preselected === true,
+        ...(result.previousSlug ? { switched_from: result.previousSlug } : {}),
+      }
+    );
+  }
+  return result;
+}
+
+/**
+ * Reconnect U8: the door CHANGE (post-confirm), atomic with project
+ * retirement when one exists — thin wrapper over `changeDoorCore`. Emits
+ * the same door_confirmed event as a switch through `confirmDoorAction`
+ * would: server-truth tuple, one event per real transition (`unchanged`
+ * emits nothing — the core already refuses to write a same-door change).
+ */
+export async function changeDoorAction(input: unknown): Promise<ChangeDoorResult> {
+  const result = await changeDoorCore(input);
+  if (result.kind === "changed" && result.previousSlug !== result.slug) {
     const i = input as { childId?: unknown; preselected?: unknown };
     void emitFunnelEvent(
       "door_confirmed",

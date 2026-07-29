@@ -99,7 +99,12 @@ export type ComposeDeps = {
       aiModel: string | null;
     }) => Promise<{ kind: "inserted"; id: string } | { kind: "conflict" } | { kind: "failed" }>;
     /** CAS increment of ai_regeneration_count: succeeds only if the count is
-     *  still `expectedCount`. The RESERVATION happens before any model call.
+     *  still `expectedCount` AND the row is still `active` (reconnect U8: a
+     *  door change retires the row to 'abandoned' — a write scoped to id
+     *  alone would regenerate a retired project). Zero rows = `"conflict"`:
+     *  either another tab's regen moved the counter or the row was retired
+     *  under you; both read as "your project changed — refresh". The
+     *  RESERVATION happens before any model call.
      *  `"locked"` (reconnect U7, R13): the projects_edit_horizon_guard
      *  trigger refused the write because the owning child is `submitted`+ —
      *  recognized via the P0120/funnel_edit_locked contract, and DISTINCT
@@ -109,17 +114,20 @@ export type ComposeDeps = {
       expectedCount: number
     ) => Promise<"reserved" | "conflict" | "locked" | "error">;
     /** Replace the draft fields (no counter change — the reservation or the
-     *  insert already owns the slot). `"locked"` = the edit-horizon trigger
-     *  refused (see reserveRegeneration). */
+     *  insert already owns the slot), scoped to the STILL-ACTIVE row.
+     *  `"locked"` = the edit-horizon trigger refused (see
+     *  reserveRegeneration); `"conflict"` = zero rows because the row was
+     *  retired under you (a door change in another tab abandoned it) —
+     *  NEVER reported as success. */
     saveDraft: (
       projectId: string,
       project: ComposedProject,
       aiModel: string | null
-    ) => Promise<boolean | "locked">;
+    ) => Promise<boolean | "locked" | "conflict">;
     saveEdit: (
       projectId: string,
       project: ComposedProject
-    ) => Promise<boolean | "locked">;
+    ) => Promise<boolean | "locked" | "conflict">;
     advanceToProjectCreated: (childId: string) => Promise<boolean>;
   }>;
   generate: (parts: { system: string; prompt: string }) => Promise<NormalizedModelResult>;
@@ -232,6 +240,11 @@ function realDeps(): ComposeDeps {
           return count ?? 0;
         },
         reserveRegeneration: async (projectId, expectedCount) => {
+          // `.eq("status", "active")` (reconnect U8): a door change retires
+          // the row to 'abandoned'; without the status condition this CAS
+          // would happily reserve a regen on a retired project. Zero rows
+          // now means EITHER the counter moved OR the row was retired under
+          // us — both are the conflict verdict (refresh guidance).
           const { data, error } = await supabase
             .from("projects")
             .update({
@@ -239,6 +252,7 @@ function realDeps(): ComposeDeps {
               updated_at: new Date().toISOString(),
             })
             .eq("id", projectId)
+            .eq("status", "active")
             .eq("ai_regeneration_count", expectedCount)
             .select("id");
           if (error) {
@@ -249,7 +263,11 @@ function realDeps(): ComposeDeps {
           return (data ?? []).length > 0 ? "reserved" : "conflict";
         },
         saveDraft: async (projectId, project, aiModel) => {
-          const { error } = await supabase
+          // `.eq("status", "active")` + row-count check (reconnect U8):
+          // without them a draft save landed on a project a concurrent
+          // door change had already retired — and reported success. Zero
+          // rows = "the row was retired under you" = conflict, distinctly.
+          const { data, error } = await supabase
             .from("projects")
             .update({
               name: project.name,
@@ -261,16 +279,20 @@ function realDeps(): ComposeDeps {
               family_edited: false,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", projectId);
+            .eq("id", projectId)
+            .eq("status", "active")
+            .select("id");
           if (error) {
             if (isEditLockedDbError(error)) return "locked";
             console.error(`[funnel/compose] draft write failed: ${error.message}`);
             return false;
           }
-          return true;
+          return (data ?? []).length > 0 ? true : "conflict";
         },
         saveEdit: async (projectId, project) => {
-          const { error } = await supabase
+          // Same active-row scoping as saveDraft: a family edit must never
+          // "save" onto a retired row and report success.
+          const { data, error } = await supabase
             .from("projects")
             .update({
               name: project.name,
@@ -280,13 +302,15 @@ function realDeps(): ComposeDeps {
               family_edited: true,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", projectId);
+            .eq("id", projectId)
+            .eq("status", "active")
+            .select("id");
           if (error) {
             if (isEditLockedDbError(error)) return "locked";
             console.error(`[funnel/compose] edit write failed: ${error.message}`);
             return false;
           }
-          return true;
+          return (data ?? []).length > 0 ? true : "conflict";
         },
         advanceToProjectCreated: async (childId) => {
           // Guarded in SQL: only added → project_created; any other state is
@@ -330,6 +354,13 @@ export type ProjectView = {
    *  adversarial finding). The card must be self-consistent. */
   groupSlug: string;
   regenerationsLeft: number;
+  /** The RAW persisted counter — the CAS token the door-change confirm
+   *  dialog echoes back (reconnect U8). Carried alongside the derived
+   *  `regenerationsLeft` because an echo must be the raw fact, not a value
+   *  re-derived from a derivation (the raw-vs-resolved rule): the RPC's
+   *  predicate is `ai_regeneration_count = <echo>`, so the client returns
+   *  exactly what the row said. */
+  aiRegenerationCount: number;
 };
 
 export type ComposeResult =
@@ -337,6 +368,11 @@ export type ComposeResult =
   | { kind: "exists"; view: ProjectView }
   | { kind: "input_rejected"; field: "what" | "who" | "offer" | "spark" }
   | { kind: "project_cap" }
+  /** Reconnect U8: the freshly-inserted row was retired under us (a door
+   *  change in another tab abandoned it) before the draft landed — the
+   *  save matched zero rows. Rendered as refresh guidance, never success
+   *  and never retry copy. */
+  | { kind: "conflict" }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
   /** Reconnect U7 (R13): the edit-horizon trigger refused the write — the
@@ -371,6 +407,7 @@ const view = (
   project,
   groupSlug,
   regenerationsLeft: Math.max(0, 2 - count),
+  aiRegenerationCount: count,
 });
 
 const rowToProject = (row: ProjectRow): ComposedProject => ({
@@ -488,6 +525,15 @@ export async function composeProjectCore(
     if (!moderated.ok) return { kind: "input_rejected", field: moderated.field };
     const storedAnswers = moderateAnswers(moderated.clean as Record<string, string>).clean;
 
+    // Reconnect U8's structural regen reset lives HERE, by construction:
+    // after a door change retires the active project ('abandoned', via
+    // change_door_and_invalidate_project), the child re-enters compose with
+    // NO active row, so this path INSERTS a fresh one whose
+    // ai_regeneration_count is the column default (0) — the full allowance,
+    // with no hand-rolled counter reset to drift. The retired row keeps its
+    // spent count; the five-project cap above still prices every retired
+    // row (deliberate — R2 counts total rows, not active ones).
+    //
     // CLAIM BEFORE SPEND: the row goes in FIRST, carrying the canned
     // fallback. The one-active partial index arbitrates races — only the
     // winner ever calls the model, and a failed insert costs zero model
@@ -530,6 +576,10 @@ export async function composeProjectCore(
       // project can only exist via staff/retention paths, but the trigger
       // is the authority): distinct verdict, no retry copy.
       if (saved === "locked") return { kind: "locked" };
+      // The row this call just inserted was retired under us (a door
+      // change in another tab): zero rows on the active-scoped save is
+      // NOT success — refresh guidance, never the degraded-composed view.
+      if (saved === "conflict") return { kind: "conflict" };
       if (saved === true) {
         return { kind: "composed", view: view(inserted.id, run.project, 0, group), degraded: null };
       }
@@ -663,6 +713,10 @@ export async function regenerateProjectCore(
     // horizon closed before the draft landed. Locked outranks failed — the
     // family needs the explanation, not a retry.
     if (wrote === "locked") return { kind: "locked" };
+    // The row was retired between the reserve and the save (door change in
+    // another tab): zero rows on the active-scoped save = conflict, the
+    // same refresh guidance as a lost reserve — never a success view.
+    if (wrote === "conflict") return { kind: "conflict" };
     if (!wrote) return { kind: "failed" };
 
     return {
@@ -686,6 +740,10 @@ const editInputSchema = z.object({
 
 export type EditResult =
   | { kind: "saved"; project: ComposedProject }
+  /** Reconnect U8: the row was retired under this edit (door change in
+   *  another tab) — the active-scoped save matched zero rows. Refresh
+   *  guidance, never success. */
+  | { kind: "conflict" }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
   /** Reconnect U7 (R13): edit horizon — see ComposeResult. */
@@ -725,6 +783,9 @@ export async function recordProjectEditCore(
     const clean = sanitizeComposed(stripped);
     const saved = await session.saveEdit(project.id, clean);
     if (saved === "locked") return { kind: "locked" };
+    // Retired under the edit (reconnect U8): zero rows is a conflict —
+    // the family's words are still in their textarea; refresh, not retry.
+    if (saved === "conflict") return { kind: "conflict" };
     if (!saved) return { kind: "failed" };
     return { kind: "saved", project: clean };
   } catch (err) {

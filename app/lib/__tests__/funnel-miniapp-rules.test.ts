@@ -8,6 +8,7 @@ import {
   DOOR_ORDER,
   MINIAPP_STEPS,
   SKIN_ROOT_CLASSES,
+  doorChangeNeedsConfirm,
   doorConfirmOutcome,
   doorsModel,
   handoffCopy,
@@ -21,6 +22,7 @@ import {
   stepNeighbour,
 } from "@/app/lib/funnel/miniapp-rules";
 import {
+  changeDoorCore,
   confirmDoorCore,
   loadMiniAppChild,
   type MiniAppDeps,
@@ -236,9 +238,22 @@ function fakeDeps(
     /** Reconnect U7: the conditional write matched zero rows — the child's
      *  state advanced past the horizon between load and write. */
     writeLocked?: boolean;
+    /** Reconnect U8: the child's active project, if any (default none). */
+    activeProject?: { id: string; aiRegenerationCount: number } | null;
+    activeProjectErrors?: boolean;
+    /** Override the fake RPC's verdict. When absent, the fake MODELS the
+     *  CAS: the echo must name the active project at its exact count, or
+     *  the transaction "rolls back" as a conflict. */
+    rpcOutcome?: "changed" | "locked" | "conflict" | "failed";
   } = {}
 ) {
   const writes: { childId: string; slug: string }[] = [];
+  const rpcCalls: {
+    childId: string;
+    slug: string;
+    expectedProjectId: string;
+    expectedRegenCount: number;
+  }[] = [];
   const deps: MiniAppDeps = {
     session: async () => ({
       userId: opts.userId === undefined ? "user-1" : opts.userId,
@@ -261,9 +276,31 @@ function fakeDeps(
         writes.push({ childId, slug });
         return "written";
       },
+      loadActiveProject: async () => {
+        if (opts.activeProjectErrors) return "error";
+        return opts.activeProject ?? null;
+      },
+      changeDoorAndInvalidate: async (args) => {
+        rpcCalls.push(args);
+        if (opts.rpcOutcome) return opts.rpcOutcome;
+        // The fake models the real RPC's semantics: one transaction —
+        // either both writes land ("changed") or NOTHING does. A stale
+        // echo (wrong project id or regen count) is the P0121 raise,
+        // surfaced as "conflict"; no partial write is representable
+        // because the fake records nothing else on that path.
+        const active = opts.activeProject ?? null;
+        if (
+          !active ||
+          args.expectedProjectId !== active.id ||
+          args.expectedRegenCount !== active.aiRegenerationCount
+        ) {
+          return "conflict";
+        }
+        return "changed";
+      },
     }),
   };
-  return { writes, deps };
+  return { writes, rpcCalls, deps };
 }
 
 const CHILD_ID = "3b241101-e2bb-4255-8caf-4136c566a962";
@@ -356,6 +393,14 @@ describe("miniapp-core relies on RLS, not the service role", () => {
     expect(code).not.toMatch(/supabaseAdmin/);
     expect(code).not.toContain('"use server"');
   });
+
+  it("the real RPC path maps 40P01 (deadlock_detected) to the conflict verdict, never generic failed", () => {
+    // Belt and braces under the RPC's standardized lock order: if a
+    // deadlock still occurs, Postgres killed one transaction and nothing
+    // was applied — exactly the conflict contract (refresh guidance).
+    const code = stripComments(read("../funnel/miniapp-core.ts"));
+    expect(code).toMatch(/error\.code === "40P01"\) return "conflict";/);
+  });
 });
 
 describe("confirmDoorCore refuses a child past the doors", () => {
@@ -415,6 +460,216 @@ describe("confirmDoorCore and the edit horizon (reconnect U7, R13)", () => {
     expect(core).toMatch(/\.in\("applicant_state", \["added", "project_created"\]\)/);
     // Zero rows on a row the session just loaded resolves to "locked".
     expect(core).toMatch(/"locked"/);
+  });
+});
+
+/* ───────────────── door change on revisit (reconnect U8, R6/R7) ───────────────── */
+
+describe("doorChangeNeedsConfirm — the dialog-trigger predicate (reconnect U8)", () => {
+  it("fires only for an actually-different door WITH a composed project at stake", () => {
+    expect(
+      doorChangeNeedsConfirm({ tappedSlug: "givers", confirmedSlug: "makers", hasComposedProject: true })
+    ).toBe(true);
+  });
+
+  it("a same-door re-walk NEVER triggers the dialog — the compare-against-server-fact rule", () => {
+    expect(
+      doorChangeNeedsConfirm({ tappedSlug: "makers", confirmedSlug: "makers", hasComposedProject: true })
+    ).toBe(false);
+  });
+
+  it("pre-compose door changes keep the silent reset — no project, no dialog", () => {
+    expect(
+      doorChangeNeedsConfirm({ tappedSlug: "givers", confirmedSlug: "makers", hasComposedProject: false })
+    ).toBe(false);
+    expect(
+      doorChangeNeedsConfirm({ tappedSlug: "givers", confirmedSlug: null, hasComposedProject: false })
+    ).toBe(false);
+  });
+
+  it("a project with no recorded confirmed door still asks — retiring it is what needs consent", () => {
+    expect(
+      doorChangeNeedsConfirm({ tappedSlug: "givers", confirmedSlug: null, hasComposedProject: true })
+    ).toBe(true);
+  });
+});
+
+const ACTIVE_PROJECT = {
+  id: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  aiRegenerationCount: 1,
+};
+
+const projectChild = {
+  id: "c1",
+  firstName: "Maya",
+  grade: 7,
+  groupSlug: "makers",
+  applicantState: "project_created",
+  isFirstChild: true,
+};
+
+const changeInput = {
+  childId: CHILD_ID,
+  slug: "givers",
+  expectedProjectId: ACTIVE_PROJECT.id,
+  expectedRegenCount: ACTIVE_PROJECT.aiRegenerationCount,
+};
+
+describe("changeDoorCore — atomic door change + project retirement (reconnect U8)", () => {
+  it("happy path: door change with a project goes through the RPC exactly once — no plain write beside it", async () => {
+    const { writes, rpcCalls, deps } = fakeDeps({
+      child: projectChild,
+      activeProject: ACTIVE_PROJECT,
+    });
+    const out = await changeDoorCore(changeInput, deps);
+    expect(out).toEqual({ kind: "changed", slug: "givers", previousSlug: "makers" });
+    // ONE RPC call carrying the ECHO — and zero writeGroup calls: the
+    // transaction is the RPC's, not a client-side sequence that could
+    // half-apply.
+    expect(rpcCalls).toEqual([
+      {
+        childId: "c1",
+        slug: "givers",
+        expectedProjectId: ACTIVE_PROJECT.id,
+        expectedRegenCount: 1,
+      },
+    ]);
+    expect(writes).toEqual([]);
+  });
+
+  it("stale echo (concurrent regen moved the counter) → conflict, and NOTHING was applied", async () => {
+    // The dialog displayed count 1; a second tab regenerated to 2 before
+    // accept. The fake models the RPC's CAS: the raise rolls the whole
+    // transaction back — one RPC call, zero other writes, no partial state.
+    const { writes, rpcCalls, deps } = fakeDeps({
+      child: projectChild,
+      activeProject: { ...ACTIVE_PROJECT, aiRegenerationCount: 2 },
+    });
+    const out = await changeDoorCore(changeInput, deps);
+    expect(out).toEqual({ kind: "conflict" });
+    expect(rpcCalls).toHaveLength(1);
+    expect(writes).toEqual([]);
+  });
+
+  it("an active project with NO echo → conflict BEFORE any call — no dialog named this project", async () => {
+    const { writes, rpcCalls, deps } = fakeDeps({
+      child: projectChild,
+      activeProject: ACTIVE_PROJECT,
+    });
+    const out = await changeDoorCore({ childId: CHILD_ID, slug: "givers" }, deps);
+    expect(out).toEqual({ kind: "conflict" });
+    expect(rpcCalls).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it("no active project + NO echo → the plain conditional write (no RPC) — the cheap tier", async () => {
+    const a = fakeDeps({ child: projectChild, activeProject: null });
+    expect(await changeDoorCore({ childId: CHILD_ID, slug: "givers" }, a.deps)).toEqual({
+      kind: "changed",
+      slug: "givers",
+      previousSlug: "makers",
+    });
+    expect(a.writes).toEqual([{ childId: "c1", slug: "givers" }]);
+    expect(a.rpcCalls).toEqual([]);
+  });
+
+  it("an echo with NO active project → conflict, NOTHING written — authorize the snapshot, refuse stale", async () => {
+    // The version-echo lesson: the dialog's accept authorized retiring a
+    // SPECIFIC snapshot, and the server no longer holds that fact (another
+    // tab retired it). The earlier deviation proceeded here because "the
+    // authorized outcome results anyway" — that accepted an authorization
+    // no current fact backs. Refuse with refresh guidance instead.
+    const b = fakeDeps({ child: projectChild, activeProject: null });
+    expect(await changeDoorCore(changeInput, b.deps)).toEqual({ kind: "conflict" });
+    expect(b.writes).toEqual([]);
+    expect(b.rpcCalls).toEqual([]);
+  });
+
+  it("an echo naming a DIFFERENT project than the active one → conflict BEFORE the RPC", async () => {
+    // Retired-and-recomposed in another tab: an active row exists but it is
+    // not the one the dialog named. The id disagreement is already decisive
+    // client-of-the-database — refuse without asking (the RPC's CAS would
+    // only conflict anyway), nothing written.
+    const { writes, rpcCalls, deps } = fakeDeps({
+      child: projectChild,
+      activeProject: { id: "0f8fad5b-d9cb-469f-a165-70867728950e", aiRegenerationCount: 0 },
+    });
+    expect(await changeDoorCore(changeInput, deps)).toEqual({ kind: "conflict" });
+    expect(rpcCalls).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it("same door → unchanged: zero writes, zero RPC calls — a re-walk can never retire anything", async () => {
+    const { writes, rpcCalls, deps } = fakeDeps({
+      child: projectChild,
+      activeProject: ACTIVE_PROJECT,
+    });
+    const out = await changeDoorCore({ ...changeInput, slug: "makers" }, deps);
+    expect(out).toEqual({ kind: "unchanged" });
+    expect(writes).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("maps the RPC's verdicts distinctly: locked and failed", async () => {
+    for (const [rpcOutcome, kind] of [
+      ["locked", "locked"],
+      ["failed", "failed"],
+    ] as const) {
+      const { deps } = fakeDeps({
+        child: projectChild,
+        activeProject: ACTIVE_PROJECT,
+        rpcOutcome,
+      });
+      expect((await changeDoorCore(changeInput, deps)).kind, rpcOutcome).toBe(kind);
+    }
+  });
+
+  it("returns the DISTINCT locked verdict for every at-or-past-submitted state, with zero calls", async () => {
+    for (const applicantState of [
+      "submitted", "in_review", "offered", "waitlisted", "deposited", "enrolled",
+    ]) {
+      const { writes, rpcCalls, deps } = fakeDeps({
+        child: { ...projectChild, applicantState },
+        activeProject: ACTIVE_PROJECT,
+      });
+      const out = await changeDoorCore(changeInput, deps);
+      expect(out.kind, String(applicantState)).toBe("locked");
+      expect(writes, String(applicantState)).toEqual([]);
+      expect(rpcCalls, String(applicantState)).toEqual([]);
+    }
+  });
+
+  it("refuses a NULL or junk state — a pre-funnel child has no funnel door to change", async () => {
+    for (const applicantState of [null, "junk"]) {
+      const { writes, rpcCalls, deps } = fakeDeps({
+        child: { ...projectChild, applicantState },
+      });
+      expect((await changeDoorCore(changeInput, deps)).kind, String(applicantState)).toBe("invalid");
+      expect(writes).toEqual([]);
+      expect(rpcCalls).toEqual([]);
+    }
+  });
+
+  it("refuses malformed input, unknown doors, missing child, unauthenticated; fails closed on reads", async () => {
+    expect((await changeDoorCore({ ...changeInput, slug: "not-a-door" }, fakeDeps().deps)).kind).toBe("invalid");
+    expect((await changeDoorCore({ ...changeInput, childId: "nope" }, fakeDeps().deps)).kind).toBe("invalid");
+    expect((await changeDoorCore({ ...changeInput, expectedRegenCount: -1 }, fakeDeps().deps)).kind).toBe("invalid");
+    expect((await changeDoorCore(changeInput, fakeDeps({ child: null }).deps)).kind).toBe("invalid");
+    expect((await changeDoorCore(changeInput, fakeDeps({ userId: null }).deps)).kind).toBe("unauthenticated");
+    expect((await changeDoorCore(changeInput, fakeDeps({ loadErrors: true }).deps)).kind).toBe("failed");
+    expect(
+      (
+        await changeDoorCore(
+          changeInput,
+          fakeDeps({ child: projectChild, activeProjectErrors: true }).deps
+        )
+      ).kind
+    ).toBe("failed");
+  });
+
+  it("no-project path still honours the edit horizon: a zero-row conditional write reads as locked", async () => {
+    const { deps } = fakeDeps({ child: projectChild, activeProject: null, writeLocked: true });
+    expect((await changeDoorCore({ childId: CHILD_ID, slug: "givers" }, deps)).kind).toBe("locked");
   });
 });
 
@@ -559,5 +814,101 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
       (shellCode.match(/disabled=\{pending\}\s*className=\{BACK_CLASSES\}/g) ?? []).length
     ).toBe(2);
     expect(shellCode).toMatch(/aria-disabled=\{pending \|\| undefined\}/);
+  });
+});
+
+describe("the door-change confirm dialog (reconnect U8) — what only a source scan can pin here", () => {
+  const shellCode = stripComments(read("../../start/child/[childId]/MiniAppShell.tsx"));
+
+  it("ONE entry point submits door writes: confirm(), the silent tier, and the dialog's accept all reach submitDoorWrite", () => {
+    // The 2026-07-24 confirmation-gate learning: a gate in a wrapper some
+    // callers skip is no gate. Exactly one call to each action, both inside
+    // submitDoorWrite; confirm() and acceptDoorChange call submitDoorWrite,
+    // never an action directly.
+    expect((shellCode.match(/changeDoorAction\(/g) ?? []).length).toBe(1);
+    expect((shellCode.match(/confirmDoorAction\(/g) ?? []).length).toBe(1);
+    // Exactly two call sites: confirm()'s ungated tiers and the dialog's
+    // accept — both downstream of confirm()'s gate.
+    expect((shellCode.match(/submitDoorWrite\(/g) ?? []).length).toBe(2);
+    expect(shellCode).toMatch(/const submitDoorWrite = \(/);
+  });
+
+  it("the dialog fires through the doorChangeNeedsConfirm rule, on the SERVER-persisted door", () => {
+    expect(shellCode).toMatch(/doorChangeNeedsConfirm\(\{/);
+    expect(shellCode).toMatch(/confirmedSlug,\s*hasComposedProject: composeView !== null/);
+  });
+
+  it("a same-door re-confirm is pure navigation — no dialog, no write, before any action", () => {
+    expect(shellCode).toMatch(
+      /if \(selected === confirmedSlug\) \{\s*setTappedSlug\(null\);\s*go\(stepNeighbour\("doors", "next"\)\);\s*return;\s*\}/
+    );
+  });
+
+  it("the dialog names and submits the SNAPSHOT, never live state", () => {
+    // What it renders is the snapshot's name…
+    expect(shellCode).toMatch(/\{doorConfirm\.projectName\}/);
+    // …and what accept submits is the snapshot, captured before the dialog
+    // closes — not composeView re-read at resolution time.
+    expect(shellCode).toMatch(
+      /const snap = doorConfirm;\s*setDoorConfirm\(null\);\s*submitDoorWrite\(snap\.slug, snap\.preselected, \{\s*projectId: snap\.projectId,\s*expectedRegenCount: snap\.expectedRegenCount,\s*\}\);/
+    );
+    // The echo the wire carries is the raw CAS token pair.
+    expect(shellCode).toMatch(/expectedProjectId: echo\.projectId/);
+    expect(shellCode).toMatch(/expectedRegenCount: echo\.expectedRegenCount/);
+  });
+
+  it("cancel is INERT — it closes the dialog and nothing else", () => {
+    expect(shellCode).toMatch(/onClick=\{\(\) => setDoorConfirm\(null\)\}\s*disabled=\{pending\}/);
+  });
+
+  it("every dialog control and the entry point are pending-guarded", () => {
+    // The 2026-07-29 pending-transitions learning: an in-flight resolution
+    // must never race a tap the user just made.
+    expect(shellCode).toMatch(/onClick=\{acceptDoorChange\}\s*disabled=\{pending\}/);
+    expect(shellCode).toMatch(/if \(!selected \|\| pending \|\| isLocked\) return;/);
+    expect(shellCode).toMatch(/if \(!doorConfirm \|\| pending\) return;/);
+  });
+
+  it("the dialog copy names what resets, with no em dashes (copy rules)", () => {
+    expect(shellCode).toContain("This will retire the current project");
+    expect(shellCode).toContain("Your child starts a fresh one behind the new door.");
+    const dialog = shellCode.slice(
+      shellCode.indexOf("CHANGE DOORS?"),
+      shellCode.indexOf("Keep this door")
+    );
+    expect(dialog.length).toBeGreaterThan(0);
+    expect(dialog).not.toContain("—");
+  });
+
+  it("conflict renders REFRESH guidance — never the generic retry copy, never a dead end", () => {
+    expect(shellCode).toMatch(/kind === "conflict"/);
+    expect(shellCode).toContain("Refresh this page to see the newest version");
+  });
+
+  it("the door-change conflict TRIGGERS the refresh itself — router.refresh() in the conflict branch", () => {
+    // The heal for both conflict dead-ends (stale dialog echo AND the
+    // stale composeView === null tab): the notice alone told the family to
+    // refresh; router.refresh() actually re-renders the server facts, and
+    // the prop-keyed re-seed folds them into composeView. Idempotent and
+    // pending-safe — refresh writes nothing.
+    expect(shellCode).toMatch(
+      /kind === "conflict"\) \{\s*setNotice\(\s*"Your project changed in another tab\. Refresh this page to see the newest version, then pick again\."\s*\);\s*router\.refresh\(\);\s*return;/
+    );
+    // The re-seed seam the refresh lands on: keyed by the CAS identity
+    // (id + raw count), never object identity — navigation re-serializes
+    // the prop, and identity alone would wipe unsaved drafts.
+    expect(shellCode).toMatch(/serverProjectKey !== seededProjectKey/);
+    expect(shellCode).toMatch(/\$\{initialProject\.id\}:\$\{initialProject\.aiRegenerationCount\}/);
+  });
+
+  it("a successful change runs the door-keyed client wipe and lands on templates", () => {
+    // The existing scoped-state reset (2026-07-28 learning) is now ONE
+    // function every door-write result path calls; success still walks
+    // doors → templates via the ladder.
+    expect(shellCode).toMatch(/const resetDoorScopedState = /);
+    expect(shellCode).toMatch(
+      /if \(result\.slug !== confirmedSlug\) resetDoorScopedState\(\);/
+    );
+    expect((shellCode.match(/go\(stepNeighbour\("doors", "next"\)\)/g) ?? []).length).toBeGreaterThanOrEqual(3);
   });
 });

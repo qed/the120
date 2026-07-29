@@ -48,8 +48,8 @@ function harness(opts: {
   modelResults?: NormalizedModelResult[];
   insertOutcome?: "inserted" | "conflict" | "failed";
   reserveOutcome?: "reserved" | "conflict" | "locked" | "error";
-  saveDraftOk?: boolean | "locked";
-  saveEditOutcome?: boolean | "locked";
+  saveDraftOk?: boolean | "locked" | "conflict";
+  saveEditOutcome?: boolean | "locked" | "conflict";
   modelId?: string | null;
 }): Harness {
   const results = [...(opts.modelResults ?? [])];
@@ -211,6 +211,37 @@ describe("composeProjectCore — gates", () => {
     if (result.kind === "exists") expect(result.view.id).toBe(PROJECT_ID);
     expect(h.generateCalls).toHaveLength(0);
     expect(h.advanced).toEqual([CHILD_ID]);
+  });
+
+  it("reconnect U8's structural regen reset: a project_created child with NO active row composes a FRESH row at count 0", async () => {
+    // After change_door_and_invalidate_project retires the project
+    // ('abandoned'), the child re-enters compose exactly here: state
+    // project_created, no active row. The INSERT path runs — a NEW row
+    // whose ai_regeneration_count is the column default — so the regen
+    // allowance resets structurally, with no hand-rolled counter write to
+    // drift. This is the deferred plan decision, landed as construction.
+    const h = harness({
+      child: { ...child, applicantState: "project_created" },
+      modelResults: [respond(goodObject)],
+    });
+    const result = await composeProjectCore(composeInput, h.deps);
+    expect(result.kind).toBe("composed");
+    if (result.kind !== "composed") return;
+    expect(result.view.regenerationsLeft).toBe(2);
+    expect(result.view.aiRegenerationCount).toBe(0);
+    expect(h.events[0]).toBe("insert");
+  });
+
+  it("the view carries the RAW counter beside the derived allowance — the door-change CAS echo (reconnect U8)", async () => {
+    // The echo must be the raw fact, not a value re-derived from
+    // regenerationsLeft (raw-vs-resolved): the RPC's predicate is
+    // ai_regeneration_count = <echo>.
+    const h = harness({ child, activeProject: { ...projectRow, aiRegenerationCount: 1 } });
+    const result = await composeProjectCore(composeInput, h.deps);
+    expect(result.kind).toBe("exists");
+    if (result.kind !== "exists") return;
+    expect(result.view.aiRegenerationCount).toBe(1);
+    expect(result.view.regenerationsLeft).toBe(1);
   });
 });
 
@@ -477,6 +508,69 @@ describe("the edit horizon (reconnect U7, R13) — DB refusals map to the DISTIN
       "utf8"
     );
     expect((core.match(/isEditLockedDbError\(error\)/g) ?? []).length).toBe(3);
+  });
+});
+
+describe("the retired row (reconnect U8) — writes against an abandoned project refuse, never succeed", () => {
+  // A door change in another tab retires the active row to 'abandoned'.
+  // The real-deps UPDATEs are scoped `.eq("status", "active")`, so against
+  // a retired row they match ZERO rows — surfaced by the fakes below as
+  // the "conflict" outcomes. The core must map every one to a refusal with
+  // refresh guidance: no silent success, no model spend, no retry copy.
+
+  it("regen: the reserve against a retired row → conflict, model NOT called — the attempt is not burned", async () => {
+    // Same zero-row shape as a lost CAS race; retirement now rides the
+    // same rail. The refusal happens before any model call, so the regen
+    // allowance of whatever row comes next is untouched.
+    const h = harness({ child, project: projectRow, reserveOutcome: "conflict" });
+    expect(await regenerateProjectCore({ projectId: PROJECT_ID }, h.deps)).toEqual({
+      kind: "conflict",
+    });
+    expect(h.events).toEqual(["reserve"]);
+    expect(h.generateCalls).toHaveLength(0);
+    expect(h.drafts).toHaveLength(0);
+  });
+
+  it("regen: the row retired BETWEEN reserve and save → conflict, never a success view", async () => {
+    const h = harness({
+      child,
+      project: projectRow,
+      modelResults: [respond(goodObject)],
+      saveDraftOk: "conflict",
+    });
+    expect((await regenerateProjectCore({ projectId: PROJECT_ID }, h.deps)).kind).toBe(
+      "conflict"
+    );
+  });
+
+  it("compose: the freshly-inserted row retired before the draft landed → conflict, not degraded-composed", async () => {
+    const h = harness({ child, modelResults: [respond(goodObject)], saveDraftOk: "conflict" });
+    expect((await composeProjectCore(composeInput, h.deps)).kind).toBe("conflict");
+  });
+
+  it("edit: the save against a retired row → conflict, nothing recorded, never silent success", async () => {
+    const h = harness({ project: projectRow, saveEditOutcome: "conflict" });
+    const result = await recordProjectEditCore(
+      { projectId: PROJECT_ID, project: goodObject },
+      h.deps
+    );
+    expect(result).toEqual({ kind: "conflict" });
+    expect(h.edits).toHaveLength(0);
+  });
+
+  it("the real deps scope every projects UPDATE to the ACTIVE row", () => {
+    // Enforcement scan: reserveRegeneration, saveDraft, and saveEdit each
+    // carry `.eq(\"status\", \"active\")`, and loadActiveProject reads with
+    // it — four occurrences total. A writer scoped by id alone would land
+    // on (and \"succeed\" against) a retired row.
+    const raw = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../funnel/compose-core.ts"),
+      "utf8"
+    );
+    // Comment-stripped: the WHY comments quote the predicate too, and that
+    // prose must not count as a scoped write.
+    const core = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect((core.match(/\.eq\("status", "active"\)/g) ?? []).length).toBe(4);
   });
 });
 

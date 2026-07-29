@@ -216,6 +216,26 @@ export function isEditLockedDbError(
   return (err.message ?? "").includes(EDIT_LOCKED_SIGNAL);
 }
 
+/**
+ * The door-change RPC's conflict contract, mirrored (reconnect U8):
+ * `change_door_and_invalidate_project` (20260824120000) RAISES errcode
+ * `P0121` / message `funnel_door_change_conflict` when the expected active
+ * project is not at the echoed regen count — raised, not returned, so the
+ * already-done children door write rolls back with it. The core maps it to
+ * a distinct `{kind:"conflict"}` (refresh guidance), never retry copy.
+ * Same belt-and-brace recognizer shape as the edit-lock contract above.
+ */
+export const DOOR_CHANGE_CONFLICT_SIGNAL = "funnel_door_change_conflict";
+export const DOOR_CHANGE_CONFLICT_ERRCODE = "P0121";
+
+export function isDoorChangeConflictDbError(
+  err: { code?: string | null; message?: string | null } | null | undefined
+): boolean {
+  if (!err) return false;
+  if (err.code === DOOR_CHANGE_CONFLICT_ERRCODE) return true;
+  return (err.message ?? "").includes(DOOR_CHANGE_CONFLICT_SIGNAL);
+}
+
 /* ─────────────────────────── projects (R1, R2) ─────────────────────────── */
 
 /** `projects.status`. Pinned to `projects_status_check` by the parity test. */

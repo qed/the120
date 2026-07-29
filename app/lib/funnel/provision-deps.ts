@@ -250,6 +250,16 @@ export function realProvisionDeps(owner: string): ProvisionDeps {
       return "error";
     },
 
+    holdsLease: async (childId) => {
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .select("lease_owner")
+        .eq("child_id", childId)
+        .maybeSingle();
+      if (error) return false; // unreadable = do not mint
+      return (data?.lease_owner as string | null) === owner;
+    },
+
     markWorkspaceAttempt: async (childId, email) => {
       const { data, error } = await db
         .from(CLAIM_TABLE)

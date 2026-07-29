@@ -67,6 +67,7 @@ function harness(over: {
   claimResults?: Array<"set" | "conflict" | "error">;
   reassignResults?: Array<"set" | "conflict" | "missing" | "error">;
   finishRunResult?: boolean;
+  holdsLease?: boolean;
 } = {}): Harness {
   const calls: Call[] = [];
   const finished: Harness["finished"] = [];
@@ -96,6 +97,10 @@ function harness(over: {
       calls.push(`markAttempt:${email}`);
       marked.push(email);
       return true;
+    },
+    holdsLease: async () => {
+      calls.push("holdsLease");
+      return over.holdsLease ?? true;
     },
     classifyWorkspaceUser: async () => {
       calls.push("classifyWs");
@@ -480,6 +485,16 @@ describe("driveProvisioning — the review fixes (fencing, self-adoption, refund
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out.kind).toBe("refund_parked");
     expect(h.alerts).toEqual([]);
+  });
+
+  it("a lease torn mid-run (refund racing the identity leg) stops BEFORE the auth mint — no orphaned user", async () => {
+    const h = harness({ holdsLease: false });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("deferred");
+    expect(h.calls).not.toContain("createAuthUser");
+    // The pre-flight sits between the existence read and the mint.
+    expect(h.calls).toContain("findAuthUser");
+    expect(h.calls).toContain("holdsLease");
   });
 
   it("the marker write is fenced too: a refused markWorkspaceAttempt defers instead of inserting", async () => {

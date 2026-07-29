@@ -119,6 +119,12 @@ export type ProvisionDeps = {
    *  crash between insert and state write is distinguishable from a
    *  hand-created collision on the next drive. */
   markWorkspaceAttempt: (childId: string, email: string) => Promise<boolean>;
+  /** Cheap fenced read: is the lease still OURS right now? The identity
+   *  leg's pre-flight before its external mint — the mailbox leg gets the
+   *  same collapse-the-window check from markWorkspaceAttempt, and
+   *  without this a refund tearing the lease mid-run could still mint an
+   *  orphaned auth user nothing ever records (adversarial review). */
+  holdsLease: (childId: string) => Promise<boolean>;
   /** Base-scoped probes (`like base%`), never whole-population reads —
    *  PostgREST truncates unranged selects at 1000 rows SILENTLY, and a
    *  truncated taken-set re-mints somebody's address. Over-matching longer
@@ -349,6 +355,13 @@ export async function driveProvisioning(
     if (existing !== null) {
       supabaseUserId = existing; // adopt — never create again
     } else {
+      // Pre-flight: a refund (or takeover) tearing the lease during the
+      // reads above must stop the mint HERE — the fenced finishRun would
+      // refuse later anyway, but by then the auth user would exist with
+      // its id recorded nowhere (the orphan the adversarial review named).
+      if (!(await deps.holdsLease(childId))) {
+        return { kind: "deferred", detail: "lease lost before identity mint" };
+      }
       const created = await deps.createAuthUser(email);
       if (created === "error") {
         return land(

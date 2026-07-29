@@ -82,6 +82,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let retentionResult: {
+    purged: number;
+    noticed: number;
+    skipped: number;
+    unallowlisted: number;
+  } | null = null;
   try {
     const db: Db = supabaseAdmin();
     const [projects, deposits, children] = await Promise.all([
@@ -220,9 +226,31 @@ export async function GET(req: Request) {
       console.error("[funnel/retention] allowlist audit skipped:", err);
     }
 
-    // ── U8: the provisioning lifecycle sweeps. Each is independently
-    // try/caught — a failed sweep never takes down the retention pass or
-    // its siblings, and every sweep is idempotent so the next run heals.
+    retentionResult = {
+      purged,
+      noticed,
+      skipped: plan.skipped.length,
+      unallowlisted: unallowlisted.length,
+    };
+  } catch (err) {
+    console.error("[funnel/retention]", err);
+    // A failed weekly run means the written schedule is silently unmet —
+    // a human hears about it (closing-note carried item 18).
+    await notifyOps(
+      "retention cron FAILED",
+      `The weekly retention pass threw and did nothing.\n` +
+        `(The U8 lifecycle sweeps below this pass still ran — they sit outside this failure.)\n\n` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  // ── U8: the provisioning lifecycle sweeps — OUTSIDE the retention try,
+  // so an early retention throw cannot starve them for a week (the
+  // correctness review). The HOURLY funnel-lifecycle cron is the primary
+  // cadence; this weekly repeat is belt-and-braces (all idempotent). Each
+  // sweep is independently try/caught.
+  {
+    const db = supabaseAdmin();
     const sweeps: Record<string, unknown> = {};
     try {
       sweeps.staleClaims = await sweepStaleProvisioningClaims();
@@ -271,22 +299,9 @@ export async function GET(req: Request) {
       sweeps.capacity = "skipped";
     }
 
-    return NextResponse.json({
-      ok: true,
-      purged,
-      noticed,
-      skipped: plan.skipped.length,
-      unallowlisted: unallowlisted.length,
-      sweeps,
-    });
-  } catch (err) {
-    console.error("[funnel/retention]", err);
-    // A failed weekly run means the written schedule is silently unmet —
-    // a human hears about it (closing-note carried item 18).
-    await notifyOps(
-      "retention cron FAILED",
-      `The weekly retention pass threw and did nothing.\n\n${err instanceof Error ? err.message : String(err)}`
-    );
-    return NextResponse.json({ error: "retention run failed" }, { status: 500 });
+    if (!retentionResult) {
+      return NextResponse.json({ error: "retention run failed", sweeps }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, ...retentionResult, sweeps });
   }
 }

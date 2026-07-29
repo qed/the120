@@ -283,6 +283,11 @@ export function MiniAppShell({
   const serverProjectKey = initialProject
     ? `${initialProject.id}:${initialProject.aiRegenerationCount}`
     : null;
+  // U10 fidelity (drift 13): compose is a project PAGE with an edit toggle
+  // ("Change anything" / "Done editing"), not a form of labelled textareas.
+  // Client state only — the draft itself already lives in composeDraft.
+  // Declared before the reconciliation block below, which resets it.
+  const [composeEditing, setComposeEditing] = useState(false);
   const [seededProjectKey, setSeededProjectKey] = useState(serverProjectKey);
   if (serverProjectKey !== seededProjectKey) {
     setSeededProjectKey(serverProjectKey);
@@ -295,14 +300,13 @@ export function MiniAppShell({
     if (clientKey !== serverProjectKey) {
       setComposeView(initialProject);
       setComposeDraft(initialProject?.project ?? null);
+      // The edit toggle is scoped by the same fact as the draft it edits —
+      // a reconciled project must not arrive under a stale open editor.
+      setComposeEditing(false);
     }
   }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
   const [composeDegraded, setComposeDegraded] = useState(false);
-  // U10 fidelity (drift 13): compose is a project PAGE with an edit toggle
-  // ("Change anything" / "Done editing"), not a form of labelled textareas.
-  // Client state only — the draft itself already lives in composeDraft.
-  const [composeEditing, setComposeEditing] = useState(false);
 
   // What the current `answers` were seeded FROM. Re-advancing through the
   // templates step with the SAME choice must not re-seed — a child who edited
@@ -1085,7 +1089,7 @@ export function MiniAppShell({
                 variant="secondary"
                 size="sm"
                 onClick={() => setComposeEditing((e) => !e)}
-                disabled={isLocked}
+                disabled={pending || isLocked}
               >
                 {composeEditing ? COMPOSE_UI_COPY.editOff : COMPOSE_UI_COPY.editOn}
               </Button>

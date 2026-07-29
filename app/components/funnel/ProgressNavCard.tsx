@@ -20,6 +20,7 @@
  * Surfaces that already hold a sign-out (the dashboard store) pass theirs in.
  */
 
+import { useState } from "react";
 import Wordmark from "@/app/components/Wordmark";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import type { NavCardModel } from "@/app/lib/funnel/nav-card-rules";
@@ -32,9 +33,22 @@ export function ProgressNavCard({
   /** Override for surfaces with their own sign-out (the dashboard store). */
   onSignOut?: () => void;
 }) {
-  const handleSignOut = () => {
-    if (onSignOut) onSignOut();
-    else void supabaseBrowser().auth.signOut();
+  // Await the revocation BEFORE the hard navigation: window.location.assign
+  // unloads the document and can abort an in-flight signOut network call,
+  // leaving the server-side session unrevoked (the pending-navigation
+  // lesson, docs/solutions/ui-bugs/, 2026-07-29). The latch also prevents a
+  // double-fire while the round-trip runs.
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      if (onSignOut) await onSignOut();
+      else await supabaseBrowser().auth.signOut();
+    } catch {
+      // Revocation failed or timed out; still leave the page — the local
+      // session is cleared either way and staying stuck here is worse.
+    }
     window.location.assign("/");
   };
 
@@ -70,7 +84,8 @@ export function ProgressNavCard({
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="text-muted transition-colors hover:text-red"
+                disabled={signingOut}
+                className="text-muted transition-colors hover:text-red disabled:cursor-not-allowed disabled:opacity-30"
               >
                 SIGN OUT
               </button>

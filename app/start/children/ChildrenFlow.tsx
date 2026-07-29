@@ -136,8 +136,14 @@ export function ChildrenFlow({
     });
   };
 
+  // U10 fidelity, batch B3 (audit drift 16/X7): Add Children is a
+  // marketing-register scene in the handoff — desktop body is the 960px
+  // column, the child cards flow into a responsive grid
+  // (`repeat(auto-fit,minmax(340px,1fr))` → two columns at 960; screenshot
+  // 14), and the add-form's name/grade pair sits side by side (the
+  // prototype's `1fr 1fr` field grid). Mobile is untouched below md/lg.
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
       {/* R32/X1: the floating nav card carries the bar at add_child (20%). */}
       <ProgressNavCard model={navCardForStep("add_child", null)} />
 
@@ -145,7 +151,7 @@ export function ChildrenFlow({
       <h1 className="display text-3xl text-ink">
         {children.length === 0 ? "Who's applying?" : "Your children"}
       </h1>
-      <p className="mt-3 text-base leading-7 text-ink-soft">
+      <p className="mt-3 text-base leading-7 text-ink-soft lg:max-w-[560px]">
         {children.length === 0
           ? "Their first name and the grade they're in now. You can add more later."
           : "Pick who you're working on, or add another."}
@@ -158,7 +164,7 @@ export function ChildrenFlow({
       )}
 
       {children.length > 0 && (
-        <ul className="mt-7 flex flex-col gap-2">
+        <ul className="mt-7 flex flex-col gap-2 md:grid md:grid-cols-2">
           {children.map((c) => {
             const isActive = active?.id === c.id;
             return (
@@ -213,7 +219,7 @@ export function ChildrenFlow({
         </p>
       )}
 
-      <div className="mt-8 flex flex-col gap-4 border-t border-line pt-8">
+      <div className="mt-8 flex flex-col gap-4 border-t border-line pt-8 md:grid md:grid-cols-2 md:items-start">
         <label className="flex flex-col gap-1.5">
           <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted">
             Child&apos;s first name
@@ -260,7 +266,7 @@ export function ChildrenFlow({
           )}
         </label>
 
-        {notice && <p className="text-sm leading-6 text-ink-soft">{notice}</p>}
+        {notice && <p className="text-sm leading-6 text-ink-soft md:col-span-2">{notice}</p>}
 
         {/* U10 fidelity (audit item 8): once a child exists, the add
             affordance goes SECONDARY (white with a red outline) so the
@@ -268,7 +274,7 @@ export function ChildrenFlow({
         <button
           onClick={submit}
           disabled={pending}
-          className={`mt-1 inline-flex h-11 items-center justify-center rounded-full px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-colors disabled:cursor-wait disabled:opacity-60 ${
+          className={`mt-1 inline-flex h-11 items-center justify-center rounded-full px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-colors disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start ${
             children.length === 0
               ? "bg-red text-white hover:bg-red-dark"
               : "border border-red bg-white text-red hover:bg-red/5"

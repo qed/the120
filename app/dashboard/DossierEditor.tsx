@@ -251,8 +251,13 @@ export default function DossierEditor({
 
 
 
+  // U10 fidelity, batch B3 (audit drift 16/X7): the wizard is a
+  // marketing-register scene in the handoff — its desktop body is the
+  // 960px column (screenshot 15: header card and stepper span it, the
+  // step forms' `sm:grid-cols-2` pairs match the prototype's `1fr 1fr`
+  // field grids). Mobile/tablet untouched below lg.
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    <div className="mx-auto w-full max-w-3xl px-6 py-10 lg:max-w-[960px]">
       {/* U10 fidelity (audit X1/X2, item 11f): the wizard's top bar IS the
           floating nav card — the 80/90/96/100 rungs finally consumed, plus
           NAME · SIGN OUT from the wizard on. Replaces DashHeader in the
@@ -283,7 +288,7 @@ export default function DossierEditor({
             Status · {statusMeta(child.status).label}
           </p>
         </div>
-        <Meter value={pct} className="w-full sm:w-56" />
+        <Meter value={pct} className="w-full sm:w-56 lg:w-72" />
       </div>
 
       {locked && (

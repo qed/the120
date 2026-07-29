@@ -106,8 +106,14 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
     });
   };
 
+  // U10 fidelity, batch B3 (audit drift 16/X7): the explainer/capture is a
+  // marketing-register scene in the handoff — its desktop body is the 960px
+  // column (`.fp-appframe.is-desktop .fp-appbody{max-width:960px}`), with
+  // the nav card spanning it and the text/form keeping their own 440/430px
+  // measures, left-aligned (screenshot 13 + the prototype's inline
+  // max-widths). Mobile is untouched below lg.
   return (
-    <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
       {/* R32/X1: the floating nav card runs from the first explainer through
           submission — the bar lives inside it, never bare in the column. */}
       <ProgressNavCard model={navCardForStep(step, null)} />
@@ -144,7 +150,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           <h1 className="display mt-3 text-3xl text-ink">
             {explainer.headline}
           </h1>
-          <p className="mt-4 text-base leading-7 text-ink-soft">{explainer.body}</p>
+          <p className="mt-4 text-base leading-7 text-ink-soft lg:max-w-[440px]">{explainer.body}</p>
           <button
             onClick={() => setStage((s) => (s + 1) as Stage)}
             className="mt-8 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
@@ -159,11 +165,11 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           <h1 className="display text-3xl text-ink">
             Where should we send it?
           </h1>
-          <p className="mt-3 text-base leading-7 text-ink-soft">
+          <p className="mt-3 text-base leading-7 text-ink-soft lg:max-w-[430px]">
             So you can pick this up on any device, and see what your child builds.
           </p>
 
-          <div className="mt-7 flex flex-col gap-4">
+          <div className="mt-7 flex flex-col gap-4 lg:max-w-[430px]">
             <Field
               label="Your first name"
               value={fields.firstName}
@@ -203,7 +209,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           </div>
 
           {outcome === "existing" && (
-            <p className="mt-5 rounded-xl border border-line bg-white p-4 text-sm leading-6 text-ink-soft">
+            <p className="mt-5 rounded-xl border border-line bg-white p-4 text-sm leading-6 text-ink-soft lg:max-w-[430px]">
               You already have an application with us.{" "}
               <Link href="/dashboard" className="text-red underline underline-offset-4">
                 Sign in
@@ -216,7 +222,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
             // can hit the per-IP bound, and a returning family would otherwise
             // never learn they already have an account. Always offer the door
             // the old modal always offered.
-            <p className="mt-5 text-sm leading-6 text-ink-soft">
+            <p className="mt-5 text-sm leading-6 text-ink-soft lg:max-w-[430px]">
               That&apos;s a few tries in a short window — give it a couple of minutes.
               Already have an application?{" "}
               <Link href="/dashboard" className="text-red underline underline-offset-4">
@@ -226,7 +232,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
             </p>
           )}
           {outcome === "failed" && (
-            <p className="mt-5 text-sm leading-6 text-ink-soft">
+            <p className="mt-5 text-sm leading-6 text-ink-soft lg:max-w-[430px]">
               Something went wrong on our end. Try that again in a moment.
             </p>
           )}
@@ -237,7 +243,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           <button
             onClick={submit}
             disabled={busy}
-            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:bg-line-strong disabled:hover:bg-line-strong"
+            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:bg-line-strong disabled:hover:bg-line-strong lg:max-w-[430px]"
           >
             {pending ? "One moment…" : "Next Step →"}
           </button>

@@ -1,5 +1,12 @@
 # NEXT SESSION — the funnel wrap: the three migration units
 
+> **Where to work (changed 2026-07-29):** `C:\Users\pkupe\Aardvark\120-The120`.
+> The `120-funnel` worktree is gone and the two-lane setup is retired — see
+> `docs/LANES.md`. One working tree, ordinary feature branches. Note that
+> `main` used to be protected structurally (git refuses to check out a
+> branch already checked out in another worktree); that guarantee left with
+> the second worktree, so branch from `origin/main` deliberately.
+
 *Written 2026-07-28. Units 1, 2, 4, and 5 of
 `docs/plans/2026-07-28-003-feat-funnel-wrap-execution-plan.md` are merged
 (PRs #99–#102). Suite on origin/main: 140 files / 3,715 tests; tsc, build

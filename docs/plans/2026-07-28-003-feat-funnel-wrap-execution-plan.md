@@ -598,7 +598,7 @@ W12c) and prove the allowlist test can fail.
 address; guard suite green with mutation cases; no `REVIEWED_CALL_SITES`
 entries remain for the forms.
 
-- [ ] **Unit 6: Workspace + Supabase provisioning core (W10, W10a, W11, W11a, W13a, W15 ledger)**
+- [x] **Unit 6: Workspace + Supabase provisioning core (W10, W10a, W11, W11a, W13a, W15 ledger)** — merged PR #109 (part 1: pure rules) + PR #113 (part 2: core, migrations `20260817120000`/`20260818120000` applied+verified, claim-first webhook). Four-agent review findings all fixed pre-merge (lease fencing, self-mailbox adoption via intent marker, cascade→set-null FK, refund parking); admin email-change mail-safety verified empirically. Carried to U7/U8: no driver wired yet (by design); released/child_deleted rows need the U8 suspend sweep; U8's ledger writer must re-read local_part in-transaction.
 
 **Goal:** A paid child gets a platform identity and a real
 `first.last@the120.school` mailbox, idempotently, with every failure

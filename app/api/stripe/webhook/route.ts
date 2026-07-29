@@ -62,30 +62,34 @@ function realDeps(): WebhookDeps {
       return !error;
     },
     markRefunded: async (paymentIntent) => {
-      // ZERO rows is a FAILURE, not a success: Stripe does not order
-      // deliveries, and a refund arriving before its `completed` would
-      // otherwise be acknowledged against nothing and lost forever — the
-      // family's money back, the books showing a paid seat (both U14
-      // reviewers). Returning false answers non-200 so Stripe retries the
-      // refund until the deposit row exists. (Residual, documented: a
-      // refund for a session whose row NEVER lands — the double-paid
-      // second session — retries to exhaustion; the log below is the
-      // staff signal.)
-      const { data, error } = await db
-        .from("deposits")
-        .update({ status: "refunded", refunded_at: new Date().toISOString() })
-        .eq("stripe_payment_intent", paymentIntent)
-        .select("stripe_session_id");
+      // U8 (W15): ONE SQL transaction — the refund mark, the claim's flip
+      // to suspend_pending, and the never-reissue ledger insert commit or
+      // roll back together (deposit_refund_release RPC). The refund mark
+      // is the effective dedupe stamp: separate PostgREST calls after it
+      // would be lost forever on a crash, because the replayed refund
+      // no-ops and Stripe stops retrying.
+      //
+      // 'no_deposit' keeps the zero-rows-is-FAILURE lesson exactly: Stripe
+      // does not order deliveries, and a refund arriving before its
+      // `completed` must answer non-200 and retry until the row lands.
+      // (Residual, documented: a refund for a session whose row NEVER
+      // lands — the double-paid second session — retries to exhaustion;
+      // the log below is the staff signal.)
+      const { data, error } = await db.rpc("deposit_refund_release", {
+        p_payment_intent: paymentIntent,
+      });
       if (error) {
-        console.error("[stripe/webhook] refund update failed:", error.message);
+        console.error("[stripe/webhook] refund release failed:", error.message);
         return false;
       }
-      if ((data ?? []).length === 0) {
+      if (data === "no_deposit") {
         console.error(
           `[stripe/webhook] refund matched ZERO rows for intent ${paymentIntent} — retrying until the deposit lands`
         );
         return false;
       }
+      // 'released' or 'noop_replay' — both acknowledged; exactly one
+      // ledger row exists either way (ON CONFLICT DO NOTHING).
       return true;
     },
     linkAttempt: async (attemptId, sessionId) => {

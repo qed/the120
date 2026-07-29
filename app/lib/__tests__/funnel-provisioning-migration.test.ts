@@ -208,6 +208,56 @@ describe("the fencing migration (review follow-up)", () => {
   });
 });
 
+describe("the refund-release RPC (W15, U8) — one transaction or nothing", () => {
+  const REFUND = "supabase/migrations/20260821120000_funnel_refund_release.sql";
+  const sql = () => read(REFUND);
+  const fn = () =>
+    /create or replace function public\.deposit_refund_release[\s\S]*?\$\$;/.exec(sql())![0];
+
+  it("the refund mark, the claim flip, and the ledger insert live in ONE function body", () => {
+    const body = fn();
+    expect(body).toContain("update public.deposits");
+    expect(body).toContain("set state = 'suspend_pending'");
+    expect(body).toContain("insert into public.funnel_released_aliases");
+  });
+
+  it("a replayed refund is exactly-one-ledger-row idempotent", () => {
+    expect(fn()).toContain("on conflict (local_part) do nothing");
+    expect(fn()).toContain("'noop_replay'");
+  });
+
+  it("out-of-order delivery answers no_deposit — the zero-row-refund lesson survives the rewrite", () => {
+    expect(fn()).toContain("'no_deposit'");
+  });
+
+  it("the claim's lease is TORN UP in the same statement — a running drive's fenced writes then refuse", () => {
+    const flip = /set state = 'suspend_pending'[\s\S]*?where child_id = v_child/.exec(fn());
+    expect(flip).not.toBeNull();
+    expect(flip![0]).toContain("lease_owner = null");
+  });
+
+  it("the ledger records the local part read INSIDE the transaction (FOR UPDATE precedes the insert)", () => {
+    const body = fn();
+    const lockAt = body.indexOf("for update", body.indexOf("funnel_student_provisioning"));
+    const insertAt = body.indexOf("insert into public.funnel_released_aliases");
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(insertAt).toBeGreaterThan(lockAt);
+  });
+
+  it("carries the deposit_fulfil grant posture", () => {
+    expect(sql()).toContain(
+      "revoke all on function public.deposit_refund_release(text) from public, anon, authenticated"
+    );
+    expect(sql()).toContain(
+      "grant execute on function public.deposit_refund_release(text) to service_role"
+    );
+  });
+
+  it("adds workspace_suspended_at idempotently", () => {
+    expect(sql()).toContain("add column if not exists workspace_suspended_at");
+  });
+});
+
 describe("idempotency — every statement re-runnable", () => {
   const sql = read(MIGRATION);
 

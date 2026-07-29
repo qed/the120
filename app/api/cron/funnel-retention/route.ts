@@ -8,6 +8,14 @@ import {
 } from "@/app/lib/funnel/retention-rules";
 import { unallowlistedStaffAddresses } from "@/app/lib/auth-mail-guard";
 import { isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
+import {
+  sweepOverdueForwarding,
+  sweepStaleProvisioningClaims,
+  sweepSuspendPendingClaims,
+} from "@/app/lib/funnel/provision-deps";
+import { capacityAlarm } from "@/app/lib/funnel/deposit-rules";
+import { SEATS_TOTAL } from "@/app/lib/site";
+import { FOUNDING_COMMITMENTS } from "@/app/lib/seats";
 
 /** Page-walk every auth user and ask which domain accounts the guard is
  *  refusing that it should not be. perPage is explicit: the admin API
@@ -212,12 +220,64 @@ export async function GET(req: Request) {
       console.error("[funnel/retention] allowlist audit skipped:", err);
     }
 
+    // ── U8: the provisioning lifecycle sweeps. Each is independently
+    // try/caught — a failed sweep never takes down the retention pass or
+    // its siblings, and every sweep is idempotent so the next run heals.
+    const sweeps: Record<string, unknown> = {};
+    try {
+      sweeps.staleClaims = await sweepStaleProvisioningClaims();
+    } catch (err) {
+      console.error("[funnel/retention] stale-claim sweep threw:", err);
+      sweeps.staleClaims = "skipped";
+    }
+    try {
+      sweeps.forwarding = await sweepOverdueForwarding();
+    } catch (err) {
+      console.error("[funnel/retention] forwarding sweep threw:", err);
+      sweeps.forwarding = "skipped";
+    }
+    try {
+      // W15: the mailbox lifecycle close (suspend_pending → released,
+      // plus released/child_deleted rows with a never-darkened mailbox).
+      sweeps.suspend = await sweepSuspendPendingClaims();
+    } catch (err) {
+      console.error("[funnel/retention] suspend sweep threw:", err);
+      sweeps.suspend = "skipped";
+    }
+    try {
+      // The U2 carry: capacity reconciliation, independent of any single
+      // webhook invocation. The inline over-capacity page is best-effort —
+      // a serverless timeout between the fulfil write and the 200 loses it
+      // forever (the retry is a replay_noop and can never re-alert). This
+      // standing check is the durable healing; while over capacity it
+      // pages on every run, deliberately (the DOUBLE-PAID precedent:
+      // repetition of a rare, money-owed signal is the safe direction).
+      const { data } = await db.rpc("seats_claimed");
+      const claimed = typeof data === "number" ? data : null;
+      if (capacityAlarm(claimed, SEATS_TOTAL, FOUNDING_COMMITMENTS)) {
+        const sellable = Math.max(0, SEATS_TOTAL - FOUNDING_COMMITMENTS);
+        await notifyOps(
+          "Capacity reconciliation — seats over-allocated",
+          `seats_claimed=${claimed} of ${sellable} sellable.\n` +
+            `Standing weekly check (U8), independent of the webhook's inline page. ` +
+            `Review the offer queue and waitlist before offering again.`
+        );
+        sweeps.capacity = "alerted";
+      } else {
+        sweeps.capacity = claimed === null ? "unreadable" : "below";
+      }
+    } catch (err) {
+      console.error("[funnel/retention] capacity reconciliation threw:", err);
+      sweeps.capacity = "skipped";
+    }
+
     return NextResponse.json({
       ok: true,
       purged,
       noticed,
       skipped: plan.skipped.length,
       unallowlisted: unallowlisted.length,
+      sweeps,
     });
   } catch (err) {
     console.error("[funnel/retention]", err);

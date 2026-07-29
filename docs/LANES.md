@@ -1,103 +1,52 @@
-# Lanes
+# Lanes — RETIRED 2026-07-29
 
-Two workstreams run in parallel on one machine, in two git worktrees of this repo, each
-driven by its own Claude Code session. This file is the contract between them. **Both
-lanes read it first, every session.**
+**The two-lane setup is over. One repository, one working tree, ordinary
+feature branches.** The second worktree
+(`C:\Users\pkupe\Aardvark\120-funnel`) has been removed and everything now
+happens in `C:\Users\pkupe\Aardvark\120-The120`.
 
-## The lanes
+Nothing below is operative. It is kept because the shared-state rules it
+discovered are still true — they were never really about lanes, and three
+of the four still bind a single worker.
 
-| Lane | Worktree | Owns | Dev port | Handoff prompt |
-|---|---|---|---|---|
-| **A — Staff Front Door** | `C:\Users\pkupe\Aardvark\120-The120` | `app/staff/`, `app/lib/staff-bar/`, `app/crm/`, `app/fp/fw/` | 3000 | `docs/plans/NEXT-SESSION-unit-N.md` |
-| **B — First Profit funnel** | `C:\Users\pkupe\Aardvark\120-funnel` | marketing components, `app/dashboard/`, `app/start/`, `app/groups/`, `app/first-profit/` | 3001 | `docs/plans/NEXT-SESSION-funnel-unit-N.md` |
+## What still applies, lanes or no lanes
 
-Lane A is the primary worktree and the only one that may check out `main`. That is a
-structural guarantee, not a convention: git refuses to check out a branch that is already
-checked out elsewhere, so **Lane B cannot commit to main even by accident.**
+**Migrations apply to production the moment they are authored.** Same live
+Supabase project, no staging copy, no rehearsal window, no undo. Before
+authoring one, still query the live list for the next free version:
 
-Plans: Lane A `docs/plans/2026-07-27-001-feat-staff-front-door-plan.md`, Lane B
-`docs/plans/2026-07-27-002-feat-first-profit-funnel-plan.md`.
-Requirements: Lane A `docs/brainstorms/2026-07-26-staff-front-door-requirements.md`,
-Lane B `docs/brainstorms/2026-07-27-first-profit-funnel-requirements.md`.
-
-## The four shared-state rules
-
-Worktrees isolate files. They do not isolate the things that actually cause damage. These
-four do.
-
-### 1. Migrations — Lane B owns them
-
-Both worktrees point at the **same live Supabase project**, and this repo's standing rule
-is that migrations apply to production the moment they are authored. There is no staging
-copy and no rehearsal window.
-
-**`supabase/MIGRATION-LOCK.md` names the sole migration author** — that file is the
-authority, not this paragraph (it moved twice on 2026-07-27: Lane A held it for the
-staff plan's Units 6–10 with Peter's approval, then handed it back). A lane that is
-not the named holder stops and asks Peter before authoring one; a lane taking the
-lock changes the holder line in the same PR as the migration. One breach is on
-record (funnel U3 authored+applied while Lane A held it — surfaced to Peter,
-schemas verified compatible after the fact): the file only works if both lanes
-read it before every migration, which is why this rule now points there instead of
-naming a lane.
-
-This is a rule, not a mechanism. It is written down in three places (here, the lock file,
-and each lane's handoff prompt) because nothing in the toolchain can enforce it.
-
-### 2. The Stripe CLI listener — single holder
-
-Only one `stripe listen` can hold `STRIPE_WEBHOOK_SECRET` at a time. **Lane B holds it**,
-because it owns checkout (funnel U10). Lane A does not need it. If Lane A ever does, the
-lanes swap explicitly rather than both running one.
-
-### 3. `app/lib/__tests__/vitest-include-coverage.test.ts` — append, never interleave
-
-This allowlist is the one file both lanes are guaranteed to touch, because both add tests
-in new directories. Each lane appends to **its own commented block at the end of the
-list**, never alphabetically into the middle. Interleaved edits produce a real merge
-conflict; appended blocks produce none.
-
-```ts
-// --- Lane A: Staff Front Door ---
-"app/staff/**/__tests__/**",
-// --- Lane B: First Profit funnel ---
-"app/start/**/__tests__/**",
+```sql
+select version, name from supabase_migrations.schema_migrations
+order by version desc limit 5;
 ```
 
-### 4. Rebase before the PR
+The repo's file listing is not the truth — three version collisions are on
+record, and only that query catches an applied-but-unmerged one.
+`supabase/MIGRATION-LOCK.md` keeps the incident history for that reason;
+the holder line is now moot, but the ritual is not.
 
-Both lanes branch from `origin/main`, which moves under both. Each lane rebases on
-`origin/main` immediately before opening its PR. Whichever lane merges second rebases
-again. One PR per unit, squash merge — unchanged from how this repo already works.
+**Every statement idempotent, additive-only while code is live.** A
+migration lands before the code that depends on it, never after.
 
-## Why this pairing is safe
+**`main` is protected by workflow, not by git.** The old structural
+guarantee — git refuses to check out a branch already checked out in
+another worktree, so the funnel lane *could not* commit to main by
+accident — is gone with the second worktree. Branch from `origin/main`
+and open a PR; nothing stops a direct commit to main any more except
+choosing not to.
 
-The two lanes are almost perfectly disjoint. Lane A touches `app/lib/staff-bar/`,
-`app/staff/`, `app/crm/(app)/layout.tsx`, and `app/fp/fw/`. Lane B touches marketing
-components, `app/dashboard/`, and new routes that do not exist yet. Outside the allowlist
-file above, they do not share a single source file.
+## What the lanes were
 
-That was verified, not assumed, and it is the reason this pairing was chosen over splitting
-the funnel into two lanes. **If a future lane pairing overlaps more, re-verify before
-starting** — the isolation is a property of these two workstreams, not of worktrees.
+| Lane | Worktree | Owned |
+|---|---|---|
+| **A — Staff Front Door** | `120-The120` | `app/staff/`, `app/lib/staff-bar/`, `app/crm/`, `app/fp/fw/` |
+| **B — First Profit funnel** | `120-funnel` | marketing components, `app/dashboard/`, `app/start/`, `app/groups/`, `app/first-profit/` |
 
-## Adding a lane
+Both shipped. Lane A: the Staff Front Door plan (Units 1–12, PRs #59–#77).
+Lane B: the First Profit funnel (16/17 units, PRs #66–#96) and its wrap
+(PRs #99–#105, with Unit 3 waiting on its migration in PR #104).
 
-```powershell
-.\scripts\new-lane.ps1 -Name funnel -Branch feat/funnel-unit-1 -Port 3001
-```
-
-The script creates the worktree, copies `.env.local` (gitignored, holds live Stripe and
-service-role keys, so it is copied rather than symlinked and each lane may diverge), runs
-`npm ci`, and prints the dev command. A third lane costs one command and one `node_modules`.
-
-## Running a lane
-
-```powershell
-cd C:\Users\pkupe\Aardvark\120-funnel
-npm run dev -- -p 3001     # port on the command line, so package.json stays undirtied
-npm test
-```
-
-Never edit `package.json` to set a lane's port. A tracked-file edit that exists only to
-serve one worktree shows up as a phantom diff in every PR that lane opens.
+The parallelism worked, and its one real cost is worth recording: shared
+state does not respect worktree boundaries. Files were isolated; the
+database, the migration ledger, the auth user list, and production were
+not. Every incident logged in `MIGRATION-LOCK.md` came from that gap.

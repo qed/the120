@@ -1,6 +1,33 @@
-# Migration lock
+# Migration lock — NO LONGER CONTENDED (2026-07-29)
 
-**Current holder: Lane B — First Profit funnel.**
+**The two-lane setup is retired** (see `docs/LANES.md`). The second
+worktree is gone, so there is one working tree and no second author to
+race. The holder line below is historical.
+
+**What survives, and is not optional:** query the live ledger for the next
+free version immediately before authoring a migration —
+
+```sql
+select version, name from supabase_migrations.schema_migrations
+order by version desc limit 5;
+```
+
+Three collisions are recorded below. The last one was invisible to the
+repo's file listing because the other lane's migration was applied but
+unmerged, and only that query would have caught it. A single worker can
+still collide with a version applied by hand in the dashboard, or by a
+branch that has not merged yet — the ritual costs five seconds and the
+failure mode is a silently corrupted `db push` diff for every future
+migration.
+
+Also unchanged: authoring **is** applying (no staging, no undo), every
+statement idempotent, additive-only while code is live.
+
+---
+
+*Historical below this line.*
+
+**Holder at retirement: Lane B — First Profit funnel.**
 
 Lane A (fieldwork, FW ops/guide redesign) briefly took the lock on 2026-07-28
 with Peter's approval for exactly two migrations — now complete

@@ -57,6 +57,13 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
   const [errors, setErrors] = useState<CaptureFieldError[]>([]);
   const [outcome, setOutcome] = useState<null | "existing" | "limited" | "failed">(null);
   const [pending, startTransition] = useTransition();
+  // `pending` ends the moment the transition callback returns — which is
+  // BEFORE the browser finishes the window.location.assign navigation in the
+  // captured branch. `navigating` keeps the controls dead for the full
+  // lifetime of the redirect so a second submit (duplicate captureAction +
+  // duplicate c1 event) or a stage change mid-unload is impossible.
+  const [navigating, setNavigating] = useState(false);
+  const busy = pending || navigating;
 
   // Narrowed once, so the three explainer slides and the capture screen are
   // genuinely exclusive to the compiler rather than by convention.
@@ -72,6 +79,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
     startTransition(async () => {
       const result = await captureAction({ ...fields, source });
       if (result.kind === "captured") {
+        setNavigating(true);
         // The session is live; Add a Child is next. A full navigation rather
         // than a router push: the session cookie was just set by the Server
         // Action, and the destination is a server-rendered route that must
@@ -108,6 +116,27 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
           {percent}% · Application
         </p>
       </div>
+
+      {/* R5 (reconnect): visible back between swipes. Disabled while a
+          transition is pending — a resolving action must never race a
+          navigation the user just made (see docs/solutions/ui-bugs/
+          a-pending-transitions-resolution-must-not-override-user-navigation-2026-07-29.md). */}
+      {stage > 0 ? (
+        <button
+          onClick={() => {
+            // Backing off the capture screen retires its notices — a banner
+            // about a submission that predates the navigation must not
+            // resurface when the user walks forward again.
+            setOutcome(null);
+            setErrors([]);
+            setStage((s) => (s - 1) as Stage);
+          }}
+          disabled={busy}
+          className="mb-6 inline-flex items-center self-start font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          ← Back
+        </button>
+      ) : null}
 
       {explainer ? (
         <section>
@@ -204,7 +233,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
 
           <button
             onClick={submit}
-            disabled={pending}
+            disabled={busy}
             className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
           >
             {pending ? "One moment…" : "Start Here →"}

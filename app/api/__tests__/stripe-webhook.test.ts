@@ -144,13 +144,18 @@ describe("applyStripeEvent", () => {
     expect(h.linked).toEqual(["attempt-1"]);
   });
 
-  it("a replayed completed for the same session is a no-op", async () => {
+  it("a replayed completed for the same session writes nothing — but carries replayedPaid so a lost provisioning claim can heal", async () => {
     const h = harness({ cs_1: { status: "paid", refunded_at: null } });
     const out = await applyStripeEvent(h.deps, {
       type: "checkout.session.completed",
       session: session(),
     });
-    expect(out).toEqual({ kind: "ok" });
+    // NOT `fulfilled` (the c3 emit must never double-count a conversion) —
+    // the ids ride a separate arm that only the claim insert consumes.
+    expect(out).toEqual({
+      kind: "ok",
+      replayedPaid: { childId: "child-1", parentId: "parent-1", sessionId: "cs_1" },
+    });
     expect(h.writes).toEqual([]);
   });
 
@@ -160,6 +165,8 @@ describe("applyStripeEvent", () => {
       type: "checkout.session.completed",
       session: session(),
     });
+    // Bare ok, NO replayedPaid: a refunded family must never have a
+    // provisioning claim healed off a redelivered completed.
     expect(out).toEqual({ kind: "ok" });
     expect(h.writes).toEqual([]);
     expect(h.rows.get("cs_1")!.status).toBe("refunded");
@@ -293,8 +300,16 @@ describe("alertIfAtCapacity — the W6a page, and why a replay cannot re-fire it
 
   it("A REPLAYED completed never reads seats and never pages — replay_noop carries no fulfilled payload", async () => {
     const { deps, notified, readCount } = spyDeps(113);
-    // This is exactly what applyStripeEvent returns for a replay: ok, no payload.
-    expect(await alertIfAtCapacity(deps, { kind: "ok" }, 120, 7)).toBe("not_fulfilled");
+    // This is exactly what applyStripeEvent returns for a replay: ok, with
+    // replayedPaid but NO fulfilled — the capacity page keys on fulfilled.
+    expect(
+      await alertIfAtCapacity(
+        deps,
+        { kind: "ok", replayedPaid: { childId: "c1", parentId: "p1", sessionId: "cs_1" } },
+        120,
+        7
+      )
+    ).toBe("not_fulfilled");
     expect(readCount()).toBe(0);
     expect(notified).toEqual([]);
   });
@@ -367,6 +382,30 @@ describe("the route's source pins", () => {
     expect(sql).toContain("when unique_violation then");
     const route = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
     expect(route).toContain('rpc("deposit_fulfil"');
+  });
+
+  it("the provisioning CLAIM is the webhook's only new duty — awaited, no external calls in the request path (source pin)", () => {
+    const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    // The claim insert consumes BOTH arms — a fresh fulfilment and the
+    // replay that heals a lost claim after a non-200.
+    expect(src).toContain("outcome.fulfilled ?? outcome.replayedPaid");
+    expect(src).toContain("await ensureProvisionClaim(");
+    // A failed claim insert answers non-200 so Stripe redelivers —
+    // anchored INSIDE the failure branch, not mere text proximity (a
+    // nearby unrelated 500 must not keep this green — adversarial review).
+    expect(src).toMatch(/if \(!claimed\) \{[\s\S]{0,160}status: 500/);
+    // The legs NEVER run here: no driver, no Google, no auth-admin call.
+    expect(src).not.toContain("driveProvisioning");
+    expect(src).not.toContain("googleapis");
+    expect(src).not.toContain("createAuthUser");
+  });
+
+  it("the claim insert lands AFTER the awaited c3 emit in source order — a 500 on claim failure must not re-emit on retry", () => {
+    const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    const emitAt = src.indexOf("await emitFunnelEvent(");
+    const claimAt = src.indexOf("await ensureProvisionClaim(");
+    expect(emitAt).toBeGreaterThan(-1);
+    expect(claimAt).toBeGreaterThan(emitAt);
   });
 
   it("events without metadata (foreign sessions) are acknowledged without writes", async () => {

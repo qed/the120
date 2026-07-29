@@ -5,6 +5,7 @@ import { alertIfAtCapacity, applyStripeEvent, type WebhookDeps } from "@/app/lib
 import { SEATS_TOTAL } from "@/app/lib/site";
 import { FOUNDING_COMMITMENTS } from "@/app/lib/seats";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
+import { ensureProvisionClaim } from "@/app/lib/funnel/provision-deps";
 import { notifyOps } from "@/app/lib/ops-alert";
 
 /**
@@ -181,6 +182,22 @@ export async function POST(req: Request) {
     SEATS_TOTAL,
     FOUNDING_COMMITMENTS
   );
+  // U15 (wrap U6 part 2): the provisioning CLAIM, and only the claim —
+  // never a Google or Supabase-admin call in the request path; the legs
+  // run out-of-band under the lease RPC (arrival page, cron sweep).
+  // AWAITED, and load-bearing: a paid child with no claim row is a family
+  // nothing will ever provision. The insert is idempotent by
+  // UNIQUE(child_id), and a failure answers non-200 so Stripe redelivers —
+  // the redelivery is a replay_noop, which carries `replayedPaid` exactly
+  // so this line can heal the missing claim (a refunded row never reaches
+  // either arm).
+  const claimFor = outcome.kind === "ok" ? (outcome.fulfilled ?? outcome.replayedPaid) : undefined;
+  if (claimFor) {
+    const claimed = await ensureProvisionClaim(claimFor.childId);
+    if (!claimed) {
+      return NextResponse.json({ error: "provisioning claim failed" }, { status: 500 });
+    }
+  }
   if (outcome.kind === "double_paid" && session) {
     // A family paid twice for one seat: a refund is owed and only a human
     // can issue it. The console.error alone was the whole detection channel

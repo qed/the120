@@ -111,6 +111,19 @@ const REVIEWED_EMAIL_CHANGE_SITES: readonly { file: string; why: string }[] = [
       "namespace. Cannot route through assertNoAuthMailToFwStudent — that guard " +
       "throws on FW addresses by design.",
   },
+  {
+    file: "app/lib/funnel/provision-deps.ts",
+    why:
+      "funnel provisioning collision realign (wrap U6): after a Workspace 409 forces " +
+      "the child onto the next candidate address, the child's own dormant Supabase " +
+      "identity is realigned to that new bare student address with email_confirm:true " +
+      "— no confirmation/change mail is enqueued, and the target is by construction " +
+      "the address the DB claim just arbitrated for this same child. Cannot route " +
+      "through the default-deny guard: student addresses are exactly what it refuses. " +
+      "VERIFIED EMPIRICALLY 2026-07-29 against the live project (secure email change " +
+      "ENABLED): admin updateUserById applied the change directly — new_email null, " +
+      "email_change_sent_at null — probe user created and deleted the same minute.",
+  },
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -200,6 +213,14 @@ describe("no-auth-mail invariant — enforcement, not intention", () => {
     // FW namespace. Pin it to the actual call.
     const source = readFileSync(path.resolve(process.cwd(), "app/fp/lib/fw-ops-core.ts"), "utf8");
     expect(ADMIN_EMAIL_CHANGE.test(source), "fw-ops-core no longer changes an email").toBe(true);
+    // Same safeguard for the funnel realign site (wrap U6): the email
+    // change must carry email_confirm:true or GoTrue could enqueue a
+    // change-confirmation to a bare student address.
+    const funnel = readFileSync(
+      path.resolve(process.cwd(), "app/lib/funnel/provision-deps.ts"),
+      "utf8"
+    );
+    expect(funnel).toMatch(/updateUserById\([\s\S]{0,120}email_confirm: true/);
     expect(source).toMatch(/updateUserById\([^)]*email:[^)]*email_confirm:\s*true/);
   });
 

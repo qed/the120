@@ -54,6 +54,7 @@ The race is two writers with no ordering: the state write (children) and the gua
 
 - Whenever a trigger (or any guard) reads a *different table's* row to authorize a write, ask what happens if that row is mid-update in another transaction. If the answer matters, lock the read (`FOR SHARE`), or restructure so the predicate and the write target share a row.
 - `FOR KEY SHARE` vs `FOR SHARE`: match the lock to the column being trusted — non-key columns need `FOR SHARE`.
+- **The trigger silently defines a canonical lock order for everyone else.** Every single-statement `projects` UPDATE now acquires projects→children (its own row lock, then the trigger's `FOR SHARE`). Any multi-statement transaction touching both tables MUST take the same order — the U8 door-change RPC originally locked children→projects and was a textbook AB/BA deadlock with a concurrent regen (caught in review; fixed with a leading `SELECT … FOR UPDATE` on the projects row, plus 40P01 mapped to a retryable conflict as belt and braces).
 - Keep an emergency rollback snippet with any live guard (this repo carries no down migrations):
   ```sql
   drop trigger if exists projects_edit_horizon_guard on public.projects;

@@ -293,7 +293,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 **Verification:** with a `submitted` child, no funnel surface can mutate door/project; the UI explains why and offers the admissions route.
 
-- [ ] **Unit 8: Edit-on-revisit — tiered reset, confirm dialog, atomic invalidation**
+- [x] **Unit 8: Edit-on-revisit — tiered reset, confirm dialog, atomic invalidation** *(migration 20260824120000 applied to prod)*
 
 **Goal:** Revisiting completed steps allows editing; changing the door with a composed project shows a confirm naming what resets, then invalidates the project atomically with the door write; cheap pre-compose drafts reset silently.
 

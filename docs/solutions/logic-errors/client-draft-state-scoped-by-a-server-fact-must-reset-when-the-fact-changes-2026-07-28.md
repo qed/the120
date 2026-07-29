@@ -97,3 +97,11 @@ legitimate consumer is the resolver that checks the scope.
 - In URL-state wizards, walk the adversarial navigation orders explicitly:
   Back past a committed step, change the commitment, Forward again. Every
   step's client state must be either still-valid or visibly re-requested.
+
+## Related
+
+- `../ui-bugs/a-pending-transitions-resolution-must-not-override-user-navigation-2026-07-29.md`
+  — same component, the navigation-side complements of this rule: pending-guard
+  the affordances (an async completion must not stomp user navigation) and
+  materialize the resolved step into the URL so no stale bare-URL history
+  entry survives.

@@ -4,9 +4,12 @@ import { StartFlow } from "./StartFlow";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { readCtaSource } from "@/app/lib/cta-source";
-import { listChildrenCore } from "@/app/lib/funnel/children-core";
-import { resolveReentry, screenRoute } from "@/app/lib/funnel/session-rules";
-import { isApplicantState } from "@/app/lib/funnel/applicant-rules";
+import {
+  deriveEnrolled,
+  resolveReentry,
+  screenRoute,
+} from "@/app/lib/funnel/session-rules";
+import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
 import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
 
 /**
@@ -56,22 +59,45 @@ export default async function StartPage({
     data: { user },
   } = await supabase.auth.getUser();
   if (user) {
-    const listed = await listChildrenCore();
-    const children =
-      listed.kind === "ok"
-        ? listed.children.map((c) => ({
-            id: c.id,
-            applicantState: isApplicantState(c.applicantState) ? c.applicantState : null,
-            createdAt: c.createdAt,
-          }))
-        : [];
+    // RLS scopes both reads to the caller's own family (children:
+    // `auth.uid() = parent_id`; projects: "own children's projects") — no
+    // hand-written scope filter, per Decision 2. `status` rides along for
+    // deriveEnrolled's legacy-member rule; a failed read degrades to an
+    // empty list (children grid), same as before.
+    const { data: childRows } = await supabase
+      .from("children")
+      .select("id, applicant_state, created_at, status")
+      .order("created_at", { ascending: true });
+    const rows = childRows ?? [];
+
+    // The composed-project fact — only `project_created` children consult it
+    // (childNextScreen), so only they are asked about. An active row IS the
+    // fact; `projects_one_active_per_child` guarantees at most one each.
+    const owingIds = rows
+      .filter((c) => parseApplicantState(c.applicant_state) === "project_created")
+      .map((c) => String(c.id));
+    const composed = new Set<string>();
+    if (owingIds.length > 0) {
+      const { data: projectRows } = await supabase
+        .from("projects")
+        .select("child_id")
+        .eq("status", "active")
+        .in("child_id", owingIds);
+      for (const p of projectRows ?? []) composed.add(String(p.child_id));
+    }
+
+    const children = rows.map((c) => ({
+      id: String(c.id),
+      applicantState: parseApplicantState(c.applicant_state),
+      createdAt: String(c.created_at),
+      hasComposedProject: composed.has(String(c.id)),
+      status: c.status as unknown,
+    }));
     const dest = resolveReentry({
       hasSession: true,
       link: "none",
       hasPassword: !isFunnelProvisioned(user.app_metadata),
-      enrolled: children.some(
-        (c) => c.applicantState === "deposited" || c.applicantState === "enrolled"
-      ),
+      enrolled: deriveEnrolled(children),
       children,
     });
     // redirect() throws NEXT_REDIRECT by design and must stay OUTSIDE a try —

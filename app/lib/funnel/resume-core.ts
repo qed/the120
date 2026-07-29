@@ -85,11 +85,13 @@ import {
   type ResumeStore,
 } from "@/app/lib/funnel/resume-store";
 import {
+  deriveEnrolled,
   resolveReentry,
   screenRoute,
   type ReentryChild,
 } from "@/app/lib/funnel/session-rules";
-import { isApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { supabaseAdmin } from "@/app/lib/supabase/admin";
 
 export type ResumeDeps = {
   store: ResumeStore;
@@ -99,6 +101,16 @@ export type ResumeDeps = {
   ip: () => Promise<string>;
   /** Fire-and-forget for work that must not shape response latency. */
   defer: (fn: () => Promise<void>) => void;
+  /**
+   * Which of these children hold an active (composed) project — the fact the
+   * uniform landing needs (reconnect U1): a `project_created` child WITH a
+   * project lands on the dashboard, one WITHOUT resumes into the mini-app's
+   * compose. Null on read failure; the caller degrades to "no project"
+   * (mini-app), never a dead end.
+   */
+  loadActiveProjectChildIds: (
+    childIds: readonly string[]
+  ) => Promise<ReadonlySet<string> | null>;
 };
 
 function realDeps(): ResumeDeps {
@@ -113,6 +125,20 @@ function realDeps(): ResumeDeps {
     ip: async () => clientIp(await headers()),
     defer: (fn) => {
       void fn().catch((e) => console.error("[funnel/resume] deferred work failed:", e));
+    },
+    loadActiveProjectChildIds: async (childIds) => {
+      if (childIds.length === 0) return new Set();
+      // Service-role like the rest of the store's redemption reads: the CAS
+      // win established whose children these are (the ids come from the
+      // token row's own loadChildren), and the fresh cookie may not yet be
+      // visible to a new server client inside this same request.
+      const { data, error } = await supabaseAdmin()
+        .from("projects")
+        .select("child_id")
+        .eq("status", "active")
+        .in("child_id", childIds as string[]);
+      if (error) return null;
+      return new Set((data ?? []).map((p) => String(p.child_id)));
     },
   };
 }
@@ -319,17 +345,23 @@ export async function redeemResumeTokenCore(
     const kids = await store.loadChildren(row.parentId);
     if (!kids.ok) return await abandonClaim();
 
-    const children: ReentryChild[] = kids.rows.map((k) => ({
+    // The composed-project fact for the uniform landing. A failed read is NOT
+    // abandonClaim material: it degrades to "no project", which lands a
+    // project_created family in the mini-app (the pre-U1 behavior) — a wrong
+    // room, never a locked door.
+    const composed =
+      (await deps.loadActiveProjectChildIds(kids.rows.map((k) => k.id))) ??
+      new Set<string>();
+
+    // Extra `status` rides along for deriveEnrolled; ReentryChild ignores it.
+    const children: (ReentryChild & { status: unknown })[] = kids.rows.map((k) => ({
       id: k.id,
-      applicantState: isApplicantState(k.applicantState) ? k.applicantState : null,
+      applicantState: parseApplicantState(k.applicantState),
       createdAt: k.createdAt,
+      hasComposedProject: composed.has(k.id),
+      status: k.status,
     }));
-    const enrolled = kids.rows.some(
-      (k) =>
-        k.applicantState === "deposited" ||
-        k.applicantState === "enrolled" ||
-        k.status === "member"
-    );
+    const enrolled = deriveEnrolled(children);
 
     const dest = resolveReentry({
       hasSession: true,

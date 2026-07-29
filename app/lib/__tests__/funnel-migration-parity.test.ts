@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   APPLICANT_STATES,
+  EDIT_LOCKED_ERRCODE,
+  EDIT_LOCKED_SIGNAL,
   PROJECT_CREATION_ROUTES,
   PROJECT_STATUSES,
 } from "@/app/lib/funnel/applicant-rules";
@@ -181,5 +183,77 @@ describe("U1's migration invariants", () => {
     expect(sql).not.toMatch(/children_status_guard/);
     expect(sql).not.toMatch(/alter column status/);
     expect(sql).not.toMatch(/create (or replace )?(trigger|function)/i);
+  });
+});
+
+describe("the edit-horizon guard (reconnect U7, R13) vs its TS mirrors", () => {
+  const file = readdirSync(MIGRATIONS_DIR).find((f) =>
+    f.endsWith("_funnel_edit_horizon.sql")
+  );
+  const src = file ? readFileSync(path.join(MIGRATIONS_DIR, file), "utf8") : "";
+  const sql = src.replace(/--.*$/gm, "");
+
+  it("exists and installs a BEFORE UPDATE trigger on projects — UPDATE only, no INSERT arm", () => {
+    // No INSERT arm is deliberate: a BEFORE INSERT branch would re-open the
+    // EXCLUDED-poisoning trap (2026-07-14) the moment any writer upserts,
+    // and the one-active-per-child index already arbitrates inserts.
+    expect(file, "the Unit 7 migration file is missing").toBeTruthy();
+    expect(sql).toMatch(
+      /create trigger projects_edit_horizon_guard\s+before update on public\.projects/
+    );
+    expect(sql).not.toMatch(/before insert/i);
+    expect(sql).not.toMatch(/or insert/i);
+  });
+
+  it("carries the applicant ladder EXACTLY as APPLICANT_STATES, in order", () => {
+    // The trigger's array_position comparison is only correct while its
+    // array IS the ladder — same values, same order. A rung added to the TS
+    // ladder without editing the migration reddens this.
+    const m = /v_order text\[\] := array\[([^\]]*)\]/.exec(sql);
+    expect(m, "the guard's v_order ladder array is missing").not.toBeNull();
+    const values = [...(m as RegExpExecArray)[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    expect(values).toEqual([...APPLICANT_STATES]);
+  });
+
+  it("keys the lock by PREVIOUS-STATE CLASS — at-or-past 'submitted', not enumerated pairs", () => {
+    // The 2026-07-29 waitlist learning: the invariant is the class boundary,
+    // expressed as a position comparison, so future rungs past `submitted`
+    // are covered with no list to maintain. An unknown state fails CLOSED.
+    expect(sql).toMatch(/>=\s*array_position\(v_order, 'submitted'\)/);
+    expect(sql).toMatch(/coalesce\(array_position\(v_order, v_state\), 999\)/);
+  });
+
+  it("locks the child-state read FOR SHARE — the trigger read must block behind an in-flight submit", () => {
+    // Race hardening: under READ COMMITTED a plain SELECT could read the
+    // child's pre-submission state while a children submit is committing,
+    // letting a racing projects UPDATE land inside the commit window. FOR
+    // SHARE conflicts with the concurrent children UPDATE's row lock, so
+    // the read blocks until the submit commits, then sees 'submitted'.
+    expect(sql).toMatch(
+      /select applicant_state into v_state\s+from public\.children\s+where id = OLD\.child_id\s+for share;/
+    );
+  });
+
+  it("raises the exact error contract the TS recognizer pins — signal and errcode", () => {
+    expect(sql).toContain(`raise exception '${EDIT_LOCKED_SIGNAL}'`);
+    expect(sql).toContain(`errcode = '${EDIT_LOCKED_ERRCODE}'`);
+  });
+
+  it("exempts the service role — the retention cron must keep purging submitted+ children's projects", () => {
+    expect(sql).toMatch(/if auth\.role\(\) = 'service_role' then\s+return NEW;/);
+  });
+
+  it("the locked state is REACHABLE — the sync trigger derives 'submitted' from the dossier submit", () => {
+    // Writer coverage (the fixture-states learning): a lock nothing can
+    // trip is dead vocabulary. The submission path is children.status
+    // draft → submitted (store.tsx targeted UPDATE), which the U13 sync
+    // trigger maps onto applicant_state 'submitted'; deleting that mapping
+    // makes the horizon unreachable and this red.
+    const sync = readFileSync(
+      path.join(MIGRATIONS_DIR, "20260810120000_funnel_applicant_state_sync.sql"),
+      "utf8"
+    );
+    expect(sync).toMatch(/when 'submitted' then 'submitted'/);
+    expect(sync).toMatch(/before update of status/);
   });
 });

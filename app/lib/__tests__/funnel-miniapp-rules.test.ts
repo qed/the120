@@ -233,6 +233,9 @@ function fakeDeps(
     } | null;
     loadErrors?: boolean;
     writeFails?: boolean;
+    /** Reconnect U7: the conditional write matched zero rows — the child's
+     *  state advanced past the horizon between load and write. */
+    writeLocked?: boolean;
   } = {}
 ) {
   const writes: { childId: string; slug: string }[] = [];
@@ -253,9 +256,10 @@ function fakeDeps(
           : opts.child;
       },
       writeGroup: async (childId, slug) => {
-        if (opts.writeFails) return false;
+        if (opts.writeFails) return "failed";
+        if (opts.writeLocked) return "locked";
         writes.push({ childId, slug });
-        return true;
+        return "written";
       },
     }),
   };
@@ -356,7 +360,7 @@ describe("miniapp-core relies on RLS, not the service role", () => {
 
 describe("confirmDoorCore refuses a child past the doors", () => {
   it("confirms only at applicant_state 'added' — a stale ?step=doors URL cannot reassign a built project's group", async () => {
-    for (const applicantState of ["project_created", "submitted", "in_review", null, "junk"]) {
+    for (const applicantState of ["project_created", null, "junk"]) {
       const { writes, deps } = fakeDeps({
         child: {
           id: "c1", firstName: "Maya", grade: 7, groupSlug: "makers",
@@ -367,6 +371,50 @@ describe("confirmDoorCore refuses a child past the doors", () => {
       expect(out.kind, String(applicantState)).toBe("invalid");
       expect(writes, String(applicantState)).toEqual([]);
     }
+  });
+});
+
+/* ───────────────────── the edit horizon (reconnect U7, R13) ───────────────────── */
+
+describe("confirmDoorCore and the edit horizon (reconnect U7, R13)", () => {
+  it("returns the DISTINCT locked verdict for every at-or-past-submitted state, with zero writes", async () => {
+    // Keyed by the state CLASS (isEditLocked), not an enumerated pair list —
+    // the whole locked half of the ladder, swept.
+    for (const applicantState of [
+      "submitted", "in_review", "offered", "waitlisted", "deposited", "enrolled",
+    ]) {
+      const { writes, deps } = fakeDeps({
+        child: {
+          id: "c1", firstName: "Maya", grade: 7, groupSlug: "makers",
+          applicantState, isFirstChild: true,
+        },
+      });
+      const out = await confirmDoorCore({ childId: CHILD_ID, slug: "givers" }, deps);
+      expect(out.kind, String(applicantState)).toBe("locked");
+      expect(writes, String(applicantState)).toEqual([]);
+    }
+  });
+
+  it("stale-tab race: the child reads 'added' but the CONDITIONAL write matches zero rows → locked, nothing written", async () => {
+    // The TOCTOU the lock closes: the state advances between this tab's load
+    // and its write. The read said `added`; the row-level condition refused.
+    // The verdict must be `locked` — never generic retry copy — and the fake
+    // records no write.
+    const { writes, deps } = fakeDeps({ writeLocked: true });
+    const out = await confirmDoorCore({ childId: CHILD_ID, slug: "makers" }, deps);
+    expect(out).toEqual({ kind: "locked" });
+    expect(writes).toEqual([]);
+  });
+
+  it("the real write path is a conditional UPDATE scoped to the pre-submission class — not a check-then-write", () => {
+    // Enforcement scan (a guard with no callers is not a mechanism): the
+    // PostgREST write carries the allow-set in the statement itself, and NULL
+    // is deliberately absent — pre-funnel children are refused earlier and
+    // never legitimately hold funnel artifacts.
+    const core = stripComments(read("../funnel/miniapp-core.ts"));
+    expect(core).toMatch(/\.in\("applicant_state", \["added", "project_created"\]\)/);
+    // Zero rows on a row the session just loaded resolves to "locked".
+    expect(core).toMatch(/"locked"/);
   });
 });
 
@@ -443,5 +491,73 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
     const grid = stripComments(read("../../start/children/ChildrenFlow.tsx"));
     expect(grid).toMatch(/active\.id === children\[0\]\?\.id/);
     expect(grid).not.toMatch(/children\.length === 1 &&/);
+  });
+});
+
+describe("the locked shell (reconnect U7, R13) — what only a source scan can pin here", () => {
+  const shell = read("../../start/child/[childId]/MiniAppShell.tsx");
+  const shellCode = stripComments(shell);
+
+  it("the page computes locked from applicant_state through isEditLocked and passes it down", () => {
+    const page = stripComments(read("../../start/child/[childId]/page.tsx"));
+    expect(page).toMatch(/isEditLocked\(loaded\.child\.applicantState\)/);
+    expect(page).toMatch(/locked=\{locked\}/);
+  });
+
+  it("renders the locked notice ONCE, with the admissions off-ramp, no em dashes", () => {
+    // The copy contract: mono/uppercase label, plain explanation, and the
+    // address the site footer and the locked dossier banner already use.
+    // Counted on comment-stripped source — the micro-spec block quotes the
+    // copy too, and that prose must not read as a second render.
+    expect(shellCode).toContain("APPLICATION SUBMITTED");
+    expect((shellCode.match(/This application is submitted\./g) ?? []).length).toBe(1);
+    expect(shellCode).toContain('href="mailto:admissions@the120.school"');
+    expect(shellCode).toContain("Need to");
+    // Copy rules: no em dash anywhere in the locked notice block.
+    const notice = shellCode.slice(
+      shellCode.indexOf("This application is submitted"),
+      shellCode.indexOf("admissions@the120.school")
+    );
+    expect(notice).not.toContain("—");
+  });
+
+  it("a refused mutation flips the SAME lock — locked results never reach the generic retry copy", () => {
+    // Every mutation handler branches on kind === "locked" BEFORE its
+    // generic notice, and the branch sets the shared lock flag; count the
+    // wiring so removing one handler's branch reddens this.
+    expect((shellCode.match(/kind === "locked"/g) ?? []).length).toBe(4);
+    expect((shellCode.match(/setLockDiscovered\(true\)/g) ?? []).length).toBe(4);
+    expect(shellCode).toMatch(/const isLocked = locked \|\| lockDiscovered/);
+  });
+
+  it("keep-it under the lock NAVIGATES without writing — retrying a refused write would strand compose", () => {
+    // The locked review walk must keep moving forward: the trigger refuses
+    // every projects write for a submitted+ child, and with inputs disabled
+    // the local composeDraft can never re-converge with the server view —
+    // so a locked keepProject that still attempted the write would trap the
+    // family on compose. The branch must come BEFORE the changed check.
+    expect(shellCode).toMatch(
+      /if \(isLocked \|\| lockDiscovered\) \{\s*go\(stepNeighbour\("compose", "next"\)\);\s*return;\s*\}/
+    );
+    const lockBranch = shellCode.indexOf("if (isLocked || lockDiscovered)");
+    const changedCheck = shellCode.indexOf("const changed =");
+    expect(lockBranch).toBeGreaterThan(-1);
+    expect(changedCheck).toBeGreaterThan(-1);
+    expect(lockBranch).toBeLessThan(changedCheck);
+  });
+
+  it("locked disables the mutating surface but never the Back slot", () => {
+    // Inputs and mutating CTAs consult isLocked…
+    expect((shellCode.match(/disabled=\{isLocked\}/g) ?? []).length).toBeGreaterThanOrEqual(8);
+    expect(shellCode).toMatch(/disabled=\{!selected \|\| pending \|\| isLocked\}/);
+    expect(shellCode).toMatch(/disabled=\{pending \|\| isLocked\}/);
+    expect(shellCode).toMatch(/disabled=\{pending \|\| isLocked \|\| composeView\.regenerationsLeft === 0\}/);
+    // …while the Back slot's disabled conditions stay pending-only: the
+    // review walk must keep moving. Both Back buttons and the handoff exit
+    // anchor gate on `pending` alone.
+    expect(
+      (shellCode.match(/disabled=\{pending\}\s*className=\{BACK_CLASSES\}/g) ?? []).length
+    ).toBe(2);
+    expect(shellCode).toMatch(/aria-disabled=\{pending \|\| undefined\}/);
   });
 });

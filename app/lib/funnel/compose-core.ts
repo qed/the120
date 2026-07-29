@@ -39,7 +39,12 @@ import {
   TEMPLATES,
   quizBandForGrade,
 } from "@/app/lib/funnel/quiz-rules";
-import { canCreateProject } from "@/app/lib/funnel/applicant-rules";
+import {
+  canCreateProject,
+  isEditLocked,
+  isEditLockedDbError,
+  parseApplicantState,
+} from "@/app/lib/funnel/applicant-rules";
 import {
   assembleCompose,
   canRegenerate,
@@ -94,19 +99,27 @@ export type ComposeDeps = {
       aiModel: string | null;
     }) => Promise<{ kind: "inserted"; id: string } | { kind: "conflict" } | { kind: "failed" }>;
     /** CAS increment of ai_regeneration_count: succeeds only if the count is
-     *  still `expectedCount`. The RESERVATION happens before any model call. */
+     *  still `expectedCount`. The RESERVATION happens before any model call.
+     *  `"locked"` (reconnect U7, R13): the projects_edit_horizon_guard
+     *  trigger refused the write because the owning child is `submitted`+ —
+     *  recognized via the P0120/funnel_edit_locked contract, and DISTINCT
+     *  from `"error"` so the client never renders retry copy for it. */
     reserveRegeneration: (
       projectId: string,
       expectedCount: number
-    ) => Promise<"reserved" | "conflict" | "error">;
+    ) => Promise<"reserved" | "conflict" | "locked" | "error">;
     /** Replace the draft fields (no counter change — the reservation or the
-     *  insert already owns the slot). */
+     *  insert already owns the slot). `"locked"` = the edit-horizon trigger
+     *  refused (see reserveRegeneration). */
     saveDraft: (
       projectId: string,
       project: ComposedProject,
       aiModel: string | null
-    ) => Promise<boolean>;
-    saveEdit: (projectId: string, project: ComposedProject) => Promise<boolean>;
+    ) => Promise<boolean | "locked">;
+    saveEdit: (
+      projectId: string,
+      project: ComposedProject
+    ) => Promise<boolean | "locked">;
     advanceToProjectCreated: (childId: string) => Promise<boolean>;
   }>;
   generate: (parts: { system: string; prompt: string }) => Promise<NormalizedModelResult>;
@@ -229,6 +242,7 @@ function realDeps(): ComposeDeps {
             .eq("ai_regeneration_count", expectedCount)
             .select("id");
           if (error) {
+            if (isEditLockedDbError(error)) return "locked";
             console.error(`[funnel/compose] regen reserve failed: ${error.message}`);
             return "error";
           }
@@ -249,6 +263,7 @@ function realDeps(): ComposeDeps {
             })
             .eq("id", projectId);
           if (error) {
+            if (isEditLockedDbError(error)) return "locked";
             console.error(`[funnel/compose] draft write failed: ${error.message}`);
             return false;
           }
@@ -267,6 +282,7 @@ function realDeps(): ComposeDeps {
             })
             .eq("id", projectId);
           if (error) {
+            if (isEditLockedDbError(error)) return "locked";
             console.error(`[funnel/compose] edit write failed: ${error.message}`);
             return false;
           }
@@ -323,6 +339,10 @@ export type ComposeResult =
   | { kind: "project_cap" }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
+  /** Reconnect U7 (R13): the edit-horizon trigger refused the write — the
+   *  owning child is `submitted`+. Rendered as the locked explanation +
+   *  admissions off-ramp, never retry copy. */
+  | { kind: "locked" }
   | { kind: "failed" };
 
 const REGEN_FIELDS = ["what", "who", "offer", "spark"] as const;
@@ -443,6 +463,18 @@ export async function composeProjectCore(
       };
     }
 
+    // The edit horizon guards the INSERT path here, server-side (reconnect
+    // U7 follow-up): the projects_edit_horizon_guard trigger is BEFORE
+    // UPDATE only — deliberately, no INSERT arm — so a directly-invoked
+    // compose for a submitted+ child with NO active project would otherwise
+    // insert a fresh project past the horizon. Refuse with the same distinct
+    // locked verdict before counting, moderating, or spending anything.
+    // Unknown states parse to null (the CHECK constraint makes them
+    // impossible); the trigger stays the fail-closed authority on updates.
+    if (isEditLocked(parseApplicantState(child.applicantState))) {
+      return { kind: "locked" };
+    }
+
     // R2's cap: at most five projects per child, enforced at the only
     // creation site (dormant until a later unit ships non-active statuses,
     // but the guard belongs where the insert is).
@@ -494,7 +526,11 @@ export async function composeProjectCore(
     );
     if (run.outcome === "accept") {
       const saved = await session.saveDraft(inserted.id, run.project, deps.modelId());
-      if (saved) {
+      // The horizon closed mid-flight (a submitted+ child with no active
+      // project can only exist via staff/retention paths, but the trigger
+      // is the authority): distinct verdict, no retry copy.
+      if (saved === "locked") return { kind: "locked" };
+      if (saved === true) {
         return { kind: "composed", view: view(inserted.id, run.project, 0, group), degraded: null };
       }
       // The model draft could not be persisted; the STORED row is the
@@ -553,6 +589,8 @@ export type RegenerateResult =
   | { kind: "conflict" }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
+  /** Reconnect U7 (R13): edit horizon — see ComposeResult. */
+  | { kind: "locked" }
   | { kind: "failed" };
 
 export async function regenerateProjectCore(
@@ -601,6 +639,7 @@ export async function regenerateProjectCore(
       project.id,
       project.aiRegenerationCount
     );
+    if (reserved === "locked") return { kind: "locked" };
     if (reserved === "error") return { kind: "failed" };
     if (reserved === "conflict") return { kind: "conflict" };
 
@@ -620,6 +659,10 @@ export async function regenerateProjectCore(
     const aiModel = run.outcome === "accept" ? deps.modelId() : null;
 
     const wrote = await session.saveDraft(project.id, draft, aiModel);
+    // The reservation raced a submission: the attempt was reserved but the
+    // horizon closed before the draft landed. Locked outranks failed — the
+    // family needs the explanation, not a retry.
+    if (wrote === "locked") return { kind: "locked" };
     if (!wrote) return { kind: "failed" };
 
     return {
@@ -645,6 +688,8 @@ export type EditResult =
   | { kind: "saved"; project: ComposedProject }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
+  /** Reconnect U7 (R13): edit horizon — see ComposeResult. */
+  | { kind: "locked" }
   | { kind: "failed" };
 
 export async function recordProjectEditCore(
@@ -679,6 +724,7 @@ export async function recordProjectEditCore(
     };
     const clean = sanitizeComposed(stripped);
     const saved = await session.saveEdit(project.id, clean);
+    if (saved === "locked") return { kind: "locked" };
     if (!saved) return { kind: "failed" };
     return { kind: "saved", project: clean };
   } catch (err) {

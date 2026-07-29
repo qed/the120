@@ -8,6 +8,7 @@ import {
   resolveStep,
 } from "@/app/lib/funnel/miniapp-rules";
 import { loadActiveProjectViewCore } from "@/app/lib/funnel/compose-core";
+import { isEditLocked } from "@/app/lib/funnel/applicant-rules";
 import { MiniAppShell } from "./MiniAppShell";
 
 /**
@@ -71,12 +72,19 @@ export default async function MiniAppPage({
   if (step === "quiz") void emitFunnelEvent("quiz_start", { childId });
   if (step === "reveal") void emitFunnelEvent("reveal_viewed", { childId });
 
+  // Reconnect U7 (R13): at `submitted`+ the mini-app renders read-only.
+  // This prop is PRESENTATION — the guarantee is the write path (the
+  // projects_edit_horizon_guard trigger and the conditional children
+  // write), which refuses even when a stale tab's prop still says false.
+  const locked = isEditLocked(loaded.child.applicantState);
+
   return (
     <MiniAppShell
       child={loaded.child}
       hintSlug={rawHint ?? null}
       initialProject={initialProject}
       serverInitialStep={serverInitialStep}
+      locked={locked}
     />
   );
 }

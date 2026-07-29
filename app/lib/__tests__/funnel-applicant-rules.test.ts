@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   APPLICANT_ENTRY_STATE,
   APPLICANT_STATES,
+  EDIT_LOCKED_ERRCODE,
+  EDIT_LOCKED_SIGNAL,
+  EDIT_LOCKED_STATES,
+  isEditLocked,
+  isEditLockedDbError,
   APPLICANT_STATES_ALLOWING_RESERVE,
   APPLICANT_TRANSITIONS,
   MAX_PROJECTS_PER_CHILD,
@@ -349,6 +354,55 @@ describe("the two vocabularies overlap — which is why the gate takes both", ()
       expect(statusIndex(s as unknown as SeatStatus)).toBe(-1);
       expect(canReserveSeat(s, [])).toBe(false);
     }
+  });
+});
+
+describe("the edit horizon (reconnect U7, R13)", () => {
+  it("locks exactly the at-or-past-submitted class, across all eight states and NULL", () => {
+    // The full matrix, cell by cell — the boundary rungs named so a ladder
+    // reorder cannot silently move the horizon.
+    const expected: Record<string, boolean> = {
+      added: false,
+      project_created: false,
+      submitted: true,
+      in_review: true,
+      offered: true,
+      waitlisted: true,
+      deposited: true,
+      enrolled: true,
+    };
+    for (const s of APPLICANT_STATES) {
+      expect(isEditLocked(s), s).toBe(expected[s]);
+    }
+    // NULL = pre-funnel child: nothing to lock, and the mini-app refuses
+    // them earlier for other reasons.
+    expect(isEditLocked(null)).toBe(false);
+  });
+
+  it("EDIT_LOCKED_STATES is DERIVED from the ladder at 'submitted' — a class, not an enumeration", () => {
+    // The previous-state-class rule (the 2026-07-29 waitlist learning): a
+    // rung added past `submitted` must join the locked set with no edit
+    // here. slice() from the ladder is what buys that; this pins it.
+    expect([...EDIT_LOCKED_STATES]).toEqual(
+      APPLICANT_STATES.slice(APPLICANT_STATES.indexOf("submitted"))
+    );
+    expect(EDIT_LOCKED_STATES[0]).toBe("submitted");
+    expect(EDIT_LOCKED_STATES).toHaveLength(6);
+  });
+
+  it("recognizes the DB guard's rejection by errcode OR message — and nothing else", () => {
+    expect(EDIT_LOCKED_ERRCODE).toBe("P0120");
+    expect(EDIT_LOCKED_SIGNAL).toBe("funnel_edit_locked");
+    // Either half of the contract suffices (belt and brace).
+    expect(isEditLockedDbError({ code: "P0120", message: "anything" })).toBe(true);
+    expect(isEditLockedDbError({ code: "XX000", message: "funnel_edit_locked" })).toBe(true);
+    expect(isEditLockedDbError({ message: "funnel_edit_locked" })).toBe(true);
+    // Ordinary failures never read as locked — retry copy stays retry copy.
+    expect(isEditLockedDbError({ code: "23505", message: "duplicate key" })).toBe(false);
+    expect(isEditLockedDbError({ code: "P0001", message: "some other raise" })).toBe(false);
+    expect(isEditLockedDbError({})).toBe(false);
+    expect(isEditLockedDbError(null)).toBe(false);
+    expect(isEditLockedDbError(undefined)).toBe(false);
   });
 });
 

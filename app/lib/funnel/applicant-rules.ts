@@ -167,6 +167,55 @@ export function applicantStateAllowsReserve(value: unknown): boolean {
   return APPLICANT_STATES_ALLOWING_RESERVE.includes(value);
 }
 
+/* ──────────────────── the edit horizon (reconnect U7, R13) ──────────────────── */
+
+/**
+ * The states at-or-past `submitted` — DERIVED from the ladder, never
+ * enumerated separately, so a future rung past `submitted` is locked for
+ * free (the previous-state-class rule: key the exception on the state the
+ * child is IN, not on a list of writes you thought of). Mirrors the
+ * `>= array_position(v_order, 'submitted')` comparison in the
+ * `projects_edit_horizon_guard` trigger (20260823120000), pinned by
+ * `funnel-migration-parity.test.ts`.
+ */
+export const EDIT_LOCKED_STATES: readonly ApplicantState[] =
+  APPLICANT_STATES.slice(APPLICANT_STATES.indexOf("submitted"));
+
+/**
+ * Is this child's pre-submission surface read-only?
+ *
+ * - NULL → false: a pre-funnel child has no funnel artifacts to lock, and
+ *   the mini-app already refuses them at the door-confirm gate.
+ * - `added` / `project_created` → false: the application is still theirs
+ *   to shape.
+ * - `submitted` and everything past it → true.
+ *
+ * PRESENTATION ONLY at the call sites that disable inputs — the guarantee
+ * is the write path (the DB trigger + the conditional children write), and
+ * the tests assert the refusal there, not here.
+ */
+export function isEditLocked(state: ApplicantState | null): boolean {
+  return state !== null && EDIT_LOCKED_STATES.includes(state);
+}
+
+/**
+ * The DB guard's error contract, mirrored: `projects_edit_horizon_guard`
+ * raises errcode `P0120` with message `funnel_edit_locked`. The funnel
+ * cores recognize EITHER half (belt and brace — PostgREST surfaces the
+ * SQLSTATE as `code` and the raise text as `message`) and map it to a
+ * distinct `{kind:"locked"}` result, never the generic retry copy.
+ */
+export const EDIT_LOCKED_SIGNAL = "funnel_edit_locked";
+export const EDIT_LOCKED_ERRCODE = "P0120";
+
+export function isEditLockedDbError(
+  err: { code?: string | null; message?: string | null } | null | undefined
+): boolean {
+  if (!err) return false;
+  if (err.code === EDIT_LOCKED_ERRCODE) return true;
+  return (err.message ?? "").includes(EDIT_LOCKED_SIGNAL);
+}
+
 /* ─────────────────────────── projects (R1, R2) ─────────────────────────── */
 
 /** `projects.status`. Pinned to `projects_status_check` by the parity test. */

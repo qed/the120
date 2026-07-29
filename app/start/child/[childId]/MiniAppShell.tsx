@@ -92,11 +92,40 @@ import {
 const BACK_CLASSES =
   "inline-flex items-center font-mono text-[0.65rem] uppercase tracking-[0.12em] opacity-60 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:opacity-30";
 
+/*
+ * ── Locked-state micro-spec (reconnect Unit 7, R13) ──
+ * Pending Peter's design sign-off; audited in Unit 9 against this spec.
+ *
+ * At applicant_state `submitted`+ the mini-app is a read-only review walk:
+ *
+ * - Notice: ONE compact card at the top of the step content, directly under
+ *   the Back slot, rendered once per screen — never per input. Chrome: the
+ *   progress label's mono idiom for the label line (font-mono uppercase
+ *   tracking, opacity-60), body in the step's text register. Same literal
+ *   classes in both skins (hq and trail inherit ink/canvas from
+ *   SKIN_ROOT_CLASSES) — register-appropriate without per-skin variants.
+ * - Copy (copy rules: no em dashes, nothing scary):
+ *   label "APPLICATION SUBMITTED"; body "This application is submitted.
+ *   It can't be edited here." + off-ramp "Need to change something? Email
+ *   admissions@the120.school" (the address the site footer and the locked
+ *   dossier banner already use — one contact channel, not a new one).
+ * - Read-only: every input is disabled and every MUTATING CTA (confirm
+ *   door, make my page, try another version) is disabled. Pure-navigation
+ *   CTAs (handoff, quiz next, tasks next, keep-it when nothing changed)
+ *   stay live so the R13 review walk can move forward; Back always works.
+ * - The lock's GUARANTEE is the write path (DB trigger + conditional
+ *   children write), not this rendering: any mutation that slips through a
+ *   stale tab returns {kind:"locked"} and this same notice appears —
+ *   NEVER the generic "tap again" retry copy.
+ */
+const LOCKED_NOTICE_LABEL = "APPLICATION SUBMITTED";
+
 export function MiniAppShell({
   child,
   hintSlug,
   initialProject,
   serverInitialStep,
+  locked,
 }: {
   child: MiniAppChild;
   hintSlug: string | null;
@@ -109,6 +138,10 @@ export function MiniAppShell({
    *  `?step=` at all — a present param, even an invalid one, still resolves
    *  through `parseStep`. */
   serverInitialStep: MiniAppStep;
+  /** Reconnect U7 (R13): server-computed `isEditLocked(applicant_state)` —
+   *  `submitted`+ renders read-only. Presentation only; the write path is
+   *  the guarantee. */
+  locked: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -146,6 +179,11 @@ export function MiniAppShell({
   const [tappedSlug, setTappedSlug] = useState<GroupSlug | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Reconnect U7: a stale tab discovers the lock through a refused mutation
+  // ({kind:"locked"}) — from then on this render is locked too, and the
+  // SAME notice explains it (never "tap again").
+  const [lockDiscovered, setLockDiscovered] = useState(false);
+  const isLocked = locked || lockDiscovered;
 
   // ── U9: template + quiz state ──
   // CLIENT state, deliberately: the projects row (and with it server-side
@@ -220,7 +258,7 @@ export function MiniAppShell({
   };
 
   const confirm = () => {
-    if (!selected) return;
+    if (!selected || isLocked) return;
     setNotice(null);
     startTransition(async () => {
       // R57: only the HINT-match flag rides along (the ad hint is client
@@ -256,6 +294,12 @@ export function MiniAppShell({
         go(stepNeighbour("doors", "next"));
         return;
       }
+      if (result.kind === "locked") {
+        // The horizon closed under this tab: the locked notice explains,
+        // never retry copy.
+        setLockDiscovered(true);
+        return;
+      }
       setNotice(
         result.kind === "unauthenticated"
           ? "Your session expired. Start again and we'll pick this up."
@@ -265,6 +309,7 @@ export function MiniAppShell({
   };
 
   const buildProject = () => {
+    if (isLocked) return;
     setComposeNotice(null);
     startTransition(async () => {
       const result = await composeProjectAction({
@@ -289,6 +334,10 @@ export function MiniAppShell({
         go("quiz");
         return;
       }
+      if (result.kind === "locked") {
+        setLockDiscovered(true);
+        return;
+      }
       setComposeNotice(
         result.kind === "unauthenticated"
           ? "Your session expired. Start again and we'll pick this up."
@@ -300,7 +349,7 @@ export function MiniAppShell({
   };
 
   const regenerate = () => {
-    if (!composeView) return;
+    if (!composeView || isLocked) return;
     setComposeNotice(null);
     startTransition(async () => {
       const result = await regenerateProjectAction({ projectId: composeView.id });
@@ -308,6 +357,10 @@ export function MiniAppShell({
         setComposeView(result.view);
         setComposeDraft(result.view.project);
         setComposeDegraded(result.degraded !== null);
+        return;
+      }
+      if (result.kind === "locked") {
+        setLockDiscovered(true);
         return;
       }
       setComposeNotice(
@@ -322,6 +375,15 @@ export function MiniAppShell({
 
   const keepProject = () => {
     if (!composeView || !composeDraft) return;
+    // Locked review walk (R13): "Keep it" is pure NAVIGATION here — never a
+    // write. The trigger will refuse every projects write for a submitted+
+    // child, and with the inputs disabled the local composeDraft can never
+    // re-converge with the server view, so retrying the write would strand
+    // the family on compose forever. Move forward instead.
+    if (isLocked || lockDiscovered) {
+      go(stepNeighbour("compose", "next"));
+      return;
+    }
     const changed =
       JSON.stringify(composeDraft) !== JSON.stringify(composeView.project);
     startTransition(async () => {
@@ -331,6 +393,10 @@ export function MiniAppShell({
           projectId: composeView.id,
           project: composeDraft,
         });
+        if (saved.kind === "locked") {
+          setLockDiscovered(true);
+          return;
+        }
         if (saved.kind !== "saved") {
           setComposeNotice("Saving your edits didn't work. Try again.");
           return;
@@ -391,6 +457,24 @@ export function MiniAppShell({
           )}
         </div>
 
+        {/* The locked notice — once, at the top of the step content, per the
+            micro-spec above. The same card whether the lock arrived with the
+            server render or through a refused mutation. */}
+        {isLocked && (
+          <div className="mb-6 rounded-2xl border border-black/15 bg-white/70 px-5 py-4">
+            <p className="font-mono text-[0.6rem] uppercase tracking-[0.14em] opacity-60">
+              {LOCKED_NOTICE_LABEL}
+            </p>
+            <p className="mt-1.5 text-[14px] leading-6 opacity-80">
+              This application is submitted. It can&apos;t be edited here. Need to
+              change something? Email{" "}
+              <a href="mailto:admissions@the120.school" className="underline">
+                admissions@the120.school
+              </a>
+            </p>
+          </div>
+        )}
+
         {step === "handoff" && <Handoff child={child} skin={skin} onNext={() => go("doors")} />}
 
         {step === "doors" && (
@@ -403,6 +487,7 @@ export function MiniAppShell({
                   <li key={door.slug}>
                     <button
                       onClick={() => setTappedSlug(door.slug)}
+                      disabled={isLocked}
                       aria-pressed={isSelected}
                       className={`flex w-full items-center gap-4 rounded-2xl border px-5 py-4 text-left transition-all ${
                         isSelected
@@ -440,7 +525,7 @@ export function MiniAppShell({
 
             <button
               onClick={confirm}
-              disabled={!selected || pending}
+              disabled={!selected || pending || isLocked}
               className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending ? "Saving…" : "This one →"}
@@ -460,6 +545,7 @@ export function MiniAppShell({
                 <li key={t.id}>
                   <button
                     onClick={() => setTemplateId(t.id)}
+                    disabled={isLocked}
                     aria-pressed={templateId === t.id}
                     className={`flex w-full flex-col gap-1 rounded-2xl border px-5 py-4 text-left transition-all ${
                       templateId === t.id
@@ -485,6 +571,7 @@ export function MiniAppShell({
                 >
                   <button
                     onClick={() => setTemplateId(OWN_IDEA.id)}
+                    disabled={isLocked}
                     className="flex flex-col gap-1 text-left"
                   >
                     <span className="text-[16px] font-semibold">{OWN_IDEA.title}</span>
@@ -496,6 +583,7 @@ export function MiniAppShell({
                       onChange={(e) => setOwnIdea(capWellFormed(e.target.value, OWN_IDEA_MAX_CHARS))}
                       placeholder="Tell us in your own words…"
                       maxLength={OWN_IDEA_MAX_CHARS}
+                      disabled={isLocked}
                       rows={3}
                       className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] outline-none focus:border-current"
                     />
@@ -579,6 +667,7 @@ export function MiniAppShell({
                       }
                       placeholder={q.suggestion[band]}
                       maxLength={ANSWER_MAX_CHARS}
+                      disabled={isLocked}
                       rows={2}
                       className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] outline-none focus:border-current"
                     />
@@ -617,7 +706,7 @@ export function MiniAppShell({
             {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
             <button
               onClick={buildProject}
-              disabled={pending}
+              disabled={pending || isLocked}
               className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending ? "Building…" : "Make my page →"}
@@ -641,6 +730,7 @@ export function MiniAppShell({
                 </span>
                 <input
                   value={composeDraft.name}
+                  disabled={isLocked}
                   onChange={(e) =>
                     setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
                   }
@@ -653,6 +743,7 @@ export function MiniAppShell({
                 </span>
                 <textarea
                   value={composeDraft.description}
+                  disabled={isLocked}
                   onChange={(e) =>
                     setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
                   }
@@ -666,6 +757,7 @@ export function MiniAppShell({
                 </span>
                 <textarea
                   value={composeDraft.offerSketch}
+                  disabled={isLocked}
                   onChange={(e) =>
                     setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
                   }
@@ -679,6 +771,7 @@ export function MiniAppShell({
                 </span>
                 <textarea
                   value={composeDraft.firstCustomerHypothesis ?? ""}
+                  disabled={isLocked}
                   onChange={(e) =>
                     setComposeDraft({
                       ...composeDraft,
@@ -707,7 +800,7 @@ export function MiniAppShell({
               </button>
               <button
                 onClick={regenerate}
-                disabled={pending || composeView.regenerationsLeft === 0}
+                disabled={pending || isLocked || composeView.regenerationsLeft === 0}
                 className="inline-flex h-11 w-full items-center justify-center rounded-full border border-current px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Try another version ({composeView.regenerationsLeft} left)

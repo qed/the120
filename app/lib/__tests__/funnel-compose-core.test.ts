@@ -47,8 +47,9 @@ function harness(opts: {
   projectCount?: number;
   modelResults?: NormalizedModelResult[];
   insertOutcome?: "inserted" | "conflict" | "failed";
-  reserveOutcome?: "reserved" | "conflict" | "error";
-  saveDraftOk?: boolean;
+  reserveOutcome?: "reserved" | "conflict" | "locked" | "error";
+  saveDraftOk?: boolean | "locked";
+  saveEditOutcome?: boolean | "locked";
   modelId?: string | null;
 }): Harness {
   const results = [...(opts.modelResults ?? [])];
@@ -106,6 +107,9 @@ function harness(opts: {
           return opts.saveDraftOk ?? true;
         },
         saveEdit: async (projectId, project) => {
+          if (opts.saveEditOutcome !== undefined && opts.saveEditOutcome !== true) {
+            return opts.saveEditOutcome;
+          }
           h.edits.push({ projectId, name: project.name, description: project.description });
           return true;
         },
@@ -399,6 +403,80 @@ describe("recordProjectEditCore (R40)", () => {
     expect(
       (await recordProjectEditCore({ projectId: PROJECT_ID, project: goodObject }, h.deps)).kind
     ).toBe("invalid");
+  });
+});
+
+describe("the edit horizon (reconnect U7, R13) — DB refusals map to the DISTINCT locked kind", () => {
+  it("regen: the reserve write refused by the trigger → locked, ZERO model calls, no draft written", async () => {
+    // The stale-tab race through the real ordering: the child submitted
+    // between this tab's load and its reserve. The CAS write is the FIRST
+    // projects write of the regen path, so the trigger answers there.
+    const h = harness({ child, project: projectRow, reserveOutcome: "locked" });
+    expect(await regenerateProjectCore({ projectId: PROJECT_ID }, h.deps)).toEqual({
+      kind: "locked",
+    });
+    expect(h.events).toEqual(["reserve"]);
+    expect(h.generateCalls).toHaveLength(0);
+    expect(h.drafts).toHaveLength(0);
+  });
+
+  it("regen: a reserve that won but a draft save the horizon then refused → locked, not failed", async () => {
+    const h = harness({
+      child,
+      project: projectRow,
+      modelResults: [respond(goodObject)],
+      saveDraftOk: "locked",
+    });
+    expect((await regenerateProjectCore({ projectId: PROJECT_ID }, h.deps)).kind).toBe("locked");
+  });
+
+  it("edit: the save refused by the trigger → locked, nothing recorded", async () => {
+    const h = harness({ project: projectRow, saveEditOutcome: "locked" });
+    const result = await recordProjectEditCore(
+      { projectId: PROJECT_ID, project: goodObject },
+      h.deps
+    );
+    expect(result).toEqual({ kind: "locked" });
+    expect(h.edits).toHaveLength(0);
+  });
+
+  it("edit: a plain write failure still reads failed — locked and failed never collapse", async () => {
+    // The whole point of the distinct kind: retry copy for transient
+    // failures, the locked explanation for the horizon. If these merged in
+    // either direction the client would render the wrong one.
+    const h = harness({ project: projectRow, saveEditOutcome: false });
+    expect(
+      (await recordProjectEditCore({ projectId: PROJECT_ID, project: goodObject }, h.deps)).kind
+    ).toBe("failed");
+  });
+
+  it("compose: a submitted+ child with NO active project is refused BEFORE the insert — the trigger has no INSERT arm", async () => {
+    // The trigger guards UPDATEs only (deliberately — no INSERT arm), so a
+    // directly-invoked compose past the horizon would insert a fresh
+    // project. The core refuses server-side: locked, zero writes, zero
+    // model spend.
+    const h = harness({ child: { ...child, applicantState: "submitted" } });
+    expect(await composeProjectCore(composeInput, h.deps)).toEqual({ kind: "locked" });
+    expect(h.inserted).toHaveLength(0);
+    expect(h.generateCalls).toHaveLength(0);
+    expect(h.events).toEqual([]);
+  });
+
+  it("compose: an accepted draft whose save the horizon refused → locked (staff/retention corner)", async () => {
+    const h = harness({ child, modelResults: [respond(goodObject)], saveDraftOk: "locked" });
+    expect((await composeProjectCore(composeInput, h.deps)).kind).toBe("locked");
+  });
+
+  it("the real deps recognize the trigger's contract — errcode P0120 / message funnel_edit_locked", () => {
+    // Enforcement scan (a guard with no callers is not a mechanism): the
+    // PostgREST error path in every projects writer consults the shared
+    // recognizer, whose constants the migration-parity test pins to the
+    // migration's raise.
+    const core = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../funnel/compose-core.ts"),
+      "utf8"
+    );
+    expect((core.match(/isEditLockedDbError\(error\)/g) ?? []).length).toBe(3);
   });
 });
 

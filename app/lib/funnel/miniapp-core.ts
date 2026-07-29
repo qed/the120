@@ -22,7 +22,7 @@ import "server-only";
 import { z } from "zod";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { GROUP_SLUGS, type GroupSlug } from "@/app/lib/site";
-import { isApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { isApplicantState, isEditLocked } from "@/app/lib/funnel/applicant-rules";
 import type { ApplicantState } from "@/app/lib/funnel/applicant-rules";
 
 export type MiniAppChild = {
@@ -50,7 +50,18 @@ export type MiniAppDeps = {
       | null
       | "error"
     >;
-    writeGroup: (childId: string, slug: GroupSlug) => Promise<boolean>;
+    /** Reconnect U7 (R13): the write is CONDITIONAL on the child's state —
+     *  `WHERE applicant_state IN ('added','project_created')` — so a state
+     *  advance between load and write (stale tab) refuses at the row, not
+     *  in a check-then-write race. Zero rows on a child the session just
+     *  loaded = the edit horizon closed = `"locked"`. NULL is deliberately
+     *  NOT in the allow-set: a pre-funnel child is refused earlier (the
+     *  `applicantState !== "added"` gate), and every child the mini-app
+     *  legitimately serves entered the ladder at `added`. */
+    writeGroup: (
+      childId: string,
+      slug: GroupSlug
+    ) => Promise<"written" | "locked" | "failed">;
   }>;
 };
 
@@ -85,15 +96,21 @@ function realDeps(): MiniAppDeps {
           };
         },
         writeGroup: async (childId, slug) => {
-          const { error } = await supabase
+          // Conditional write (reconnect U7): the allow-set is the
+          // pre-submission class. The caller already proved the row exists
+          // and is visible to this session (loadChild), so zero rows here
+          // means the state advanced past the horizon — locked, distinctly.
+          const { data, error } = await supabase
             .from("children")
             .update({ group_slug: slug })
-            .eq("id", childId);
+            .eq("id", childId)
+            .in("applicant_state", ["added", "project_created"])
+            .select("id");
           if (error) {
             console.error(`[funnel/miniapp] group write failed: ${error.message}`);
-            return false;
+            return "failed";
           }
-          return true;
+          return (data ?? []).length > 0 ? "written" : "locked";
         },
       };
     },
@@ -147,6 +164,10 @@ export type ConfirmDoorResult =
     }
   | { kind: "invalid" }
   | { kind: "unauthenticated" }
+  /** Reconnect U7 (R13): the child reached `submitted`+ between load and
+   *  write — the edit horizon refused the row. Rendered as the locked
+   *  explanation + admissions off-ramp, NEVER the generic retry copy. */
+  | { kind: "locked" }
   | { kind: "failed" };
 
 export async function confirmDoorCore(
@@ -177,10 +198,19 @@ export async function confirmDoorCore(
     if (child.applicantState !== null && !isApplicantState(child.applicantState)) {
       return { kind: "invalid" };
     }
+    // Reconnect U7: a child at-or-past `submitted` gets the DISTINCT locked
+    // verdict (the shell renders the explanation + admissions off-ramp);
+    // `project_created`/NULL keep the existing `invalid` (wrong room, not a
+    // sealed application). The conditional write below closes the race this
+    // read cannot.
+    if (isApplicantState(child.applicantState) && isEditLocked(child.applicantState)) {
+      return { kind: "locked" };
+    }
     if (child.applicantState !== "added") return { kind: "invalid" };
 
     const wrote = await session.writeGroup(child.id, slug);
-    if (!wrote) return { kind: "failed" };
+    if (wrote === "locked") return { kind: "locked" };
+    if (wrote === "failed") return { kind: "failed" };
     return { kind: "confirmed", slug, previousSlug: child.groupSlug || null };
   } catch (err) {
     console.error("[funnel/miniapp] confirm exception:", err);

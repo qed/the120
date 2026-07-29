@@ -284,6 +284,18 @@ export default function DashboardApp({
                             Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
                           </p>
                         </>
+                      ) : c.status === "waitlisted" ? (
+                        // W7: never "Under Review" for a waitlisted family —
+                        // they have been reviewed, and promising a deposit
+                        // step next is simply untrue for them.
+                        <>
+                          <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
+                            On the waitlist
+                          </p>
+                          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+                            Seats open when plans change. We contact you first.
+                          </p>
+                        </>
                       ) : c.status !== "draft" ? (
                         <>
                           <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">

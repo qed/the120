@@ -104,12 +104,19 @@ const OFFERED_OR_LATER = ["offered", "member"];
 export function isOutstandingOffer(item: OfferQueueItem): boolean {
   const paid = item.deposits.some((d) => d.status === "paid" && !d.refunded_at);
   if (paid) return false;
-  // W7: waitlisting RETIRES the promise. `offer_email_sent_at` is never
-  // cleared, so without this a child moved to the waitlist would count as
-  // an outstanding offer forever — permanently depressing headroom and
-  // pinning the over-commit warning on, which trains staff to click
-  // through the one warning that matters.
-  if (item.reviewStatus === "waitlisted") return false;
+  // W7: waitlisting retires an unanswered PROMISE — `offer_email_sent_at`
+  // is never cleared, so without this a waitlisted child would depress
+  // headroom forever and pin the over-commit warning on.
+  //
+  // But it retires a promise, never MONEY. A child waitlisted while their
+  // bank debit is still clearing keeps that debit: `deposit_fulfil` is
+  // deposit-blind and `seats_claimed()` counts every paid row with no join
+  // to children, so the debit lands and consumes a real seat whatever the
+  // review status says. Dropping them from the count here would free
+  // headroom a staff member then offers away — two families, one seat,
+  // and nothing anywhere flags it (adversarial review).
+  const clearing = item.deposits.some((d) => d.status === "pending" && !d.refunded_at);
+  if (item.reviewStatus === "waitlisted" && !clearing) return false;
   return item.offerSentAt !== null || OFFERED_OR_LATER.includes(item.reviewStatus);
 }
 

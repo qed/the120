@@ -120,6 +120,14 @@ export function demoteWarning(opts: {
   offerSentAt: string | null;
   deposits: { status: string }[];
 }): boolean {
+  // Waitlisting a family who has PAID is the loudest case, not the
+  // quietest. The paid-deposit early return below exists because a demote
+  // cannot hurt someone who already bought the seat — but waitlisting
+  // them can: it flips their dashboard to "Waitlisted" while their money
+  // sits with us and their pipeline stage still reads member. That move
+  // had NO confirmation at all, because this returned false before ever
+  // reaching the comparison (adversarial review).
+  if (opts.targetStatus === "waitlisted" && hasPaidDeposit(opts.deposits)) return true;
   if (!opts.offerSentAt) return false;
   if (hasPaidDeposit(opts.deposits)) return false;
   return statusIndex(opts.targetStatus as SeatStatus) < statusIndex("offered");

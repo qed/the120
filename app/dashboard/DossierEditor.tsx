@@ -278,6 +278,19 @@ export default function DossierEditor({
               This dossier is locked for review and the seat deposit is in — contact{" "}
               <span className="text-ink">admissions@the120.school</span> for any changes.
             </>
+          ) : child.status === "waitlisted" ? (
+            // W7: a waitlisted family must not read "we will review your
+            // submission" — they HAVE been reviewed. `waitlisted` is not a
+            // SeatStatus, so statusIndex returns -1 and the offered check
+            // below is false, which silently landed them on the in-review
+            // copy while the header said Waitlisted (adversarial review).
+            <>
+              The 120&rsquo;s seats are spoken for, so {child.firstName || "your builder"} is on the
+              waitlist. Your application stays exactly where it is, and the work stays theirs.{" "}
+              <a href="/start/waitlist" className="text-blue underline hover:text-red">
+                What being on the waitlist means →
+              </a>
+            </>
           ) : statusIndex(child.status) >= statusIndex("offered") ? (
             // Accepted, deposit pending — never say "we will review" here: the
             // dashboard CTA is simultaneously asking this family to pay (R12/R13).

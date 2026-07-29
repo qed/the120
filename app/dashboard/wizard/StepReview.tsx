@@ -46,9 +46,12 @@ export default function StepReview({
         locked
           ? depositPaid
             ? "Your seat is reserved — the deposit is in."
-            : statusIndex(child.status) >= statusIndex("offered")
-              ? "Your application has been accepted — reserve your seat from your dashboard."
-              : "We will review your submission and be in touch."
+            : child.status === "waitlisted"
+              ? // W7: reviewed already, so the review copy would be a lie.
+                "The seats are spoken for — you hold a place on the waitlist."
+              : statusIndex(child.status) >= statusIndex("offered")
+                ? "Your application has been accepted — reserve your seat from your dashboard."
+                : "We will review your submission and be in touch."
           : "Everything below must be checked off before the dossier can go in."
       }
     >

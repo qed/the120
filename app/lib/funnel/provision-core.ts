@@ -119,6 +119,12 @@ export type ProvisionDeps = {
    *  crash between insert and state write is distinguishable from a
    *  hand-created collision on the next drive. */
   markWorkspaceAttempt: (childId: string, email: string) => Promise<boolean>;
+  /** Cheap fenced read: is the lease still OURS right now? The identity
+   *  leg's pre-flight before its external mint — the mailbox leg gets the
+   *  same collapse-the-window check from markWorkspaceAttempt, and
+   *  without this a refund tearing the lease mid-run could still mint an
+   *  orphaned auth user nothing ever records (adversarial review). */
+  holdsLease: (childId: string) => Promise<boolean>;
   /** Base-scoped probes (`like base%`), never whole-population reads —
    *  PostgREST truncates unranged selects at 1000 rows SILENTLY, and a
    *  truncated taken-set re-mints somebody's address. Over-matching longer
@@ -349,6 +355,13 @@ export async function driveProvisioning(
     if (existing !== null) {
       supabaseUserId = existing; // adopt — never create again
     } else {
+      // Pre-flight: a refund (or takeover) tearing the lease during the
+      // reads above must stop the mint HERE — the fenced finishRun would
+      // refuse later anyway, but by then the auth user would exist with
+      // its id recorded nowhere (the orphan the adversarial review named).
+      if (!(await deps.holdsLease(childId))) {
+        return { kind: "deferred", detail: "lease lost before identity mint" };
+      }
       const created = await deps.createAuthUser(email);
       if (created === "error") {
         return land(
@@ -646,6 +659,91 @@ export async function driveForwarding(
     return "deferred";
   }
   return "requested";
+}
+
+/* ───────────────────── the suspend sweep (W15, U8) ───────────────────── */
+
+/**
+ * The relationship ending ends the mailbox — out-of-band, because the
+ * refund webhook's transaction must never hold an external call. The
+ * refund RPC flips the claim to `suspend_pending` (tearing up any live
+ * lease, so a running drive's fenced writes refuse); this sweep, driven
+ * by the retention cron, does the Workspace suspend and closes the
+ * lifecycle to `released`.
+ *
+ * Unconditionally safe to re-run: suspending a suspended user is a noop,
+ * and the workspace_suspended_at stamp keeps closed rows out of the list.
+ * Also covers released/child_deleted rows (the U6 carry): a deleted child
+ * may leave a live mailbox that still needs suspension — those are
+ * stamped but never re-flipped (already terminal).
+ *
+ * `released/unissued` placeholder rows are NEVER in scope: their address
+ * exists at Google under someone ELSE's ownership (the 409 that created
+ * them) — suspending it would attack a foreign mailbox. The adapter's
+ * reason filter excludes them; this is a load-bearing exclusion.
+ */
+
+export type SuspendableClaim = {
+  claimId: string;
+  childId: string | null;
+  email: string | null;
+  /** "suspend_pending" (finalize to released) or "released" (stamp only). */
+  state: string;
+};
+
+export type SuspendSweepDeps = {
+  workspaceConfigured: boolean;
+  listSuspendables: () => Promise<SuspendableClaim[] | "error">;
+  /** users.update {suspended:true} — idempotent at Google ("suspended"
+   *  for an already-suspended user); "missing" = nothing ever minted. */
+  suspendWorkspaceUser: (email: string) => Promise<"suspended" | "missing" | "error">;
+  /** Stamp workspace_suspended_at; finalize also lands state=released. */
+  markSuspended: (claimId: string, finalize: boolean) => Promise<boolean>;
+  notifyOps: (subject: string, body: string) => Promise<void>;
+};
+
+export async function sweepSuspendPending(
+  deps: SuspendSweepDeps
+): Promise<{ closed: number; skipped: number } | "skipped"> {
+  const rows = await deps.listSuspendables();
+  if (rows === "error") return "skipped";
+  let closed = 0;
+  let skipped = 0;
+  const failures: string[] = [];
+  for (const row of rows) {
+    const finalize = row.state === "suspend_pending";
+    if (!row.email) {
+      // Refund before an address was ever claimed — nothing exists at
+      // Google; close the lifecycle directly.
+      if (await deps.markSuspended(row.claimId, finalize)) closed += 1;
+      else skipped += 1;
+      continue;
+    }
+    if (!deps.workspaceConfigured) {
+      // Quiet: the credential prework has not landed; suspend_pending
+      // persists and a later sweep completes it.
+      skipped += 1;
+      continue;
+    }
+    const res = await deps.suspendWorkspaceUser(row.email);
+    if (res === "error") {
+      skipped += 1;
+      failures.push(`claim=${row.claimId} child=${row.childId ?? "?"}`);
+      continue;
+    }
+    // "suspended" and "missing" close identically: either the mailbox is
+    // now dark, or there was never one to darken.
+    if (await deps.markSuspended(row.claimId, finalize)) closed += 1;
+    else skipped += 1;
+  }
+  if (failures.length > 0) {
+    await deps.notifyOps(
+      "Workspace suspend failed for leaving families",
+      failures.join("\n") +
+        "\nsuspend_pending persists; the next retention run retries (suspend is idempotent)."
+    );
+  }
+  return { closed, skipped };
 }
 
 /* ───────────────────── the stale-claim backstop ───────────────────── */

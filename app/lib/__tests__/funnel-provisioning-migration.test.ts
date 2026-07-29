@@ -208,6 +208,117 @@ describe("the fencing migration (review follow-up)", () => {
   });
 });
 
+describe("the refund-release RPC (W15, U8) — one transaction or nothing", () => {
+  // The LIVE definition is the hardening file's (last wins — 20260822
+  // redefined it to fix the ledger email fallback).
+  const REFUND = "supabase/migrations/20260822120000_funnel_lifecycle_hardening.sql";
+  const sql = () => read(REFUND);
+  const fn = () =>
+    /create or replace function public\.deposit_refund_release[\s\S]*?\$\$;/.exec(sql())![0];
+
+  it("the refund mark, the claim flip, and the ledger insert live in ONE function body", () => {
+    const body = fn();
+    expect(body).toContain("update public.deposits");
+    expect(body).toContain("set state = 'suspend_pending'");
+    expect(body).toContain("insert into public.funnel_released_aliases");
+  });
+
+  it("a replayed refund is exactly-one-ledger-row idempotent", () => {
+    expect(fn()).toContain("on conflict (local_part) do nothing");
+    expect(fn()).toContain("'noop_replay'");
+  });
+
+  it("out-of-order delivery answers no_deposit — the zero-row-refund lesson survives the rewrite", () => {
+    expect(fn()).toContain("'no_deposit'");
+  });
+
+  it("the claim's lease is TORN UP in the same statement — a running drive's fenced writes then refuse", () => {
+    const flip = /set state = 'suspend_pending'[\s\S]*?where child_id = v_child/.exec(fn());
+    expect(flip).not.toBeNull();
+    expect(flip![0]).toContain("lease_owner = null");
+  });
+
+  it("the ledger records the local part read INSIDE the transaction (FOR UPDATE precedes the insert)", () => {
+    const body = fn();
+    const lockAt = body.indexOf("for update", body.indexOf("funnel_student_provisioning"));
+    const insertAt = body.indexOf("insert into public.funnel_released_aliases");
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(insertAt).toBeGreaterThan(lockAt);
+  });
+
+  it("carries the deposit_fulfil grant posture", () => {
+    expect(sql()).toContain(
+      "revoke all on function public.deposit_refund_release(text) from public, anon, authenticated"
+    );
+    expect(sql()).toContain(
+      "grant execute on function public.deposit_refund_release(text) to service_role"
+    );
+  });
+
+  it("adds workspace_suspended_at idempotently (in the 20260821 file)", () => {
+    expect(read("supabase/migrations/20260821120000_funnel_refund_release.sql")).toContain(
+      "add column if not exists workspace_suspended_at"
+    );
+  });
+
+  it("the ledger email fallback reconstructs a REAL address, never a bare local part", () => {
+    expect(fn()).toContain("coalesce(v_email, v_local || '@the120.school')");
+    expect(fn()).not.toMatch(/coalesce\(v_email, v_local\)[^|]/);
+  });
+
+  it("the child-deleted trigger writes the ledger row AT deletion — a later refund cannot find the claim by child_id anymore", () => {
+    // The hole: child deleted → child_id nulled → refund's ledger lookup
+    // misses. The trigger's own insert closes it (correctness review).
+    const trigger = /create or replace function public\.funnel_provisioning_child_deleted[\s\S]*?\$\$;/.exec(
+      sql()
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger![0]).toMatch(
+      /insert into public\.funnel_released_aliases[\s\S]*?'child_deleted'/
+    );
+    expect(trigger![0]).toContain("on conflict (local_part) do nothing");
+    // Recorded against the OLD child id — remembering whose address this
+    // was is the entire point.
+    expect(trigger![0]).toContain("OLD.child_id");
+  });
+});
+
+describe("the lifecycle cron (U8 review follow-up) — hourly, so suspend latency is minutes not a week", () => {
+  it("vercel.json schedules /api/cron/funnel-lifecycle hourly", () => {
+    const vercel = JSON.parse(read("vercel.json")) as {
+      crons: Array<{ path: string; schedule: string }>;
+    };
+    const entry = vercel.crons.find((c) => c.path === "/api/cron/funnel-lifecycle");
+    expect(entry, "lifecycle cron missing from vercel.json").toBeTruthy();
+    // Hourly: minute field fixed, hour field wildcard.
+    expect(entry!.schedule).toMatch(/^\d+ \* \* \* \*$/);
+  });
+
+  it("the route runs all three sweeps + capacity, GET, each independently caught", () => {
+    const route = read("app/api/cron/funnel-lifecycle/route.ts");
+    expect(route).toContain("export async function GET");
+    expect(route).toContain("await sweepSuspendPendingClaims()");
+    expect(route).toContain("await sweepStaleProvisioningClaims()");
+    expect(route).toContain("await sweepOverdueForwarding()");
+    expect(route).toContain("capacityAlarm(");
+    expect(route).toContain("CRON_SECRET");
+    expect(route.match(/catch \(err\)/g)!.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("the retention cron's sweeps sit OUTSIDE the retention try — an early throw cannot starve them", () => {
+    const cron = read("app/api/cron/funnel-retention/route.ts");
+    // The retention failure path no longer returns before the sweeps: the
+    // catch records the failure and falls through.
+    expect(cron).toContain("retentionResult = {");
+    const catchAt = cron.indexOf('"retention cron FAILED"');
+    const sweepsAt = cron.indexOf("await sweepSuspendPendingClaims()");
+    expect(catchAt).toBeGreaterThan(-1);
+    expect(sweepsAt).toBeGreaterThan(catchAt);
+    // And the 500 answer carries the sweeps that DID run.
+    expect(cron).toMatch(/"retention run failed", sweeps/);
+  });
+});
+
 describe("idempotency — every statement re-runnable", () => {
   const sql = read(MIGRATION);
 

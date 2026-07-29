@@ -5,11 +5,14 @@ import {
   driveForwarding,
   driveProvisioning,
   STALE_CLAIM_ALERT_MINUTES,
+  sweepSuspendPending,
   type ForwardingClaim,
   type ForwardingDeps,
   type ProvisionClaim,
   type ProvisionDeps,
   type StaleClaim,
+  type SuspendableClaim,
+  type SuspendSweepDeps,
 } from "@/app/lib/funnel/provision-core";
 import { CONSENT_MIN_POLICY_VERSION } from "@/app/lib/funnel/deposit-rules";
 
@@ -64,6 +67,7 @@ function harness(over: {
   claimResults?: Array<"set" | "conflict" | "error">;
   reassignResults?: Array<"set" | "conflict" | "missing" | "error">;
   finishRunResult?: boolean;
+  holdsLease?: boolean;
 } = {}): Harness {
   const calls: Call[] = [];
   const finished: Harness["finished"] = [];
@@ -93,6 +97,10 @@ function harness(over: {
       calls.push(`markAttempt:${email}`);
       marked.push(email);
       return true;
+    },
+    holdsLease: async () => {
+      calls.push("holdsLease");
+      return over.holdsLease ?? true;
     },
     classifyWorkspaceUser: async () => {
       calls.push("classifyWs");
@@ -479,12 +487,123 @@ describe("driveProvisioning — the review fixes (fencing, self-adoption, refund
     expect(h.alerts).toEqual([]);
   });
 
+  it("a lease torn mid-run (refund racing the identity leg) stops BEFORE the auth mint — no orphaned user", async () => {
+    const h = harness({ holdsLease: false });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("deferred");
+    expect(h.calls).not.toContain("createAuthUser");
+    // The pre-flight sits between the existence read and the mint.
+    expect(h.calls).toContain("findAuthUser");
+    expect(h.calls).toContain("holdsLease");
+  });
+
   it("the marker write is fenced too: a refused markWorkspaceAttempt defers instead of inserting", async () => {
     const h = harness();
     h.deps.markWorkspaceAttempt = async () => false;
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out.kind).toBe("deferred");
     expect(h.calls.join(",")).not.toContain("createWsUser");
+  });
+});
+
+describe("sweepSuspendPending — the relationship ending ends the mailbox (W15)", () => {
+  const row = (over: Partial<SuspendableClaim> = {}): SuspendableClaim => ({
+    claimId: "claim-1",
+    childId: CHILD,
+    email: "maya.chen@the120.school",
+    state: "suspend_pending",
+    ...over,
+  });
+
+  type SHarness = {
+    deps: SuspendSweepDeps;
+    suspended: string[];
+    marked: Array<{ claimId: string; finalize: boolean }>;
+    alerts: string[];
+  };
+
+  function sharness(over: {
+    rows?: SuspendableClaim[] | "error";
+    configured?: boolean;
+    suspendResults?: Array<"suspended" | "missing" | "error">;
+    markResult?: boolean;
+  } = {}): SHarness {
+    const suspended: string[] = [];
+    const marked: SHarness["marked"] = [];
+    const alerts: string[] = [];
+    const suspendResults = [...(over.suspendResults ?? [])];
+    return {
+      suspended,
+      marked,
+      alerts,
+      deps: {
+        workspaceConfigured: over.configured ?? true,
+        listSuspendables: async () => over.rows ?? [row()],
+        suspendWorkspaceUser: async (email) => {
+          suspended.push(email);
+          return suspendResults.shift() ?? "suspended";
+        },
+        markSuspended: async (claimId, finalize) => {
+          marked.push({ claimId, finalize });
+          return over.markResult ?? true;
+        },
+        notifyOps: async (subject) => {
+          alerts.push(subject);
+        },
+      },
+    };
+  }
+
+  it("happy path: suspend at Google, then finalize the claim to released", async () => {
+    const h = sharness();
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 0 });
+    expect(h.suspended).toEqual(["maya.chen@the120.school"]);
+    expect(h.marked).toEqual([{ claimId: "claim-1", finalize: true }]);
+  });
+
+  it("re-running over an already-suspended user is a safe noop-close (Google idempotence)", async () => {
+    // Google answers 'suspended' for a suspended user — same path.
+    const h = sharness({ suspendResults: ["suspended"] });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 0 });
+  });
+
+  it("refund before an address was claimed: nothing at Google, lifecycle closes directly", async () => {
+    const h = sharness({ rows: [row({ email: null })] });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 0 });
+    expect(h.suspended).toEqual([]);
+  });
+
+  it("a missing Workspace user closes too — never created, or already deleted", async () => {
+    const h = sharness({ suspendResults: ["missing"] });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 0 });
+  });
+
+  it("a suspend API failure keeps the row for the next run and pages ops — never a silent skip", async () => {
+    const h = sharness({ suspendResults: ["error"] });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 0, skipped: 1 });
+    expect(h.marked).toEqual([]);
+    expect(h.alerts).toHaveLength(1);
+  });
+
+  it("unconfigured Workspace skips quietly (credential prework pending) — except never-minted rows, which still close", async () => {
+    const h = sharness({
+      configured: false,
+      rows: [row(), row({ claimId: "claim-2", email: null })],
+    });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 1 });
+    expect(h.suspended).toEqual([]);
+    expect(h.alerts).toEqual([]);
+  });
+
+  it("released/child_deleted rows are stamped but never re-flipped (finalize=false)", async () => {
+    const h = sharness({ rows: [row({ state: "released" })] });
+    expect(await sweepSuspendPending(h.deps)).toEqual({ closed: 1, skipped: 0 });
+    expect(h.marked).toEqual([{ claimId: "claim-1", finalize: false }]);
+  });
+
+  it("a list read failure skips the whole sweep, never throws", async () => {
+    const h = sharness({ rows: "error" });
+    expect(await sweepSuspendPending(h.deps)).toBe("skipped");
   });
 });
 
@@ -498,6 +617,43 @@ describe("the adapter postures the core cannot see (source pins)", () => {
     expect(src).toMatch(/ops_alerted_at: null/);
     // The reassign RPC call carries the owner for in-RPC fencing.
     expect(src).toContain("p_owner: owner");
+  });
+
+  it("the suspendables list NEVER includes released/unissued placeholders — that address is someone else's at Google", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("app/lib/funnel/provision-deps.ts", "utf8");
+    const list = /listSuspendables[\s\S]*?\.or\("([^"]+)"\)/.exec(src);
+    expect(list, "listSuspendables or() filter not found").not.toBeNull();
+    // Only suspend_pending and released/child_deleted are in scope; the
+    // filter must name child_deleted explicitly, not sweep all released.
+    expect(list![1]).toContain("state.eq.suspend_pending");
+    expect(list![1]).toContain("released_reason.eq.child_deleted");
+    expect(list![1]).not.toContain("unissued");
+    expect(src).toMatch(/listSuspendables[\s\S]*?\.is\("workspace_suspended_at", null\)/);
+  });
+
+  it("the retention cron drives all three sweeps AND the standing capacity reconciliation (wiring scan, U8)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const cron = readFileSync("app/api/cron/funnel-retention/route.ts", "utf8");
+    expect(cron).toContain("await sweepStaleProvisioningClaims()");
+    expect(cron).toContain("await sweepOverdueForwarding()");
+    expect(cron).toContain("await sweepSuspendPendingClaims()");
+    // The U2 carry: seats reconciliation independent of any webhook run.
+    expect(cron).toContain('rpc("seats_claimed")');
+    expect(cron).toContain("capacityAlarm(");
+    // Still a GET (the 405-forever lesson) and each sweep is try/caught.
+    expect(cron).toContain("export async function GET");
+    expect(cron.match(/catch \(err\)/g)!.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("the webhook's refund path is the ONE-transaction RPC, zero-row semantics preserved (wiring scan, U8)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const route = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    expect(route).toContain('rpc("deposit_refund_release"');
+    // Out-of-order refunds still answer non-200 and retry until the row lands.
+    expect(route).toMatch(/data === "no_deposit"[\s\S]{0,200}return false/);
+    // The old two-step (update-then-hope) is gone.
+    expect(route).not.toMatch(/\.update\(\{ status: "refunded"/);
   });
 });
 

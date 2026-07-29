@@ -87,11 +87,11 @@ export type CapacityAlertResult = "alerted" | "below" | "not_fulfilled" | "skipp
  *
  * KNOWN, and deliberate (the DOUBLE PAID precedent in this file's route):
  * once claimed is past capacity EVERY later fulfilment pages again. That
- * repetition is not noise to suppress — it is the only backstop for the
- * case where this call is lost to a serverless timeout between the write
- * and the 200 (the retry is a replay_noop and can never re-alert). A
- * standing reconciliation sweep is the durable fix; until it lands, the
- * repeat is what heals a lost page.
+ * repetition is not noise to suppress — it is the fast path for the case
+ * where this call is lost to a serverless timeout between the write and
+ * the 200 (the retry is a replay_noop and can never re-alert). The
+ * DURABLE healing is the retention cron's standing capacity
+ * reconciliation (U8), independent of any single webhook invocation.
  */
 export async function alertIfAtCapacity(
   deps: CapacityAlertDeps,

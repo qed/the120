@@ -40,8 +40,14 @@ import type {
   ProvisionOutcome,
   StaleClaim,
   StaleSweepDeps,
+  SuspendableClaim,
+  SuspendSweepDeps,
 } from "@/app/lib/funnel/provision-core";
-import { driveProvisioning, alertStaleClaims } from "@/app/lib/funnel/provision-core";
+import {
+  driveProvisioning,
+  alertStaleClaims,
+  sweepSuspendPending,
+} from "@/app/lib/funnel/provision-core";
 import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
 import {
   FORWARDING_TOTAL_ALERT_DAYS,
@@ -92,6 +98,7 @@ type DirectoryClient = {
   users: {
     get: (params: Record<string, unknown>) => Promise<{ data: { isMailboxSetup?: boolean } }>;
     insert: (params: Record<string, unknown>) => Promise<unknown>;
+    update: (params: Record<string, unknown>) => Promise<unknown>;
   };
 };
 
@@ -241,6 +248,16 @@ export function realProvisionDeps(owner: string): ProvisionDeps {
       if (data === "set" || data === "conflict" || data === "missing") return data;
       // 'lost_lease' (and anything unexpected) must stop the run.
       return "error";
+    },
+
+    holdsLease: async (childId) => {
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .select("lease_owner")
+        .eq("child_id", childId)
+        .maybeSingle();
+      if (error) return false; // unreadable = do not mint
+      return (data?.lease_owner as string | null) === owner;
     },
 
     markWorkspaceAttempt: async (childId, email) => {
@@ -492,6 +509,85 @@ export function realStaleSweepDeps(): StaleSweepDeps {
 /** The stale-claim human backstop, exported for the cron that gains it. */
 export async function sweepStaleProvisioningClaims(): Promise<"alerted" | "none" | "skipped"> {
   return alertStaleClaims(realStaleSweepDeps());
+}
+
+/* ─────────────────────────── the suspend sweep (W15, U8) ─────────────────────────── */
+
+export function realSuspendSweepDeps(): SuspendSweepDeps {
+  const db = supabaseAdmin();
+  return {
+    workspaceConfigured: saKeyRaw().length > 0,
+
+    listSuspendables: async () => {
+      // suspend_pending claims, PLUS released/child_deleted rows whose
+      // mailbox was never darkened (the U6 carry). NEVER released/unissued
+      // placeholders — that address belongs to someone else at Google.
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .select("id, child_id, email, state, released_reason")
+        .is("workspace_suspended_at", null)
+        .or("state.eq.suspend_pending,and(state.eq.released,released_reason.eq.child_deleted)")
+        .limit(200);
+      if (error) return "error";
+      return (data ?? []).map(
+        (r): SuspendableClaim => ({
+          claimId: String(r.id),
+          childId: (r.child_id as string | null) ?? null,
+          email: (r.email as string | null) ?? null,
+          state: String(r.state),
+        })
+      );
+    },
+
+    suspendWorkspaceUser: async (email) => {
+      try {
+        const dir = await directoryClient();
+        await dir.users.update({ userKey: email, requestBody: { suspended: true } });
+        return "suspended";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        console.error("[provision] workspace suspend failed:", err);
+        return "error";
+      }
+    },
+
+    markSuspended: async (claimId, finalize) => {
+      const now = new Date().toISOString();
+      if (finalize) {
+        const { data, error } = await db
+          .from(CLAIM_TABLE)
+          .update({
+            workspace_suspended_at: now,
+            state: "released",
+            released_reason: "refund",
+            updated_at: now,
+          })
+          .eq("id", claimId)
+          .eq("state", "suspend_pending")
+          .select("id");
+        if (error) {
+          console.error("[provision] suspend finalize failed:", error.message);
+          return false;
+        }
+        return (data ?? []).length === 1;
+      }
+      const { error } = await db
+        .from(CLAIM_TABLE)
+        .update({ workspace_suspended_at: now, updated_at: now })
+        .eq("id", claimId);
+      if (error) console.error("[provision] suspend stamp failed:", error.message);
+      return !error;
+    },
+
+    notifyOps,
+  };
+}
+
+/** The retention cron's entry point for the W15 lifecycle close. */
+export async function sweepSuspendPendingClaims(): Promise<
+  { closed: number; skipped: number } | "skipped"
+> {
+  return sweepSuspendPending(realSuspendSweepDeps());
 }
 
 /* ─────────────────────────── forwarding (W14, U7) ─────────────────────────── */

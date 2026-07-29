@@ -31,7 +31,36 @@ agent should take on the strength of a plan approval.
 **Unit 7 is not blocked by credentials** — it is blocked by Unit 6, which
 it depends on for the provisioning state it renders.
 
-## Unit 3 is BUILT and waiting — PR #104 (draft)
+## Unit 3 — DONE 2026-07-29 (PR #104 merged, migration verified live)
+
+Applied as `20260815120000 / funnel_waitlist_move`, verified against
+production, and rehearsed end-to-end in a rolled-back transaction:
+
+```
+start        = draft/added
+→ in_review  = in_review/in_review
+→ waitlisted = waitlisted/waitlisted
+→ invited    = invited/in_review      (the ordinary-menu path; no stranding)
+→ offered    = offered/offered        (W7a: offer from waitlist works)
+```
+
+**A trap for anyone rehearsing this again.** The Management API connects
+as `postgres`, not `service_role`. `children_status_guard` and
+`children_applicant_state_guard` both coerce non-service-role writes, so
+a naive rehearsal shows `status` never moving and `waitlisted` never
+sticking — which looks exactly like a broken migration and is not. Set
+the claim first:
+
+```sql
+perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+```
+
+The rehearsal pattern itself is worth reusing: do the moves inside a
+`do $$ … $$` block and end with `raise exception` carrying the collected
+results. The raise guarantees rollback and the API hands the results back
+in the error message, so production is read-only throughout.
+
+## (historical) Unit 3 was BUILT and waiting — PR #104 (draft)
 
 Everything except applying the SQL is done: the migration authored, the
 RPC rewritten, the CRM vocabulary + move menu + queue filter wired, the

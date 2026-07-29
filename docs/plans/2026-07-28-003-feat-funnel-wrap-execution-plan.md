@@ -715,7 +715,7 @@ legs, all verdict pairs) is the test surface, not just each primitive.
 Supabase user and one Workspace user in the student OU; mail to the
 address lands in the mailbox; replay produces no seconds.
 
-- [ ] **Unit 7: Arrival page, forwarding, event (W13, W14, W16)**
+- [x] **Unit 7: Arrival page, forwarding, event (W13, W14, W16)** — merged PR #115 (2026-07-29); migrations `20260819120000`/`20260820120000` applied+verified. Review findings fixed pre-merge (30s resume cooldown, 21-day total-age forwarding backstop, hardened pins); flip-back-to-verified-target tradeoff ACCEPTED and documented (Supabase secure-email-change anchors freshness) — flagged to Peter in the PR. Carried to U8: cron wiring for `sweepStaleProvisioningClaims` + `sweepOverdueForwarding`, the staff re-send affordance, merge-path forwarding re-sync (W14 partial, recorded).
 
 **Goal:** The acceptance moment: a page that's honest about in-flight
 provisioning, mail that reaches the parent, telemetry that can't lie.

@@ -119,7 +119,10 @@ const REVIEWED_EMAIL_CHANGE_SITES: readonly { file: string; why: string }[] = [
       "identity is realigned to that new bare student address with email_confirm:true " +
       "— no confirmation/change mail is enqueued, and the target is by construction " +
       "the address the DB claim just arbitrated for this same child. Cannot route " +
-      "through the default-deny guard: student addresses are exactly what it refuses.",
+      "through the default-deny guard: student addresses are exactly what it refuses. " +
+      "VERIFIED EMPIRICALLY 2026-07-29 against the live project (secure email change " +
+      "ENABLED): admin updateUserById applied the change directly — new_email null, " +
+      "email_change_sent_at null — probe user created and deleted the same minute.",
   },
 ];
 

@@ -7,7 +7,12 @@ import { FORWARDING_STATES, PROVISION_STATES } from "@/app/lib/funnel/provision-
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const MIGRATION = "supabase/migrations/20260817120000_funnel_student_provisioning.sql";
+const FENCING = "supabase/migrations/20260818120000_funnel_provisioning_fencing.sql";
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
+/** Every migration that touches the provisioning tables, concatenated in
+ *  version order — grant/policy pins must see the WHOLE history, since a
+ *  later file can widen what an earlier one narrowed. */
+const allProvisioningSql = () => read(MIGRATION) + "\n" + read(FENCING);
 
 /**
  * Wrap U6 part 2. The provisioning invariants live in SQL; these pin the
@@ -98,12 +103,23 @@ describe("RLS posture, stated and pinned", () => {
     expect(sql).toContain(
       "revoke all on table public.funnel_student_provisioning from anon, authenticated"
     );
-    const grant = /grant select \(([^)]+)\)\s+on public\.funnel_student_provisioning to authenticated/.exec(
-      sql
-    );
-    expect(grant, "narrow column grant not found").not.toBeNull();
-    const cols = grant![1].split(",").map((c) => c.trim()).sort();
+    // ALL grants to authenticated across EVERY migration, unioned: Postgres
+    // grants are additive, so a second statement in a later file would
+    // silently widen the surface while a first-match-only pin stayed green
+    // (adversarial review of this very test).
+    const everyMigration = allProvisioningSql();
+    const grants = [
+      ...everyMigration.matchAll(
+        /grant select \(([^)]+)\)\s+on (?:table )?public\.funnel_student_provisioning to authenticated/g
+      ),
+    ];
+    expect(grants, "expected exactly one narrow grant across all migrations").toHaveLength(1);
+    const cols = [...new Set(grants.flatMap((g) => g[1].split(",").map((c) => c.trim())))].sort();
     expect(cols).toEqual(["child_id", "email", "forwarding_state", "state"]);
+    // And no table-wide (non-column-list) select grant anywhere.
+    expect(everyMigration).not.toMatch(
+      /grant select on (?:table )?public\.funnel_student_provisioning to authenticated/
+    );
   });
 });
 
@@ -111,15 +127,18 @@ describe("the RPCs", () => {
   const sql = read(MIGRATION);
 
   it("both carry the deposit_fulfil grant posture: revoked from public/anon/authenticated, granted to service_role", () => {
-    for (const fn of [
-      "provision_lease(uuid, text, integer)",
-      "provision_reassign_local_part(uuid, text, text)",
-    ]) {
+    // The reassign RPC's LIVE definition is the fencing migration's
+    // four-arg version (the three-arg original was dropped there).
+    const cases: Array<[string, string]> = [
+      [sql, "provision_lease(uuid, text, integer)"],
+      [read(FENCING), "provision_reassign_local_part(uuid, text, text, text)"],
+    ];
+    for (const [source, fn] of cases) {
       const esc = fn.replace(/[()]/g, "\\$&").replace(/, /g, ",\\s*");
-      expect(sql).toMatch(
+      expect(source).toMatch(
         new RegExp(`revoke all on function public\\.${esc} from public, anon, authenticated`)
       );
-      expect(sql).toMatch(
+      expect(source).toMatch(
         new RegExp(`grant execute on function public\\.${esc} to service_role`)
       );
     }
@@ -133,7 +152,10 @@ describe("the RPCs", () => {
   });
 
   it("reassignment parks the abandoned part on a placeholder row IN THE SAME TRANSACTION, and never in the ledger", () => {
-    const fn = /create or replace function public\.provision_reassign_local_part[\s\S]*?\$\$;/.exec(sql);
+    // The LIVE definition lives in the fencing migration (last wins).
+    const fn = /create or replace function public\.provision_reassign_local_part[\s\S]*?\$\$;/.exec(
+      read(FENCING)
+    );
     expect(fn).not.toBeNull();
     // The placeholder insert targets the CLAIM table (total unique keeps
     // arbitrating), with a null child and the 'unissued' reason…
@@ -142,6 +164,47 @@ describe("the RPCs", () => {
     expect(fn![0]).not.toContain("funnel_released_aliases");
     // A 23505 on the new part rolls the whole move back as 'conflict'.
     expect(fn![0]).toContain("when unique_violation then");
+  });
+});
+
+describe("the fencing migration (review follow-up)", () => {
+  const sql = read(FENCING);
+
+  it("the FK is SET NULL, never CASCADE — a deleted child must not free an issued address", () => {
+    // The original cascade let a parent's ordinary Remove-child delete a
+    // claim row outright, removing its local_part from the total unique
+    // index (data-migrations review, high). SET NULL degrades the row to
+    // a placeholder instead.
+    expect(sql).toMatch(/foreign key \(child_id\) references public\.children \(id\) on delete set null/);
+    // Comments stripped first: the file's header EXPLAINS the cascade bug
+    // at length, and that prose must not read as a touch.
+    expect(sql.replace(/--.*$/gm, "")).not.toMatch(/on delete cascade/);
+  });
+
+  it("the orphaned claim is flipped to released/child_deleted by trigger, keeping the address arbitrated", () => {
+    const fn = /create or replace function public\.funnel_provisioning_child_deleted[\s\S]*?\$\$;/.exec(sql);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain("NEW.state := 'released'");
+    expect(fn![0]).toContain("'child_deleted'");
+    expect(sql).toContain("before update of child_id on public.funnel_student_provisioning");
+  });
+
+  it("the reassign RPC is lease-fenced: only the current leaseholder may move an address", () => {
+    const fn = /create or replace function public\.provision_reassign_local_part[\s\S]*?\$\$;/.exec(sql);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain("lease_owner = p_owner");
+    expect(fn![0]).toContain("state = 'in_progress'");
+    expect(fn![0]).toContain("'lost_lease'");
+    // And the unfenced three-arg original is dropped, not overloaded —
+    // an overload would 300 every PostgREST caller.
+    expect(sql).toContain(
+      "drop function if exists public.provision_reassign_local_part(uuid, text, text);"
+    );
+  });
+
+  it("adds the workspace-attempt marker columns idempotently", () => {
+    expect(sql).toContain("add column if not exists workspace_attempted_at");
+    expect(sql).toContain("add column if not exists workspace_attempted_email");
   });
 });
 

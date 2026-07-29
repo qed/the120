@@ -88,17 +88,31 @@ type DirectoryClient = {
   };
 };
 
+type DirectoryUsersGet = { data: { isMailboxSetup?: boolean; orgUnitPath?: string } };
+
+let cachedDirectory: Promise<DirectoryClient> | null = null;
+
 async function directoryClient(): Promise<DirectoryClient> {
-  // Dynamic import + per-call construction: nothing Google-shaped exists
-  // at build time or when the credential is absent.
-  const { google } = await import("googleapis");
-  const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
-  const auth = new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: ["https://www.googleapis.com/auth/admin.directory.user"],
-  });
-  return google.admin({ version: "directory_v1", auth }) as unknown as DirectoryClient;
+  // Dynamic import + lazy construction: nothing Google-shaped exists at
+  // build time or when the credential is absent. CACHED per instance —
+  // the collision loop can make many calls, and re-parsing the key and
+  // re-minting a JWT client per call compounds latency for nothing.
+  if (!cachedDirectory) {
+    cachedDirectory = (async () => {
+      const { google } = await import("googleapis");
+      const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
+      const auth = new google.auth.JWT({
+        email: creds.client_email,
+        key: creds.private_key,
+        scopes: ["https://www.googleapis.com/auth/admin.directory.user"],
+      });
+      return google.admin({ version: "directory_v1", auth }) as unknown as DirectoryClient;
+    })();
+    cachedDirectory.catch(() => {
+      cachedDirectory = null; // a failed construction must not stick
+    });
+  }
+  return cachedDirectory;
 }
 
 const googleStatus = (err: unknown): number | null => {
@@ -113,13 +127,22 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ─────────────────────────── the real deps ─────────────────────────── */
 
-export function realProvisionDeps(): ProvisionDeps {
+/**
+ * Deps are constructed PER RUN with the run's owner string bound in: every
+ * claim-table write is fenced on `lease_owner = owner`, so a zombie run
+ * that lost its lease to an expiry takeover has every write refused
+ * (adversarial review — finishRun without the fence could stomp the new
+ * leaseholder's landed state).
+ */
+export function realProvisionDeps(owner: string): ProvisionDeps {
   const db = supabaseAdmin();
   return {
     getClaim: async (childId) => {
       const { data, error } = await db
         .from(CLAIM_TABLE)
-        .select("child_id, state, local_part, email, supabase_user_id")
+        .select(
+          "child_id, state, local_part, email, supabase_user_id, workspace_attempted_email, pending_reason"
+        )
         .eq("child_id", childId)
         .maybeSingle();
       if (error) return "error";
@@ -131,6 +154,8 @@ export function realProvisionDeps(): ProvisionDeps {
         localPart: (data.local_part as string | null) ?? null,
         email: (data.email as string | null) ?? null,
         supabaseUserId: (data.supabase_user_id as string | null) ?? null,
+        workspaceAttemptedEmail: (data.workspace_attempted_email as string | null) ?? null,
+        pendingReason: (data.pending_reason as string | null) ?? null,
       };
       return claim;
     },
@@ -152,6 +177,10 @@ export function realProvisionDeps(): ProvisionDeps {
         state: patch.state,
         lease_owner: null,
         lease_expires_at: null,
+        // Every landing clears the stale-alert stamp: each NEW stall
+        // period earns its own one-shot page (a lifetime stamp would
+        // swallow a second, unrelated stall — adversarial review).
+        ops_alerted_at: null,
         updated_at: new Date().toISOString(),
       };
       if ("pendingReason" in patch) row.pending_reason = patch.pendingReason ?? null;
@@ -161,18 +190,33 @@ export function realProvisionDeps(): ProvisionDeps {
         row.consent_policy_version = patch.consentPolicyVersion ?? null;
       if ("lastError" in patch) row.last_error = patch.lastError ?? null;
       if (patch.mailboxReady) row.mailbox_ready_at = new Date().toISOString();
-      const { error } = await db.from(CLAIM_TABLE).update(row).eq("child_id", childId);
-      if (error) console.error("[provision] finishRun update failed:", error.message);
-      return !error;
+      // FENCED: only the current leaseholder may land. Zero rows matched
+      // means the lease was taken over — report false, write nothing.
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .update(row)
+        .eq("child_id", childId)
+        .eq("lease_owner", owner)
+        .select("child_id");
+      if (error) {
+        console.error("[provision] finishRun update failed:", error.message);
+        return false;
+      }
+      if ((data ?? []).length !== 1) {
+        console.error(`[provision] finishRun refused for ${childId} — lease no longer ours`);
+        return false;
+      }
+      return true;
     },
 
     claimLocalPart: async (childId, localPart, email) => {
-      // Guarded on the row still being unassigned: the lease should make
-      // this impossible to race, but the DB stays the arbiter anyway.
+      // Fenced on the lease AND on the row still being unassigned: the
+      // DB stays the arbiter even if the in-memory picture is stale.
       const { data, error } = await db
         .from(CLAIM_TABLE)
         .update({ local_part: localPart, email, updated_at: new Date().toISOString() })
         .eq("child_id", childId)
+        .eq("lease_owner", owner)
         .is("local_part", null)
         .select("child_id");
       if (error) return error.code === "23505" ? "conflict" : "error";
@@ -182,12 +226,32 @@ export function realProvisionDeps(): ProvisionDeps {
     reassignLocalPart: async (childId, localPart, email) => {
       const { data, error } = await db.rpc("provision_reassign_local_part", {
         p_child_id: childId,
+        p_owner: owner,
         p_new_local_part: localPart,
         p_new_email: email,
       });
       if (error) return "error";
       if (data === "set" || data === "conflict" || data === "missing") return data;
+      // 'lost_lease' (and anything unexpected) must stop the run.
       return "error";
+    },
+
+    markWorkspaceAttempt: async (childId, email) => {
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .update({
+          workspace_attempted_at: new Date().toISOString(),
+          workspace_attempted_email: email,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("child_id", childId)
+        .eq("lease_owner", owner)
+        .select("child_id");
+      if (error) {
+        console.error("[provision] attempt-marker write failed:", error.message);
+        return false;
+      }
+      return (data ?? []).length === 1;
     },
 
     readTakenSet: async (base) => {
@@ -231,7 +295,20 @@ export function realProvisionDeps(): ProvisionDeps {
         .is("refunded_at", null)
         .maybeSingle();
       if (depErr) return "error";
-      if (!deposit?.stripe_session_id) return { version: null };
+      if (!deposit?.stripe_session_id) {
+        // No live paid deposit. Distinguish "refunded mid-provisioning"
+        // (Unit 8's lane, must not masquerade as a consent gap) from
+        // "never had an acceptance".
+        const { data: refunded, error: refErr } = await db
+          .from("deposits")
+          .select("id")
+          .eq("child_id", childId)
+          .not("refunded_at", "is", null)
+          .limit(1);
+        if (refErr) return "error";
+        if ((refunded ?? []).length > 0) return "refunded";
+        return { version: null };
+      }
       const { data: attempt, error: attErr } = await db
         .from("deposit_attempts")
         .select("policy_version, created_at")
@@ -298,6 +375,24 @@ export function realProvisionDeps(): ProvisionDeps {
       }
     },
 
+    classifyWorkspaceUser: async (email) => {
+      // "Ours" = lives in the student OU. Only this pipeline creates
+      // users there, so marker + OU is proof of a prior/racing attempt of
+      // this same claim — adopt, never abandon the family's mailbox.
+      try {
+        const dir = await directoryClient();
+        const { data } = (await dir.users.get({
+          userKey: email,
+          fields: "orgUnitPath",
+        })) as DirectoryUsersGet;
+        return data.orgUnitPath === studentOu() ? "ours" : "foreign";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        console.error("[provision] workspace classify failed:", err);
+        return "unknown";
+      }
+    },
+
     createWorkspaceUser: async ({ email, firstName, lastName }) => {
       try {
         const dir = await directoryClient();
@@ -350,7 +445,7 @@ export async function driveProvisioningForChild(
   childId: string,
   owner: string
 ): Promise<ProvisionOutcome> {
-  return driveProvisioning(realProvisionDeps(), childId, owner);
+  return driveProvisioning(realProvisionDeps(owner), childId, owner);
 }
 
 export function realStaleSweepDeps(): StaleSweepDeps {
@@ -360,7 +455,7 @@ export function realStaleSweepDeps(): StaleSweepDeps {
       const cutoff = new Date(Date.now() - thresholdMinutes * 60_000).toISOString();
       const { data, error } = await db
         .from(CLAIM_TABLE)
-        .select("child_id, state, updated_at, ops_alerted_at")
+        .select("child_id, state, updated_at, ops_alerted_at, pending_reason")
         .in("state", ["pending", "in_progress", "identity_only"])
         .not("child_id", "is", null)
         .lt("updated_at", cutoff)
@@ -372,6 +467,7 @@ export function realStaleSweepDeps(): StaleSweepDeps {
           state: String(r.state),
           minutesStale: (Date.now() - new Date(String(r.updated_at)).getTime()) / 60_000,
           opsAlertedAt: (r.ops_alerted_at as string | null) ?? null,
+          pendingReason: (r.pending_reason as string | null) ?? null,
         })
       );
     },

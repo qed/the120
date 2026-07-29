@@ -390,8 +390,10 @@ describe("the route's source pins", () => {
     // replay that heals a lost claim after a non-200.
     expect(src).toContain("outcome.fulfilled ?? outcome.replayedPaid");
     expect(src).toContain("await ensureProvisionClaim(");
-    // A failed claim insert answers non-200 so Stripe redelivers.
-    expect(src).toMatch(/ensureProvisionClaim[\s\S]{0,220}status: 500/);
+    // A failed claim insert answers non-200 so Stripe redelivers —
+    // anchored INSIDE the failure branch, not mere text proximity (a
+    // nearby unrelated 500 must not keep this green — adversarial review).
+    expect(src).toMatch(/if \(!claimed\) \{[\s\S]{0,160}status: 500/);
     // The legs NEVER run here: no driver, no Google, no auth-admin call.
     expect(src).not.toContain("driveProvisioning");
     expect(src).not.toContain("googleapis");

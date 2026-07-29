@@ -30,37 +30,51 @@ type Harness = {
   alerts: Array<{ subject: string; body: string }>;
   claimed: string[];
   reassigned: string[];
+  marked: string[];
 };
+
+/** A bare pending claim; tests override fields as needed. */
+const bareClaim = (over: Partial<ProvisionClaim> = {}): ProvisionClaim => ({
+  childId: CHILD,
+  state: "pending",
+  localPart: null,
+  email: null,
+  supabaseUserId: null,
+  workspaceAttemptedEmail: null,
+  pendingReason: null,
+  ...over,
+});
 
 function harness(over: {
   claim?: ProvisionClaim | null | "error";
   lease?: { granted: true } | { granted: false; state: string } | "error";
-  acceptedVersion?: string | null | "error";
+  acceptedVersion?: string | null | "error" | "refunded";
   child?: { firstName: string; lastName: string } | null;
   taken?: { live: string[]; released: string[]; fwBases: string[] };
   authUser?: string | null | "unknown";
   createAuth?: "ok" | "error";
   workspaceConfigured?: boolean;
   wsUser?: "exists" | null | "unknown";
+  wsClass?: "ours" | "foreign" | "missing" | "unknown";
   createWs?: Array<"created" | "already_exists" | "error">;
   mailboxReady?: boolean | "unknown";
   claimResults?: Array<"set" | "conflict" | "error">;
   reassignResults?: Array<"set" | "conflict" | "missing" | "error">;
+  finishRunResult?: boolean;
 } = {}): Harness {
   const calls: Call[] = [];
   const finished: Harness["finished"] = [];
   const alerts: Harness["alerts"] = [];
   const claimed: string[] = [];
   const reassigned: string[] = [];
+  const marked: string[] = [];
   const claimResults = [...(over.claimResults ?? ["set"])];
   const reassignResults = [...(over.reassignResults ?? ["set"])];
   const createWs = [...(over.createWs ?? ["created"])];
   const deps: ProvisionDeps = {
     getClaim: async () => {
       calls.push("getClaim");
-      if (over.claim === undefined) {
-        return { childId: CHILD, state: "pending", localPart: null, email: null, supabaseUserId: null };
-      }
+      if (over.claim === undefined) return bareClaim();
       return over.claim;
     },
     takeLease: async () => {
@@ -70,7 +84,16 @@ function harness(over: {
     finishRun: async (_childId, patch) => {
       calls.push(`finishRun:${patch.state}`);
       finished.push({ state: patch.state, patch: patch as Record<string, unknown> });
+      return over.finishRunResult ?? true;
+    },
+    markWorkspaceAttempt: async (_childId, email) => {
+      calls.push(`markAttempt:${email}`);
+      marked.push(email);
       return true;
+    },
+    classifyWorkspaceUser: async () => {
+      calls.push("classifyWs");
+      return over.wsClass ?? "foreign";
     },
     claimLocalPart: async (_childId, localPart) => {
       calls.push(`claimLocalPart:${localPart}`);
@@ -93,6 +116,7 @@ function harness(over: {
     readAcceptedPolicyVersion: async () => {
       calls.push("readConsent");
       if (over.acceptedVersion === "error") return "error";
+      if (over.acceptedVersion === "refunded") return "refunded";
       return {
         version:
           over.acceptedVersion === undefined ? CONSENT_MIN_POLICY_VERSION : over.acceptedVersion,
@@ -129,7 +153,7 @@ function harness(over: {
       alerts.push({ subject, body });
     },
   };
-  return { deps, calls, finished, alerts, claimed, reassigned };
+  return { deps, calls, finished, alerts, claimed, reassigned, marked };
 }
 
 const lastState = (h: Harness) => h.finished[h.finished.length - 1]?.state;
@@ -179,13 +203,12 @@ describe("driveProvisioning — the happy composition", () => {
 
   it("a recorded supabaseUserId skips the identity leg entirely", async () => {
     const h = harness({
-      claim: {
-        childId: CHILD,
+      claim: bareClaim({
         state: "identity_only",
         localPart: "maya.chen",
         email: "maya.chen@the120.school",
         supabaseUserId: "already-recorded",
-      },
+      }),
     });
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out.kind).toBe("complete");
@@ -254,13 +277,12 @@ describe("driveProvisioning — the lease (claim-before-spend)", () => {
 
   it("a terminal claim is a noop before the lease is even attempted", async () => {
     const h = harness({
-      claim: {
-        childId: CHILD,
+      claim: bareClaim({
         state: "complete",
         localPart: "maya.chen",
         email: "maya.chen@the120.school",
         supabaseUserId: "u1",
-      },
+      }),
     });
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out).toEqual({ kind: "noop_terminal", state: "complete" });
@@ -297,13 +319,12 @@ describe("driveProvisioning — the Workspace leg", () => {
 
   it("the re-drive after a partial completes without touching the existing identity", async () => {
     const h = harness({
-      claim: {
-        childId: CHILD,
+      claim: bareClaim({
         state: "identity_only",
         localPart: "maya.chen",
         email: "maya.chen@the120.school",
         supabaseUserId: "u1",
-      },
+      }),
     });
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out).toMatchObject({ kind: "complete", didCreateIdentity: false, didCreateMailbox: true });
@@ -356,29 +377,156 @@ describe("driveProvisioning — the Workspace leg", () => {
   });
 });
 
+describe("driveProvisioning — the review fixes (fencing, self-adoption, refunds)", () => {
+  it("a refused finishRun means the run landed NOTHING — deferred, never complete (zombie-lease fencing)", async () => {
+    const h = harness({ finishRunResult: false });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("deferred");
+    expect(String((out as { detail: string }).detail)).toContain("lease");
+  });
+
+  it("a refused exception persist does NOT page ops — the new leaseholder owns the claim now", async () => {
+    const h = harness({
+      finishRunResult: false,
+      child: { firstName: "Алексей", lastName: "Иванов" },
+    });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("deferred");
+    expect(h.alerts).toEqual([]);
+  });
+
+  it("an existing mailbox WITH a prior-run marker classified ours is ADOPTED — never reassigned away (the crash-after-create case)", async () => {
+    const h = harness({
+      claim: bareClaim({
+        state: "identity_only",
+        localPart: "maya.chen",
+        email: "maya.chen@the120.school",
+        supabaseUserId: "u1",
+        workspaceAttemptedEmail: "maya.chen@the120.school",
+      }),
+      wsUser: "exists",
+      wsClass: "ours",
+    });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toMatchObject({
+      kind: "complete",
+      email: "maya.chen@the120.school",
+      didCreateMailbox: false,
+    });
+    expect(h.reassigned).toEqual([]);
+    expect(h.calls.join(",")).not.toContain("createWsUser");
+  });
+
+  it("a racing sibling's 409 in the SAME run (marker just stamped) classified ours is adopted too", async () => {
+    const h = harness({ createWs: ["already_exists"], wsClass: "ours" });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toMatchObject({ kind: "complete", didCreateMailbox: false });
+    expect(h.marked).toEqual(["maya.chen@the120.school"]);
+    expect(h.reassigned).toEqual([]);
+  });
+
+  it("an existing mailbox with a marker but classified FOREIGN still collides and advances", async () => {
+    let wsCalls = 0;
+    const h = harness({
+      claim: bareClaim({ workspaceAttemptedEmail: "maya.chen@the120.school" }),
+      wsClass: "foreign",
+    });
+    h.deps.findWorkspaceUser = async () => {
+      wsCalls += 1;
+      return wsCalls === 1 ? "exists" : null;
+    };
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toMatchObject({ kind: "complete", email: "maya.chen2@the120.school" });
+    expect(h.reassigned).toEqual(["maya.chen2"]);
+  });
+
+  it("an existing mailbox with NO marker anywhere is a hand-created collision — no classify call wasted", async () => {
+    let wsCalls = 0;
+    const h = harness();
+    h.deps.findWorkspaceUser = async () => {
+      wsCalls += 1;
+      return wsCalls === 1 ? "exists" : null;
+    };
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toMatchObject({ kind: "complete", email: "maya.chen2@the120.school" });
+    expect(h.calls.slice(0, h.calls.indexOf("reassignLocalPart:maya.chen2"))).not.toContain(
+      "classifyWs"
+    );
+  });
+
+  it("a refund mid-provisioning parks DISTINCTLY (never as a consent gap) and pages ops once", async () => {
+    const h = harness({ acceptedVersion: "refunded" });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("refund_parked");
+    expect(String(h.finished[0].patch.pendingReason)).toContain("refunded");
+    expect(String(h.finished[0].patch.pendingReason)).not.toContain("consent");
+    expect(h.alerts).toHaveLength(1);
+    expect(h.claimed).toEqual([]); // no mint, no external calls
+  });
+
+  it("a re-drive of an already-refund-parked claim does not re-page", async () => {
+    const reason =
+      "deposit refunded mid-provisioning — no mint; lifecycle (Unit 8) owns cleanup";
+    const h = harness({
+      acceptedVersion: "refunded",
+      claim: bareClaim({ pendingReason: reason }),
+    });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("refund_parked");
+    expect(h.alerts).toEqual([]);
+  });
+
+  it("the marker write is fenced too: a refused markWorkspaceAttempt defers instead of inserting", async () => {
+    const h = harness();
+    h.deps.markWorkspaceAttempt = async () => false;
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out.kind).toBe("deferred");
+    expect(h.calls.join(",")).not.toContain("createWsUser");
+  });
+});
+
+describe("the adapter postures the core cannot see (source pins)", () => {
+  it("finishRun is lease-fenced and clears the stale-alert stamp on every landing", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("app/lib/funnel/provision-deps.ts", "utf8");
+    // The fence: every landing write names the owner.
+    expect(src).toMatch(/\.eq\("lease_owner", owner\)/);
+    // The re-alert fix: each new stall period earns its own page.
+    expect(src).toMatch(/ops_alerted_at: null/);
+    // The reassign RPC call carries the owner for in-RPC fencing.
+    expect(src).toContain("p_owner: owner");
+  });
+});
+
 describe("alertStaleClaims — the human backstop", () => {
   const stale = (childId: string, opsAlertedAt: string | null): StaleClaim => ({
     childId,
     state: "pending",
     minutesStale: STALE_CLAIM_ALERT_MINUTES + 30,
     opsAlertedAt,
+    pendingReason: childId === "c1" ? "consent gate: consent_stale — example" : null,
   });
 
   it("alerts ONCE per claim: already-alerted claims never re-page", async () => {
     const alerts: string[] = [];
     const marked: string[][] = [];
+    const bodies: string[] = [];
     const result = await alertStaleClaims({
       listStaleClaims: async () => [stale("c1", null), stale("c2", "2026-07-29T00:00:00Z")],
       markOpsAlerted: async (ids) => {
         marked.push(ids);
       },
-      notifyOps: async (subject) => {
+      notifyOps: async (subject, body) => {
         alerts.push(subject);
+        bodies.push(body);
       },
     });
     expect(result).toBe("alerted");
     expect(alerts).toHaveLength(1);
     expect(marked).toEqual([["c1"]]);
+    // The page body carries the parking REASON, so a refund-caused stall
+    // is distinguishable from a slow consent (adversarial review).
+    expect(bodies[0]).toContain("reason=consent gate");
   });
 
   it("nothing stale, nothing paged", async () => {

@@ -289,7 +289,7 @@ export default function DashboardApp({
                           {childName(c)}
                         </p>
                         <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
-                          {c.grade === "" ? "Grade —" : `Grade ${c.grade}`} ·{" "}
+                          {c.grade === "" ? "Grade" : `Grade ${c.grade}`} ·{" "}
                           <span className={statusTone}>{verdict.statusLine}</span>
                         </p>
                       </div>

@@ -246,6 +246,14 @@ describe("requestResumeLinkCore", () => {
   // throw still RESOLVES with the same message, (c) the mail send is off
   // the response path, (d) both rate buckets record before either verdict.
 
+  it("wiring — the sign-in screen actually calls requestResumeLinkAction", () => {
+    // Source scan (node env cannot mount the client): the guarantees above
+    // protect a caller that exists — a fully-tested core consumed by nothing
+    // reads as load-bearing while being a no-op (the U13 finding).
+    const src = read("../../dashboard/SignIn.tsx");
+    expect(src).toContain("requestResumeLinkAction(");
+  });
+
   it("known and unknown addresses resolve with BYTE-IDENTICAL payloads", async () => {
     const known = await requestResumeLinkCore({ email: "family@example.com" }, fakeDeps().deps);
     const unknown = await requestResumeLinkCore(
@@ -465,6 +473,48 @@ describe("redeemResumeTokenCore", () => {
     expect(await redeemResumeTokenCore({ token: TOKEN }, enrolled.deps)).toEqual({
       success: true,
       destination: "/dashboard",
+    });
+  });
+
+  it("routes a project_created child WITH a composed project to the dashboard", async () => {
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        { id: "c1", applicantState: "project_created", createdAt: iso(NOW - 1), status: "draft" },
+      ],
+      composedChildIds: ["c1"],
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/dashboard",
+    });
+  });
+
+  it("routes a project_created child WITHOUT a composed project into the mini-app compose", async () => {
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        { id: "c1", applicantState: "project_created", createdAt: iso(NOW - 1), status: "draft" },
+      ],
+      composedChildIds: [],
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/start/child/c1",
+    });
+  });
+
+  it("degrades to the mini-app when the projects read fails — a wrong room, never an error or the dashboard", async () => {
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        { id: "c1", applicantState: "project_created", createdAt: iso(NOW - 1), status: "draft" },
+      ],
+      projectsReadFails: true,
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/start/child/c1",
     });
   });
 });

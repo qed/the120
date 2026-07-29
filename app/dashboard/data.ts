@@ -222,10 +222,15 @@ export type CardVerdict =
  * paid row exists — `deposit_fulfil` flips refunded rows to 'refunded'
  * atomically, so `status === "paid"` IS the live-pair fact on this wire).
  *
- * A live paid deposit outranks every rung except `enrolled` — mirroring the
- * legacy card's "paid always wins". This is also the writers bridge: no code
- * path writes `applicant_state = 'deposited'` yet (the ladder's writers stop
- * at the status-sync trigger, which maps no status onto it), so a paid funnel
+ * Precedence order: `enrolled` > `waitlisted` > paid-deposit bridge > state
+ * switch. `waitlisted` outranks a live paid deposit: the waitlist move
+ * (`offered → waitlisted`) is legal without touching deposit rows, and the
+ * F7 invariant says waitlisted never yields a payment CTA — so a waitlisted
+ * child always renders the WAITLISTED verdict, paid or not. For every other
+ * rung a live paid deposit wins — mirroring the legacy card's "paid always
+ * wins". This is also the writers bridge: no code path writes
+ * `applicant_state = 'deposited'` yet (the ladder's writers stop at the
+ * status-sync trigger, which maps no status onto it), so a paid funnel
  * family really sits at `offered` + paid — and must see SEAT RESERVED, not a
  * re-offer (see the fixture-states learning; asserted in
  * funnel-dashboard-cards.test.ts).
@@ -249,7 +254,9 @@ export function cardVerdict(
     return { kind: "funnel", statusLine: "ENROLLED", tone: "red", secondaryReviewLink };
   }
 
-  if (hasPaidDeposit(deposits)) {
+  // `waitlisted` takes precedence over the paid shortcut below: the state
+  // falls through to the switch, whose waitlisted arm never renders a CTA.
+  if (state !== "waitlisted" && hasPaidDeposit(deposits)) {
     const next = childNextScreen({
       applicantState: state,
       liveDeposit: true,

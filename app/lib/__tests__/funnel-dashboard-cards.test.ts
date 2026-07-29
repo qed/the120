@@ -151,6 +151,16 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.secondaryReviewLink).toBeDefined();
   });
 
+  it("waitlisted + live paid deposit → still WAITLISTED, no payment CTA (F7 outranks the paid shortcut)", () => {
+    // The offered → waitlisted staff move is legal without touching deposit
+    // rows, so this combination is reachable — the state must win over paid.
+    const v = funnel(cardVerdict(child("waitlisted"), paid, true));
+    expect(v.statusLine).toBe("WAITLISTED");
+    expect(v.tone).toBe("red");
+    expect(v.primaryCta).toBeUndefined();
+    expect(v.note).toBe("Seats open when plans change. We contact you first.");
+  });
+
   it("deposited + live deposit → SEAT RESERVED, green, arrival link", () => {
     const v = funnel(cardVerdict(child("deposited"), paid, true));
     expect(v.statusLine).toBe("SEAT RESERVED");

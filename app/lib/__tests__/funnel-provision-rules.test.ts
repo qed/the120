@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_LOCAL_PART_ATTEMPTS,
   PROVISION_STATES,
+  allowlistEntriesHeldByStudents,
+  assembleTakenSet,
   composeState,
   consentVerdict,
   deriveStudentLocalBase,
@@ -13,7 +15,11 @@ import {
   staffLocalParts,
   studentEmailForLocalPart,
 } from "@/app/lib/funnel/provision-rules";
-import { CONSENT_MIN_POLICY_VERSION } from "@/app/lib/funnel/deposit-rules";
+import {
+  CONSENT_MIN_POLICY_VERSION,
+  PUBLISHED_POLICY_VERSIONS,
+  REFUND_POLICY,
+} from "@/app/lib/funnel/deposit-rules";
 import { authMailVerdict } from "@/app/lib/auth-mail-guard";
 
 const taken = (...parts: string[]) => new Set([...staffLocalParts(), ...parts]);
@@ -81,14 +87,56 @@ describe("picking an address nobody else holds", () => {
     expect(p.ok && p.localPart).not.toBe("maya.chen");
   });
 
-  it("can never mint a student onto a STAFF address", () => {
-    // peter@ is allowlisted for auth mail. A student minted there would
-    // silently inherit that exemption.
-    const p = pickStudentLocalPart({ firstName: "Peter", lastName: "", taken: taken() });
-    expect(p.ok).toBe(false); // empty last name is underivable anyway
-    const p2 = pickStudentLocalPart({ firstName: "Pe", lastName: "Ter", taken: taken() });
-    expect(p2.ok && p2.localPart).not.toBe("peter");
-    expect(staffLocalParts()).toContain("peter");
+  it("WHY a staff collision is unreachable today: derivation always dots, staff addresses do not", () => {
+    // This is the real reason a child cannot currently land on peter@ —
+    // and it is worth pinning, because it is a property of the data, not
+    // of the code. buildFwLocalBase always emits `first.last`, so no
+    // derivation can ever produce a single-word local part.
+    //
+    // A mutation check proved the point: deleting the staff seed from
+    // pickStudentLocalPart reddened NOTHING, because no test could
+    // construct the collision. The seed is defence for the day someone
+    // adds a DOTTED staff address (sam.aiken@) — which is exactly the
+    // ordering `allowlistEntriesHeldByStudents` below exists to police.
+    const dotted = staffLocalParts().filter((l) => l.includes("."));
+    expect(
+      dotted,
+      "a DOTTED staff address now exists — the internal staff seed in pickStudentLocalPart " +
+        "is now load-bearing rather than precautionary, and this test should be replaced with " +
+        "one that constructs the collision for it"
+    ).toEqual([]);
+    for (const local of staffLocalParts()) {
+      expect(local, `${local} would be derivable`).not.toMatch(/\./);
+    }
+    const d = deriveStudentLocalBase("Maya", "Chen");
+    expect(d.ok && d.base).toContain(".");
+  });
+
+  it("the seed still holds if a caller passes an EMPTY taken set", () => {
+    // The trap both reviewers found: the docstring promised the staff
+    // guarantee while only the test helper supplied it. Seeded internally
+    // now, so an omission cannot reopen it.
+    const p = pickStudentLocalPart({
+      firstName: "Maya",
+      lastName: "Chen",
+      taken: new Set<string>(),
+    });
+    expect(p.ok).toBe(true);
+    if (p.ok) expect(authMailVerdict(p.email).allowed).toBe(false);
+  });
+
+  it("assembleTakenSet seeds staff unconditionally, so the set cannot be built wrong", () => {
+    const s = assembleTakenSet({ live: [], released: [], fwBases: [] });
+    for (const local of staffLocalParts()) expect(s.has(local), local).toBe(true);
+    const s2 = assembleTakenSet({
+      live: ["Maya.Chen"],
+      released: ["Old.Student"],
+      fwBases: ["Fw.Base"],
+    });
+    // case-folded on the way in, so a differently-cased read cannot slip past
+    expect(s2.has("maya.chen")).toBe(true);
+    expect(s2.has("old.student")).toBe(true);
+    expect(s2.has("fw.base")).toBe(true);
   });
 
   it("every address it hands out is REFUSED by the auth-mail guard", () => {
@@ -117,10 +165,10 @@ describe("picking an address nobody else holds", () => {
 });
 
 describe("the consent gate (Education terms: consent BEFORE the account exists)", () => {
-  it("permits an acceptance at or after the consent version", () => {
+  it("permits a PUBLISHED acceptance at or after the consent version", () => {
     expect(consentVerdict(CONSENT_MIN_POLICY_VERSION).ok).toBe(true);
-    expect(consentVerdict("2026-08-01.1").ok).toBe(true);
-    expect(consentVerdict("2026-07-28.10").ok).toBe(true); // structural, not lexicographic
+    expect(consentVerdict(REFUND_POLICY.version).ok).toBe(true);
+    expect(consentVerdict(`  ${CONSENT_MIN_POLICY_VERSION}  `).ok).toBe(true); // trimmed
   });
 
   it("parks a pre-clause acceptance instead of minting — a known cohort, not an error", () => {
@@ -138,6 +186,42 @@ describe("the consent gate (Education terms: consent BEFORE the account exists)"
       expect(v.ok).toBe(false);
       if (!v.ok) expect(v.reason).toBe("consent_missing");
     }
+  });
+
+  it("refuses a version that sorts late but was never PUBLISHED — ordering is not proof of consent", () => {
+    // The thing being authorised is a real mailbox for a real child, so a
+    // well-formed string that happens to sort after the anchor must not
+    // pass. Today the checkout route pins the version by strict equality,
+    // but a backfill or admin override would bypass that entirely.
+    for (const fake of ["2099-01-01.1", "2026-07-28.9", "2027-03-03.2"]) {
+      const v = consentVerdict(fake);
+      expect(v.ok, fake).toBe(false);
+      if (!v.ok) expect(v.reason).toBe("consent_unknown");
+    }
+  });
+
+  it("the live policy version is a published one — bumping without appending reddens here", () => {
+    expect(PUBLISHED_POLICY_VERSIONS).toContain(REFUND_POLICY.version);
+    expect(PUBLISHED_POLICY_VERSIONS).toContain(CONSENT_MIN_POLICY_VERSION);
+  });
+});
+
+describe("the reverse allowlist check — the ordering nothing else catches", () => {
+  it("names an allowlist entry a live student already holds", () => {
+    // Sam Aiken the child is minted first; Sam Aiken the hire is
+    // allowlisted later, and the child's address silently becomes a valid
+    // reset recipient. This is the audit that sees it.
+    const held = allowlistEntriesHeldByStudents(["maya.chen", "peter", "ada.verne"]);
+    expect(held).toEqual(["peter"]);
+  });
+
+  it("is quiet when no student holds a staff local part", () => {
+    expect(allowlistEntriesHeldByStudents(["maya.chen", "ada.verne"])).toEqual([]);
+    expect(allowlistEntriesHeldByStudents([])).toEqual([]);
+  });
+
+  it("case-folds, so a differently-cased roster entry cannot hide the collision", () => {
+    expect(allowlistEntriesHeldByStudents(["PETER", " Ethan "])).toEqual(["ethan", "peter"]);
   });
 });
 

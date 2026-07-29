@@ -60,6 +60,23 @@ export const REFUND_POLICY = {
 export const CONSENT_MIN_POLICY_VERSION = "2026-07-28.2";
 
 /**
+ * Every policy version that has ever been PUBLISHED, oldest first.
+ *
+ * Exists so consent can be checked against reality rather than against
+ * arithmetic. An ordering test alone ("is this at-or-after the anchor?")
+ * accepts any well-formed string that sorts late — `2099-01-01.1` passes,
+ * as would a version from some other document. That is only safe today
+ * because the checkout route pins the accepted version by strict equality
+ * to the live constant; a backfill, an admin override, or a second write
+ * path would quietly bypass it, and the thing being authorised is a real
+ * mailbox for a real child (adversarial review).
+ *
+ * ⚠️ Append every new version here in the same PR that bumps
+ * REFUND_POLICY.version — a test pins that the live version is a member.
+ */
+export const PUBLISHED_POLICY_VERSIONS: readonly string[] = ["2026-07-28.1", "2026-07-28.2"];
+
+/**
  * Structural "at-or-after" for policy versions ("YYYY-MM-DD.N"). NEVER
  * compare these lexicographically: "2026-07-28.10" < "2026-07-28.2" as a
  * string, but .10 is the LATER revision (U1 review). Malformed versions

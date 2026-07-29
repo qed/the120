@@ -15,7 +15,11 @@
 
 import { buildFwLocalBase, isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
 import { STAFF_AUTH_MAIL_ALLOWLIST, STUDENT_MAIL_DOMAIN } from "@/app/lib/auth-mail-guard";
-import { CONSENT_MIN_POLICY_VERSION, policyVersionAtLeast } from "@/app/lib/funnel/deposit-rules";
+import {
+  CONSENT_MIN_POLICY_VERSION,
+  PUBLISHED_POLICY_VERSIONS,
+  policyVersionAtLeast,
+} from "@/app/lib/funnel/deposit-rules";
 
 /* ─────────────────── the address ─────────────────── */
 
@@ -64,19 +68,62 @@ export type LocalPartPick =
   | { ok: false; reason: "exhausted"; detail: string };
 
 /**
+ * Assemble the taken-set. **Use this rather than building a Set by hand**
+ * — it is the one place that knows every population an address can
+ * already belong to, and the staff seed is unconditional so no caller can
+ * omit it.
+ *
+ * Each input is bare local parts:
+ *   - `live` — every claim currently holding an address.
+ *   - `released` — every address ever freed. Never re-issued, because an
+ *     address is a promise someone may still hold; re-minting it silently
+ *     reconnects a channel a departed family (or whoever now controls
+ *     that inbox) still has. This is the `path_fw_released_aliases` rule.
+ *   - `fwBases` — the FW population's bases. Final addresses never collide
+ *     (bare vs `.fw@`), but the released ledger is keyed on the BASE, so
+ *     letting the two populations share one would entangle their ledgers.
+ *
+ * ⚠️ `released` has no writer on the funnel side yet — that lands with the
+ * lifecycle work (Unit 8). Until it does, pass the FW ledger and treat
+ * this guarantee as unproven, not as held (adversarial review).
+ */
+export function assembleTakenSet(input: {
+  live: readonly string[];
+  released: readonly string[];
+  fwBases: readonly string[];
+}): Set<string> {
+  return new Set<string>([
+    ...staffLocalParts(), // unconditional: never a caller's choice
+    ...input.live.map((s) => s.toLowerCase()),
+    ...input.released.map((s) => s.toLowerCase()),
+    ...input.fwBases.map((s) => s.toLowerCase()),
+  ]);
+}
+
+/**
  * Pick the address, avoiding everything already spoken for.
  *
- * `taken` must carry, all as bare local parts:
- *   - every live claim,
- *   - every RELEASED address (never re-issued to a different child — the
- *     `path_fw_released_aliases` rule, which exists because an address is
- *     a promise someone may still hold),
- *   - the staff allowlist (seeded below, so a student can never be minted
- *     onto `peter@` and inherit its auth-mail exemption),
- *   - the FW `.fw` bases, so the two student populations cannot collide.
+ * The staff allowlist is seeded HERE, not left to the caller. Both
+ * reviewers landed on the same trap: this function documented that
+ * guarantee while only the test helper supplied it, so a first-draft
+ * caller building `taken` from a live-students query alone would mint a
+ * child onto `peter@` — an address the auth-mail guard deliberately
+ * ALLOWS, handing a minor's inbox the staff exemption. Seeding internally
+ * makes that unwritable.
  *
- * This is the fast path only. The database's unique constraint is the real
- * arbiter under a race, and the caller retries on 23505.
+ * Every candidate is additionally self-checked against `isReservedAddress`
+ * so the safety property does not rest on set-construction alone.
+ *
+ * ON RACES, precisely — the previous wording gave false confidence. The
+ * database's unique constraint arbitrates only EXACT-STRING collisions
+ * within one population (two callers picking the same full address). It
+ * does NOT catch:
+ *   - re-minting a RELEASED address from a stale snapshot: nothing live
+ *     holds that string, so the insert succeeds with no 23505 to retry;
+ *   - a funnel pick racing an FW pick on the same base: the final
+ *     addresses differ (`maya.chen@` vs `maya.chen.fw@`), so no unique
+ *     index on the address can ever fire between them.
+ * Both require the caller to serialize against the released ledger.
  */
 export function pickStudentLocalPart(input: {
   firstName: string;
@@ -86,11 +133,14 @@ export function pickStudentLocalPart(input: {
   const derived = deriveStudentLocalBase(input.firstName, input.lastName);
   if (!derived.ok) return derived;
 
+  const reserved = new Set(staffLocalParts());
   for (let attempt = 1; attempt <= MAX_LOCAL_PART_ATTEMPTS; attempt += 1) {
     const localPart = attempt === 1 ? derived.base : `${derived.base}${attempt}`;
-    if (!input.taken.has(localPart)) {
-      return { ok: true, localPart, email: studentEmailForLocalPart(localPart), attempt };
-    }
+    if (input.taken.has(localPart) || reserved.has(localPart)) continue;
+    // Belt and braces: never hand back an address any other population
+    // holds, whatever the caller's set said.
+    if (isReservedAddress(studentEmailForLocalPart(localPart))) continue;
+    return { ok: true, localPart, email: studentEmailForLocalPart(localPart), attempt };
   }
   return {
     ok: false,
@@ -134,7 +184,7 @@ export function isReservedAddress(email: string): boolean {
  */
 export type ConsentVerdict =
   | { ok: true }
-  | { ok: false; reason: "consent_missing" | "consent_stale"; detail: string };
+  | { ok: false; reason: "consent_missing" | "consent_stale" | "consent_unknown"; detail: string };
 
 export function consentVerdict(acceptedPolicyVersion: string | null | undefined): ConsentVerdict {
   if (!acceptedPolicyVersion || acceptedPolicyVersion.trim().length === 0) {
@@ -144,16 +194,50 @@ export function consentVerdict(acceptedPolicyVersion: string | null | undefined)
       detail: "the deposit carries no policy acceptance",
     };
   }
-  if (!policyVersionAtLeast(acceptedPolicyVersion, CONSENT_MIN_POLICY_VERSION)) {
+  const accepted = acceptedPolicyVersion.trim();
+  // Ordering alone is not proof of consent: any well-formed string that
+  // sorts late would pass. Require a version we actually published.
+  if (!PUBLISHED_POLICY_VERSIONS.includes(accepted)) {
+    return {
+      ok: false,
+      reason: "consent_unknown",
+      detail: `accepted "${accepted}", which is not a published policy version — refusing to infer consent from a version number alone`,
+    };
+  }
+  if (!policyVersionAtLeast(accepted, CONSENT_MIN_POLICY_VERSION)) {
     return {
       ok: false,
       reason: "consent_stale",
       detail:
-        `accepted ${acceptedPolicyVersion}, which predates the parental-consent clause ` +
+        `accepted ${accepted}, which predates the parental-consent clause ` +
         `(${CONSENT_MIN_POLICY_VERSION}) — needs a re-consent touch before minting`,
     };
   }
   return { ok: true };
+}
+
+/* ─────────────────── the reverse allowlist check ─────────────────── */
+
+/**
+ * The mirror of `unallowlistedStaffAddresses`, and the hole it left open.
+ *
+ * That audit asks "which staff addresses are missing FROM the allowlist?"
+ * — it never asks the reverse: which allowlist entries are already held by
+ * a LIVE STUDENT? Ordering makes that reachable. A child named Sam Aiken
+ * is minted `sam.aiken@` today; months later a same-named hire (or a role
+ * address nobody cross-checks) is added to the allowlist. The instant that
+ * entry lands, the guard flips that address from default-deny to allowed —
+ * for the child's still-live account — and reset mail can reach a minor's
+ * inbox with no code change anywhere to catch it (adversarial review).
+ *
+ * Run this against the student roster before any allowlist entry ships,
+ * and on the same schedule as the forward audit.
+ */
+export function allowlistEntriesHeldByStudents(studentLocalParts: readonly string[]): string[] {
+  const students = new Set(studentLocalParts.map((s) => s.trim().toLowerCase()));
+  return staffLocalParts()
+    .filter((local) => students.has(local))
+    .sort();
 }
 
 /* ─────────────────── provisioning state ─────────────────── */

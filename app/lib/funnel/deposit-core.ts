@@ -51,7 +51,16 @@ export type WebhookDeps = {
 };
 
 export type WebhookOutcome =
-  | { kind: "ok"; fulfilled?: { childId: string; parentId: string; sessionId: string } }
+  | {
+      kind: "ok";
+      fulfilled?: { childId: string; parentId: string; sessionId: string };
+      /** A replayed `completed` over an already-paid, non-refunded row
+       *  (U15): no write happened and no event may re-emit, but the ids
+       *  still flow so the route can HEAL a lost provisioning claim — a
+       *  claim-insert failure answers non-200, Stripe redelivers, and the
+       *  redelivery is exactly this arm. Never set alongside `fulfilled`. */
+      replayedPaid?: { childId: string; parentId: string; sessionId: string };
+    }
   | { kind: "double_paid" }
   | { kind: "failed" };
 
@@ -168,8 +177,16 @@ export async function applyStripeEvent(
       // The refund is newer truth than any replayed fulfilment: a
       // redelivered `completed` must never resurrect `paid` over a
       // refunded row (the carried refunded_at bug).
-      if (verdict === "refused_refunded" || verdict === "replay_noop") {
+      if (verdict === "refused_refunded") {
+        // The refund stands — and no provisioning claim may be healed off
+        // a refunded family either.
         return { kind: "ok" };
+      }
+      if (verdict === "replay_noop") {
+        return {
+          kind: "ok",
+          replayedPaid: { childId: s.childId, parentId: s.parentId, sessionId: s.id },
+        };
       }
     } else if (existing) {
       // A pending record never downgrades an existing row.

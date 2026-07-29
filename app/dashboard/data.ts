@@ -4,7 +4,12 @@
  *   parents → children → subject_picks / workshop_selections / project_pitch → dossier(status)
  */
 
-import { applicantStateAllowsReserve } from "@/app/lib/funnel/applicant-rules";
+import {
+  APPLICANT_STATES,
+  applicantStateAllowsReserve,
+  type ApplicantState,
+} from "@/app/lib/funnel/applicant-rules";
+import { childNextScreen } from "@/app/lib/funnel/session-rules";
 
 /**
  * Every value `children.status` can actually hold — which since W7
@@ -122,6 +127,228 @@ export function canReserveSeatForChild(opts: {
     canReserveSeat(opts.status, opts.deposits) &&
     applicantStateAllowsReserve(opts.applicantState)
   );
+}
+
+/* ───────────────── state-aware child cards (reconnect U3, R1/R10) ───────────────── */
+
+/** Stale-tab degradation (reconnect U3): a funnel card only ever shows the
+ *  Reserve CTA when the state it RENDERED allowed it, so a server refusal
+ *  means the state moved under the tab. A refresh instruction, never the
+ *  under-review sentence (which reads as a dead end against a card that just
+ *  offered payment) and never a bare retry. */
+export const STALE_STATUS_MESSAGE =
+  "Status changed. Refresh this page to see the latest.";
+
+/**
+ * Map a checkout refusal to what THIS card should say. Pure so it is
+ * testable without mounting the client: the known applicant-state-gate
+ * refusal (`RESERVE_GATE_MESSAGE`, rendered verbatim today) becomes the
+ * stale-tab message for funnel children only — NULL-state children keep the
+ * exact server string they have always seen (their card really can show the
+ * CTA pre-approval via a stale `status`, and the under-review sentence is
+ * the right answer there). Unknown errors pass through untouched.
+ */
+export function reserveRefusalMessage(opts: {
+  serverError: string;
+  applicantState: string | null;
+}): string {
+  if (opts.applicantState !== null && opts.serverError === RESERVE_GATE_MESSAGE) {
+    return STALE_STATUS_MESSAGE;
+  }
+  return opts.serverError;
+}
+
+/** The handoff's band note (screen 3, BANDMETA): bottom-left of every funnel
+ *  card. Derived from grade alone — grades 3–5 Trail, 6–12 HQ (R31's split;
+ *  boundaries stated inline rather than importing `TRAIL_GRADES`, because
+ *  child-rules imports GRADES from THIS module and the cycle is not worth a
+ *  constant). "" for an unset grade: render nothing, never a guess. */
+export function bandNote(grade: number | ""): string {
+  if (grade === "" || typeof grade !== "number") return "";
+  if (grade <= 5) return "GRADES 3–5 · TRAIL BAND";
+  if (grade <= 8) return "GRADES 6–8 · HQ BAND";
+  return "GRADES 9–12 · HQ BAND";
+}
+
+/** Copy shared by funnel cards. Copy rules (handoff): no em dashes, "Not
+ *  Yet" never "failed". */
+const WAITLIST_CARD_NOTE = "Seats open when plans change. We contact you first.";
+const PENDING_DEPOSIT_NOTE =
+  "Payment processing. Bank debits can take a few days. No further action needed.";
+
+/** What the funnel card's primary affordance IS — layout renders, never
+ *  decides (repo convention: components are layout-only). */
+export type FunnelCardCta =
+  /** Red pill link into the mini-app (`added`). */
+  | { kind: "start"; label: string; href: string }
+  /** Red pill that opens the dossier editor client-side — the per-child
+   *  "dossier intent" (wizard has no URL; DashboardApp consumes this). */
+  | { kind: "continue_dossier"; label: string }
+  /** Red pill link into the mini-app compose (`project_created` whose
+   *  composed project was invalidated — the re-compose obligation). */
+  | { kind: "compose"; label: string; href: string }
+  /** Blue reserve flow — the EXISTING checkout entry (policy text +
+   *  checkbox + button), gated by `canReserveSeatForChild`. */
+  | { kind: "reserve"; label: string }
+  /** Green reserved badge; `href` present only when the arrival surface is
+   *  this child's verdict (live deposit at `deposited`). */
+  | { kind: "reserved"; label: string; href?: string };
+
+export type CardVerdict =
+  /** NULL applicant_state: render today's card EXACTLY as-is. */
+  | { kind: "legacy" }
+  | {
+      kind: "funnel";
+      /** Mono uppercase status (the handoff's red status line). */
+      statusLine: string;
+      /** Status-line treatment: red is the handoff default; green is the
+       *  reserved-seat treatment. */
+      tone: "red" | "green";
+      /** Small mono context line (waitlist / clearing-debit), no CTA. */
+      note?: string;
+      primaryCta?: FunnelCardCta;
+      /** The R13 review-walk entry: read-only mini-app, `submitted`+ only.
+       *  Deliberately small/secondary. */
+      secondaryReviewLink?: { label: string; href: string };
+    };
+
+/**
+ * The per-card decision (reconnect U3): ONE pure function from a child's
+ * server facts to what the card renders, layered on `childNextScreen` (the
+ * shared state→surface mapping) and `canReserveSeatForChild` (the same
+ * predicate the checkout route enforces — UI and server can never drift).
+ *
+ * `deposits` is the FULL per-child list (`hasPaidDeposit` semantics: a live
+ * paid row exists — `deposit_fulfil` flips refunded rows to 'refunded'
+ * atomically, so `status === "paid"` IS the live-pair fact on this wire).
+ *
+ * A live paid deposit outranks every rung except `enrolled` — mirroring the
+ * legacy card's "paid always wins". This is also the writers bridge: no code
+ * path writes `applicant_state = 'deposited'` yet (the ladder's writers stop
+ * at the status-sync trigger, which maps no status onto it), so a paid funnel
+ * family really sits at `offered` + paid — and must see SEAT RESERVED, not a
+ * re-offer (see the fixture-states learning; asserted in
+ * funnel-dashboard-cards.test.ts).
+ */
+export function cardVerdict(
+  child: Pick<Child, "id" | "status" | "applicantState">,
+  deposits: { status: string }[],
+  hasComposedProject: boolean
+): CardVerdict {
+  const state = child.applicantState;
+  if (state === null) return { kind: "legacy" };
+
+  const miniAppHref = `/start/child/${child.id}`;
+  const submittedPlus =
+    APPLICANT_STATES.indexOf(state) >= APPLICANT_STATES.indexOf("submitted");
+  const secondaryReviewLink = submittedPlus
+    ? { label: "Review application", href: miniAppHref }
+    : undefined;
+
+  if (state === "enrolled") {
+    return { kind: "funnel", statusLine: "ENROLLED", tone: "red", secondaryReviewLink };
+  }
+
+  if (hasPaidDeposit(deposits)) {
+    const next = childNextScreen({
+      applicantState: state,
+      liveDeposit: true,
+      hasComposedProject,
+    });
+    return {
+      kind: "funnel",
+      statusLine: "SEAT RESERVED",
+      tone: "green",
+      primaryCta: {
+        kind: "reserved",
+        label: "Seat reserved ✓",
+        ...(next.surface === "arrival" ? { href: "/start/arrival" } : {}),
+      },
+      secondaryReviewLink,
+    };
+  }
+
+  const pendingDeposit = deposits.some((d) => d.status === "pending");
+  // The same gate the checkout route enforces; a pending (clearing) debit
+  // additionally closes the CTA client-side because the server 409s it —
+  // rendering the button would be the dead retry this unit removes.
+  const reserveCta =
+    !pendingDeposit &&
+    canReserveSeatForChild({
+      status: child.status,
+      applicantState: state,
+      deposits,
+    })
+      ? ({ kind: "reserve", label: "Reserve seat · $250" } as const)
+      : undefined;
+  const pendingNote = pendingDeposit ? PENDING_DEPOSIT_NOTE : undefined;
+
+  switch (state) {
+    case "added":
+      return {
+        kind: "funnel",
+        statusLine: "PROJECT NOT STARTED",
+        tone: "red",
+        primaryCta: { kind: "start", label: "Start", href: miniAppHref },
+      };
+    case "project_created":
+      return {
+        kind: "funnel",
+        statusLine: "PROJECT CREATED",
+        tone: "red",
+        primaryCta: hasComposedProject
+          ? { kind: "continue_dossier", label: "Continue" }
+          : { kind: "compose", label: "Continue", href: miniAppHref },
+      };
+    case "submitted":
+      return {
+        kind: "funnel",
+        statusLine: "SUBMITTED FOR REVIEW",
+        tone: "red",
+        secondaryReviewLink,
+      };
+    case "in_review":
+      return {
+        kind: "funnel",
+        statusLine: "UNDER REVIEW",
+        tone: "red",
+        secondaryReviewLink,
+      };
+    case "waitlisted":
+      // F7: never a payment CTA — checkout is closed for this family.
+      return {
+        kind: "funnel",
+        statusLine: "WAITLISTED",
+        tone: "red",
+        note: WAITLIST_CARD_NOTE,
+        secondaryReviewLink,
+      };
+    case "offered":
+      return {
+        kind: "funnel",
+        statusLine: "OFFERED A SEAT",
+        tone: "red",
+        note: pendingNote,
+        primaryCta: reserveCta,
+        secondaryReviewLink,
+      };
+    case "deposited":
+      // No live paid row at `deposited` = refunded: the seat was released
+      // and they may reserve again (re_reserve) — never the arrival CTA,
+      // which would bounce off its no-live-deposit redirect forever.
+      return {
+        kind: "funnel",
+        statusLine: "SEAT RELEASED",
+        tone: "red",
+        note: pendingNote,
+        primaryCta: reserveCta,
+        secondaryReviewLink,
+      };
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
 }
 
 export const GRADES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
@@ -679,6 +906,10 @@ export type Child = {
   // Dossier status
   status: SeatStatus;
   submittedAt?: string;
+  /** The funnel ladder rung (reconnect U3). NULL = a pre-funnel child; the
+   *  card renders exactly as before this column existed. Read through
+   *  `parseApplicantState` (fail-closed), never raw off the wire. */
+  applicantState: ApplicantState | null;
 };
 
 export type Parent = {
@@ -710,6 +941,9 @@ export function emptyChild(id: string): Child {
     childEmail: "",
     childEmailNone: false,
     status: "draft",
+    // A child added on the dashboard never enters the funnel ladder here —
+    // the row inserts with a NULL applicant_state (the legacy card path).
+    applicantState: null,
   };
 }
 

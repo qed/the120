@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
-import { canReserveSeat, childName, completeness, hasPaidDeposit, statusMeta } from "./data";
+import {
+  type Child,
+  bandNote,
+  canReserveSeat,
+  cardVerdict,
+  childName,
+  completeness,
+  hasPaidDeposit,
+  reserveRefusalMessage,
+  statusMeta,
+} from "./data";
 import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
@@ -18,7 +28,8 @@ export default function DashboardApp({
 }: {
   seatsRemaining?: number;
 }) {
-  const { ready, session, parent, children, deposits, addChild, refreshDeposits } = useDashboard();
+  const { ready, session, parent, children, deposits, composedChildIds, addChild, refreshDeposits } =
+    useDashboard();
   const [view, setView] = useState<View>("home");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Returning from Stripe Checkout: the banner derives from the URL ONCE at
@@ -76,7 +87,19 @@ export default function DashboardApp({
       if (!res.ok || !body.url) throw new Error(body.error ?? "Could not start checkout");
       window.location.href = body.url;
     } catch (err) {
-      setCheckoutError(err instanceof Error ? err.message : "Could not start checkout — try again.");
+      const message =
+        err instanceof Error ? err.message : "Could not start checkout — try again.";
+      // Stale-tab degradation (reconnect U3): a funnel card's Reserve CTA
+      // only renders when the state it read allowed it, so the server gate's
+      // refusal means the state moved — say "refresh", never a dead retry.
+      // The mapping is pure (data.ts) so it is tested without mounting this.
+      const child = children.find((x) => x.id === childId);
+      setCheckoutError(
+        reserveRefusalMessage({
+          serverError: message,
+          applicantState: child?.applicantState ?? null,
+        })
+      );
       setReservingId(null);
     }
   };
@@ -85,6 +108,55 @@ export default function DashboardApp({
   // multiple rows, and a single find() can grab the refunded one while a
   // paid one exists (the gate + paid banner would then disagree with the API).
   const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
+
+  // The reserve entry (R50/R51a) — next-steps link, FULL policy text above an
+  // unticked checkbox, then the checkout button. ONE block shared by the
+  // legacy card and the funnel `offered`/re-reserve cards so the dispute-
+  // evidence posture (inline policy + explicit tick) can never fork.
+  const renderReserveCta = (c: Child) => (
+    <>
+      {/* R50: the three swipes are the offer's front door. */}
+      <a
+        href={`/start/next-steps?child=${c.id}`}
+        className="mb-3 inline-block rounded font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue underline hover:text-red"
+      >
+        See your next steps →
+      </a>
+      {/* R51a: the FULL policy text inline at the point
+          of payment, above an UNTICKED checkbox — a
+          checkbox holding only a link is rejected by
+          card issuers as dispute evidence. */}
+      <p className="mb-2 rounded-lg border border-line bg-paper-2 p-3 text-[11px] leading-4 text-ink-soft">
+        {REFUND_POLICY.text}
+      </p>
+      <label className="mb-3 flex items-start gap-2 text-[12px] leading-4 text-ink">
+        <input
+          type="checkbox"
+          checked={policyAcceptedIds.has(c.id)}
+          onChange={(e) =>
+            setPolicyAcceptedIds((prev) => {
+              const next = new Set(prev);
+              if (e.target.checked) next.add(c.id);
+              else next.delete(c.id);
+              return next;
+            })
+          }
+          className="mt-0.5 h-4 w-4 accent-blue"
+        />
+        I have read and accept the refund policy above.
+      </label>
+      <button
+        onClick={() => reserveSeat(c.id)}
+        disabled={reservingId === c.id || !policyAcceptedIds.has(c.id)}
+        className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
+      </button>
+      <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+        Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
+      </p>
+    </>
+  );
 
   // Auth gate: everything below assumes a signed-in parent.
   if (ready && !session) return <SignIn />;
@@ -192,6 +264,118 @@ export default function DashboardApp({
                 // Approval gate (R11–R13): the same predicate the checkout
                 // route enforces — reservable only at `offered` or later.
                 const canReserve = canReserveSeat(c.status, childDeposits);
+                // Reconnect U3: funnel children (non-NULL applicant_state)
+                // render the state-aware card; NULL children fall through to
+                // the legacy card below, byte-for-byte as before.
+                const verdict = cardVerdict(c, childDeposits, composedChildIds.has(c.id));
+                if (verdict.kind === "funnel") {
+                  const dossierNext = verdict.primaryCta?.kind === "continue_dossier";
+                  const statusTone =
+                    verdict.tone === "green" ? "text-crm-green" : "text-red";
+                  const header = (
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
+                        {c.photo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.photo} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span className="font-display">
+                            {(c.firstName[0] || "?").toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-display text-lg font-bold text-ink">
+                          {childName(c)}
+                        </p>
+                        <p className="font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
+                          {c.grade === "" ? "Grade —" : `Grade ${c.grade}`} ·{" "}
+                          <span className={statusTone}>{verdict.statusLine}</span>
+                        </p>
+                      </div>
+                    </div>
+                  );
+                  const pillClass =
+                    "inline-flex h-10 items-center justify-center rounded-full px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white";
+                  const cta = verdict.primaryCta;
+                  return (
+                    <div
+                      key={c.id}
+                      className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
+                    >
+                      {dossierNext ? (
+                        // The per-child dossier intent: the wizard has no URL,
+                        // so the card itself opens the editor (same affordance
+                        // as the legacy card).
+                        <button onClick={() => openEditor(c.id)} className="w-full text-left">
+                          {header}
+                          <Meter value={pct} className="mt-5" />
+                          <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
+                            Open dossier →
+                          </p>
+                        </button>
+                      ) : (
+                        <div className="w-full text-left">
+                          {header}
+                          <Meter value={pct} className="mt-5" />
+                        </div>
+                      )}
+
+                      <div className="mt-4 border-t border-line pt-4">
+                        {verdict.note && (
+                          <p className="mb-3 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+                            {verdict.note}
+                          </p>
+                        )}
+                        {cta?.kind === "reserve" ? (
+                          renderReserveCta(c)
+                        ) : (
+                          <div className="flex items-end justify-between gap-4">
+                            <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+                              {bandNote(c.grade)}
+                            </p>
+                            {cta?.kind === "start" || cta?.kind === "compose" ? (
+                              <a
+                                href={cta.href}
+                                className={`${pillClass} bg-red transition-colors hover:bg-red-dark`}
+                              >
+                                {cta.label}
+                              </a>
+                            ) : cta?.kind === "continue_dossier" ? (
+                              <button
+                                onClick={() => openEditor(c.id)}
+                                className={`${pillClass} bg-red transition-colors hover:bg-red-dark`}
+                              >
+                                {cta.label}
+                              </button>
+                            ) : cta?.kind === "reserved" ? (
+                              cta.href ? (
+                                <a
+                                  href={cta.href}
+                                  className={`${pillClass} bg-crm-green transition-opacity hover:opacity-90`}
+                                >
+                                  {cta.label}
+                                </a>
+                              ) : (
+                                <span className={`${pillClass} bg-crm-green`}>{cta.label}</span>
+                              )
+                            ) : null}
+                          </div>
+                        )}
+                        {verdict.secondaryReviewLink && (
+                          <p className="mt-3">
+                            <a
+                              href={verdict.secondaryReviewLink.href}
+                              className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
+                            >
+                              {verdict.secondaryReviewLink.label} →
+                            </a>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <div
                     key={c.id}
@@ -242,48 +426,7 @@ export default function DashboardApp({
                           action needed.
                         </p>
                       ) : canReserve ? (
-                        <>
-                          {/* R50: the three swipes are the offer's front door. */}
-                          <a
-                            href={`/start/next-steps?child=${c.id}`}
-                            className="mb-3 inline-block rounded font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue underline hover:text-red"
-                          >
-                            See your next steps →
-                          </a>
-                          {/* R51a: the FULL policy text inline at the point
-                              of payment, above an UNTICKED checkbox — a
-                              checkbox holding only a link is rejected by
-                              card issuers as dispute evidence. */}
-                          <p className="mb-2 rounded-lg border border-line bg-paper-2 p-3 text-[11px] leading-4 text-ink-soft">
-                            {REFUND_POLICY.text}
-                          </p>
-                          <label className="mb-3 flex items-start gap-2 text-[12px] leading-4 text-ink">
-                            <input
-                              type="checkbox"
-                              checked={policyAcceptedIds.has(c.id)}
-                              onChange={(e) =>
-                                setPolicyAcceptedIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(c.id);
-                                  else next.delete(c.id);
-                                  return next;
-                                })
-                              }
-                              className="mt-0.5 h-4 w-4 accent-blue"
-                            />
-                            I have read and accept the refund policy above.
-                          </label>
-                          <button
-                            onClick={() => reserveSeat(c.id)}
-                            disabled={reservingId === c.id || !policyAcceptedIds.has(c.id)}
-                            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
-                          </button>
-                          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                            Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
-                          </p>
-                        </>
+                        renderReserveCta(c)
                       ) : c.status === "waitlisted" ? (
                         // W7: never "Under Review" for a waitlisted family —
                         // they have been reviewed, and promising a deposit

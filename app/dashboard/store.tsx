@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Session } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { type Child, type Parent, emptyChild, parseAcademics } from "./data";
+import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
 import { prefillDraft } from "./wizard-rules";
 
 /**
@@ -20,6 +21,10 @@ type Store = {
   parent: Parent | null;
   children: Child[];
   deposits: Deposit[];
+  /** Children holding a composed (active) project — derived from the SAME
+   *  projects load the prefill uses (reconnect U3), never a second query.
+   *  Feeds `cardVerdict`'s hasComposedProject axis. */
+  composedChildIds: ReadonlySet<string>;
   addChild: () => string;
   updateChild: (id: string, patch: Partial<Child>) => void;
   removeChild: (id: string) => void;
@@ -60,6 +65,9 @@ export type ChildRow = {
   child_email_none: boolean | null;
   status: Child["status"];
   submitted_at: string | null;
+  /** Funnel ladder rung (reconnect U3); NULL for every pre-funnel child.
+   *  The `select("*")` load already carries it. */
+  applicant_state: string | null;
 };
 
 export function rowToChild(r: ChildRow): Child {
@@ -82,6 +90,9 @@ export function rowToChild(r: ChildRow): Child {
     childEmailNone: r.child_email_none ?? false,
     status: r.status,
     submittedAt: r.submitted_at ?? undefined,
+    // Fail-closed read: an unknown wire value drops to NULL (the legacy
+    // card), never coerces to a rung the row does not hold.
+    applicantState: parseApplicantState(r.applicant_state),
   };
 }
 
@@ -157,6 +168,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   const [parent, setParent] = useState<Parent | null>(null);
   const [children, setChildren] = useState<Child[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [composedChildIds, setComposedChildIds] = useState<ReadonlySet<string>>(new Set());
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const childrenRef = useRef<Child[]>([]);
   /** Per-child promise chains: at most one in-flight write per child, and a
@@ -339,6 +351,9 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     );
     const loaded = ((childRows as ChildRow[]) ?? []).map(rowToChild);
     const prefilled = loaded.map((c) => prefillDraft(c, projectByChild.get(c.id) ?? null));
+    // The composed-project fact for the card verdicts, from the load already
+    // in hand (the same active-projects read the prefill consumes).
+    setComposedChildIds(new Set(projectByChild.keys()));
     applyChildren(prefilled);
     prefilled.forEach((c, i) => {
       if (c !== loaded[i] && c.status === "draft") void enqueueWrite(c.id);
@@ -367,6 +382,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         setParent(null);
         applyChildren([]);
         setDeposits([]);
+        setComposedChildIds(new Set());
       }
     });
     return () => subscription.unsubscribe();
@@ -477,6 +493,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         parent,
         children,
         deposits,
+        composedChildIds,
         addChild,
         updateChild,
         removeChild,

@@ -32,6 +32,8 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
 import { PROVISION_STATES, type ProvisionState } from "@/app/lib/funnel/provision-rules";
 import type {
+  ForwardingClaim,
+  ForwardingDeps,
   LeaseResult,
   ProvisionClaim,
   ProvisionDeps,
@@ -40,6 +42,11 @@ import type {
   StaleSweepDeps,
 } from "@/app/lib/funnel/provision-core";
 import { driveProvisioning, alertStaleClaims } from "@/app/lib/funnel/provision-core";
+import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
+import {
+  FORWARDING_TOTAL_ALERT_DAYS,
+  FORWARDING_VERIFY_ALERT_DAYS,
+} from "@/app/lib/funnel/arrival-rules";
 
 const CLAIM_TABLE = "funnel_student_provisioning";
 export const PROVISION_LEASE_SECONDS = 120;
@@ -485,4 +492,215 @@ export function realStaleSweepDeps(): StaleSweepDeps {
 /** The stale-claim human backstop, exported for the cron that gains it. */
 export async function sweepStaleProvisioningClaims(): Promise<"alerted" | "none" | "skipped"> {
   return alertStaleClaims(realStaleSweepDeps());
+}
+
+/* ─────────────────────────── forwarding (W14, U7) ─────────────────────────── */
+
+const isForwardingState = (v: unknown): v is ForwardingState =>
+  typeof v === "string" && (FORWARDING_STATES as readonly string[]).includes(v);
+
+type GmailClient = {
+  users: {
+    settings: {
+      forwardingAddresses: {
+        get: (p: Record<string, unknown>) => Promise<{ data: { verificationStatus?: string } }>;
+        create: (p: Record<string, unknown>) => Promise<unknown>;
+      };
+      updateAutoForwarding: (p: Record<string, unknown>) => Promise<unknown>;
+    };
+  };
+};
+
+/** DWD impersonation of the STUDENT (the one deliberate DWD exception,
+ *  scoped to gmail.settings.sharing alone). Per-student subject, so no
+ *  module-level cache — forwarding volume is a trickle. */
+async function gmailClientFor(studentEmail: string): Promise<GmailClient> {
+  const { google } = await import("googleapis");
+  const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
+  const auth = new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: ["https://www.googleapis.com/auth/gmail.settings.sharing"],
+    subject: studentEmail,
+  });
+  return google.gmail({ version: "v1", auth }) as unknown as GmailClient;
+}
+
+export function realForwardingDeps(): ForwardingDeps {
+  const db = supabaseAdmin();
+  return {
+    forwardingConfigured: saKeyRaw().length > 0,
+
+    getForwardingClaim: async (childId) => {
+      const { data, error } = await db
+        .from(CLAIM_TABLE)
+        .select("child_id, state, email, forwarding_state, forwarding_target")
+        .eq("child_id", childId)
+        .maybeSingle();
+      if (error) return "error";
+      if (!data) return null;
+      if (!isProvisionState(data.state) || !isForwardingState(data.forwarding_state)) {
+        return "error"; // fail closed on vocabulary drift
+      }
+      const claim: ForwardingClaim = {
+        childId: String(data.child_id),
+        state: data.state,
+        email: (data.email as string | null) ?? null,
+        forwardingState: data.forwarding_state,
+        forwardingTarget: (data.forwarding_target as string | null) ?? null,
+      };
+      return claim;
+    },
+
+    getParentEmail: async (childId) => {
+      // The CURRENT account email — auth is the login truth, so the read
+      // goes to auth, not to a parents-table copy that can lag a change.
+      const { data: child, error } = await db
+        .from("children")
+        .select("parent_id")
+        .eq("id", childId)
+        .maybeSingle();
+      if (error) return "error";
+      if (!child?.parent_id) return null;
+      const { data: user, error: userErr } = await db.auth.admin.getUserById(
+        String(child.parent_id)
+      );
+      if (userErr) return "error";
+      return user?.user?.email ?? null;
+    },
+
+    getForwardingStatus: async (studentEmail, target) => {
+      try {
+        const gmail = await gmailClientFor(studentEmail);
+        const { data } = await gmail.users.settings.forwardingAddresses.get({
+          userId: "me",
+          forwardingEmail: target,
+        });
+        if (data.verificationStatus === "accepted") return "verified";
+        if (data.verificationStatus === "pending") return "pending";
+        return "unknown";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "none";
+        console.error("[provision] forwarding status read failed:", err);
+        return "unknown";
+      }
+    },
+
+    requestForwarding: async (studentEmail, target) => {
+      try {
+        const gmail = await gmailClientFor(studentEmail);
+        await gmail.users.settings.forwardingAddresses.create({
+          userId: "me",
+          requestBody: { forwardingEmail: target },
+        });
+        return true;
+      } catch (err) {
+        // 409: the address already exists at Google — its verification
+        // mail already went out; re-sending is exactly what must not
+        // happen, so this reads as success.
+        if (googleStatus(err) === 409) return true;
+        console.error("[provision] forwarding request failed:", err);
+        return false;
+      }
+    },
+
+    enableAutoForwarding: async (studentEmail, target) => {
+      try {
+        const gmail = await gmailClientFor(studentEmail);
+        await gmail.users.settings.updateAutoForwarding({
+          userId: "me",
+          requestBody: { enabled: true, emailAddress: target, disposition: "leaveInInbox" },
+        });
+        return true;
+      } catch (err) {
+        console.error("[provision] autoforward enable failed:", err);
+        return false;
+      }
+    },
+
+    casForwarding: async (childId, expected, next) => {
+      const row: Record<string, unknown> = {
+        forwarding_state: next.state,
+        forwarding_target: next.target,
+        updated_at: new Date().toISOString(),
+      };
+      if (next.stampRequested) {
+        row.forwarding_requested_at = new Date().toISOString();
+        row.forwarding_alerted_at = null; // a new request cycle re-arms its alert
+      }
+      let q = db
+        .from(CLAIM_TABLE)
+        .update(row)
+        .eq("child_id", childId)
+        .eq("forwarding_state", expected.state);
+      q = expected.target === null ? q.is("forwarding_target", null) : q.eq("forwarding_target", expected.target);
+      const { data, error } = await q.select("child_id");
+      if (error) {
+        console.error("[provision] forwarding CAS failed:", error.message);
+        return false;
+      }
+      const won = (data ?? []).length === 1;
+      if (won && next.stampRequested) {
+        // The FIRST request ever, stamped once and never cleared: the
+        // total-age backstop that survives any number of target flips
+        // (each flip resets the per-cycle clock — adversarial review).
+        await db
+          .from(CLAIM_TABLE)
+          .update({ forwarding_first_requested_at: new Date().toISOString() })
+          .eq("child_id", childId)
+          .is("forwarding_first_requested_at", null);
+      }
+      return won;
+    },
+  };
+}
+
+/** The W14 backstop: verifications the parent never clicked, paged once
+ *  per request cycle (the CAS clears the stamp when a NEW request goes
+ *  out). Wired into the retention cron in Unit 8, beside the
+ *  suspend_pending sweep. */
+export async function sweepOverdueForwarding(): Promise<"alerted" | "none" | "skipped"> {
+  const db = supabaseAdmin();
+  const cycleCutoff = new Date(
+    Date.now() - FORWARDING_VERIFY_ALERT_DAYS * 86_400_000
+  ).toISOString();
+  const totalCutoff = new Date(
+    Date.now() - FORWARDING_TOTAL_ALERT_DAYS * 86_400_000
+  ).toISOString();
+  const { data, error } = await db
+    .from(CLAIM_TABLE)
+    .select("child_id, forwarding_requested_at, forwarding_first_requested_at")
+    .eq("forwarding_state", "pending_verification")
+    // Either the CURRENT cycle aged out, or the child has been without
+    // active forwarding for the total bound across any number of cycles
+    // (target flip-flops reset the per-cycle clock, never this one).
+    .or(
+      `forwarding_requested_at.lt.${cycleCutoff},forwarding_first_requested_at.lt.${totalCutoff}`
+    )
+    .is("forwarding_alerted_at", null)
+    .not("child_id", "is", null)
+    .limit(200);
+  if (error) {
+    console.error("[provision] forwarding sweep read failed:", error.message);
+    return "skipped";
+  }
+  const overdue = data ?? [];
+  if (overdue.length === 0) return "none";
+  await notifyOps(
+    "Forwarding verification unclicked past the bound",
+    overdue
+      .map((r) => `child=${r.child_id} requested=${r.forwarding_requested_at}`)
+      .join("\n") +
+      `\nMail delivered before verification sits unread in the dormant mailbox. ` +
+      `Nudge the parent (or re-send the verification once the staff affordance ships in Unit 8).`
+  );
+  const { error: stampErr } = await db
+    .from(CLAIM_TABLE)
+    .update({ forwarding_alerted_at: new Date().toISOString() })
+    .in(
+      "child_id",
+      overdue.map((r) => String(r.child_id))
+    );
+  if (stampErr) console.error("[provision] forwarding sweep stamp failed:", stampErr.message);
+  return "alerted";
 }

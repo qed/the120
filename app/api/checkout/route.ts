@@ -191,7 +191,11 @@ export async function POST(req: Request) {
           description: `The 120 — refundable seat deposit (${child.first_name || "child"})`,
           metadata: { child_id: childId, parent_id: user.id },
         },
-        success_url: `${origin}/dashboard?deposit=success`,
+        // U7 (W13): success lands on the ARRIVAL page — without this the
+        // acceptance moment is unreachable. Cancel keeps the dashboard
+        // (nothing to arrive at; the page itself also redirects any
+        // session with no live paid deposit back to the dashboard).
+        success_url: `${origin}/start/arrival?child=${encodeURIComponent(childId)}`,
         cancel_url: `${origin}/dashboard?deposit=cancelled`,
         expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
       },

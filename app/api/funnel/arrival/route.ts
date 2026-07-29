@@ -58,7 +58,7 @@ export async function GET(req: Request) {
   const readClaim = async () => {
     const { data } = await admin
       .from("funnel_student_provisioning")
-      .select("state, email, forwarding_state, lease_expires_at")
+      .select("state, email, forwarding_state, lease_expires_at, updated_at")
       .eq("child_id", childId)
       .maybeSingle();
     return data ?? null;
@@ -78,6 +78,9 @@ export async function GET(req: Request) {
     shouldResumeProvisioning({
       state: String(claim.state),
       leaseExpiresAt: (claim.lease_expires_at as string | null) ?? null,
+      // The cooldown bounds SEQUENTIAL re-drives: a scripted loop against
+      // this route pays cheap DB reads, never the external pipeline.
+      lastWriteAt: (claim.updated_at as string | null) ?? null,
       now: new Date(),
     })
   ) {

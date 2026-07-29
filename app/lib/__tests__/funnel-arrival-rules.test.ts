@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARRIVAL_POLL_MAX_ATTEMPTS,
   arrivalView,
+  FORWARDING_TOTAL_ALERT_DAYS,
   FORWARDING_VERIFY_ALERT_DAYS,
   forwardingOverdue,
   pollStep,
@@ -147,9 +148,39 @@ describe("pollStep — bounded await, consecutive terminal confirmation", () => 
 describe("shouldResumeProvisioning — the page as primary driver", () => {
   const now = new Date("2026-07-29T12:00:00Z");
 
-  it("pending and identity_only resume", () => {
-    expect(shouldResumeProvisioning({ state: "pending", leaseExpiresAt: null, now })).toBe(true);
-    expect(shouldResumeProvisioning({ state: "identity_only", leaseExpiresAt: null, now })).toBe(true);
+  it("pending and identity_only resume (no recent landing)", () => {
+    expect(
+      shouldResumeProvisioning({ state: "pending", leaseExpiresAt: null, lastWriteAt: null, now })
+    ).toBe(true);
+    expect(
+      shouldResumeProvisioning({
+        state: "identity_only",
+        leaseExpiresAt: null,
+        lastWriteAt: "2026-07-29T11:00:00Z",
+        now,
+      })
+    ).toBe(true);
+  });
+
+  it("the cooldown bounds SEQUENTIAL re-drives: a fresh landing refuses, an aged one resumes", () => {
+    // A scripted loop against the poll route must pay cheap DB reads, not
+    // the external pipeline (adversarial review).
+    expect(
+      shouldResumeProvisioning({
+        state: "pending",
+        leaseExpiresAt: null,
+        lastWriteAt: "2026-07-29T11:59:50Z", // 10s ago — inside the cooldown
+        now,
+      })
+    ).toBe(false);
+    expect(
+      shouldResumeProvisioning({
+        state: "pending",
+        leaseExpiresAt: null,
+        lastWriteAt: "2026-07-29T11:59:00Z", // 60s ago — past it
+        now,
+      })
+    ).toBe(true);
   });
 
   it("a LIVE in_progress lease is left alone; an expired one is takeable", () => {
@@ -157,6 +188,7 @@ describe("shouldResumeProvisioning — the page as primary driver", () => {
       shouldResumeProvisioning({
         state: "in_progress",
         leaseExpiresAt: "2026-07-29T12:01:00Z",
+        lastWriteAt: null,
         now,
       })
     ).toBe(false);
@@ -164,6 +196,7 @@ describe("shouldResumeProvisioning — the page as primary driver", () => {
       shouldResumeProvisioning({
         state: "in_progress",
         leaseExpiresAt: "2026-07-29T11:59:00Z",
+        lastWriteAt: null,
         now,
       })
     ).toBe(true);
@@ -171,9 +204,13 @@ describe("shouldResumeProvisioning — the page as primary driver", () => {
 
   it("terminal states, suspend_pending, missing claims, and unknown states never resume", () => {
     for (const state of ["complete", "exception", "released", "suspend_pending", "wat"]) {
-      expect(shouldResumeProvisioning({ state, leaseExpiresAt: null, now })).toBe(false);
+      expect(shouldResumeProvisioning({ state, leaseExpiresAt: null, lastWriteAt: null, now })).toBe(
+        false
+      );
     }
-    expect(shouldResumeProvisioning({ state: null, leaseExpiresAt: null, now })).toBe(false);
+    expect(
+      shouldResumeProvisioning({ state: null, leaseExpiresAt: null, lastWriteAt: null, now })
+    ).toBe(false);
   });
 });
 
@@ -182,6 +219,10 @@ describe("the driver and route wiring (source pins)", () => {
     const driver = read("app/lib/funnel/provision-driver.ts");
     // Gated on kind "complete" — the fenced landing, exactly once per child.
     expect(driver).toMatch(/outcome\.kind === "complete"[\s\S]{0,400}await emitFunnelEvent\("student_account_created"/);
+    // EXACTLY one emit call site — a duplicated call near the adjacent
+    // forwarding branch would satisfy the regex above and silently break
+    // once-per-child (adversarial review).
+    expect(driver.split('emitFunnelEvent("student_account_created"').length - 1).toBe(1);
     // Source order: the drive precedes the emit.
     expect(driver.indexOf("driveProvisioningForChild")).toBeLessThan(
       driver.indexOf('emitFunnelEvent("student_account_created"')
@@ -218,7 +259,28 @@ describe("the driver and route wiring (source pins)", () => {
     const screen = /export const ARRIVAL_SCREEN = \{[\s\S]*?\} as const;/.exec(rules);
     expect(screen).not.toBeNull();
     const copy = screen![0].toLowerCase();
-    for (const forbidden of ["reply", "sign in", "sign-in", "log in", "login", "password:"]) {
+    // Semantic categories, not just literal words (adversarial review):
+    // reply-promise language, monitoring/checking language, and
+    // access/sign-in language each get several spellings. A substring pin
+    // can never fully carry a semantic guarantee — revisions still go
+    // through review — but the common regressions should redden here.
+    for (const forbidden of [
+      "reply",
+      "respond",
+      "write back",
+      "writes back",
+      "check the inbox",
+      "check their inbox",
+      "checks this inbox",
+      "monitor",
+      "sign in",
+      "sign-in",
+      "log in",
+      "login",
+      "credential",
+      "access their account",
+      "password:",
+    ]) {
       expect(copy, `copy must not contain "${forbidden}"`).not.toContain(forbidden);
     }
     // The one password mention allowed is the explicit "no password" fact.
@@ -230,22 +292,49 @@ describe("forwardingOverdue — the black-hole window's bound (W14)", () => {
   const now = new Date("2026-07-29T12:00:00Z");
   const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
 
-  it("pending past the bound with no prior alert is overdue", () => {
+  it("pending past the cycle bound with no prior alert is overdue", () => {
     expect(
       forwardingOverdue({
         forwardingState: "pending_verification",
         requestedAt: daysAgo(FORWARDING_VERIFY_ALERT_DAYS + 1),
+        firstRequestedAt: daysAgo(FORWARDING_VERIFY_ALERT_DAYS + 1),
         alertedAt: null,
         now,
       })
     ).toBe(true);
   });
 
-  it("inside the bound, already-alerted, non-pending, or unstamped requests are not", () => {
+  it("the TOTAL-age backstop pages a flip-flopping target even when every cycle stays young", () => {
+    // Each email change resets the per-cycle clock; the first-ever stamp
+    // does not — three weeks without active forwarding pages regardless
+    // (adversarial review: the flip-flop suppression hole).
+    expect(
+      forwardingOverdue({
+        forwardingState: "pending_verification",
+        requestedAt: daysAgo(2), // fresh cycle
+        firstRequestedAt: daysAgo(FORWARDING_TOTAL_ALERT_DAYS + 1),
+        alertedAt: null,
+        now,
+      })
+    ).toBe(true);
+    // Under both bounds: quiet.
+    expect(
+      forwardingOverdue({
+        forwardingState: "pending_verification",
+        requestedAt: daysAgo(2),
+        firstRequestedAt: daysAgo(FORWARDING_TOTAL_ALERT_DAYS - 1),
+        alertedAt: null,
+        now,
+      })
+    ).toBe(false);
+  });
+
+  it("inside the bounds, already-alerted, non-pending, or unstamped requests are not", () => {
     expect(
       forwardingOverdue({
         forwardingState: "pending_verification",
         requestedAt: daysAgo(FORWARDING_VERIFY_ALERT_DAYS - 1),
+        firstRequestedAt: daysAgo(FORWARDING_VERIFY_ALERT_DAYS - 1),
         alertedAt: null,
         now,
       })
@@ -254,17 +343,25 @@ describe("forwardingOverdue — the black-hole window's bound (W14)", () => {
       forwardingOverdue({
         forwardingState: "pending_verification",
         requestedAt: daysAgo(FORWARDING_VERIFY_ALERT_DAYS + 5),
+        firstRequestedAt: daysAgo(FORWARDING_TOTAL_ALERT_DAYS + 5),
         alertedAt: daysAgo(1),
         now,
       })
     ).toBe(false);
     expect(
-      forwardingOverdue({ forwardingState: "active", requestedAt: daysAgo(30), alertedAt: null, now })
+      forwardingOverdue({
+        forwardingState: "active",
+        requestedAt: daysAgo(30),
+        firstRequestedAt: daysAgo(30),
+        alertedAt: null,
+        now,
+      })
     ).toBe(false);
     expect(
       forwardingOverdue({
         forwardingState: "pending_verification",
         requestedAt: null,
+        firstRequestedAt: null,
         alertedAt: null,
         now,
       })

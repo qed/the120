@@ -43,7 +43,10 @@ import type {
 } from "@/app/lib/funnel/provision-core";
 import { driveProvisioning, alertStaleClaims } from "@/app/lib/funnel/provision-core";
 import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
-import { FORWARDING_VERIFY_ALERT_DAYS } from "@/app/lib/funnel/arrival-rules";
+import {
+  FORWARDING_TOTAL_ALERT_DAYS,
+  FORWARDING_VERIFY_ALERT_DAYS,
+} from "@/app/lib/funnel/arrival-rules";
 
 const CLAIM_TABLE = "funnel_student_provisioning";
 export const PROVISION_LEASE_SECONDS = 120;
@@ -636,7 +639,18 @@ export function realForwardingDeps(): ForwardingDeps {
         console.error("[provision] forwarding CAS failed:", error.message);
         return false;
       }
-      return (data ?? []).length === 1;
+      const won = (data ?? []).length === 1;
+      if (won && next.stampRequested) {
+        // The FIRST request ever, stamped once and never cleared: the
+        // total-age backstop that survives any number of target flips
+        // (each flip resets the per-cycle clock — adversarial review).
+        await db
+          .from(CLAIM_TABLE)
+          .update({ forwarding_first_requested_at: new Date().toISOString() })
+          .eq("child_id", childId)
+          .is("forwarding_first_requested_at", null);
+      }
+      return won;
     },
   };
 }
@@ -647,14 +661,22 @@ export function realForwardingDeps(): ForwardingDeps {
  *  suspend_pending sweep. */
 export async function sweepOverdueForwarding(): Promise<"alerted" | "none" | "skipped"> {
   const db = supabaseAdmin();
-  const cutoff = new Date(
+  const cycleCutoff = new Date(
     Date.now() - FORWARDING_VERIFY_ALERT_DAYS * 86_400_000
+  ).toISOString();
+  const totalCutoff = new Date(
+    Date.now() - FORWARDING_TOTAL_ALERT_DAYS * 86_400_000
   ).toISOString();
   const { data, error } = await db
     .from(CLAIM_TABLE)
-    .select("child_id, forwarding_requested_at")
+    .select("child_id, forwarding_requested_at, forwarding_first_requested_at")
     .eq("forwarding_state", "pending_verification")
-    .lt("forwarding_requested_at", cutoff)
+    // Either the CURRENT cycle aged out, or the child has been without
+    // active forwarding for the total bound across any number of cycles
+    // (target flip-flops reset the per-cycle clock, never this one).
+    .or(
+      `forwarding_requested_at.lt.${cycleCutoff},forwarding_first_requested_at.lt.${totalCutoff}`
+    )
     .is("forwarding_alerted_at", null)
     .not("child_id", "is", null)
     .limit(200);

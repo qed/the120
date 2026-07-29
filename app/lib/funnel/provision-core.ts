@@ -595,6 +595,13 @@ export async function driveForwarding(
   if (claim.forwardingState === "pending_verification" && claim.forwardingTarget === target) {
     const status = await deps.getForwardingStatus(claim.email, target);
     if (status === "pending") return "already_pending"; // NEVER re-send
+    // "verified" may be HISTORICAL (Google verifications never expire, so
+    // a target the parent used before verifies instantly on a flip-back).
+    // Accepted deliberately, and safe: the target is always the parent's
+    // CURRENT auth email, and Supabase's secure-email-change (verified ON
+    // for this project, 2026-07-29) makes setting that email fresh proof
+    // of inbox control — the freshness the Google record lacks is anchored
+    // there instead (adversarial review; recorded in the U7 PR for Peter).
     if (status === "verified") {
       const enabled = await deps.enableAutoForwarding(claim.email, target);
       if (!enabled) return "deferred";

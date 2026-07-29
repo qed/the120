@@ -115,15 +115,28 @@ export function pollStep(input: {
 /* ─────────────────── the server-side resume ─────────────────── */
 
 /**
+ * A resumable claim is not re-driven more often than this, however fast
+ * the poll (or a scripted curl loop) hits the route. The lease serializes
+ * OVERLAPPING runs; this bounds SEQUENTIAL ones — without it, a parent
+ * scripting the poll endpoint re-runs the full external pipeline (auth
+ * page-walk, Google Directory calls) on every request, against quotas the
+ * whole org shares (adversarial review). Ticks inside the cooldown are
+ * cheap DB reads only.
+ */
+export const RESUME_COOLDOWN_MS = 30_000;
+
+/**
  * The arrival page is the PRIMARY out-of-band provisioning driver (the
  * family lands seconds after paying). Resume only when the claim is
- * actionable and no live run holds it — the lease RPC re-checks
- * atomically; this is the cheap pre-filter that keeps page loads from
- * hammering the RPC for terminal claims.
+ * actionable, no live run holds it, and the last landing is older than
+ * the cooldown — the lease RPC still re-checks atomically; this is the
+ * cheap pre-filter that keeps page loads from hammering it.
  */
 export function shouldResumeProvisioning(input: {
   state: string | null; // null = no claim row yet
   leaseExpiresAt: string | null;
+  /** The claim's updated_at — every landing write refreshes it. */
+  lastWriteAt: string | null;
   now: Date;
 }): boolean {
   if (input.state === null) return false; // nothing to resume — heal first
@@ -135,7 +148,12 @@ export function shouldResumeProvisioning(input: {
     if (!input.leaseExpiresAt) return true; // structurally odd — let the RPC arbitrate
     return new Date(input.leaseExpiresAt).getTime() < input.now.getTime();
   }
-  return true; // pending / identity_only
+  // pending / identity_only: honour the cooldown since the last landing.
+  if (input.lastWriteAt) {
+    const age = input.now.getTime() - new Date(input.lastWriteAt).getTime();
+    if (age < RESUME_COOLDOWN_MS) return false;
+  }
+  return true;
 }
 
 /* ─────────────────── the copy ─────────────────── */
@@ -178,18 +196,33 @@ export const ARRIVAL_SCREEN = {
 /** W14: a verification the parent never clicks bounds the black-hole
  *  window — mail delivered pre-verification sits unread in the dormant
  *  mailbox, which is why the bound exists. Deferred-to-implementation
- *  choice, recorded: seven days. */
+ *  choice, recorded: seven days per request cycle. */
 export const FORWARDING_VERIFY_ALERT_DAYS = 7;
+
+/** The TOTAL-age backstop: every email change starts a fresh cycle and
+ *  resets the 7-day clock, so a target that flip-flops faster than the
+ *  bound would never page (adversarial review). The first request ever is
+ *  stamped once and never cleared; three weeks of no active forwarding —
+ *  across any number of cycles — pages regardless. */
+export const FORWARDING_TOTAL_ALERT_DAYS = 21;
 
 export function forwardingOverdue(input: {
   forwardingState: string;
   requestedAt: string | null;
+  firstRequestedAt: string | null;
   alertedAt: string | null;
   now: Date;
 }): boolean {
   if (input.forwardingState !== "pending_verification") return false;
-  if (!input.requestedAt) return false;
   if (input.alertedAt !== null) return false; // one page per request cycle
-  const ageMs = input.now.getTime() - new Date(input.requestedAt).getTime();
-  return ageMs >= FORWARDING_VERIFY_ALERT_DAYS * 24 * 60 * 60 * 1000;
+  const day = 24 * 60 * 60 * 1000;
+  if (input.requestedAt) {
+    const cycleAge = input.now.getTime() - new Date(input.requestedAt).getTime();
+    if (cycleAge >= FORWARDING_VERIFY_ALERT_DAYS * day) return true;
+  }
+  if (input.firstRequestedAt) {
+    const totalAge = input.now.getTime() - new Date(input.firstRequestedAt).getTime();
+    if (totalAge >= FORWARDING_TOTAL_ALERT_DAYS * day) return true;
+  }
+  return false;
 }

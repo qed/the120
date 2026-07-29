@@ -267,7 +267,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 **Verification:** each stage after the first shows Back; capture form input survives a back-then-forward within the mounted component.
 
-- [ ] **Unit 7: Edit horizon — write-path lock + locked UX**
+- [x] **Unit 7: Edit horizon — write-path lock + locked UX** *(migration 20260823120000 applied to prod)*
 
 **Goal:** Funnel mutations refuse edits at `submitted`+ via conditional writes; the mini-app renders read-only with a locked-state explanation and admissions off-ramp.
 

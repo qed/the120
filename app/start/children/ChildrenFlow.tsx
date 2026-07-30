@@ -120,6 +120,14 @@ export function ChildrenFlow({
         setFirstName("");
         setGrade("");
         setErrors([]);
+        // Straight into the unified application flow for the child just
+        // added (2026-07-30): the server landing rule picks the first step.
+        // The `?g=` hint rides only for the family's FIRST-BORN (R36 —
+        // `children` here is the pre-add snapshot, so empty means first).
+        window.location.href =
+          hintSlug && children.length === 0
+            ? `/start/child/${result.childId}?g=${encodeURIComponent(hintSlug)}`
+            : `/start/child/${result.childId}`;
         return;
       }
       if (result.kind === "invalid") {

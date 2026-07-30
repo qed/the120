@@ -12,10 +12,14 @@ import {
   mergedStepNeighbour,
   seamCopy,
   stepListForChild,
+  terminalTreatment,
   type MergedFlowFacts,
+  type TerminalTreatment,
 } from "@/app/lib/funnel/merged-flow-rules";
 import { MINIAPP_STEPS } from "@/app/lib/funnel/miniapp-rules";
-import { checklist } from "@/app/dashboard/data";
+import { APPLICANT_STATES } from "@/app/lib/funnel/applicant-rules";
+import { WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
+import { checklist, type SeatStatus } from "@/app/dashboard/data";
 
 /**
  * Unified-flow Unit 6 (R3, R6, R6a, R8): the form-step screens + the seam,
@@ -280,14 +284,14 @@ describe("the review step's Unit-6 modes and the per-cohort backward terminal", 
     expect(sections).toMatch(/initialStepForFacts\(\{\s*doorConfirmed: facts\.doorConfirmed,\s*hasProject: facts\.hasProject,\s*\}\)/);
   });
 
-  it("locked terminals → read-only summary with the Unit 7 TODO seam and zero buttons", () => {
+  it("locked terminals → the read-only summary renders in every Unit 7 ending arm", () => {
     const readonlyArm = sections.slice(
       sections.indexOf('if (terminal !== "submit")'),
-      sections.indexOf("return (\n    <StepCard\n      n=\"05\"\n      title=\"Review & submit\"\n      hint=\"Everything below")
+      sections.indexOf('hint="Everything below')
     );
     expect(readonlyArm.length).toBeGreaterThan(0);
-    expect(readonlyArm).not.toContain("<button");
-    expect(read(SECTIONS)).toContain("TODO(unified-flow Unit 7)");
+    // The one shared checklist summary appears in each of the three arms.
+    expect((readonlyArm.match(/\{summary\}/g) ?? []).length).toBe(3);
   });
 
   it("backward terminal: build cohort keeps ← ALL CHILDREN on handoff; a legacy first form step exits ← DASHBOARD", () => {
@@ -301,6 +305,162 @@ describe("the review step's Unit-6 modes and the per-cohort backward terminal", 
     expect(
       mergedStepNeighbour("basics", "back", facts({ applicantState: "project_created" }))
     ).toBe("seam");
+  });
+});
+
+/* ─────────────── flow endings by state (Unit 7; R9/R9a + the endings map) ─────────────── */
+
+describe("the flow's endings by state — terminalTreatment drives the review step's rendering", () => {
+  const sections = stripComments(read(SECTIONS));
+
+  /**
+   * The treatment → render-arm map, EXHAUSTIVE by construction: the Record
+   * key is `TerminalTreatment`, so adding a treatment without naming its arm
+   * here is a compile error, and the matrix test below fails if any arm's
+   * marker leaves the source.
+   */
+  const ARM_MARKERS: Record<TerminalTreatment, string> = {
+    submit: "Submit for review",
+    finish_build: 'terminal === "finish_build"',
+    under_review: 'case "under_review":',
+    waitlisted: 'case "waitlisted":',
+    next_steps: 'case "next_steps":',
+  };
+
+  const SEAT_STATUS_MATRIX: Record<SeatStatus, true> = {
+    draft: true,
+    submitted: true,
+    in_review: true,
+    invited: true,
+    offered: true,
+    member: true,
+    waitlisted: true,
+  };
+  const SEAT_STATUSES = Object.keys(SEAT_STATUS_MATRIX) as SeatStatus[];
+
+  const underReviewArm = sections.slice(
+    sections.indexOf('case "under_review":'),
+    sections.indexOf('case "waitlisted":')
+  );
+  const waitlistedArm = sections.slice(
+    sections.indexOf('case "waitlisted":'),
+    sections.indexOf('case "next_steps":')
+  );
+  const nextStepsArm = sections.slice(
+    sections.indexOf('case "next_steps":'),
+    sections.indexOf('hint="Everything below')
+  );
+
+  it("every treatment has a render arm in the source", () => {
+    for (const [treatment, marker] of Object.entries(ARM_MARKERS)) {
+      expect(sections, treatment).toContain(marker);
+    }
+  });
+
+  it("exhaustive: every applicantState × status × gate maps to a treatment whose arm exists", () => {
+    for (const applicantState of [...APPLICANT_STATES, null]) {
+      for (const status of SEAT_STATUSES) {
+        for (const nextStepsReachable of [true, false]) {
+          const t = terminalTreatment({ applicantState, status, nextStepsReachable });
+          const label = `${applicantState}/${status}/${nextStepsReachable}`;
+          expect(Object.keys(ARM_MARKERS), label).toContain(t);
+          expect(sections, label).toContain(ARM_MARKERS[t]);
+        }
+      }
+    }
+  });
+
+  it("legacy (null-state) endings: every non-draft status reaches its defined terminal (I1)", () => {
+    const expected: Record<SeatStatus, TerminalTreatment> = {
+      draft: "submit",
+      submitted: "under_review",
+      in_review: "under_review",
+      invited: "under_review",
+      waitlisted: "waitlisted",
+      offered: "next_steps",
+      member: "next_steps",
+    };
+    for (const status of SEAT_STATUSES) {
+      expect(
+        terminalTreatment({ applicantState: null, status, nextStepsReachable: false }),
+        status
+      ).toBe(expected[status]);
+    }
+  });
+
+  it("terminal arms carry the explicit dashboard control and NO forward control — absent, not disabled (R9a)", () => {
+    // The shared control is a real /dashboard Link (the next-steps
+    // final-screen idiom), defined once above the switch…
+    const block = sections.slice(
+      sections.indexOf('if (terminal !== "submit")'),
+      sections.indexOf('case "under_review":')
+    );
+    expect(block).toContain('<Link href="/dashboard"');
+    // …and each status terminal renders it with zero pressable controls:
+    // no button, no jump, no submit, and nothing merely disabled.
+    for (const arm of [underReviewArm, waitlistedArm]) {
+      expect(arm).toContain("{dashboardControl}");
+      expect(arm).not.toContain("<button");
+      expect(arm).not.toContain("onJump");
+      expect(arm).not.toContain("onSubmit");
+      expect(arm).not.toContain("nextBtnCls");
+      expect(arm).not.toContain("disabled");
+    }
+  });
+
+  it("under_review speaks the review-wait screen's vocabulary (REVIEW_SCREEN, /start/review's copy)", () => {
+    expect(underReviewArm).toContain("REVIEW_SCREEN.title");
+    expect(underReviewArm).toContain("REVIEW_SCREEN.kicker");
+    expect(underReviewArm).toContain("REVIEW_SCREEN.intro");
+  });
+
+  it("waitlisted speaks the waitlist vocabulary and never a payment CTA (F7)", () => {
+    expect(waitlistedArm).toContain("WAITLIST_SCREEN.title");
+    expect(waitlistedArm).toContain("WAITLIST_SCREEN.kicker");
+    expect(waitlistedArm).toContain("WAITLIST_SCREEN.intro");
+    expect(waitlistedArm).toContain("WAITLIST_SCREEN.footer");
+    // The steps rows mention deposits — they stay on /start/waitlist.
+    expect(waitlistedArm).not.toContain("WAITLIST_SCREEN.steps");
+    expect(waitlistedArm).not.toMatch(/reserve|deposit|checkout|\bpay\b|\$/i);
+    for (const s of [
+      WAITLIST_SCREEN.kicker,
+      WAITLIST_SCREEN.title,
+      WAITLIST_SCREEN.intro,
+      WAITLIST_SCREEN.footer,
+    ]) {
+      expect(s).not.toMatch(/reserve|deposit|checkout|\bpay\b|\$/i);
+    }
+  });
+
+  it("next_steps continues FORWARD — review's next neighbour (the Unit 8 stub target), dashboard fallback when no neighbour", () => {
+    expect(nextStepsArm).toContain("onJump(next)");
+    expect(nextStepsArm).toContain("Continue →");
+    // The endings map's total-coverage arm (next_steps without the gate):
+    // never a dead Continue — the dashboard control renders instead.
+    expect(nextStepsArm).toContain("dashboardControl");
+    // Rules: the forward edge exists exactly when the gate appended the
+    // screens; Unit 8's marked stub still owns the target.
+    expect(
+      mergedStepNeighbour(
+        "review",
+        "next",
+        facts({ applicantState: "offered", nextStepsReachable: true })
+      )
+    ).toBe("progress");
+    expect(
+      mergedStepNeighbour("review", "next", facts({ applicantState: "submitted" }))
+    ).toBeNull();
+    expect(read(SHELL)).toContain("TODO(unified-flow Unit 8)");
+  });
+
+  it("the shell passes status through the facts and never re-derives the terminal; Back stays live at terminals", () => {
+    const page = stripComments(read(PAGE));
+    expect(page).toContain("status: loaded.child.status as SeatStatus");
+    const shell = stripComments(read(SHELL));
+    // The endings render in the review section ONLY — the shell's Back slot
+    // (outside the section) carries no terminal condition, so the read-only
+    // walk stays walkable backward at every terminal.
+    expect(shell).not.toContain("terminalTreatment");
   });
 });
 

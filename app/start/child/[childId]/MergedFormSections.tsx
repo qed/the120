@@ -42,7 +42,9 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import { saveFormStepAction, submitApplicationAction } from "@/app/lib/funnel/actions/form-steps";
+import { REVIEW_SCREEN, WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
 import {
   checklistChildForFields,
   mergedLockVerdict,
@@ -89,6 +91,11 @@ const textareaCls =
   "w-full resize-y rounded-xl border border-line-strong bg-white px-3.5 py-3 text-sm leading-6 text-ink outline-none transition-colors placeholder:text-muted focus:border-red disabled:cursor-not-allowed disabled:opacity-60";
 
 const nextBtnCls = `mt-7 inline-flex h-12 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`;
+
+/** The terminal's explicit dashboard control (Unit 7, R9a) — the next-steps
+ *  final-screen Link idiom (a real navigation, never a form button), in the
+ *  review-wait screen's outlined-pill chrome and its exact label. */
+const dashboardLinkCls = `mt-7 inline-flex h-11 items-center justify-center self-start rounded-full border border-line-strong px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-ink transition-colors hover:border-ink ${focusRing}`;
 
 /** The wizard's white card section, ported byte-for-byte (StepSection). */
 function StepCard({
@@ -1036,6 +1043,9 @@ function ReviewSection({
   const missing = items.filter((i) => !i.done);
   const complete = missing.length === 0;
   const terminal = terminalTreatment(facts);
+  // The review→progress forward edge (Unit 7/8 seam): only a next-steps-
+  // gated list has a neighbour past review, so this is null everywhere else.
+  const next = mergedStepNeighbour("review", "next", facts);
 
   if (terminal === "finish_build") {
     // C1: `added → submitted` has no legal edge — the review step points at
@@ -1070,40 +1080,92 @@ function ReviewSection({
   }
 
   if (terminal !== "submit") {
-    // Locked walk (under_review / waitlisted / next_steps): a read-only
-    // summary under the shell's single locked notice — zero pressable
-    // controls here.
+    // Locked walk (unified-flow Unit 7; R9/R9a + the endings map): the
+    // flow's END renders by `terminalTreatment` — one closed vocabulary, one
+    // arm each, so no cohort reaches a pressable control that does nothing.
+    // Every arm keeps the read-only application summary; the ending differs:
     //
-    // TODO(unified-flow Unit 7): the terminal treatments render from this
-    // seam — under-review copy with the explicit dashboard control (R9a),
-    // the waitlist branch's copy, and Unit 8's forward edge into next-steps
-    // for `next_steps`. Unreachable while MERGED_FLOW_ENABLED is false, so
-    // no interim controls ship in the meantime.
-    return (
-      <StepCard
-        n="05"
-        title="Review & submit"
-        hint="This application is in. We will review it and be in touch."
-      >
-        <ul className="grid gap-2 sm:grid-cols-2">
-          {items.map((i) => (
-            <li key={i.label} className="flex items-center gap-2 text-sm">
-              <span
-                aria-hidden
-                className={`flex h-4 w-4 flex-none items-center justify-center rounded-full text-[0.6rem] ${
-                  i.done ? "bg-red text-white" : "border border-line-strong text-transparent"
-                }`}
-              >
-                ✓
-              </span>
-              <span className={i.done ? "text-muted line-through" : "text-ink-soft"}>
-                {i.label}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </StepCard>
+    // - under_review → the review-wait screen's status vocabulary
+    //   (REVIEW_SCREEN, /start/review's confirmed copy — today's copy makes
+    //   no submitted-vs-in_review distinction, so neither does this) with
+    //   the EXPLICIT dashboard control and NO forward control: absent, not
+    //   disabled (R9a).
+    // - waitlisted → the waitlist screen's vocabulary (WAITLIST_SCREEN —
+    //   never a payment or reserve CTA, F7), same dashboard control, no
+    //   forward.
+    // - next_steps → the walk continues FORWARD into the next-steps screens
+    //   (Unit 8 renders them; until then the shell's marked stub holds the
+    //   step). If the gate did not append the screens (the endings map's
+    //   total-coverage arm), the dashboard control renders instead — never
+    //   a dead Continue.
+    //
+    // Back stays live at every terminal: the shell's Back slot sits outside
+    // this section, so the read-only walk stays walkable backward.
+    const summary = (
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {items.map((i) => (
+          <li key={i.label} className="flex items-center gap-2 text-sm">
+            <span
+              aria-hidden
+              className={`flex h-4 w-4 flex-none items-center justify-center rounded-full text-[0.6rem] ${
+                i.done ? "bg-red text-white" : "border border-line-strong text-transparent"
+              }`}
+            >
+              ✓
+            </span>
+            <span className={i.done ? "text-muted line-through" : "text-ink-soft"}>
+              {i.label}
+            </span>
+          </li>
+        ))}
+      </ul>
     );
+    const dashboardControl = (
+      <Link href="/dashboard" className={dashboardLinkCls}>
+        ← Back to the dashboard
+      </Link>
+    );
+    switch (terminal) {
+      case "under_review":
+        return (
+          <StepCard n="05" title={REVIEW_SCREEN.title} hint={REVIEW_SCREEN.kicker}>
+            <p className="text-sm leading-6 text-ink-soft">{REVIEW_SCREEN.intro}</p>
+            <div className="mt-5">{summary}</div>
+            {dashboardControl}
+          </StepCard>
+        );
+      case "waitlisted":
+        return (
+          <StepCard n="05" title={WAITLIST_SCREEN.title} hint={WAITLIST_SCREEN.kicker}>
+            <p className="text-sm leading-6 text-ink-soft">{WAITLIST_SCREEN.intro}</p>
+            <p className="mt-2 text-sm leading-6 text-ink-soft">{WAITLIST_SCREEN.footer}</p>
+            <div className="mt-5">{summary}</div>
+            {dashboardControl}
+          </StepCard>
+        );
+      case "next_steps":
+        return (
+          <StepCard
+            n="05"
+            title="Review & submit"
+            hint="This application is in. Your next steps are ahead."
+          >
+            {summary}
+            {next !== null ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => onJump(next)}
+                className={nextBtnCls}
+              >
+                Continue →
+              </button>
+            ) : (
+              dashboardControl
+            )}
+          </StepCard>
+        );
+    }
   }
 
   return (

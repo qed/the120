@@ -110,6 +110,18 @@
       <p class="stamp">Committed · 2026-07-30 · deploying on push</p>
     </li>
     <li>
+      <div class="row"><span class="title">10 · Tasks-page title = your company name (AI enabled)</span>
+        <span class="badge done">Done</span></div>
+      <p class="note">The 3-steps page already titles itself with the project's name — it was
+        generic because the AI compose had no model configured in production, so every
+        project fell back to the canned "Your First Real Company". Fixed by setting
+        <strong>FUNNEL_COMPOSE_MODEL = anthropic/claude-haiku-4.5</strong> (Vercel AI
+        Gateway, OIDC auth — no API key needed) in Production + Preview. Takes effect from
+        the next deploy; re-test with a fresh child. Note: the ZDR agreement with the
+        provider was flagged as a Peter-owned launch precondition.</p>
+      <p class="stamp">Env set · 2026-07-30 · live on next deploy</p>
+    </li>
+    <li>
       <div class="row"><span class="title">12 · Delete ALL kids named Caradoc</span>
         <span class="badge done">Done</span></div>
       <p class="note">Production sweep: every remaining child named Caradoc deleted (the last

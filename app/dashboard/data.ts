@@ -179,14 +179,14 @@ const PENDING_DEPOSIT_NOTE =
 /** What the funnel card's primary affordance IS — layout renders, never
  *  decides (repo convention: components are layout-only). */
 export type FunnelCardCta =
-  /** Red pill link into the mini-app (`added`). */
+  /** Blue pill link into the mini-app (`added`). */
   | { kind: "start"; label: string; href: string }
-  /** Red pill link into the merged application flow (`project_created` with
+  /** Blue pill link into the merged application flow (`project_created` with
    *  a composed project) — the server landing rule picks the step, so the
    *  href carries no `?step=` (unified-flow U9; the embedded editor this
    *  kind used to open is retired). */
   | { kind: "continue_dossier"; label: string; href: string }
-  /** Red pill link into the mini-app compose (`project_created` whose
+  /** Blue pill link into the mini-app compose (`project_created` whose
    *  composed project was invalidated — the re-compose obligation). */
   | { kind: "compose"; label: string; href: string }
   /** Blue reserve flow — the EXISTING checkout entry (policy text +
@@ -210,10 +210,10 @@ export type CardVerdict =
       note?: string;
       primaryCta?: FunnelCardCta;
       /** The R13 review-walk entry: read-only mini-app, `submitted`+ only.
-       *  `presentation` is the unified-flow R1 split: the offered/re-reserve
-       *  card promotes it to an outlined pill twin beside Reserve; every
-       *  other submitted+ card keeps the small underlined link. */
-      secondaryReviewLink?: { label: string; href: string; presentation: "pill" | "link" };
+       *  Always the outlined blue pill twin (2026-07-30: the red mono
+       *  "Open application" links are retired — every card carries only the
+       *  blue CTA pair, Continue application / Review application). */
+      secondaryReviewLink?: { label: string; href: string };
     };
 
 /**
@@ -274,7 +274,7 @@ export function cardVerdict(
     next.surface !== "mini_app" &&
     !(next.surface === "dashboard" && next.intent === "dossier");
   const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: miniAppHref, presentation: "link" as const }
+    ? { label: "Review application", href: miniAppHref }
     : undefined;
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).
@@ -322,13 +322,13 @@ export function cardVerdict(
             kind: "funnel",
             statusLine: "PROJECT NOT STARTED",
             tone: "red",
-            primaryCta: { kind: "start", label: "Start", href: miniAppHref },
+            primaryCta: { kind: "start", label: "Continue application", href: miniAppHref },
           }
         : {
             kind: "funnel",
             statusLine: "PROJECT CREATED",
             tone: "red",
-            primaryCta: { kind: "compose", label: "Continue", href: miniAppHref },
+            primaryCta: { kind: "compose", label: "Continue application", href: miniAppHref },
           };
     case "dashboard":
       // Only `dossier` reaches here — `legacy` and `enrolled` returned above.
@@ -336,7 +336,7 @@ export function cardVerdict(
         kind: "funnel",
         statusLine: "PROJECT CREATED",
         tone: "red",
-        primaryCta: { kind: "continue_dossier", label: "Continue", href: miniAppHref },
+        primaryCta: { kind: "continue_dossier", label: "Continue application", href: miniAppHref },
       };
     case "status_only":
       switch (next.intent) {
@@ -379,13 +379,9 @@ export function cardVerdict(
         tone: "red",
         note: pendingNote,
         primaryCta: reserveCta,
-        // R1: the offered/re-reserve card carries the outlined pill twin —
-        // beside Reserve when it renders, alone (R1a) when reserve is
-        // suppressed (pending debit / gate refusal).
-        secondaryReviewLink: secondaryReviewLink && {
-          ...secondaryReviewLink,
-          presentation: "pill" as const,
-        },
+        // R1: the outlined pill twin — beside Reserve when it renders, alone
+        // (R1a) when reserve is suppressed (pending debit / gate refusal).
+        secondaryReviewLink,
       };
     case "arrival":
       // Unreachable: `arrival` exists only with a live deposit, which the

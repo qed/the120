@@ -76,53 +76,55 @@ describe("cardVerdict — NULL applicant_state is the legacy card, unchanged", (
 });
 
 describe("cardVerdict — one verdict per ladder state", () => {
-  it("added → PROJECT NOT STARTED with a red START into the mini-app", () => {
+  it("added → PROJECT NOT STARTED with a blue CONTINUE APPLICATION into the mini-app", () => {
     const v = funnel(cardVerdict(child("added"), none, false));
     expect(v.statusLine).toBe("PROJECT NOT STARTED");
     expect(v.tone).toBe("red");
-    expect(v.primaryCta).toEqual({ kind: "start", label: "Start", href: "/start/child/kid-1" });
+    expect(v.primaryCta).toEqual({
+      kind: "start",
+      label: "Continue application",
+      href: "/start/child/kid-1",
+    });
     expect(v.secondaryReviewLink).toBeUndefined();
   });
 
-  it("project_created WITH a composed project → CONTINUE links into the merged flow (U9: the landing rule picks the step, no ?step=)", () => {
+  it("project_created WITH a composed project → CONTINUE APPLICATION links into the merged flow (U9: the landing rule picks the step, no ?step=)", () => {
     const v = funnel(cardVerdict(child("project_created"), none, true));
     expect(v.statusLine).toBe("PROJECT CREATED");
     expect(v.primaryCta).toEqual({
       kind: "continue_dossier",
-      label: "Continue",
+      label: "Continue application",
       href: "/start/child/kid-1",
     });
   });
 
-  it("project_created WITHOUT a project (invalidated) → CONTINUE into the mini-app compose", () => {
+  it("project_created WITHOUT a project (invalidated) → CONTINUE APPLICATION into the mini-app compose", () => {
     // The one deliberate exception to post-compose-means-dashboard: the
     // re-compose obligation lives in the mini-app (childNextScreen's cell).
     const v = funnel(cardVerdict(child("project_created"), none, false));
     expect(v.primaryCta).toEqual({
       kind: "compose",
-      label: "Continue",
+      label: "Continue application",
       href: "/start/child/kid-1",
     });
   });
 
-  it("submitted → SUBMITTED FOR REVIEW, no primary CTA, review LINK (not pill)", () => {
+  it("submitted → SUBMITTED FOR REVIEW, no primary CTA, the Review pill", () => {
     const v = funnel(cardVerdict(child("submitted"), none, true));
     expect(v.statusLine).toBe("SUBMITTED FOR REVIEW");
     expect(v.primaryCta).toBeUndefined();
     expect(v.secondaryReviewLink).toEqual({
       label: "Review application",
       href: "/start/child/kid-1",
-      presentation: "link",
     });
   });
 
-  it("offered → the review entry is the outlined PILL twin (unified-flow R1), beside Reserve", () => {
+  it("offered → the review entry is the outlined pill twin (unified-flow R1), beside Reserve", () => {
     const v = funnel(cardVerdict(child("offered"), none, true));
     expect(v.primaryCta).toEqual({ kind: "reserve", label: "Reserve seat · $250" });
     expect(v.secondaryReviewLink).toEqual({
       label: "Review application",
       href: "/start/child/kid-1",
-      presentation: "pill",
     });
   });
 
@@ -130,7 +132,7 @@ describe("cardVerdict — one verdict per ladder state", () => {
     const v = funnel(cardVerdict(child("offered"), [{ status: "pending" }], true));
     expect(v.primaryCta).toBeUndefined();
     expect(v.note).toBeDefined();
-    expect(v.secondaryReviewLink?.presentation).toBe("pill");
+    expect(v.secondaryReviewLink).toBeDefined();
   });
 
   it("in_review → UNDER REVIEW, no primary CTA", () => {

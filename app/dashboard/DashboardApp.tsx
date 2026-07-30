@@ -155,6 +155,13 @@ export default function DashboardApp({
   const reviewPillClass =
     "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
 
+  // The filled blue pill — the primary application CTA (2026-07-30: the red
+  // mono "Open application" links are retired; every card carries only the
+  // blue pair, Continue application / Review application). ONE literal shared
+  // by the Reserve button and every Continue-application pill.
+  const bluePillClass =
+    "inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark";
+
   // The reserve entry (unified-flow R1) — two pills of ONE button family:
   // filled Reserve leading, outlined "Review application" twin beside it.
   // ONE block shared by the legacy card and the funnel `offered`/re-reserve
@@ -176,7 +183,7 @@ export default function DashboardApp({
           <button
             onClick={() => reserveSeat(c.id)}
             disabled={reserving}
-            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+            className={`${bluePillClass} disabled:cursor-not-allowed disabled:opacity-60`}
           >
             {reserving ? "Opening checkout…" : "Reserve seat · $250"}
           </button>
@@ -465,18 +472,9 @@ export default function DashboardApp({
                     verdict.secondaryReviewLink &&
                     cta?.kind !== "reserve" && (
                       <p className="mt-3">
-                        {verdict.secondaryReviewLink.presentation === "pill" ? (
-                          <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
-                            {verdict.secondaryReviewLink.label}
-                          </a>
-                        ) : (
-                          <a
-                            href={verdict.secondaryReviewLink.href}
-                            className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
-                          >
-                            {verdict.secondaryReviewLink.label} →
-                          </a>
-                        )}
+                        <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                          {verdict.secondaryReviewLink.label}
+                        </a>
                       </p>
                     )}
                 </div>
@@ -594,6 +592,7 @@ export default function DashboardApp({
                 const pct = completeness(c);
                 const childDeposits = depositsFor(c.id);
                 const paid = hasPaidDeposit(childDeposits);
+                const pendingLegacy = childDeposits.some((d) => d.status === "pending");
                 // Approval gate (R11–R13): the same predicate the checkout
                 // route enforces — reservable only at `offered` or later.
                 const canReserve = canReserveSeat(c.status, childDeposits);
@@ -602,7 +601,6 @@ export default function DashboardApp({
                 // the legacy card below, byte-for-byte as before.
                 const verdict = cardVerdict(c, childDeposits, composedChildIds.has(c.id));
                 if (verdict.kind === "funnel") {
-                  const dossierNext = verdict.primaryCta?.kind === "continue_dossier";
                   const statusTone =
                     verdict.tone === "green" ? "text-crm-green" : "text-red";
                   const header = (
@@ -636,24 +634,13 @@ export default function DashboardApp({
                       key={c.id}
                       className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
                     >
-                      {dossierNext ? (
-                        // The application intent (U9): the card itself links
-                        // into the merged flow — the server landing rule
-                        // resumes at the first incomplete form step (same
-                        // affordance as the legacy card).
-                        <a href={flowHref(c.id)} className="block w-full text-left">
-                          {header}
-                          <Meter value={pct} className="mt-5" />
-                          <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                            Open application →
-                          </p>
-                        </a>
-                      ) : (
-                        <div className="w-full text-left">
-                          {header}
-                          <Meter value={pct} className="mt-5" />
-                        </div>
-                      )}
+                      {/* 2026-07-30: the red "Open application →" card link
+                          is retired — the blue CTA pill below is the ONE
+                          entry into the merged flow. */}
+                      <div className="w-full text-left">
+                        {header}
+                        <Meter value={pct} className="mt-5" />
+                      </div>
 
                       <div className="mt-4 border-t border-line pt-4">
                         {verdict.note && (
@@ -675,7 +662,7 @@ export default function DashboardApp({
                               // the landing rule picks the step per child.
                               <a
                                 href={cta.href}
-                                className={`${pillClass} bg-red transition-colors hover:bg-red-dark`}
+                                className={`${pillClass} bg-blue transition-colors hover:bg-blue-dark`}
                               >
                                 {cta.label}
                               </a>
@@ -697,18 +684,9 @@ export default function DashboardApp({
                             twin; render here only when it did not. */}
                         {verdict.secondaryReviewLink && cta?.kind !== "reserve" && (
                           <p className="mt-3">
-                            {verdict.secondaryReviewLink.presentation === "pill" ? (
-                              <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
-                                {verdict.secondaryReviewLink.label}
-                              </a>
-                            ) : (
-                              <a
-                                href={verdict.secondaryReviewLink.href}
-                                className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
-                              >
-                                {verdict.secondaryReviewLink.label} →
-                              </a>
-                            )}
+                            <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                              {verdict.secondaryReviewLink.label}
+                            </a>
                           </p>
                         )}
                       </div>
@@ -722,8 +700,10 @@ export default function DashboardApp({
                   >
                     {/* U9: the legacy card links into the merged flow — a
                         draft resumes at its first incomplete form step; a
-                        locked row opens the read-only walk (R5). */}
-                    <a href={flowHref(c.id)} className="block w-full text-left">
+                        locked row opens the read-only walk (R5). 2026-07-30:
+                        the red "Open application →" card link is retired —
+                        the blue CTA pill below is the ONE entry. */}
+                    <div className="w-full text-left">
                       <div className="flex items-center gap-4">
                         <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
                           {c.photo ? (
@@ -748,10 +728,21 @@ export default function DashboardApp({
                         </div>
                       </div>
                       <Meter value={pct} className="mt-5" />
-                      <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                        Open application →
+                      <p className="mt-4">
+                        {c.status === "draft" ? (
+                          <a href={flowHref(c.id)} className={bluePillClass}>
+                            Continue application
+                          </a>
+                        ) : !canReserve || paid || pendingLegacy ? (
+                          // Complete (submitted+): the outlined Review twin —
+                          // unless the reserve block below renders, which
+                          // already carries it (the R1 no-duplicate rule).
+                          <a href={flowHref(c.id)} className={reviewPillClass}>
+                            Review application
+                          </a>
+                        ) : null}
                       </p>
-                    </a>
+                    </div>
 
                     {/* Seat deposit CTA (R11–R13): paid always wins; the
                         deposit unlocks only once admissions approves
@@ -762,7 +753,7 @@ export default function DashboardApp({
                         <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
                           ✓ Seat reserved · $250 deposit paid
                         </p>
-                      ) : depositsFor(c.id).some((d) => d.status === "pending") ? (
+                      ) : pendingLegacy ? (
                         <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
                           Payment processing — bank debits can take a few days. No further
                           action needed.

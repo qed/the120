@@ -9,8 +9,11 @@ import {
   MERGED_NEXT_STEPS,
   checklistChildForFields,
   isMergedFormStep,
+  isMergedNextStep,
+  mergedLockVerdict,
   mergedStepNeighbour,
   seamCopy,
+  stepEditableInWalk,
   stepListForChild,
   terminalTreatment,
   type MergedFlowFacts,
@@ -18,6 +21,7 @@ import {
 } from "@/app/lib/funnel/merged-flow-rules";
 import { MINIAPP_STEPS } from "@/app/lib/funnel/miniapp-rules";
 import { APPLICANT_STATES } from "@/app/lib/funnel/applicant-rules";
+import { NEXT_STEPS, nextStepsReachable } from "@/app/lib/funnel/deposit-rules";
 import { WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
 import { checklist, type SeatStatus } from "@/app/dashboard/data";
 
@@ -104,13 +108,13 @@ describe("every MergedStep has a render arm when the flag is on", () => {
     }
   });
 
-  it("the next-steps screens fall to the stub with the Unit 8 seam marked", () => {
-    // No dedicated arm yet — Unit 8 owns those screens; the stub covers
-    // them (unreachable while dark) and the TODO names the owner.
-    expect(read(SHELL)).toContain("TODO(unified-flow Unit 8)");
-    for (const step of MERGED_NEXT_STEPS) {
-      expect(shell).not.toContain(`step === "${step}"`);
-    }
+  it("the next-steps screens dispatch through isMergedNextStep into one section (Unit 8 closed the stub)", () => {
+    expect(shell).toContain("isMergedNextStep(step) && (");
+    expect(shell).toContain("function MergedNextStepsSection(");
+    // The Unit 6 stub (and its TODO marker) is gone — every merged step now
+    // has a real render arm.
+    expect(read(SHELL)).not.toContain("TODO(unified-flow Unit 8)");
+    expect(shell).not.toContain("This part is landing shortly.");
   });
 
   it("rules-level: the full walk (build + seam + form + next) is exactly the union, in order", () => {
@@ -124,12 +128,16 @@ describe("every MergedStep has a render arm when the flag is on", () => {
       ...MERGED_NEXT_STEPS,
     ]);
     // Every member of that walk is either a shell arm, a section case, or
-    // the marked Unit 8 stub — the three buckets partition the list.
+    // a next-steps swipe rendered by MergedNextStepsSection — the three
+    // buckets partition the list.
+    const nextArm =
+      shell.includes("isMergedNextStep(step) && (") &&
+      shell.includes("function MergedNextStepsSection(");
     for (const step of full) {
       const hasShellArm = shell.includes(`step === "${step}"`);
       const isFormCase = isMergedFormStep(step) && sections.includes(`case "${step}":`);
-      const isNextStub = (MERGED_NEXT_STEPS as readonly string[]).includes(step);
-      expect(hasShellArm || isFormCase || isNextStub, step).toBe(true);
+      const isNextCase = (MERGED_NEXT_STEPS as readonly string[]).includes(step) && nextArm;
+      expect(hasShellArm || isFormCase || isNextCase, step).toBe(true);
     }
   });
 });
@@ -432,14 +440,14 @@ describe("the flow's endings by state — terminalTreatment drives the review st
     }
   });
 
-  it("next_steps continues FORWARD — review's next neighbour (the Unit 8 stub target), dashboard fallback when no neighbour", () => {
+  it("next_steps continues FORWARD — review's next neighbour (the Unit 8 progress screen), dashboard fallback when no neighbour", () => {
     expect(nextStepsArm).toContain("onJump(next)");
     expect(nextStepsArm).toContain("Continue →");
     // The endings map's total-coverage arm (next_steps without the gate):
     // never a dead Continue — the dashboard control renders instead.
     expect(nextStepsArm).toContain("dashboardControl");
     // Rules: the forward edge exists exactly when the gate appended the
-    // screens; Unit 8's marked stub still owns the target.
+    // screens; Unit 8's section owns the target.
     expect(
       mergedStepNeighbour(
         "review",
@@ -450,7 +458,7 @@ describe("the flow's endings by state — terminalTreatment drives the review st
     expect(
       mergedStepNeighbour("review", "next", facts({ applicantState: "submitted" }))
     ).toBeNull();
-    expect(read(SHELL)).toContain("TODO(unified-flow Unit 8)");
+    expect(stripComments(read(SHELL))).toContain("isMergedNextStep(step) && (");
   });
 
   it("the shell passes status through the facts and never re-derives the terminal; Back stays live at terminals", () => {
@@ -461,6 +469,109 @@ describe("the flow's endings by state — terminalTreatment drives the review st
     // (outside the section) carries no terminal condition, so the read-only
     // walk stays walkable backward at every terminal.
     expect(shell).not.toContain("terminalTreatment");
+  });
+});
+
+/* ─────────────── the next-steps screens (Unit 8; R10/R11) ─────────────── */
+
+describe("the three next-steps screens render from the SAME constants the standalone flow uses (Unit 8)", () => {
+  const shellRaw = read(SHELL);
+  const shell = stripComments(shellRaw);
+  const nextSection = shell.slice(shell.indexOf("function MergedNextStepsSection("));
+
+  it("import-identity: copy, cap, and CTA come from deposit-rules; the write is the ONE saveGoalAction", () => {
+    expect(nextSection.length).toBeGreaterThan(0);
+    // One import statement carries all three deposit-rules names…
+    expect(shellRaw).toMatch(
+      /import \{[^}]*GOAL_MAX_CHARS[^}]*NEXT_STEPS[^}]*holdSeatCta[^}]*\} from "@\/app\/lib\/funnel\/deposit-rules"/
+    );
+    // …and the goal write is the standalone flow's exact action module.
+    expect(shellRaw).toMatch(
+      /import \{ saveGoalAction \} from "@\/app\/lib\/funnel\/actions\/next-steps"/
+    );
+    // No duplicated copy: the swipe titles/bodies appear ONLY via the
+    // constant, never as string literals the shell could drift.
+    for (const swipe of NEXT_STEPS.swipes) {
+      expect(shell, swipe.id).not.toContain(swipe.title);
+      expect(shell, swipe.id).not.toContain(swipe.body.slice(0, 40));
+    }
+    expect(nextSection).toContain("NEXT_STEPS.swipes");
+  });
+
+  it("goal saves on Next through saveGoalAction, navigates only on the saved verdict, and shows the I5 hint", () => {
+    expect(nextSection).toContain("saveGoalAction({ childId: fields.id, goal })");
+    // Save-on-Next: the write happens inside the goal branch of next(),
+    // and go(target) sits behind the saved verdict.
+    expect(nextSection).toMatch(
+      /if \(result\.kind === "saved"\) \{\s*setSavedGoal\(result\.goal\);\s*setGoal\(result\.goal\);\s*go\(target\);/
+    );
+    expect(nextSection).toContain("Saving the goal didn't work. Try again.");
+    // The deferred I5 decision: the inline saved-on-Next HINT, not a
+    // save-on-Back — Back stays pure navigation.
+    expect(nextSection).toContain("Saved when you tap Next");
+    expect(nextSection).toContain("GOAL_MAX_CHARS");
+    expect(nextSection).toContain("capWellFormed");
+  });
+
+  it("the seat screen's final CTA is holdSeatCta(firstName) as a Link to /dashboard — checkout untouched", () => {
+    expect(nextSection).toContain("{holdSeatCta(fields.firstName)}");
+    expect(nextSection).toMatch(/<Link\s*href="\/dashboard"/);
+    // No checkout/reserve mechanics in the section — the dashboard card
+    // owns the deposit flow.
+    expect(nextSection).not.toMatch(/checkout|stripe|reserve/i);
+  });
+
+  it("rules: the walk's neighbours — Back from progress re-enters review; the screens chain in order; seat is the end", () => {
+    const f = facts({ applicantState: "offered", nextStepsReachable: true });
+    expect(mergedStepNeighbour("progress", "back", f)).toBe("review");
+    expect(mergedStepNeighbour("progress", "next", f)).toBe("goal");
+    expect(mergedStepNeighbour("goal", "back", f)).toBe("progress");
+    expect(mergedStepNeighbour("goal", "next", f)).toBe("seat");
+    expect(mergedStepNeighbour("seat", "next", f)).toBeNull();
+    // Back is the shell's slot (the no-doubling rule) — the section renders
+    // no second back control.
+    expect(nextSection).not.toContain("← Back");
+    expect(nextSection).not.toContain('"back"');
+  });
+
+  it("rules: the gate is nextStepsReachable verbatim — deposited/enrolled pass; goal stays writable in EVERY reachable state", () => {
+    const reachable: Array<Pick<MergedFlowFacts, "applicantState" | "status">> = [
+      { applicantState: "offered", status: "submitted" },
+      { applicantState: "deposited", status: "submitted" },
+      { applicantState: "enrolled", status: "member" },
+      { applicantState: null, status: "offered" },
+      { applicantState: null, status: "member" },
+    ];
+    for (const f of reachable) {
+      const label = `${f.applicantState}/${f.status}`;
+      expect(nextStepsReachable(f), label).toBe(true);
+      const list = stepListForChild(
+        facts({ ...f, nextStepsReachable: true })
+      );
+      for (const s of MERGED_NEXT_STEPS) expect(list, label).toContain(s);
+      // Goal writable under the dual lock verdict, deposit paid or not —
+      // R10's named write exception (M1: stays writable post-deposit).
+      const locked = mergedLockVerdict(f);
+      expect(stepEditableInWalk("goal", locked, true), label).toBe(true);
+      expect(stepEditableInWalk("goal", locked, false), label).toBe(true);
+    }
+    // Ungated lists carry none of the three screens (the clamp re-lands
+    // any deep link naming them).
+    const ungated = stepListForChild(facts({ applicantState: "submitted" }));
+    for (const s of MERGED_NEXT_STEPS) expect(ungated).not.toContain(s);
+  });
+
+  it("the swipe ids and the merged step ids are the SAME vocabulary — the section can never miss a swipe", () => {
+    expect(NEXT_STEPS.swipes.map((s) => s.id)).toEqual([...MERGED_NEXT_STEPS]);
+    for (const s of MERGED_NEXT_STEPS) expect(isMergedNextStep(s)).toBe(true);
+    expect(isMergedNextStep("review")).toBe(false);
+  });
+
+  it("the section rides the shell's single transition (run/pending) — no second useTransition", () => {
+    expect(shell).toMatch(/run=\{\(task\) => startTransition\(task\)\}/);
+    expect((shell.match(/useTransition\(\)/g) ?? []).length).toBe(1);
+    // Controls are pending-guarded like every control in this shell.
+    expect(nextSection).toMatch(/disabled=\{pending\}/);
   });
 });
 

@@ -113,8 +113,13 @@ export const isMergedFormStep = (x: unknown): x is MergedFormStep =>
 
 const isFormStep = (x: MergedStep): x is MergedFormStep => isMergedFormStep(x);
 
-const isNextStep = (x: MergedStep): x is MergedNextStep =>
-  (MERGED_NEXT_STEPS as readonly string[]).includes(x);
+/** Is this merged step one of the three next-steps screens? Exported for the
+ *  shell's section dispatch (Unit 8) — the same list the step-list builder
+ *  appends behind the gate, so the two ends cannot drift. */
+export const isMergedNextStep = (x: unknown): x is MergedNextStep =>
+  typeof x === "string" && (MERGED_NEXT_STEPS as readonly string[]).includes(x);
+
+const isNextStep = (x: MergedStep): x is MergedNextStep => isMergedNextStep(x);
 
 /* ─────────────────────────────── step → progress rung ─────────────────────────────── */
 

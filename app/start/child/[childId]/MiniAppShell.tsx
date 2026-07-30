@@ -20,7 +20,7 @@ import { saveGoalAction } from "@/app/lib/funnel/actions/next-steps";
 // caps the standalone NextStepsFlow renders — imported, never copied, so
 // the two surfaces cannot drift while the shim keeps the old one alive.
 import { GOAL_MAX_CHARS, NEXT_STEPS, holdSeatCta } from "@/app/lib/funnel/deposit-rules";
-import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
+import { emitFaqOpenedAction } from "@/app/lib/funnel/actions/events";
 import {
   composeProjectAction,
   recordProjectEditAction,
@@ -36,10 +36,10 @@ import {
   CLIMB_BULLETS,
   CLIMB_CAPTION,
   CLIMB_HEADING,
+  PROGRESS_HEADING,
   REVEAL_UI_COPY,
   firstTasks,
   revealModel,
-  shareCardSvg,
 } from "@/app/lib/funnel/reveal-rules";
 import type { MergedFlowFields, MiniAppChild } from "@/app/lib/funnel/miniapp-core";
 // Unified-flow U6: the merged ladder — LIVE since Unit 9 flipped
@@ -1278,9 +1278,7 @@ export function MiniAppShell({
           if (model.kind !== "ok") return null;
           return (
             <section>
-              <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
-                {REVEAL_UI_COPY.tasksEyebrow}
-              </p>
+              {/* 2026-07-30: no "Your project" eyebrow on this page. */}
               <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
                 {composeView.project.name}
               </h1>
@@ -1368,12 +1366,14 @@ export function MiniAppShell({
               <p className="mt-2 text-center font-path-mono text-[0.65rem] opacity-70">
                 {CLIMB_CAPTION}
               </p>
-              <p className="mt-3 font-path-mono text-[0.6rem] uppercase tracking-[0.1em] opacity-60">
-                {model.projectionLabel}
-              </p>
 
-              {/* R43: the stat strip — every number is a real pass criterion. */}
-              <div className="mt-6 flex gap-4">
+              {/* The progress-examples strip (Peter, 2026-07-30): a sub-
+                  headline a little smaller than the main one, then the
+                  illustrative 60/40/20 examples. */}
+              <p className="mt-8 font-path-display text-2xl font-semibold leading-snug">
+                {PROGRESS_HEADING}
+              </p>
+              <div className="mt-4 flex gap-4">
                 {model.stats.map((s) => (
                   <div key={s.label} className="flex flex-col">
                     <span className="font-path-display text-2xl font-semibold">{s.value}</span>
@@ -1382,42 +1382,19 @@ export function MiniAppShell({
                 ))}
               </div>
 
-              {/* R45: the share card, parent-only. */}
-              <Button
-                skin={skin}
-                variant="secondary"
-                onClick={() => {
-                  const svg = shareCardSvg(model.shareCard);
-                  const url = URL.createObjectURL(
-                    new Blob([svg], { type: "image/svg+xml" })
-                  );
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "first-profit-card.svg";
-                  // WebKit needs the anchor in the document, and revoking on
-                  // the same tick as click() races the download to a
-                  // zero-byte file. Defer the revoke.
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                  setTimeout(() => URL.revokeObjectURL(url), 1000);
-                  void emitShareCardAction({ childId: child.id });
-                }}
-                className="mt-6"
-              >
-                {REVEAL_UI_COPY.downloadLabel}
-              </Button>
-
               {/* R44: the close — the ONLY nested register swap in the funnel.
-                  Application register inside the child's skin subtree. */}
+                  Application register inside the child's skin subtree. The
+                  parents line and the download-card button are retired
+                  (2026-07-30); the CTA advances STRAIGHT to the 01 Basics
+                  step, never back to the dashboard. */}
               <div className={`mt-10 -mx-6 px-6 py-8 ${APPLICATION_REGISTER_CLASSES}`}>
-                <p className="text-[14px] italic leading-6 opacity-80">{model.parentLine}</p>
-                <a
-                  href="/dashboard"
-                  className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+                <button
+                  onClick={() => go("basics")}
+                  disabled={pending}
+                  className="mt-1 inline-flex h-11 w-full items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {model.cta}
-                </a>
+                </button>
                 <div className="mt-7 flex flex-col divide-y divide-line border-y border-line">
                   {model.faq.map((row) => (
                     <details

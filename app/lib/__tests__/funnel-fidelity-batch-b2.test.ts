@@ -263,7 +263,7 @@ describe("drift 11 + E2: the reveal climb — seals, bullets, captions", () => {
   const shell = stripComments(read(SHELL));
 
   it("the narrative bullets are the prototype's, phase by phase", () => {
-    expect(CLIMB_HEADING).toBe("From first pitch to a live product.");
+    expect(CLIMB_HEADING).toBe("Four months from now...");
     expect(CLIMB_BULLETS.map((b) => b.phase)).toEqual(["SELL", "BUILD", "VALIDATE"]);
     const sentences = CLIMB_BULLETS.map((b) => `${b.before}${b.phase}${b.after}`);
     expect(sentences).toEqual([
@@ -318,7 +318,10 @@ describe("drift 11 + E2: the reveal climb — seals, bullets, captions", () => {
   it("the application-register close strip survives, register seam intact", () => {
     expect(shell).toContain("APPLICATION_REGISTER_CLASSES");
     expect(shell).toContain("{model.cta}");
-    expect(shell).toContain("{model.parentLine}");
+    // 2026-07-30: the parents line and download-card button are retired,
+    // and the CTA advances straight to basics — never the dashboard.
+    expect(shell).not.toContain("model.parentLine");
+    expect(shell).toMatch(/onClick=\{\(\) => go\("basics"\)\}/);
   });
 });
 

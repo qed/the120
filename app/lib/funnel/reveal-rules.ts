@@ -73,7 +73,7 @@ export function revealClimb(): ClimbPhase[] {
  * phase name) so the component renders the phase-coloured dot and the bold
  * name without string surgery.
  */
-export const CLIMB_HEADING = "From first pitch to a live product.";
+export const CLIMB_HEADING = "Four months from now...";
 
 export type ClimbBullet = {
   /** The phase whose dot colours the bullet and whose name renders bold. */
@@ -112,50 +112,25 @@ export const PROJECTION_LABEL: Record<QuizBand, string> = {
   b912: "Projected trajectory. Nothing here is achieved yet; the program is where it becomes real.",
 };
 
-/* ─────────────────── the stat strip (R43) ─────────────────── */
+/* ─────────────────── the progress examples strip ─────────────────── */
 
 export type RevealStat = {
   value: string;
   label: string;
-  /** The EXACT pass criterion this number cites, verbatim from the published
-   *  Path content. A stat with no criterion is an invented stat. */
-  criterion: string;
 };
 
-const SELL = pathSteps.find((p) => p.key === "SELL");
+/** The sub-headline over the strip (Peter, 2026-07-30) — a little smaller
+ *  than the main headline. */
+export const PROGRESS_HEADING = "Examples of progress so far";
 
-/** R43: the strip may cite only numbers that are actual pass criteria. These
- *  three are SELL's own numbers — the phase the first tasks live in. */
+/** The strip is ILLUSTRATIVE (Peter, 2026-07-30): examples of progress so
+ *  far, replacing the earlier criterion-cited stats. */
 export function statStrip(): RevealStat[] {
-  if (!SELL) return [];
   return [
-    { value: "60", label: "seconds to pitch", criterion: SELL.criteria[0] },
-    { value: "3", label: "nos, logged and learned from", criterion: SELL.criteria[2] },
-    { value: "25", label: "supervised outreach attempts", criterion: SELL.criteria[4] },
+    { value: "60", label: "a 60 second pitch, perfected" },
+    { value: "40", label: "outreach attempts to non-family" },
+    { value: "20", label: "nos received, logged and learned from" },
   ];
-}
-
-/** The published copy sometimes spells small numbers ("three times"); a stat
- *  citing it in digits is the same number. */
-const NUMBER_WORDS: Record<string, string> = {
-  "1": "one", "2": "two", "3": "three", "4": "four", "5": "five",
-  "6": "six", "7": "seven", "8": "eight", "9": "nine", "10": "ten",
-};
-
-/** The testable constraint: a stat is valid only if its cited criterion is a
- *  real published pass criterion AND contains the stat's number (as digits
- *  or as the written word) — on WORD BOUNDARIES. Substring matching defeated
- *  the guard by execution: "1" matched inside "money" via "one", "5" inside
- *  "25", "6" inside "60" (the adversarial review). A guard that exists to
- *  catch invented stats must not be satisfiable by coincidence. */
-export function statCiteVerdict(stat: RevealStat): boolean {
-  const published = pathSteps.some((p) => p.criteria.includes(stat.criterion));
-  if (!published) return false;
-  const lower = stat.criterion.toLowerCase();
-  const digits = stat.value.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`(^|\\D)${digits}(\\D|$)`).test(lower)) return true;
-  const word = NUMBER_WORDS[stat.value];
-  return word !== undefined && new RegExp(`\\b${word}\\b`).test(lower);
 }
 
 /* ─────────────────── the first three tasks (R42) ─────────────────── */
@@ -201,13 +176,6 @@ export function firstTasks(project: ComposedProject): TaskBubble[] {
 
 export const REVEAL_CTA = "Continue Application →";
 
-/** The italic, band-worded parent line above the FAQ. */
-export const PARENT_LINE: Record<QuizBand, string> = {
-  b35: "Parents: this is where their idea becomes an application. Ten more minutes, together.",
-  b68: "Parents: the project is real. The application takes about ten minutes from here.",
-  b912: "Parents: your builder did this part alone. The application is the short part.",
-};
-
 export type FaqRow = {
   q: string;
   a: string;
@@ -236,17 +204,19 @@ export const REVEAL_FAQ: readonly FaqRow[] = [
     a: "A real person reads the application and comes back to you. Seats are offered through the admissions review, not first-come-first-served.",
     defaultOpen: false,
   },
+  // The bottom two rows are Peter's 2026-07-30 copy, verbatim (the deadline
+  // still rides DEPOSIT_REFUND_DEADLINE_LABEL — one source for the date).
   {
-    q: "How long until $10K?",
-    a: "The goal is aspirational and open-ended. Some founders hit it in 90 days; younger or busier kids may take a year or more. The goal doesn't expire, and nobody's clock is compared to anybody else's.",
+    q: "How long until profits are earned?",
+    a: "The goal is to learn how to run a business. Maybe in year 1 you do $2,000 in revenue and $10 in profit. Maybe in year 2 you do $4,000 in revenue and $1,000 in profit. Maybe you go a lot faster. The goal is to earn $10,000 in lifetime profits and to build muscle in the areas of financial literacy and entrepreneurship.",
     defaultOpen: false,
   },
   {
     q: "What does it cost?",
     a:
-      "Membership is $3,000 for the year; the full core program is $15,000. " +
+      "Membership is $3,000 for the year. " +
       `The seat deposit is $250 and fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}. ` +
-      "Those are the real numbers. A school tells you what it costs.",
+      "This gives you access to all workshops and the software to help you reach sustainable ongoing profit.",
     defaultOpen: false,
   },
 ];
@@ -377,7 +347,6 @@ export type RevealModel =
       stats: RevealStat[];
       tasks: TaskBubble[];
       cta: string;
-      parentLine: string;
       faq: readonly FaqRow[];
       shareCard: ShareCard;
     }
@@ -402,7 +371,6 @@ export function revealModel(input: {
     stats: statStrip(),
     tasks: firstTasks(input.project),
     cta: REVEAL_CTA,
-    parentLine: PARENT_LINE[input.band],
     faq: REVEAL_FAQ,
     shareCard: shareCardModel(input.project, input.group),
   };
@@ -423,7 +391,6 @@ export const REVEAL_UI_COPY = {
   tasksIntro: "Every founder starts the same way: pitch it, sell it, learn from the no's.",
   tasksFooter: "In the app, each step is broken down into 4–6 unit tasks. First Profit helps you win.",
   tasksNext: "See where this leads →",
-  downloadLabel: "Parents: download the card",
 } as const;
 
 /** Every user-facing string the model emits, flattened — the copy-rules test
@@ -433,6 +400,7 @@ export function emittedCopy(model: RevealModel): string[] {
     ...Object.values(REVEAL_UI_COPY),
     CLIMB_HEADING,
     CLIMB_CAPTION,
+    PROGRESS_HEADING,
     ...CLIMB_BULLETS.map((b) => `${b.before}${b.phase}${b.after}`),
   ];
   if (model.kind !== "ok") return [...chrome];
@@ -440,7 +408,6 @@ export function emittedCopy(model: RevealModel): string[] {
     ...chrome,
     model.projectionLabel,
     model.cta,
-    model.parentLine,
     ...model.stats.map((s) => `${s.value} ${s.label}`),
     ...model.tasks.flatMap((t) => [t.id, t.title, t.line]),
     ...model.faq.flatMap((f) => [f.q, f.a]),

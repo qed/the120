@@ -172,7 +172,9 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
     const shell = read("app/start/child/[childId]/MiniAppShell.tsx");
     expect(shell).not.toContain('from "@/app/lib/funnel/events"');
     expect(shell).toContain("emitFaqOpenedAction");
-    expect(shell).toContain("emitShareCardAction");
+    // 2026-07-30: the download-card button (the share_card emitter's only
+    // call site) is retired from the reveal; the server action remains.
+    expect(shell).not.toContain("emitShareCardAction");
   });
 });
 

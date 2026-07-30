@@ -747,16 +747,16 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
   });
 
   it("no pre-compose step links to /dashboard without ?stay=1 — the Unit 2 gate's loop guard", () => {
-    // THREE /dashboard links in the shell: the reveal close (post-compose,
-    // outside the gate's redirect cohort), unified-flow U6's "← DASHBOARD"
-    // backward terminal — which only renders on a form step whose merged
-    // list has NO build steps, i.e. a LEGACY (null-state) child, never a
-    // member of the gate's pre-compose redirect cohort — and unified-flow
-    // U8's seat-screen CTA (holdSeatCta → the dashboard reserve block),
-    // which only renders on a nextStepsReachable list (offered+), also
-    // never pre-compose. Any NEW pre-compose dashboard link must carry
-    // ?stay=1; this pins the count so adding one forces a decision.
-    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(3);
+    // TWO /dashboard links in the shell (the reveal close now advances to
+    // basics, 2026-07-30): unified-flow U6's "← DASHBOARD" backward
+    // terminal — which only renders on a form step whose merged list has NO
+    // build steps, i.e. a LEGACY (null-state) child, never a member of the
+    // gate's pre-compose redirect cohort — and unified-flow U8's
+    // seat-screen CTA (holdSeatCta → the dashboard reserve block), which
+    // only renders on a nextStepsReachable list (offered+), also never
+    // pre-compose. Any NEW pre-compose dashboard link must carry ?stay=1;
+    // this pins the count so adding one forces a decision.
+    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(2);
     expect(shell).toMatch(/href="\/dashboard"/);
   });
 

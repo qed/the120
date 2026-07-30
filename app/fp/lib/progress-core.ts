@@ -69,6 +69,19 @@ export function criterionIdOf(taskId: string): string {
   return taskId.split(".").slice(0, 2).join(".");
 }
 
+/**
+ * THE canonical "this task counts as done" state — the single definition every
+ * verified-count aggregate derives from: `loadJourney`'s per-phase fold (the
+ * student map, family cards) and the parent dashboard's screen-16 bars
+ * (`dashboard-gate-core`'s DB-side count). One row per (student, task) is
+ * structural (`unique (student_id, task_id)`), and the three-column FK pins
+ * every progress row to a task of the student's pinned program — so counting
+ * rows in this state IS counting the pinned program's verified tasks. A parity
+ * test pins this constant against the migration's CHECK list and both
+ * consumers, so the definition cannot fork.
+ */
+export const VERIFIED_TASK_STATE: TaskState = "verified";
+
 /* ----------------------------------------- fail-closed input narrowing */
 
 /**

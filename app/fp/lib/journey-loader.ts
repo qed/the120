@@ -46,7 +46,13 @@ import {
   type NowSelection,
   type PhaseView,
 } from "./now-card-rules";
-import { bandForGrade, firstNameFromChildJoin, gradeFromChildJoin, narrowTaskState } from "./progress-core";
+import {
+  VERIFIED_TASK_STATE,
+  bandForGrade,
+  firstNameFromChildJoin,
+  gradeFromChildJoin,
+  narrowTaskState,
+} from "./progress-core";
 import { loadStudentContext, type StudentContext } from "./progress-loader";
 import type { Skin } from "./skin-tokens";
 import type { TaskState } from "./transition-table";
@@ -212,7 +218,7 @@ export async function loadJourney(
         }
         taskStates[task.id] = state;
         states.push(state);
-        if (state === "verified") phaseVerified++;
+        if (state === VERIFIED_TASK_STATE) phaseVerified++;
         reviewOpenedAt[task.id] = row?.review_opened_at ?? null;
 
         const rowMs = row?.updated_at ? Date.parse(row.updated_at) : NaN;

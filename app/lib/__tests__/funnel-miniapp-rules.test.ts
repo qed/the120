@@ -772,9 +772,12 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
     expect((shell.match(/confirmDoorAction\(/g) ?? []).length).toBe(1);
   });
 
-  it("the grid forwards the hint by FIRST-BORN, not only-child", () => {
+  it("the add flow forwards the hint by FIRST-BORN, not only-child", () => {
+    // 2026-07-30: the picker grid is retired — the hint now rides the
+    // post-add redirect, gated on the PRE-add snapshot being empty (the
+    // child just added is the first-born exactly then).
     const grid = stripComments(read("../../start/children/ChildrenFlow.tsx"));
-    expect(grid).toMatch(/active\.id === children\[0\]\?\.id/);
+    expect(grid).toMatch(/hintSlug && children\.length === 0/);
     expect(grid).not.toMatch(/children\.length === 1 &&/);
   });
 });

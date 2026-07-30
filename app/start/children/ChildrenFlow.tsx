@@ -80,17 +80,12 @@ export function ChildrenFlow({
   initialChildren,
   loadFailed,
   hintSlug,
-  addOnly = false,
 }: {
   initialChildren: FunnelChild[];
   loadFailed: boolean;
   /** The `?g=` door hint, forwarded into the mini-app for the FIRST child
    *  only (R36) — siblings pick cold. */
   hintSlug: string | null;
-  /** Dashboard's "+ Add a child" (`?add=1`, 2026-07-30): a dedicated
-   *  add-a-child page — no existing-children picker (the parent already said
-   *  "add"), just the form and a back link to the dashboard. */
-  addOnly?: boolean;
 }) {
   const [children, setChildren] = useState<FunnelChild[]>(initialChildren);
   const selectedId = useSyncExternalStore(
@@ -163,76 +158,24 @@ export function ChildrenFlow({
     <ProgressNavCard model={navCardForStep("add_child", null)} />
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
 
-      {addOnly && (
-        <a
-          href="/dashboard"
-          className="mb-4 inline-flex items-center gap-1 self-start font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted transition-colors hover:text-ink"
-        >
-          ← Back to dashboard
-        </a>
-      )}
+      {/* 2026-07-30: this page is ONLY Add a Child. Existing children live
+          on the parent dashboard — the picker grid is retired. */}
+      <a
+        href="/dashboard"
+        className="mb-4 inline-flex items-center gap-1 self-start font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted transition-colors hover:text-ink"
+      >
+        ← Back to dashboard
+      </a>
       {/* U10 fidelity (audit drift 12): Georgia display heading. */}
-      <h1 className="display text-3xl text-ink">
-        {addOnly ? "Add a child" : children.length === 0 ? "Who's applying?" : "Your children"}
-      </h1>
+      <h1 className="display text-3xl text-ink">Add a child</h1>
       <p className="mt-3 text-base leading-7 text-ink-soft lg:max-w-[560px]">
-        {addOnly || children.length === 0
-          ? "Their first name and the grade they're in now. You can add more later."
-          : "Pick who you're working on, or add another."}
+        Their first name and the grade they&apos;re in now. You can add more later.
       </p>
 
       {loadFailed && (
         <p className="mt-5 text-sm leading-6 text-ink-soft">
           We couldn&apos;t load your children just now — adding one below still works.
         </p>
-      )}
-
-      {!addOnly && children.length > 0 && (
-        <ul className="mt-7 flex flex-col gap-2 md:grid md:grid-cols-2">
-          {children.map((c) => {
-            const isActive = active?.id === c.id;
-            return (
-              <li key={c.id}>
-                <button
-                  onClick={() => persistSelection(c.id)}
-                  aria-pressed={isActive}
-                  className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
-                    isActive
-                      ? "border-ink bg-white"
-                      : "border-line bg-white/60 hover:border-ink-soft"
-                  }`}
-                >
-                  <span className="text-[15px] text-ink">{c.firstName}</span>
-                  <span className="font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted">
-                    Grade {c.grade}
-                    {isActive ? " · Active" : ""}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {!addOnly && active && (
-        // The forward path (U8): into the mini-app for the active child. The
-        // hint travels ONLY when this is the family's first child — R36 says
-        // siblings pick cold, and the grid is where first-ness is known.
-        <a
-          href={
-            // R36: first-child-only means FIRST-BORN, not only-child. The list
-            // arrives created_at-ordered from the core, so children[0] IS the
-            // first child — gating on length === 1 dropped the hint the moment
-            // a sibling was added, for the very child it was destined for
-            // (both reviewers, independently).
-            hintSlug && active.id === children[0]?.id
-              ? `/start/child/${active.id}?g=${encodeURIComponent(hintSlug)}`
-              : `/start/child/${active.id}`
-          }
-          className="mt-6 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
-        >
-          {`Start building with ${active.firstName} →`}
-        </a>
       )}
 
       {seats && (
@@ -298,13 +241,7 @@ export function ChildrenFlow({
         <button
           onClick={submit}
           disabled={pending}
-          className={`mt-1 inline-flex h-11 items-center justify-center rounded-full px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-colors disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start ${
-            addOnly
-              ? "bg-red text-white hover:bg-red-dark"
-              : children.length === 0
-              ? "bg-red text-white hover:bg-red-dark"
-              : "border border-red bg-white text-red hover:bg-red/5"
-          }`}
+          className="mt-1 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start"
         >
           {/* ONE promise (2026-07-30): the submit adds the child AND enters
               the unified flow, so the label says where it goes. */}

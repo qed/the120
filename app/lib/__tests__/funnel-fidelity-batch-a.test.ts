@@ -121,10 +121,12 @@ describe("drift 8: + ADD A CHILD goes secondary once ≥1 child exists", () => {
     );
   });
 
-  it("the funnel grid's add button mirrors the treatment", () => {
+  it("the add-only page's CTA is the primary red pill (2026-07-30: the picker grid is retired)", () => {
     const src = stripComments(read("app/start/children/ChildrenFlow.tsx"));
-    expect(src).toMatch(
-      /children\.length === 0\s*\?\s*"bg-red text-white hover:bg-red-dark"\s*:\s*"border border-red bg-white text-red hover:bg-red\/5"/
-    );
+    // ONE CTA on the page — always primary red; no secondary treatment and
+    // no existing-children picker remain.
+    expect(src).toContain("bg-red px-6 font-mono");
+    expect(src).not.toContain("Start building with");
+    expect(src).not.toContain("aria-pressed");
   });
 });

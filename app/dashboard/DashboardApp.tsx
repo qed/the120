@@ -227,9 +227,9 @@ export default function DashboardApp({
   // add-child flow (the store's local-first addChild raced its own debounced
   // insert against the navigation, so the server-action flow owns creation).
   const flowHref = (id: string) => `/start/child/${id}`;
-  // `?add=1` (2026-07-30): from the dashboard, Add a child is a dedicated
-  // add-only page — the parent already said "add", so no picker renders.
-  const ADD_CHILD_HREF = "/start/children?add=1";
+  // 2026-07-30: /start/children IS the add-only page now (the picker grid
+  // is retired — existing children live on this dashboard).
+  const ADD_CHILD_HREF = "/start/children";
 
   const isPath = register === "path";
 

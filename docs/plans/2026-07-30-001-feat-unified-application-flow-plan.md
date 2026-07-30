@@ -456,7 +456,7 @@ recorded decision.
 **Verification:** written go/no-go with evidence paths, appended to this
 plan under a "Unit 3 findings" note.
 
-- [ ] **Unit 4: Step-model and lock foundation (pure rules only)**
+- [x] **Unit 4: Step-model and lock foundation (pure rules only)** *(landed 2026-07-30)*
 
 **Goal:** extend the rules layer for the merged ladder — no UI yet.
 
@@ -506,7 +506,7 @@ plan under a "Unit 3 findings" note.
 **Verification:** exhaustive matrix tests green; existing rules tests
 updated deliberately, none skipped.
 
-- [ ] **Unit 5: Server load + form-step actions**
+- [x] **Unit 5: Server load + form-step actions** *(landed 2026-07-30)*
 
 **Goal:** the mini-app route loads the full application data model and
 gains typed save actions for the form steps.
@@ -559,7 +559,7 @@ gains typed save actions for the form steps.
 **Verification:** core tests green; page redirect target changed and
 pinned; no core dep reaches the wire.
 
-- [ ] **Unit 6: Form-step screens + the seam**
+- [x] **Unit 6: Form-step screens + the seam** *(landed 2026-07-30)*
 
 **Goal:** R6/R6a — the five form steps render inside `MiniAppShell` with
 pending guards, read-only treatment, group difference note, and the
@@ -607,7 +607,7 @@ hand-back seam after reveal.
 **Verification:** fidelity pins updated; walkthrough of each cohort's list
 renders without dead controls.
 
-- [ ] **Unit 7: Flow endings by state**
+- [x] **Unit 7: Flow endings by state** *(landed 2026-07-30)*
 
 **Goal:** R9/R9a + the endings map — submit for pre-submit, status
 terminal for submitted-not-offered, "finish the build" pointer for
@@ -633,7 +633,7 @@ pre-project children.
 
 **Verification:** no cohort reaches a pressable control that does nothing.
 
-- [ ] **Unit 8: Next-steps re-homing + shim + returnTo completion**
+- [x] **Unit 8: Next-steps re-homing + shim + returnTo completion** *(landed 2026-07-30)*
 
 **Goal:** R10/R11/R12 — the 3 screens as flow steps past review, gate =
 `nextStepsReachable` verbatim, goal save preserved, shim carries full
@@ -684,7 +684,7 @@ standalone behavior.
 **Verification:** standalone page code no longer renders screens (shim
 only); all next-steps behavior tests green.
 
-- [ ] **Unit 9: Retire the embedded editor + final rewiring + assembly audit**
+- [x] **Unit 9: Retire the embedded editor + final rewiring + assembly audit** *(landed 2026-07-30)*
 
 **Goal:** R5/R7 — dashboard links land in the flow via the landing rule;
 embedded `DossierEditor`/`DossierPreview` views and the interim wiring are

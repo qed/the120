@@ -104,6 +104,25 @@ export default async function ReviewApplicationPage({
         </p>
         <h1 className="display mt-2 text-3xl text-ink">{childName}</h1>
 
+        {String(child.status ?? "draft") === "draft" && (
+          // Not submitted yet (2026-07-30): the summary still renders below,
+          // but the headline prompt is to CONTINUE the new unified flow.
+          <div className="mt-4 rounded-2xl border border-red/30 bg-red/5 p-5">
+            <p className="text-[15px] font-semibold text-ink">
+              This application isn&apos;t submitted yet.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-ink-soft">
+              Pick up where you left off and finish the application flow.
+            </p>
+            <a
+              href={`/start/child/${childId}`}
+              className="mt-3 inline-flex h-11 items-center justify-center rounded-full bg-blue px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark"
+            >
+              Continue application →
+            </a>
+          </div>
+        )}
+
         <section className="mt-7 rounded-2xl border border-line bg-white p-6">
           <h2 className="display text-lg text-ink">Basics</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">

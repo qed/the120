@@ -754,6 +754,15 @@ export default function DashboardApp({
                           <a href={flowHref(c.id)} className={bluePillClass}>
                             Continue application
                           </a>
+                        ) : !composedChildIds.has(c.id) ? (
+                          // The redo exception (2026-07-30, Abe's class): the
+                          // offer stands, but the NEW unified flow was never
+                          // walked (no designed business). The secondary CTA
+                          // starts the new flow and persists until the
+                          // application is completed.
+                          <a href={flowHref(c.id)} className={reviewPillClass}>
+                            Start new flow
+                          </a>
                         ) : !canReserve || paid || pendingLegacy ? (
                           // Complete (submitted+): the outlined Review twin —
                           // unless the reserve block below renders, which

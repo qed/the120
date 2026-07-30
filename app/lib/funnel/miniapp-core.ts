@@ -27,8 +27,10 @@ import {
   isDoorChangeConflictDbError,
   isEditLocked,
   isEditLockedDbError,
+  parseApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
 import type { ApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { parseAcademics, type Academic } from "@/app/dashboard/data";
 
 export type MiniAppChild = {
   id: string;
@@ -447,6 +449,185 @@ export async function changeDoorCore(
     return { kind: "changed", slug, previousSlug: child.groupSlug || null };
   } catch (err) {
     console.error("[funnel/miniapp] door change exception:", err);
+    return { kind: "failed" };
+  }
+}
+
+/* ───────────── merged-flow load (unified-flow U5; R6, R8) ───────────── */
+
+/**
+ * The FULL application data model the merged flow's form steps render and
+ * save (unified-flow Unit 5) — the wizard's field set on top of the
+ * mini-app's, plus the fact axes Unit 4's rules consume:
+ *
+ * - `formProgress` inputs: lastName / currentSchool / academics / interests /
+ *   portfolioLinks / childEmail / childEmailNone (merged-flow-rules owns the
+ *   predicate; this loader only carries the fields).
+ * - `mergedLockVerdict` / `nextStepsReachable` inputs: applicantState +
+ *   status (both vocabularies ride together, never one without the other).
+ * - the deposit-paid fact (group-until-deposit exception, R8) via the
+ *   deposits read — returned alongside the child, not folded into it, so
+ *   the child shape stays a row mirror.
+ *
+ * PII note: these fields include child email / birth year / school. They are
+ * returned to the OWNING session only (RLS) and must never be copied into
+ * verdicts, funnel event payloads, or logs — the form-step cores state the
+ * same rule on their side.
+ */
+export type MergedFlowFields = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  /** null = not yet chosen (the row's NULL) — callers needing the wizard's
+   *  `""` vocabulary convert at the edge, the loader never invents a 0. */
+  grade: number | null;
+  birthYear: string;
+  currentSchool: string;
+  photo: string | null;
+  groupSlug: string | null;
+  academics: Academic[];
+  /** Legacy subject picks — read-only fallback the checklist still credits. */
+  subjects: string[];
+  interests: string;
+  projectPitch: string;
+  portfolioLinks: string;
+  childEmail: string;
+  childEmailNone: boolean;
+  /** `children.status` RAW off the row (the legacy vocabulary). Kept as a
+   *  string: unknown values must reach `mergedLockVerdict` as "not draft"
+   *  (locked, fail-closed), never coerce toward an editable rung. */
+  status: string;
+  familyGoal: string;
+  applicantState: ApplicantState | null;
+};
+
+export type MergedFlowChild = MergedFlowFields & {
+  /** R36: the hint is first-child-only — same contract as MiniAppChild. */
+  isFirstChild: boolean;
+};
+
+/** The one children SELECT for the merged flow — shared with the form-step
+ *  core so the loader and the save path can never read different shapes. */
+export const MERGED_FLOW_COLUMNS =
+  "id, first_name, last_name, grade, birth_year, current_school, photo, group_slug, academics, subjects, interests, project_pitch, portfolio_links, child_email, child_email_none, status, family_goal, applicant_state, created_at";
+
+/** Row → fields, fail-closed everywhere: applicant_state through
+ *  `parseApplicantState`, academics through the tolerant `parseAcademics`,
+ *  nullable text to "" exactly as the dashboard's `rowToChild`. */
+export function mapMergedFlowRow(row: Record<string, unknown>): MergedFlowFields {
+  return {
+    id: String(row.id),
+    firstName: String(row.first_name ?? ""),
+    lastName: String(row.last_name ?? ""),
+    grade: row.grade === null || row.grade === undefined ? null : Number(row.grade),
+    birthYear: String(row.birth_year ?? ""),
+    currentSchool: String(row.current_school ?? ""),
+    photo: (row.photo as string | null) ?? null,
+    groupSlug: (row.group_slug as string | null) || null,
+    academics: parseAcademics(row.academics),
+    subjects: Array.isArray(row.subjects) ? (row.subjects as string[]) : [],
+    interests: String(row.interests ?? ""),
+    projectPitch: String(row.project_pitch ?? ""),
+    portfolioLinks: String(row.portfolio_links ?? ""),
+    childEmail: String(row.child_email ?? ""),
+    childEmailNone: row.child_email_none === true,
+    status: String(row.status ?? ""),
+    familyGoal: String(row.family_goal ?? ""),
+    applicantState: parseApplicantState(row.applicant_state),
+  };
+}
+
+export type MergedFlowDeps = {
+  session: () => Promise<{
+    userId: string | null;
+    /** ALL of this family's children (RLS-scoped, created_at ascending) —
+     *  the sibling read decides first-child-ness, same as loadMiniAppChild. */
+    loadChildren: () => Promise<MergedFlowFields[] | "error">;
+    /** This child's deposit rows. The paid predicate mirrors the DB
+     *  group-lock guard exactly (status='paid' AND refunded_at IS NULL) —
+     *  the guard is the gate this fact presents. */
+    loadDeposits: (
+      childId: string
+    ) => Promise<{ status: string; refundedAt: string | null }[] | "error">;
+  }>;
+};
+
+function mergedFlowRealDeps(): MergedFlowDeps {
+  return {
+    session: async () => {
+      const supabase = await supabaseServer();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return {
+        userId: user?.id ?? null,
+        loadChildren: async () => {
+          const { data, error } = await supabase
+            .from("children")
+            .select(MERGED_FLOW_COLUMNS)
+            .order("created_at", { ascending: true })
+            .limit(50);
+          if (error) return "error";
+          return (data ?? []).map((row) => mapMergedFlowRow(row as Record<string, unknown>));
+        },
+        loadDeposits: async (childId) => {
+          const { data, error } = await supabase
+            .from("deposits")
+            .select("status, refunded_at")
+            .eq("child_id", childId);
+          if (error) return "error";
+          return ((data as { status: string; refunded_at: string | null }[]) ?? []).map(
+            (d) => ({ status: String(d.status), refundedAt: d.refunded_at ?? null })
+          );
+        },
+      };
+    },
+  };
+}
+
+/** A LIVE paid deposit — the DB group-lock guard's own predicate
+ *  (status='paid' AND refunded_at IS NULL), not the dashboard's looser
+ *  status-only check, so the presented lock and the enforcing trigger agree. */
+const livePaidDeposit = (rows: { status: string; refundedAt: string | null }[]) =>
+  rows.some((d) => d.status === "paid" && d.refundedAt === null);
+
+export type LoadMergedFlowResult =
+  | { kind: "ok"; child: MergedFlowChild; depositPaid: boolean }
+  | { kind: "not_found" }
+  | { kind: "unauthenticated" }
+  | { kind: "failed" };
+
+/**
+ * `loadMiniAppChild` grown to the merged flow's data model (Unit 5). Same
+ * refusal shape: RLS makes "someone else's child" and "no such child" the
+ * SAME zero-rows answer — both `not_found`, never an existence oracle.
+ *
+ * The deposits read DEGRADES on failure (depositPaid=false): the fact is
+ * presentation for the group step's lock treatment; the guarantee is the DB
+ * group-lock guard on the write path, which refuses regardless of what a
+ * flaky read told the page. Same tradeoff as the page's projects-read
+ * degrade.
+ */
+export async function loadMergedFlowChild(
+  childId: string,
+  deps: MergedFlowDeps = mergedFlowRealDeps()
+): Promise<LoadMergedFlowResult> {
+  try {
+    const session = await deps.session();
+    if (!session.userId) return { kind: "unauthenticated" };
+    const rows = await session.loadChildren();
+    if (rows === "error") return { kind: "failed" };
+    const child = rows.find((c) => c.id === childId);
+    if (!child) return { kind: "not_found" };
+    const deposits = await session.loadDeposits(childId);
+    const depositPaid = deposits === "error" ? false : livePaidDeposit(deposits);
+    return {
+      kind: "ok",
+      child: { ...child, isFirstChild: rows.length > 0 && rows[0].id === childId },
+      depositPaid,
+    };
+  } catch (err) {
+    console.error("[funnel/miniapp] merged-flow load exception:", err);
     return { kind: "failed" };
   }
 }

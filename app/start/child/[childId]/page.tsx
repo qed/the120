@@ -9,6 +9,7 @@ import {
 } from "@/app/lib/funnel/miniapp-rules";
 import { loadActiveProjectViewCore } from "@/app/lib/funnel/compose-core";
 import { isEditLocked } from "@/app/lib/funnel/applicant-rules";
+import { returnToHref } from "@/app/lib/funnel/return-to-rules";
 import { MiniAppShell } from "./MiniAppShell";
 
 /**
@@ -35,7 +36,21 @@ export default async function MiniAppPage({
 
   const loaded = await loadMiniAppChild(childId);
   // redirect()/notFound() throw by design — outside any try.
-  if (loaded.kind === "unauthenticated") redirect("/start");
+  if (loaded.kind === "unauthenticated") {
+    // R12 (the auth-fix half, unified-flow U5): a signed-out deep link
+    // bounces to the dashboard sign-in CARRYING the way back — this page's
+    // own URL, query preserved — instead of restarting the funnel at
+    // /start. The param is validated on consumption (safeReturnTo,
+    // canonicalize-then-match); SignIn's redirect-back lands in Unit 8, so
+    // until then the param rides inert. Pure GET, nothing mutated.
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      const v = Array.isArray(value) ? value[0] : value;
+      if (typeof v === "string") qs.set(key, v);
+    }
+    const search = qs.toString();
+    redirect(returnToHref(`/start/child/${childId}${search ? `?${search}` : ""}`));
+  }
   if (loaded.kind === "not_found") notFound();
   if (loaded.kind === "failed") redirect("/start/children");
 

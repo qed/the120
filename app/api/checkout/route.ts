@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     if (!child) return NextResponse.json({ error: "Child not found" }, { status: 404 });
     if (child.status === "draft")
       return NextResponse.json(
-        { error: "Submit the dossier before reserving a seat." },
+        { error: "Submit the application before reserving a seat." },
         { status: 400 }
       );
 

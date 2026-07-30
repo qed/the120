@@ -263,7 +263,9 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
     expect(home).toMatch(/verdict\.statusLine/);
     // The reserve block is the ONE shared renderReserveCta — the dispute-
     // evidence posture (inline policy + tick) must not fork per register.
-    expect(home).toMatch(/renderReserveCta\(c\)/);
+    expect(home).toMatch(
+      /renderReserveCta\(c, verdict\.kind === "funnel" \? verdict\.secondaryReviewLink : undefined\)/
+    );
   });
 
   it("post-arrival cards key on the sticky column, not applicant state or deposits", () => {
@@ -274,6 +276,32 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
     const appMain = app.slice(app.indexOf('<main className="mx-auto w-full max-w-5xl px-6 py-10">'));
     expect(appMain).toMatch(/of \{SEATS_TOTAL\} seats remain/);
     expect(appMain).not.toMatch(/The Gauntlet/);
+  });
+
+  /* ── the two-CTA reserve block (unified-flow Phase A, R1/R1a/R2) ── */
+
+  it("the next-steps link is GONE from the dashboard (R2) — the offer email is its only front door until Phase B", () => {
+    expect(app).not.toContain("/start/next-steps");
+  });
+
+  it("the reserve block renders the outlined Review pill from the ONE shared class literal", () => {
+    // reviewPillClass is declared once and consumed by BOTH the reserve
+    // block's twin and the R1a standalone pill — the pair cannot drift.
+    expect(app.match(/reviewPillClass\b/g)?.length).toBeGreaterThanOrEqual(4);
+    // The twin renders the verdict's computed link, never a re-hardcoded
+    // label/href (data.ts stays the one source of truth).
+    expect(app).toMatch(/renderReserveCta\(c, verdict\.secondaryReviewLink\)/);
+  });
+
+  it("both registers suppress the standalone review link when the reserve block already carries the pill", () => {
+    // The double-render guard exists at BOTH trailing render sites.
+    expect(app.match(/cta\?\.kind !== "reserve"/g)?.length).toBe(2);
+  });
+
+  it("the disabled twin blocks every input modality while checkout opens (anchor has no real disabled)", () => {
+    expect(app).toMatch(/tabIndex=\{reserving \? -1 : undefined\}/);
+    expect(app).toMatch(/if \(reservingId === c\.id\) e\.preventDefault\(\);/);
+    expect(app).toMatch(/pointer-events-none opacity-60/);
   });
 });
 

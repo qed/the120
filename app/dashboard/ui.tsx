@@ -11,7 +11,7 @@ export function Meter({ value, className = "" }: { value: number; className?: st
   return (
     <div className={className}>
       <div className="flex items-center justify-between font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted">
-        <span>Dossier</span>
+        <span>Application</span>
         <span className={value === 100 ? "text-red" : "text-ink-soft"}>{value}% complete</span>
       </div>
       <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line-strong">

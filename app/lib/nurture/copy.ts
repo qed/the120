@@ -1,7 +1,7 @@
 /**
  * GTM-1: nurture email copy — one template per sequence step, each with
  * exactly ONE call to action (GTM plan §5: "every email ends with one CTA:
- * book the call or finish the dossier"). Voice matches welcome email #1
+ * book the call or finish the application"). Voice matches welcome email #1
  * (app/api/welcome/route.ts). Public facts (intensive dates) come from
  * app/lib/site.ts — the single source of truth — never hardcoded here.
  */
@@ -59,23 +59,23 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
   switch (template) {
     case "account-dossier-nudge":
       return {
-        subject: "15 minutes finishes the dossier",
+        subject: "15 minutes finishes the application",
         text: [
           hi,
           "",
-          "Quick nudge: your child's dossier is the application, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, and their group. That's it.",
+          "Quick nudge: your child's application takes one sitting, and most families finish it in about 15 minutes. Their interests, a project pitch, and their group. That's it.",
           "",
           "Once it's submitted, we review it and invite you to a qualifying assessment and a call.",
           "",
-          `Finish the dossier: ${DASHBOARD_URL}`,
+          `Finish the application: ${DASHBOARD_URL}`,
         ].join("\n"),
         html: layout(
           p(hi) +
             p(
-              "Quick nudge: <strong>your child's dossier is the application</strong>, and most families finish it in one sitting — about 15 minutes. Their interests, a project pitch, and their group. That's it."
+              "Quick nudge: <strong>your child's application takes one sitting</strong>, and most families finish it in about 15 minutes. Their interests, a project pitch, and their group. That's it."
             ) +
             p("Once it's submitted, we review it and invite you to a qualifying assessment and a call."),
-          { label: "Finish the dossier", url: DASHBOARD_URL }
+          { label: "Finish the application", url: DASHBOARD_URL }
         ),
       };
 
@@ -136,7 +136,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
           "",
           "Your seat is reserved — your family is one of the founding 120. Thank you for the trust; it means a great deal.",
           "",
-          `What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
+          `What happens next: we finish the review of your child's application, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.`,
           "",
           `Your dashboard: ${DASHBOARD_URL}`,
         ].join("\n"),
@@ -146,7 +146,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
               "Your seat is reserved — <strong>your family is one of the founding 120.</strong> Thank you for the trust; it means a great deal."
             ) +
             p(
-              `What happens next: we finish the review of your child's dossier, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEADLINE_NBSP}.`
+              `What happens next: we finish the review of your child's application, match them into their group, and you'll hear from me directly about the first intensive. Your deposit stays fully refundable until ${DEADLINE_NBSP}.`
             ),
           { label: "Your dashboard", url: DASHBOARD_URL }
         ),
@@ -205,11 +205,11 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
     case "stall-nudge": {
       const kid = child ?? "your child";
       return {
-        subject: child ? `${child}'s dossier is one step from done` : "The dossier is one step from done",
+        subject: child ? `${child}'s application is one step from done` : "The application is one step from done",
         text: [
           hi,
           "",
-          `You're nearly there — ${kid}'s dossier is almost complete, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`,
+          `You're nearly there — ${kid}'s application is almost complete, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`,
           "",
           "Nothing is lost; everything you've entered is saved right where you left it.",
           "",
@@ -218,7 +218,7 @@ export function renderNurtureEmail(template: NurtureTemplate, params: Params): N
         html: layout(
           p(esc(hi)) +
             p(
-              `You're nearly there — <strong>${esc(kid)}'s dossier is almost complete</strong>, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`
+              `You're nearly there — <strong>${esc(kid)}'s application is almost complete</strong>, and it's been sitting a few days. One short sitting finishes it, and submitting is what starts the review.`
             ) +
             p("Nothing is lost; everything you've entered is saved right where you left it."),
           { label: "Finish and submit", url: DASHBOARD_URL }

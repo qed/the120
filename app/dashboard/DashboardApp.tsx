@@ -156,30 +156,54 @@ export default function DashboardApp({
   // paid one exists (the gate + paid banner would then disagree with the API).
   const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
 
-  // The reserve entry (R50) — next-steps link, then the checkout button.
+  // The outlined pill twin's classes — ONE literal, shared by the reserve
+  // block and the R1a standalone render so the pair can never drift apart.
+  const reviewPillClass =
+    "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
+
+  // The reserve entry (unified-flow R1) — two pills of ONE button family:
+  // filled Reserve leading, outlined "Review application" twin beside it.
   // ONE block shared by the legacy card and the funnel `offered`/re-reserve
   // cards. The refund policy renders at checkout, not here (2026-07-30).
-  const renderReserveCta = (c: Child) => (
-    <>
-      {/* R50: the three swipes are the offer's front door. */}
-      <a
-        href={`/start/next-steps?child=${c.id}`}
-        className="mb-3 inline-block rounded font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue underline hover:text-red"
-      >
-        See your next steps →
-      </a>
-      <button
-        onClick={() => reserveSeat(c.id)}
-        disabled={reservingId === c.id}
-        className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
-      </button>
-      <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-        Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
-      </p>
-    </>
-  );
+  // The pair wraps to stacked on narrow cards; both disable while a
+  // checkout is opening so a double-navigation can't race the redirect —
+  // an anchor has no real `disabled`, so the twin needs ALL THREE guards:
+  // tabIndex -1 (keyboard focus), preventDefault (a still-focused Enter),
+  // pointer-events-none (mouse/touch). aria-disabled alone is advisory.
+  // `review` is the verdict's computed link (data.ts stays the ONE source
+  // of label/href); the legacy card, whose verdict carries none, falls
+  // back to the same mini-app walk.
+  const renderReserveCta = (c: Child, review?: { label: string; href: string }) => {
+    const link = review ?? { label: "Review application", href: `/start/child/${c.id}` };
+    const reserving = reservingId === c.id;
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => reserveSeat(c.id)}
+            disabled={reserving}
+            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {reserving ? "Opening checkout…" : "Reserve seat · $250"}
+          </button>
+          <a
+            href={link.href}
+            aria-disabled={reserving}
+            tabIndex={reserving ? -1 : undefined}
+            onClick={(e) => {
+              if (reservingId === c.id) e.preventDefault();
+            }}
+            className={`${reviewPillClass} ${reserving ? "pointer-events-none opacity-60" : ""}`}
+          >
+            {link.label}
+          </a>
+        </div>
+        <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+          Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
+        </p>
+      </>
+    );
+  };
 
   // Auth gate: everything below assumes a signed-in parent. Signed out
   // always renders the application-register SignIn (the server computed the
@@ -312,7 +336,7 @@ export default function DashboardApp({
             Add your first child
           </span>
           <span className="mt-1 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-muted">
-            Ages 8–17 · one dossier each
+            Ages 8–17 · one application each
           </span>
         </button>
       ) : (
@@ -409,7 +433,7 @@ export default function DashboardApp({
                     </p>
                   )}
                   {cta?.kind === "reserve" ? (
-                    renderReserveCta(c)
+                    renderReserveCta(c, verdict.kind === "funnel" ? verdict.secondaryReviewLink : undefined)
                   ) : (
                     <div className="flex items-center justify-end gap-3">
                       {cta?.kind === "start" || cta?.kind === "compose" ? (
@@ -433,21 +457,31 @@ export default function DashboardApp({
                         )
                       ) : verdict.kind === "legacy" ? (
                         <button onClick={() => openEditor(c.id)} className={pathPill}>
-                          Open dossier
+                          Open application
                         </button>
                       ) : null}
                     </div>
                   )}
-                  {verdict.kind === "funnel" && verdict.secondaryReviewLink && (
-                    <p className="mt-3">
-                      <a
-                        href={verdict.secondaryReviewLink.href}
-                        className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
-                      >
-                        {verdict.secondaryReviewLink.label} →
-                      </a>
-                    </p>
-                  )}
+                  {/* R1: the reserve block already carries the pill twin;
+                      render here only when it did not. */}
+                  {verdict.kind === "funnel" &&
+                    verdict.secondaryReviewLink &&
+                    cta?.kind !== "reserve" && (
+                      <p className="mt-3">
+                        {verdict.secondaryReviewLink.presentation === "pill" ? (
+                          <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                            {verdict.secondaryReviewLink.label}
+                          </a>
+                        ) : (
+                          <a
+                            href={verdict.secondaryReviewLink.href}
+                            className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
+                          >
+                            {verdict.secondaryReviewLink.label} →
+                          </a>
+                        )}
+                      </p>
+                    )}
                 </div>
               </div>
             );
@@ -487,7 +521,7 @@ export default function DashboardApp({
             <div className="mb-6 rounded-2xl border border-line bg-white p-5">
               <p className="font-display font-bold text-ink">✓ Seat deposit received.</p>
               <p className="mt-1 text-sm leading-6 text-ink-soft">
-                Your $250 CAD deposit is in — the seat is held while the dossier goes through
+                Your $250 CAD deposit is in — the seat is held while the application goes through
                 review. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A Stripe receipt is on its way
                 to your email.
               </p>
@@ -512,7 +546,7 @@ export default function DashboardApp({
                 {parent ? `Welcome, ${parent.firstName}.` : "Welcome."}
               </h1>
               <p className="mt-2 max-w-md text-sm leading-6 text-ink-soft">
-                Add each child, build their dossier, and submit it for review. A strong dossier is
+                Add each child, build their application, and submit it for review. A strong application is
                 your child&rsquo;s candidacy for one of the 120 seats.
               </p>
             </div>
@@ -558,7 +592,7 @@ export default function DashboardApp({
                 Add your first child
               </span>
               <span className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">
-                Ages 8–17 · one dossier each
+                Ages 8–17 · one application each
               </span>
             </button>
           ) : (
@@ -617,7 +651,7 @@ export default function DashboardApp({
                           {header}
                           <Meter value={pct} className="mt-5" />
                           <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                            Open dossier →
+                            Open application →
                           </p>
                         </button>
                       ) : (
@@ -634,7 +668,7 @@ export default function DashboardApp({
                           </p>
                         )}
                         {cta?.kind === "reserve" ? (
-                          renderReserveCta(c)
+                          renderReserveCta(c, verdict.secondaryReviewLink)
                         ) : (
                           <div className="flex items-end justify-between gap-4">
                             <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
@@ -668,14 +702,22 @@ export default function DashboardApp({
                             ) : null}
                           </div>
                         )}
-                        {verdict.secondaryReviewLink && (
+                        {/* R1: the reserve block already carries the pill
+                            twin; render here only when it did not. */}
+                        {verdict.secondaryReviewLink && cta?.kind !== "reserve" && (
                           <p className="mt-3">
-                            <a
-                              href={verdict.secondaryReviewLink.href}
-                              className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
-                            >
-                              {verdict.secondaryReviewLink.label} →
-                            </a>
+                            {verdict.secondaryReviewLink.presentation === "pill" ? (
+                              <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                                {verdict.secondaryReviewLink.label}
+                              </a>
+                            ) : (
+                              <a
+                                href={verdict.secondaryReviewLink.href}
+                                className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
+                              >
+                                {verdict.secondaryReviewLink.label} →
+                              </a>
+                            )}
                           </p>
                         )}
                       </div>
@@ -713,7 +755,7 @@ export default function DashboardApp({
                       </div>
                       <Meter value={pct} className="mt-5" />
                       <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                        Open dossier →
+                        Open application →
                       </p>
                     </button>
 
@@ -756,7 +798,7 @@ export default function DashboardApp({
                         </>
                       ) : (
                         <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                          Submit the dossier to reserve a seat ($250, refundable)
+                          Submit the application to reserve a seat ($250, refundable)
                         </p>
                       )}
                     </div>

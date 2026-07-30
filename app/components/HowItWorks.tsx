@@ -16,7 +16,7 @@ const steps = [
   },
   {
     n: "STEP 02",
-    strong: "Finish the dossier together.",
+    strong: "Finish the application together.",
     rest: "Their group, their interests, and the project they just built — in their own words. Then admissions reviews it.",
   },
   {

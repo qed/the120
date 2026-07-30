@@ -45,7 +45,7 @@ function WizardRail({
   onSelect: (s: WizardStepId) => void;
 }) {
   return (
-    <nav aria-label="Dossier steps" className="mt-6">
+    <nav aria-label="Application steps" className="mt-6">
       {/* Full rail ≥480px */}
       <ol className="hidden flex-wrap gap-x-2 gap-y-3 min-[480px]:flex">
         {steps.map((s, i) => {
@@ -279,7 +279,7 @@ export default function DossierEditor({
       {/* Header + meter */}
       <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-line bg-paper-2 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="eyebrow">Dossier</p>
+          <p className="eyebrow">Application</p>
           {/* U10 fidelity (audit drift 12): Georgia display header. */}
           <h2 className="display mt-1 text-2xl text-ink">
             {childName(child)}
@@ -295,7 +295,7 @@ export default function DossierEditor({
         <p className="mt-4 rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink-soft">
           {depositPaid ? (
             <>
-              This dossier is locked for review and the seat deposit is in — contact{" "}
+              This application is locked for review and the seat deposit is in — contact{" "}
               <span className="text-ink">admissions@the120.school</span> for any changes.
             </>
           ) : child.status === "waitlisted" ? (
@@ -413,7 +413,7 @@ export default function DossierEditor({
           )}
           {!locked && step === "group" && child.groupSlug === "" && (
             <p className="w-full font-mono text-[0.7rem] text-muted">
-              Pick a group to continue — it shapes the rest of the dossier.
+              Pick a group to continue — it shapes the rest of the application.
             </p>
           )}
           {lockedSavedStep === step && (

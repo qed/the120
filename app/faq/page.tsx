@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 const faqs = [
   {
     q: "What happens after I create an account?",
-    a: "You build your child's dossier in the dashboard — their group, their interests, a project pitch in their own words, and any scores you want to share — then submit it for review. If it's a fit, you're invited to a call with our team.",
+    a: "You build your child's application in the dashboard — their group, their interests, a project pitch in their own words, and any scores you want to share — then submit it for review. If it's a fit, you're invited to a call with our team.",
   },
   {
     q: "Does my child leave their current school?",
@@ -65,7 +65,7 @@ const faqs = [
   },
   {
     q: "How is my family's information handled?",
-    a: "Dossiers contain children's personal information, so we treat them as sensitive: collected only as needed for admissions, access-controlled, and covered by our privacy policy. Uploads like report cards are never shared outside the admissions team.",
+    a: "Applications contain children's personal information, so we treat them as sensitive: collected only as needed for admissions, access-controlled, and covered by our privacy policy. Uploads like report cards are never shared outside the admissions team.",
   },
 ];
 

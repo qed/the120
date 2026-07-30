@@ -37,7 +37,7 @@ const finePrint = [
   },
   {
     title: "Admission first",
-    body: "Tuition applies only after your child qualifies: dossier review, then the qualifying assessment. No payment until a seat is offered.",
+    body: "Tuition applies only after your child qualifies: application review, then the qualifying assessment. No payment until a seat is offered.",
   },
   {
     title: "The network stays 120",

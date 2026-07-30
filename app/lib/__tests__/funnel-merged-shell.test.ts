@@ -1,0 +1,333 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+import {
+  MERGED_FLOW_ENABLED,
+  MERGED_FORM_STEPS,
+  MERGED_NEXT_STEPS,
+  checklistChildForFields,
+  isMergedFormStep,
+  mergedStepNeighbour,
+  seamCopy,
+  stepListForChild,
+  type MergedFlowFacts,
+} from "@/app/lib/funnel/merged-flow-rules";
+import { MINIAPP_STEPS } from "@/app/lib/funnel/miniapp-rules";
+import { checklist } from "@/app/dashboard/data";
+
+/**
+ * Unified-flow Unit 6 (R3, R6, R6a, R8): the form-step screens + the seam,
+ * DARK behind the merge flag. Source scans (node env, no renderer) + the
+ * rules-level walk assertions the shell relies on.
+ */
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
+const stripComments = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+const SHELL = "app/start/child/[childId]/MiniAppShell.tsx";
+const SECTIONS = "app/start/child/[childId]/MergedFormSections.tsx";
+const PAGE = "app/start/child/[childId]/page.tsx";
+
+const facts = (over: Partial<MergedFlowFacts> = {}): MergedFlowFacts => ({
+  applicantState: null,
+  status: "draft",
+  doorConfirmed: false,
+  hasProject: false,
+  nextStepsReachable: false,
+  formProgress: false,
+  firstIncompleteFormStep: "basics",
+  mergeFlagOn: true,
+  ...over,
+});
+
+/* ─────────────── the dark flag (Units 6–8 ship dark) ─────────────── */
+
+describe("the merge flag is DARK — Unit 9 flips it and deletes it", () => {
+  it("MERGED_FLOW_ENABLED is false", () => {
+    expect(MERGED_FLOW_ENABLED).toBe(false);
+  });
+
+  it("dark-path identity: the step list IS today's MINIAPP_STEPS, by reference", () => {
+    // Byte-identical /start/child behaviour while dark: no seam, no form
+    // steps, no next-steps in any cohort's list.
+    expect(stepListForChild(facts({ mergeFlagOn: false }))).toBe(MINIAPP_STEPS);
+    expect(
+      stepListForChild(
+        facts({
+          mergeFlagOn: false,
+          applicantState: "offered",
+          nextStepsReachable: true,
+          formProgress: true,
+        })
+      )
+    ).toBe(MINIAPP_STEPS);
+  });
+
+  it("the page wires the flag as the ONE mergeFlagOn input — never a second literal", () => {
+    const page = stripComments(read(PAGE));
+    expect(page).toContain("mergeFlagOn: MERGED_FLOW_ENABLED");
+    expect(page).not.toMatch(/mergeFlagOn: (true|false)/);
+  });
+
+  it("dark step resolution in shell and page stays the existing resolveStep call", () => {
+    const shell = stripComments(read(SHELL));
+    const page = stripComments(read(PAGE));
+    expect(shell).toMatch(/MERGED_FLOW_ENABLED\s*\?\s*resolveMergedStep\(rawStep, merged\.facts\)\s*:\s*resolveStep\(rawStep, serverInitialStep\)/);
+    expect(page).toMatch(/MERGED_FLOW_ENABLED\s*\?\s*resolveMergedStep\(/);
+  });
+});
+
+/* ─────────────── step-list × shell-section mapping, exhaustive ─────────────── */
+
+describe("every MergedStep has a render arm when the flag is on", () => {
+  const shell = stripComments(read(SHELL));
+  const sections = stripComments(read(SECTIONS));
+
+  it("build steps + seam each have an explicit shell arm", () => {
+    for (const step of [...MINIAPP_STEPS, "seam"]) {
+      expect(shell, step).toContain(`step === "${step}"`);
+    }
+  });
+
+  it("the form steps dispatch through isMergedFormStep into one section per step", () => {
+    expect(shell).toContain("isMergedFormStep(step) && (");
+    for (const step of MERGED_FORM_STEPS) {
+      expect(sections, step).toContain(`case "${step}":`);
+    }
+  });
+
+  it("the next-steps screens fall to the stub with the Unit 8 seam marked", () => {
+    // No dedicated arm yet — Unit 8 owns those screens; the stub covers
+    // them (unreachable while dark) and the TODO names the owner.
+    expect(read(SHELL)).toContain("TODO(unified-flow Unit 8)");
+    for (const step of MERGED_NEXT_STEPS) {
+      expect(shell).not.toContain(`step === "${step}"`);
+    }
+  });
+
+  it("rules-level: the full walk (build + seam + form + next) is exactly the union, in order", () => {
+    const full = stepListForChild(
+      facts({ applicantState: "offered", nextStepsReachable: true })
+    );
+    expect([...full]).toEqual([
+      ...MINIAPP_STEPS,
+      "seam",
+      ...MERGED_FORM_STEPS,
+      ...MERGED_NEXT_STEPS,
+    ]);
+    // Every member of that walk is either a shell arm, a section case, or
+    // the marked Unit 8 stub — the three buckets partition the list.
+    for (const step of full) {
+      const hasShellArm = shell.includes(`step === "${step}"`);
+      const isFormCase = isMergedFormStep(step) && sections.includes(`case "${step}":`);
+      const isNextStub = (MERGED_NEXT_STEPS as readonly string[]).includes(step);
+      expect(hasShellArm || isFormCase || isNextStub, step).toBe(true);
+    }
+  });
+});
+
+/* ─────────────── pending guards — every control, one transition ─────────────── */
+
+describe("every form-section control is pending-guarded (the shell's single useTransition)", () => {
+  const sections = stripComments(read(SECTIONS));
+
+  it("controls and guards balance: each input/select/textarea/button carries a frozen|pending disabled", () => {
+    // RAW source, not comment-stripped: `accept="image/*"` reads as a
+    // comment-opener to the stripper and would swallow the file input's
+    // disabled attribute (the source-scan-defeated-by-a-spelling learning).
+    // Comments contain no JSX tags and no `disabled={` literals, so the raw
+    // counts are exact.
+    const raw = read(SECTIONS);
+    const controls = (raw.match(/<(input|select|textarea|button)\b/g) ?? []).length;
+    const guards = (raw.match(/disabled=\{(frozen|pending)/g) ?? []).length;
+    expect(controls).toBeGreaterThan(15); // the port is not vacuous
+    expect(controls).toBe(guards);
+  });
+
+  it("the sections own no second transition — pending comes from the shell", () => {
+    expect(sections).not.toContain("useTransition");
+    const shell = stripComments(read(SHELL));
+    expect((shell.match(/useTransition\(\)/g) ?? []).length).toBe(1);
+    expect(shell).toMatch(/run=\{\(task\) => startTransition\(task\)\}/);
+  });
+
+  it("locked latches through the shell's lockDiscovered; failed saves show the retry copy; rejects are caught", () => {
+    expect(sections).toContain('if (result.kind === "locked")');
+    expect(sections).toContain("props.onLocked()");
+    expect(sections).toContain("That didn't save. Give it a second and tap again.");
+    // The frozen-modal learning: the awaited action may REJECT — the catch
+    // resolves the transition task so pending always resets.
+    expect((sections.match(/catch \{\s*setNotice\(RETRY_COPY\);\s*\}/g) ?? []).length).toBe(2);
+    const shell = stripComments(read(SHELL));
+    expect(shell).toMatch(/onLocked=\{\(\) => setLockDiscovered\(true\)\}/);
+  });
+
+  it("saves go through saveFormStepAction — never the dashboard store", () => {
+    expect(sections).toContain("saveFormStepAction");
+    expect(sections).toContain("submitApplicationAction");
+    expect(sections).not.toContain("store");
+    expect(sections).not.toContain("updateChild");
+  });
+});
+
+/* ─────────────── the R6a seam ─────────────── */
+
+describe("the seam — between reveal and basics, build cohorts only, explicitly actionable", () => {
+  it("rules: the seam sits exactly between reveal and basics in a build walk", () => {
+    const list = stepListForChild(facts({ applicantState: "project_created" }));
+    expect(list.indexOf("seam")).toBe(list.indexOf("reveal") + 1);
+    expect(list.indexOf("basics")).toBe(list.indexOf("seam") + 1);
+  });
+
+  it("rules: a legacy child's list has NO seam", () => {
+    expect(stepListForChild(facts({ status: "draft" }))).not.toContain("seam");
+  });
+
+  it("rules: the seam's neighbours are reveal (back) and basics (next)", () => {
+    const f = facts({ applicantState: "project_created" });
+    expect(mergedStepNeighbour("seam", "back", f)).toBe("reveal");
+    expect(mergedStepNeighbour("seam", "next", f)).toBe("basics");
+  });
+
+  it("copy: addressed to the CHILD handing the device back, both skins, named", () => {
+    for (const skin of ["trail", "hq"] as const) {
+      const copy = seamCopy("Maya", skin);
+      expect(copy.title).toContain("Maya");
+      expect(copy.title.toLowerCase()).toContain("hand the device back");
+      expect(copy.body.toLowerCase()).toContain("hand the device back");
+      expect(copy.cta.length).toBeGreaterThan(0);
+      // Copy rules: no em dashes.
+      for (const v of Object.values(copy)) expect(v).not.toContain("—");
+    }
+    expect(seamCopy("  ", "hq").title).toContain("founder");
+  });
+
+  it("shell: one CTA advancing to basics, no auto-advance", () => {
+    const shell = stripComments(read(SHELL));
+    const seam = shell.slice(
+      shell.indexOf("function SeamHandback("),
+      shell.indexOf("function Handoff(")
+    );
+    expect(seam.length).toBeGreaterThan(0);
+    // The CTA is the ONE advance — a DS Button bound to onNext…
+    expect(seam).toMatch(/onClick=\{onNext\}/);
+    // …and nothing in the seam advances on mount.
+    expect(seam).not.toContain("useEffect");
+    // The call site wires onNext to the merged neighbour (basics).
+    expect(shell).toMatch(/onNext=\{\(\) => go\(mergedStepNeighbour\("seam", "next", merged\.facts\)\)\}/);
+  });
+});
+
+/* ─────────────── read-only rendering + the group exception ─────────────── */
+
+describe("read-only walks and the group step's window", () => {
+  const sections = stripComments(read(SECTIONS));
+
+  it("sections derive editability from stepEditableInWalk over the dual verdict", () => {
+    expect(sections).toContain("mergedLockVerdict(facts)");
+    expect(sections).toContain("stepEditableInWalk(step, lockVerdict, depositPaid)");
+    // One guard feeds every input: frozen = pending || !editable.
+    expect(sections).toMatch(/const frozen = pending \|\| !editable/);
+  });
+
+  it("a read-only step's Next is pure navigation — zero writes", () => {
+    expect(sections).toMatch(/if \(!editable\) \{\s*props\.go\(next\);\s*return;\s*\}/);
+  });
+
+  it("the group difference note renders when the built project's door differs — and names the never-resets rule", () => {
+    expect(sections).toContain("projectGroupSlug !== null && current !== null && current !== projectGroupSlug");
+    expect(sections).toContain("never resets");
+    expect(sections).toContain("The group stays editable until a seat deposit is paid.");
+  });
+
+  it("the shell renders NO second locked notice for form steps — the one card covers the walk", () => {
+    const shell = stripComments(read(SHELL));
+    expect((shell.match(/This application is submitted\./g) ?? []).length).toBe(1);
+    expect(sections).not.toContain("APPLICATION SUBMITTED");
+  });
+});
+
+/* ─────────────── review step + backward terminal ─────────────── */
+
+describe("the review step's Unit-6 modes and the per-cohort backward terminal", () => {
+  const sections = stripComments(read(SECTIONS));
+  const shell = stripComments(read(SHELL));
+
+  it("submit mode: complete → submitApplicationAction; success navigates to /start/review", () => {
+    expect(sections).toContain("submitApplicationAction({ childId: fields.id })");
+    expect(sections).toContain("props.onSubmitted()");
+    expect(shell).toMatch(/onSubmitted=\{\(\) => router\.push\("\/start\/review"\)\}/);
+    // The Next-16 learning's race is push()+refresh() PAIRED — the shell
+    // must not pair them here.
+    expect(shell).not.toMatch(/push\("\/start\/review"\);\s*router\.refresh/);
+  });
+
+  it("incomplete → the missing-items list with jump links; submit disabled, never dead", () => {
+    expect(sections).toContain("const missing = items.filter((i) => !i.done)");
+    expect(sections).toContain("formStepForLabel(i.label)");
+    expect(sections).toMatch(/disabled=\{pending \|\| !complete\}/);
+    expect(sections).toContain("Complete the application (100%) to submit for review.");
+  });
+
+  it("finish_build → pointer to the furthest build step, no submit button", () => {
+    expect(sections).toContain('terminal === "finish_build"');
+    expect(sections).toContain("Finish the build →");
+    // The pointer resolves through the same fact rule the landing uses.
+    expect(sections).toMatch(/initialStepForFacts\(\{\s*doorConfirmed: facts\.doorConfirmed,\s*hasProject: facts\.hasProject,\s*\}\)/);
+  });
+
+  it("locked terminals → read-only summary with the Unit 7 TODO seam and zero buttons", () => {
+    const readonlyArm = sections.slice(
+      sections.indexOf('if (terminal !== "submit")'),
+      sections.indexOf("return (\n    <StepCard\n      n=\"05\"\n      title=\"Review & submit\"\n      hint=\"Everything below")
+    );
+    expect(readonlyArm.length).toBeGreaterThan(0);
+    expect(readonlyArm).not.toContain("<button");
+    expect(read(SECTIONS)).toContain("TODO(unified-flow Unit 7)");
+  });
+
+  it("backward terminal: build cohort keeps ← ALL CHILDREN on handoff; a legacy first form step exits ← DASHBOARD", () => {
+    expect(shell).toContain("← ALL CHILDREN");
+    expect(shell).toContain("← DASHBOARD");
+    expect(shell).toMatch(/back === null \? \(\s*<a\s*href="\/dashboard"/);
+    // Rules: a legacy walk's first form step has no back neighbour (the
+    // null the shell renders as ← DASHBOARD); a build walk's basics goes
+    // back to the seam.
+    expect(mergedStepNeighbour("basics", "back", facts({ status: "draft" }))).toBeNull();
+    expect(
+      mergedStepNeighbour("basics", "back", facts({ applicantState: "project_created" }))
+    ).toBe("seam");
+  });
+});
+
+/* ─────────────── the checklist assembly helper ─────────────── */
+
+describe("checklistChildForFields — server truth into the ONE checklist definition", () => {
+  const base = {
+    id: "0f0e0d0c-0b0a-4a4b-8c8d-0e0f10111213",
+    firstName: "Maya",
+    lastName: "Kestrel",
+    grade: 6 as number | null,
+    birthYear: "2015",
+    currentSchool: "Maple PS",
+    groupSlug: "founders" as string | null,
+    academics: [{ subject: "Math", plan: "reach-ahead" as const, goal: "" }],
+    subjects: [],
+    interests: "robots",
+    projectPitch: "A robot that walks dogs around the block",
+    portfolioLinks: "",
+  };
+
+  it("a complete field set completes the checklist", () => {
+    expect(checklist(checklistChildForFields(base)).every((i) => i.done)).toBe(true);
+  });
+
+  it("null grade / null group read as the wizard's empty values, not fake completeness", () => {
+    const items = checklist(checklistChildForFields({ ...base, grade: null, groupSlug: null }));
+    expect(items.some((i) => !i.done)).toBe(true);
+  });
+});

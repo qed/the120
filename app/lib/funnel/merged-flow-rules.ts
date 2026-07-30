@@ -38,7 +38,26 @@ import {
   type NavCardModel,
 } from "@/app/lib/funnel/nav-card-rules";
 import type { WizardStepId } from "@/app/dashboard/wizard-rules";
-import type { SeatStatus } from "@/app/dashboard/data";
+import { emptyChild, type Child, type SeatStatus } from "@/app/dashboard/data";
+import type { Skin } from "@/app/lib/funnel/child-rules";
+
+/* ─────────────────────────────── the merge flag (Units 6–8 ship dark) ─────────────────────────────── */
+
+/**
+ * THE merge flag (unified-flow Unit 6). While `false`, `/start/child`
+ * behaviour is byte-identical to today: `stepListForChild` returns exactly
+ * `MINIAPP_STEPS`, the landing defers to `initialStepForFacts`, and none of
+ * the seam/form/next-steps screens is reachable — so the two-owner
+ * form-state window (a stale dashboard tab's debounced full-row upsert
+ * clobbering per-step action saves) never opens in production. Unit 9 flips
+ * this to `true`, retires the wizard, and DELETES the flag in one deploy.
+ *
+ * Typed `boolean` deliberately: a `false` literal type would let the
+ * compiler prune the flag-on arms as dead code (TS2367 on every merged-step
+ * comparison), and the whole point is that both arms stay compiled and
+ * tested until Unit 9 chooses one.
+ */
+export const MERGED_FLOW_ENABLED: boolean = false;
 
 /* ─────────────────────────────── the merged step union ─────────────────────────────── */
 
@@ -86,8 +105,13 @@ const ALL_MERGED_STEPS: readonly MergedStep[] = [
 export const isMergedStep = (x: unknown): x is MergedStep =>
   typeof x === "string" && (ALL_MERGED_STEPS as readonly string[]).includes(x);
 
-const isFormStep = (x: MergedStep): x is MergedFormStep =>
-  (MERGED_FORM_STEPS as readonly string[]).includes(x);
+/** Is this merged step one of the five application-form steps? Exported for
+ *  the shell's section dispatch (Unit 6) — the same list the step-list
+ *  builder splices, so the two ends cannot drift. */
+export const isMergedFormStep = (x: unknown): x is MergedFormStep =>
+  typeof x === "string" && (MERGED_FORM_STEPS as readonly string[]).includes(x);
+
+const isFormStep = (x: MergedStep): x is MergedFormStep => isMergedFormStep(x);
 
 const isNextStep = (x: MergedStep): x is MergedNextStep =>
   (MERGED_NEXT_STEPS as readonly string[]).includes(x);
@@ -420,4 +444,104 @@ export function terminalTreatment(
   // Unreachable for parsed inputs; the conservative default for a widened
   // string is the no-controls terminal, never a submit.
   return "under_review";
+}
+
+/* ─────────────────────────────── walk neighbours (Unit 6) ─────────────────────────────── */
+
+/**
+ * One rung forward/back through THIS child's resolved list — the merged
+ * `stepNeighbour`. Ends return null (the shell's Back slot renders its
+ * per-cohort backward terminal on null: "← ALL CHILDREN" never reaches here
+ * because handoff is special-cased first; a legacy list's first form step
+ * gets "← Dashboard"). A step outside the list returns null too — the clamp
+ * already re-lands such a request before any neighbour is asked for.
+ */
+export function mergedStepNeighbour(
+  step: MergedStep,
+  direction: "back" | "next",
+  facts: MergedFlowFacts
+): MergedStep | null {
+  const list = stepListForChild(facts);
+  const i = list.indexOf(step);
+  if (i === -1) return null;
+  const j = direction === "next" ? i + 1 : i - 1;
+  return j >= 0 && j < list.length ? list[j] : null;
+}
+
+/* ─────────────────────────────── the R6a seam copy ─────────────────────────────── */
+
+/**
+ * R6a: the explicit hand-BACK seam between reveal and basics, build cohort
+ * only. The handoff step's device-passing idiom, mirrored: this side is
+ * addressed to the CHILD handing the device back to the parent, one CTA
+ * advancing to basics, never an auto-advance. One template so the copy
+ * cannot drift per call site (the handoffCopy precedent). Copy rules: no em
+ * dashes, nothing scary.
+ */
+export type SeamCopy = {
+  eyebrow: string;
+  title: string;
+  body: string;
+  parentLine: string;
+  cta: string;
+};
+
+export function seamCopy(firstName: string, skin: Skin): SeamCopy {
+  const name = firstName.trim() || "founder";
+  return skin === "trail"
+    ? {
+        eyebrow: "Hand it back",
+        title: `${name}, hand the device back to your parent.`,
+        body: "Your business is built and saved. The next part is grown-up paperwork. Hand the device back to your parent.",
+        parentLine: "Parents: the application questions are yours from here.",
+        cta: "It's back with a parent",
+      }
+    : {
+        eyebrow: "Hand the device back",
+        title: `${name}, hand the device back to your parent.`,
+        body: "Your build is done and saved. The application questions are for your parent now. Hand the device back.",
+        parentLine: "Parents: from here it's the application. Five short steps.",
+        cta: "I have the device, continue",
+      };
+}
+
+/* ─────────────────────────────── checklist assembly (Unit 6) ─────────────────────────────── */
+
+/**
+ * The merged flow's loaded fields assembled into the dashboard's `Child`
+ * shape, so `checklist`/`firstIncompleteStep` read the SAME definition the
+ * meter renders (data.ts is the one checklist; its lockstep mirrors are
+ * nurture + CRM). Assembled over server-persisted content only — unsaved
+ * keystrokes can never fake completeness. Mirrors the submit core's
+ * assembly; the fields subset is structural so both the loader shape and
+ * the core's row shape fit.
+ */
+export function checklistChildForFields(f: {
+  id: string;
+  firstName: string;
+  lastName: string;
+  grade: number | null;
+  birthYear: string;
+  currentSchool: string;
+  groupSlug: string | null;
+  academics: Child["academics"];
+  subjects: string[];
+  interests: string;
+  projectPitch: string;
+  portfolioLinks: string;
+}): Child {
+  return {
+    ...emptyChild(f.id),
+    firstName: f.firstName,
+    lastName: f.lastName,
+    grade: f.grade ?? "",
+    birthYear: f.birthYear,
+    currentSchool: f.currentSchool,
+    groupSlug: f.groupSlug ?? "",
+    academics: f.academics,
+    subjects: f.subjects,
+    interests: f.interests,
+    projectPitch: f.projectPitch,
+    portfolioLinks: f.portfolioLinks,
+  };
 }

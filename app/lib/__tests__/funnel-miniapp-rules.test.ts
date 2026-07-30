@@ -747,11 +747,14 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
   });
 
   it("no pre-compose step links to /dashboard without ?stay=1 — the Unit 2 gate's loop guard", () => {
-    // The ONLY /dashboard link in the shell is the reveal close, which
-    // renders post-compose (outside the gate's redirect cohort), so it needs
-    // no stay parameter. Any NEW pre-compose dashboard link must carry
-    // ?stay=1; this pins the current count so adding one forces a decision.
-    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(1);
+    // TWO /dashboard links in the shell: the reveal close (post-compose,
+    // outside the gate's redirect cohort) and unified-flow U6's "← DASHBOARD"
+    // backward terminal — which only renders on a form step whose merged
+    // list has NO build steps, i.e. a LEGACY (null-state) child, never a
+    // member of the gate's pre-compose redirect cohort. Any NEW pre-compose
+    // dashboard link must carry ?stay=1; this pins the count so adding one
+    // forces a decision.
+    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(2);
     expect(shell).toMatch(/href="\/dashboard"/);
   });
 
@@ -806,7 +809,10 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
     // generic notice, and the branch sets the shared lock flag; count the
     // wiring so removing one handler's branch reddens this.
     expect((shellCode.match(/kind === "locked"/g) ?? []).length).toBe(4);
-    expect((shellCode.match(/setLockDiscovered\(true\)/g) ?? []).length).toBe(4);
+    // 5, not 4 (unified-flow U6): the four build-step handlers plus the
+    // form sections' onLocked callback — the merged form steps latch the
+    // SAME lock through MergedFormSections' locked-verdict branches.
+    expect((shellCode.match(/setLockDiscovered\(true\)/g) ?? []).length).toBe(5);
     expect(shellCode).toMatch(/const isLocked = locked \|\| lockDiscovered/);
   });
 
@@ -835,9 +841,11 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
     // …while the Back slot's disabled conditions stay pending-only: the
     // review walk must keep moving. Both Back buttons and the handoff exit
     // anchor gate on `pending` alone.
+    // 3, not 2 (unified-flow U6): the ladder Back, the door-gate variant,
+    // and the merged-only steps' Back — all gating on `pending` alone.
     expect(
       (shellCode.match(/disabled=\{pending\}\s*className=\{BACK_CLASSES\}/g) ?? []).length
-    ).toBe(2);
+    ).toBe(3);
     expect(shellCode).toMatch(/aria-disabled=\{pending \|\| undefined\}/);
   });
 });

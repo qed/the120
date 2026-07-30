@@ -279,8 +279,10 @@ export function cardVerdict(
   const submittedPlus =
     next.surface !== "mini_app" &&
     !(next.surface === "dashboard" && next.intent === "dossier");
+  // 2026-07-30 (Peter's pick): the review entry opens the ONE-PAGE summary
+  // at /start/child/<id>/review, never the locked form walk.
   const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: miniAppHref }
+    ? { label: "Review application", href: `${miniAppHref}/review` }
     : undefined;
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).

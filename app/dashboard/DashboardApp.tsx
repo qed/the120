@@ -184,7 +184,7 @@ export default function DashboardApp({
   // of label/href); the legacy card, whose verdict carries none, falls
   // back to the same mini-app walk.
   const renderReserveCta = (c: Child, review?: { label: string; href: string }) => {
-    const link = review ?? { label: "Review application", href: `/start/child/${c.id}` };
+    const link = review ?? { label: "Review application", href: `/start/child/${c.id}/review` };
     const reserving = reservingId === c.id;
     return (
       <>
@@ -758,7 +758,8 @@ export default function DashboardApp({
                           // Complete (submitted+): the outlined Review twin —
                           // unless the reserve block below renders, which
                           // already carries it (the R1 no-duplicate rule).
-                          <a href={flowHref(c.id)} className={reviewPillClass}>
+                          // 2026-07-30: review opens the one-page summary.
+                          <a href={`${flowHref(c.id)}/review`} className={reviewPillClass}>
                             Review application
                           </a>
                         ) : null}

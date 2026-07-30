@@ -156,42 +156,54 @@ export default function DashboardApp({
   // paid one exists (the gate + paid banner would then disagree with the API).
   const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
 
+  // The outlined pill twin's classes — ONE literal, shared by the reserve
+  // block and the R1a standalone render so the pair can never drift apart.
+  const reviewPillClass =
+    "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
+
   // The reserve entry (unified-flow R1) — two pills of ONE button family:
   // filled Reserve leading, outlined "Review application" twin beside it.
   // ONE block shared by the legacy card and the funnel `offered`/re-reserve
   // cards. The refund policy renders at checkout, not here (2026-07-30).
   // The pair wraps to stacked on narrow cards; both disable while a
-  // checkout is opening so a double-navigation can't race the redirect.
-  const renderReserveCta = (c: Child) => (
-    <>
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={() => reserveSeat(c.id)}
-          disabled={reservingId === c.id}
-          className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
-        </button>
-        <a
-          href={`/start/child/${c.id}`}
-          aria-disabled={reservingId === c.id}
-          className={`inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5 ${
-            reservingId === c.id ? "pointer-events-none opacity-60" : ""
-          }`}
-        >
-          Review application
-        </a>
-      </div>
-      <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-        Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
-      </p>
-    </>
-  );
-
-  // R1a: the reserve-suppressed offered card (pending debit / gate refusal)
-  // keeps the outlined twin alone — never an empty CTA row.
-  const reviewPillClass =
-    "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
+  // checkout is opening so a double-navigation can't race the redirect —
+  // an anchor has no real `disabled`, so the twin needs ALL THREE guards:
+  // tabIndex -1 (keyboard focus), preventDefault (a still-focused Enter),
+  // pointer-events-none (mouse/touch). aria-disabled alone is advisory.
+  // `review` is the verdict's computed link (data.ts stays the ONE source
+  // of label/href); the legacy card, whose verdict carries none, falls
+  // back to the same mini-app walk.
+  const renderReserveCta = (c: Child, review?: { label: string; href: string }) => {
+    const link = review ?? { label: "Review application", href: `/start/child/${c.id}` };
+    const reserving = reservingId === c.id;
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => reserveSeat(c.id)}
+            disabled={reserving}
+            className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {reserving ? "Opening checkout…" : "Reserve seat · $250"}
+          </button>
+          <a
+            href={link.href}
+            aria-disabled={reserving}
+            tabIndex={reserving ? -1 : undefined}
+            onClick={(e) => {
+              if (reservingId === c.id) e.preventDefault();
+            }}
+            className={`${reviewPillClass} ${reserving ? "pointer-events-none opacity-60" : ""}`}
+          >
+            {link.label}
+          </a>
+        </div>
+        <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+          Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
+        </p>
+      </>
+    );
+  };
 
   // Auth gate: everything below assumes a signed-in parent. Signed out
   // always renders the application-register SignIn (the server computed the
@@ -421,7 +433,7 @@ export default function DashboardApp({
                     </p>
                   )}
                   {cta?.kind === "reserve" ? (
-                    renderReserveCta(c)
+                    renderReserveCta(c, verdict.kind === "funnel" ? verdict.secondaryReviewLink : undefined)
                   ) : (
                     <div className="flex items-center justify-end gap-3">
                       {cta?.kind === "start" || cta?.kind === "compose" ? (
@@ -656,7 +668,7 @@ export default function DashboardApp({
                           </p>
                         )}
                         {cta?.kind === "reserve" ? (
-                          renderReserveCta(c)
+                          renderReserveCta(c, verdict.secondaryReviewLink)
                         ) : (
                           <div className="flex items-end justify-between gap-4">
                             <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">

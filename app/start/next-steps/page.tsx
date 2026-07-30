@@ -7,9 +7,12 @@ import { NextStepsFlow } from "./NextStepsFlow";
 
 /**
  * Next Steps (funnel U14; R50): three swipes — progress made, set your
- * goal, secure the seat. Reached from the offer email or the dashboard
- * once a child is `offered` — NEVER directly from submission: a family
- * with no offered child redirects to the dashboard, server-side.
+ * goal, secure the seat. Reached from the OFFER EMAIL only since the
+ * unified-flow Phase A (2026-07-30) removed the dashboard card's link —
+ * NEVER directly from submission: a family with no offered child
+ * redirects to the dashboard, server-side. Phase B (plan
+ * 2026-07-30-001, Unit 8) re-homes these screens to the end of the
+ * unified application walk and turns this route into a shim.
  */
 
 export const dynamic = "force-dynamic";

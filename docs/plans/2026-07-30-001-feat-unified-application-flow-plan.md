@@ -307,7 +307,8 @@ absent.
 
 ### Phase A — ship-first tranche (independent of the merge)
 
-- [ ] **Unit 1: Offered-card two-CTA block**
+- [x] **Unit 1: Offered-card two-CTA block** *(landed 2026-07-30 + review
+  fixes: keyboard-proof disable, pill consumes the verdict link)*
 
 **Goal:** R1/R1a/R2 — filled Reserve + outlined "Review application" pill,
 next-steps link removed, degraded variants defined.
@@ -344,7 +345,8 @@ next-steps link removed, degraded variants defined.
 **Verification:** card matrix tests green; no `next-steps` href remains in
 `renderReserveCta`; checkout reserve mechanics untouched.
 
-- [ ] **Unit 2: Parent-facing rename sweep (dossier → application)**
+- [x] **Unit 2: Parent-facing rename sweep (dossier → application)**
+  *(landed 2026-07-30; straggler test proven red both ways; zero CRM churn)*
 
 **Goal:** R4 — full sweep with a checkable completion criterion.
 

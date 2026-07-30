@@ -80,12 +80,17 @@ export function ChildrenFlow({
   initialChildren,
   loadFailed,
   hintSlug,
+  addOnly = false,
 }: {
   initialChildren: FunnelChild[];
   loadFailed: boolean;
   /** The `?g=` door hint, forwarded into the mini-app for the FIRST child
    *  only (R36) — siblings pick cold. */
   hintSlug: string | null;
+  /** Dashboard's "+ Add a child" (`?add=1`, 2026-07-30): a dedicated
+   *  add-a-child page — no existing-children picker (the parent already said
+   *  "add"), just the form and a back link to the dashboard. */
+  addOnly?: boolean;
 }) {
   const [children, setChildren] = useState<FunnelChild[]>(initialChildren);
   const selectedId = useSyncExternalStore(
@@ -155,12 +160,20 @@ export function ChildrenFlow({
       {/* R32/X1: the floating nav card carries the bar at add_child (20%). */}
       <ProgressNavCard model={navCardForStep("add_child", null)} />
 
+      {addOnly && (
+        <a
+          href="/dashboard"
+          className="mb-4 inline-flex items-center gap-1 self-start font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted transition-colors hover:text-ink"
+        >
+          ← Back to dashboard
+        </a>
+      )}
       {/* U10 fidelity (audit drift 12): Georgia display heading. */}
       <h1 className="display text-3xl text-ink">
-        {children.length === 0 ? "Who's applying?" : "Your children"}
+        {addOnly ? "Add a child" : children.length === 0 ? "Who's applying?" : "Your children"}
       </h1>
       <p className="mt-3 text-base leading-7 text-ink-soft lg:max-w-[560px]">
-        {children.length === 0
+        {addOnly || children.length === 0
           ? "Their first name and the grade they're in now. You can add more later."
           : "Pick who you're working on, or add another."}
       </p>
@@ -171,7 +184,7 @@ export function ChildrenFlow({
         </p>
       )}
 
-      {children.length > 0 && (
+      {!addOnly && children.length > 0 && (
         <ul className="mt-7 flex flex-col gap-2 md:grid md:grid-cols-2">
           {children.map((c) => {
             const isActive = active?.id === c.id;
@@ -198,7 +211,7 @@ export function ChildrenFlow({
         </ul>
       )}
 
-      {active && (
+      {!addOnly && active && (
         // The forward path (U8): into the mini-app for the active child. The
         // hint travels ONLY when this is the family's first child — R36 says
         // siblings pick cold, and the grid is where first-ness is known.
@@ -283,7 +296,9 @@ export function ChildrenFlow({
           onClick={submit}
           disabled={pending}
           className={`mt-1 inline-flex h-11 items-center justify-center rounded-full px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] transition-colors disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start ${
-            children.length === 0
+            addOnly
+              ? "bg-red text-white hover:bg-red-dark"
+              : children.length === 0
               ? "bg-red text-white hover:bg-red-dark"
               : "border border-red bg-white text-red hover:bg-red/5"
           }`}

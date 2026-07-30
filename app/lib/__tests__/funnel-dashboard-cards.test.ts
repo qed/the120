@@ -428,8 +428,9 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     expect(src).toContain("const flowHref = (id: string) => `/start/child/${id}`");
     expect(src).not.toMatch(/\/start\/child\/[^`"']*\?step=/);
     // ADD A CHILD routes to the funnel's add-child flow (server-action
-    // creation — the store's local-first addChild is retired).
-    expect(src).toContain('const ADD_CHILD_HREF = "/start/children"');
+    // creation — the store's local-first addChild is retired). `?add=1` is
+    // the dedicated add-only page (2026-07-30).
+    expect(src).toContain('const ADD_CHILD_HREF = "/start/children?add=1"');
     expect(src).not.toContain("addChild(");
   });
 

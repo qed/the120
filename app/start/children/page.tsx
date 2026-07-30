@@ -40,6 +40,9 @@ export default async function ChildrenPage({
       initialChildren={listed.kind === "ok" ? listed.children : []}
       loadFailed={listed.kind === "failed"}
       hintSlug={(Array.isArray(g) ? g[0] : g) ?? null}
+      // The dashboard's "+ Add a child" (2026-07-30): a dedicated add-only
+      // page — no picker, back link to the dashboard, Start building CTA.
+      addOnly={params.add != null}
     />
   );
 }

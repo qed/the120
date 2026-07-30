@@ -1,7 +1,7 @@
 ---
 title: "feat: Reconnect dashboard to the funnel, step-back navigation, design fidelity"
 type: feat
-status: active
+status: completed
 date: 2026-07-29
 origin: docs/brainstorms/2026-07-29-funnel-dashboard-reconnect-requirements.md
 ---
@@ -326,7 +326,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 ### Phase 3 — Design fidelity
 
-- [ ] **Unit 9: Fidelity audit (deviation checklist)**
+- [x] **Unit 9: Fidelity audit (deviation checklist)**
 
 **Goal:** Screen-by-screen comparison of the live flow against the handoff inventory, producing a classified checklist.
 
@@ -346,7 +346,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 **Verification:** every screen in the handoff inventory has a checklist entry (even if "matches"); each deviation is classified or escalated.
 
-- [ ] **Unit 10: Fidelity fix pass**
+- [x] **Unit 10: Fidelity fix pass** *(batches A, B1, B2, B3; escalations ruled by Peter; open flags in the audit addendum: same-door fresh compose, accent Button variant)*
 
 **Goal:** Fix every drift-classified deviation; record waivers with reasons.
 
@@ -367,7 +367,7 @@ Phases: 1 = must-ship (A+D), 2 = back navigation (B), 3 = fidelity (C), 4 = late
 
 ### Phase 4 — Later tier
 
-- [ ] **Unit 11: Path-register dashboard flip (screen-16)**
+- [x] **Unit 11: Path-register dashboard flip (screen-16)** *(migration 20260825120000 applied to prod; screen-16 inventions flagged for Peter)*
 
 **Goal:** Whole-dashboard flip to the Path register once any child has ever completed arrival; must land before the first family reaches arrival.
 

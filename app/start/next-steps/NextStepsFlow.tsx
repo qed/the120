@@ -56,9 +56,12 @@ export function NextStepsFlow({
   };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center bg-paper px-6 py-14 text-ink">
-      {/* X1: post-ladder, the card shows name + SIGN OUT only (no bar). */}
-      <ProgressNavCard model={navCardIdentityOnly(parentName)} />
+    <div className="min-h-screen bg-paper text-ink">
+    {/* X1: post-ladder, the card shows name + SIGN OUT only (no bar). It
+        mounts ABOVE the column (2026-07-30) so it holds the home nav's
+        exact full-width geometry. */}
+    <ProgressNavCard model={navCardIdentityOnly(parentName)} />
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-6 py-14">
       <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
         Next steps · {index + 1} of {NEXT_STEPS.swipes.length}
       </p>
@@ -115,5 +118,6 @@ export function NextStepsFlow({
         )}
       </div>
     </main>
+    </div>
   );
 }

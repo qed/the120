@@ -113,10 +113,12 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
   // measures, left-aligned (screenshot 13 + the prototype's inline
   // max-widths). Mobile is untouched below lg.
   return (
+    <>
+    {/* R32/X1: the floating nav card runs from the first explainer through
+        submission. It mounts ABOVE the column (2026-07-30) so it holds the
+        home nav's exact full-width geometry. */}
+    <ProgressNavCard model={navCardForStep(step, null)} />
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
-      {/* R32/X1: the floating nav card runs from the first explainer through
-          submission — the bar lives inside it, never bare in the column. */}
-      <ProgressNavCard model={navCardForStep(step, null)} />
 
       {/* R5 (reconnect): visible back between swipes. Disabled while a
           transition is pending — a resolving action must never race a
@@ -250,6 +252,7 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
         </section>
       )}
     </main>
+    </>
   );
 }
 

@@ -156,9 +156,12 @@ export function ChildrenFlow({
   // 14), and the add-form's name/grade pair sits side by side (the
   // prototype's `1fr 1fr` field grid). Mobile is untouched below md/lg.
   return (
+    <>
+    {/* R32/X1: the floating nav card carries the bar at add_child (20%). It
+        mounts ABOVE the column (2026-07-30) so it holds the home nav's
+        exact full-width geometry. */}
+    <ProgressNavCard model={navCardForStep("add_child", null)} />
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
-      {/* R32/X1: the floating nav card carries the bar at add_child (20%). */}
-      <ProgressNavCard model={navCardForStep("add_child", null)} />
 
       {addOnly && (
         <a
@@ -309,5 +312,6 @@ export function ChildrenFlow({
         </button>
       </div>
     </main>
+    </>
   );
 }

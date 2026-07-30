@@ -15,12 +15,12 @@
  * child's skin on the mini-app steps (the dc.html skinned scenes carry it
  * unchanged), so no per-skin variant exists.
  *
- * GEOMETRY (2026-07-30): the card sits in the EXACT place the home page's
- * <Nav> does — viewport-fixed, 20px side insets (its `mx-5`), 18px from the
- * top, the same 14px radius, 22/11 padding and 64px min row height — so the
- * bar never jumps as a family moves between the marketing site and the
- * application flow. An in-flow spacer of the same height keeps column
- * content from tucking underneath. Change <Nav> and this together.
+ * GEOMETRY (2026-07-30): the card is STRUCTURALLY the home page's <Nav> —
+ * the same `sticky top-[18px] mx-5 mt-[18px]` wrapper, 14px radius, 22/11
+ * padding and 64px min row height — so the bar sits in the exact same
+ * place, same width, on every surface. The contract with mount sites: this
+ * renders as a sibling ABOVE the page's centered column (never inside a
+ * max-w container, which would shrink it). Change <Nav> and this together.
  *
  * Sign-out reuses the dashboard's mechanism: supabase `auth.signOut()` then
  * a full navigation home (`DashHeader` is `signOut` + `<Link href="/">`).
@@ -63,8 +63,7 @@ export function ProgressNavCard({
   const showsIdentity = model.kind === "progress_identity" || model.kind === "identity";
 
   return (
-    <>
-    <div className="fixed inset-x-5 top-[18px] z-50">
+    <div className="sticky top-[18px] z-50 mx-5 mt-[18px]">
       <div className="flex min-h-16 items-center justify-between gap-3 rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
         <Wordmark />
         <span className="flex min-w-0 items-center gap-2.5">
@@ -102,9 +101,5 @@ export function ProgressNavCard({
         </span>
       </div>
     </div>
-    {/* In-flow spacer: the card above is viewport-fixed, so reserve its
-        height (64px row + the 18px top offset) at the top of the column. */}
-    <div aria-hidden className="mb-8 h-16" />
-    </>
   );
 }

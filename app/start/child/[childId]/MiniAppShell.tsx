@@ -635,22 +635,24 @@ export function MiniAppShell({
 
   return (
     <div className={`min-h-screen ${SKIN_ROOT_CLASSES[skin]}`}>
+      {/* R32/X1: the floating nav card keeps running through the mini-app —
+          the dc.html skinned scenes carry the SAME white application-register
+          card over the child's canvas, so no per-skin variant exists here.
+          It mounts ABOVE the column (2026-07-30) so it holds the home nav's
+          exact full-width geometry. */}
+      {/* Unified-flow U6: build steps keep miniAppNavCard verbatim (a
+          build rung maps to itself, so the two are identical there); the
+          merged-only steps (seam/form/next-steps) take the merged mapper
+          with the parent identity threaded in (U9) — NAME · SIGN OUT from
+          the form zone on, exactly the retired wizard's treatment. */}
+      <ProgressNavCard
+        model={
+          isMiniAppStep(step)
+            ? miniAppNavCard(step)
+            : mergedNavCard(step, parentIdentity, isLocked)
+        }
+      />
       <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-6 py-14">
-        {/* R32/X1: the floating nav card keeps running through the mini-app —
-            the dc.html skinned scenes carry the SAME white application-register
-            card over the child's canvas, so no per-skin variant exists here. */}
-        {/* Unified-flow U6: build steps keep miniAppNavCard verbatim (a
-            build rung maps to itself, so the two are identical there); the
-            merged-only steps (seam/form/next-steps) take the merged mapper
-            with the parent identity threaded in (U9) — NAME · SIGN OUT from
-            the form zone on, exactly the retired wizard's treatment. */}
-        <ProgressNavCard
-          model={
-            isMiniAppStep(step)
-              ? miniAppNavCard(step)
-              : mergedNavCard(step, parentIdentity, isLocked)
-          }
-        />
 
         {/* The Back slot — one per screen, per the micro-spec above.
             Disabled while an action is pending, like the forward CTAs: an

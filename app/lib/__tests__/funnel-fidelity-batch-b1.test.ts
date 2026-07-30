@@ -30,12 +30,14 @@ describe("X1: the floating nav card component (the ONE bar)", () => {
     expect(card).toContain("rounded-[14px]");
     expect(card).toContain("bg-white");
     expect(card).toContain("shadow-[0_4px_18px_rgba(19,20,22,0.14)]");
-    // 2026-07-30: viewport-fixed in the SAME place as the home <Nav> — 20px
-    // side insets, 18px from the top, 64px min row height — so the bar never
-    // jumps between the marketing site and the flow. Change Nav.tsx together.
-    expect(card).toContain("fixed inset-x-5 top-[18px]");
+    // 2026-07-30: STRUCTURALLY the home <Nav> — the same sticky wrapper,
+    // side margins, top offset and 64px min row height — so the bar sits in
+    // the exact same place on every surface. Change Nav.tsx together.
+    expect(card).toContain("sticky top-[18px] z-50 mx-5 mt-[18px]");
     expect(card).toContain("min-h-16");
-    expect(stripComments(read("app/components/Nav.tsx"))).toContain("min-h-16");
+    const nav = stripComments(read("app/components/Nav.tsx"));
+    expect(nav).toContain("sticky top-[18px] z-50 mx-5 mt-[18px]");
+    expect(nav).toContain("min-h-16");
   });
 
   it("carries the brand lockup and the 4px red bar on the track token, .35s width transition", () => {

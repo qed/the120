@@ -72,9 +72,27 @@ export function ProgressNavCard({
   return (
     <div className="sticky top-[18px] z-50 mx-5 mt-[18px]">
       <div className="flex min-h-16 items-center justify-between gap-3 rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-        <Link href={logoHref} aria-label="The 120">
-          <Wordmark />
-        </Link>
+        {logoHref === "/dashboard" ? (
+          // In the application process the lockup says where it goes
+          // (2026-07-30): the red 120 chip + "Dashboard". Everywhere else
+          // keeps the standard wordmark.
+          <Link
+            href={logoHref}
+            aria-label="Your dashboard"
+            className="flex items-center gap-[11px]"
+          >
+            <span className="bg-red px-[9px] py-[6px] text-[17px] font-bold leading-none tracking-[-0.04em] text-white">
+              120
+            </span>
+            <span className="whitespace-nowrap text-[17px] font-bold leading-none tracking-[-0.02em] text-ink">
+              Dashboard
+            </span>
+          </Link>
+        ) : (
+          <Link href={logoHref} aria-label="The 120">
+            <Wordmark />
+          </Link>
+        )}
         <span className="flex min-w-0 items-center gap-2.5">
           {showsBar && (
             <>

@@ -383,7 +383,40 @@ diffs.
 
 ### Phase B — the merge (gated by Unit 3)
 
-- [ ] **Unit 3: Falsification spike (investigation, no product code)**
+- [x] **Unit 3: Falsification spike — GO** *(2026-07-30, executed rolled-back
+  probes against production via the Management API playbook)*
+
+  **Findings (all four criteria pass):**
+  1. Authenticated-context writes behave exactly per the trigger contracts:
+     a direct `applicant_state` write is silently coerced back
+     (`p1: project_created` after writing `submitted`); the group-lock
+     guard raises with a live paid deposit (`p4`); content-column writes
+     pass at submitted+ (`p5` — read-only is app-level, as planned).
+     Every guard keys on `auth.role()` from the JWT claims — the planned
+     server actions use the same PostgREST channel + user JWT as the
+     browser store, so the contexts are identical by construction AND by
+     executed probe.
+  2. Submit = `children.status` draft→submitted patch fires BOTH triggers:
+     `children_applicant_state_sync` derived the ladder
+     (`p2_applicant_state: submitted`) and `children_seed_group_assignment`
+     (security definer) upserted the staff review row
+     (`p2_review_rows: 1`, `group_assignment` follows later group edits).
+     Probe note: `child_reviews` is staff-only RLS — a session-role read
+     shows 0 rows; the row exists (first probe's false alarm).
+  3. Field-by-step: every wizard field is a column of the one children row;
+     one action call per step suffices; no cross-step unsaved dependency
+     (submit's completeness check is app-level).
+  4. Post-submit pre-deposit group edit succeeds without touching projects
+     or P0120 (`p3`), and the staff row follows.
+
+  **Pre-existing quirk (not caused by this plan, constrains it):** trigger
+  order (`children_applicant_state_sync` alphabetically before
+  `children_status_guard`) means an authenticated status write to a
+  DISALLOWED value (e.g. `in_review`) is reverted by the status guard —
+  but the sync has already advanced `applicant_state` off the attempted
+  value (`p6`: status stayed `submitted`, ladder read `in_review`). Our
+  submit action must only ever write `'submitted'` (it does); never reuse
+  the status patch for any other value without fixing the trigger order.
 
 **Goal:** run the origin's two falsifiers before committing: (a) form steps
 adopt "URL is the step state" via typed-action save-on-Next without a

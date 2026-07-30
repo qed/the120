@@ -1,7 +1,7 @@
 ---
 title: "feat: One unified application flow — merge the wizard into the funnel, offered-card CTAs"
 type: feat
-status: active
+status: completed
 date: 2026-07-30
 origin: docs/brainstorms/2026-07-30-unified-application-flow-requirements.md
 ---

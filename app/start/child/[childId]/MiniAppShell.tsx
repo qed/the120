@@ -24,7 +24,6 @@ import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actio
 import {
   composeProjectAction,
   recordProjectEditAction,
-  regenerateProjectAction,
 } from "@/app/lib/funnel/actions/compose";
 import type { ProjectView } from "@/app/lib/funnel/compose-core";
 import {
@@ -352,7 +351,6 @@ export function MiniAppShell({
     }
   }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
-  const [composeDegraded, setComposeDegraded] = useState(false);
 
   // What the current `answers` were seeded FROM. Re-advancing through the
   // templates step with the SAME choice must not re-seed — a child who edited
@@ -419,7 +417,6 @@ export function MiniAppShell({
     setComposeView(null);
     setComposeDraft(null);
     setComposeNotice(null);
-    setComposeDegraded(false);
     setComposeEditing(false);
   };
 
@@ -566,7 +563,6 @@ export function MiniAppShell({
       if (result.kind === "composed" || result.kind === "exists") {
         setComposeView(result.view);
         setComposeDraft(result.view.project);
-        setComposeDegraded(result.kind === "composed" && result.degraded !== null);
         return;
       }
       if (result.kind === "input_rejected") {
@@ -589,35 +585,6 @@ export function MiniAppShell({
                 // change in another tab). Refresh guidance, never retry copy.
                 "Your project changed in another tab. Refresh to see the newest version."
               : "That didn't work. Give it a second and tap again."
-      );
-    });
-  };
-
-  const regenerate = () => {
-    if (!composeView || isLocked) return;
-    setComposeNotice(null);
-    startTransition(async () => {
-      const result = await regenerateProjectAction({ projectId: composeView.id });
-      if (result.kind === "regenerated") {
-        setComposeView(result.view);
-        setComposeDraft(result.view.project);
-        setComposeDegraded(result.degraded !== null);
-        return;
-      }
-      if (result.kind === "locked") {
-        setLockDiscovered(true);
-        return;
-      }
-      setComposeNotice(
-        result.kind === "limit"
-          ? "That's both redos used. Every word below is still yours to change by hand."
-          : result.kind === "conflict"
-            ? // Neutral copy on purpose (reconnect U8): the conflict now
-              // covers BOTH a racing regen and a row retired by a door
-              // change in another tab — "another tab got there first" only
-              // described the former.
-              "Your project changed in another tab. Refresh to see the newest version."
-            : "That didn't work. Give it a second and tap again."
       );
     });
   };
@@ -1013,7 +980,12 @@ export function MiniAppShell({
                   return;
                 }
                 setQuizNotice(null);
+                // Straight to the project page (2026-07-30): the interstitial
+                // "Time to make it real" stop is retired — Shape my project
+                // kicks the compose off and lands on the loading state, then
+                // the composed page.
                 go(stepNeighbour("quiz", "next"));
+                if (!composeView && !isLocked) buildProject();
               }}
               className="mt-7 w-full"
             >
@@ -1039,16 +1011,13 @@ export function MiniAppShell({
           </section>
         )}
 
+        {/* 2026-07-30: the "Time to make it real" interstitial is retired —
+            the quiz's Shape my project triggers compose directly. This arm
+            survives only as the recovery surface (a failed compose, or a
+            deep link straight to ?step=compose). */}
         {step === "compose" && confirmedSlug && !composeView && !pending && (
           <section>
-            <h1 className="font-path-display text-3xl font-semibold leading-tight">
-              Time to make it real.
-            </h1>
-            <p className="mt-3 text-base leading-7 opacity-80">
-              Your answers become your project&apos;s first page. Every word of it
-              stays yours to change.
-            </p>
-            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
+            {composeNotice && <p className="text-sm opacity-80">{composeNotice}</p>}
             <Button
               skin={skin}
               size="lg"
@@ -1061,22 +1030,18 @@ export function MiniAppShell({
           </section>
         )}
 
-        {/* Drift 13: the composed project renders as a PAGE — name as the
-            display heading, description as prose, "The offer" and "First
-            customers" as cards — with "Change anything" flipping the same
-            fields into edit mode. Every field stays editable (R40); the
-            edits are still recorded through keepProject on the way out. */}
+        {/* The composed project renders as a PAGE (2026-07-30 shape): the
+            AI-invented business name as an always-editable field, the pitch
+            paragraph (AI-combined from the four answers), and FOUR cards —
+            The Offer / First Customers / Product v1 / Why am I building
+            this? — with "Edit This" flipping the pitch and card fields into
+            edit mode. Every field stays editable (R40); the edits are still
+            recorded through keepProject on the way out. */}
         {step === "compose" && confirmedSlug && composeView && composeDraft && (
           <section>
             <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
               {COMPOSE_UI_COPY.eyebrow}
             </p>
-            {composeDegraded && (
-              <p className="mt-2 text-[13px] leading-5 opacity-70">
-                We started you with the classic version. Every word below is yours
-                to change.
-              </p>
-            )}
             {composeEditing ? (
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1.5">
@@ -1094,7 +1059,7 @@ export function MiniAppShell({
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                    What it is
+                    The pitch
                   </span>
                   <textarea
                     value={composeDraft.description}
@@ -1146,9 +1111,18 @@ export function MiniAppShell({
               </div>
             ) : (
               <>
-                <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
-                  {composeDraft.name}
-                </h1>
+                {/* The business name: AI-invented, editable RIGHT HERE —
+                    styled as the display heading, recorded through
+                    keepProject like every other edit (2026-07-30). */}
+                <input
+                  aria-label="Business name"
+                  value={composeDraft.name}
+                  disabled={isLocked}
+                  onChange={(e) =>
+                    setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
+                  }
+                  className="mt-2 w-full rounded-xl border border-transparent bg-transparent font-path-display text-3xl font-semibold leading-tight outline-none transition-colors hover:border-black/10 focus:border-black/15 focus:bg-white/60"
+                />
                 <p className="mt-3 text-[14px] leading-[1.65]">{composeDraft.description}</p>
                 <div className="mt-4 flex flex-col gap-2.5">
                   <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
@@ -1165,12 +1139,37 @@ export function MiniAppShell({
                       {composeDraft.firstCustomerHypothesis ?? CUSTOMER_ASK_AGAIN_PLACEHOLDER}
                     </p>
                   </div>
+                  {/* The child's own answers as cards (2026-07-30): Product
+                      v1 = the "what" answer, Why am I building this? = the
+                      "spark" answer — straight off the composed row's
+                      moderated quiz answers, so they survive refresh. */}
+                  {(composeView.quizAnswers.what ?? "").trim().length > 0 && (
+                    <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                      <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                        {COMPOSE_UI_COPY.productLabel}
+                      </p>
+                      <p className="mt-1 text-[13px] leading-5">
+                        {composeView.quizAnswers.what}
+                      </p>
+                    </div>
+                  )}
+                  {(composeView.quizAnswers.spark ?? "").trim().length > 0 && (
+                    <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                      <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                        {COMPOSE_UI_COPY.whyLabel}
+                      </p>
+                      <p className="mt-1 text-[13px] leading-5">
+                        {composeView.quizAnswers.spark}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </>
             )}
-            {/* The controls row: Change anything / Shape it again ×2 / Start
-                over. "Start over" is the doors step — the existing door-
-                change machinery is the invalidation path; no new mutation. */}
+            {/* The controls row: Edit This / Start over. "Shape it again"
+                (regeneration) is retired from this screen (2026-07-30).
+                "Start over" is the doors step — the existing door-change
+                machinery is the invalidation path; no new mutation. */}
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 skin={skin}
@@ -1180,15 +1179,6 @@ export function MiniAppShell({
                 disabled={pending || isLocked}
               >
                 {composeEditing ? COMPOSE_UI_COPY.editOff : COMPOSE_UI_COPY.editOn}
-              </Button>
-              <Button
-                skin={skin}
-                variant="secondary"
-                size="sm"
-                onClick={regenerate}
-                disabled={pending || isLocked || composeView.regenerationsLeft === 0}
-              >
-                Shape it again ({composeView.regenerationsLeft} left)
               </Button>
               <Button
                 skin={skin}

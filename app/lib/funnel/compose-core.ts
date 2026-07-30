@@ -361,6 +361,10 @@ export type ProjectView = {
    *  predicate is `ai_regeneration_count = <echo>`, so the client returns
    *  exactly what the row said. */
   aiRegenerationCount: number;
+  /** The moderated quiz answers the project was composed from (2026-07-30):
+   *  the compose page's "Product v1" (what) and "Why am I building this?"
+   *  (spark) cards render these, so they must survive a refresh. */
+  quizAnswers: Record<string, string>;
 };
 
 export type ComposeResult =
@@ -401,13 +405,15 @@ const view = (
   id: string,
   project: ComposedProject,
   count: number,
-  groupSlug: string
+  groupSlug: string,
+  quizAnswers: Record<string, string>
 ): ProjectView => ({
   id,
   project,
   groupSlug,
   regenerationsLeft: Math.max(0, 2 - count),
   aiRegenerationCount: count,
+  quizAnswers,
 });
 
 const rowToProject = (row: ProjectRow): ComposedProject => ({
@@ -496,7 +502,13 @@ export async function composeProjectCore(
       await session.advanceToProjectCreated(childId);
       return {
         kind: "exists",
-        view: view(existing.id, rowToProject(existing), existing.aiRegenerationCount, existing.groupSlug),
+        view: view(
+          existing.id,
+          rowToProject(existing),
+          existing.aiRegenerationCount,
+          existing.groupSlug,
+          existing.quizAnswers
+        ),
       };
     }
 
@@ -555,7 +567,13 @@ export async function composeProjectCore(
       await session.advanceToProjectCreated(childId);
       return {
         kind: "exists",
-        view: view(raced.id, rowToProject(raced), raced.aiRegenerationCount, raced.groupSlug),
+        view: view(
+          raced.id,
+          rowToProject(raced),
+          raced.aiRegenerationCount,
+          raced.groupSlug,
+          raced.quizAnswers
+        ),
       };
     }
 
@@ -581,15 +599,23 @@ export async function composeProjectCore(
       // NOT success — refresh guidance, never the degraded-composed view.
       if (saved === "conflict") return { kind: "conflict" };
       if (saved === true) {
-        return { kind: "composed", view: view(inserted.id, run.project, 0, group), degraded: null };
+        return {
+          kind: "composed",
+          view: view(inserted.id, run.project, 0, group, storedAnswers as Record<string, string>),
+          degraded: null,
+        };
       }
       // The model draft could not be persisted; the STORED row is the
       // fallback, and the view must say what the row says.
-      return { kind: "composed", view: view(inserted.id, fallback, 0, group), degraded: "error" };
+      return {
+        kind: "composed",
+        view: view(inserted.id, fallback, 0, group, storedAnswers as Record<string, string>),
+        degraded: "error",
+      };
     }
     return {
       kind: "composed",
-      view: view(inserted.id, fallback, 0, group),
+      view: view(inserted.id, fallback, 0, group, storedAnswers as Record<string, string>),
       degraded: run.reason,
     };
   } catch (err) {
@@ -621,7 +647,9 @@ export async function loadActiveProjectViewCore(
     if (row === "error") return { kind: "failed" };
     return {
       kind: "ok",
-      view: row ? view(row.id, rowToProject(row), row.aiRegenerationCount, row.groupSlug) : null,
+      view: row
+        ? view(row.id, rowToProject(row), row.aiRegenerationCount, row.groupSlug, row.quizAnswers)
+        : null,
     };
   } catch (err) {
     console.error("[funnel/compose] project read exception:", err);
@@ -721,7 +749,13 @@ export async function regenerateProjectCore(
 
     return {
       kind: "regenerated",
-      view: view(project.id, draft, project.aiRegenerationCount + 1, project.groupSlug),
+      view: view(
+        project.id,
+        draft,
+        project.aiRegenerationCount + 1,
+        project.groupSlug,
+        project.quizAnswers
+      ),
       childId: project.childId,
       degraded: run.outcome === "fallback" ? run.reason : null,
     };

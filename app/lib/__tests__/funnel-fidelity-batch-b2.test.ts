@@ -176,9 +176,11 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(COMPOSE_UI_COPY.loadingBody).toBe(
       "Your words are becoming a company page. A few seconds."
     );
-    expect(COMPOSE_UI_COPY.offerLabel).toBe("The offer");
-    expect(COMPOSE_UI_COPY.customersLabel).toBe("First customers");
-    expect(COMPOSE_UI_COPY.editOn).toBe("Change anything");
+    expect(COMPOSE_UI_COPY.offerLabel).toBe("The Offer");
+    expect(COMPOSE_UI_COPY.customersLabel).toBe("First Customers");
+    expect(COMPOSE_UI_COPY.productLabel).toBe("Product v1");
+    expect(COMPOSE_UI_COPY.whyLabel).toBe("Why am I building this?");
+    expect(COMPOSE_UI_COPY.editOn).toBe("Edit This");
     expect(COMPOSE_UI_COPY.editOff).toBe("Done editing");
     expect(COMPOSE_UI_COPY.startOver).toBe("Start over");
     expect(COMPOSE_UI_COPY.goldNote).toBe(
@@ -199,24 +201,36 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
   });
 
   it("the composed project renders as a PAGE with an edit toggle, not a bare form", () => {
-    // View mode: display-face name, description prose, both cards.
-    expect(shell).toMatch(/font-path-display[^"]*"[^>]*>\s*\{composeDraft\.name\}/);
+    // View mode (2026-07-30): the business name is an always-editable field
+    // styled as the heading, the pitch renders as prose, and all FOUR cards
+    // render — The Offer / First Customers / Product v1 / Why am I building
+    // this? (the latter two off the composed row's quiz answers).
+    expect(shell).toContain('aria-label="Business name"');
+    expect(shell).toMatch(/value=\{composeDraft\.name\}/);
     expect(shell).toContain("{composeDraft.description}</p>");
     expect(shell).toContain("{COMPOSE_UI_COPY.offerLabel}");
     expect(shell).toContain("{COMPOSE_UI_COPY.customersLabel}");
+    expect(shell).toContain("{COMPOSE_UI_COPY.productLabel}");
+    expect(shell).toContain("{COMPOSE_UI_COPY.whyLabel}");
+    expect(shell).toContain("composeView.quizAnswers.what");
+    expect(shell).toContain("composeView.quizAnswers.spark");
     // The toggle flips the same fields into edit mode.
     expect(shell).toMatch(/composeEditing \? COMPOSE_UI_COPY\.editOff : COMPOSE_UI_COPY\.editOn/);
     expect(shell).toMatch(/setComposeEditing\(\(e\) => !e\)/);
   });
 
-  it("the controls row: Change anything / Shape it again ×2 / Start over", () => {
-    expect(shell).toContain("Shape it again ({composeView.regenerationsLeft} left)");
+  it("the controls row: Edit This / Start over — regeneration is retired (2026-07-30)", () => {
+    expect(shell).not.toContain("Shape it again");
+    expect(shell).not.toContain("regenerateProjectAction");
     expect(shell).toContain("{COMPOSE_UI_COPY.startOver}");
     // Start over maps to the doors step — the existing door-change
     // machinery is the invalidation path; NO new mutation was invented.
     expect(shell).toMatch(/onClick=\{\(\) => go\("doors"\)\}\s*disabled=\{pending\}\s*>\s*\{COMPOSE_UI_COPY\.startOver\}/);
-    // The regen cap stays the server's counter, pending-guarded.
-    expect(shell).toMatch(/disabled=\{pending \|\| isLocked \|\| composeView\.regenerationsLeft === 0\}/);
+  });
+
+  it("the interstitial is gone: Shape my project composes directly; the no-view arm is recovery only", () => {
+    expect(shell).not.toContain("Time to make it real");
+    expect(shell).toMatch(/go\(stepNeighbour\("quiz", "next"\)\);\s*if \(!composeView && !isLocked\) buildProject\(\);/);
   });
 
   it("the gold founders-pivot note and the (out of 25) CTA render", () => {

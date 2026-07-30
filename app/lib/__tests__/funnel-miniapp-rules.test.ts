@@ -810,11 +810,13 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
     // Every mutation handler branches on kind === "locked" BEFORE its
     // generic notice, and the branch sets the shared lock flag; count the
     // wiring so removing one handler's branch reddens this.
-    expect((shellCode.match(/kind === "locked"/g) ?? []).length).toBe(4);
-    // 5, not 4 (unified-flow U6): the four build-step handlers plus the
+    // 3 build-step handlers since 2026-07-30 (regenerate retired with the
+    // Shape-it-again button).
+    expect((shellCode.match(/kind === "locked"/g) ?? []).length).toBe(3);
+    // 4, not 3 (unified-flow U6): the three build-step handlers plus the
     // form sections' onLocked callback — the merged form steps latch the
     // SAME lock through MergedFormSections' locked-verdict branches.
-    expect((shellCode.match(/setLockDiscovered\(true\)/g) ?? []).length).toBe(5);
+    expect((shellCode.match(/setLockDiscovered\(true\)/g) ?? []).length).toBe(4);
     expect(shellCode).toMatch(/const isLocked = locked \|\| lockDiscovered/);
   });
 
@@ -839,7 +841,6 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
     expect((shellCode.match(/disabled=\{isLocked\}/g) ?? []).length).toBeGreaterThanOrEqual(8);
     expect(shellCode).toMatch(/disabled=\{!selected \|\| pending \|\| isLocked\}/);
     expect(shellCode).toMatch(/disabled=\{pending \|\| isLocked\}/);
-    expect(shellCode).toMatch(/disabled=\{pending \|\| isLocked \|\| composeView\.regenerationsLeft === 0\}/);
     // …while the Back slot's disabled conditions stay pending-only: the
     // review walk must keep moving. Both Back buttons and the handoff exit
     // anchor gate on `pending` alone.

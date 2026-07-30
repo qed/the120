@@ -186,3 +186,7 @@ old-client-safe for one deploy (see the `unavailable` member's rollout note in
   — guard the mutation choke point; deleting the action is that rule applied.
 - `docs/solutions/best-practices/a-server-side-timeout-does-not-bound-a-request-that-never-lands-bound-the-clients-own-await-2026-07-27.md`
   — the sibling case where the client's own await is what needs bounding.
+- `docs/solutions/database-issues/stale-writer-schema-poison-2026-07-30.md`
+  — the DB-level complement for the residual exposure this doc names: when
+  the stale bundle writes via raw PostgREST (no action id, no deploymentId
+  protection), a post-deploy column rename kills the write atomically.

@@ -4,10 +4,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  removeChildCore,
   saveFormStepCore,
   submitApplicationCore,
   type FormStepDeps,
   type FormStepPatch,
+  type RemoveChildDeps,
 } from "@/app/lib/funnel/form-step-core";
 import {
   loadMergedFlowChild,
@@ -446,6 +448,79 @@ describe("submitApplicationCore — gates before any write", () => {
   });
 });
 
+/* ─────────────────────────── removeChildCore ─────────────────────────── */
+
+function removeHarness(opts: {
+  userId?: string | null;
+  outcome?: "deleted" | "refused" | "missing" | "failed";
+}): { deps: RemoveChildDeps; deletes: string[] } {
+  const deletes: string[] = [];
+  return {
+    deletes,
+    deps: {
+      session: async () => ({
+        userId: opts.userId === undefined ? "user-1" : opts.userId,
+        deleteChild: async (childId) => {
+          deletes.push(childId);
+          return opts.outcome ?? "deleted";
+        },
+      }),
+    },
+  };
+}
+
+describe("removeChildCore — the retired editor's capability, typed verdicts", () => {
+  it("deletes the row once → removed", async () => {
+    const h = removeHarness({});
+    const res = await removeChildCore({ childId: CHILD_ID }, h.deps);
+    expect(res).toEqual({ kind: "removed" });
+    expect(h.deletes).toEqual([CHILD_ID]);
+  });
+
+  it("the DB delete guard's raise (reviewed or paid) maps to the DISTINCT refused", async () => {
+    const h = removeHarness({ outcome: "refused" });
+    const res = await removeChildCore({ childId: CHILD_ID }, h.deps);
+    expect(res).toEqual({ kind: "refused" });
+    // The delete was ATTEMPTED (the guard is the decider, not an app-side
+    // re-implementation) and the guard rolled it back — one attempt, no
+    // retry loop.
+    expect(h.deletes).toEqual([CHILD_ID]);
+  });
+
+  it("unauthenticated / bad input → zero delete attempts", async () => {
+    const unauth = removeHarness({ userId: null });
+    expect(await removeChildCore({ childId: CHILD_ID }, unauth.deps)).toEqual({
+      kind: "unauthenticated",
+    });
+    expect(unauth.deletes).toHaveLength(0);
+
+    const bad = removeHarness({});
+    expect(await removeChildCore({ childId: "not-a-uuid" }, bad.deps)).toEqual({
+      kind: "invalid",
+    });
+    expect(await removeChildCore(null, bad.deps)).toEqual({ kind: "invalid" });
+    expect(bad.deletes).toHaveLength(0);
+  });
+
+  it("RLS zero rows (foreign or absent) → the 404-shaped invalid; write failure → failed", async () => {
+    expect(
+      await removeChildCore({ childId: CHILD_ID }, removeHarness({ outcome: "missing" }).deps)
+    ).toEqual({ kind: "invalid" });
+    expect(
+      await removeChildCore({ childId: CHILD_ID }, removeHarness({ outcome: "failed" }).deps)
+    ).toEqual({ kind: "failed" });
+  });
+
+  it("a rejecting deps layer resolves to failed — never a throw across the wire", async () => {
+    const deps: RemoveChildDeps = {
+      session: async () => {
+        throw new Error("boom");
+      },
+    };
+    expect(await removeChildCore({ childId: CHILD_ID }, deps)).toEqual({ kind: "failed" });
+  });
+});
+
 /* ─────────────────────────── loadMergedFlowChild ─────────────────────────── */
 
 function loaderDeps(opts: {
@@ -485,9 +560,14 @@ describe("loadMergedFlowChild", () => {
     expect(res.kind === "ok" && res.depositPaid).toBe(false);
   });
 
-  it("a flaky deposits read DEGRADES to unpaid (the guard is the guarantee)", async () => {
+  it("a flaky deposits read reports depositPaid null (unknown), never a guessed false", async () => {
+    // Read-honesty: a degraded `false` would render the group step editable
+    // on a LOCKED walk (stepEditableInWalk's exception) when the write path
+    // would refuse — null fails closed instead.
     const res = await loadMergedFlowChild(CHILD_ID, loaderDeps({ deposits: "error" }));
-    expect(res.kind === "ok" && res.depositPaid).toBe(false);
+    expect(res.kind).toBe("ok");
+    if (res.kind !== "ok") return;
+    expect(res.depositPaid).toBeNull();
   });
 
   it("second child is not the first child", async () => {
@@ -534,5 +614,15 @@ describe("form-step core — source pins", () => {
     expect(actions).not.toMatch(/supabase/i);
     expect(actions).toMatch(/saveFormStepCore\(input\)/);
     expect(actions).toMatch(/submitApplicationCore\(input\)/);
+    expect(actions).toMatch(/removeChildCore\(input\)/);
+  });
+
+  it("the remove path recognizes the children_delete_guard's raise and scopes the DELETE by id", () => {
+    // The guard's message is the ONE signal the DB sends for reviewed/paid
+    // children — mapped to `refused`, never the generic failed.
+    expect(core).toMatch(/in review or has a paid deposit/i);
+    // The DELETE carries the explicit id predicate (RLS + id, the write
+    // discipline's shape).
+    expect(core).toMatch(/\.delete\(\)\s*\.eq\("id", childId\)/);
   });
 });

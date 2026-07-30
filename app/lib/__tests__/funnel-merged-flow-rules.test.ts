@@ -135,9 +135,20 @@ describe("mergedProgressStep", () => {
     expect(mergedProgressStep("seam", true)).toBe("reveal");
   });
 
-  it("form steps are byte-identical to wizardProgressStep, both submitted values", () => {
+  it("form steps DELEGATE to wizardProgressStep — pinned by the literal rung table", () => {
+    // The delegation (one switch, one owner) plus the literal expectations,
+    // so a drifted wizardProgressStep cannot silently drag this along.
+    const table: Record<(typeof MERGED_FORM_STEPS)[number], string> = {
+      basics: "wizard_1",
+      group: "wizard_1",
+      academics: "wizard_2",
+      project: "wizard_2",
+      review: "wizard_3",
+    };
     for (const step of MERGED_FORM_STEPS) {
+      expect(mergedProgressStep(step, false)).toBe(table[step]);
       expect(mergedProgressStep(step, false)).toBe(wizardProgressStep(step, false));
+      expect(mergedProgressStep(step, true)).toBe("submitted");
       expect(mergedProgressStep(step, true)).toBe(wizardProgressStep(step, true));
     }
   });
@@ -354,10 +365,27 @@ describe("resolveMergedStep — a step outside the child's list resolves as if a
     expect(resolveMergedStep("goal", offered)).toBe("goal");
   });
 
-  it("?step=goal for a submitted child clamps to their landing (gate closed)", () => {
+  it("?step=goal for a submitted child (locked) resolves to review — the explaining terminal, not bare basics", () => {
     expect(resolveMergedStep("goal", facts({ applicantState: "submitted" }))).toBe(
-      "basics"
+      "review"
     );
+  });
+
+  it("?step=seat for a waitlisted child resolves to review (the waitlist arm explains)", () => {
+    expect(resolveMergedStep("seat", facts({ applicantState: "waitlisted" }))).toBe(
+      "review"
+    );
+    // Legacy vocabulary too: a null-state waitlisted child is equally locked.
+    expect(resolveMergedStep("seat", facts({ status: "waitlisted" }))).toBe("review");
+  });
+
+  it("a next-step id on an UNLOCKED child keeps the plain clamp (no review shortcut)", () => {
+    // A legacy draft is not locked — the demotion arm must not fire.
+    expect(
+      resolveMergedStep("goal", facts({ status: "draft", firstIncompleteFormStep: "group" }))
+    ).toBe("group");
+    // A pre-application funnel child is not locked either.
+    expect(resolveMergedStep("seat", facts({ applicantState: "added" }))).toBe("handoff");
   });
 
   it("?step=doors for a legacy child clamps (build steps absent from the list)", () => {
@@ -366,22 +394,30 @@ describe("resolveMergedStep — a step outside the child's list resolves as if a
     ).toBe("group");
   });
 
-  it("demotion refresh: standing on goal, gate revoked mid-walk → re-lands", () => {
+  it("demotion refresh: standing on goal, gate revoked mid-walk → lands on review, the arm that explains", () => {
     // Yesterday: offered, on "goal". Today: staff moved them back to
-    // in_review — the refresh resolves the SAME URL against the new facts.
+    // in_review — the refresh resolves the SAME URL against the new facts,
+    // and a LOCKED child holding a next-step URL lands on the review
+    // terminal (under-review/waitlist copy), never bare basics.
     const demoted = facts({ applicantState: "in_review", nextStepsReachable: false });
-    expect(resolveMergedStep("goal", demoted)).toBe("basics");
+    expect(resolveMergedStep("goal", demoted)).toBe("review");
   });
 
-  it("garbage steps clamp too — never a throw, never handoff for legacy", () => {
+  it("garbage steps clamp too — never a throw, never handoff for legacy, never the review shortcut", () => {
     expect(resolveMergedStep("wizard_1", facts({ status: "submitted" }))).toBe("basics");
     expect(resolveMergedStep("", facts({ applicantState: "added" }))).toBe("handoff");
   });
 
-  it("dark flag: form steps are not reachable — clamps to today's landing", () => {
+  it("dark flag: form steps are not reachable — clamps to today's landing (demotion arm stays dark too)", () => {
     const dark = facts({ mergeFlagOn: false, applicantState: "added" });
     expect(resolveMergedStep("basics", dark)).toBe("handoff");
     expect(resolveMergedStep("doors", dark)).toBe("doors");
+    // A next-step id under the dark flag must never resolve to "review" —
+    // the dark shell has no arm for it.
+    const darkLocked = facts({ mergeFlagOn: false, applicantState: "submitted" });
+    expect(resolveMergedStep("goal", darkLocked)).toBe(
+      initialStepForFacts({ doorConfirmed: false, hasProject: false })
+    );
   });
 });
 
@@ -488,6 +524,24 @@ describe("stepEditableInWalk", () => {
 
   it("group locks once a deposit is paid", () => {
     expect(stepEditableInWalk("group", true, true)).toBe(false);
+  });
+
+  it("an UNKNOWN deposit fact (null — the read failed) fails closed on a locked walk", () => {
+    // The group exception needs a PROVEN false: null must never render an
+    // editable group step whose save writeGroup would then refuse.
+    expect(stepEditableInWalk("group", true, null)).toBe(false);
+    for (const step of ALL_STEPS) {
+      if (step === "goal" || step === "group") continue;
+      expect(stepEditableInWalk(step, true, null)).toBe(false);
+    }
+    // Goal's write exception is deposit-independent — null included.
+    expect(stepEditableInWalk("goal", true, null)).toBe(true);
+  });
+
+  it("a pre-submit (unlocked) walk is unaffected by an unknown deposit fact", () => {
+    for (const step of ALL_STEPS) {
+      expect(stepEditableInWalk(step, false, null)).toBe(true);
+    }
   });
 
   it("goal stays writable for every next-steps-reachable state, deposit or not (M1)", () => {

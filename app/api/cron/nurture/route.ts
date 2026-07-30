@@ -50,7 +50,10 @@ export async function GET(req: Request) {
     db
       .from("children")
       .select(
-        "id,parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,applicant_state,workshop_ids,interests,project_pitch,status,updated_at"
+        // workshop_ids deliberately UN-NAMED (stale-writer poison, 2026-07-30):
+        // the column renames to workshop_ids_legacy post-deploy so pre-deploy
+        // bundles' full-row upserts die; completeness ignored it anyway (U12).
+        "id,parent_id,first_name,last_name,grade,birth_year,current_school,group_slug,academics,subjects,applicant_state,interests,project_pitch,status,updated_at"
       ),
     db.from("deposits").select("parent_id,child_id,status,refunded_at,created_at"),
     db.from("nurture_sends").select("family_id,sequence,step"),

@@ -765,9 +765,14 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
       db
         .from("children")
         .select(
+          // workshop_ids deliberately UN-NAMED (stale-writer poison,
+          // 2026-07-30): the column renames to workshop_ids_legacy
+          // post-deploy so pre-deploy dashboard bundles' full-row upserts
+          // die. The legacy workshops chips retire with it; the data
+          // survives in the DB under the legacy name.
           "id, parent_id, first_name, last_name, grade, birth_year, " +
             "current_school, group_slug, academics, subjects, " +
-            "workshop_ids, interests, project_pitch, portfolio_links, " +
+            "interests, project_pitch, portfolio_links, " +
             "status, submitted_at, created_at"
         ),
       db.from("parents").select("id, first_name, last_name, email, phone"),
@@ -846,7 +851,9 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
     group_slug: string;
     academics: unknown;
     subjects: unknown;
-    workshop_ids: unknown;
+    /** No longer selected (stale-writer poison 2026-07-30) — optional so
+     *  old callers passing full rows keep compiling. */
+    workshop_ids?: unknown;
     interests: string;
     project_pitch: string;
     portfolio_links: string;
@@ -910,6 +917,9 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
 
       const parent = parents.get(c.parent_id);
       const family = familyByParent.get(c.parent_id);
+      // Always [] since the stale-writer poison (2026-07-30): the column is
+      // un-selected and renames to workshop_ids_legacy; the legacy chips
+      // retire. `asStringArray(undefined)` keeps the shape without a branch.
       const workshopIds = asStringArray(c.workshop_ids);
       return {
         childId: c.id,

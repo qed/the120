@@ -12,8 +12,10 @@
  */
 
 import {
+  removeChildCore,
   saveFormStepCore,
   submitApplicationCore,
+  type RemoveChildResult,
   type SaveFormStepResult,
   type SubmitApplicationResult,
 } from "@/app/lib/funnel/form-step-core";
@@ -24,4 +26,8 @@ export async function saveFormStepAction(input: unknown): Promise<SaveFormStepRe
 
 export async function submitApplicationAction(input: unknown): Promise<SubmitApplicationResult> {
   return submitApplicationCore(input);
+}
+
+export async function removeChildAction(input: unknown): Promise<RemoveChildResult> {
+  return removeChildCore(input);
 }

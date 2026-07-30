@@ -596,7 +596,12 @@ const livePaidDeposit = (rows: { status: string; refundedAt: string | null }[]) 
   rows.some((d) => d.status === "paid" && d.refundedAt === null);
 
 export type LoadMergedFlowResult =
-  | { kind: "ok"; child: MergedFlowChild; depositPaid: boolean }
+  /** `depositPaid: null` = the deposits read FAILED — the fact is unknown,
+   *  not false. Consumers must fail CLOSED on a locked walk (the group step
+   *  renders read-only, `stepEditableInWalk` requires `=== false`): a
+   *  degraded `false` would render an editable group step whose save
+   *  `writeGroup` then refuses — a false affordance. */
+  | { kind: "ok"; child: MergedFlowChild; depositPaid: boolean | null }
   | { kind: "not_found" }
   | { kind: "unauthenticated" }
   | { kind: "failed" };
@@ -606,11 +611,12 @@ export type LoadMergedFlowResult =
  * refusal shape: RLS makes "someone else's child" and "no such child" the
  * SAME zero-rows answer — both `not_found`, never an existence oracle.
  *
- * The deposits read DEGRADES on failure (depositPaid=false): the fact is
- * presentation for the group step's lock treatment; the guarantee is the DB
- * group-lock guard on the write path, which refuses regardless of what a
- * flaky read told the page. Same tradeoff as the page's projects-read
- * degrade.
+ * The deposits read does NOT degrade to `false` on failure — it reports
+ * `null` (unknown) and logs. The guarantee is still the DB group-lock guard
+ * on the write path; the null keeps the PRESENTATION honest too: a locked
+ * walk with an unknown deposit fact renders the group step read-only rather
+ * than offering an edit the write path would refuse. Pre-submit walks are
+ * unaffected (group is editable there via the not-locked path).
  */
 export async function loadMergedFlowChild(
   childId: string,
@@ -624,7 +630,10 @@ export async function loadMergedFlowChild(
     const child = rows.find((c) => c.id === childId);
     if (!child) return { kind: "not_found" };
     const deposits = await session.loadDeposits(childId);
-    const depositPaid = deposits === "error" ? false : livePaidDeposit(deposits);
+    if (deposits === "error") {
+      console.error("[funnel/miniapp] merged-flow deposits read failed (depositPaid unknown)");
+    }
+    const depositPaid = deposits === "error" ? null : livePaidDeposit(deposits);
     return {
       kind: "ok",
       child: { ...child, isFirstChild: rows.length > 0 && rows[0].id === childId },
@@ -700,7 +709,14 @@ function prefillPersistRealDeps(): PrefillPersistDeps {
             .update({ ...patch, updated_at: new Date().toISOString() })
             .eq("id", childId)
             .eq("status", "draft");
-          return error ? "failed" : "written";
+          if (error) {
+            // Best-effort, but never SILENT best-effort: the seed defers to
+            // the next visit, and this line is how anyone learns it did.
+            // Column names at worst, never content (PII).
+            console.error(`[funnel/miniapp] prefill write failed: ${error.message}`);
+            return "failed";
+          }
+          return "written";
         },
       };
     },
@@ -725,7 +741,13 @@ export async function persistPrefillCore(
   try {
     const session = await deps.session();
     if (!session.userId) return "skipped";
-    return await session.writePrefill(input.childId, input.patch);
+    const wrote = await session.writePrefill(input.childId, input.patch);
+    if (wrote === "failed") {
+      // The ordinary failed path stays observable even when the deps layer
+      // already logged the DB error — one line names the deferral itself.
+      console.error("[funnel/miniapp] prefill persist failed (seed deferred to next visit)");
+    }
+    return wrote;
   } catch (err) {
     console.error("[funnel/miniapp] prefill persist exception:", err);
     return "failed";

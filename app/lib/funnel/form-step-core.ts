@@ -501,6 +501,98 @@ export async function submitApplicationCore(
   }
 }
 
+/* ─────────────────────────────── remove child ─────────────────────────────── */
+
+/**
+ * Child removal — the capability the retired dashboard editor carried
+ * (StepReview's "Remove this child"), restored to the merged flow. ONE
+ * RLS-scoped DELETE with an explicit id predicate: a foreign or absent id is
+ * a zero-row no-op (the same 404-shaped `invalid` as everywhere else, never
+ * an existence oracle). The DB's `children_delete_guard` (BEFORE DELETE,
+ * SECURITY DEFINER) is the guarantee: it raises for a child whose review
+ * advanced past draft/submitted or who holds a paid deposit — that raise
+ * maps to the DISTINCT `refused` verdict (copy points at admissions), never
+ * retry copy. No app-side re-implementation of the guard's predicate: the
+ * trigger is the one owner of "who may be removed".
+ */
+
+const removeChildSchema = z.object({ childId: z.uuid() });
+
+export type RemoveChildDeps = {
+  session: () => Promise<{
+    userId: string | null;
+    /** ONE DELETE, id-scoped under RLS. `refused` = the
+     *  children_delete_guard raised (reviewed or paid); `missing` = zero
+     *  rows (foreign/absent id — RLS makes them the same answer). */
+    deleteChild: (
+      childId: string
+    ) => Promise<"deleted" | "refused" | "missing" | "failed">;
+  }>;
+};
+
+function removeChildRealDeps(): RemoveChildDeps {
+  return {
+    session: async () => {
+      const supabase = await supabaseServer();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return {
+        userId: user?.id ?? null,
+        deleteChild: async (childId) => {
+          const { data, error } = await supabase
+            .from("children")
+            .delete()
+            .eq("id", childId)
+            .select("id");
+          if (error) {
+            // The delete guard's raise ("This dossier is in review or has a
+            // paid deposit — contact admissions to remove it.") — the
+            // distinct refused verdict, never retry copy.
+            if (/in review or has a paid deposit/i.test(error.message ?? "")) {
+              return "refused";
+            }
+            console.error(`[funnel/form-step] child removal failed: ${error.message}`);
+            return "failed";
+          }
+          return (data ?? []).length > 0 ? "deleted" : "missing";
+        },
+      };
+    },
+  };
+}
+
+export type RemoveChildResult =
+  | { kind: "removed" }
+  /** The DB delete guard refused: reviewed or paid — rendered as the
+   *  contact-admissions explanation, never retry copy. */
+  | { kind: "refused" }
+  | { kind: "invalid" }
+  | { kind: "unauthenticated" }
+  | { kind: "failed" };
+
+export async function removeChildCore(
+  input: unknown,
+  deps: RemoveChildDeps = removeChildRealDeps()
+): Promise<RemoveChildResult> {
+  try {
+    const parsed = removeChildSchema.safeParse(input);
+    if (!parsed.success) return { kind: "invalid" };
+
+    const session = await deps.session();
+    if (!session.userId) return { kind: "unauthenticated" };
+
+    const outcome = await session.deleteChild(parsed.data.childId);
+    if (outcome === "refused") return { kind: "refused" };
+    if (outcome === "missing") return { kind: "invalid" };
+    if (outcome === "failed") return { kind: "failed" };
+    return { kind: "removed" };
+  } catch (err) {
+    console.error("[funnel/form-step] remove exception:", err);
+    return { kind: "failed" };
+  }
+}
+
 // Goal saving deliberately lives elsewhere: the next-steps `saveGoalCore`
 // (app/lib/funnel/next-steps-core.ts) already owns the family_goal write —
 // reused as-is, never duplicated here (unit spec).

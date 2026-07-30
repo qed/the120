@@ -227,7 +227,9 @@ export function MiniAppShell({
   merged: {
     facts: MergedFlowFacts;
     fields: MergedFlowFields;
-    depositPaid: boolean;
+    /** `null` = the deposits read failed (unknown) — fails closed on a
+     *  locked walk's group step, see `stepEditableInWalk`. */
+    depositPaid: boolean | null;
   };
 }) {
   const router = useRouter();

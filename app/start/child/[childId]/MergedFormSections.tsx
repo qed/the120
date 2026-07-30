@@ -43,7 +43,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { saveFormStepAction, submitApplicationAction } from "@/app/lib/funnel/actions/form-steps";
+import {
+  removeChildAction,
+  saveFormStepAction,
+  submitApplicationAction,
+} from "@/app/lib/funnel/actions/form-steps";
 import { REVIEW_SCREEN, WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
 import {
   checklistChildForFields,
@@ -194,7 +198,9 @@ export type MergedFormSectionProps = {
    *  against it, and the review checklist reads ONLY it. */
   fields: MergedFlowFields;
   facts: MergedFlowFacts;
-  depositPaid: boolean;
+  /** `null` = the deposits read failed (fact unknown) — `stepEditableInWalk`
+   *  fails closed on a locked walk, so no false group-edit affordance. */
+  depositPaid: boolean | null;
   /** The composed project's door (server-loaded), for the group step's
    *  difference note. Null = no composed project. */
   projectGroupSlug: string | null;
@@ -219,6 +225,14 @@ export function MergedFormSection(props: MergedFormSectionProps) {
   // the locked micro-spec). Navigation controls gate on `pending` alone so
   // the read-only review walk keeps moving.
   const frozen = pending || !editable;
+  // The frozen BELT for the Save & continue buttons: on an EDITABLE step the
+  // button tracks the full frozen guard (so a future widening of `frozen`
+  // covers the save path too, not just the inputs); on a read-only step the
+  // same button is PURE NAVIGATION ("Continue →" — saveThenGo's !editable
+  // branch writes nothing) and must stay live so the R13 review walk can
+  // move forward — there it gates on pending alone, like every
+  // pure-navigation CTA in the shell.
+  const saveFrozen = editable && frozen;
   const next = mergedStepNeighbour(step, "next", facts);
 
   /**
@@ -287,6 +301,44 @@ export function MergedFormSection(props: MergedFormSectionProps) {
     });
   };
 
+  /**
+   * Child removal (the retired StepReview capability, restored): confirm()
+   * then act — the quiet-destructive idiom — pending-guarded through the
+   * shell's one transition. Success navigates with a FULL load
+   * (window.location.assign): this child's flow URL just died, so a client
+   * push into the dead route is the wrong tool. The DB delete guard is the
+   * guarantee; `refused` renders the admissions off-ramp, never retry copy.
+   */
+  const remove = () => {
+    if (pending) return;
+    if (
+      !window.confirm(
+        `Remove ${fields.firstName.trim() || "this child"}'s application? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setNotice(null);
+    props.run(async () => {
+      try {
+        const result = await removeChildAction({ childId: fields.id });
+        if (result.kind === "removed") {
+          window.location.assign("/dashboard");
+          return;
+        }
+        if (result.kind === "refused") {
+          setNotice(
+            "This application is in review or has a paid deposit. Contact admissions@the120.school to remove it."
+          );
+          return;
+        }
+        setNotice(result.kind === "unauthenticated" ? SESSION_COPY : RETRY_COPY);
+      } catch {
+        setNotice(RETRY_COPY);
+      }
+    });
+  };
+
   const nextLabel = !editable ? "Continue →" : pending ? "Saving…" : "Save & continue →";
 
   switch (step) {
@@ -295,10 +347,16 @@ export function MergedFormSection(props: MergedFormSectionProps) {
         <BasicsSection
           fields={fields}
           frozen={frozen}
+          saveFrozen={saveFrozen}
           pending={pending}
           notice={notice}
           nextLabel={nextLabel}
           onNext={saveThenGo}
+          // The quiet remove control renders on the basics step only, and
+          // only while the walk is NOT locked (draft vocabulary, both
+          // kinds) — a locked walk's off-ramp is admissions, not a delete.
+          canRemove={!lockVerdict}
+          onRemove={remove}
         />
       );
     case "group":
@@ -321,6 +379,7 @@ export function MergedFormSection(props: MergedFormSectionProps) {
         <AcademicsSection
           fields={fields}
           frozen={frozen}
+          saveFrozen={saveFrozen}
           pending={pending}
           notice={notice}
           nextLabel={nextLabel}
@@ -332,6 +391,7 @@ export function MergedFormSection(props: MergedFormSectionProps) {
         <ProjectSection
           fields={fields}
           frozen={frozen}
+          saveFrozen={saveFrozen}
           pending={pending}
           notice={notice}
           nextLabel={nextLabel}
@@ -357,17 +417,23 @@ export function MergedFormSection(props: MergedFormSectionProps) {
 function BasicsSection({
   fields,
   frozen,
+  saveFrozen,
   pending,
   notice,
   nextLabel,
   onNext,
+  canRemove,
+  onRemove,
 }: {
   fields: MergedFlowFields;
   frozen: boolean;
+  saveFrozen: boolean;
   pending: boolean;
   notice: string | null;
   nextLabel: string;
   onNext: (input: unknown) => void;
+  canRemove: boolean;
+  onRemove: () => void;
 }) {
   const [draft, setDraft] = useState(() => ({
     firstName: fields.firstName,
@@ -380,10 +446,20 @@ function BasicsSection({
     childEmailNone: fields.childEmailNone,
   }));
   const set = (patch: Partial<typeof draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // A FileReader read is ASYNC: Save & continue racing an in-flight read
+  // would persist the draft WITHOUT the photo the family just picked —
+  // silently. `photoReading` holds the Next button until onload/onerror
+  // resolves (the disabled state is the whole treatment; nothing fancy).
+  const [photoReading, setPhotoReading] = useState(false);
   const onPhoto = (file?: File) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => set({ photo: String(reader.result) });
+    setPhotoReading(true);
+    reader.onload = () => {
+      set({ photo: String(reader.result) });
+      setPhotoReading(false);
+    };
+    reader.onerror = () => setPhotoReading(false);
     reader.readAsDataURL(file);
   };
 
@@ -512,7 +588,7 @@ function BasicsSection({
       )}
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || saveFrozen || photoReading}
         onClick={() =>
           onNext({
             step: "basics",
@@ -531,6 +607,22 @@ function BasicsSection({
       >
         {nextLabel}
       </button>
+
+      {/* The quiet-destructive remove (the retired StepReview's idiom):
+          basics only, unlocked walks only — confirm() lives in the
+          dispatcher's handler, the act is pending-guarded. */}
+      {canRemove && (
+        <div className="mt-8 border-t border-line pt-4">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onRemove}
+            className={`rounded font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
+          >
+            Remove this child
+          </button>
+        </div>
+      )}
     </StepCard>
   );
 }
@@ -695,6 +787,7 @@ const isListedSubject = (s: string) =>
 function AcademicsSection({
   fields,
   frozen,
+  saveFrozen,
   pending,
   notice,
   nextLabel,
@@ -702,6 +795,7 @@ function AcademicsSection({
 }: {
   fields: MergedFlowFields;
   frozen: boolean;
+  saveFrozen: boolean;
   pending: boolean;
   notice: string | null;
   nextLabel: string;
@@ -865,7 +959,7 @@ function AcademicsSection({
       )}
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || saveFrozen}
         onClick={() =>
           onNext({
             step: "academics",
@@ -914,6 +1008,7 @@ const GROUP_PROJECT_EXAMPLES: Record<string, string[]> = {
 function ProjectSection({
   fields,
   frozen,
+  saveFrozen,
   pending,
   notice,
   nextLabel,
@@ -921,6 +1016,7 @@ function ProjectSection({
 }: {
   fields: MergedFlowFields;
   frozen: boolean;
+  saveFrozen: boolean;
   pending: boolean;
   notice: string | null;
   nextLabel: string;
@@ -992,7 +1088,7 @@ function ProjectSection({
       )}
       <button
         type="button"
-        disabled={pending}
+        disabled={pending || saveFrozen}
         onClick={() =>
           onNext({
             step: "project",

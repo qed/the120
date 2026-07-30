@@ -81,6 +81,17 @@ describe("the merge flag is LIVE — Unit 9 flipped it in the same change that r
     expect(page).not.toMatch(/mergeFlagOn: (true|false)/);
   });
 
+  it("the prefill persist rides behind the page's draft gate — status === 'draft' precedes the write", () => {
+    const page = stripComments(read(PAGE));
+    // The ONE call site, gated: a non-draft row never receives the seed
+    // (the write path's own .eq('status','draft') is the belt; this gate is
+    // the brace that keeps the call itself draft-scoped).
+    expect(page).toMatch(
+      /if \(prefill && loaded\.child\.status === "draft"\) \{\s*await persistPrefillCore\(\{ childId, patch: prefill \}\);/
+    );
+    expect((page.match(/persistPrefillCore\(/g) ?? []).length).toBe(1);
+  });
+
   it("dark step resolution in shell and page stays the existing resolveStep call", () => {
     const shell = stripComments(read(SHELL));
     const page = stripComments(read(PAGE));
@@ -172,8 +183,9 @@ describe("every form-section control is pending-guarded (the shell's single useT
     expect(sections).toContain("props.onLocked()");
     expect(sections).toContain("That didn't save. Give it a second and tap again.");
     // The frozen-modal learning: the awaited action may REJECT — the catch
-    // resolves the transition task so pending always resets.
-    expect((sections.match(/catch \{\s*setNotice\(RETRY_COPY\);\s*\}/g) ?? []).length).toBe(2);
+    // resolves the transition task so pending always resets (save, submit,
+    // AND remove).
+    expect((sections.match(/catch \{\s*setNotice\(RETRY_COPY\);\s*\}/g) ?? []).length).toBe(3);
     const shell = stripComments(read(SHELL));
     expect(shell).toMatch(/onLocked=\{\(\) => setLockDiscovered\(true\)\}/);
   });
@@ -260,6 +272,44 @@ describe("read-only walks and the group step's window", () => {
     const shell = stripComments(read(SHELL));
     expect((shell.match(/This application is submitted\./g) ?? []).length).toBe(1);
     expect(sections).not.toContain("APPLICATION SUBMITTED");
+  });
+});
+
+/* ─────────────── child removal (the retired StepReview capability) ─────────────── */
+
+describe("the quiet remove control — basics only, unlocked walks only, confirm-then-act", () => {
+  const raw = read(SECTIONS);
+  const sections = stripComments(raw);
+
+  it("renders on the BASICS section only", () => {
+    expect((raw.match(/Remove this child/g) ?? []).length).toBe(1);
+    const basicsArm = raw.slice(
+      raw.indexOf("function BasicsSection("),
+      raw.indexOf("function GroupSection(")
+    );
+    expect(basicsArm).toContain("Remove this child");
+    expect(basicsArm).toContain("{canRemove && (");
+  });
+
+  it("only unlocked walks get the control (draft vocabulary, both kinds)", () => {
+    expect(sections).toContain("canRemove={!lockVerdict}");
+  });
+
+  it("confirm-then-act (the retired StepReview idiom), pending-guarded, admissions copy on refusal", () => {
+    const remove = sections.slice(
+      sections.indexOf("const remove = ()"),
+      sections.indexOf("const nextLabel")
+    );
+    expect(remove.length).toBeGreaterThan(0);
+    expect(remove).toMatch(/if \(pending\) return;/);
+    expect(remove).toContain("window.confirm(");
+    expect(remove).toContain("This cannot be undone.");
+    expect(remove).toContain("removeChildAction({ childId: fields.id })");
+    // Success leaves through a FULL navigation — this child's flow URL just
+    // died, so a client push into the dead route is the wrong tool.
+    expect(remove).toContain('window.location.assign("/dashboard")');
+    // The guard's refusal points at admissions — never retry copy.
+    expect(remove).toContain("Contact admissions@the120.school");
   });
 });
 

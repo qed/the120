@@ -38,7 +38,7 @@ import {
   navCardIdentityOnly,
   type NavCardModel,
 } from "@/app/lib/funnel/nav-card-rules";
-import type { WizardStepId } from "@/app/dashboard/wizard-rules";
+import { wizardProgressStep, type WizardStepId } from "@/app/dashboard/wizard-rules";
 import { emptyChild, type Child, type SeatStatus } from "@/app/dashboard/data";
 import type { Skin } from "@/app/lib/funnel/child-rules";
 
@@ -126,16 +126,15 @@ const isNextStep = (x: MergedStep): x is MergedNextStep => isMergedNextStep(x);
 /* ─────────────────────────────── step → progress rung ─────────────────────────────── */
 
 /**
- * Which rung of R32's ladder a merged step shows — the `wizardProgressStep`
- * precedent, extended over the whole union. Build steps ARE `ProgressStep`
- * members and map to themselves; the seam shows reveal's rung (it sits on
- * reveal's landing, before any form work exists to count); form steps reuse
- * the existing wizard_1/2/3 rungs with the same pairing the wizard ships
- * (basics/group → wizard_1, academics/project → wizard_2, review →
- * wizard_3), flipping to `submitted` (100) once submitted — byte-identical
- * to `wizardProgressStep`, pinned by a parity test. Next-steps screens sit
- * PAST the ladder: `null`, the documented past-ladder value — the nav card
- * degrades to identity-only (`navCardIdentityOnly` zone), never a stray 100.
+ * Which rung of R32's ladder a merged step shows — `wizardProgressStep`
+ * extended over the whole union. Build steps ARE `ProgressStep` members and
+ * map to themselves; the seam shows reveal's rung (it sits on reveal's
+ * landing, before any form work exists to count); form steps DELEGATE to
+ * `wizardProgressStep` itself (one switch, one owner — never a
+ * re-implementation a rename could desync; the test suite pins the
+ * delegation with a literal table). Next-steps screens sit PAST the ladder:
+ * `null`, the documented past-ladder value — the nav card degrades to
+ * identity-only (`navCardIdentityOnly` zone), never a stray 100.
  *
  * `submitted` only lifts the FORM steps: a read-only re-walk of the build
  * steps still shows each step's own rung (the bar narrates where you stand,
@@ -147,19 +146,7 @@ export function mergedProgressStep(
 ): ProgressStep | null {
   if (isNextStep(step)) return null;
   if (step === "seam") return "reveal";
-  if (isFormStep(step)) {
-    if (submitted) return "submitted";
-    switch (step) {
-      case "basics":
-      case "group":
-        return "wizard_1";
-      case "academics":
-      case "project":
-        return "wizard_2";
-      case "review":
-        return "wizard_3";
-    }
-  }
+  if (isFormStep(step)) return wizardProgressStep(step, submitted);
   // A MiniAppStep is a ProgressStep by construction (the `satisfies` coupling).
   return step;
 }
@@ -284,6 +271,13 @@ export function mergedInitialStep(facts: MergedFlowFacts): MergedStep {
  * resolves exactly as if no `?step=` were present. One rule closes
  * deep-link abuse, mid-walk demotion refresh, and the valid-but-absent
  * case; the silent re-landing matches today's invalid-step behaviour.
+ *
+ * ONE softened arm: a NEXT-STEPS id on a LOCKED walk whose list lacks the
+ * screens is the demotion-mid-walk shape (yesterday: offered, standing on
+ * goal; today: staff pulled the offer back). Re-landing that family on
+ * bare basics would strand them with no explanation — resolve to "review"
+ * instead, whose terminal arm narrates the state (under-review/waitlist
+ * copy). Garbage steps and unlocked children keep the plain clamp.
  */
 export function resolveMergedStep(
   rawStep: string | null,
@@ -292,6 +286,13 @@ export function resolveMergedStep(
   const list = stepListForChild(facts);
   if (rawStep !== null && (list as readonly string[]).includes(rawStep)) {
     return rawStep as MergedStep;
+  }
+  if (
+    facts.mergeFlagOn &&
+    isMergedNextStep(rawStep) &&
+    mergedLockVerdict(facts)
+  ) {
+    return "review";
   }
   return mergedInitialStep(facts);
 }
@@ -364,7 +365,12 @@ export function mergedLockVerdict(
  * - `group` stays editable until a PAID deposit exists (R8's decided
  *   semantics: post-submit group change is a direct write behind the
  *   deposit-keyed group-lock guard, project intact — in BOTH vocabularies,
- *   because the verdict already unions them).
+ *   because the verdict already unions them). The fact must be a PROVEN
+ *   `false`: `null` means the deposits read failed, and an unknown deposit
+ *   fails CLOSED on a locked walk — rendering the step editable on a guess
+ *   would offer an edit `writeGroup` then refuses (a false affordance).
+ *   Pre-submit walks are unaffected: group is editable there via the
+ *   not-locked path, whatever the deposit fact says.
  * - `goal` is ALWAYS writable: the field sits outside the edit horizon by
  *   design (R10's named write exception; M1 decided it stays writable even
  *   post-deposit), and the step only exists in next-steps-reachable lists,
@@ -375,11 +381,11 @@ export function mergedLockVerdict(
 export function stepEditableInWalk(
   step: MergedStep,
   lockVerdict: boolean,
-  depositPaid: boolean
+  depositPaid: boolean | null
 ): boolean {
   if (step === "goal") return true;
   if (!lockVerdict) return true;
-  return step === "group" && !depositPaid;
+  return step === "group" && depositPaid === false;
 }
 
 /* ─────────────────────────────── the endings map (R9/R9a) ─────────────────────────────── */

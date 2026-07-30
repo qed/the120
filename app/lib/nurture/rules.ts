@@ -66,9 +66,10 @@ export type NurtureChildRow = {
    *  out. Anchors the applied-but-no-deposit sequence (R61's fourth point,
    *  covered since the follow-ups pass). */
   offer_email_sent_at?: string | null;
-  /** Legacy picks: kept on the row shape for old data, ignored by
-   *  completeness since the Workshops removal (funnel U12). */
-  workshop_ids: string[] | null;
+  /** Legacy picks: ignored by completeness since the Workshops removal
+   *  (funnel U12); OPTIONAL since the stale-writer poison (2026-07-30) —
+   *  the column is no longer selected and renames to workshop_ids_legacy. */
+  workshop_ids?: string[] | null;
   interests: string | null;
   project_pitch: string | null;
   status: string;

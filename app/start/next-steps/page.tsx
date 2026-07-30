@@ -61,9 +61,15 @@ export default async function NextStepsPage({
       redirect(returnToHref(`/start/next-steps${search ? `?${search}` : ""}`));
     }
 
-    const { data: rows } = await supabase
+    const { data: rows, error: rowsError } = await supabase
       .from("children")
       .select("id, status, applicant_state");
+    if (rowsError) {
+      // The /dashboard fallback below still fires (a family with no
+      // readable children has no offered child to resolve), but a FAILED
+      // read misrouting an offered family must be observable, not silent.
+      console.error(`[funnel/next-steps-shim] children read failed: ${rowsError.message}`);
+    }
     const offered = (rows ?? []).filter((c) =>
       nextStepsReachable({
         applicantState: (c.applicant_state as string | null) ?? null,

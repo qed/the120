@@ -408,6 +408,21 @@ describe("the route's source pins", () => {
     expect(claimAt).toBeGreaterThan(emitAt);
   });
 
+  it("the fulfil path reads Stripe's consent record and persists it on the c3 event (source pin)", () => {
+    // P0 2026-07-30: the attempt row records what checkout PRESENTED; the
+    // affirmative acceptance evidence is Stripe's own consent record
+    // (`session.consent.terms_of_service`). No deposit_attempts/deposits
+    // column fits it yet (follow-up: Lane B migration), so the verdict
+    // must ride the c3_deposit event's jsonb properties and a per-fulfilment
+    // log — with the session id as the retrievable Stripe-side anchor.
+    const src = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+    expect(src).toContain('session?.consent?.terms_of_service === "accepted"');
+    expect(src).toContain("tos_consent: tosConsent");
+    // A fulfilment WITHOUT a consent record (the degraded rendered-text-only
+    // session) logs loudly — the signal that the ToS URL is still unset.
+    expect(src).toContain("WITHOUT a Stripe consent record");
+  });
+
   it("events without metadata (foreign sessions) are acknowledged without writes", async () => {
     const h = harness();
     const out = await applyStripeEvent(h.deps, {

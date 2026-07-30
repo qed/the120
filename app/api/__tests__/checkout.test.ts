@@ -1,24 +1,43 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import type Stripe from "stripe";
 
 import {
   ALLOWED_ORIGINS,
   CONSENT_MIN_POLICY_VERSION,
   DEPOSIT_AMOUNT_CENTS,
+  NEXT_STEPS,
   POLICY_CLAIMS_FOR_PETER,
   REFUND_POLICY,
   nextStepsReachable,
   policyVersionAtLeast,
   resolveOrigin,
 } from "@/app/lib/funnel/deposit-rules";
-import { policyHash, recordCheckoutAttempt } from "@/app/lib/funnel/deposit-core";
+import {
+  buildCheckoutSessionParams,
+  createCheckoutSessionWithConsent,
+  isMissingTosUrlError,
+  policyHash,
+  recordCheckoutAttempt,
+  resetTosTickDegradeForTests,
+  type CheckoutSessionInput,
+} from "@/app/lib/funnel/deposit-core";
 import { canReserveSeatForChild } from "@/app/dashboard/data";
 import { SITE_URL } from "@/app/lib/site";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
+
+const SESSION_INPUT: CheckoutSessionInput = {
+  childId: "child-1",
+  parentId: "parent-1",
+  customerEmail: "parent@example.com",
+  childFirstName: "Ada",
+  priceId: "price_deposit",
+  origin: "https://the120.test",
+};
 
 /** U14 (R50, R51, R51a, R52a): the checkout side — pure decisions plus
  *  wiring scans on the route (the trust boundary logic itself is the
@@ -67,10 +86,17 @@ describe("R51a — the policy record", () => {
     // charge caught only at the partial index (the adversarial review).
     // With a child-scoped key and stable params, Stripe replays the same
     // session; expires_at shortens the window to the 30-minute minimum.
+    const consent = buildCheckoutSessionParams(SESSION_INPUT, "consent_tick");
+    expect(consent.idempotencyKey).toBe("deposit:child-1");
+    expect(consent.params.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    // The degraded mode uses a DIFFERENT (still child-scoped) key: Stripe
+    // stores the first result under a key — including the missing-ToS
+    // error — and refuses the same key with different params, so the
+    // text-only retry must not reuse the consent-mode key.
+    const degraded = buildCheckoutSessionParams(SESSION_INPUT, "text_only");
+    expect(degraded.idempotencyKey).toBe("deposit:child-1:notos");
     const src = read("app/api/checkout/route.ts");
-    expect(src).toContain("idempotencyKey: `deposit:${childId}`");
-    expect(src).toContain("expires_at");
-    // The attempt row remains the R51a acceptance record, linked post-create.
+    // The attempt row remains the R51a presentation record, linked post-create.
     expect(src).toContain('.update({ stripe_session_id: session.id })');
   });
 
@@ -84,11 +110,23 @@ describe("R51a — the policy record", () => {
     expect(policyHash(REFUND_POLICY.text)).not.toBe(policyHash(REFUND_POLICY.text + " "));
   });
 
-  it("the route refuses a request without policyAccepted; the dashboard sends it with the pinned version", () => {
-    const route = read("app/api/checkout/route.ts");
-    expect(route).toContain("policyAccepted !== true");
+  it("`policyAccepted` is GONE from the client and the route — no fabricated acceptance literal anywhere", () => {
+    // WHY the old string-match was the gap that let the regression ship:
+    // this test used to assert `ui.toContain("policyAccepted: true")` — it
+    // pinned the LITERAL, not that a rendering surface backed it. When
+    // 6fa1f8f removed the dashboard's inline policy+checkbox, the
+    // hardcoded `policyAccepted: true` stayed in the POST body, the string
+    // still matched, the suite stayed green, and every acceptance record
+    // became a fabrication over text no surface rendered. The acceptance
+    // now happens ON the Stripe-hosted page (consent_collection, pinned
+    // structurally below), so the boolean must not exist at all: any
+    // reappearance of `policyAccepted` is a claim the client cannot make.
     const ui = read("app/dashboard/DashboardApp.tsx");
-    expect(ui).toContain("policyAccepted: true");
+    expect(ui).not.toContain("policyAccepted");
+    const route = read("app/api/checkout/route.ts");
+    expect(route).not.toContain("policyAccepted");
+    // The version echo survives — it binds the record to what the client's
+    // bundle will present at checkout.
     expect(ui).toContain("REFUND_POLICY.version");
   });
 
@@ -141,6 +179,132 @@ describe("R51a — the policy record", () => {
   });
 });
 
+describe("consent at checkout (P0 2026-07-30) — the policy renders and is accepted on the Stripe-hosted page", () => {
+  beforeEach(() => resetTosTickDegradeForTests());
+
+  it("consent_tick params: consent_collection REQUIRED + the policy VERBATIM as the tick's message", () => {
+    const { params } = buildCheckoutSessionParams(SESSION_INPUT, "consent_tick");
+    expect(params.consent_collection).toEqual({ terms_of_service: "required" });
+    // Verbatim, byte-for-byte: the acceptance record (version/hash on the
+    // attempt row) binds to THIS rendered text — a paraphrase would decouple
+    // what was accepted from what was recorded.
+    expect(params.custom_text?.terms_of_service_acceptance).toEqual({
+      message: REFUND_POLICY.text,
+    });
+    expect(params.mode).toBe("payment");
+    expect(params.metadata).toEqual({ child_id: "child-1", parent_id: "parent-1" });
+  });
+
+  it("the policy text fits Stripe's 1200-char custom_text limit — an over-limit text must FAIL here, never be condensed", () => {
+    // stripe@22 types (Checkout/Sessions.d.ts, TermsOfServiceAcceptance):
+    // "Text can be up to 1200 characters in length." Currently 671 chars.
+    expect(REFUND_POLICY.text.length).toBeLessThanOrEqual(1200);
+  });
+
+  it("text_only params (the degrade): NO consent_collection, but the policy still renders via custom_text.submit", () => {
+    const { params } = buildCheckoutSessionParams(SESSION_INPUT, "text_only");
+    expect(params.consent_collection).toBeUndefined();
+    expect(params.custom_text?.submit).toEqual({ message: REFUND_POLICY.text });
+    expect(params.custom_text?.terms_of_service_acceptance).toBeUndefined();
+  });
+
+  it("a missing-ToS-URL failure degrades: retries WITHOUT consent_collection, keeps the rendered policy, and latches for the process", async () => {
+    // consent_collection.terms_of_service: "required" fails session
+    // creation if the Stripe account has no Terms-of-Service URL set in
+    // its Dashboard (a setting unverifiable from code — Peter's pending
+    // Stripe-login item). Checkout must never brick on it: the tick
+    // degrades, the RENDERING survives.
+    const calls: { params: Stripe.Checkout.SessionCreateParams; key: string }[] = [];
+    const missingTos = {
+      type: "StripeInvalidRequestError",
+      message:
+        "You must set a URL for your terms of service in your Dashboard settings before creating a session with consent_collection[terms_of_service].",
+      param: "consent_collection[terms_of_service]",
+    };
+    const deps = {
+      createSession: async (
+        params: Stripe.Checkout.SessionCreateParams,
+        opts: { idempotencyKey: string }
+      ) => {
+        calls.push({ params, key: opts.idempotencyKey });
+        if (params.consent_collection) throw missingTos;
+        return { id: "cs_degraded", url: "https://stripe.test/cs_degraded" };
+      },
+    };
+    const first = await createCheckoutSessionWithConsent(deps, SESSION_INPUT);
+    expect(first.session.id).toBe("cs_degraded");
+    expect(first.consentTick).toBe(false);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].params.consent_collection).toEqual({ terms_of_service: "required" });
+    expect(calls[0].key).toBe("deposit:child-1");
+    expect(calls[1].params.consent_collection).toBeUndefined();
+    expect(calls[1].params.custom_text).toEqual({ submit: { message: REFUND_POLICY.text } });
+    expect(calls[1].key).toBe("deposit:child-1:notos"); // never reuse a key with different params
+    // ONCE per process: the next checkout goes straight to text_only.
+    const second = await createCheckoutSessionWithConsent(deps, SESSION_INPUT);
+    expect(second.consentTick).toBe(false);
+    expect(calls).toHaveLength(3);
+    expect(calls[2].params.consent_collection).toBeUndefined();
+  });
+
+  it("any OTHER Stripe failure rethrows — the degrade is only for the one unverifiable dashboard setting", async () => {
+    const boom = { type: "StripeAuthenticationError", message: "Invalid API key" };
+    const deps = {
+      createSession: async () => {
+        throw boom;
+      },
+    };
+    await expect(createCheckoutSessionWithConsent(deps, SESSION_INPUT)).rejects.toBe(boom);
+  });
+
+  it("isMissingTosUrlError recognises the missing-ToS shape and nothing else", () => {
+    expect(
+      isMissingTosUrlError({
+        type: "StripeInvalidRequestError",
+        message: "...",
+        param: "consent_collection[terms_of_service]",
+      })
+    ).toBe(true);
+    expect(
+      isMissingTosUrlError({
+        type: "StripeInvalidRequestError",
+        message:
+          "You must set a URL for your terms of service in your Dashboard settings.",
+      })
+    ).toBe(true);
+    expect(
+      isMissingTosUrlError({ type: "StripeInvalidRequestError", message: "No such price" })
+    ).toBe(false);
+    expect(isMissingTosUrlError({ type: "StripeAuthenticationError", message: "bad key" })).toBe(
+      false
+    );
+    expect(isMissingTosUrlError(new Error("network"))).toBe(false);
+    expect(isMissingTosUrlError(null)).toBe(false);
+  });
+
+  it("the route creates sessions through the consent wrapper (wiring scan)", () => {
+    const src = read("app/api/checkout/route.ts");
+    expect(src).toContain("createCheckoutSessionWithConsent");
+    // No bare sessions.create with inline params left in the route — the
+    // params (and the consent shape) live in deposit-core where they are
+    // pinned structurally above.
+    expect(src).not.toMatch(/consent_collection:/);
+    expect(src).not.toMatch(/success_url:/);
+  });
+
+  it('the next-steps claim "The full refund policy is shown at payment" is TRUE in both modes', () => {
+    const seat = NEXT_STEPS.swipes.find((s) => s.id === "seat")!;
+    expect(seat.body).toContain("The full refund policy is shown at payment.");
+    // ...because BOTH session shapes carry the full text to the hosted page:
+    const tick = buildCheckoutSessionParams(SESSION_INPUT, "consent_tick");
+    const degraded = buildCheckoutSessionParams(SESSION_INPUT, "text_only");
+    expect(tick.params.custom_text?.terms_of_service_acceptance).toEqual({
+      message: REFUND_POLICY.text,
+    });
+    expect(degraded.params.custom_text?.submit).toEqual({ message: REFUND_POLICY.text });
+  });
+});
+
 describe("the server gates", () => {
   it("ownership refusal equals non-existent child (RLS answers both with no rows) — and pre-offer states refuse", () => {
     expect(
@@ -162,13 +326,15 @@ describe("the server gates", () => {
     expect(DEPOSIT_AMOUNT_CENTS).toBe(25000);
   });
 
-  it("U7 (W13): success lands on the ARRIVAL page, child-scoped; cancel keeps the dashboard (wiring scan)", () => {
-    const src = read("app/api/checkout/route.ts");
+  it("U7 (W13): success lands on the ARRIVAL page, child-scoped; cancel keeps the dashboard — in BOTH consent modes", () => {
     // Without this the acceptance moment is unreachable — the whole of
     // Unit 7 hangs off this one URL.
-    expect(src).toMatch(/success_url: `\$\{origin\}\/start\/arrival\?child=/);
-    expect(src).toContain("cancel_url: `${origin}/dashboard?deposit=cancelled`");
-    expect(src).not.toContain("dashboard?deposit=success");
+    for (const mode of ["consent_tick", "text_only"] as const) {
+      const { params } = buildCheckoutSessionParams(SESSION_INPUT, mode);
+      expect(params.success_url).toBe("https://the120.test/start/arrival?child=child-1");
+      expect(params.cancel_url).toBe("https://the120.test/dashboard?deposit=cancelled");
+      expect(params.success_url).not.toContain("deposit=success");
+    }
   });
 });
 

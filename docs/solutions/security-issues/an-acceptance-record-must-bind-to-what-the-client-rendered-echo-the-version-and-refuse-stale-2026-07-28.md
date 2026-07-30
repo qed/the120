@@ -49,3 +49,30 @@ Any flow where the server records "the user agreed to X" by reading its
 own current X: terms checkboxes, consent banners, pricing confirmations.
 If the client doesn't prove which revision it rendered, a deploy turns
 every open tab into a forged agreement to the new revision.
+
+## Second failure mode (2026-07-30): a boolean with no surface behind it
+
+The regression class this lesson predicts arrived: a refactor moved the policy
+"to checkout" by deleting the dashboard checkbox and text — but the client kept
+sending `policyAccepted: true` as a hardcoded literal, and nothing at checkout
+rendered anything. The server's `policyAccepted !== true` guard became a
+tautology, and the acceptance row recorded consent no user ever gave. The
+version echo survived intact and proved nothing, because the version it echoed
+was never rendered anywhere.
+
+Two rules fall out:
+
+- **When an acceptance surface moves, the collection moves with it in the same
+  commit** — deleting the surface while keeping the boolean fabricates the
+  record. The fix here: Stripe `consent_collection.terms_of_service: "required"`
+  + `custom_text.terms_of_service_acceptance.message` carrying the full policy
+  text (671 chars, under Stripe's 1200 limit — length is test-pinned so an
+  over-limit text fails rather than being condensed), a loud non-bricking
+  degrade to rendered-text-only when the account's ToS URL is unconfigured,
+  the client sending only `policyVersion`, and the webhook persisting
+  `session.consent` as the real acceptance evidence.
+- **Never test an acceptance with a string match on the boolean.** The old test
+  asserted the literal `policyAccepted: true` existed in the source — which
+  passes identically for a real gated tick and a fabricated constant. Pin the
+  rendering surface and the gesture structurally (session params carry the
+  text; the tick gates payment; the client has no unconditional literal).

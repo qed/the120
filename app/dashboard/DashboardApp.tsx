@@ -105,11 +105,16 @@ export default function DashboardApp({
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // The version this bundle RENDERED, echoed so the server can refuse
-        // a stale tab: without it, an acceptance clicked against old text
-        // would be stamped with whatever version is live at POST time — a
-        // false consent record (U1 review, adversarial).
-        body: JSON.stringify({ childId, policyAccepted: true, policyVersion: REFUND_POLICY.version }),
+        // The version this bundle will PRESENT at checkout (the policy
+        // renders on the Stripe-hosted page, P0 2026-07-30), echoed so the
+        // server can refuse a stale tab: without it, a checkout opened
+        // against old text would be stamped with whatever version is live
+        // at POST time — a false consent record (U1 review, adversarial).
+        // NO accepted-boolean in this body (a test pins its absence):
+        // nothing here renders the policy, so the client has no acceptance
+        // to claim — the acceptance happens on Stripe's page and Stripe
+        // records it.
+        body: JSON.stringify({ childId, policyVersion: REFUND_POLICY.version }),
       });
       const body = await res.json();
       if (res.status === 409 && body.stalePolicy) {

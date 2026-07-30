@@ -2,7 +2,8 @@
  * Deposit integrity — the pure decision surface (funnel U14; R50, R51,
  * R51a, R52, R52a, R52b). Every branch the two Stripe routes take lives
  * here, testable without Stripe or a database. Client-safe: no node
- * imports (the policy text renders inline at the point of payment).
+ * imports (the client imports REFUND_POLICY.version for the echo; the
+ * policy TEXT renders on the Stripe-hosted checkout page since 2026-07-30).
  */
 
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SITE_URL } from "@/app/lib/site";
@@ -30,16 +31,23 @@ export function resolveOrigin(originHeader: string | null): string {
 /**
  * Policy text CONFIRMED as written 2026-07-28 (Peter, decision batch);
  * the post-deadline-tuition wording remains flagged pending Ontario
- * counsel. Rendered IN FULL at the point of payment above an UNTICKED
- * checkbox — a checkbox containing only a link is explicitly rejected by
- * card issuers as dispute evidence. The accepted version/hash/timestamp/IP
- * persist on the attempt row — and, since 2026-07-28.2, that acceptance
- * record is ALSO the verifiable parental-consent artifact Google's
- * Education terms require BEFORE a student account may be provisioned
- * (the funnel-wrap plan's consent-precedes-minting decision): U15's
- * provisioning refuses to mint unless the fulfilled deposit carries an
- * acceptance at-or-after this version. Change the TEXT → bump the
- * VERSION, always.
+ * counsel. Rendered IN FULL on the Stripe-hosted checkout page (P0
+ * 2026-07-30) above a REQUIRED tick that gates payment
+ * (consent_collection + custom_text.terms_of_service_acceptance) — the
+ * full text, never a bare link, which card issuers reject as dispute
+ * evidence. If the Stripe account's ToS URL is unset the tick degrades
+ * (deposit-core) but the text STILL renders via custom_text.submit. The
+ * presented version/hash/timestamp/IP persist on the attempt row; the
+ * affirmative acceptance is Stripe's consent record on the session — and,
+ * since 2026-07-28.2, that record is ALSO the verifiable parental-consent
+ * artifact Google's Education terms require BEFORE a student account may
+ * be provisioned (the funnel-wrap plan's consent-precedes-minting
+ * decision): U15's provisioning refuses to mint unless the fulfilled
+ * deposit carries an acceptance at-or-after this version. Change the
+ * TEXT → bump the VERSION, always — and the text must stay within
+ * Stripe's 1200-char custom_text limit (pinned by test): the acceptance
+ * binds to the rendered text, so an over-limit text must FAIL, never be
+ * condensed.
  */
 export const REFUND_POLICY = {
   version: "2026-07-28.2",
@@ -254,8 +262,9 @@ export const GOAL_MAX_CHARS = 280;
  * U10 fidelity (audit drift 12-label): the final Next Steps CTA is the
  * handoff's "Hold {name}'s seat · $250 →": the seat is held for a NAMED
  * child, and the ask is stated on the button (R51's spirit). The routing
- * (to the dashboard reserve block, where the R51a policy text lives) is the
- * decided policy-at-payment shape and does not change with the label.
+ * (to the dashboard reserve block, whose checkout opens the Stripe-hosted
+ * page where the R51a policy text renders) is the decided
+ * policy-at-payment shape and does not change with the label.
  */
 export function holdSeatCta(firstName: string): string {
   const name = firstName.trim() || "your builder";

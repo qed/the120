@@ -10,6 +10,7 @@ import "server-only";
  */
 
 import { createHash } from "node:crypto";
+import type Stripe from "stripe";
 import {
   DEPOSIT_AMOUNT_CENTS,
   REFUND_POLICY,
@@ -245,7 +246,15 @@ export type AttemptDeps = {
 };
 
 /** The persisted attempt: the idempotency key's anchor AND the R51a
- *  acceptance record, in one insert that happens BEFORE the Stripe call. */
+ *  PRESENTATION record, in one insert that happens BEFORE the Stripe call.
+ *
+ *  Semantics since 2026-07-30 (the consent-collection P0): the row records
+ *  what checkout WILL render — version, hash of the exact text, timestamp
+ *  (row default), IP — not that anyone accepted it. The affirmative
+ *  acceptance evidence is Stripe's own consent record on the Checkout
+ *  session (`session.consent.terms_of_service === "accepted"`), reachable
+ *  through this row's `stripe_session_id`. The version echo in the route
+ *  still binds the record to what the client's bundle will present. */
 export async function recordCheckoutAttempt(
   deps: AttemptDeps,
   input: { parentId: string; childId: string; acceptedIp: string }
@@ -259,4 +268,162 @@ export async function recordCheckoutAttempt(
   });
   if (!attemptId) return null;
   return { attemptId, idempotencyKey: `deposit-attempt:${attemptId}` };
+}
+
+/* ─────────────── consent at checkout (P0 2026-07-30) ─────────────── */
+
+/**
+ * Commit 6fa1f8f removed the dashboard's inline policy+checkbox but left
+ * the client POSTing a hardcoded `policyAccepted: true` — a fabricated
+ * acceptance with NO surface rendering the policy. Peter's ruling: the
+ * policy renders and is accepted ON the Stripe-hosted checkout page.
+ *
+ * Two modes, built here so tests can pin the exact session params without
+ * a Stripe call:
+ *
+ * - "consent_tick" (the intended shape): `consent_collection.
+ *   terms_of_service: "required"` puts a REQUIRED tick on the hosted page
+ *   that gates payment, and `custom_text.terms_of_service_acceptance.
+ *   message` replaces Stripe's default agreement line with OUR full policy
+ *   text VERBATIM (671 chars, under Stripe's 1200-char limit — pinned by
+ *   test; the acceptance must bind to the rendered text, so a text that
+ *   outgrows the limit must fail the pin, never be silently condensed).
+ *
+ * - "text_only" (the degraded shape): `terms_of_service: "required"`
+ *   fails session creation when the Stripe account has no Terms-of-Service
+ *   URL configured (Dashboard → Settings → Business → Public details) — a
+ *   setting we cannot verify from code. Checkout must never brick on it:
+ *   the policy still renders in full via `custom_text.submit.message`
+ *   (rendering survives; only the dedicated tick degrades — paying is
+ *   still the affirmative act, with the policy on screen above the button).
+ *
+ * The two modes use DIFFERENT idempotency keys (`:notos` suffix): Stripe
+ * stores the first result — including the error — under a key and refuses
+ * the same key with different params, so the degraded retry must not reuse
+ * the consent-mode key. Both keys stay child-scoped, so the double-click /
+ * second-device dedupe (the R52b lesson) holds within each mode.
+ */
+export type CheckoutSessionInput = {
+  childId: string;
+  parentId: string;
+  customerEmail: string | null | undefined;
+  childFirstName: string;
+  priceId: string;
+  /** Already validated by resolveOrigin — never the raw Origin header. */
+  origin: string;
+};
+
+export type CheckoutConsentMode = "consent_tick" | "text_only";
+
+export function buildCheckoutSessionParams(
+  input: CheckoutSessionInput,
+  mode: CheckoutConsentMode
+): { params: Stripe.Checkout.SessionCreateParams; idempotencyKey: string } {
+  const params: Stripe.Checkout.SessionCreateParams = {
+    mode: "payment",
+    line_items: [{ price: input.priceId, quantity: 1 }],
+    customer_email: input.customerEmail ?? undefined,
+    metadata: { child_id: input.childId, parent_id: input.parentId },
+    payment_intent_data: {
+      description: `The 120 — refundable seat deposit (${input.childFirstName || "child"})`,
+      metadata: { child_id: input.childId, parent_id: input.parentId },
+    },
+    // U7 (W13): success lands on the ARRIVAL page — without this the
+    // acceptance moment is unreachable. Cancel keeps the dashboard.
+    success_url: `${input.origin}/start/arrival?child=${encodeURIComponent(input.childId)}`,
+    cancel_url: `${input.origin}/dashboard?deposit=cancelled`,
+    // expires_at shortens the double-payment window from Stripe's 24h
+    // default to the minimum 30 minutes (R52b adversarial review).
+    expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    ...(mode === "consent_tick"
+      ? {
+          consent_collection: { terms_of_service: "required" as const },
+          custom_text: { terms_of_service_acceptance: { message: REFUND_POLICY.text } },
+        }
+      : {
+          custom_text: { submit: { message: REFUND_POLICY.text } },
+        }),
+  };
+  return {
+    params,
+    // CHILD-scoped with STABLE params (no attempt id in metadata — the
+    // attempt links to the session afterwards): a double-click replays the
+    // SAME open session instead of minting a second payable one.
+    idempotencyKey:
+      mode === "consent_tick" ? `deposit:${input.childId}` : `deposit:${input.childId}:notos`,
+  };
+}
+
+/**
+ * The specific failure that means "the Stripe account has no ToS URL
+ * configured" — pure shape-check so it is testable without the SDK's
+ * error classes. Stripe raises an invalid_request_error naming
+ * `consent_collection[terms_of_service]` / the missing terms-of-service
+ * URL. Anything else (auth, network, bad price id) must RETHROW — the
+ * degrade is only for the one setting we cannot verify from here.
+ */
+export function isMissingTosUrlError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { type?: unknown; message?: unknown; param?: unknown };
+  if (e.type !== "StripeInvalidRequestError") return false;
+  const msg = typeof e.message === "string" ? e.message : "";
+  const param = typeof e.param === "string" ? e.param : "";
+  return (
+    param.includes("consent_collection") ||
+    msg.includes("consent_collection") ||
+    (/terms of service/i.test(msg) && /url|dashboard|settings/i.test(msg))
+  );
+}
+
+/** Once-per-process latch: after the first missing-ToS-URL failure, later
+ *  checkouts in this process go straight to text_only instead of paying a
+ *  doomed round-trip per request. Resets on deploy/cold start — which is
+ *  exactly when Peter may have fixed the dashboard setting. */
+let tosTickDegradedThisProcess = false;
+
+/** Test-only reset for the process-level latch. */
+export function resetTosTickDegradeForTests(): void {
+  tosTickDegradedThisProcess = false;
+}
+
+export type CreateSessionDeps = {
+  createSession: (
+    params: Stripe.Checkout.SessionCreateParams,
+    opts: { idempotencyKey: string }
+  ) => Promise<{ id: string; url: string | null }>;
+};
+
+/**
+ * Create the Checkout session with the required consent tick, degrading
+ * ONCE per process to rendered-text-only if the Stripe account's ToS URL
+ * is missing. `consentTick: false` tells the caller the session carries no
+ * Stripe consent record (the webhook logs the same from `session.consent`).
+ *
+ * FOLLOW-UP for Peter (pending Stripe-login item): set the Terms-of-Service
+ * URL in the Stripe Dashboard (Settings → Business → Public details) so
+ * the required tick stops degrading. The loud log below is the signal.
+ */
+export async function createCheckoutSessionWithConsent(
+  deps: CreateSessionDeps,
+  input: CheckoutSessionInput
+): Promise<{ session: { id: string; url: string | null }; consentTick: boolean }> {
+  if (!tosTickDegradedThisProcess) {
+    const { params, idempotencyKey } = buildCheckoutSessionParams(input, "consent_tick");
+    try {
+      const session = await deps.createSession(params, { idempotencyKey });
+      return { session, consentTick: true };
+    } catch (err) {
+      if (!isMissingTosUrlError(err)) throw err;
+      tosTickDegradedThisProcess = true;
+      console.error(
+        "STRIPE TOS URL NOT CONFIGURED — consent tick degraded to rendered-text-only. " +
+          "The policy still renders on the hosted page (custom_text.submit) but Stripe " +
+          "records no terms_of_service consent. Peter: set the Terms-of-Service URL in " +
+          "the Stripe Dashboard (Settings → Business → Public details)."
+      );
+    }
+  }
+  const { params, idempotencyKey } = buildCheckoutSessionParams(input, "text_only");
+  const session = await deps.createSession(params, { idempotencyKey });
+  return { session, consentTick: false };
 }

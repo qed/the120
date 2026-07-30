@@ -122,6 +122,13 @@ export async function POST(req: Request) {
 
   const isSessionEvent = event.type.startsWith("checkout.session.");
   const session = isSessionEvent ? (event.data.object as Stripe.Checkout.Session) : null;
+  // P0 2026-07-30: Stripe's own consent record is the affirmative
+  // acceptance evidence (the attempt row records what checkout PRESENTED,
+  // not that anyone accepted it). "none" is the degraded rendered-text-only
+  // session (no ToS URL configured) — the policy still rendered; payment
+  // itself was the affirmative act.
+  const tosConsent: "accepted" | "none" =
+    session?.consent?.terms_of_service === "accepted" ? "accepted" : "none";
   const charge = event.type === "charge.refunded" ? (event.data.object as Stripe.Charge) : null;
 
   // charge.refunded fires for PARTIAL refunds too; `charge.refunded` (the
@@ -160,13 +167,32 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "DB write failed" }, { status: 500 });
   }
   if (outcome.kind === "ok" && outcome.fulfilled) {
+    // Consent persistence (P0 2026-07-30): neither deposit_attempts nor
+    // deposits has a column that fits Stripe's consent verdict (checked
+    // 2026-07-30 — no jsonb, every text column load-bearing), and a
+    // migration is deliberately NOT added here (Lane B holds the lock).
+    // FOLLOW-UP: Lane B migration adding e.g.
+    // `deposit_attempts.tos_consented_at timestamptz`. Until then the
+    // verdict rides (a) this log and (b) the c3_deposit event's jsonb
+    // properties below; the session id on the attempt/deposit rows is the
+    // retrievable Stripe-side evidence anchor either way
+    // (sessions.retrieve(id).consent).
+    if (tosConsent === "accepted") {
+      console.log(
+        `[stripe/webhook] ToS consent ACCEPTED on session ${outcome.fulfilled.sessionId} (Stripe consent record is the acceptance evidence)`
+      );
+    } else {
+      console.error(
+        `[stripe/webhook] deposit fulfilled WITHOUT a Stripe consent record — session ${outcome.fulfilled.sessionId} was a degraded rendered-text-only checkout (ToS URL unset?). Acceptance evidence is the rendered policy + payment itself.`
+      );
+    }
     // R56/R58: C3 — once per WRITTEN fulfilment, never per replay.
     // AWAITED: a serverless freeze after the 200 must not eat the
     // conversion the ads math divides by.
     await emitFunnelEvent(
       "c3_deposit",
       { childId: outcome.fulfilled.childId, parentId: outcome.fulfilled.parentId },
-      { session: outcome.fulfilled.sessionId }
+      { session: outcome.fulfilled.sessionId, tos_consent: tosConsent }
     );
   }
   // W6a: a cleared bank debit is honoured even past capacity, so the

@@ -209,10 +209,30 @@ export type MergedFlowFacts = {
 export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] {
   if (!facts.mergeFlagOn) return MINIAPP_STEPS;
   const list: MergedStep[] = [];
-  if (facts.applicantState !== null) list.push(...MINIAPP_STEPS, "seam");
-  list.push(...MERGED_FORM_STEPS);
+  if (facts.applicantState !== null) {
+    list.push(...MINIAPP_STEPS, "seam");
+    // 2026-07-30 (Peter): the door pick earlier in the flow IS the group
+    // choice — the group form step is SKIPPED for the build cohort. Legacy
+    // children (no build steps) keep it: it is their only group surface.
+    list.push(...MERGED_FORM_STEPS.filter((s) => s !== "group"));
+  } else {
+    list.push(...MERGED_FORM_STEPS);
+  }
   if (facts.nextStepsReachable) list.push(...MERGED_NEXT_STEPS);
   return list;
+}
+
+/**
+ * The step's "0N" chip for THIS child's walk (2026-07-30): numbered off the
+ * child's own form list, so a build-cohort walk (group skipped) reads
+ * 01/02/03/04 with no gap. A step outside the list (shouldn't render, but
+ * fail soft) falls back to its full-list position.
+ */
+export function formStepNumber(step: MergedFormStep, facts: MergedFlowFacts): string {
+  const formList = stepListForChild(facts).filter(isFormStep);
+  const i = formList.indexOf(step);
+  const n = (i === -1 ? MERGED_FORM_STEPS.indexOf(step) : i) + 1;
+  return String(n).padStart(2, "0");
 }
 
 /* ─────────────────────────────── the landing rule (R5) ─────────────────────────────── */
@@ -242,6 +262,24 @@ export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] 
  * Dark flag → the existing mini-app landing, untouched.
  */
 export function mergedInitialStep(facts: MergedFlowFacts): MergedStep {
+  return clampToChildList(mergedInitialStepRaw(facts), facts);
+}
+
+/** A fact-derived landing the child's list lacks (e.g. `group` on a build
+ *  cohort whose walk skips it, 2026-07-30) resolves to the NEXT in-list
+ *  step in the full walk order — never a screen the child shouldn't see. */
+function clampToChildList(step: MergedStep, facts: MergedFlowFacts): MergedStep {
+  if (!facts.mergeFlagOn) return step;
+  const list = stepListForChild(facts) as readonly string[];
+  if (list.includes(step)) return step;
+  const i = ALL_MERGED_STEPS.indexOf(step);
+  for (let j = i + 1; j < ALL_MERGED_STEPS.length; j++) {
+    if (list.includes(ALL_MERGED_STEPS[j])) return ALL_MERGED_STEPS[j];
+  }
+  return FIRST_FORM_STEP;
+}
+
+function mergedInitialStepRaw(facts: MergedFlowFacts): MergedStep {
   if (!facts.mergeFlagOn) return initialStepForFacts(facts);
   // The RESUME landing is one step BACK from the next-new step (Peter,
   // 2026-07-30): the parent re-lands on the LAST screen they completed —

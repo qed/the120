@@ -123,11 +123,18 @@ describe("assembly audit — the swapped composites, one pinned fact each", () =
   });
 
   it("the full gated walk assembles build + seam + form + next-steps, in order, under the LIVE flag", () => {
+    // 2026-07-30: the build cohort's walk SKIPS the group form step — the
+    // door pick earlier in the flow is the group choice.
     expect([
       ...stepListForChild(
         liveFacts({ applicantState: "offered", nextStepsReachable: true })
       ),
-    ]).toEqual([...MINIAPP_STEPS, "seam", ...MERGED_FORM_STEPS, ...MERGED_NEXT_STEPS]);
+    ]).toEqual([
+      ...MINIAPP_STEPS,
+      "seam",
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
+      ...MERGED_NEXT_STEPS,
+    ]);
   });
 
   it("the seam sits between reveal and basics for the build cohort — and nowhere in a legacy walk", () => {

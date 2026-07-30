@@ -197,18 +197,23 @@ describe("stepListForChild", () => {
     ).toBe(MINIAPP_STEPS);
   });
 
-  it("funnel child, gate closed: build + seam + form, no next-steps", () => {
+  it("funnel child, gate closed: build + seam + form (group SKIPPED, 2026-07-30), no next-steps", () => {
     expect(stepListForChild(facts({ applicantState: "project_created" }))).toEqual([
       ...MINIAPP_STEPS,
       "seam",
-      ...MERGED_FORM_STEPS,
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
     ]);
   });
 
-  it("funnel child, gate open: next-steps append after review", () => {
+  it("funnel child, gate open: next-steps append after review (group still skipped)", () => {
     expect(
       stepListForChild(facts({ applicantState: "offered", nextStepsReachable: true }))
-    ).toEqual([...MINIAPP_STEPS, "seam", ...MERGED_FORM_STEPS, ...MERGED_NEXT_STEPS]);
+    ).toEqual([
+      ...MINIAPP_STEPS,
+      "seam",
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
+      ...MERGED_NEXT_STEPS,
+    ]);
   });
 
   it("legacy child: form steps only — build steps simply absent, not greyed", () => {
@@ -254,6 +259,8 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
       lands: "seam",
     },
     {
+      // One back from academics is BASICS for the build cohort (2026-07-30:
+      // their walk skips the group step — the door already chose it).
       name: "mid-form (project_created + progress) → last completed form step (one back)",
       over: {
         applicantState: "project_created",
@@ -261,7 +268,7 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
         formProgress: true,
         firstIncompleteFormStep: "academics",
       },
-      lands: "group",
+      lands: "basics",
     },
     {
       name: "offered → FIRST form step, even mid-form (R3: review from the top)",

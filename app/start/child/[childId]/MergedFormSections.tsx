@@ -51,6 +51,7 @@ import {
 import { REVIEW_SCREEN, WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
 import {
   checklistChildForFields,
+  formStepNumber,
   mergedLockVerdict,
   mergedStepNeighbour,
   stepEditableInWalk,
@@ -73,7 +74,7 @@ import {
   childEmailPatch,
   stepForChecklistLabel,
 } from "@/app/dashboard/wizard-rules";
-import { BOOKING_URL, groupBySlug, groups } from "@/app/lib/site";
+import { groupBySlug, groups } from "@/app/lib/site";
 
 /* ─────────────── verdict copy (the existing shell patterns) ─────────────── */
 
@@ -377,6 +378,7 @@ export function MergedFormSection(props: MergedFormSectionProps) {
     case "academics":
       return (
         <AcademicsSection
+          n={formStepNumber(step, facts)}
           fields={fields}
           frozen={frozen}
           saveFrozen={saveFrozen}
@@ -389,6 +391,7 @@ export function MergedFormSection(props: MergedFormSectionProps) {
     case "project":
       return (
         <ProjectSection
+          n={formStepNumber(step, facts)}
           fields={fields}
           frozen={frozen}
           saveFrozen={saveFrozen}
@@ -401,6 +404,7 @@ export function MergedFormSection(props: MergedFormSectionProps) {
     case "review":
       return (
         <ReviewSection
+          n={formStepNumber(step, facts)}
           fields={fields}
           facts={facts}
           pending={pending}
@@ -739,20 +743,8 @@ function GroupSection({
         </p>
       )}
 
-      {/* Undecided affordance (R17) */}
-      <div className="mt-5 rounded-xl border border-dashed border-line-strong bg-paper-2 p-4">
-        <p className="font-display text-sm font-bold text-ink">Not sure which group?</p>
-        <p className="mt-1 text-sm leading-6 text-ink-soft">
-          Most families pick where the kid&rsquo;s energy already lives — our staff confirm the
-          fit at the review call, and the choice stays editable until a deposit is paid.
-        </p>
-        <a
-          href={BOOKING_URL}
-          className={`mt-2 inline-block rounded font-mono text-xs uppercase tracking-[0.12em] text-blue hover:text-red ${focusRing}`}
-        >
-          Book a 20-minute call →
-        </a>
-      </div>
+      {/* 2026-07-30: the "Not sure which group?" / book-a-call card is
+          removed (item 28). */}
 
       {notice && (
         <p role="alert" className="mt-4 text-sm text-red">
@@ -785,6 +777,7 @@ const isListedSubject = (s: string) =>
   ACADEMIC_SUBJECTS.includes(s as (typeof ACADEMIC_SUBJECTS)[number]);
 
 function AcademicsSection({
+  n,
   fields,
   frozen,
   saveFrozen,
@@ -793,6 +786,8 @@ function AcademicsSection({
   nextLabel,
   onNext,
 }: {
+  /** The per-child "0N" chip (2026-07-30: the build cohort skips group). */
+  n: string;
   fields: MergedFlowFields;
   frozen: boolean;
   saveFrozen: boolean;
@@ -820,7 +815,7 @@ function AcademicsSection({
 
   return (
     <StepCard
-      n="03"
+      n={n}
       title="Academics"
       hint="We help you: Choose a subject (or 2) and a project the next year."
     >
@@ -1006,6 +1001,7 @@ const GROUP_PROJECT_EXAMPLES: Record<string, string[]> = {
 };
 
 function ProjectSection({
+  n,
   fields,
   frozen,
   saveFrozen,
@@ -1014,6 +1010,8 @@ function ProjectSection({
   nextLabel,
   onNext,
 }: {
+  /** The per-child "0N" chip (2026-07-30: the build cohort skips group). */
+  n: string;
   fields: MergedFlowFields;
   frozen: boolean;
   saveFrozen: boolean;
@@ -1031,7 +1029,7 @@ function ProjectSection({
 
   return (
     <StepCard
-      n="04"
+      n={n}
       title="Project & interests"
       hint={
         scholars
@@ -1118,6 +1116,7 @@ function formStepForLabel(label: string): MergedFormStep {
 }
 
 function ReviewSection({
+  n,
   fields,
   facts,
   pending,
@@ -1125,6 +1124,8 @@ function ReviewSection({
   onJump,
   onSubmit,
 }: {
+  /** The per-child "0N" chip (2026-07-30: the build cohort skips group). */
+  n: string;
   fields: MergedFlowFields;
   facts: MergedFlowFacts;
   pending: boolean;
@@ -1148,7 +1149,7 @@ function ReviewSection({
     // the furthest build step instead of a submit button.
     return (
       <StepCard
-        n="05"
+        n={n}
         title="Review & submit"
         hint="The application submits once your child's build is finished."
       >
@@ -1224,7 +1225,7 @@ function ReviewSection({
     switch (terminal) {
       case "under_review":
         return (
-          <StepCard n="05" title={REVIEW_SCREEN.title} hint={REVIEW_SCREEN.kicker}>
+          <StepCard n={n} title={REVIEW_SCREEN.title} hint={REVIEW_SCREEN.kicker}>
             <p className="text-sm leading-6 text-ink-soft">{REVIEW_SCREEN.intro}</p>
             <div className="mt-5">{summary}</div>
             {dashboardControl}
@@ -1232,7 +1233,7 @@ function ReviewSection({
         );
       case "waitlisted":
         return (
-          <StepCard n="05" title={WAITLIST_SCREEN.title} hint={WAITLIST_SCREEN.kicker}>
+          <StepCard n={n} title={WAITLIST_SCREEN.title} hint={WAITLIST_SCREEN.kicker}>
             <p className="text-sm leading-6 text-ink-soft">{WAITLIST_SCREEN.intro}</p>
             <p className="mt-2 text-sm leading-6 text-ink-soft">{WAITLIST_SCREEN.footer}</p>
             <div className="mt-5">{summary}</div>
@@ -1242,7 +1243,7 @@ function ReviewSection({
       case "next_steps":
         return (
           <StepCard
-            n="05"
+            n={n}
             title="Review & submit"
             hint="This application is in. Your next steps are ahead."
           >
@@ -1266,7 +1267,7 @@ function ReviewSection({
 
   return (
     <StepCard
-      n="05"
+      n={n}
       title="Review & submit"
       hint="Everything below must be checked off before the application can go in."
     >

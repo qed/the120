@@ -7,14 +7,17 @@ import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL, groups } f
 import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
 import {
   type Child,
+  PATH_TASK_TOTAL,
   bandNote,
   canReserveSeat,
   cardVerdict,
   childName,
   completeness,
   hasPaidDeposit,
+  pathBarWidthPct,
   reserveRefusalMessage,
   statusMeta,
+  sumVerifiedTaskCounts,
 } from "./data";
 import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
 import { useDashboard } from "./store";
@@ -60,9 +63,15 @@ const cardSkin = (grade: number | ""): "trail" | "hq" =>
 export default function DashboardApp({
   seatsRemaining = SEATS_REMAINING,
   register = "application",
+  verifiedTaskCounts = null,
 }: {
   seatsRemaining?: number;
   register?: DashboardRegister;
+  /** Child id → REAL verified fp task count, loaded server-side by the gate
+   *  (dashboard-gate-core) fresh on each page load. Absent key = no fp
+   *  profile yet = a true 0; null = counts read failed OR application
+   *  register — both render the 0 floor (the dashboard always renders). */
+  verifiedTaskCounts?: Record<string, number> | null;
 }) {
   const { ready, session, parent, children, deposits, composedChildIds, addChild, refreshDeposits, signOut } =
     useDashboard();
@@ -77,9 +86,6 @@ export default function DashboardApp({
     return result === "success" || result === "cancelled" ? result : null;
   });
   const [reservingId, setReservingId] = useState<string | null>(null);
-  // R51a: the ids whose policy checkbox is TICKED — unticked by default,
-  // per child, never remembered across loads.
-  const [policyAcceptedIds, setPolicyAcceptedIds] = useState<Set<string>>(new Set());
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -145,10 +151,9 @@ export default function DashboardApp({
   // paid one exists (the gate + paid banner would then disagree with the API).
   const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
 
-  // The reserve entry (R50/R51a) — next-steps link, FULL policy text above an
-  // unticked checkbox, then the checkout button. ONE block shared by the
-  // legacy card and the funnel `offered`/re-reserve cards so the dispute-
-  // evidence posture (inline policy + explicit tick) can never fork.
+  // The reserve entry (R50) — next-steps link, then the checkout button.
+  // ONE block shared by the legacy card and the funnel `offered`/re-reserve
+  // cards. The refund policy renders at checkout, not here (2026-07-30).
   const renderReserveCta = (c: Child) => (
     <>
       {/* R50: the three swipes are the offer's front door. */}
@@ -158,32 +163,9 @@ export default function DashboardApp({
       >
         See your next steps →
       </a>
-      {/* R51a: the FULL policy text inline at the point
-          of payment, above an UNTICKED checkbox — a
-          checkbox holding only a link is rejected by
-          card issuers as dispute evidence. */}
-      <p className="mb-2 rounded-lg border border-line bg-paper-2 p-3 text-[11px] leading-4 text-ink-soft">
-        {REFUND_POLICY.text}
-      </p>
-      <label className="mb-3 flex items-start gap-2 text-[12px] leading-4 text-ink">
-        <input
-          type="checkbox"
-          checked={policyAcceptedIds.has(c.id)}
-          onChange={(e) =>
-            setPolicyAcceptedIds((prev) => {
-              const next = new Set(prev);
-              if (e.target.checked) next.add(c.id);
-              else next.delete(c.id);
-              return next;
-            })
-          }
-          className="mt-0.5 h-4 w-4 accent-blue"
-        />
-        I have read and accept the refund policy above.
-      </label>
       <button
         onClick={() => reserveSeat(c.id)}
-        disabled={reservingId === c.id || !policyAcceptedIds.has(c.id)}
+        disabled={reservingId === c.id}
         className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
       >
         {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
@@ -271,10 +253,11 @@ export default function DashboardApp({
         </div>
       )}
 
-      {/* Hero (screen 16): welcome + the family verified-count stat box.
-          The count renders the KNOWN FLOOR (0): per-task verification lives
-          in the First Profit app's path_* tables, keyed by student profile —
-          not reachable through this store's parent-session reads. */}
+      {/* Hero (screen 16): welcome + the family verified-count stat box —
+          the REAL sum of the children's verified fp tasks, loaded server-side
+          by the gate on each page load (freshness = per page load; no client
+          poll). A failed counts read arrives as null and renders the 0 floor
+          — the dashboard always renders. */}
       <div className="mt-4 flex flex-col gap-6 rounded-2xl border border-hq-border bg-white p-7 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] text-phase-sell-ink">
@@ -289,7 +272,12 @@ export default function DashboardApp({
           </p>
         </div>
         <div className="flex-none rounded-xl bg-hq-sunken px-6 py-4 text-center">
-          <p className="font-path-mono text-3xl font-semibold leading-none text-verified">0</p>
+          <p className="font-path-mono text-3xl font-semibold leading-none text-verified">
+            {sumVerifiedTaskCounts(
+              verifiedTaskCounts,
+              children.map((x) => x.id)
+            )}
+          </p>
           <p className="mt-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
             Tasks verified · all children
           </p>
@@ -358,19 +346,24 @@ export default function DashboardApp({
               </div>
             );
             if (arrived) {
-              // POST-arrival: THE PATH progress bar at the KNOWN FLOOR
-              // (0/125 — see the hero note), rung chip, KEEP BUILDING → /fp.
+              // POST-arrival: THE PATH progress bar with the child's REAL
+              // verified count (see the hero note: per-page-load freshness;
+              // absent/null → the honest 0 floor), rung chip, KEEP BUILDING
+              // → /fp. The total is the fp manifest's canonical task count.
+              const verified = verifiedTaskCounts?.[c.id] ?? 0;
               return (
                 <div key={c.id} className="rounded-2xl border border-hq-border bg-white p-5">
                   {header}
                   <div className="mt-4 flex items-center justify-between gap-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
                     <span>The Path</span>
-                    <span>0 / 125 verified</span>
+                    <span>
+                      {verified} / {PATH_TASK_TOTAL} verified
+                    </span>
                   </div>
                   <div className="mt-1.5 h-[3px] rounded-full bg-hq-sunken">
                     <div
                       className={`h-full rounded-full ${PHASE_BAR_CLASSES[skin]}`}
-                      style={{ width: "2%" }}
+                      style={{ width: `${pathBarWidthPct(verified, PATH_TASK_TOTAL)}%` }}
                     />
                   </div>
                   <div className="my-4 border-t border-hq-border" />
@@ -767,31 +760,6 @@ export default function DashboardApp({
               })}
             </div>
           )}
-
-          {/* The Gauntlet (moved off the marketing nav 2026-07-13): the
-              family's game — progress and leaderboard identity save to this
-              account. Points at the beta door while the public page is
-              Coming Soon (2026-07-18) — signed-in families are insiders. */}
-          <Link
-            href="/gauntlet/beta"
-            className="mt-8 flex flex-col gap-4 rounded-3xl border border-line bg-blue p-8 transition-shadow hover:shadow-[0_20px_50px_-30px_rgba(3,0,237,0.7)] sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div>
-              <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-white/70">
-                For the kids
-              </p>
-              <p className="mt-2 font-display text-2xl font-bold tracking-tight text-white">
-                The Gauntlet
-              </p>
-              <p className="mt-2 max-w-md text-sm leading-6 text-white/80">
-                Boss-battle FastMath. Progress and leaderboard handle save to this account —
-                cross-device, always free.
-              </p>
-            </div>
-            <span className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full bg-red px-6 font-mono text-xs uppercase tracking-[0.12em] text-white">
-              Enter the Gauntlet →
-            </span>
-          </Link>
 
           <p className="mt-10 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
             Saved as you go — every Next click saves your progress. PIPEDA: children&rsquo;s info is collected only for

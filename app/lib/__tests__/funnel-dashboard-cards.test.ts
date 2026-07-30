@@ -17,6 +17,7 @@ import {
   reserveRefusalMessage,
   type CardVerdict,
 } from "@/app/dashboard/data";
+import { childNextScreen } from "@/app/lib/funnel/session-rules";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
@@ -198,6 +199,63 @@ describe("cardVerdict — one verdict per ladder state", () => {
       expect(!!v.secondaryReviewLink, state).toBe(expected);
       if (v.secondaryReviewLink) {
         expect(v.secondaryReviewLink.href).toBe("/start/child/kid-1");
+      }
+    }
+  });
+});
+
+describe("cardVerdict × childNextScreen — the card's CTA agrees with the shared mapping (R3)", () => {
+  it("sweeps every (state × deposit-shape × project) cell", () => {
+    // cardVerdict is a presentation layer over childNextScreen; this is the
+    // drift tripwire. The paid-deposit bridge is the ONE sanctioned
+    // divergence (no writer advances applicant_state to 'deposited' yet, so
+    // the mapping has no paid-at-offered cell), which is why the actionable
+    // assertions below are conditioned on the CTA the card actually chose.
+    const states: (ApplicantState | null)[] = [null, ...APPLICANT_STATES];
+    const depositShapes = [none, paid, refunded, pending, [...paid, ...refunded]];
+    for (const state of states) {
+      for (const deposits of depositShapes) {
+        for (const composed of [true, false]) {
+          const liveDeposit = deposits.some((d) => d.status === "paid");
+          const next = childNextScreen({
+            applicantState: state,
+            liveDeposit,
+            hasComposedProject: composed,
+          });
+          const v = cardVerdict(child(state), deposits, composed);
+          const label = `${state} / ${JSON.stringify(deposits)} / composed=${composed}`;
+
+          if (state === null) {
+            // The legacy card and the legacy verdict are the same cell.
+            expect(v, label).toEqual({ kind: "legacy" });
+            expect(next, label).toEqual({ surface: "dashboard", intent: "legacy" });
+            continue;
+          }
+          const cta = funnel(v).primaryCta;
+
+          // A mini-app CTA only when the mapping says mini_app.
+          if (cta?.kind === "start" || cta?.kind === "compose") {
+            expect(next.surface, label).toBe("mini_app");
+          }
+          // The dossier opener only on the dashboard/dossier cell.
+          if (cta?.kind === "continue_dossier") {
+            expect(next, label).toEqual({ surface: "dashboard", intent: "dossier" });
+          }
+          // A reserve CTA only when the mapping says next_steps.
+          if (cta?.kind === "reserve") {
+            expect(next.surface, label).toBe("next_steps");
+          }
+          // The arrival link rides the reserved badge EXACTLY when the
+          // mapping's surface is arrival (live-paid `deposited`).
+          expect(cta?.kind === "reserved" && cta.href === "/start/arrival", label).toBe(
+            next.surface === "arrival"
+          );
+          // A status_only cell with no live deposit renders nothing
+          // actionable (submitted / in_review / waitlisted).
+          if (next.surface === "status_only" && !liveDeposit) {
+            expect(cta, label).toBeUndefined();
+          }
+        }
       }
     }
   });

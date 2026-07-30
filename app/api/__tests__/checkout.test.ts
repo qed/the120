@@ -84,13 +84,12 @@ describe("R51a — the policy record", () => {
     expect(policyHash(REFUND_POLICY.text)).not.toBe(policyHash(REFUND_POLICY.text + " "));
   });
 
-  it("the route refuses a request without policyAccepted; the dashboard renders the FULL text above an unticked checkbox", () => {
+  it("the route refuses a request without policyAccepted; the dashboard sends it with the pinned version", () => {
     const route = read("app/api/checkout/route.ts");
     expect(route).toContain("policyAccepted !== true");
     const ui = read("app/dashboard/DashboardApp.tsx");
-    expect(ui).toContain("REFUND_POLICY.text");
-    expect(ui).toContain('type="checkbox"');
     expect(ui).toContain("policyAccepted: true");
+    expect(ui).toContain("REFUND_POLICY.version");
   });
 
   it("every factual claim in the policy is registered for Peter and present in the text", () => {

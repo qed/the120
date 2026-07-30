@@ -5,11 +5,11 @@
  */
 
 import {
-  APPLICANT_STATES,
   applicantStateAllowsReserve,
   type ApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
 import { childNextScreen } from "@/app/lib/funnel/session-rules";
+import { MANIFEST_2026_27 } from "@/app/fp/content/manifest";
 
 /**
  * Every value `children.status` can actually hold — which since W7
@@ -222,46 +222,65 @@ export type CardVerdict =
  * paid row exists — `deposit_fulfil` flips refunded rows to 'refunded'
  * atomically, so `status === "paid"` IS the live-pair fact on this wire).
  *
- * Precedence order: `enrolled` > `waitlisted` > paid-deposit bridge > state
- * switch. `waitlisted` outranks a live paid deposit: the waitlist move
- * (`offered → waitlisted`) is legal without touching deposit rows, and the
- * F7 invariant says waitlisted never yields a payment CTA — so a waitlisted
- * child always renders the WAITLISTED verdict, paid or not. For every other
- * rung a live paid deposit wins — mirroring the legacy card's "paid always
- * wins". This is also the writers bridge: no code path writes
- * `applicant_state = 'deposited'` yet (the ladder's writers stop at the
- * status-sync trigger, which maps no status onto it), so a paid funnel
- * family really sits at `offered` + paid — and must see SEAT RESERVED, not a
- * re-offer (see the fixture-states learning; asserted in
- * funnel-dashboard-cards.test.ts).
+ * `childNextScreen` is consulted exactly ONCE, and everything below keys off
+ * the returned `{surface, intent}` pair — never a second switch on the raw
+ * state (the parallel-mapping drift R3 forbids). Verdict precedence:
+ * `enrolled` > `waitlisted` > paid-deposit bridge > verdict switch, realized
+ * as two pre-guards the shared mapping cannot absorb:
+ *
+ *  - ENROLLED outranks everything, including a live paid deposit — the
+ *    `dashboard`/`enrolled` cell returns before the bridge can claim it.
+ *  - The paid-deposit BRIDGE: no code path writes `applicant_state =
+ *    'deposited'` yet (the ladder's writers stop at the status-sync trigger,
+ *    which maps no status onto it), so a paid funnel family really sits at
+ *    `offered` + paid — and `childNextScreen({offered, liveDeposit: true})`
+ *    still answers `next_steps`/`reserve` (the mapping has no
+ *    paid-at-offered cell; asserted in funnel-dashboard-cards.test.ts). The
+ *    bridge therefore renders SEAT RESERVED for ANY live-paid state EXCEPT
+ *    the `waitlisted` intent: the waitlist move (`offered → waitlisted`) is
+ *    legal without touching deposit rows, and the F7 invariant says
+ *    waitlisted never yields a payment CTA — so a waitlisted child always
+ *    renders the WAITLISTED verdict, paid or not. The arrival `href` rides
+ *    the bridge exactly when the mapping's surface is `arrival` (a live-paid
+ *    `deposited` row).
  */
 export function cardVerdict(
   child: Pick<Child, "id" | "status" | "applicantState">,
   deposits: { status: string }[],
   hasComposedProject: boolean
 ): CardVerdict {
-  const state = child.applicantState;
-  if (state === null) return { kind: "legacy" };
+  const liveDeposit = hasPaidDeposit(deposits);
+  const next = childNextScreen({
+    applicantState: child.applicantState,
+    liveDeposit,
+    hasComposedProject,
+  });
+
+  // NULL applicant_state: render today's card EXACTLY as-is.
+  if (next.surface === "dashboard" && next.intent === "legacy") {
+    return { kind: "legacy" };
+  }
 
   const miniAppHref = `/start/child/${child.id}`;
+  // `submitted`-and-later, read off the verdict: the pre-submission cells are
+  // exactly the mini_app surfaces (`added`, compose owed) and the `dossier`
+  // intent (`project_created` with a project); every other cell is at or past
+  // submission and carries the R13 review-walk link.
   const submittedPlus =
-    APPLICANT_STATES.indexOf(state) >= APPLICANT_STATES.indexOf("submitted");
+    next.surface !== "mini_app" &&
+    !(next.surface === "dashboard" && next.intent === "dossier");
   const secondaryReviewLink = submittedPlus
     ? { label: "Review application", href: miniAppHref }
     : undefined;
 
-  if (state === "enrolled") {
+  // Pre-guard 1: ENROLLED (see the precedence docblock).
+  if (next.surface === "dashboard" && next.intent === "enrolled") {
     return { kind: "funnel", statusLine: "ENROLLED", tone: "red", secondaryReviewLink };
   }
 
-  // `waitlisted` takes precedence over the paid shortcut below: the state
-  // falls through to the switch, whose waitlisted arm never renders a CTA.
-  if (state !== "waitlisted" && hasPaidDeposit(deposits)) {
-    const next = childNextScreen({
-      applicantState: state,
-      liveDeposit: true,
-      hasComposedProject,
-    });
+  // Pre-guard 2: the paid-deposit bridge — every live-paid cell except the
+  // waitlisted intent (F7: the WAITLISTED verdict wins, paid or not).
+  if (liveDeposit && next.intent !== "waitlisted") {
     return {
       kind: "funnel",
       statusLine: "SEAT RESERVED",
@@ -283,76 +302,94 @@ export function cardVerdict(
     !pendingDeposit &&
     canReserveSeatForChild({
       status: child.status,
-      applicantState: state,
+      applicantState: child.applicantState,
       deposits,
     })
       ? ({ kind: "reserve", label: "Reserve seat · $250" } as const)
       : undefined;
   const pendingNote = pendingDeposit ? PENDING_DEPOSIT_NOTE : undefined;
 
-  switch (state) {
-    case "added":
-      return {
-        kind: "funnel",
-        statusLine: "PROJECT NOT STARTED",
-        tone: "red",
-        primaryCta: { kind: "start", label: "Start", href: miniAppHref },
-      };
-    case "project_created":
+  switch (next.surface) {
+    case "mini_app":
+      // `resume` = `added`; `compose` = `project_created` whose composed
+      // project was invalidated (the re-compose obligation).
+      return next.intent === "resume"
+        ? {
+            kind: "funnel",
+            statusLine: "PROJECT NOT STARTED",
+            tone: "red",
+            primaryCta: { kind: "start", label: "Start", href: miniAppHref },
+          }
+        : {
+            kind: "funnel",
+            statusLine: "PROJECT CREATED",
+            tone: "red",
+            primaryCta: { kind: "compose", label: "Continue", href: miniAppHref },
+          };
+    case "dashboard":
+      // Only `dossier` reaches here — `legacy` and `enrolled` returned above.
       return {
         kind: "funnel",
         statusLine: "PROJECT CREATED",
         tone: "red",
-        primaryCta: hasComposedProject
-          ? { kind: "continue_dossier", label: "Continue" }
-          : { kind: "compose", label: "Continue", href: miniAppHref },
+        primaryCta: { kind: "continue_dossier", label: "Continue" },
       };
-    case "submitted":
+    case "status_only":
+      switch (next.intent) {
+        case "submitted":
+          return {
+            kind: "funnel",
+            statusLine: "SUBMITTED FOR REVIEW",
+            tone: "red",
+            secondaryReviewLink,
+          };
+        case "in_review":
+          return {
+            kind: "funnel",
+            statusLine: "UNDER REVIEW",
+            tone: "red",
+            secondaryReviewLink,
+          };
+        case "waitlisted":
+          // F7: never a payment CTA — checkout is closed for this family.
+          return {
+            kind: "funnel",
+            statusLine: "WAITLISTED",
+            tone: "red",
+            note: WAITLIST_CARD_NOTE,
+            secondaryReviewLink,
+          };
+        default: {
+          const exhaustive: never = next;
+          return exhaustive;
+        }
+      }
+    case "next_steps":
+      // `reserve` = `offered`; `re_reserve` = `deposited` with no live paid
+      // row (refunded: the seat was released and they may reserve again —
+      // never the arrival CTA, which would bounce off its no-live-deposit
+      // redirect forever).
       return {
         kind: "funnel",
-        statusLine: "SUBMITTED FOR REVIEW",
-        tone: "red",
-        secondaryReviewLink,
-      };
-    case "in_review":
-      return {
-        kind: "funnel",
-        statusLine: "UNDER REVIEW",
-        tone: "red",
-        secondaryReviewLink,
-      };
-    case "waitlisted":
-      // F7: never a payment CTA — checkout is closed for this family.
-      return {
-        kind: "funnel",
-        statusLine: "WAITLISTED",
-        tone: "red",
-        note: WAITLIST_CARD_NOTE,
-        secondaryReviewLink,
-      };
-    case "offered":
-      return {
-        kind: "funnel",
-        statusLine: "OFFERED A SEAT",
-        tone: "red",
-        note: pendingNote,
-        primaryCta: reserveCta,
-        secondaryReviewLink,
-      };
-    case "deposited":
-      // No live paid row at `deposited` = refunded: the seat was released
-      // and they may reserve again (re_reserve) — never the arrival CTA,
-      // which would bounce off its no-live-deposit redirect forever.
-      return {
-        kind: "funnel",
-        statusLine: "SEAT RELEASED",
+        statusLine: next.intent === "reserve" ? "OFFERED A SEAT" : "SEAT RELEASED",
         tone: "red",
         note: pendingNote,
         primaryCta: reserveCta,
+        secondaryReviewLink,
+      };
+    case "arrival":
+      // Unreachable: `arrival` exists only with a live deposit, which the
+      // bridge above already consumed — kept exhaustive with the bridge's own
+      // reserved-with-href shape rather than a throw.
+      return {
+        kind: "funnel",
+        statusLine: "SEAT RESERVED",
+        tone: "green",
+        primaryCta: { kind: "reserved", label: "Seat reserved ✓", href: "/start/arrival" },
         secondaryReviewLink,
       };
     default: {
-      const exhaustive: never = state;
+      const exhaustive: never = next;
       return exhaustive;
     }
   }
@@ -1001,4 +1038,43 @@ export function completeness(c: Child): number {
 export function childName(c: Child): string {
   const n = `${c.firstName} ${c.lastName}`.trim();
   return n || "New child";
+}
+
+/* ─────────────────────── the Path progress bars (screen 16) ─────────────────────── */
+
+/**
+ * The Path's task total for the screen-16 "n / 125" surfaces — the CANONICAL
+ * constant from the fp program manifest, never a fresh literal. T1 ships one
+ * program version; when a second manifest exists, per-child totals should come
+ * from each student's pinned version instead of this single constant.
+ */
+export const PATH_TASK_TOTAL = MANIFEST_2026_27.tasks;
+
+/**
+ * The phase-coloured bar width for a "n / total" Path bar, in percent. Honest
+ * floor: a real 0 keeps the 2% sliver the placeholder bar rendered — the track
+ * must read as a bar that has not moved, not as a missing element — and the
+ * width is clamped to 100 so a count that somehow exceeds the total cannot
+ * overflow the track.
+ */
+export function pathBarWidthPct(verified: number, total: number): number {
+  if (!(total > 0) || !Number.isFinite(verified) || verified <= 0) return 2;
+  return Math.max(2, Math.min(100, (verified / total) * 100));
+}
+
+/**
+ * The hero stat box's family total: the verified counts summed across the
+ * given children. Absent key = a child with no fp profile yet = a true 0;
+ * a null map (counts read failed, or not in the path register) sums to the
+ * 0 floor — the box renders either way.
+ */
+export function sumVerifiedTaskCounts(
+  counts: Record<string, number> | null,
+  childIds: readonly string[]
+): number {
+  if (!counts) return 0;
+  return childIds.reduce((sum, id) => {
+    const n = counts[id];
+    return sum + (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
 }

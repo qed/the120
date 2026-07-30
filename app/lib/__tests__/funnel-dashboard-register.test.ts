@@ -7,6 +7,10 @@ import {
   dashboardRegister,
   type DashboardGateChild,
 } from "@/app/lib/funnel/session-rules";
+import { PATH_TASK_TOTAL, pathBarWidthPct, sumVerifiedTaskCounts } from "@/app/dashboard/data";
+import { MANIFEST_2026_27 } from "@/app/fp/content/manifest";
+import { VERIFIED_TASK_STATE } from "@/app/fp/lib/progress-core";
+import { TASK_STATES } from "@/app/fp/lib/transition-table";
 
 /**
  * Reconnect U11 (R12, flip tier): the whole-dashboard register flip.
@@ -82,16 +86,27 @@ describe("dashboardRegister — the R12 flip fact", () => {
 
 /* ─────────────────── the server gate wiring ─────────────────── */
 
-describe("the dashboard gate loads the flip fact (page.tsx)", () => {
+describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx)", () => {
+  // The gate's data loading moved to the injectable core (P2 refactor); the
+  // select pin follows it, and the page keeps only cache() + the register.
+  const core = read("app/lib/funnel/dashboard-gate-core.ts");
   const page = read("app/dashboard/page.tsx");
 
   it("selects arrived_at with the other child columns — the ONE children read serves the flip", () => {
-    expect(page).toMatch(/select\("id, applicant_state, created_at, status, arrived_at"\)/);
+    expect(core).toMatch(/select\("id, applicant_state, created_at, status, arrived_at"\)/);
+  });
+
+  it("the page delegates loading to the core inside its cache() wrapper", () => {
+    expect(page).toMatch(/cache\(\(\) => loadDashboardGateFactsCore\(\)\)/);
   });
 
   it("computes the register through dashboardRegister and passes it to DashboardApp", () => {
     expect(page).toMatch(/dashboardRegister\(facts\.children\)/);
-    expect(page).toMatch(/<DashboardApp seatsRemaining=\{seatsRemaining\} register=\{register\} \/>/);
+    expect(page).toMatch(/register=\{register\}/);
+  });
+
+  it("passes the gate's verified counts straight through to DashboardApp", () => {
+    expect(page).toMatch(/verifiedTaskCounts=\{facts\.verifiedTaskCounts\}/);
   });
 });
 
@@ -255,10 +270,120 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
     expect(app).toMatch(/const arrived = c\.arrivedAt != null;/);
   });
 
-  it("application mode is byte-compatible: the legacy main still renders the seats box and Gauntlet", () => {
+  it("application mode still renders the seats box; the Gauntlet card is retired (2026-07-30)", () => {
     const appMain = app.slice(app.indexOf('<main className="mx-auto w-full max-w-5xl px-6 py-10">'));
     expect(appMain).toMatch(/of \{SEATS_TOTAL\} seats remain/);
-    expect(appMain).toMatch(/The Gauntlet/);
+    expect(appMain).not.toMatch(/The Gauntlet/);
+  });
+});
+
+/* ─────────────────── the real verified counts (follow-up #5) ─────────────────── */
+
+describe("the screen-16 bars carry REAL verified counts, not the 0 placeholder", () => {
+  const app = read("app/dashboard/DashboardApp.tsx");
+  const core = read("app/lib/funnel/dashboard-gate-core.ts");
+
+  it("the placeholder floor is gone — no KNOWN FLOOR caveat, no hardcoded 0/125 label", () => {
+    expect(app).not.toMatch(/KNOWN FLOOR/);
+    expect(app).not.toMatch(/0 \/ 125 verified/);
+    // The total is the fp manifest's canonical constant, never a re-typed
+    // literal anywhere in the component.
+    expect(app).not.toMatch(/125/);
+    expect(app).toMatch(/\{PATH_TASK_TOTAL\} verified/);
+  });
+
+  it("the per-child bar and the hero stat box consume the gate's counts", () => {
+    expect(app).toMatch(/const verified = verifiedTaskCounts\?\.\[c\.id\] \?\? 0;/);
+    expect(app).toMatch(/pathBarWidthPct\(verified, PATH_TASK_TOTAL\)/);
+    expect(app).toMatch(/sumVerifiedTaskCounts\(/);
+  });
+
+  it("the gate reads counts DB-side as truncation-proof HEAD counts, filtered on the canonical state", () => {
+    // Decision 1 tables (RLS on, zero policies) — the admin client is the
+    // named client for this read; the scope is the RLS'd children read's ids.
+    expect(core).toMatch(/supabaseAdmin\(\)/);
+    expect(core).toMatch(/\{ count: "exact", head: true \}/);
+    expect(core).toMatch(/\.eq\("state", VERIFIED_TASK_STATE\)/);
+    // …and only profiles resolved FROM those child ids are ever counted.
+    expect(core).toMatch(/\.in\("child_id", childIds as string\[\]\)/);
+  });
+
+  it("counts load only for a path-register family, and a failure keeps children (fail open to the floor)", () => {
+    expect(core).toMatch(/childRows\.some\(\(c\) => c\.arrived_at != null\)/);
+    expect(core).toMatch(/verifiedTaskCounts = counts === null \? null : Object\.fromEntries\(counts\)/);
+  });
+});
+
+/* ─────────────────── the count definition parity pin ─────────────────── */
+
+describe("ONE verified-count definition — fp's canonical rule, pinned end to end", () => {
+  const migration = read("supabase/migrations/20260722120000_path_progress.sql");
+  const journeyLoader = read("app/fp/lib/journey-loader.ts");
+
+  it("VERIFIED_TASK_STATE is the fp state machine's terminal 'verified' member", () => {
+    expect(VERIFIED_TASK_STATE).toBe("verified");
+    expect(TASK_STATES).toContain(VERIFIED_TASK_STATE);
+  });
+
+  it("matches the DB CHECK list in the path_task_progress migration (the SQL side of the rule)", () => {
+    // Parse the actual CHECK clause, not the whole file — an assertion that
+    // merely greps 'verified' anywhere could never fail (the parity-scope
+    // lesson, docs/solutions/test-failures 2026-07-23).
+    const m = migration.match(/state text not null default 'locked'\s*\n\s*check \(state in \(([^)]+)\)\)/);
+    expect(m).not.toBeNull();
+    const dbStates = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(dbStates).toEqual([...TASK_STATES]);
+    expect(dbStates).toContain(VERIFIED_TASK_STATE);
+  });
+
+  it("fp's own verifiedTotal fold counts through the SAME constant — the definition cannot fork", () => {
+    expect(journeyLoader).toMatch(/if \(state === VERIFIED_TASK_STATE\) phaseVerified\+\+;/);
+    // No stray literal comparison left behind in the loader's fold.
+    expect(journeyLoader).not.toMatch(/state === "verified"/);
+  });
+
+  it("the dashboard total IS the fp manifest's task count — 125 today, one source", () => {
+    expect(PATH_TASK_TOTAL).toBe(MANIFEST_2026_27.tasks);
+    expect(PATH_TASK_TOTAL).toBe(125); // the screen-16 label's number, pinned
+  });
+});
+
+/* ─────────────────── the pure bar rules ─────────────────── */
+
+describe("pathBarWidthPct — phase-coloured width with the honest floor sliver", () => {
+  it("keeps the 2% sliver at 0 (a bar that has not moved, not a missing element)", () => {
+    expect(pathBarWidthPct(0, 125)).toBe(2);
+  });
+
+  it("scales n/total to percent once past the sliver, clamped to 100", () => {
+    expect(pathBarWidthPct(25, 125)).toBe(20);
+    expect(pathBarWidthPct(125, 125)).toBe(100);
+    expect(pathBarWidthPct(200, 125)).toBe(100); // corrupt over-count cannot overflow
+  });
+
+  it("small real progress never renders BELOW the floor sliver", () => {
+    expect(pathBarWidthPct(1, 125)).toBe(2); // 0.8% would read as zero
+  });
+
+  it("degenerate inputs (zero/negative total, NaN) fall back to the floor", () => {
+    expect(pathBarWidthPct(3, 0)).toBe(2);
+    expect(pathBarWidthPct(Number.NaN, 125)).toBe(2);
+    expect(pathBarWidthPct(-4, 125)).toBe(2);
+  });
+});
+
+describe("sumVerifiedTaskCounts — the hero stat box's family total", () => {
+  it("sums across the given children; an absent key is a true 0 (no fp profile yet)", () => {
+    expect(sumVerifiedTaskCounts({ a: 17, b: 4 }, ["a", "b", "c"])).toBe(21);
+  });
+
+  it("a null map (read failed / application register) sums to the 0 floor", () => {
+    expect(sumVerifiedTaskCounts(null, ["a", "b"])).toBe(0);
+  });
+
+  it("ignores counts for children not on this dashboard, and junk values", () => {
+    expect(sumVerifiedTaskCounts({ a: 5, zombie: 40 }, ["a"])).toBe(5);
+    expect(sumVerifiedTaskCounts({ a: Number.NaN, b: -3, c: 2 }, ["a", "b", "c"])).toBe(2);
   });
 });
 

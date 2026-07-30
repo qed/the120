@@ -6,14 +6,20 @@
  * subtree root (Decision 10): `SKIN_ROOT_CLASSES[skin]`, complete literals.
  *
  * Steps are URL state: changing step is `router.push` with a new `?step=`,
- * so Back walks the ladder and refresh restores the current step. Steps
- * beyond `BUILT_STEPS` render the coming-next stub until their units land.
+ * so Back walks the ladder and refresh restores the current step. Every
+ * merged step has a render arm (Unit 8 closed the last stub).
  */
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { changeDoorAction, confirmDoorAction } from "@/app/lib/funnel/actions/miniapp";
+import { saveGoalAction } from "@/app/lib/funnel/actions/next-steps";
+// Unit 8 (R10): the re-homed next-steps screens reuse the SAME copy and
+// caps the standalone NextStepsFlow renders — imported, never copied, so
+// the two surfaces cannot drift while the shim keeps the old one alive.
+import { GOAL_MAX_CHARS, NEXT_STEPS, holdSeatCta } from "@/app/lib/funnel/deposit-rules";
 import { emitFaqOpenedAction, emitShareCardAction } from "@/app/lib/funnel/actions/events";
 import {
   composeProjectAction,
@@ -36,9 +42,25 @@ import {
   revealModel,
   shareCardSvg,
 } from "@/app/lib/funnel/reveal-rules";
-import type { MiniAppChild } from "@/app/lib/funnel/miniapp-core";
+import type { MergedFlowFields, MiniAppChild } from "@/app/lib/funnel/miniapp-core";
+// Unified-flow U6: the merged ladder — LIVE since Unit 9 flipped
+// MERGED_FLOW_ENABLED (the wizard retired in the same change, so form state
+// never had two owners).
 import {
-  BUILT_STEPS,
+  MERGED_FLOW_ENABLED,
+  isMergedFormStep,
+  isMergedNextStep,
+  mergedNavCard,
+  mergedStepNeighbour,
+  resolveMergedStep,
+  seamCopy,
+  type MergedFlowFacts,
+  type MergedNextStep,
+  type MergedStep,
+} from "@/app/lib/funnel/merged-flow-rules";
+import { MergedFormSection } from "./MergedFormSections";
+import {
+  isMiniAppStep,
   DOOR_ARCH_CLASSES,
   DOOR_BLURBS,
   DOORS_SUBHEAD,
@@ -175,6 +197,8 @@ export function MiniAppShell({
   initialProject,
   serverInitialStep,
   locked,
+  parentIdentity,
+  merged,
 }: {
   child: MiniAppChild;
   hintSlug: string | null;
@@ -189,8 +213,24 @@ export function MiniAppShell({
   serverInitialStep: MiniAppStep;
   /** Reconnect U7 (R13): server-computed `isEditLocked(applicant_state)` —
    *  `submitted`+ renders read-only. Presentation only; the write path is
-   *  the guarantee. */
+   *  the guarantee. (Unified-flow U6: with the merge flag on, the page
+   *  passes the DUAL `mergedLockVerdict` here instead — one treatment for
+   *  both vocabularies.) */
   locked: boolean;
+  /** Unified-flow U9: the parent's nav-card identity line (NAME · SIGN OUT)
+   *  for the form/next-steps zone — `navCardIdentityName` output, null when
+   *  nothing usable was captured (the card degrades to SIGN OUT alone). */
+  parentIdentity: string | null;
+  /** Unified-flow U6: the merged flow's facts + full field set + deposit
+   *  fact. Consumed ONLY while MERGED_FLOW_ENABLED — the flag-off arm never
+   *  reads past `merged.facts.mergeFlagOn === false`. */
+  merged: {
+    facts: MergedFlowFacts;
+    fields: MergedFlowFields;
+    /** `null` = the deposits read failed (unknown) — fails closed on a
+     *  locked walk's group step, see `stepEditableInWalk`. */
+    depositPaid: boolean | null;
+  };
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -210,7 +250,13 @@ export function MiniAppShell({
   // entry carries `?step=`, and `parseStep`'s invalid-value fail-open (inside
   // `resolveStep`) is untouched.
   const rawStep = searchParams.get("step");
-  const step: MiniAppStep = resolveStep(rawStep, serverInitialStep);
+  // Unified-flow U6: with the merge flag ON, resolution goes through the
+  // merged rule (clamp included: a ?step= outside this child's list resolves
+  // as if absent). Dark, this is byte-identical to before — the same
+  // resolveStep(rawStep, serverInitialStep) fail-open.
+  const step: MergedStep = MERGED_FLOW_ENABLED
+    ? resolveMergedStep(rawStep, merged.facts)
+    : resolveStep(rawStep, serverInitialStep);
 
   // The replace-on-mount contract (see the derivation comment above): a bare
   // URL is rewritten in place — same history entry, rest of the query
@@ -332,7 +378,8 @@ export function MiniAppShell({
   // the tasks/reveal no-project gate wins instead.
   const doorGated =
     !confirmedSlug &&
-    (stepNeedsDoor(step) || (step === "reveal" && composeView !== null));
+    ((isMiniAppStep(step) && stepNeedsDoor(step)) ||
+      (step === "reveal" && composeView !== null));
 
   const doors = useMemo(
     () =>
@@ -346,7 +393,7 @@ export function MiniAppShell({
   const selected: GroupSlug | null =
     tappedSlug ?? doors.find((d) => d.preselected)?.slug ?? null;
 
-  const go = (next: MiniAppStep | null) => {
+  const go = (next: MergedStep | null) => {
     if (!next) return;
     // Preserve the REST of the query — a bare `?step=` push would drop the
     // `?g=` hint the whole funnel threaded here, and a refresh on the doors
@@ -625,7 +672,18 @@ export function MiniAppShell({
         {/* R32/X1: the floating nav card keeps running through the mini-app —
             the dc.html skinned scenes carry the SAME white application-register
             card over the child's canvas, so no per-skin variant exists here. */}
-        <ProgressNavCard model={miniAppNavCard(step)} />
+        {/* Unified-flow U6: build steps keep miniAppNavCard verbatim (a
+            build rung maps to itself, so the two are identical there); the
+            merged-only steps (seam/form/next-steps) take the merged mapper
+            with the parent identity threaded in (U9) — NAME · SIGN OUT from
+            the form zone on, exactly the retired wizard's treatment. */}
+        <ProgressNavCard
+          model={
+            isMiniAppStep(step)
+              ? miniAppNavCard(step)
+              : mergedNavCard(step, parentIdentity, isLocked)
+          }
+        />
 
         {/* The Back slot — one per screen, per the micro-spec above.
             Disabled while an action is pending, like the forward CTAs: an
@@ -641,6 +699,36 @@ export function MiniAppShell({
             >
               ← ALL CHILDREN
             </a>
+          ) : !isMiniAppStep(step) ? (
+            // Unified-flow U6: the merged-only steps (seam/form/next-steps)
+            // walk THIS child's resolved list. A null neighbour is the
+            // per-cohort backward terminal: a legacy list has no build
+            // steps, so its first form step exits to the dashboard (the
+            // build cohort's exit stays "← ALL CHILDREN" on handoff above).
+            // Plain /dashboard, no ?stay=1: only legacy (non-funnel)
+            // children can stand on a null-back form step, and the
+            // dashboard gate's redirect cohort never contains them.
+            (() => {
+              const back = mergedStepNeighbour(step, "back", merged.facts);
+              return back === null ? (
+                <a
+                  href="/dashboard"
+                  aria-disabled={pending || undefined}
+                  tabIndex={pending ? -1 : undefined}
+                  className={`${BACK_CLASSES} ${pending ? "pointer-events-none opacity-30" : ""}`}
+                >
+                  ← DASHBOARD
+                </a>
+              ) : (
+                <button
+                  onClick={() => go(back)}
+                  disabled={pending}
+                  className={BACK_CLASSES}
+                >
+                  ← BACK
+                </button>
+              );
+            })()
           ) : doorGated ? (
             <button
               onClick={() => go("doors")}
@@ -1368,6 +1456,43 @@ export function MiniAppShell({
           );
         })()}
 
+        {/* ── Unified-flow U6 (LIVE since Unit 9 flipped MERGED_FLOW_ENABLED) ── */}
+
+        {/* The R6a seam: reveal → hand the device BACK → basics. Build
+            cohort only (only their step list contains it), child-addressed,
+            one CTA, no auto-advance — the handoff idiom mirrored. */}
+        {step === "seam" && (
+          <SeamHandback child={child} skin={skin} pending={pending} onNext={() => go(mergedStepNeighbour("seam", "next", merged.facts))} />
+        )}
+
+        {/* The five application-form steps, in the APPLICATION register
+            inside the child's skin subtree — the same nested-register swap
+            as the reveal close strip. `key={step}` remounts the section per
+            step so its draft re-seeds from the server fields (draft state
+            keyed by the facts it edits; no cross-step client draft store). */}
+        {isMergedFormStep(step) && (
+          <div className={`-mx-6 px-6 py-2 ${APPLICATION_REGISTER_CLASSES}`}>
+            <MergedFormSection
+              key={step}
+              step={step}
+              fields={merged.fields}
+              facts={merged.facts}
+              depositPaid={merged.depositPaid}
+              projectGroupSlug={initialProject?.groupSlug ?? null}
+              pending={pending}
+              run={(task) => startTransition(task)}
+              onLocked={() => setLockDiscovered(true)}
+              go={go}
+              // Submit success navigates CLIENT-side, the existing shell
+              // pattern (every funnel action returns a verdict; none
+              // redirects server-side). The Next-16 race the 2026-07-28
+              // learning names is push()+refresh() PAIRED — this is a bare
+              // push to a force-dynamic route, the legitimate form.
+              onSubmitted={() => router.push("/start/review")}
+            />
+          </div>
+        )}
+
         {/* The door-change confirm dialog (reconnect U8) — see the
             micro-spec above. Renders the SNAPSHOT, submits the SNAPSHOT. */}
         {doorConfirm && (
@@ -1405,20 +1530,202 @@ export function MiniAppShell({
           </div>
         )}
 
-        {!BUILT_STEPS.includes(step) && (
-          <section>
-            <h1 className="font-path-display text-3xl font-semibold leading-tight">
-              {child.firstName ? `Nice pick, ${child.firstName}.` : "Nice pick."}
-            </h1>
-            {/* Consolidated: the Back slot above is the way back — no second
-                pill (the Unit 5 no-doubling rule). */}
-            <p className="mt-3 text-base leading-7 opacity-80">
-              This part is landing shortly. Everything you did is saved.
-            </p>
-          </section>
+        {/* The three next-steps screens (unified-flow Unit 8; R10/R11) —
+            progress/goal/seat re-homed past review, in the APPLICATION
+            register (parent screens, same nested-register swap as the form
+            steps). Only a nextStepsReachable list contains them (the gate ran
+            in the step-list builder; the clamp re-lands any deep link) —
+            LIVE since Unit 9 flipped MERGED_FLOW_ENABLED. Deliberately
+            NOT key={step}: one mounted section carries the goal draft across
+            the three screens, exactly as the standalone NextStepsFlow does. */}
+        {isMergedNextStep(step) && (
+          <div className={`-mx-6 px-6 py-2 ${APPLICATION_REGISTER_CLASSES}`}>
+            <MergedNextStepsSection
+              step={step}
+              fields={merged.fields}
+              facts={merged.facts}
+              pending={pending}
+              run={(task) => startTransition(task)}
+              go={go}
+            />
+          </div>
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * Unified-flow U6 (R6a): the hand-BACK seam — the handoff idiom mirrored at
+ * the other end of the build. Addressed to the CHILD (they hold the device
+ * after reveal), explicitly actionable: ONE CTA advancing to basics, never
+ * an auto-advance. Renders in the child's skin (the device is still in
+ * their hands); the application register begins on the next screen. Copy
+ * from `seamCopy` (merged-flow-rules) so it stays sweepable. LIVE since
+ * Unit 9 flipped MERGED_FLOW_ENABLED.
+ */
+function SeamHandback({
+  child,
+  skin,
+  pending,
+  onNext,
+}: {
+  child: MiniAppChild;
+  skin: ReturnType<typeof skinForGrade>;
+  pending: boolean;
+  onNext: () => void;
+}) {
+  const seam = seamCopy(child.firstName, skin);
+  return (
+    <section className="text-center">
+      <span className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-current">
+        <Image src="/path-logo.svg" alt="" width={32} height={30} unoptimized />
+      </span>
+      <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
+        {seam.eyebrow}
+      </p>
+      <h1 className="mt-2 font-path-display text-3xl font-semibold leading-tight">
+        {seam.title}
+      </h1>
+      <p className="mx-auto mt-3 max-w-md text-base leading-7 opacity-80">{seam.body}</p>
+      <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 opacity-70">
+        {seam.parentLine}
+      </p>
+      <Button skin={skin} size="lg" onClick={onNext} disabled={pending} className="mt-8">
+        {seam.cta}
+      </Button>
+    </section>
+  );
+}
+
+/**
+ * Unified-flow Unit 8 (R10/R11): the three next-steps screens — progress /
+ * goal / seat — re-homed to the end of the walk. LIVE since Unit 9 flipped
+ * MERGED_FLOW_ENABLED; /start/next-steps is now the pure-GET shim redirecting
+ * into this walk (the emailed URL survives forever).
+ *
+ * - Copy/caps/CTA come from deposit-rules (`NEXT_STEPS`, `GOAL_MAX_CHARS`,
+ *   `holdSeatCta`) and the write is the SAME `saveGoalAction` — imported,
+ *   never duplicated, so this and NextStepsFlow cannot drift.
+ * - Goal keeps SAVE-ON-NEXT (R10's named write exception — always writable,
+ *   `stepEditableInWalk` says so, deposited/enrolled included). The deferred
+ *   I5 decision lands here as the inline HINT ("Saved when you tap Next"),
+ *   NOT save-on-Back: an explicit, visible save affordance beats a hidden
+ *   write on a control whose meaning everywhere else is pure navigation —
+ *   Back must never be a mutation a family didn't ask for.
+ * - Back lives in the shell's Back slot (one per screen, the Unit 5
+ *   no-doubling rule): progress steps back into review, which renders
+ *   read-only under the gate's states (the dual lock verdict).
+ * - The seat screen's final CTA is the existing `holdSeatCta(firstName)`
+ *   Link to /dashboard — Reserve lives on the dashboard card; checkout
+ *   mechanics untouched.
+ */
+function MergedNextStepsSection({
+  step,
+  fields,
+  facts,
+  pending,
+  run,
+  go,
+}: {
+  step: MergedNextStep;
+  fields: MergedFlowFields;
+  facts: MergedFlowFacts;
+  pending: boolean;
+  run: (task: () => Promise<void>) => void;
+  go: (next: MergedStep | null) => void;
+}) {
+  // The goal draft, seeded from the SERVER field and carried across the
+  // three screens by this one mounted section (never key={step} — walking
+  // seat → goal must keep unsaved typing, same as the standalone flow).
+  const [goal, setGoal] = useState(fields.familyGoal);
+  const [savedGoal, setSavedGoal] = useState(fields.familyGoal);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const swipe = NEXT_STEPS.swipes.find((s) => s.id === step);
+  if (!swipe) return null;
+  const index = NEXT_STEPS.swipes.indexOf(swipe);
+  const name = fields.firstName || "your builder";
+
+  const next = () => {
+    setNotice(null);
+    const target = mergedStepNeighbour(step, "next", facts);
+    if (step === "goal" && goal.trim() !== savedGoal.trim()) {
+      // Save-on-Next through the ONE goal action (R10). Navigation only on
+      // a saved verdict — a failed write keeps the family here with the
+      // notice, never a silent advance past an unsaved goal.
+      run(async () => {
+        const result = await saveGoalAction({ childId: fields.id, goal });
+        if (result.kind === "saved") {
+          setSavedGoal(result.goal);
+          setGoal(result.goal);
+          go(target);
+        } else {
+          setNotice("Saving the goal didn't work. Try again.");
+        }
+      });
+      return;
+    }
+    go(target);
+  };
+
+  return (
+    <section>
+      <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
+        Next steps · {index + 1} of {NEXT_STEPS.swipes.length}
+      </p>
+      {/* Georgia display titles — the same literal the standalone flow pins. */}
+      <h1 className="display mt-2 text-3xl">{swipe.title}</h1>
+      <p className="mt-3 text-base leading-7 text-ink-soft">
+        {swipe.id === "progress" ? `${name}: ${swipe.body}` : swipe.body}
+      </p>
+
+      {swipe.id === "goal" && (
+        <>
+          <textarea
+            value={goal}
+            onChange={(e) => setGoal(capWellFormed(e.target.value, GOAL_MAX_CHARS))}
+            maxLength={GOAL_MAX_CHARS}
+            disabled={pending}
+            rows={3}
+            placeholder={`e.g. ${name} runs a real stand at the fall market and keeps the books.`}
+            className="mt-5 w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-ink disabled:cursor-wait disabled:opacity-60"
+          />
+          {savedGoal.trim() !== "" && goal.trim() === savedGoal.trim() ? (
+            <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+              Goal saved ✓ · editable any time
+            </p>
+          ) : (
+            // The I5 hint (see the header comment): the save is on Next,
+            // said out loud — Back keeps being pure navigation.
+            <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+              Saved when you tap Next
+            </p>
+          )}
+        </>
+      )}
+
+      {notice && <p className="mt-4 text-sm text-red">{notice}</p>}
+
+      <div className="mt-8 flex items-center gap-3">
+        {swipe.id === "seat" ? (
+          <Link
+            href="/dashboard"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark"
+          >
+            {holdSeatCta(fields.firstName)}
+          </Link>
+        ) : (
+          <button
+            onClick={next}
+            disabled={pending}
+            className="inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Next →"}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 

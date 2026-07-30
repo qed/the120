@@ -1,7 +1,7 @@
 ---
 title: "feat: One unified application flow — merge the wizard into the funnel, offered-card CTAs"
 type: feat
-status: active
+status: completed
 date: 2026-07-30
 origin: docs/brainstorms/2026-07-30-unified-application-flow-requirements.md
 ---
@@ -383,7 +383,40 @@ diffs.
 
 ### Phase B — the merge (gated by Unit 3)
 
-- [ ] **Unit 3: Falsification spike (investigation, no product code)**
+- [x] **Unit 3: Falsification spike — GO** *(2026-07-30, executed rolled-back
+  probes against production via the Management API playbook)*
+
+  **Findings (all four criteria pass):**
+  1. Authenticated-context writes behave exactly per the trigger contracts:
+     a direct `applicant_state` write is silently coerced back
+     (`p1: project_created` after writing `submitted`); the group-lock
+     guard raises with a live paid deposit (`p4`); content-column writes
+     pass at submitted+ (`p5` — read-only is app-level, as planned).
+     Every guard keys on `auth.role()` from the JWT claims — the planned
+     server actions use the same PostgREST channel + user JWT as the
+     browser store, so the contexts are identical by construction AND by
+     executed probe.
+  2. Submit = `children.status` draft→submitted patch fires BOTH triggers:
+     `children_applicant_state_sync` derived the ladder
+     (`p2_applicant_state: submitted`) and `children_seed_group_assignment`
+     (security definer) upserted the staff review row
+     (`p2_review_rows: 1`, `group_assignment` follows later group edits).
+     Probe note: `child_reviews` is staff-only RLS — a session-role read
+     shows 0 rows; the row exists (first probe's false alarm).
+  3. Field-by-step: every wizard field is a column of the one children row;
+     one action call per step suffices; no cross-step unsaved dependency
+     (submit's completeness check is app-level).
+  4. Post-submit pre-deposit group edit succeeds without touching projects
+     or P0120 (`p3`), and the staff row follows.
+
+  **Pre-existing quirk (not caused by this plan, constrains it):** trigger
+  order (`children_applicant_state_sync` alphabetically before
+  `children_status_guard`) means an authenticated status write to a
+  DISALLOWED value (e.g. `in_review`) is reverted by the status guard —
+  but the sync has already advanced `applicant_state` off the attempted
+  value (`p6`: status stayed `submitted`, ladder read `in_review`). Our
+  submit action must only ever write `'submitted'` (it does); never reuse
+  the status patch for any other value without fixing the trigger order.
 
 **Goal:** run the origin's two falsifiers before committing: (a) form steps
 adopt "URL is the step state" via typed-action save-on-Next without a
@@ -423,7 +456,7 @@ recorded decision.
 **Verification:** written go/no-go with evidence paths, appended to this
 plan under a "Unit 3 findings" note.
 
-- [ ] **Unit 4: Step-model and lock foundation (pure rules only)**
+- [x] **Unit 4: Step-model and lock foundation (pure rules only)** *(landed 2026-07-30)*
 
 **Goal:** extend the rules layer for the merged ladder — no UI yet.
 
@@ -473,7 +506,7 @@ plan under a "Unit 3 findings" note.
 **Verification:** exhaustive matrix tests green; existing rules tests
 updated deliberately, none skipped.
 
-- [ ] **Unit 5: Server load + form-step actions**
+- [x] **Unit 5: Server load + form-step actions** *(landed 2026-07-30)*
 
 **Goal:** the mini-app route loads the full application data model and
 gains typed save actions for the form steps.
@@ -526,7 +559,7 @@ gains typed save actions for the form steps.
 **Verification:** core tests green; page redirect target changed and
 pinned; no core dep reaches the wire.
 
-- [ ] **Unit 6: Form-step screens + the seam**
+- [x] **Unit 6: Form-step screens + the seam** *(landed 2026-07-30)*
 
 **Goal:** R6/R6a — the five form steps render inside `MiniAppShell` with
 pending guards, read-only treatment, group difference note, and the
@@ -574,7 +607,7 @@ hand-back seam after reveal.
 **Verification:** fidelity pins updated; walkthrough of each cohort's list
 renders without dead controls.
 
-- [ ] **Unit 7: Flow endings by state**
+- [x] **Unit 7: Flow endings by state** *(landed 2026-07-30)*
 
 **Goal:** R9/R9a + the endings map — submit for pre-submit, status
 terminal for submitted-not-offered, "finish the build" pointer for
@@ -600,7 +633,7 @@ pre-project children.
 
 **Verification:** no cohort reaches a pressable control that does nothing.
 
-- [ ] **Unit 8: Next-steps re-homing + shim + returnTo completion**
+- [x] **Unit 8: Next-steps re-homing + shim + returnTo completion** *(landed 2026-07-30)*
 
 **Goal:** R10/R11/R12 — the 3 screens as flow steps past review, gate =
 `nextStepsReachable` verbatim, goal save preserved, shim carries full
@@ -651,7 +684,7 @@ standalone behavior.
 **Verification:** standalone page code no longer renders screens (shim
 only); all next-steps behavior tests green.
 
-- [ ] **Unit 9: Retire the embedded editor + final rewiring + assembly audit**
+- [x] **Unit 9: Retire the embedded editor + final rewiring + assembly audit** *(landed 2026-07-30)*
 
 **Goal:** R5/R7 — dashboard links land in the flow via the landing rule;
 embedded `DossierEditor`/`DossierPreview` views and the interim wiring are

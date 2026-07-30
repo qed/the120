@@ -11,7 +11,10 @@ import "server-only";
  * not own").
  *
  * ── The write discipline (R35, the plan's trap list) ──
- * `confirmDoor` is the ONLY write in this module, and taps never reach it.
+ * `confirmDoor` is the only USER-INTENT write in this module, and taps never
+ * reach it. (`persistPrefillCore`, unified-flow U9, is the one other write:
+ * the seeding responsibility that moved here from the dashboard store —
+ * additive, idempotent, drafts only. See its header.)
  * Door switching is client state; confirm persists `children.group_slug`
  * once. The seeding trigger early-returns on `status = 'draft'` — verified
  * against the trigger source, and the funnel keeps children draft until C2 —
@@ -27,8 +30,11 @@ import {
   isDoorChangeConflictDbError,
   isEditLocked,
   isEditLockedDbError,
+  parseApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
 import type { ApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { emptyChild, parseAcademics, type Academic } from "@/app/dashboard/data";
+import { prefillDraft, type FunnelProjectSeed } from "@/app/dashboard/wizard-rules";
 
 export type MiniAppChild = {
   id: string;
@@ -448,5 +454,302 @@ export async function changeDoorCore(
   } catch (err) {
     console.error("[funnel/miniapp] door change exception:", err);
     return { kind: "failed" };
+  }
+}
+
+/* ───────────── merged-flow load (unified-flow U5; R6, R8) ───────────── */
+
+/**
+ * The FULL application data model the merged flow's form steps render and
+ * save (unified-flow Unit 5) — the wizard's field set on top of the
+ * mini-app's, plus the fact axes Unit 4's rules consume:
+ *
+ * - `formProgress` inputs: lastName / currentSchool / academics / interests /
+ *   portfolioLinks / childEmail / childEmailNone (merged-flow-rules owns the
+ *   predicate; this loader only carries the fields).
+ * - `mergedLockVerdict` / `nextStepsReachable` inputs: applicantState +
+ *   status (both vocabularies ride together, never one without the other).
+ * - the deposit-paid fact (group-until-deposit exception, R8) via the
+ *   deposits read — returned alongside the child, not folded into it, so
+ *   the child shape stays a row mirror.
+ *
+ * PII note: these fields include child email / birth year / school. They are
+ * returned to the OWNING session only (RLS) and must never be copied into
+ * verdicts, funnel event payloads, or logs — the form-step cores state the
+ * same rule on their side.
+ */
+export type MergedFlowFields = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  /** null = not yet chosen (the row's NULL) — callers needing the wizard's
+   *  `""` vocabulary convert at the edge, the loader never invents a 0. */
+  grade: number | null;
+  birthYear: string;
+  currentSchool: string;
+  photo: string | null;
+  groupSlug: string | null;
+  academics: Academic[];
+  /** Legacy subject picks — read-only fallback the checklist still credits. */
+  subjects: string[];
+  interests: string;
+  projectPitch: string;
+  portfolioLinks: string;
+  childEmail: string;
+  childEmailNone: boolean;
+  /** `children.status` RAW off the row (the legacy vocabulary). Kept as a
+   *  string: unknown values must reach `mergedLockVerdict` as "not draft"
+   *  (locked, fail-closed), never coerce toward an editable rung. */
+  status: string;
+  familyGoal: string;
+  applicantState: ApplicantState | null;
+};
+
+export type MergedFlowChild = MergedFlowFields & {
+  /** R36: the hint is first-child-only — same contract as MiniAppChild. */
+  isFirstChild: boolean;
+};
+
+/** The one children SELECT for the merged flow — shared with the form-step
+ *  core so the loader and the save path can never read different shapes. */
+export const MERGED_FLOW_COLUMNS =
+  "id, first_name, last_name, grade, birth_year, current_school, photo, group_slug, academics, subjects, interests, project_pitch, portfolio_links, child_email, child_email_none, status, family_goal, applicant_state, created_at";
+
+/** Row → fields, fail-closed everywhere: applicant_state through
+ *  `parseApplicantState`, academics through the tolerant `parseAcademics`,
+ *  nullable text to "" exactly as the dashboard's `rowToChild`. */
+export function mapMergedFlowRow(row: Record<string, unknown>): MergedFlowFields {
+  return {
+    id: String(row.id),
+    firstName: String(row.first_name ?? ""),
+    lastName: String(row.last_name ?? ""),
+    grade: row.grade === null || row.grade === undefined ? null : Number(row.grade),
+    birthYear: String(row.birth_year ?? ""),
+    currentSchool: String(row.current_school ?? ""),
+    photo: (row.photo as string | null) ?? null,
+    groupSlug: (row.group_slug as string | null) || null,
+    academics: parseAcademics(row.academics),
+    subjects: Array.isArray(row.subjects) ? (row.subjects as string[]) : [],
+    interests: String(row.interests ?? ""),
+    projectPitch: String(row.project_pitch ?? ""),
+    portfolioLinks: String(row.portfolio_links ?? ""),
+    childEmail: String(row.child_email ?? ""),
+    childEmailNone: row.child_email_none === true,
+    status: String(row.status ?? ""),
+    familyGoal: String(row.family_goal ?? ""),
+    applicantState: parseApplicantState(row.applicant_state),
+  };
+}
+
+export type MergedFlowDeps = {
+  session: () => Promise<{
+    userId: string | null;
+    /** ALL of this family's children (RLS-scoped, created_at ascending) —
+     *  the sibling read decides first-child-ness, same as loadMiniAppChild. */
+    loadChildren: () => Promise<MergedFlowFields[] | "error">;
+    /** This child's deposit rows. The paid predicate mirrors the DB
+     *  group-lock guard exactly (status='paid' AND refunded_at IS NULL) —
+     *  the guard is the gate this fact presents. */
+    loadDeposits: (
+      childId: string
+    ) => Promise<{ status: string; refundedAt: string | null }[] | "error">;
+  }>;
+};
+
+function mergedFlowRealDeps(): MergedFlowDeps {
+  return {
+    session: async () => {
+      const supabase = await supabaseServer();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return {
+        userId: user?.id ?? null,
+        loadChildren: async () => {
+          const { data, error } = await supabase
+            .from("children")
+            .select(MERGED_FLOW_COLUMNS)
+            .order("created_at", { ascending: true })
+            .limit(50);
+          if (error) return "error";
+          return (data ?? []).map((row) => mapMergedFlowRow(row as Record<string, unknown>));
+        },
+        loadDeposits: async (childId) => {
+          const { data, error } = await supabase
+            .from("deposits")
+            .select("status, refunded_at")
+            .eq("child_id", childId);
+          if (error) return "error";
+          return ((data as { status: string; refunded_at: string | null }[]) ?? []).map(
+            (d) => ({ status: String(d.status), refundedAt: d.refunded_at ?? null })
+          );
+        },
+      };
+    },
+  };
+}
+
+/** A LIVE paid deposit — the DB group-lock guard's own predicate
+ *  (status='paid' AND refunded_at IS NULL), not the dashboard's looser
+ *  status-only check, so the presented lock and the enforcing trigger agree. */
+const livePaidDeposit = (rows: { status: string; refundedAt: string | null }[]) =>
+  rows.some((d) => d.status === "paid" && d.refundedAt === null);
+
+export type LoadMergedFlowResult =
+  /** `depositPaid: null` = the deposits read FAILED — the fact is unknown,
+   *  not false. Consumers must fail CLOSED on a locked walk (the group step
+   *  renders read-only, `stepEditableInWalk` requires `=== false`): a
+   *  degraded `false` would render an editable group step whose save
+   *  `writeGroup` then refuses — a false affordance. */
+  | { kind: "ok"; child: MergedFlowChild; depositPaid: boolean | null }
+  | { kind: "not_found" }
+  | { kind: "unauthenticated" }
+  | { kind: "failed" };
+
+/**
+ * `loadMiniAppChild` grown to the merged flow's data model (Unit 5). Same
+ * refusal shape: RLS makes "someone else's child" and "no such child" the
+ * SAME zero-rows answer — both `not_found`, never an existence oracle.
+ *
+ * The deposits read does NOT degrade to `false` on failure — it reports
+ * `null` (unknown) and logs. The guarantee is still the DB group-lock guard
+ * on the write path; the null keeps the PRESENTATION honest too: a locked
+ * walk with an unknown deposit fact renders the group step read-only rather
+ * than offering an edit the write path would refuse. Pre-submit walks are
+ * unaffected (group is editable there via the not-locked path).
+ */
+export async function loadMergedFlowChild(
+  childId: string,
+  deps: MergedFlowDeps = mergedFlowRealDeps()
+): Promise<LoadMergedFlowResult> {
+  try {
+    const session = await deps.session();
+    if (!session.userId) return { kind: "unauthenticated" };
+    const rows = await session.loadChildren();
+    if (rows === "error") return { kind: "failed" };
+    const child = rows.find((c) => c.id === childId);
+    if (!child) return { kind: "not_found" };
+    const deposits = await session.loadDeposits(childId);
+    if (deposits === "error") {
+      console.error("[funnel/miniapp] merged-flow deposits read failed (depositPaid unknown)");
+    }
+    const depositPaid = deposits === "error" ? null : livePaidDeposit(deposits);
+    return {
+      kind: "ok",
+      child: { ...child, isFirstChild: rows.length > 0 && rows[0].id === childId },
+      depositPaid,
+    };
+  } catch (err) {
+    console.error("[funnel/miniapp] merged-flow load exception:", err);
+    return { kind: "failed" };
+  }
+}
+
+/* ───────────── prefill-persist (unified-flow U9; R46/R47, the U12 invariant) ───────────── */
+
+/**
+ * The prefill derivations for a loaded child — `prefillDraft`'s output
+ * (birth year from grade, project pitch from the composed project) diffed
+ * into a snake_case children patch. `null` = nothing to seed. PURE: the ONE
+ * derivation stays `prefillDraft` (wizard-rules), never a re-implementation —
+ * the never-overwrite semantics (only empty fields fill; a partial project
+ * seeds no pitch) ride along by construction.
+ *
+ * Ownership note (Unit 9): this responsibility MOVED here from the dashboard
+ * store's `loadFamily` (whose copy was removed in the same change) — the
+ * write has exactly one owner and never zero. Persisting (not just
+ * in-memory prefilling) is what keeps the parent meter, the CRM queue, and
+ * the stall-nudge cron row-honest: all three read the RAW row (the U12
+ * adversarial finding — "finish your application" mailed to a dashboard
+ * showing 100%).
+ */
+export function prefillPatchForFields(
+  f: Pick<MergedFlowFields, "id" | "grade" | "birthYear" | "projectPitch">,
+  project: FunnelProjectSeed | null
+): { birth_year?: string; project_pitch?: string } | null {
+  const base = {
+    ...emptyChild(f.id),
+    grade: f.grade ?? ("" as const),
+    birthYear: f.birthYear,
+    projectPitch: f.projectPitch,
+  };
+  const filled = prefillDraft(base, project);
+  if (filled === base) return null;
+  const patch: { birth_year?: string; project_pitch?: string } = {};
+  if (filled.birthYear !== f.birthYear) patch.birth_year = filled.birthYear;
+  if (filled.projectPitch !== f.projectPitch) patch.project_pitch = filled.projectPitch;
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+export type PrefillPersistDeps = {
+  session: () => Promise<{
+    userId: string | null;
+    /** ONE UPDATE of the derived columns, id-scoped under RLS AND
+     *  `status = 'draft'` — the draft scope closes the race with a
+     *  concurrent submit, and RLS makes a foreign id a zero-row no-op. */
+    writePrefill: (
+      childId: string,
+      patch: { birth_year?: string; project_pitch?: string }
+    ) => Promise<"written" | "failed">;
+  }>;
+};
+
+function prefillPersistRealDeps(): PrefillPersistDeps {
+  return {
+    session: async () => {
+      const supabase = await supabaseServer();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return {
+        userId: user?.id ?? null,
+        writePrefill: async (childId, patch) => {
+          const { error } = await supabase
+            .from("children")
+            .update({ ...patch, updated_at: new Date().toISOString() })
+            .eq("id", childId)
+            .eq("status", "draft");
+          if (error) {
+            // Best-effort, but never SILENT best-effort: the seed defers to
+            // the next visit, and this line is how anyone learns it did.
+            // Column names at worst, never content (PII).
+            console.error(`[funnel/miniapp] prefill write failed: ${error.message}`);
+            return "failed";
+          }
+          return "written";
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Persist the prefill derivations for a DRAFT child — BEST-EFFORT: the write
+ * is additive and idempotent (the same load re-derives the same patch), so a
+ * failure only defers the seed to the next visit; it never blocks or fails
+ * the page load, and it never throws. Content columns only — `status`,
+ * `submitted_at`, and `applicant_state` are not expressible in the patch
+ * type (the childToRow rule, carried over from the retired store).
+ */
+export async function persistPrefillCore(
+  input: {
+    childId: string;
+    patch: { birth_year?: string; project_pitch?: string };
+  },
+  deps: PrefillPersistDeps = prefillPersistRealDeps()
+): Promise<"written" | "skipped" | "failed"> {
+  try {
+    const session = await deps.session();
+    if (!session.userId) return "skipped";
+    const wrote = await session.writePrefill(input.childId, input.patch);
+    if (wrote === "failed") {
+      // The ordinary failed path stays observable even when the deps layer
+      // already logged the DB error — one line names the deferral itself.
+      console.error("[funnel/miniapp] prefill persist failed (seed deferred to next visit)");
+    }
+    return wrote;
+  } catch (err) {
+    console.error("[funnel/miniapp] prefill persist exception:", err);
+    return "failed";
   }
 }

@@ -227,9 +227,10 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
   const app = read("app/dashboard/DashboardApp.tsx");
 
   it("path mode suppresses the application DashHeader at the ONE render site", () => {
-    // Exactly one DashHeader render, and it is gated on !isPath.
+    // Exactly one DashHeader render, and it is gated on !isPath. (U9: the
+    // editor-view half of the old gate is gone with the editor itself.)
     expect(app.match(/<DashHeader \/>/g)).toHaveLength(1);
-    expect(app).toMatch(/&& !isPath && <DashHeader \/>/);
+    expect(app).toMatch(/\{!isPath && <DashHeader \/>\}/);
   });
 
   it("the root swaps skin by COMPLETE class literals (the SKIN_ROOT_CLASSES pattern)", () => {
@@ -420,12 +421,16 @@ describe("sumVerifiedTaskCounts — the hero stat box's family total", () => {
 describe("the client store treats arrived_at as server-owned", () => {
   const store = read("app/dashboard/store.tsx");
 
-  it("rowToChild maps it; childToRow NEVER serializes it (no client write path)", () => {
+  it("rowToChild maps it; the store holds NO children write path at all (U9: read side only)", () => {
     expect(store).toMatch(/arrivedAt: r\.arrived_at \?\? null/);
-    const toRow = store.slice(
-      store.indexOf("export function childToRow"),
-      store.indexOf("export function submitStatusPatch")
-    );
-    expect(toRow).not.toMatch(/arrived_at/);
+    // The write machinery is retired with the wizard — no serializer, no
+    // submit patch, and no update/upsert/delete against the children table
+    // anywhere in the store (the ONE surviving write is the parents-profile
+    // upsert in loadFamily, which was never wizard state).
+    expect(store).not.toContain("childToRow");
+    expect(store).not.toContain("submitStatusPatch");
+    expect(store).not.toMatch(/from\("children"\)\s*\.\s*(update|upsert|delete)/);
+    expect(store.match(/\.upsert\(/g)).toHaveLength(1);
+    expect(store).toMatch(/from\("parents"\)\.upsert\(/);
   });
 });

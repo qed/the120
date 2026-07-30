@@ -58,7 +58,13 @@ describe("X1: every application-register surface mounts the card", () => {
     ["app/start/StartFlow.tsx", /navCardForStep\(step, null\)/],
     ["app/start/children/ChildrenFlow.tsx", /navCardForStep\("add_child", null\)/],
     ["app/start/child/[childId]/MiniAppShell.tsx", /miniAppNavCard\(step\)/],
-    ["app/dashboard/DossierEditor.tsx", /wizardProgressStep\(step, child\.status !== "draft"\)/],
+    // Unified-flow U9: the wizard is retired — the merged flow's form and
+    // next-steps zones take the merged mapper in the SAME shell mount, with
+    // the parent identity threaded in.
+    [
+      "app/start/child/[childId]/MiniAppShell.tsx",
+      /mergedNavCard\(step, parentIdentity, isLocked\)/,
+    ],
     ["app/start/next-steps/NextStepsFlow.tsx", /navCardIdentityOnly\(parentName\)/],
     ["app/start/arrival/ArrivalFlow.tsx", /navCardIdentityOnly\(parentName\)/],
   ];
@@ -76,19 +82,25 @@ describe("X1: every application-register surface mounts the card", () => {
     }
   });
 
-  it("the wizard's card carries the parent identity and the store's sign-out", () => {
-    const editor = stripComments(read("app/dashboard/DossierEditor.tsx"));
-    expect(editor).toMatch(/navCardIdentityName\(parent\?\.firstName \?\? "", parent\?\.lastName \?\? ""\)/);
-    expect(editor).toMatch(/onSignOut=\{signOut\}/);
+  it("the merged form zone carries the parent identity (U9: the wizard's treatment, re-homed)", () => {
+    // The /start/child page reads the parents row and derives the identity
+    // through navCardIdentityName; the shell threads it into mergedNavCard.
+    const page = stripComments(read("app/start/child/[childId]/page.tsx"));
+    expect(page).toMatch(/navCardIdentityName\(/);
+    expect(page).toMatch(/from\("parents"\)/);
+    const shell = stripComments(read("app/start/child/[childId]/MiniAppShell.tsx"));
+    expect(shell).toMatch(/mergedNavCard\(step, parentIdentity, isLocked\)/);
   });
 
-  it("the editor view swaps DashHeader for the card — never both bars at once", () => {
-    // U11 extends the gate with `!isPath`: the Path register (screen 16) has
-    // its own top bar, and the registers never mix on one screen.
+  it("the dashboard renders ONE top bar per register — the editor view (and its second bar) is retired (U9)", () => {
+    // U11's rule survives the editor's retirement: the Path register
+    // (screen 16) has its own top bar, the application register has
+    // DashHeader, and the flow page mounts ProgressNavCard — never two bars
+    // on one screen.
     const app = stripComments(read("app/dashboard/DashboardApp.tsx"));
-    expect(app).toMatch(
-      /\{!\(ready && view === "editor" && selected\) && !isPath && <DashHeader \/>\}/
-    );
+    expect(app).toMatch(/\{!isPath && <DashHeader \/>\}/);
+    expect(app).not.toContain("DossierEditor");
+    expect(app).not.toContain('view === "editor"');
   });
 
   it("next-steps and arrival pages read the parent for the identity line", () => {
@@ -109,9 +121,12 @@ describe("drift 12: Georgia display headings on application-register funnel scre
     ["app/start/children/ChildrenFlow.tsx", /className="display text-3xl text-ink"/],
     // Next-steps titles.
     ["app/start/next-steps/NextStepsFlow.tsx", /className="display mt-2 text-3xl"/],
-    // Wizard headers: the dossier header card + step section headers.
-    ["app/dashboard/DossierEditor.tsx", /className="display mt-1 text-2xl text-ink"/],
-    ["app/dashboard/wizard/shared.tsx", /className="display text-lg text-ink"/],
+    // The merged form sections' step headers (U9: the wizard's StepSection
+    // chrome, ported — same Georgia display class).
+    [
+      "app/start/child/[childId]/MergedFormSections.tsx",
+      /className="display text-lg text-ink"/,
+    ],
   ];
 
   it.each(GEORGIA_HEADINGS)("%s uses `.display` (Georgia 400)", (file, pattern) => {

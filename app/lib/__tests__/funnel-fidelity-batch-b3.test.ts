@@ -43,9 +43,13 @@ describe("drift 16: marketing-register surfaces widen to the 960px desktop body"
     expect(flow).toContain("md:grid md:grid-cols-2");
   });
 
-  it("the dossier wizard shell is 960 at lg", () => {
-    const editor = stripComments(read("app/dashboard/DossierEditor.tsx"));
-    expect(editor).toContain("max-w-3xl px-6 py-10 lg:max-w-[960px]");
+  it("the application form lives in the shell's 560px app column now — the 960 wizard shell is retired (U9)", () => {
+    // The form steps render inside MiniAppShell's max-w-xl column (pinned in
+    // the app-register block below); the sections themselves never widen to
+    // the marketing body or grow a desktop grid.
+    const sections = stripComments(read("app/start/child/[childId]/MergedFormSections.tsx"));
+    expect(sections).not.toContain("lg:max-w-[960px]");
+    expect(sections).not.toContain("md:grid-cols");
   });
 
   it("the landing keeps its wide containers and the three-column proof strip", () => {

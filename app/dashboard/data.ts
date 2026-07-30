@@ -181,9 +181,11 @@ const PENDING_DEPOSIT_NOTE =
 export type FunnelCardCta =
   /** Red pill link into the mini-app (`added`). */
   | { kind: "start"; label: string; href: string }
-  /** Red pill that opens the dossier editor client-side — the per-child
-   *  "dossier intent" (wizard has no URL; DashboardApp consumes this). */
-  | { kind: "continue_dossier"; label: string }
+  /** Red pill link into the merged application flow (`project_created` with
+   *  a composed project) — the server landing rule picks the step, so the
+   *  href carries no `?step=` (unified-flow U9; the embedded editor this
+   *  kind used to open is retired). */
+  | { kind: "continue_dossier"; label: string; href: string }
   /** Red pill link into the mini-app compose (`project_created` whose
    *  composed project was invalidated — the re-compose obligation). */
   | { kind: "compose"; label: string; href: string }
@@ -334,7 +336,7 @@ export function cardVerdict(
         kind: "funnel",
         statusLine: "PROJECT CREATED",
         tone: "red",
-        primaryCta: { kind: "continue_dossier", label: "Continue" },
+        primaryCta: { kind: "continue_dossier", label: "Continue", href: miniAppHref },
       };
     case "status_only":
       switch (next.intent) {

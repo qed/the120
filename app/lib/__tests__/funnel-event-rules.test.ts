@@ -176,6 +176,32 @@ describe("the emit points exist (wiring scans — server-side only, R56)", () =>
   });
 });
 
+describe("locked walks emit NOTHING (unified-flow U6 — owned by that unit)", () => {
+  // Read-only review traffic must not pollute funnel metrics: the per-render
+  // emissions (quiz_start, reveal_viewed) sit behind the DUAL lock verdict
+  // (mergedLockVerdict — funnel edit horizon OR legacy status lock).
+  // Telemetry inherits the trust boundary: the emit carries every gate the
+  // walk itself has (the 2026-07-28 learning).
+  const page = read("app/start/child/[childId]/page.tsx");
+
+  it("the page computes the dual verdict and guards BOTH per-render emissions with it", () => {
+    expect(page).toContain("const walkLocked = mergedLockVerdict(facts)");
+    const guard = page.match(/if \(!walkLocked\) \{([\s\S]*?)\n  \}/);
+    expect(guard).not.toBeNull();
+    expect(guard![1]).toContain('emitFunnelEvent("quiz_start"');
+    expect(guard![1]).toContain('emitFunnelEvent("reveal_viewed"');
+  });
+
+  it("no per-render emission exists OUTSIDE the guard — locked walks emit zero events", () => {
+    // Exactly one call site per event name, and both sit inside the guarded
+    // block asserted above — a second, unguarded emit would break the count.
+    expect((page.match(/emitFunnelEvent\("quiz_start"/g) ?? []).length).toBe(1);
+    expect((page.match(/emitFunnelEvent\("reveal_viewed"/g) ?? []).length).toBe(1);
+    // And no other emitFunnelEvent call exists in the page at all.
+    expect((page.match(/emitFunnelEvent\(/g) ?? []).length).toBe(2);
+  });
+});
+
 describe("the ads question (R58) — the verification, as a documented query", () => {
   it("C1→C2→C3 by entry_source needs only the events table (the tuple is denormalized)", () => {
     const sql = read("supabase/migrations/20260813120000_funnel_events.sql");

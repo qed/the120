@@ -1,7 +1,20 @@
 /**
- * Pure step-derivation + prefill rules for the dossier wizard (Units 3/6;
- * rewired by funnel U12 — the Workshops step is REMOVED, R46). No React in
- * here — everything is unit-testable in the node vitest env.
+ * Pure step-derivation + prefill rules for the APPLICATION FORM (born as the
+ * dossier wizard's rules, Units 3/6; rewired by funnel U12 — the Workshops
+ * step is REMOVED, R46). The wizard COMPONENTS are retired (unified-flow
+ * Unit 9), but these rules moved consumers, not homes:
+ *
+ * - `stepsForGroup`/`firstIncompleteStep` → the merged flow's step list and
+ *   resume landing (merged-flow-rules / the /start/child page).
+ * - `prefillDraft`/`birthYearForGrade` → the flow loader's prefill-persist
+ *   (miniapp-core `prefillPatchForFields`) and the basics section's live
+ *   derivation (MergedFormSections).
+ * - `stepForChecklistLabel`/`childEmailPatch` → the review checklist jump
+ *   map and the child-email pair (MergedFormSections).
+ * - `wizardProgressStep` → the parity source `mergedProgressStep` is pinned
+ *   byte-identical to (funnel-merged-flow-rules.test.ts).
+ *
+ * No React in here — everything is unit-testable in the node vitest env.
  */
 
 import { checklist, type Child } from "./data";
@@ -10,14 +23,6 @@ import type { ProgressStep } from "@/app/lib/funnel/capture-rules";
 /* ---------- steps ---------- */
 
 export type WizardStepId = "basics" | "group" | "academics" | "project" | "review";
-
-export const STEP_LABELS: Record<WizardStepId, string> = {
-  basics: "Basics",
-  group: "Group",
-  academics: "Academics",
-  project: "Project & Interests",
-  review: "Review & Submit",
-};
 
 /**
  * ONE list for every group since the Workshops removal (funnel U12, R46).
@@ -69,17 +74,6 @@ export function firstIncompleteStep(c: Child): WizardStepId {
     }
   }
   return "review";
-}
-
-/**
- * Where to land when a stored/stale step id no longer exists. Accepts a raw
- * STRING deliberately: pre-U12 sessions and resume state can still say
- * "workshops", and that step's successor was Project & Interests — the same
- * fallback covers any other unknown id.
- */
-export function resolveStep(current: string, groupSlug: string): WizardStepId {
-  const steps = stepsForGroup(groupSlug);
-  return (steps as string[]).includes(current) ? (current as WizardStepId) : "project";
 }
 
 /* ---------- funnel prefill (U12; R46, R47) ---------- */

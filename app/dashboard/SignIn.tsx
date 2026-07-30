@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { requestParentPasswordResetAction } from "@/app/lib/auth/actions/reset";
 import { requestResumeLinkAction } from "@/app/lib/funnel/actions/resume";
+import { RETURN_TO_PARAM, safeReturnTo } from "@/app/lib/funnel/return-to-rules";
 import JoinButton from "@/app/components/JoinButton";
 import Wordmark from "@/app/components/Wordmark";
 
@@ -20,6 +21,22 @@ export default function SignIn() {
   const [resetSent, setResetSent] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
   const [linkMessage, setLinkMessage] = useState<string | null>(null);
+  // R12 (redirect-back half): the validated returnTo, read from the URL ONCE
+  // at mount (lazy initializer — no setState-in-effect, the depositBanner
+  // pattern). safeReturnTo is the ONLY admission gate: anything it rejects
+  // (absolute URLs, //evil.com, dot segments, …) collapses to null, which
+  // means exactly today's behavior — in-place dashboard swap, no navigation.
+  // Deliberate scope: returnTo applies only to a sign-in COMPLETING in this
+  // mount. An already-signed-in visitor landing on /dashboard?returnTo=…
+  // (back button, stale link) never renders <SignIn/> at all — the store's
+  // session gate shows the dashboard — so they are never yanked to /start.
+  const [returnTo] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return safeReturnTo(new URLSearchParams(window.location.search).get(RETURN_TO_PARAM));
+  });
+  // Latch: the navigation fires at most once, even if a second submit lands
+  // before the browser tears this page down.
+  const navigatedRef = useRef(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,8 +52,19 @@ export default function SignIn() {
             : error.message
       );
       setBusy(false);
+      return; // failed sign-ins NEVER navigate
     }
-    // On success the store's onAuthStateChange swaps in the dashboard.
+    if (returnTo && !navigatedRef.current) {
+      // Success with a validated returnTo: full navigation to the funnel
+      // route (it's server-rendered — a client swap can't take us there).
+      // The store's onAuthStateChange may swap the dashboard in during the
+      // same tick; that's moot once assign() unloads the page, and `busy`
+      // stays true so the form is inert either way.
+      navigatedRef.current = true;
+      window.location.assign(returnTo);
+      return;
+    }
+    // On success (no returnTo) the store's onAuthStateChange swaps in the dashboard.
   };
 
   const handleReset = async (e: React.FormEvent) => {

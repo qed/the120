@@ -22,11 +22,7 @@ import {
 import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
-import DossierEditor from "./DossierEditor";
-import DossierPreview from "./DossierPreview";
 import SignIn from "./SignIn";
-
-type View = "home" | "editor" | "preview";
 
 /**
  * The two-register seam (reconnect U11, R12): which whole-dashboard skeleton
@@ -73,10 +69,8 @@ export default function DashboardApp({
    *  register — both render the 0 floor (the dashboard always renders). */
   verifiedTaskCounts?: Record<string, number> | null;
 }) {
-  const { ready, session, parent, children, deposits, composedChildIds, addChild, refreshDeposits, signOut } =
+  const { ready, session, parent, children, deposits, composedChildIds, refreshDeposits, signOut } =
     useDashboard();
-  const [view, setView] = useState<View>("home");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   // Returning from Stripe Checkout: the banner derives from the URL ONCE at
   // mount (lazy initializer — no setState-in-effect, the React Compiler
   // rule); the effect below handles only the side effects.
@@ -210,14 +204,14 @@ export default function DashboardApp({
   // register from no session as "application" too — they agree).
   if (ready && !session) return <SignIn />;
 
-  const selected = children.find((c) => c.id === selectedId) ?? null;
-
-  const openEditor = (id: string) => {
-    setSelectedId(id);
-    setView("editor");
-  };
-  const onAdd = () => openEditor(addChild());
-  const goHome = () => setView("home");
+  // Unified-flow U9 (R5/R7): every application entry point is a LINK into
+  // the merged flow at /start/child/<id> — the server landing rule picks the
+  // step, so no `?step=` rides on these hrefs. The embedded editor/preview
+  // views are retired; ADD A CHILD routes to /start/children, the funnel's
+  // add-child flow (the store's local-first addChild raced its own debounced
+  // insert against the navigation, so the server-action flow owns creation).
+  const flowHref = (id: string) => `/start/child/${id}`;
+  const ADD_CHILD_HREF = "/start/children";
 
   const isPath = register === "path";
 
@@ -316,17 +310,17 @@ export default function DashboardApp({
       {/* Your children */}
       <div className="mt-7 flex items-center justify-between gap-3">
         <h2 className="font-path-display text-lg font-semibold text-hq-ink">Your children</h2>
-        <button
-          onClick={onAdd}
+        <Link
+          href={ADD_CHILD_HREF}
           className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-hq-border-strong bg-white px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink hover:bg-hq-sunken"
         >
           + Add a child
-        </button>
+        </Link>
       </div>
 
       {children.length === 0 ? (
-        <button
-          onClick={onAdd}
+        <Link
+          href={ADD_CHILD_HREF}
           className="mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed border-hq-border-strong bg-white py-16 text-center transition-colors hover:border-hq-ink"
         >
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-hq-sunken text-2xl text-hq-ink">
@@ -338,7 +332,7 @@ export default function DashboardApp({
           <span className="mt-1 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-muted">
             Ages 8–17 · one application each
           </span>
-        </button>
+        </Link>
       ) : (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {children.map((c) => {
@@ -436,14 +430,14 @@ export default function DashboardApp({
                     renderReserveCta(c, verdict.kind === "funnel" ? verdict.secondaryReviewLink : undefined)
                   ) : (
                     <div className="flex items-center justify-end gap-3">
-                      {cta?.kind === "start" || cta?.kind === "compose" ? (
+                      {cta?.kind === "start" ||
+                      cta?.kind === "compose" ||
+                      cta?.kind === "continue_dossier" ? (
+                        // All three link into the merged flow (R5) — the
+                        // server landing rule picks the step per child.
                         <a href={cta.href} className={pathPill}>
                           {cta.label}
                         </a>
-                      ) : cta?.kind === "continue_dossier" ? (
-                        <button onClick={() => openEditor(c.id)} className={pathPill}>
-                          {cta.label}
-                        </button>
                       ) : cta?.kind === "reserved" ? (
                         cta.href ? (
                           <a
@@ -456,9 +450,12 @@ export default function DashboardApp({
                           <span className={`${pathPill} !bg-crm-green`}>{cta.label}</span>
                         )
                       ) : verdict.kind === "legacy" ? (
-                        <button onClick={() => openEditor(c.id)} className={pathPill}>
+                        // The legacy pill links into the same flow — the
+                        // landing rule resumes a draft at its first
+                        // incomplete form step (I2, no regression).
+                        <a href={flowHref(c.id)} className={pathPill}>
                           Open application
-                        </button>
+                        </a>
                       ) : null}
                     </div>
                   )}
@@ -498,21 +495,17 @@ export default function DashboardApp({
         isPath ? "min-h-screen bg-hq-canvas font-path-body text-hq-ink" : "min-h-screen bg-paper"
       }
     >
-      {/* U10 fidelity (audit 3c/X1): in the editor view the wizard's floating
-          nav card (progress + NAME · SIGN OUT, mounted by DossierEditor) IS
-          the top bar — DashHeader would double the brand and sign-out. In
-          PATH mode DashHeader never renders (registers never mix); the Path
-          top bar lives inside renderPathHome. */}
-      {!(ready && view === "editor" && selected) && !isPath && <DashHeader />}
+      {/* The application register's ONE top bar (U9: the embedded editor and
+          its nav card are retired — the flow at /start/child/<id> mounts its
+          own ProgressNavCard). In PATH mode DashHeader never renders
+          (registers never mix); the Path top bar lives inside
+          renderPathHome. */}
+      {!isPath && <DashHeader />}
 
       {!ready ? (
         <div className="mx-auto max-w-5xl px-6 py-20 font-mono text-xs uppercase tracking-[0.14em] text-muted">
           Loading your dashboard…
         </div>
-      ) : view === "editor" && selected ? (
-        <DossierEditor child={selected} onBack={goHome} onPreview={() => setView("preview")} />
-      ) : view === "preview" && selected ? (
-        <DossierPreview child={selected} onBack={() => setView("editor")} />
       ) : isPath ? (
         renderPathHome()
       ) : (
@@ -568,8 +561,8 @@ export default function DashboardApp({
             {/* U10 fidelity (audit item 3d): the pill is red only while the
                 grid is empty; once ≥1 child exists it goes secondary
                 (white with a red outline) per the handoff addchild spec. */}
-            <button
-              onClick={onAdd}
+            <Link
+              href={ADD_CHILD_HREF}
               className={`inline-flex h-11 items-center justify-center rounded-full px-5 font-mono text-xs uppercase tracking-[0.12em] ${
                 children.length > 0
                   ? "border border-red bg-white text-red hover:bg-red/5"
@@ -577,12 +570,12 @@ export default function DashboardApp({
               }`}
             >
               + Add a child
-            </button>
+            </Link>
           </div>
 
           {children.length === 0 ? (
-            <button
-              onClick={onAdd}
+            <Link
+              href={ADD_CHILD_HREF}
               className="mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed border-line-strong bg-white py-16 text-center transition-colors hover:border-red"
             >
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red/10 text-2xl text-red">
@@ -594,7 +587,7 @@ export default function DashboardApp({
               <span className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">
                 Ages 8–17 · one application each
               </span>
-            </button>
+            </Link>
           ) : (
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               {children.map((c) => {
@@ -644,16 +637,17 @@ export default function DashboardApp({
                       className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
                     >
                       {dossierNext ? (
-                        // The per-child dossier intent: the wizard has no URL,
-                        // so the card itself opens the editor (same affordance
-                        // as the legacy card).
-                        <button onClick={() => openEditor(c.id)} className="w-full text-left">
+                        // The application intent (U9): the card itself links
+                        // into the merged flow — the server landing rule
+                        // resumes at the first incomplete form step (same
+                        // affordance as the legacy card).
+                        <a href={flowHref(c.id)} className="block w-full text-left">
                           {header}
                           <Meter value={pct} className="mt-5" />
                           <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
                             Open application →
                           </p>
-                        </button>
+                        </a>
                       ) : (
                         <div className="w-full text-left">
                           {header}
@@ -674,20 +668,17 @@ export default function DashboardApp({
                             <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
                               {bandNote(c.grade)}
                             </p>
-                            {cta?.kind === "start" || cta?.kind === "compose" ? (
+                            {cta?.kind === "start" ||
+                            cta?.kind === "compose" ||
+                            cta?.kind === "continue_dossier" ? (
+                              // All three link into the merged flow (R5) —
+                              // the landing rule picks the step per child.
                               <a
                                 href={cta.href}
                                 className={`${pillClass} bg-red transition-colors hover:bg-red-dark`}
                               >
                                 {cta.label}
                               </a>
-                            ) : cta?.kind === "continue_dossier" ? (
-                              <button
-                                onClick={() => openEditor(c.id)}
-                                className={`${pillClass} bg-red transition-colors hover:bg-red-dark`}
-                              >
-                                {cta.label}
-                              </button>
                             ) : cta?.kind === "reserved" ? (
                               cta.href ? (
                                 <a
@@ -729,7 +720,10 @@ export default function DashboardApp({
                     key={c.id}
                     className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
                   >
-                    <button onClick={() => openEditor(c.id)} className="w-full text-left">
+                    {/* U9: the legacy card links into the merged flow — a
+                        draft resumes at its first incomplete form step; a
+                        locked row opens the read-only walk (R5). */}
+                    <a href={flowHref(c.id)} className="block w-full text-left">
                       <div className="flex items-center gap-4">
                         <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
                           {c.photo ? (
@@ -757,7 +751,7 @@ export default function DashboardApp({
                       <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
                         Open application →
                       </p>
-                    </button>
+                    </a>
 
                     {/* Seat deposit CTA (R11–R13): paid always wins; the
                         deposit unlocks only once admissions approves

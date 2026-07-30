@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FP Additions — status</title>
+<style>
+  :root {
+    --ink: #131416; --ink-soft: #4b4d52; --muted: #8a8d93;
+    --paper: #faf9f7; --line: #e6e3dd; --red: #c0392b;
+    --green: #1e7b45; --amber: #b07d10; --blue: #1f5fbf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.6 Georgia, "Times New Roman", serif; padding: 48px 24px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font: 11px/1.5 "IBM Plex Mono", Consolas, monospace;
+         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 28px; }
+  ol { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  li { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .title { font-weight: bold; }
+  .badge { flex: none; font: 10px/1 "IBM Plex Mono", Consolas, monospace;
+           text-transform: uppercase; letter-spacing: 0.1em; padding: 5px 10px; border-radius: 999px; }
+  .done     { background: rgba(30,123,69,.1);  color: var(--green); }
+  .shipping { background: rgba(176,125,16,.12); color: var(--amber); }
+  .pending  { background: rgba(31,95,191,.1);  color: var(--blue); }
+  .note { color: var(--ink-soft); font-size: 14px; margin-top: 6px; }
+  .stamp { color: var(--muted); font: 10px/1.5 "IBM Plex Mono", Consolas, monospace;
+           text-transform: uppercase; letter-spacing: 0.1em; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FP Additions</h1>
+  <p class="sub">Requested 2026-07-30 · updated as each item lands</p>
+  <ol>
+    <li>
+      <div class="row"><span class="title">1 · Dashboard cards: blue CTAs only</span>
+        <span class="badge done">Done</span></div>
+      <p class="note">Delete the red-letter "Open application →" links on the school-dashboard
+        child cards. Every card carries only the blue pair: a filled
+        <strong>Continue application</strong> pill while the application is incomplete, or the
+        outlined <strong>Review application</strong> pill once it is complete.</p>
+      <p class="stamp">Committed 9d9f4fc · 2026-07-30 · deploying on push</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">2 · Delete Caradoc Kuperman (pkuperman@gmail.com)</span>
+        <span class="badge pending">Pending</span></div>
+      <p class="note">Remove the child record "Caradoc Kuperman" from the parent account
+        pkuperman@gmail.com in production. Rows will be verified before deletion.</p>
+      <p class="stamp">Not started</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">3 · Add a child → straight into the flow</span>
+        <span class="badge shipping">Shipping</span></div>
+      <p class="note">Adding a child takes the parent directly to the first step of the unified
+        application flow for that new child (no intermediate stop).</p>
+      <p class="stamp">Code done · awaiting deploy</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">4 · Floating nav bar consistent everywhere</span>
+        <span class="badge shipping">Shipping</span></div>
+      <p class="note">The floating nav card at /start/children and every application-flow step
+        sits in the exact same place as the home-page nav: same width (20px side margins),
+        same top offset (18px), same height (64px row).</p>
+      <p class="stamp">Code done · awaiting deploy</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">5 · Dedicated Add-a-Child page from the dashboard</span>
+        <span class="badge shipping">Shipping</span></div>
+      <p class="note">"+ Add a child" on the dashboard opens an add-only page — no
+        pick-your-child list (the parent already said "add") — with a
+        "← Back to dashboard" link.</p>
+      <p class="stamp">Code done · awaiting deploy</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">6 · Add-a-Child CTA: "Start building"</span>
+        <span class="badge shipping">Shipping</span></div>
+      <p class="note">The add-child form's CTA is <strong>Start building →</strong> (not "Add
+        another") and goes directly into the unified application flow for the child just added.</p>
+      <p class="stamp">Code done · awaiting deploy</p>
+    </li>
+    <li>
+      <div class="row"><span class="title">7 · This tracker</span>
+        <span class="badge done">Done</span></div>
+      <p class="note">docs/FP-additions.html — open it in a browser to see live status of these
+        additions; it is updated as each item lands.</p>
+      <p class="stamp">2026-07-30</p>
+    </li>
+  </ol>
+</main>
+</body>
+</html>

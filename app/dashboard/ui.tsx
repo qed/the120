@@ -69,8 +69,12 @@ export function DashHeader() {
   // (and the CRM's requireStaff() + RLS remain the real gate regardless).
   const isStaff = session?.user.app_metadata?.role === "admin";
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-paper/90 backdrop-blur-md">
-      <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
+    // The home <Nav>'s exact floating-card geometry (2026-07-30): sticky
+    // 18px from the top, 20px side margins, 14px radius, 22/11 padding,
+    // 64px min row height — logo far left, actions far right, same places
+    // as the home page. Change Nav.tsx and ProgressNavCard together.
+    <header className="sticky top-[18px] z-40 mx-5 mt-[18px]">
+      <div className="flex min-h-16 items-center justify-between rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
         <Link href="/" aria-label="The 120 home">
           <Wordmark />
         </Link>

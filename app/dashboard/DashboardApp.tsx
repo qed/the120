@@ -324,7 +324,7 @@ export default function DashboardApp({
             Add your first child
           </span>
           <span className="mt-1 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-muted">
-            Ages 8–17 · one dossier each
+            Ages 8–17 · one application each
           </span>
         </button>
       ) : (
@@ -445,7 +445,7 @@ export default function DashboardApp({
                         )
                       ) : verdict.kind === "legacy" ? (
                         <button onClick={() => openEditor(c.id)} className={pathPill}>
-                          Open dossier
+                          Open application
                         </button>
                       ) : null}
                     </div>
@@ -509,7 +509,7 @@ export default function DashboardApp({
             <div className="mb-6 rounded-2xl border border-line bg-white p-5">
               <p className="font-display font-bold text-ink">✓ Seat deposit received.</p>
               <p className="mt-1 text-sm leading-6 text-ink-soft">
-                Your $250 CAD deposit is in — the seat is held while the dossier goes through
+                Your $250 CAD deposit is in — the seat is held while the application goes through
                 review. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A Stripe receipt is on its way
                 to your email.
               </p>
@@ -534,7 +534,7 @@ export default function DashboardApp({
                 {parent ? `Welcome, ${parent.firstName}.` : "Welcome."}
               </h1>
               <p className="mt-2 max-w-md text-sm leading-6 text-ink-soft">
-                Add each child, build their dossier, and submit it for review. A strong dossier is
+                Add each child, build their application, and submit it for review. A strong application is
                 your child&rsquo;s candidacy for one of the 120 seats.
               </p>
             </div>
@@ -580,7 +580,7 @@ export default function DashboardApp({
                 Add your first child
               </span>
               <span className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-muted">
-                Ages 8–17 · one dossier each
+                Ages 8–17 · one application each
               </span>
             </button>
           ) : (
@@ -639,7 +639,7 @@ export default function DashboardApp({
                           {header}
                           <Meter value={pct} className="mt-5" />
                           <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                            Open dossier →
+                            Open application →
                           </p>
                         </button>
                       ) : (
@@ -743,7 +743,7 @@ export default function DashboardApp({
                       </div>
                       <Meter value={pct} className="mt-5" />
                       <p className="mt-4 font-mono text-[0.7rem] uppercase tracking-[0.1em] text-red">
-                        Open dossier →
+                        Open application →
                       </p>
                     </button>
 
@@ -786,7 +786,7 @@ export default function DashboardApp({
                         </>
                       ) : (
                         <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                          Submit the dossier to reserve a seat ($250, refundable)
+                          Submit the application to reserve a seat ($250, refundable)
                         </p>
                       )}
                     </div>

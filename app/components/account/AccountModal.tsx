@@ -279,7 +279,7 @@ export default function AccountModal({
                   Claim your child&rsquo;s seat.
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-ink-soft">
-                  Create your parent account. Next, you&rsquo;ll build your child&rsquo;s dossier and
+                  Create your parent account. Next, you&rsquo;ll build your child&rsquo;s application and
                   submit it for review — an assessment invitation follows.
                 </p>
 
@@ -447,11 +447,11 @@ function SuccessView({
     ? [
         `Open the confirmation email we just sent to ${email}.`,
         "Click the link — it signs you in and opens your dashboard.",
-        "Add your child and build their dossier — submit for review when ready.",
+        "Add your child and build their application — submit for review when ready.",
       ]
     : [
         "You're signed in — your account is live.",
-        "Add your child and build their dossier in the dashboard.",
+        "Add your child and build their application in the dashboard.",
         "Submit for review → we invite you to a qualifying assessment + call.",
       ];
   return (

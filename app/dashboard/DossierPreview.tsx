@@ -139,7 +139,7 @@ export default function DossierPreview({
         </div>
 
         <footer className="flex items-center justify-between border-t border-line px-8 py-5 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted">
-          <span>{group ? `The 120 · ${group.name} — dossier` : "The 120 — dossier"}</span>
+          <span>{group ? `The 120 · ${group.name} — application` : "The 120 — application"}</span>
           <span className="text-red">{statusMeta(child.status).label}</span>
         </footer>
       </article>

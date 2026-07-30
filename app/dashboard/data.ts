@@ -34,7 +34,7 @@ export type SeatStatus =
   | "waitlisted";
 
 export const STATUS_FLOW: { id: SeatStatus; label: string; short: string }[] = [
-  { id: "draft", label: "Draft", short: "Building the dossier" },
+  { id: "draft", label: "Draft", short: "Building the application" },
   { id: "submitted", label: "Submitted", short: "Sent for review" },
   { id: "in_review", label: "In review", short: "The 120 team is reviewing" },
   { id: "invited", label: "Invited to assessment", short: "Assessment + call scheduled" },

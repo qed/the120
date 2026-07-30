@@ -12,7 +12,7 @@ import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
-  description: "Build your child's dossier and submit it for review.",
+  description: "Build your child's application and submit it for review.",
 };
 
 /**

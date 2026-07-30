@@ -52,7 +52,7 @@ export default function StepReview({
               : statusIndex(child.status) >= statusIndex("offered")
                 ? "Your application has been accepted — reserve your seat from your dashboard."
                 : "We will review your submission and be in touch."
-          : "Everything below must be checked off before the dossier can go in."
+          : "Everything below must be checked off before the application can go in."
       }
     >
       <ul className="grid gap-2 sm:grid-cols-2">
@@ -87,7 +87,7 @@ export default function StepReview({
           onClick={onPreview}
           className={`inline-flex h-12 items-center justify-center rounded-full border border-line-strong px-6 font-mono text-xs uppercase tracking-[0.12em] text-ink hover:border-ink ${focusRing}`}
         >
-          Preview dossier
+          Preview application
         </button>
         <button
           type="button"
@@ -99,12 +99,12 @@ export default function StepReview({
         </button>
         {submitState === "error" && submitError && (
           <p role="alert" className="w-full text-sm text-red">
-            {submitError} — your dossier is safe; press Submit to retry.
+            {submitError} — your application is safe; press Submit to retry.
           </p>
         )}
         {pct !== 100 && !locked && (
           <p className="w-full font-mono text-[0.7rem] text-muted">
-            Complete the dossier (100%) to submit for review.
+            Complete the application (100%) to submit for review.
           </p>
         )}
       </div>
@@ -117,7 +117,7 @@ export default function StepReview({
           // child the parent just deleted.
           disabled={submitState === "saving"}
           onClick={() => {
-            if (confirm(`Remove ${childName(child)}'s dossier? This cannot be undone.`)) onRemove();
+            if (confirm(`Remove ${childName(child)}'s application? This cannot be undone.`)) onRemove();
           }}
           className={`rounded font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
         >

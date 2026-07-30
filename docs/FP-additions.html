@@ -29,6 +29,15 @@
   .shipping { background: rgba(176,125,16,.12); color: var(--amber); }
   .pending  { background: rgba(31,95,191,.1);  color: var(--blue); }
   .note { color: var(--ink-soft); font-size: 14px; margin-top: 6px; }
+  .clear-btn { flex: none; margin-left: 4px; font: 10px/1 "IBM Plex Mono", Consolas, monospace;
+               text-transform: uppercase; letter-spacing: 0.1em; padding: 5px 10px;
+               border-radius: 999px; border: 1px solid var(--line); background: transparent;
+               color: var(--muted); cursor: pointer; }
+  .clear-btn:hover { border-color: var(--ink); color: var(--ink); }
+  #cleared-note { display: none; margin-top: 20px; font: 11px/1.5 "IBM Plex Mono", Consolas, monospace;
+                  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+                  background: none; border: none; cursor: pointer; padding: 0; }
+  #cleared-note:hover { color: var(--ink); }
   .stamp { color: var(--muted); font: 10px/1.5 "IBM Plex Mono", Consolas, monospace;
            text-transform: uppercase; letter-spacing: 0.1em; margin-top: 8px; }
 </style>
@@ -111,6 +120,14 @@
       <p class="stamp">Committed · 2026-07-30 · deploying on push</p>
     </li>
     <li>
+      <div class="row"><span class="title">15 · Clear buttons on this tracker</span>
+        <span class="badge done">Done</span></div>
+      <p class="note">Every item now carries a <strong>Clear</strong> button — once you've
+        checked an item, clear it and it stays hidden (saved in your browser). A "Show n
+        cleared items" link at the bottom restores everything.</p>
+      <p class="stamp">Committed · 2026-07-30</p>
+    </li>
+    <li>
       <div class="row"><span class="title">13 · /start/children picker retired — add-only page</span>
         <span class="badge done">Done</span></div>
       <p class="note">The pick-your-child grid at /start/children no longer exists. Existing
@@ -166,6 +183,56 @@
       <p class="stamp">2026-07-30</p>
     </li>
   </ol>
+  <button id="cleared-note" type="button"></button>
 </main>
+<script>
+  // Per-item Clear: once Peter has checked an item he can clear it — hidden
+  // via localStorage (keyed by title) so it stays hidden on reload. The
+  // footer button un-clears everything. Buttons are injected here so newly
+  // added <li> entries never need manual wiring.
+  (function () {
+    var KEY = "fp-additions-cleared";
+    var cleared;
+    try { cleared = new Set(JSON.parse(localStorage.getItem(KEY) || "[]")); }
+    catch (e) { cleared = new Set(); }
+    var save = function () { localStorage.setItem(KEY, JSON.stringify(Array.from(cleared))); };
+    var items = Array.prototype.slice.call(document.querySelectorAll("ol > li"));
+    var footer = document.getElementById("cleared-note");
+    var idOf = function (li) {
+      var t = li.querySelector(".title");
+      return t ? t.textContent.trim() : "";
+    };
+    var update = function () {
+      var n = 0;
+      items.forEach(function (li) {
+        var hide = cleared.has(idOf(li));
+        li.style.display = hide ? "none" : "";
+        if (hide) n++;
+      });
+      footer.textContent = "Show " + n + " cleared item" + (n === 1 ? "" : "s");
+      footer.style.display = n > 0 ? "inline" : "none";
+    };
+    items.forEach(function (li) {
+      var row = li.querySelector(".row");
+      if (!row) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "clear-btn";
+      btn.textContent = "Clear";
+      btn.addEventListener("click", function () {
+        cleared.add(idOf(li));
+        save();
+        update();
+      });
+      row.appendChild(btn);
+    });
+    footer.addEventListener("click", function () {
+      cleared.clear();
+      save();
+      update();
+    });
+    update();
+  })();
+</script>
 </body>
 </html>

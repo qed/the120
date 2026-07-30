@@ -117,7 +117,10 @@ export function StartFlow({ source, group }: { source?: string; group?: string }
     {/* R32/X1: the floating nav card runs from the first explainer through
         submission. It mounts ABOVE the column (2026-07-30) so it holds the
         home nav's exact full-width geometry. */}
-    <ProgressNavCard model={navCardForStep(step, null)} />
+    {/* Pre-auth capture: no logged-in dashboard exists yet, so the logo
+        leads home (every signed-in flow surface takes the /dashboard
+        default). */}
+    <ProgressNavCard model={navCardForStep(step, null)} logoHref="/" />
     <main className="mx-auto flex min-h-[80vh] w-full max-w-lg flex-col justify-center px-6 py-16 lg:max-w-[960px]">
 
       {/* R5 (reconnect): visible back between swipes. Disabled while a

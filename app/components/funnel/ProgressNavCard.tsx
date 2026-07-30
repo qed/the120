@@ -28,6 +28,7 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import Wordmark from "@/app/components/Wordmark";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import type { NavCardModel } from "@/app/lib/funnel/nav-card-rules";
@@ -35,10 +36,16 @@ import type { NavCardModel } from "@/app/lib/funnel/nav-card-rules";
 export function ProgressNavCard({
   model,
   onSignOut,
+  logoHref = "/dashboard",
 }: {
   model: NavCardModel;
   /** Override for surfaces with their own sign-out (the dashboard store). */
   onSignOut?: () => void;
+  /** Where the logo lockup links (2026-07-30): inside the application
+   *  process it goes to the parent's logged-in dashboard (the default);
+   *  the pre-auth capture flow overrides it to "/" — everywhere else on
+   *  the site the logo already leads home. */
+  logoHref?: string;
 }) {
   // Await the revocation BEFORE the hard navigation: window.location.assign
   // unloads the document and can abort an in-flight signOut network call,
@@ -65,7 +72,9 @@ export function ProgressNavCard({
   return (
     <div className="sticky top-[18px] z-50 mx-5 mt-[18px]">
       <div className="flex min-h-16 items-center justify-between gap-3 rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-        <Wordmark />
+        <Link href={logoHref} aria-label="The 120">
+          <Wordmark />
+        </Link>
         <span className="flex min-w-0 items-center gap-2.5">
           {showsBar && (
             <>

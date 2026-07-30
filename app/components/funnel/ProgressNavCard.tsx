@@ -11,9 +11,16 @@
  * and nothing else.
  *
  * Chrome from the prototype's card verbatim: white, 14px radius,
- * `0 4px 18px rgba(19,20,22,.14)` shadow, sticky at the top of the column —
- * the same card floats over the child's skin on the mini-app steps (the
- * dc.html skinned scenes carry it unchanged), so no per-skin variant exists.
+ * `0 4px 18px rgba(19,20,22,.14)` shadow — the same card floats over the
+ * child's skin on the mini-app steps (the dc.html skinned scenes carry it
+ * unchanged), so no per-skin variant exists.
+ *
+ * GEOMETRY (2026-07-30): the card sits in the EXACT place the home page's
+ * <Nav> does — viewport-fixed, 20px side insets (its `mx-5`), 18px from the
+ * top, the same 14px radius, 22/11 padding and 64px min row height — so the
+ * bar never jumps as a family moves between the marketing site and the
+ * application flow. An in-flow spacer of the same height keeps column
+ * content from tucking underneath. Change <Nav> and this together.
  *
  * Sign-out reuses the dashboard's mechanism: supabase `auth.signOut()` then
  * a full navigation home (`DashHeader` is `signOut` + `<Link href="/">`).
@@ -56,8 +63,9 @@ export function ProgressNavCard({
   const showsIdentity = model.kind === "progress_identity" || model.kind === "identity";
 
   return (
-    <div className="sticky top-4 z-30 mb-8">
-      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-white px-3.5 py-2.5 shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
+    <>
+    <div className="fixed inset-x-5 top-[18px] z-50">
+      <div className="flex min-h-16 items-center justify-between gap-3 rounded-[14px] bg-white px-[22px] py-[11px] shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
         <Wordmark />
         <span className="flex min-w-0 items-center gap-2.5">
           {showsBar && (
@@ -94,5 +102,9 @@ export function ProgressNavCard({
         </span>
       </div>
     </div>
+    {/* In-flow spacer: the card above is viewport-fixed, so reserve its
+        height (64px row + the 18px top offset) at the top of the column. */}
+    <div aria-hidden className="mb-8 h-16" />
+    </>
   );
 }

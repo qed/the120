@@ -26,11 +26,16 @@ const CARD = "app/components/funnel/ProgressNavCard.tsx";
 describe("X1: the floating nav card component (the ONE bar)", () => {
   const card = stripComments(read(CARD));
 
-  it("is the handoff card: white, 14px radius, the prototype's shadow, sticky", () => {
+  it("is the handoff card: white, 14px radius, the prototype's shadow, the home nav's exact geometry", () => {
     expect(card).toContain("rounded-[14px]");
     expect(card).toContain("bg-white");
     expect(card).toContain("shadow-[0_4px_18px_rgba(19,20,22,0.14)]");
-    expect(card).toContain("sticky top-4");
+    // 2026-07-30: viewport-fixed in the SAME place as the home <Nav> — 20px
+    // side insets, 18px from the top, 64px min row height — so the bar never
+    // jumps between the marketing site and the flow. Change Nav.tsx together.
+    expect(card).toContain("fixed inset-x-5 top-[18px]");
+    expect(card).toContain("min-h-16");
+    expect(stripComments(read("app/components/Nav.tsx"))).toContain("min-h-16");
   });
 
   it("carries the brand lockup and the 4px red bar on the track token, .35s width transition", () => {

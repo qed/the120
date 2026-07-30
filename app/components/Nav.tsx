@@ -58,7 +58,9 @@ export default function Nav() {
   return (
     <header className="sticky top-[18px] z-50 mx-5 mt-[18px]">
       <div className="rounded-[14px] bg-white shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-        <div className="flex items-center justify-between px-[22px] py-[11px]">
+        {/* min-h-16 mirrors ProgressNavCard's row — the funnel's floating
+            card holds the exact same geometry (2026-07-30); change together. */}
+        <div className="flex min-h-16 items-center justify-between px-[22px] py-[11px]">
           <span className="flex items-center gap-4">
             <Link href="/" aria-label="The 120 home" onClick={close}>
               <Wordmark sublabel="TORONTO" />

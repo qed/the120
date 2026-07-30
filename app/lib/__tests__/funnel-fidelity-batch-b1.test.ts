@@ -83,8 +83,12 @@ describe("X1: every application-register surface mounts the card", () => {
   });
 
   it("the editor view swaps DashHeader for the card — never both bars at once", () => {
+    // U11 extends the gate with `!isPath`: the Path register (screen 16) has
+    // its own top bar, and the registers never mix on one screen.
     const app = stripComments(read("app/dashboard/DashboardApp.tsx"));
-    expect(app).toMatch(/\{!\(ready && view === "editor" && selected\) && <DashHeader \/>\}/);
+    expect(app).toMatch(
+      /\{!\(ready && view === "editor" && selected\) && !isPath && <DashHeader \/>\}/
+    );
   });
 
   it("next-steps and arrival pages read the parent for the identity line", () => {

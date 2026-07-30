@@ -68,6 +68,10 @@ export type ChildRow = {
   /** Funnel ladder rung (reconnect U3); NULL for every pre-funnel child.
    *  The `select("*")` load already carries it. */
   applicant_state: string | null;
+  /** The sticky arrival fact (reconnect U11) — non-null iff this child has
+   *  EVER completed arrival. Server-stamped (provision driver), monotonic,
+   *  never written by this store (`childToRow` omits it on purpose). */
+  arrived_at: string | null;
 };
 
 export function rowToChild(r: ChildRow): Child {
@@ -93,6 +97,7 @@ export function rowToChild(r: ChildRow): Child {
     // Fail-closed read: an unknown wire value drops to NULL (the legacy
     // card), never coerces to a rung the row does not hold.
     applicantState: parseApplicantState(r.applicant_state),
+    arrivedAt: r.arrived_at ?? null,
   };
 }
 

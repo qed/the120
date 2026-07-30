@@ -917,6 +917,11 @@ export type Child = {
    *  card renders exactly as before this column existed. Read through
    *  `parseApplicantState` (fail-closed), never raw off the wire. */
   applicantState: ApplicantState | null;
+  /** The sticky arrival fact (reconnect U11). Non-null iff this child has
+   *  EVER completed arrival — server-stamped, monotonic, never cleared and
+   *  never written by the dashboard. Decides which children render the
+   *  KEEP BUILDING (Path) card inside the Path-register shell. */
+  arrivedAt: string | null;
 };
 
 export type Parent = {
@@ -951,6 +956,8 @@ export function emptyChild(id: string): Child {
     // A child added on the dashboard never enters the funnel ladder here —
     // the row inserts with a NULL applicant_state (the legacy card path).
     applicantState: null,
+    // Arrival is server-stamped only — a fresh child has never arrived.
+    arrivedAt: null,
   };
 }
 

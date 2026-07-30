@@ -20,6 +20,41 @@ import {
   driveProvisioningForChild,
   realForwardingDeps,
 } from "@/app/lib/funnel/provision-deps";
+import { supabaseAdmin } from "@/app/lib/supabase/admin";
+
+/**
+ * The sticky arrival fact (reconnect U11, R12): `children.arrived_at`, the
+ * column the dashboard's register flip reads. A durable PRODUCT fact, not
+ * telemetry — deliberately NOT routed through `emitFunnelEvent`'s
+ * swallow-everything path. Set-once semantics live in the WHERE
+ * (`arrived_at IS NULL` — the coalesce guard as a filter): the first stamp
+ * wins, every later call writes zero rows, and nothing ever clears it.
+ *
+ * Service-role client: the parent has no session in this driver, and the
+ * U7 projects-invalidation trigger does not apply to `children`. A failed
+ * stamp logs loudly but must NOT fail provisioning — the arrival page must
+ * still work; the register flip simply waits for a later drive of the
+ * complete claim (this is called on the noop_terminal-complete path too,
+ * exactly so a lost first stamp heals on the arrival page's next poll) or
+ * for a manual backfill.
+ */
+async function stampArrivedAt(childId: string): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin()
+      .from("children")
+      .update({ arrived_at: new Date().toISOString() })
+      .eq("id", childId)
+      .is("arrived_at", null);
+    if (error) {
+      console.error(`[provision] arrived_at stamp FAILED for ${childId}: ${error.message}`);
+    }
+  } catch (e) {
+    console.error(
+      `[provision] arrived_at stamp FAILED for ${childId}:`,
+      e instanceof Error ? e.message : e
+    );
+  }
+}
 
 export async function driveProvisioningWithEvent(
   childId: string,
@@ -41,6 +76,10 @@ export async function driveProvisioningWithEvent(
     outcome.kind === "complete" ||
     (outcome.kind === "noop_terminal" && outcome.state === "complete")
   ) {
+    // The arrival stamp rides BOTH branches: the landing run sets it, and
+    // any later drive of the complete claim re-tries a stamp the landing
+    // run lost (idempotent via the IS NULL guard).
+    await stampArrivedAt(childId);
     await driveForwarding(realForwardingDeps(), childId);
   }
 

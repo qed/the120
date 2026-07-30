@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL } from "@/app/lib/site";
+import Image from "next/image";
+import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL, groups } from "@/app/lib/site";
+import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
 import {
   type Child,
   bandNote,
@@ -23,12 +25,46 @@ import SignIn from "./SignIn";
 
 type View = "home" | "editor" | "preview";
 
+/**
+ * The two-register seam (reconnect U11, R12): which whole-dashboard skeleton
+ * renders. `application` is today's screen-3 dashboard, byte-for-byte.
+ * `path` is the screen-16 skeleton (Path top bar, tp/hq-token hero, Path
+ * child cards) — flipped server-side by `dashboardRegister` once ANY child
+ * has EVER completed arrival, sticky forever. The registers NEVER mix on
+ * one screen: in path mode the application DashHeader/hero/seats box do not
+ * render, and in application mode nothing Path-register renders.
+ */
+export type DashboardRegister = "application" | "path";
+
+/** Phase colour per skin, exactly the handoff's home-scene rule (screen 16):
+ *  Trail children carry SELL, HQ children carry BUILD. Complete literals —
+ *  the Tailwind scanner rule, same as SKIN_ROOT_CLASSES. */
+const PHASE_AVATAR_CLASSES = {
+  trail: "bg-phase-sell",
+  hq: "bg-phase-build",
+} as const;
+const PHASE_BAR_CLASSES = {
+  trail: "bg-phase-sell",
+  hq: "bg-phase-build",
+} as const;
+const PHASE_STATUS_CLASSES = {
+  trail: "text-phase-sell-ink",
+  hq: "text-phase-build-ink",
+} as const;
+
+/** The child's Path skin for card colouring — HQ for an unset grade (the
+ *  adult-adjacent default `skinForGrade` uses for out-of-range grades). */
+const cardSkin = (grade: number | ""): "trail" | "hq" =>
+  typeof grade === "number" ? skinForGrade(grade) : "hq";
+
 export default function DashboardApp({
   seatsRemaining = SEATS_REMAINING,
+  register = "application",
 }: {
   seatsRemaining?: number;
+  register?: DashboardRegister;
 }) {
-  const { ready, session, parent, children, deposits, composedChildIds, addChild, refreshDeposits } =
+  const { ready, session, parent, children, deposits, composedChildIds, addChild, refreshDeposits, signOut } =
     useDashboard();
   const [view, setView] = useState<View>("home");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -158,7 +194,9 @@ export default function DashboardApp({
     </>
   );
 
-  // Auth gate: everything below assumes a signed-in parent.
+  // Auth gate: everything below assumes a signed-in parent. Signed out
+  // always renders the application-register SignIn (the server computed the
+  // register from no session as "application" too — they agree).
   if (ready && !session) return <SignIn />;
 
   const selected = children.find((c) => c.id === selectedId) ?? null;
@@ -170,12 +208,270 @@ export default function DashboardApp({
   const onAdd = () => openEditor(addChild());
   const goHome = () => setView("home");
 
+  const isPath = register === "path";
+
+  /* ── the Path-register home (screen 16) — reconnect U11 ──
+     The SAME dashboard skeleton re-skinned by First Profit: Path top bar,
+     tp-token hero + verified stat box, "Your children" + ghost + ADD A
+     CHILD, Path child cards. NOTHING below the cards (no Gauntlet, no
+     footer line). The application register's DashHeader/hero/seats box
+     never render here — registers never mix on one screen. */
+  const renderPathHome = () => (
+    <main className="mx-auto w-full max-w-5xl px-6 py-6">
+      {/* Path top bar (screen 16): ink logo tile + First Profit / THE 120,
+          parent name · VERIFIER. SIGN OUT kept from the arrival screen's
+          corner treatment so path mode never traps a session. */}
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-hq-border bg-white px-4 py-2.5">
+        <span className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-hq-ink">
+            <Image src="/path-logo.svg" alt="" width={16} height={15} unoptimized />
+          </span>
+          <span className="flex flex-col gap-0.5">
+            <span className="font-path-display text-sm font-semibold leading-none text-hq-ink">
+              First Profit
+            </span>
+            <span className="font-path-mono text-[0.5rem] uppercase leading-none tracking-[0.2em] text-hq-ink-muted">
+              The 120
+            </span>
+          </span>
+        </span>
+        <span className="flex min-w-0 items-center gap-3 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-soft">
+          <span className="truncate">
+            {parent ? `${parent.firstName} ${parent.lastName}` : ""}{" "}
+            <span className="text-hq-ink-muted">· Verifier</span>
+          </span>
+          <Link
+            href="/"
+            onClick={signOut}
+            className="whitespace-nowrap text-hq-ink-muted transition-colors hover:text-hq-ink"
+          >
+            Sign out
+          </Link>
+        </span>
+      </div>
+
+      {/* Banners: checkout state is functional, register-neutral content. */}
+      {depositBanner === "success" && (
+        <div className="mt-4 rounded-2xl border border-hq-border bg-white p-5 text-sm leading-6 text-hq-ink-soft">
+          <p className="font-semibold text-hq-ink">✓ Seat deposit received.</p>
+          <p className="mt-1">
+            Your $250 CAD deposit is in. Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}. A
+            Stripe receipt is on its way to your email.
+          </p>
+        </div>
+      )}
+      {depositBanner === "cancelled" && (
+        <div className="mt-4 rounded-2xl border border-hq-border bg-hq-sunken p-5 text-sm leading-6 text-hq-ink-soft">
+          Checkout was cancelled. No charge was made. You can reserve the seat any time.
+        </div>
+      )}
+      {checkoutError && (
+        <div className="mt-4 rounded-2xl border border-red bg-red/5 p-5 text-sm leading-6 text-red">
+          {checkoutError}
+        </div>
+      )}
+
+      {/* Hero (screen 16): welcome + the family verified-count stat box.
+          The count renders the KNOWN FLOOR (0): per-task verification lives
+          in the First Profit app's path_* tables, keyed by student profile —
+          not reachable through this store's parent-session reads. */}
+      <div className="mt-4 flex flex-col gap-6 rounded-2xl border border-hq-border bg-white p-7 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] text-phase-sell-ink">
+            Parent dashboard
+          </p>
+          <h1 className="mt-2 font-path-display text-3xl font-semibold tracking-tight text-hq-ink">
+            {parent ? `Welcome, ${parent.firstName}.` : "Welcome."}
+          </h1>
+          <p className="mt-2 max-w-md text-sm leading-6 text-hq-ink-soft">
+            You hold the reviewer keys now. Every child&rsquo;s rung at a glance; verify real work
+            against the Done-when line, warmly.
+          </p>
+        </div>
+        <div className="flex-none rounded-xl bg-hq-sunken px-6 py-4 text-center">
+          <p className="font-path-mono text-3xl font-semibold leading-none text-verified">0</p>
+          <p className="mt-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
+            Tasks verified · all children
+          </p>
+        </div>
+      </div>
+
+      {/* Your children */}
+      <div className="mt-7 flex items-center justify-between gap-3">
+        <h2 className="font-path-display text-lg font-semibold text-hq-ink">Your children</h2>
+        <button
+          onClick={onAdd}
+          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-full border border-hq-border-strong bg-white px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink hover:bg-hq-sunken"
+        >
+          + Add a child
+        </button>
+      </div>
+
+      {children.length === 0 ? (
+        <button
+          onClick={onAdd}
+          className="mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed border-hq-border-strong bg-white py-16 text-center transition-colors hover:border-hq-ink"
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-hq-sunken text-2xl text-hq-ink">
+            +
+          </span>
+          <span className="mt-4 font-path-display text-lg font-semibold text-hq-ink">
+            Add your first child
+          </span>
+          <span className="mt-1 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-hq-ink-muted">
+            Ages 8–17 · one dossier each
+          </span>
+        </button>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {children.map((c) => {
+            const skin = cardSkin(c.grade);
+            const group = groups.find((g) => g.slug === c.groupSlug)?.name ?? "";
+            const verdict = cardVerdict(c, depositsFor(c.id), composedChildIds.has(c.id));
+            const arrived = c.arrivedAt != null;
+            const header = (
+              <div className="flex items-center gap-3">
+                <span
+                  className={`flex h-10 w-10 flex-none items-center justify-center rounded-full text-[15px] font-bold text-white ${PHASE_AVATAR_CLASSES[skin]}`}
+                >
+                  {(c.firstName[0] || "?").toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[15.5px] font-bold text-hq-ink">
+                    {childName(c)}{" "}
+                    {group && (
+                      <span className="text-[12.5px] font-medium text-hq-ink-soft">({group})</span>
+                    )}
+                  </p>
+                  <p
+                    className={`mt-0.5 truncate font-path-mono text-[0.55rem] uppercase tracking-[0.12em] ${
+                      arrived ? PHASE_STATUS_CLASSES[skin] : "text-hq-ink-muted"
+                    }`}
+                  >
+                    {arrived
+                      ? `${c.grade === "" ? "Grade" : `Grade ${c.grade}`} · ${skin === "trail" ? "Trail" : "HQ"}`
+                      : verdict.kind === "funnel"
+                        ? verdict.statusLine
+                        : statusMeta(c.status).label}
+                  </p>
+                </div>
+              </div>
+            );
+            if (arrived) {
+              // POST-arrival: THE PATH progress bar at the KNOWN FLOOR
+              // (0/125 — see the hero note), rung chip, KEEP BUILDING → /fp.
+              return (
+                <div key={c.id} className="rounded-2xl border border-hq-border bg-white p-5">
+                  {header}
+                  <div className="mt-4 flex items-center justify-between gap-2 font-path-mono text-[0.55rem] uppercase tracking-[0.12em] text-hq-ink-soft">
+                    <span>The Path</span>
+                    <span>0 / 125 verified</span>
+                  </div>
+                  <div className="mt-1.5 h-[3px] rounded-full bg-hq-sunken">
+                    <div
+                      className={`h-full rounded-full ${PHASE_BAR_CLASSES[skin]}`}
+                      style={{ width: "2%" }}
+                    />
+                  </div>
+                  <div className="my-4 border-t border-hq-border" />
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate rounded-full bg-verified/10 px-3 py-1 text-[11px] font-semibold text-verified">
+                      {/* The screen-16 demo abbreviates ("Sept 30"); the
+                          deadline-sweep rule says every surface derives the
+                          date from the ONE constant — so the full label. */}
+                      {c.applicantState === "enrolled"
+                        ? "Enrolled"
+                        : `Deposited · working to ${DEPOSIT_REFUND_DEADLINE_LABEL}`}
+                    </span>
+                    <Link
+                      href="/fp"
+                      className="inline-flex h-10 flex-none items-center justify-center rounded-lg bg-hq-ink px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90"
+                    >
+                      Keep building
+                    </Link>
+                  </div>
+                </div>
+              );
+            }
+            // PRE-arrival sibling: SAME screen-16 card chrome, carrying the
+            // funnel status line (in the header above) + CTA content from
+            // cardVerdict — the origin doc's settled design decision. The
+            // reserve block is the ONE shared renderReserveCta (dispute-
+            // evidence posture never forks).
+            const cta = verdict.kind === "funnel" ? verdict.primaryCta : undefined;
+            const pathPill =
+              "inline-flex h-10 items-center justify-center rounded-lg bg-hq-ink px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90";
+            return (
+              <div key={c.id} className="rounded-2xl border border-hq-border bg-white p-5">
+                {header}
+                <div className="mt-4 border-t border-hq-border pt-4">
+                  {verdict.kind === "funnel" && verdict.note && (
+                    <p className="mb-3 font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted">
+                      {verdict.note}
+                    </p>
+                  )}
+                  {cta?.kind === "reserve" ? (
+                    renderReserveCta(c)
+                  ) : (
+                    <div className="flex items-center justify-end gap-3">
+                      {cta?.kind === "start" || cta?.kind === "compose" ? (
+                        <a href={cta.href} className={pathPill}>
+                          {cta.label}
+                        </a>
+                      ) : cta?.kind === "continue_dossier" ? (
+                        <button onClick={() => openEditor(c.id)} className={pathPill}>
+                          {cta.label}
+                        </button>
+                      ) : cta?.kind === "reserved" ? (
+                        cta.href ? (
+                          <a
+                            href={cta.href}
+                            className={`${pathPill} !bg-crm-green`}
+                          >
+                            {cta.label}
+                          </a>
+                        ) : (
+                          <span className={`${pathPill} !bg-crm-green`}>{cta.label}</span>
+                        )
+                      ) : verdict.kind === "legacy" ? (
+                        <button onClick={() => openEditor(c.id)} className={pathPill}>
+                          Open dossier
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                  {verdict.kind === "funnel" && verdict.secondaryReviewLink && (
+                    <p className="mt-3">
+                      <a
+                        href={verdict.secondaryReviewLink.href}
+                        className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
+                      >
+                        {verdict.secondaryReviewLink.label} →
+                      </a>
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* Screen 16: nothing below the cards. */}
+    </main>
+  );
+
   return (
-    <div className="min-h-screen bg-paper">
+    <div
+      className={
+        isPath ? "min-h-screen bg-hq-canvas font-path-body text-hq-ink" : "min-h-screen bg-paper"
+      }
+    >
       {/* U10 fidelity (audit 3c/X1): in the editor view the wizard's floating
           nav card (progress + NAME · SIGN OUT, mounted by DossierEditor) IS
-          the top bar — DashHeader would double the brand and sign-out. */}
-      {!(ready && view === "editor" && selected) && <DashHeader />}
+          the top bar — DashHeader would double the brand and sign-out. In
+          PATH mode DashHeader never renders (registers never mix); the Path
+          top bar lives inside renderPathHome. */}
+      {!(ready && view === "editor" && selected) && !isPath && <DashHeader />}
 
       {!ready ? (
         <div className="mx-auto max-w-5xl px-6 py-20 font-mono text-xs uppercase tracking-[0.14em] text-muted">
@@ -185,6 +481,8 @@ export default function DashboardApp({
         <DossierEditor child={selected} onBack={goHome} onPreview={() => setView("preview")} />
       ) : view === "preview" && selected ? (
         <DossierPreview child={selected} onBack={() => setView("editor")} />
+      ) : isPath ? (
+        renderPathHome()
       ) : (
         <main className="mx-auto w-full max-w-5xl px-6 py-10">
           {depositBanner === "success" && (

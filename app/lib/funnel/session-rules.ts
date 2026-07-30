@@ -336,8 +336,15 @@ export function resolveReentry(ctx: ReentryContext): ReentryDestination {
 
 /** One child as the dashboard gate reads it: a `ReentryChild` plus the legacy
  *  `status` column, which only `deriveEnrolled` consults (the `"member"`
- *  literal — see its docblock). */
-export type DashboardGateChild = ReentryChild & { status?: unknown };
+ *  literal — see its docblock), plus the sticky arrival fact (U11 — only
+ *  `dashboardRegister` consults it). */
+export type DashboardGateChild = ReentryChild & {
+  status?: unknown;
+  /** `children.arrived_at` — non-null iff this child has EVER completed
+   *  arrival (the provisioning claim landed `complete`). Monotonic: set
+   *  once, never cleared; refund/suspension flips the CLAIM, not this. */
+  arrivedAt?: string | null;
+};
 
 export type DashboardGateVerdict =
   | { action: "render" }
@@ -394,6 +401,35 @@ export function dashboardGateVerdict(facts: {
   return next.surface === "mini_app"
     ? { action: "redirect", childId: child.id, route: `/start/child/${child.id}` }
     : { action: "render" };
+}
+
+/* ─────────────── the register flip (reconnect U11, R12 flip tier) ─────────────── */
+
+/**
+ * Which REGISTER the whole dashboard renders in (R12, later tier): once ANY
+ * child in the family has EVER completed arrival, the dashboard is the Path
+ * register (screen-16 skeleton) — for every child, including pre-submission
+ * siblings, whose cards render inside the Path shell. The two registers
+ * never mix on one screen.
+ *
+ * The fact is `children.arrived_at` — a sticky, monotonic COLUMN stamped in
+ * the same landing path that marks the provisioning claim `complete`, never
+ * cleared — NOT the current claim state (a later refund or mailbox
+ * suspension must never un-flip a family's dashboard) and NOT the
+ * best-effort `student_account_created` telemetry row (swallowed failures,
+ * admin-only table — the plan's "sticky arrival fact is a column" decision).
+ *
+ * `null` children (the gate's read-failed / signed-out shape) and legacy
+ * families whose children all carry NULL `arrived_at` render the
+ * application register — indefinitely, for families that never enter the
+ * funnel. Evaluated per page-load, server-side; an open tab flips on next
+ * navigation, not live.
+ */
+export function dashboardRegister(
+  children: readonly Pick<DashboardGateChild, "arrivedAt">[] | null
+): "application" | "path" {
+  if (!children) return "application";
+  return children.some((c) => c.arrivedAt != null) ? "path" : "application";
 }
 
 /**

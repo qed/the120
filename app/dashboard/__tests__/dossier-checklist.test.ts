@@ -130,6 +130,7 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     status: "draft",
     submitted_at: null,
     applicant_state: null,
+    arrived_at: null,
     ...overrides,
   });
 
@@ -327,7 +328,7 @@ describe("raw-shape parity: the fixtures the plan demanded (not the sanitizer's 
         subjects: [], workshop_ids: [], interests: base.interests,
         project_pitch: base.projectPitch, portfolio_links: "",
         child_email: null, child_email_none: null, status: "draft", submitted_at: null,
-        applicant_state: null,
+        applicant_state: null, arrived_at: null,
       })
     );
     const crmPct = crmCompleteness({

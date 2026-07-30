@@ -7,6 +7,7 @@ import { getSeatsRemaining } from "@/app/lib/seats";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import {
   dashboardGateVerdict,
+  dashboardRegister,
   type DashboardGateChild,
 } from "@/app/lib/funnel/session-rules";
 import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
@@ -44,7 +45,7 @@ const loadDashboardGateFacts = cache(async (): Promise<{
 
     const { data: childRows, error: childErr } = await supabase
       .from("children")
-      .select("id, applicant_state, created_at, status")
+      .select("id, applicant_state, created_at, status, arrived_at")
       .order("created_at", { ascending: true });
     if (childErr || !childRows) return { hasSession: true, hasPassword, children: null };
 
@@ -75,6 +76,8 @@ const loadDashboardGateFacts = cache(async (): Promise<{
         createdAt: String(c.created_at),
         hasComposedProject: composed.has(String(c.id)),
         status: c.status as unknown,
+        // The sticky arrival fact (U11) — feeds dashboardRegister only.
+        arrivedAt: (c.arrived_at as string | null) ?? null,
       })),
     };
   } catch {
@@ -95,10 +98,15 @@ export default async function DashboardPage({
   // a caught one reports failure on success, which this repo has shipped once.
   if (verdict.action === "redirect") redirect(verdict.route);
 
+  // The register flip (U11, R12 later tier): sticky per family — any child
+  // with `arrived_at` puts the WHOLE dashboard in the Path register. Signed
+  // out / read-failed shapes carry `children: null` → application register.
+  const register = dashboardRegister(facts.children);
+
   const seatsRemaining = await getSeatsRemaining();
   return (
     <DashboardProvider>
-      <DashboardApp seatsRemaining={seatsRemaining} />
+      <DashboardApp seatsRemaining={seatsRemaining} register={register} />
     </DashboardProvider>
   );
 }

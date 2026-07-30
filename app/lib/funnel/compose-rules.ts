@@ -114,12 +114,15 @@ export function assembleBlurb(
   const system = [
     "Please create a blurb for this business that could be used in an elevator to explain the business in a quick bite size elevator pitch.",
     UNTRUSTED_LINE,
-    "Return JSON with: description (the blurb, 2 to 3 sentences, 60 words or fewer, second person, speaking to the child).",
+    // The brochure framing supersedes speaking-to-the-child for THIS field
+    // (Peter, 2026-07-30): the description is stranger-facing copy.
+    "Return JSON with: description (the blurb, 2 to 3 sentences, 60 words or fewer).",
     name && name.trim().length > 0
       ? "Use the business name given below."
       : "",
     COPY_RULES_LINE,
     `Write for ${BAND_LABEL[payload.band]}.`,
+    "This is a pitch to a stranger. It should take the answers and imagine a stranger in an elevator is reading a brochure about the company. The description should be what would go into that brochure.",
   ]
     .filter(Boolean)
     .join("\n");

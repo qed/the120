@@ -303,7 +303,9 @@ export function ChildrenFlow({
               : "border border-red bg-white text-red hover:bg-red/5"
           }`}
         >
-          {pending ? "Adding…" : children.length === 0 ? "Add my child →" : "Add another →"}
+          {/* ONE promise (2026-07-30): the submit adds the child AND enters
+              the unified flow, so the label says where it goes. */}
+          {pending ? "Adding…" : "Start building →"}
         </button>
       </div>
     </main>

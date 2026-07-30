@@ -1,5 +1,7 @@
 import Link from "next/link";
+import Cta from "@/app/components/Cta";
 import Footer from "@/app/components/Footer";
+import SessionCtaSwap from "@/app/components/SessionCtaSwap";
 import StartCta from "@/app/components/StartCta";
 import Wordmark from "@/app/components/Wordmark";
 import { seatsDisplay, LANDING_HEADLINE_LINE_2 } from "@/app/lib/site";
@@ -99,7 +101,18 @@ export default function LandingPage({
           <Link href="/" aria-label="The 120 home">
             <Wordmark />
           </Link>
-          <StartCta source={content.source} group={content.group} className="px-5 py-2.5 text-xs" />
+          {/* Session-aware (2026-07-30): a signed-in family gets their
+              dashboard, not the funnel entry — the Nav's swap, here too. */}
+          <SessionCtaSwap
+            signedIn={
+              <Cta href="/dashboard" className="px-5 py-2.5 text-xs">
+                My dashboard
+              </Cta>
+            }
+            signedOut={
+              <StartCta source={content.source} group={content.group} className="px-5 py-2.5 text-xs" />
+            }
+          />
         </div>
       </div>
 
@@ -146,7 +159,16 @@ export default function LandingPage({
               </span>
             </div>
             <div className="mt-5">
-              <StartCta source={content.source} group={content.group} className="px-7 py-4 text-sm" />
+              <SessionCtaSwap
+                signedIn={
+                  <Cta href="/dashboard" className="px-7 py-4 text-sm">
+                    My dashboard
+                  </Cta>
+                }
+                signedOut={
+                  <StartCta source={content.source} group={content.group} className="px-7 py-4 text-sm" />
+                }
+              />
             </div>
           </div>
         </div>
@@ -184,7 +206,16 @@ export default function LandingPage({
           The application is the first day of the business.{" "}
           <span className="italic">Start it now.</span>
         </h2>
-        <StartCta source={content.source} group={content.group} variant="white" className="px-[30px] py-4 text-sm" />
+        <SessionCtaSwap
+          signedIn={
+            <Cta href="/dashboard" variant="white" className="px-[30px] py-4 text-sm">
+              My dashboard
+            </Cta>
+          }
+          signedOut={
+            <StartCta source={content.source} group={content.group} variant="white" className="px-[30px] py-4 text-sm" />
+          }
+        />
       </section>
 
       <Footer />

@@ -76,9 +76,9 @@ describe("cardVerdict — NULL applicant_state is the legacy card, unchanged", (
 });
 
 describe("cardVerdict — one verdict per ladder state", () => {
-  it("added → PROJECT NOT STARTED with a blue CONTINUE APPLICATION into the mini-app", () => {
+  it("added → APPLICATION JUST STARTED with a blue CONTINUE APPLICATION into the mini-app", () => {
     const v = funnel(cardVerdict(child("added"), none, false));
-    expect(v.statusLine).toBe("PROJECT NOT STARTED");
+    expect(v.statusLine).toBe("APPLICATION JUST STARTED");
     expect(v.tone).toBe("red");
     expect(v.primaryCta).toEqual({
       kind: "start",
@@ -90,7 +90,7 @@ describe("cardVerdict — one verdict per ladder state", () => {
 
   it("project_created WITH a composed project → CONTINUE APPLICATION links into the merged flow (U9: the landing rule picks the step, no ?step=)", () => {
     const v = funnel(cardVerdict(child("project_created"), none, true));
-    expect(v.statusLine).toBe("PROJECT CREATED");
+    expect(v.statusLine).toBe("APPLICATION JUST STARTED");
     expect(v.primaryCta).toEqual({
       kind: "continue_dossier",
       label: "Continue application",
@@ -101,16 +101,16 @@ describe("cardVerdict — one verdict per ladder state", () => {
   it("the dossier cell's status line is the PROJECT'S NAME when it is known (2026-07-30)", () => {
     const named = funnel(cardVerdict(child("project_created"), none, true, "Maple Lemonade Stand"));
     expect(named.statusLine).toBe("Maple Lemonade Stand");
-    // Read-failure armor: a null/blank name falls back to the generic line.
+    // Null/blank name (the AI-once null state) reads as the default.
     expect(funnel(cardVerdict(child("project_created"), none, true, null)).statusLine).toBe(
-      "PROJECT CREATED"
+      "APPLICATION JUST STARTED"
     );
     expect(funnel(cardVerdict(child("project_created"), none, true, "  ")).statusLine).toBe(
-      "PROJECT CREATED"
+      "APPLICATION JUST STARTED"
     );
     // The re-compose cell (no active project) never claims a name.
     expect(funnel(cardVerdict(child("project_created"), none, false, "Stale Name")).statusLine).toBe(
-      "PROJECT CREATED"
+      "APPLICATION JUST STARTED"
     );
   });
 

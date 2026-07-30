@@ -143,11 +143,14 @@
     </li>
     <li>
       <div class="row"><span class="title">18 · "Application just started" + stale view fix</span>
-        <span class="badge pending">Not started</span></div>
-      <p class="note">Dashboard card status defaults to "Application just started" until a
-        customized company name exists (existing canned names in prod get reset to the
-        null state); plus fix the cached wrong-child view on back-navigation.</p>
-      <p class="stamp">Not started</p>
+        <span class="badge done">Done</span></div>
+      <p class="note">Dashboard card status now defaults to <strong>Application just
+        started</strong> until a customized company name exists; the two prod projects
+        carrying the canned "Your First Real Company" name were reset to the null state
+        (the AI will name them on next entry). The wrong-company back-navigation view is
+        fixed: pages restored from the browser's back/forward cache force a fresh load
+        (flow pages and the dashboard).</p>
+      <p class="stamp">Committed &amp; data reset · 2026-07-30 · deploying on push</p>
     </li>
     <li>
       <div class="row"><span class="title">17 · Review application → one-page summary</span>

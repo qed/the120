@@ -220,6 +220,17 @@ export default function DashboardProvider({ children: reactChildren }: { childre
     return () => subscription.unsubscribe();
   }, [loadFamily]);
 
+  // A bfcache-restored dashboard is a snapshot of an older session's data —
+  // force a fresh load when the page returns from the back/forward cache
+  // (2026-07-30, the wrong-company back-navigation report).
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   const refreshDeposits = useCallback(async () => {
     const { data } = await getSupabase().from("deposits").select("child_id,status");
     setDeposits(

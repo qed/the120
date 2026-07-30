@@ -268,6 +268,18 @@ export function MiniAppShell({
     params.set("step", step);
     router.replace(`?${params.toString()}`, { scroll: false });
   }, [rawStep, step, router, searchParams]);
+
+  // A bfcache-restored page is a SNAPSHOT — browser Back can resurrect a
+  // different child's whole client state (Peter's wrong-company report,
+  // 2026-07-30). Force a fresh load whenever this page returns from the
+  // back/forward cache; a normal mount never sees persisted=true.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
   const [confirmedSlug, setConfirmedSlug] = useState<string | null>(child.groupSlug);
   // A TAP is client state and nothing else (R35): switching is choosing.
   const [tappedSlug, setTappedSlug] = useState<GroupSlug | null>(null);

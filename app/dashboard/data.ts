@@ -325,16 +325,18 @@ export function cardVerdict(
     case "mini_app":
       // `resume` = `added`; `compose` = `project_created` whose composed
       // project was invalidated (the re-compose obligation).
+      // 2026-07-30: pre-name cells all read APPLICATION JUST STARTED — the
+      // customized company name takes over the moment one exists.
       return next.intent === "resume"
         ? {
             kind: "funnel",
-            statusLine: "PROJECT NOT STARTED",
+            statusLine: "APPLICATION JUST STARTED",
             tone: "red",
             primaryCta: { kind: "start", label: "Continue application", href: miniAppHref },
           }
         : {
             kind: "funnel",
-            statusLine: "PROJECT CREATED",
+            statusLine: "APPLICATION JUST STARTED",
             tone: "red",
             primaryCta: { kind: "compose", label: "Continue application", href: miniAppHref },
           };
@@ -343,8 +345,10 @@ export function cardVerdict(
       return {
         kind: "funnel",
         // The child's composed project exists on this cell, so the status
-        // line is its NAME (the render sites uppercase via CSS).
-        statusLine: activeProjectName?.trim() || "PROJECT CREATED",
+        // line is its NAME (the render sites uppercase via CSS); until a
+        // customized name exists the default reads APPLICATION JUST STARTED
+        // (2026-07-30).
+        statusLine: activeProjectName?.trim() || "APPLICATION JUST STARTED",
         tone: "red",
         primaryCta: { kind: "continue_dossier", label: "Continue application", href: miniAppHref },
       };

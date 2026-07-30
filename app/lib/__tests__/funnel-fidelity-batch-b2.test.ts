@@ -180,9 +180,7 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(COMPOSE_UI_COPY.customersLabel).toBe("First Customers");
     expect(COMPOSE_UI_COPY.productLabel).toBe("Product v1");
     expect(COMPOSE_UI_COPY.whyLabel).toBe("Why am I building this?");
-    expect(COMPOSE_UI_COPY.editOn).toBe("Edit This");
-    expect(COMPOSE_UI_COPY.editOff).toBe("Done editing");
-    expect(COMPOSE_UI_COPY.startOver).toBe("Start over");
+    expect(COMPOSE_UI_COPY.pitchLabel).toBe("The pitch");
     expect(COMPOSE_UI_COPY.goldNote).toBe(
       "This project is yours. You can change it any time, and you can hold up to five. Founders pivot. That's normal here."
     );
@@ -200,32 +198,34 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(shell).toContain("{COMPOSE_UI_COPY.loadingBody}");
   });
 
-  it("the composed project renders as a PAGE with an edit toggle, not a bare form", () => {
-    // View mode (2026-07-30): the business name is an always-editable field
-    // styled as the heading, the pitch renders as prose, and all FOUR cards
-    // render — The Offer / First Customers / Product v1 / Why am I building
-    // this? (the latter two off the composed row's quiz answers).
+  it("the composed project renders as a PAGE with per-section edit icons, not a bare form", () => {
+    // 2026-07-30: the business name is an always-editable field styled as
+    // the heading (placeholder for the null state), the pitch renders as
+    // prose, and all FOUR cards render — The Offer / First Customers /
+    // Product v1 / Why am I building this? (the latter two off the composed
+    // row's quiz answers). The editable sections each carry their own edit
+    // icon in the upper right.
     expect(shell).toContain('aria-label="Business name"');
     expect(shell).toMatch(/value=\{composeDraft\.name\}/);
-    expect(shell).toContain("{composeDraft.description}</p>");
+    expect(shell).toContain('placeholder="Name your company"');
     expect(shell).toContain("{COMPOSE_UI_COPY.offerLabel}");
     expect(shell).toContain("{COMPOSE_UI_COPY.customersLabel}");
     expect(shell).toContain("{COMPOSE_UI_COPY.productLabel}");
     expect(shell).toContain("{COMPOSE_UI_COPY.whyLabel}");
     expect(shell).toContain("composeView.quizAnswers.what");
     expect(shell).toContain("composeView.quizAnswers.spark");
-    // The toggle flips the same fields into edit mode.
-    expect(shell).toMatch(/composeEditing \? COMPOSE_UI_COPY\.editOff : COMPOSE_UI_COPY\.editOn/);
-    expect(shell).toMatch(/setComposeEditing\(\(e\) => !e\)/);
+    // One icon per editable section, exactly one section editing at a time.
+    expect(shell).toMatch(/sectionEditButton\("description", COMPOSE_UI_COPY\.pitchLabel\)/);
+    expect(shell).toMatch(/sectionEditButton\("offer", COMPOSE_UI_COPY\.offerLabel\)/);
+    expect(shell).toMatch(/sectionEditButton\("customers", COMPOSE_UI_COPY\.customersLabel\)/);
+    expect(shell).toMatch(/setEditingSection\(\(s\) => \(s === section \? null : section\)\)/);
   });
 
-  it("the controls row: Edit This / Start over — regeneration is retired (2026-07-30)", () => {
+  it("the bottom controls are retired (2026-07-30): no Edit This, no Start over, no regeneration", () => {
     expect(shell).not.toContain("Shape it again");
     expect(shell).not.toContain("regenerateProjectAction");
-    expect(shell).toContain("{COMPOSE_UI_COPY.startOver}");
-    // Start over maps to the doors step — the existing door-change
-    // machinery is the invalidation path; NO new mutation was invented.
-    expect(shell).toMatch(/onClick=\{\(\) => go\("doors"\)\}\s*disabled=\{pending\}\s*>\s*\{COMPOSE_UI_COPY\.startOver\}/);
+    expect(shell).not.toContain("Edit This");
+    expect(shell).not.toContain("Start over");
   });
 
   it("the interstitial is gone: Shape my project composes directly; the no-view arm is recovery only", () => {

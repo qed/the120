@@ -157,12 +157,15 @@
     </li>
     <li>
       <div class="row"><span class="title">16 · Compose split: AI name, elevator blurb, edit icons</span>
-        <span class="badge shipping">In progress</span></div>
+        <span class="badge done">Done</span></div>
       <p class="note">Two Claude calls (Peter's prompts): one invents the company name (null
-        default; AI asked only until a name exists), one writes the elevator-pitch blurb
-        under the title. Each section gets its own edit icon (Edit This and Start over
-        removed). Model: Claude Fable 5.</p>
-      <p class="stamp">In progress</p>
+        default; AI asked only until a name exists — family-typed names also count), one
+        writes the elevator-pitch blurb under the title using that name. If a call fails
+        the field stays null and heals on the next entry. Each editable section (pitch,
+        The Offer, First Customers) has its own ✎ icon in the upper right; "Edit This" and
+        "Start over" are removed. Model: <strong>anthropic/claude-sonnet-5</strong> (per
+        the later instruction; swap the FUNNEL_COMPOSE_MODEL env var to change).</p>
+      <p class="stamp">Committed · 2026-07-30 · deploying on push</p>
     </li>
     <li>
       <div class="row"><span class="title">15 · Clear buttons on this tracker</span>

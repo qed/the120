@@ -46,13 +46,20 @@ import {
   parseApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
 import {
+  assembleBlurb,
   assembleCompose,
+  assembleName,
+  blurbOutputSchema,
   canRegenerate,
   composeBranch,
+  composeFieldBranch,
   composedProjectSchema,
   fallbackProject,
+  initialProject,
+  nameOutputSchema,
   sanitizeComposed,
   type CleanAnswers,
+  type ComposePayload,
   type ComposedProject,
   type FallbackReason,
   type NormalizedModelResult,
@@ -130,7 +137,13 @@ export type ComposeDeps = {
     ) => Promise<boolean | "locked" | "conflict">;
     advanceToProjectCreated: (childId: string) => Promise<boolean>;
   }>;
-  generate: (parts: { system: string; prompt: string }) => Promise<NormalizedModelResult>;
+  generate: (parts: {
+    system: string;
+    prompt: string;
+    /** 2026-07-30 split calls: the name/blurb calls pass their single-field
+     *  schema; absent = the legacy whole-project schema (regenerate). */
+    schema?: z.ZodType;
+  }) => Promise<NormalizedModelResult>;
   /** R40a's "back off, then fall back": one real delay before the single
    *  transient retry. Injected so tests never sleep. */
   backoff: () => Promise<void>;
@@ -427,12 +440,87 @@ const rowToProject = (row: ProjectRow): ComposedProject => ({
  *  backoff and ONE retry before the taxonomy falls back. */
 async function askModel(
   deps: ComposeDeps,
-  parts: { system: string; prompt: string }
+  parts: { system: string; prompt: string; schema?: z.ZodType }
 ): Promise<NormalizedModelResult> {
   const first = await deps.generate(parts);
   if (first.type !== "timeout" && first.type !== "rate_limited") return first;
   await deps.backoff();
   return deps.generate(parts);
+}
+
+/* ── the split calls (Peter, 2026-07-30): name, then the elevator blurb ── */
+
+type FieldAsk =
+  | { kind: "accept"; value: string }
+  | { kind: "fallback"; reason: FallbackReason };
+
+/** One field's conversation: ask (transient-retried), at most one re-ask,
+ *  then fallback — which leaves the field in its NULL state so a later
+ *  entry can ask again (the AI-once rule counts only created fields). */
+async function askField(
+  deps: ComposeDeps,
+  parts: { system: string; prompt: string },
+  field: "name" | "description"
+): Promise<FieldAsk> {
+  const schema = field === "name" ? nameOutputSchema : blurbOutputSchema;
+  const first = composeFieldBranch(await askModel(deps, { ...parts, schema }), {
+    reasked: false,
+    field,
+  });
+  if (first.kind === "accept") return { kind: "accept", value: first.value };
+  if (first.kind === "fallback") return { kind: "fallback", reason: first.reason };
+  const second = composeFieldBranch(
+    await deps.generate({
+      system: parts.system,
+      prompt: `${parts.prompt}\n\nYour previous answer was rejected: ${first.error}`,
+      schema,
+    }),
+    { reasked: true, field }
+  );
+  if (second.kind === "accept") return { kind: "accept", value: second.value };
+  return {
+    kind: "fallback",
+    reason: second.kind === "fallback" ? second.reason : "invalid_after_reask",
+  };
+}
+
+/**
+ * Fill whichever AI fields are still in their NULL state ("") — the name
+ * call first (its result feeds the blurb prompt), then the blurb. A field
+ * that already carries text (AI-made once, family-typed, or a template's
+ * own copy) is NEVER re-asked.
+ */
+async function fillMissingAiFields(
+  deps: ComposeDeps,
+  payload: ComposePayload,
+  project: ComposedProject
+): Promise<{ project: ComposedProject; changed: boolean; degraded: FallbackReason | null }> {
+  let current = project;
+  let changed = false;
+  let degraded: FallbackReason | null = null;
+  if (current.name.trim().length === 0) {
+    const asked = await askField(deps, assembleName(payload), "name");
+    if (asked.kind === "accept") {
+      current = { ...current, name: asked.value };
+      changed = true;
+    } else {
+      degraded = asked.reason;
+    }
+  }
+  if (current.description.trim().length === 0) {
+    const asked = await askField(
+      deps,
+      assembleBlurb(payload, current.name.trim().length > 0 ? current.name : null),
+      "description"
+    );
+    if (asked.kind === "accept") {
+      current = { ...current, description: asked.value };
+      changed = true;
+    } else {
+      degraded = degraded ?? asked.reason;
+    }
+  }
+  return { project: current, changed, degraded };
 }
 
 /** One model conversation: first ask (backoff-retried if transient), at most
@@ -492,6 +580,8 @@ export async function composeProjectCore(
       if (!template || template.group !== group) return { kind: "invalid" };
     }
 
+    const locked = isEditLocked(parseApplicantState(child.applicantState));
+
     // Re-entry: an active draft already exists (refresh, Back, second tab).
     // The state advance re-issues here too — it is idempotent (SQL-guarded
     // added → project_created), and re-entry is the only path that can heal
@@ -500,11 +590,41 @@ export async function composeProjectCore(
     if (existing === "error") return { kind: "failed" };
     if (existing) {
       await session.advanceToProjectCreated(childId);
+      let project = rowToProject(existing);
+      // Heal the NULL-state AI fields (2026-07-30 split calls): a compose
+      // whose model calls fell back left name/blurb empty — re-entry asks
+      // again, keyed on emptiness (the AI-once rule counts only fields that
+      // were actually created, by the model or by the family). Never past
+      // the edit horizon, never over existing text, and a failed save just
+      // returns the unhealed row (the next entry can try again).
+      if (
+        !locked &&
+        (project.name.trim().length === 0 || project.description.trim().length === 0)
+      ) {
+        const payload: ComposePayload = {
+          band: quizBandForGrade(child.grade),
+          group: (GROUP_SLUGS as readonly string[]).includes(existing.groupSlug)
+            ? (existing.groupSlug as GroupSlug)
+            : group,
+          templateId: existing.templateId,
+          answers: {
+            what: existing.quizAnswers.what ?? "",
+            who: existing.quizAnswers.who ?? "",
+            offer: existing.quizAnswers.offer ?? "",
+            ...(existing.quizAnswers.spark ? { spark: existing.quizAnswers.spark } : {}),
+          },
+        };
+        const filled = await fillMissingAiFields(deps, payload, project);
+        if (filled.changed) {
+          const saved = await session.saveDraft(existing.id, filled.project, deps.modelId());
+          if (saved === true) project = filled.project;
+        }
+      }
       return {
         kind: "exists",
         view: view(
           existing.id,
-          rowToProject(existing),
+          project,
           existing.aiRegenerationCount,
           existing.groupSlug,
           existing.quizAnswers
@@ -520,7 +640,7 @@ export async function composeProjectCore(
     // locked verdict before counting, moderating, or spending anything.
     // Unknown states parse to null (the CHECK constraint makes them
     // impossible); the trigger stays the fail-closed authority on updates.
-    if (isEditLocked(parseApplicantState(child.applicantState))) {
+    if (locked) {
       return { kind: "locked" };
     }
 
@@ -546,16 +666,16 @@ export async function composeProjectCore(
     // spent count; the five-project cap above still prices every retired
     // row (deliberate — R2 counts total rows, not active ones).
     //
-    // CLAIM BEFORE SPEND: the row goes in FIRST, carrying the canned
-    // fallback. The one-active partial index arbitrates races — only the
-    // winner ever calls the model, and a failed insert costs zero model
-    // calls (the review's converging finding: generate-then-insert made
-    // every lost race and every insert failure a free model conversation).
-    const fallback = fallbackProject(templateId, group, moderated.clean);
+    // CLAIM BEFORE SPEND: the row goes in FIRST — name and blurb in their
+    // NULL state ("") for an own idea, the template's own copy for a
+    // template start; offer/customers are the child's own answers. The
+    // one-active partial index arbitrates races — only the winner ever
+    // calls the model, and a failed insert costs zero model calls.
+    const seed = initialProject(templateId, group, moderated.clean);
     const inserted = await session.insertProject({
       childId,
       groupSlug: group,
-      project: fallback,
+      project: seed,
       templateId,
       quizAnswers: storedAnswers as Record<string, string>,
       aiModel: null,
@@ -579,44 +699,39 @@ export async function composeProjectCore(
 
     await session.advanceToProjectCreated(childId);
 
-    const run = await runCompose(
+    // The split calls (Peter, 2026-07-30): the NAME first, then the
+    // elevator BLURB — each only when its field is still empty (a template
+    // start ships both, so it spends zero model calls here).
+    const filled = await fillMissingAiFields(
       deps,
-      assembleCompose({
-        band: quizBandForGrade(child.grade),
-        group,
-        templateId,
-        answers: moderated.clean,
-      })
+      { band: quizBandForGrade(child.grade), group, templateId, answers: moderated.clean },
+      seed
     );
-    if (run.outcome === "accept") {
-      const saved = await session.saveDraft(inserted.id, run.project, deps.modelId());
+    if (filled.changed) {
+      const saved = await session.saveDraft(inserted.id, filled.project, deps.modelId());
       // The horizon closed mid-flight (a submitted+ child with no active
       // project can only exist via staff/retention paths, but the trigger
       // is the authority): distinct verdict, no retry copy.
       if (saved === "locked") return { kind: "locked" };
       // The row this call just inserted was retired under us (a door
       // change in another tab): zero rows on the active-scoped save is
-      // NOT success — refresh guidance, never the degraded-composed view.
+      // NOT success — refresh guidance, never the composed view.
       if (saved === "conflict") return { kind: "conflict" };
-      if (saved === true) {
+      if (saved !== true) {
+        // The AI fields could not be persisted; the STORED row is the seed
+        // (NULL-state name/blurb), and the view must say what the row says
+        // — re-entry heals.
         return {
           kind: "composed",
-          view: view(inserted.id, run.project, 0, group, storedAnswers as Record<string, string>),
-          degraded: null,
+          view: view(inserted.id, seed, 0, group, storedAnswers as Record<string, string>),
+          degraded: "error",
         };
       }
-      // The model draft could not be persisted; the STORED row is the
-      // fallback, and the view must say what the row says.
-      return {
-        kind: "composed",
-        view: view(inserted.id, fallback, 0, group, storedAnswers as Record<string, string>),
-        degraded: "error",
-      };
     }
     return {
       kind: "composed",
-      view: view(inserted.id, fallback, 0, group, storedAnswers as Record<string, string>),
-      degraded: run.reason,
+      view: view(inserted.id, filled.project, 0, group, storedAnswers as Record<string, string>),
+      degraded: filled.degraded,
     };
   } catch (err) {
     console.error("[funnel/compose] compose exception:", err);

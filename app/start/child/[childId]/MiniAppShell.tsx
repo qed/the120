@@ -328,11 +328,13 @@ export function MiniAppShell({
   const serverProjectKey = initialProject
     ? `${initialProject.id}:${initialProject.aiRegenerationCount}`
     : null;
-  // U10 fidelity (drift 13): compose is a project PAGE with an edit toggle
-  // ("Change anything" / "Done editing"), not a form of labelled textareas.
-  // Client state only — the draft itself already lives in composeDraft.
-  // Declared before the reconciliation block below, which resets it.
-  const [composeEditing, setComposeEditing] = useState(false);
+  // Compose is a project PAGE with PER-SECTION edit icons (2026-07-30):
+  // exactly one section edits at a time. Client state only — the draft
+  // itself already lives in composeDraft. Declared before the
+  // reconciliation block below, which resets it.
+  const [editingSection, setEditingSection] = useState<
+    "description" | "offer" | "customers" | null
+  >(null);
   const [seededProjectKey, setSeededProjectKey] = useState(serverProjectKey);
   if (serverProjectKey !== seededProjectKey) {
     setSeededProjectKey(serverProjectKey);
@@ -345,9 +347,9 @@ export function MiniAppShell({
     if (clientKey !== serverProjectKey) {
       setComposeView(initialProject);
       setComposeDraft(initialProject?.project ?? null);
-      // The edit toggle is scoped by the same fact as the draft it edits —
+      // The edit state is scoped by the same fact as the draft it edits —
       // a reconciled project must not arrive under a stale open editor.
-      setComposeEditing(false);
+      setEditingSection(null);
     }
   }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
@@ -417,7 +419,7 @@ export function MiniAppShell({
     setComposeView(null);
     setComposeDraft(null);
     setComposeNotice(null);
-    setComposeEditing(false);
+    setEditingSection(null);
   };
 
   /**
@@ -1033,50 +1035,78 @@ export function MiniAppShell({
         )}
 
         {/* The composed project renders as a PAGE (2026-07-30 shape): the
-            AI-invented business name as an always-editable field, the pitch
-            paragraph (AI-combined from the four answers), and FOUR cards —
-            The Offer / First Customers / Product v1 / Why am I building
-            this? — with "Edit This" flipping the pitch and card fields into
-            edit mode. Every field stays editable (R40); the edits are still
-            recorded through keepProject on the way out. */}
-        {step === "compose" && confirmedSlug && composeView && composeDraft && (
+            AI-invented business name (null-start) as an always-editable
+            field, the elevator-pitch paragraph, and FOUR cards — The Offer /
+            First Customers / Product v1 / Why am I building this? — the
+            editable sections each carrying their OWN edit icon in the upper
+            right. Every edit is still recorded through keepProject on the
+            way out (R40). The bottom "Edit This" toggle and "Start over"
+            are retired — Back works from every page. */}
+        {step === "compose" && confirmedSlug && composeView && composeDraft && (() => {
+          const sectionEditButton = (
+            section: "description" | "offer" | "customers",
+            label: string
+          ) => (
+            <button
+              type="button"
+              aria-label={
+                editingSection === section ? `Done editing ${label}` : `Edit ${label}`
+              }
+              onClick={() => setEditingSection((s) => (s === section ? null : section))}
+              disabled={pending || isLocked}
+              className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-[13px] opacity-50 transition-opacity hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
+            >
+              {editingSection === section ? "✓" : "✎"}
+            </button>
+          );
+          return (
           <section>
             <p className="font-path-mono text-[0.65rem] uppercase tracking-[0.14em] opacity-60">
               {COMPOSE_UI_COPY.eyebrow}
             </p>
-            {composeEditing ? (
-              <div className="mt-4 flex flex-col gap-4">
-                <label className="flex flex-col gap-1.5">
-                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                    Project name
-                  </span>
-                  <input
-                    value={composeDraft.name}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
-                    }
-                    className="rounded-xl border border-black/15 bg-white px-3 py-2 font-path-display text-[18px] font-semibold outline-none focus:border-current"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                    The pitch
-                  </span>
-                  <textarea
-                    value={composeDraft.description}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
-                    }
-                    rows={4}
-                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                    {COMPOSE_UI_COPY.offerLabel}
-                  </span>
+            {/* The business name: AI-invented once (null-start), editable
+                RIGHT HERE — styled as the display heading, recorded through
+                keepProject like every other edit. */}
+            <input
+              aria-label="Business name"
+              value={composeDraft.name}
+              placeholder="Name your company"
+              disabled={isLocked}
+              onChange={(e) =>
+                setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
+              }
+              className="mt-2 w-full rounded-xl border border-transparent bg-transparent font-path-display text-3xl font-semibold leading-tight outline-none transition-colors placeholder:opacity-40 hover:border-black/10 focus:border-black/15 focus:bg-white/60"
+            />
+            {/* The elevator pitch under the title — its own edit icon. */}
+            <div className="relative mt-3 pr-9">
+              {editingSection === "description" ? (
+                <textarea
+                  value={composeDraft.description}
+                  disabled={isLocked}
+                  onChange={(e) =>
+                    setComposeDraft({ ...composeDraft, description: e.target.value.slice(0, 1200) })
+                  }
+                  rows={4}
+                  className="w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                />
+              ) : (
+                <p
+                  className={`text-[14px] leading-[1.65] ${
+                    composeDraft.description ? "" : "opacity-50"
+                  }`}
+                >
+                  {composeDraft.description ||
+                    "Your pitch appears here. Tap the pencil to write one."}
+                </p>
+              )}
+              {sectionEditButton("description", COMPOSE_UI_COPY.pitchLabel)}
+            </div>
+            <div className="mt-4 flex flex-col gap-2.5">
+              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
+                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                  {COMPOSE_UI_COPY.offerLabel}
+                </p>
+                {editingSection === "offer" ? (
                   <textarea
                     value={composeDraft.offerSketch}
                     disabled={isLocked}
@@ -1084,21 +1114,27 @@ export function MiniAppShell({
                       setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
                     }
                     rows={2}
-                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
                   />
-                </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="font-path-mono text-[0.6rem] uppercase tracking-[0.12em] opacity-60">
-                    {COMPOSE_UI_COPY.customersLabel}
-                  </span>
+                ) : (
+                  <p className="mt-1 text-[13px] leading-5">{composeDraft.offerSketch}</p>
+                )}
+                {sectionEditButton("offer", COMPOSE_UI_COPY.offerLabel)}
+              </div>
+              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
+                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                  {COMPOSE_UI_COPY.customersLabel}
+                </p>
+                {editingSection === "customers" ? (
                   <textarea
                     value={composeDraft.firstCustomerHypothesis ?? ""}
                     disabled={isLocked}
                     onChange={(e) =>
                       setComposeDraft({
                         ...composeDraft,
-                        // R39b's null branch survives the edit box: empty = "we
-                        // don't know yet", stored as null, never a made-up name.
+                        // R39b's null branch survives the edit box: empty =
+                        // "we don't know yet", stored as null, never a
+                        // made-up name.
                         firstCustomerHypothesis:
                           e.target.value.trim().length === 0
                             ? null
@@ -1107,90 +1143,39 @@ export function MiniAppShell({
                     }
                     placeholder={CUSTOMER_ASK_AGAIN_PLACEHOLDER}
                     rows={2}
-                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-[14px] leading-6 outline-none focus:border-current"
+                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
                   />
-                </label>
+                ) : (
+                  <p className="mt-1 text-[13px] leading-5">
+                    {composeDraft.firstCustomerHypothesis ?? CUSTOMER_ASK_AGAIN_PLACEHOLDER}
+                  </p>
+                )}
+                {sectionEditButton("customers", COMPOSE_UI_COPY.customersLabel)}
               </div>
-            ) : (
-              <>
-                {/* The business name: AI-invented, editable RIGHT HERE —
-                    styled as the display heading, recorded through
-                    keepProject like every other edit (2026-07-30). */}
-                <input
-                  aria-label="Business name"
-                  value={composeDraft.name}
-                  disabled={isLocked}
-                  onChange={(e) =>
-                    setComposeDraft({ ...composeDraft, name: e.target.value.slice(0, 80) })
-                  }
-                  className="mt-2 w-full rounded-xl border border-transparent bg-transparent font-path-display text-3xl font-semibold leading-tight outline-none transition-colors hover:border-black/10 focus:border-black/15 focus:bg-white/60"
-                />
-                <p className="mt-3 text-[14px] leading-[1.65]">{composeDraft.description}</p>
-                <div className="mt-4 flex flex-col gap-2.5">
-                  <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
-                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                      {COMPOSE_UI_COPY.offerLabel}
-                    </p>
-                    <p className="mt-1 text-[13px] leading-5">{composeDraft.offerSketch}</p>
-                  </div>
-                  <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
-                    <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                      {COMPOSE_UI_COPY.customersLabel}
-                    </p>
-                    <p className="mt-1 text-[13px] leading-5">
-                      {composeDraft.firstCustomerHypothesis ?? CUSTOMER_ASK_AGAIN_PLACEHOLDER}
-                    </p>
-                  </div>
-                  {/* The child's own answers as cards (2026-07-30): Product
-                      v1 = the "what" answer, Why am I building this? = the
-                      "spark" answer — straight off the composed row's
-                      moderated quiz answers, so they survive refresh. */}
-                  {(composeView.quizAnswers.what ?? "").trim().length > 0 && (
-                    <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
-                      <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                        {COMPOSE_UI_COPY.productLabel}
-                      </p>
-                      <p className="mt-1 text-[13px] leading-5">
-                        {composeView.quizAnswers.what}
-                      </p>
-                    </div>
-                  )}
-                  {(composeView.quizAnswers.spark ?? "").trim().length > 0 && (
-                    <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
-                      <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                        {COMPOSE_UI_COPY.whyLabel}
-                      </p>
-                      <p className="mt-1 text-[13px] leading-5">
-                        {composeView.quizAnswers.spark}
-                      </p>
-                    </div>
-                  )}
+              {/* The child's own answers as cards (2026-07-30): Product v1 =
+                  the "what" answer, Why am I building this? = the "spark"
+                  answer — straight off the composed row's moderated quiz
+                  answers, so they survive refresh. Display-only. */}
+              {(composeView.quizAnswers.what ?? "").trim().length > 0 && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                  <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                    {COMPOSE_UI_COPY.productLabel}
+                  </p>
+                  <p className="mt-1 text-[13px] leading-5">
+                    {composeView.quizAnswers.what}
+                  </p>
                 </div>
-              </>
-            )}
-            {/* The controls row: Edit This / Start over. "Shape it again"
-                (regeneration) is retired from this screen (2026-07-30).
-                "Start over" is the doors step — the existing door-change
-                machinery is the invalidation path; no new mutation. */}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                skin={skin}
-                variant="secondary"
-                size="sm"
-                onClick={() => setComposeEditing((e) => !e)}
-                disabled={pending || isLocked}
-              >
-                {composeEditing ? COMPOSE_UI_COPY.editOff : COMPOSE_UI_COPY.editOn}
-              </Button>
-              <Button
-                skin={skin}
-                variant="secondary"
-                size="sm"
-                onClick={() => go("doors")}
-                disabled={pending}
-              >
-                {COMPOSE_UI_COPY.startOver}
-              </Button>
+              )}
+              {(composeView.quizAnswers.spark ?? "").trim().length > 0 && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3">
+                  <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
+                    {COMPOSE_UI_COPY.whyLabel}
+                  </p>
+                  <p className="mt-1 text-[13px] leading-5">
+                    {composeView.quizAnswers.spark}
+                  </p>
+                </div>
+              )}
             </div>
             {/* The gold founders-pivot note, verbatim. */}
             <div className="mt-4 rounded-[13px] border border-gold-leaf/30 bg-gold-leaf/10 px-3.5 py-3">
@@ -1207,7 +1192,8 @@ export function MiniAppShell({
               {pending ? "Saving…" : COMPOSE_UI_COPY.cta}
             </Button>
           </section>
-        )}
+          );
+        })()}
 
         {(step === "tasks" || step === "reveal") && !composeView && (
           <section>

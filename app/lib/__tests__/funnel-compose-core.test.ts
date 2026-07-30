@@ -155,6 +155,15 @@ const respond = (object: unknown, finishReason = "stop"): NormalizedModelResult 
   object,
 });
 
+/** The split-call fixtures (2026-07-30): compose asks for the NAME, then
+ *  the elevator BLURB — an own-idea start, since a template ships both. */
+const ownIdeaInput = { ...composeInput, templateId: null };
+const nameResp = respond({ name: "The Saturday Skills Clinic" });
+const blurbResp = respond({
+  description:
+    "You coach younger kids every Saturday. You design the drills and run the hour.",
+});
+
 describe("composeProjectCore — gates", () => {
   it("refuses unauthenticated, malformed input, unknown child, and an unconfirmed door", async () => {
     expect(
@@ -245,33 +254,51 @@ describe("composeProjectCore — gates", () => {
   });
 });
 
-describe("composeProjectCore — claim before spend", () => {
-  it("the row goes in FIRST (fallback content, no model credit); the model runs after; the accepted draft lands via saveDraft", async () => {
-    const h = harness({ child, modelResults: [respond(goodObject)] });
-    const result = await composeProjectCore(composeInput, h.deps);
+describe("composeProjectCore — claim before spend (split calls, 2026-07-30)", () => {
+  it("the row goes in FIRST (NULL-state name/blurb, no model credit); the two calls run after; the draft lands via saveDraft", async () => {
+    const h = harness({ child, modelResults: [nameResp, blurbResp] });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
 
     expect(result.kind).toBe("composed");
     if (result.kind !== "composed") return;
     expect(result.degraded).toBeNull();
-    expect(result.view.project.name).toBe(goodObject.name);
+    expect(result.view.project.name).toBe("The Saturday Skills Clinic");
+    expect(result.view.project.description).toContain("coach younger kids");
     expect(result.view.regenerationsLeft).toBe(2);
 
-    // Ordering IS the invariant: insert → advance → generate → saveDraft.
-    expect(h.events).toEqual(["insert", "advance", "generate", "saveDraft"]);
-    expect(h.inserted[0].projectName).toBe("The Skills Clinic");
+    // Ordering IS the invariant: insert → advance → name call → blurb call
+    // → saveDraft.
+    expect(h.events).toEqual(["insert", "advance", "generate", "generate", "saveDraft"]);
+    // The inserted row carries the NULL-state name — the AI-once key.
+    expect(h.inserted[0].projectName).toBe("");
     expect(h.inserted[0].aiModel).toBeNull();
     expect(h.drafts[0]).toEqual({
       projectId: PROJECT_ID,
-      name: goodObject.name,
+      name: "The Saturday Skills Clinic",
       aiModel: "test/model-1",
     });
 
-    // R39a asserted on the ACTUAL outgoing payload: no child id, no email.
-    const sent = h.generateCalls[0].system + h.generateCalls[0].prompt;
-    expect(sent).not.toContain(CHILD_ID);
-    expect(sent).not.toContain("kid@gmail.com");
+    // R39a asserted on BOTH outgoing payloads: no child id, no email.
+    for (const call of h.generateCalls) {
+      const sent = call.system + call.prompt;
+      expect(sent).not.toContain(CHILD_ID);
+      expect(sent).not.toContain("kid@gmail.com");
+    }
+    // The blurb call carries the settled business name (Peter's prompt).
+    expect(h.generateCalls[1].prompt).toContain("The Saturday Skills Clinic");
     // The stored quiz_answers copy went through the storage pass.
     expect(JSON.stringify(h.inserted[0].quizAnswers)).not.toContain("kid@gmail.com");
+  });
+
+  it("a TEMPLATE start ships the template's own copy — ZERO model calls (both fields already exist)", async () => {
+    const h = harness({ child });
+    const result = await composeProjectCore(composeInput, h.deps);
+    expect(result.kind).toBe("composed");
+    if (result.kind !== "composed") return;
+    expect(h.generateCalls).toHaveLength(0);
+    expect(h.events).toEqual(["insert", "advance"]);
+    expect(result.view.project.name.length).toBeGreaterThan(0);
+    expect(result.view.project.description.length).toBeGreaterThan(0);
   });
 
   it("a FAILED insert costs zero model calls", async () => {
@@ -293,34 +320,43 @@ describe("composeProjectCore — claim before spend", () => {
     expect(h.advanced).toEqual([CHILD_ID]);
   });
 
-  it("when the accepted draft cannot be persisted, the view reports the STORED fallback, degraded", async () => {
-    const h = harness({ child, modelResults: [respond(goodObject)], saveDraftOk: false });
-    const result = await composeProjectCore(composeInput, h.deps);
+  it("when the AI fields cannot be persisted, the view reports the STORED seed (NULL state), degraded", async () => {
+    const h = harness({ child, modelResults: [nameResp, blurbResp], saveDraftOk: false });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBe("error");
-    expect(result.view.project.name).toBe("The Skills Clinic");
+    // The row still holds the NULL-state name — a later entry heals it.
+    expect(result.view.project.name).toBe("");
   });
 });
 
-describe("composeProjectCore — the failure taxonomy in motion (R40a)", () => {
-  it("invalid shape re-asks EXACTLY once with the error appended; the row keeps the fallback", async () => {
+describe("composeProjectCore — the failure taxonomy in motion (R40a, per field)", () => {
+  it("invalid shape re-asks EXACTLY once per call with the error appended; both fields keep the NULL state", async () => {
+    const bad = () => respond({ nonsense: true });
     const h = harness({
       child,
-      modelResults: [respond({ nonsense: true }), respond({ nonsense: true })],
+      // Name: ask + re-ask; blurb: ask + re-ask — four calls, no draft.
+      modelResults: [bad(), bad(), bad(), bad()],
     });
-    const result = await composeProjectCore(composeInput, h.deps);
-    expect(h.generateCalls).toHaveLength(2);
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
+    expect(h.generateCalls).toHaveLength(4);
     expect(h.generateCalls[1].prompt).toMatch(/rejected/);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBe("invalid_after_reask");
     expect(h.drafts).toHaveLength(0);
-    expect(result.view.project.name).toBe("The Skills Clinic");
+    expect(result.view.project.name).toBe("");
   });
 
-  it("a refusal falls back after ONE call — no re-ask against a safety decision", async () => {
-    const h = harness({ child, modelResults: [respond(goodObject, "content-filter")] });
-    const result = await composeProjectCore(composeInput, h.deps);
-    expect(h.generateCalls).toHaveLength(1);
+  it("a refusal falls back after ONE call per field — no re-ask against a safety decision", async () => {
+    const h = harness({
+      child,
+      modelResults: [
+        respond(goodObject, "content-filter"),
+        respond(goodObject, "content-filter"),
+      ],
+    });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
+    expect(h.generateCalls).toHaveLength(2);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBe("refusal");
   });
@@ -328,33 +364,65 @@ describe("composeProjectCore — the failure taxonomy in motion (R40a)", () => {
   it("a transient 429 backs off, retries ONCE, and the retry's success is a full-price accept (R40a's backoff arm)", async () => {
     const h = harness({
       child,
-      modelResults: [{ type: "rate_limited" }, respond(goodObject)],
+      modelResults: [{ type: "rate_limited" }, nameResp, blurbResp],
     });
-    const result = await composeProjectCore(composeInput, h.deps);
-    expect(h.generateCalls).toHaveLength(2);
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
+    expect(h.generateCalls).toHaveLength(3);
     expect(h.backoffs).toBe(1);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBeNull();
-    expect(result.view.project.name).toBe(goodObject.name);
+    expect(result.view.project.name).toBe("The Saturday Skills Clinic");
   });
 
-  it("a 429 that persists through the backoff retry falls back", async () => {
+  it("a 429 that persists through the backoff retry falls back — the OTHER field still lands", async () => {
     const h = harness({
       child,
-      modelResults: [{ type: "rate_limited" }, { type: "rate_limited" }],
+      modelResults: [{ type: "rate_limited" }, { type: "rate_limited" }, blurbResp],
     });
-    const result = await composeProjectCore(composeInput, h.deps);
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
     expect(h.backoffs).toBe(1);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBe("rate_limited");
+    expect(result.view.project.name).toBe("");
+    expect(result.view.project.description).toContain("coach younger kids");
   });
 
-  it("a forced outage (unconfigured model) still produces a legitimate draft — the plan's verification", async () => {
-    const h = harness({ child, modelResults: [{ type: "unconfigured" }], modelId: null });
-    const result = await composeProjectCore(composeInput, h.deps);
+  it("a forced outage (unconfigured model) leaves the AI fields in their NULL state — healed on a later entry", async () => {
+    const h = harness({
+      child,
+      modelResults: [{ type: "unconfigured" }, { type: "unconfigured" }],
+      modelId: null,
+    });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
     if (result.kind !== "composed") throw new Error(result.kind);
     expect(result.degraded).toBe("unconfigured");
-    expect(result.view.project.description.length).toBeGreaterThan(40);
+    expect(result.view.project.name).toBe("");
+    expect(result.view.project.description).toBe("");
+    // The child's own answers still seed the offer card — never a blank page.
+    expect(result.view.project.offerSketch.length).toBeGreaterThan(0);
+  });
+
+  it("re-entry with NULL-state fields HEALS them — the missing calls run and the draft saves", async () => {
+    const empty = { ...projectRow, name: "", description: "", templateId: null };
+    const h = harness({
+      child,
+      activeProject: empty,
+      modelResults: [nameResp, blurbResp],
+    });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
+    expect(result.kind).toBe("exists");
+    if (result.kind !== "exists") return;
+    expect(h.generateCalls).toHaveLength(2);
+    expect(h.drafts).toHaveLength(1);
+    expect(result.view.project.name).toBe("The Saturday Skills Clinic");
+  });
+
+  it("re-entry NEVER re-asks once the fields exist — the AI-once rule (family-typed or AI-made)", async () => {
+    const h = harness({ child, activeProject: projectRow });
+    const result = await composeProjectCore(ownIdeaInput, h.deps);
+    expect(result.kind).toBe("exists");
+    expect(h.generateCalls).toHaveLength(0);
+    expect(h.drafts).toHaveLength(0);
   });
 });
 
@@ -494,8 +562,8 @@ describe("the edit horizon (reconnect U7, R13) — DB refusals map to the DISTIN
   });
 
   it("compose: an accepted draft whose save the horizon refused → locked (staff/retention corner)", async () => {
-    const h = harness({ child, modelResults: [respond(goodObject)], saveDraftOk: "locked" });
-    expect((await composeProjectCore(composeInput, h.deps)).kind).toBe("locked");
+    const h = harness({ child, modelResults: [nameResp, blurbResp], saveDraftOk: "locked" });
+    expect((await composeProjectCore(ownIdeaInput, h.deps)).kind).toBe("locked");
   });
 
   it("the real deps recognize the trigger's contract — errcode P0120 / message funnel_edit_locked", () => {
@@ -544,8 +612,8 @@ describe("the retired row (reconnect U8) — writes against an abandoned project
   });
 
   it("compose: the freshly-inserted row retired before the draft landed → conflict, not degraded-composed", async () => {
-    const h = harness({ child, modelResults: [respond(goodObject)], saveDraftOk: "conflict" });
-    expect((await composeProjectCore(composeInput, h.deps)).kind).toBe("conflict");
+    const h = harness({ child, modelResults: [nameResp, blurbResp], saveDraftOk: "conflict" });
+    expect((await composeProjectCore(ownIdeaInput, h.deps)).kind).toBe("conflict");
   });
 
   it("edit: the save against a retired row → conflict, nothing recorded, never silent success", async () => {

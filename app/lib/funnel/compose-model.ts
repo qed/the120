@@ -22,6 +22,7 @@ import {
   Output,
   generateText,
 } from "ai";
+import type { z } from "zod";
 import {
   composedProjectSchema,
   type NormalizedModelResult,
@@ -37,6 +38,10 @@ export function composeModelId(): string | null {
 export async function generateComposeDraft(parts: {
   system: string;
   prompt: string;
+  /** The expected response shape (2026-07-30 split calls): the name call
+   *  and the blurb call each pass their own single-field schema; omitted =
+   *  the legacy whole-project schema (the regenerate path). */
+  schema?: z.ZodType;
 }): Promise<NormalizedModelResult> {
   const model = composeModelId();
   if (!model) return { type: "unconfigured" };
@@ -46,7 +51,7 @@ export async function generateComposeDraft(parts: {
       system: parts.system,
       prompt: parts.prompt,
       temperature: 0,
-      output: Output.object({ schema: composedProjectSchema }),
+      output: Output.object({ schema: parts.schema ?? composedProjectSchema }),
       abortSignal: AbortSignal.timeout(COMPOSE_TIMEOUT_MS),
       // The retry policy is OURS (composeBranch owns the taxonomy; the core
       // owns the single backoff retry). The SDK default of 2 internal

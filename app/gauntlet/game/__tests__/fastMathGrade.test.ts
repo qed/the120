@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  adaptivePlacementTail,
   areaGradeSpan,
   AREAS,
   fastMathGrade,
@@ -7,6 +8,8 @@ import {
   PATHWAY,
   SKILL_GRADE,
   skillGrade,
+  skillsOfGrade,
+  summarizePlacement,
   type SkillProgress,
 } from "../pathway";
 
@@ -78,5 +81,64 @@ describe("areaGradeSpan", () => {
   it("calculus is grade 12; arithmetic starts at grade 3", () => {
     expect(areaGradeSpan("calc")).toEqual([12, 12]);
     expect(areaGradeSpan("arith")![0]).toBe(3);
+  });
+});
+
+describe("summarizePlacement", () => {
+  it("keeps probing credit above an earlier failed grade", () => {
+    const grade3 = skillsOfGrade(3);
+    const grade4 = skillsOfGrade(4);
+    const grade5 = skillsOfGrade(5);
+    const summary = summarizePlacement([
+      { grade: 3, passed: grade3.slice(0, 2), failed: [] },
+      { grade: 4, passed: grade4.slice(0, 1), failed: grade4.slice(1, 3) },
+      { grade: 5, passed: grade5.slice(0, 2), failed: [] },
+    ]);
+
+    expect(summary.frontierGrade).toBe(5);
+    expect(summary.passed).toEqual(
+      [...grade3, grade4[0], ...grade5].sort((a, b) => a - b)
+    );
+    expect(summary.gaps).toEqual(grade4.slice(1, 3));
+    expect(summary.landing).toBe(grade4[1]);
+  });
+
+  it("does not turn one miss into a gap when the grade is proved 2-of-3", () => {
+    const grade8 = skillsOfGrade(8);
+    const summary = summarizePlacement([
+      { grade: 8, passed: grade8.slice(0, 2), failed: grade8.slice(2, 3) },
+    ]);
+
+    expect(summary.frontierGrade).toBe(8);
+    expect(summary.passed).toEqual(grade8);
+    expect(summary.gaps).toEqual([]);
+  });
+
+  it("opens the full road after every station is proved", () => {
+    const summary = summarizePlacement(
+      [...new Set(PATHWAY.map((skill) => skillGrade(skill.id)))].map((grade) => ({
+        grade,
+        passed: skillsOfGrade(grade).slice(0, 2),
+        failed: [],
+      }))
+    );
+
+    expect(summary.passed).toHaveLength(PATHWAY.length);
+    expect(summary.gaps).toEqual([]);
+    expect(summary.frontierGrade).toBe(12);
+  });
+});
+
+describe("adaptivePlacementTail", () => {
+  it("replaces a long remaining climb with three spaced safety checks", () => {
+    expect(adaptivePlacementTail(4, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12])).toEqual([7, 10, 12]);
+  });
+
+  it("keeps every remaining grade when the player is already near the top", () => {
+    expect(adaptivePlacementTail(9, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12])).toEqual([10, 11, 12]);
+  });
+
+  it("sorts and deduplicates a supplied grade route", () => {
+    expect(adaptivePlacementTail(4, [12, 7, 5, 7, 9, 6, 4, 3])).toEqual([6, 9, 12]);
   });
 });

@@ -99,10 +99,12 @@ export default function AccountModal({
   // Reset + focus + scroll-lock + Esc handling while open.
   useEffect(() => {
     if (!isOpen) return;
-    setForm(EMPTY);
-    setErrors({});
-    setSubmitted(false);
-    setNeedsConfirm(false);
+    const resetTimer = window.setTimeout(() => {
+      setForm(EMPTY);
+      setErrors({});
+      setSubmitted(false);
+      setNeedsConfirm(false);
+    }, 0);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const t = setTimeout(() => firstFieldRef.current?.focus(), 60);
@@ -113,6 +115,7 @@ export default function AccountModal({
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKey);
+      clearTimeout(resetTimer);
       clearTimeout(t);
     };
   }, [isOpen, onClose]);

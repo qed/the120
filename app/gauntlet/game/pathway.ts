@@ -84,13 +84,13 @@ export const PATHWAY: Skill[] = [
   { id: "factor-gcf", label: "Factor out the GCF", area: "alg", topic: "factgcf", band: "g912" },
   { id: "geo-patterns", label: "Geometric patterns", area: "alg", topic: "nextgeo", band: "g912" },
   { id: "exp-quotient", label: "Exponent quotient rule", area: "alg", topic: "expquot", band: "g912" },
-  { id: "simplify-roots", label: "Simplify square roots", area: "alg", topic: "sqrtbig", band: "g912" },
+  { id: "simplify-roots", label: "Larger square roots", area: "alg", topic: "sqrtbig", band: "g912" },
   { id: "discriminant", label: "Discriminant & real roots", area: "alg", topic: "disc", band: "g912" },
   // Geometry
   { id: "supp-comp", label: "Supplements & complements", area: "geo", topic: "suppcomp", band: "g78" },
   { id: "pythagoras", label: "Pythagorean triples", area: "geo", topic: "pyth", band: "g78" },
   { id: "congruence", label: "Triangle congruence", area: "geo", topic: "congruence", band: "g78" },
-  { id: "distance", label: "Distance between points", area: "geo", topic: "dist", band: "g912" },
+  { id: "distance", label: "Coordinate distance triples", area: "geo", topic: "dist", band: "g912" },
   { id: "midpoints", label: "Midpoints", area: "geo", topic: "midpoint", band: "g912" },
   { id: "special-rt", label: "Special right triangles", area: "geo", topic: "srt", band: "g912" },
   // Trigonometry (P4, from gauntletcontent.md's Trig/Precalc pass)
@@ -107,7 +107,7 @@ export const PATHWAY: Skill[] = [
   { id: "logs", label: "Evaluate logarithms", area: "precalc", topic: "evallog", band: "g912" },
   { id: "log-rules", label: "Log product rule", area: "precalc", topic: "logrule", band: "g912" },
   { id: "determinants", label: "2×2 determinants", area: "precalc", topic: "det2", band: "g912" },
-  { id: "limits", label: "Limits by substitution", area: "precalc", topic: "limitsub", band: "g912" },
+  { id: "limits", label: "Limits: direct substitution", area: "precalc", topic: "limitsub", band: "g912" },
   { id: "v-asymptotes", label: "Vertical asymptotes", area: "precalc", topic: "vasymp", band: "g912" },
   { id: "h-asymptotes", label: "Horizontal asymptotes", area: "precalc", topic: "hasymp", band: "g912" },
   { id: "geo-series", label: "Geometric series", area: "precalc", topic: "geoseries", band: "g912" },
@@ -199,14 +199,86 @@ export function placementGrades(): number[] {
   return [...new Set(PATHWAY.map((s) => skillGrade(s.id)))].sort((a, b) => a - b);
 }
 
-/** Grade-staircase credit: passing up to (not including) firstFailedGrade
- *  credits every skill below it. Pass null for a clean full run. */
-export function gradePlacementPassed(firstFailedGrade: number | null): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < PATHWAY.length; i++) {
-    if (firstFailedGrade === null || skillGrade(PATHWAY[i].id) < firstFailedGrade) out.push(i);
+/**
+ * After two consecutive unproved grades, stop walking every remaining stair
+ * and probe three spaced higher anchors instead. Those anchors keep a rusty
+ * lower band from becoming a ceiling while bounding a struggling player's
+ * remaining placement to at most three stations.
+ */
+export function adaptivePlacementTail(
+  currentGrade: number,
+  grades: readonly number[] = placementGrades()
+): number[] {
+  const remaining = [...new Set(grades)]
+    .sort((a, b) => a - b)
+    .filter((grade) => grade > currentGrade);
+
+  if (remaining.length <= 3) return remaining;
+
+  const last = remaining.length - 1;
+  const indexes = [
+    Math.floor(remaining.length / 3),
+    Math.floor((remaining.length * 2) / 3),
+    last,
+  ];
+  return [...new Set(indexes.map((index) => remaining[index]))];
+}
+
+export type PlacementStationResult = {
+  grade: number;
+  passed: number[];
+  failed: number[];
+};
+
+export type PlacementSummary = {
+  /** Skills placement may safely credit at PASS_LEVEL. */
+  passed: number[];
+  /** Explicitly missed probes. Untested skills are not mislabeled as misses. */
+  gaps: number[];
+  /** Earliest uncredited skill, used by the hole-filling Continue action. */
+  landing: number;
+  /** Highest grade with two clean probes. */
+  frontierGrade: number;
+};
+
+/**
+ * Summarize the full grade staircase without allowing an early miss to become
+ * a ceiling. A 2-of-3 station credits that grade. A failed station only keeps
+ * the exact clean probes, leaves its misses as gaps, and later grades still
+ * count normally.
+ */
+export function summarizePlacement(stations: readonly PlacementStationResult[]): PlacementSummary {
+  const passed = new Set<number>();
+  const gaps = new Set<number>();
+  let frontierGrade = placementGrades()[0] ?? 3;
+  let provedGrade = false;
+
+  for (const station of stations) {
+    const clean = [...new Set(station.passed)].filter((i) => i >= 0 && i < PATHWAY.length);
+    const missed = [...new Set(station.failed)].filter((i) => i >= 0 && i < PATHWAY.length);
+    const stationPassed = clean.length >= 2;
+
+    if (stationPassed) {
+      for (const i of skillsOfGrade(station.grade)) passed.add(i);
+      frontierGrade = Math.max(frontierGrade, station.grade);
+      provedGrade = true;
+    } else {
+      for (const i of clean) passed.add(i);
+      for (const i of missed) gaps.add(i);
+    }
   }
-  return out;
+
+  for (const i of passed) gaps.delete(i);
+  const passedList = [...passed].sort((a, b) => a - b);
+  const gapsList = [...gaps].sort((a, b) => a - b);
+  const firstUncredited = PATHWAY.findIndex((_, i) => !passed.has(i));
+
+  return {
+    passed: passedList,
+    gaps: gapsList,
+    landing: firstUncredited >= 0 ? firstUncredited : PATHWAY.length - 1,
+    frontierGrade: provedGrade ? frontierGrade : placementGrades()[0] ?? 3,
+  };
 }
 
 /** Grade span of an area's skills, for the map headers ("Grades 6–8"). */

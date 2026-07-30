@@ -127,6 +127,9 @@ describe("g912 topic math (sampled correctness)", () => {
       const d = Math.hypot(x2 - x1, y2 - y1);
       expect(Number.isInteger(Number(p.answer))).toBe(true);
       expect(Number(p.answer)).toBe(Math.round(d));
+      expect(p.prompt).toContain(`Δx = ${Math.abs(x2 - x1)}`);
+      expect(p.prompt).toContain(`Δy = ${Math.abs(y2 - y1)}`);
+      expect(p.prompt).not.toContain("Distance between");
       // triples guarantee an exact integer distance
       expect(Math.abs(d - Math.round(d))).toBeLessThan(1e-9);
     }
@@ -141,12 +144,13 @@ describe("g912 topic math (sampled correctness)", () => {
     }
   });
 
-  it("midpoint: answer === (x1+x2)/2 and is an integer", () => {
+  it("midpoint: asks for the full ordered pair with integer coordinates", () => {
     for (let i = 0; i < 50; i++) {
       const p = GENERATORS.midpoint("g912");
-      const [x1, , x2] = p.key.slice("midpoint:".length).split(",").map(Number);
-      expect(p.answer).toBe(String((x1 + x2) / 2));
-      expect(Number.isInteger(Number(p.answer))).toBe(true);
+      const [x1, y1, x2, y2] = p.key.slice("midpoint:".length).split(",").map(Number);
+      expect(p.answer).toBe(`${(x1 + x2) / 2},${(y1 + y2) / 2}`);
+      expect(p.entry).toBe("two-numbers");
+      expect(p.rule).toBe("pair-ordered");
     }
   });
 });

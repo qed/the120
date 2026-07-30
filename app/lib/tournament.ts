@@ -64,6 +64,13 @@ const WINDOW = {
   endLabel: "Aug 23",
 } as const;
 
+/** Canonical half-open scoring window passed to every leaderboard query. */
+export const TOURNAMENT_WINDOW = {
+  startIso: new Date(WINDOW.startMs).toISOString(),
+  endIso: new Date(WINDOW.afterMs).toISOString(),
+} as const;
+export const TOURNAMENT_SEASON_ID = "summer-2026";
+
 /** Weekly boss themes (GPF-9/D2). Content stubs — Ethan re-cuts by tester
  *  feedback; boss names from the brief §4.2 (Clank/Gloop/Magmar/Vex). */
 export const WEEKLY_THEMES: WeeklyTheme[] = [

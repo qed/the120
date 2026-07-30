@@ -14,8 +14,8 @@ export default function BossSprite({
   useImage?: boolean;
 }) {
   if (useImage) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={`/raiders/boss-${id}.png`}
         alt=""

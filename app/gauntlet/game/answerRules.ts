@@ -33,7 +33,8 @@ export type EntryFormat =
 /* ---------- shared normalization ---------- */
 
 /** ASCII-fy: unicode minus/times from prompts or pads → plain tokens. */
-const ascii = (s: string) => s.replace(/−/g, "-").replace(/×/g, "*").replace(/\s+/g, "");
+const ascii = (s: string) =>
+  s.replace(/−/g, "-").replace(/×/g, "*").replace(/\s+/g, "").toLowerCase();
 
 /** `007` → `7`, `-0` → `0`, lone `0` kept. Returns null when not an integer. */
 function normInt(s: string): string | null {

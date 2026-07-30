@@ -22,8 +22,10 @@ describe("authored samples", () => {
   it("2ˣ = 32 → 5", () => {
     expect(problemFromKey("expsolve:2^5")!.answer).toBe("5");
   });
-  it("log₆ 4 + log₆ 9 → 2", () => {
-    expect(problemFromKey("logrule:6,4,9")!.answer).toBe("2");
+  it("log₆ 4 + log₆ 9 combines to log₆ 36", () => {
+    const p = problemFromKey("logrule:6,4,9")!;
+    expect(p.prompt).toContain("log₆ (?)");
+    expect(p.answer).toBe("36");
   });
   it("Factor: 6x + 12 → 6(x+2); (x+2)6 also accepted; unfactored rejected", () => {
     const p = problemFromKey("factgcf:6,2")!;
@@ -34,8 +36,12 @@ describe("authored samples", () => {
     expect(judge("factored-commutative-ws", "2(x+4)", "3(x+4)")).toBe(false);
   });
   it("supplement of 68° → 112; complement of 40° → 50", () => {
-    expect(problemFromKey("suppcomp:supp,68")!.answer).toBe("112");
-    expect(problemFromKey("suppcomp:comp,40")!.answer).toBe("50");
+    const supplementary = problemFromKey("suppcomp:supp,68")!;
+    const complementary = problemFromKey("suppcomp:comp,40")!;
+    expect(supplementary.prompt).toBe("What angle is supplementary to 68°?");
+    expect(supplementary.answer).toBe("112");
+    expect(complementary.prompt).toBe("What angle is complementary to 40°?");
+    expect(complementary.answer).toBe("50");
   });
   it("coterminal with 405° → 45; with −90° → 270", () => {
     expect(problemFromKey("coterm:405")!.answer).toBe("45");
@@ -74,8 +80,11 @@ describe("authored samples", () => {
   it("s(t) = t³ − 3t → velocity at t = 2 is 9", () => {
     expect(problemFromKey("veloc:3,1,3,2")!.answer).toBe("9");
   });
-  it("∫x⁴ dx = xⁿ/n + C → n = 5", () => {
-    expect(problemFromKey("antipow:4")!.answer).toBe("5");
+  it("∫x⁴ dx → x^5/5+C", () => {
+    const p = problemFromKey("antipow:4")!;
+    expect(p.answer).toBe("x^5/5+C");
+    expect(judgeAnswer(p, "x^5/5 + c")).toBe(true);
+    expect(judgeAnswer(p, "x^4/4 + C")).toBe(false);
   });
   it("lim sin(5x)/x → 5; sin(6x)/sin(2x) → 3; (1−cos x)/x → 0", () => {
     expect(problemFromKey("triglim:x,5")!.answer).toBe("5");

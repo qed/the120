@@ -20,11 +20,14 @@ export default function ParentBanner({
   const [dismissed, setDismissed] = useState(true); // default hidden → no SSR flash
 
   useEffect(() => {
-    try {
-      setDismissed(localStorage.getItem("the120.gauntlet.parentBanner") === "dismissed");
-    } catch {
-      setDismissed(false);
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        setDismissed(localStorage.getItem("the120.gauntlet.parentBanner") === "dismissed");
+      } catch {
+        setDismissed(false);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   if (!visible || dismissed) return null;

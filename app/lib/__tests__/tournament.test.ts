@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { resolvePhase, resolveTournamentState, PRIZE_BANDS } from "../tournament";
+import {
+  resolvePhase,
+  resolveTournamentState,
+  PRIZE_BANDS,
+  TOURNAMENT_SEASON_ID,
+  TOURNAMENT_WINDOW,
+} from "../tournament";
 
 // Toronto is EDT (UTC−4) in August 2026. Boundaries: Aug 3 00:00 EDT (start),
 // Aug 24 00:00 EDT (after).
@@ -24,6 +30,16 @@ describe("resolvePhase — date derivation (no env)", () => {
   it("is after from Aug 24 midnight EDT onward", () => {
     expect(resolvePhase(d("2026-08-24T04:00:00Z"), noEnv)).toBe("after");
     expect(resolvePhase(d("2026-12-01T12:00:00Z"), noEnv)).toBe("after");
+  });
+});
+
+describe("TOURNAMENT_WINDOW", () => {
+  it("exports the same half-open UTC bounds used by phase resolution", () => {
+    expect(TOURNAMENT_WINDOW).toEqual({
+      startIso: "2026-08-03T04:00:00.000Z",
+      endIso: "2026-08-24T04:00:00.000Z",
+    });
+    expect(TOURNAMENT_SEASON_ID).toBe("summer-2026");
   });
 });
 

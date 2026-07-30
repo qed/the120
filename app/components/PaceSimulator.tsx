@@ -40,8 +40,8 @@ function useCountUp(target: number, active: boolean, duration = 1200) {
   const [val, setVal] = useState(0);
   useEffect(() => {
     if (!active) {
-      setVal(0);
-      return;
+      const resetFrame = requestAnimationFrame(() => setVal(0));
+      return () => cancelAnimationFrame(resetFrame);
     }
     let raf = 0;
     let startTs = 0;
@@ -83,12 +83,6 @@ export default function PaceSimulator() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
   };
-
-  // Reset whenever the selection changes.
-  useEffect(() => {
-    clearTimers();
-    setPhase("idle");
-  }, [subject, status]);
 
   useEffect(() => () => clearTimers(), []);
 
@@ -143,7 +137,11 @@ export default function PaceSimulator() {
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => setSubject(s)}
+                    onClick={() => {
+                      clearTimers();
+                      setPhase("idle");
+                      setSubject(s);
+                    }}
                     className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors ${
                       subject.id === s.id
                         ? "border-red bg-red text-white"
@@ -165,7 +163,11 @@ export default function PaceSimulator() {
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => setStatus(s)}
+                    onClick={() => {
+                      clearTimers();
+                      setPhase("idle");
+                      setStatus(s);
+                    }}
                     className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors ${
                       status.id === s.id
                         ? "border-blue bg-blue text-white"

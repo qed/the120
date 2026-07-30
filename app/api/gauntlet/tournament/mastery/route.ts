@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { resolvePhase } from "@/app/lib/tournament";
+import { resolvePhase, TOURNAMENT_SEASON_ID } from "@/app/lib/tournament";
 import { masteryCaps, type MasteryFact } from "@/app/lib/gauntlet/masteryCaps";
+import { canonicalFactBand } from "@/app/gauntlet/game/factRegistry";
 import type { Band } from "@/app/gauntlet/game/problems";
 
 /**
@@ -20,8 +21,9 @@ import type { Band } from "@/app/gauntlet/game/problems";
  *  - Phase must be "live" (like enter/route.ts) → else 403.
  *  - The caller must have a CONFIRMED, consented entry → else 403. Only
  *    confirmed entrants accrue; a merely-authenticated user does not.
- *  - Idempotency + first-master-once: insert IGNORES conflicts on
- *    (user_id, fact_key), so replays/retries are inert.
+ *  - Idempotency + first-master-once-per-season: insert IGNORES conflicts on
+ *    (user_id, season_id, fact_key), so replays/retries are inert while a
+ *    durable fact can be re-demonstrated for a future season.
  *  - Never throws to the client: opaque 500 + prefixed console.error, and
  *    graceful degrade (credit 0) if the events table is missing.
  */
@@ -45,7 +47,10 @@ function isUuid(v: unknown): v is string {
   );
 }
 
-/** Keep only well-formed facts with a known band; drop the rest silently. */
+/**
+ * Keep only real, round-trippable Gauntlet facts. The submitted band is shape
+ * checked but never trusted; scoring always uses the registry-owned band.
+ */
 function sanitizeFacts(raw: unknown): MasteryFact[] {
   if (!Array.isArray(raw)) return [];
   const out: MasteryFact[] = [];
@@ -55,7 +60,10 @@ function sanitizeFacts(raw: unknown): MasteryFact[] {
     const band = (f as { band?: unknown }).band;
     if (typeof fact_key !== "string" || !fact_key.trim()) continue;
     if (typeof band !== "string" || !VALID_BANDS.includes(band as Band)) continue;
-    out.push({ fact_key: fact_key.trim(), band: band as Band });
+    const cleanKey = fact_key.trim();
+    const canonicalBand = canonicalFactBand(cleanKey);
+    if (!canonicalBand) continue;
+    out.push({ fact_key: cleanKey, band: canonicalBand });
     if (out.length >= MAX_BATCH) break;
   }
   return out;
@@ -185,10 +193,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, credited: 0, rejected });
     }
 
-    // 7. Insert credited facts. IGNORE conflicts on (user_id, fact_key) so a
-    //    fact credits a user exactly once and replays/retries are no-ops.
+    // 7. Insert credited facts. IGNORE per-season conflicts so a fact credits
+    //    once on this board and replays/retries are no-ops.
     const rows = credited.map((c) => ({
       user_id: user.id,
+      season_id: TOURNAMENT_SEASON_ID,
       batch_id: body.batch_id as string,
       fact_key: c.fact_key,
       band: c.band,
@@ -196,7 +205,7 @@ export async function POST(req: Request) {
     }));
     const { error: insErr } = await db
       .from("gauntlet_tournament_events")
-      .upsert(rows, { onConflict: "user_id,fact_key", ignoreDuplicates: true });
+      .upsert(rows, { onConflict: "user_id,season_id,fact_key", ignoreDuplicates: true });
     if (insErr) {
       // Table missing or write failure — never disrupt play; credit nothing.
       console.error("[gauntlet-mastery] insert", insErr.message);

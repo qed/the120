@@ -48,6 +48,10 @@ next-env.d.ts
 supabase/.temp
 .gstack/
 
+# Codex/local game audits and private planning notes
+/.local/
+/artifacts/ethansroadmap.md
+
 # CRM staff seeding — generated passwords, never committed
 scripts/.staff-passwords.local.txt
 scripts/.path-passwords.local.txt

@@ -146,17 +146,17 @@ export const TOPICS: Topic[] = [
   { id: "evalquad", label: "Evaluate quadratic", tier: 2 },
   { id: "expquot", label: "Exponent quotient rule", tier: 2 },
   { id: "disc", label: "Discriminant & real roots", tier: 2 },
-  { id: "dist", label: "Distance between points", tier: 2 },
+  { id: "dist", label: "Coordinate distance triples", tier: 2 },
   { id: "srt", label: "Special right triangles", tier: 2 },
-  { id: "sqrtbig", label: "Simplify square roots", tier: 2 }, // √529 is a compute, not a recall
-  { id: "midpoint", label: "Midpoint x-coordinate", tier: 2 },
+  { id: "sqrtbig", label: "Larger square roots", tier: 2 }, // √529 is a compute, not simplification
+  { id: "midpoint", label: "Midpoint coordinates", tier: 2 },
   // P4 — trig / precalc / calc
   { id: "refangle", label: "Reference angles", tier: 2 },
   { id: "trigval", label: "Exact trig values", tier: 1 },
   { id: "cofunc", label: "Cofunction complements", tier: 2 },
   { id: "evallog", label: "Evaluate logarithms", tier: 1 },
   { id: "det2", label: "2×2 determinants", tier: 2 },
-  { id: "limitsub", label: "Limits by substitution", tier: 2 },
+  { id: "limitsub", label: "Limits: direct substitution", tier: 2 },
   { id: "geoseries", label: "Geometric series convergence", tier: 2 },
   { id: "dstd", label: "Derivative table", tier: 1 },
   { id: "chain", label: "Chain rule (linear inner)", tier: 2 },
@@ -239,6 +239,7 @@ export const topicOfKey = (key: string): TopicId => key.split(":")[0] as TopicId
 const ENTER_ENTRY_TOPICS: ReadonlySet<TopicId> = new Set([
   "simpfrac", "likterms", "binom", "slope2", "factpair", "dpower", "dpoly",
   "pct2dec", "pct2frac", "fracadd", "fracmul", "factquad", "distlin", "factgcf",
+  "midpoint", "antipow",
 ]);
 
 /**
@@ -248,7 +249,6 @@ const ENTER_ENTRY_TOPICS: ReadonlySet<TopicId> = new Set([
  * against each entry's rating language after tester reports.
  */
 const HARD_TOPICS: ReadonlySet<TopicId> = new Set([
-  "dist", // "Medium's ceiling, 5–8s even with triple-friendly params"
   "congruence", // figure-reading + 5-option scan count as thinking time
   "defint", // "Medium's upper half, 4–7s"
   "dsecond", // "Medium's upper half, 4–7s"
@@ -578,9 +578,9 @@ function genDenom(band: Band): Problem {
 /* ---------- congruence (choice) ---------- */
 
 const CRITERIA = ["SSS", "SAS", "ASA", "AAS"] as const;
+const CONGRUENCE_ANSWERS = [...CRITERIA, "Not enough info"] as const;
 
-function genCongruence(): Problem {
-  const correct = pick([...CRITERIA, "Not enough info"] as const);
+function makeCongruence(correct: (typeof CONGRUENCE_ANSWERS)[number]): Problem {
   const sides: [number, number, number] = [ri(60, 90), ri(70, 100), ri(80, 110)];
   const o = ri(0, 2);
   const s = (i: number) => `s${(i + o) % 3}`;
@@ -606,6 +606,7 @@ function genCongruence(): Problem {
     },
   };
 }
+const genCongruence = (): Problem => makeCongruence(pick(CONGRUENCE_ANSWERS));
 
 /* ---------- Grade 9–12 (numeric/choice engines only) ---------- */
 
@@ -701,24 +702,78 @@ function genDisc(): Problem {
 }
 
 // distance between two grid points — integer distance via Pythagorean triples
-function makeDist(x1: number, y1: number, x2: number, y2: number): Problem {
+function makeDist(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  level = 3
+): Problem {
+  const dx = Math.abs(x2 - x1);
+  const dy = Math.abs(y2 - y1);
   const d = Math.round(Math.hypot(x2 - x1, y2 - y1));
-  return {
-    topic: "dist",
+  const squared = dx * dx + dy * dy;
+  const base = {
+    topic: "dist" as const,
     key: `dist:${x1},${y1},${x2},${y2}`,
-    prompt: `Distance between (${x1}, ${y1}) and (${x2}, ${y2})`,
     answer: String(d),
-    kind: "numeric",
+  };
+  if (level <= 1) {
+    return {
+      ...base,
+      prompt: `Right-triangle legs: ${dx} and ${dy}
+Hypotenuse?`,
+      kind: "numeric",
+    };
+  }
+  if (level === 2) {
+    return {
+      ...base,
+      prompt: `Coordinate gaps: Δx = ${dx}, Δy = ${dy}
+Straight-line distance?`,
+      kind: "numeric",
+    };
+  }
+  if (level === 3) {
+    return {
+      ...base,
+      prompt: `d = √(Δx² + Δy²)
+From (${x1}, ${y1}) to (${x2}, ${y2})
+Δx = ${dx}, Δy = ${dy} · d = ?`,
+      kind: "numeric",
+    };
+  }
+  const choices = [...new Set([
+    d,
+    Math.max(1, d - 1),
+    d + 1,
+    Math.max(dx, dy),
+    dx + dy,
+  ])]
+    .slice(0, 4)
+    .map(String)
+    .sort(() => Math.random() - 0.5);
+  return {
+    ...base,
+    prompt: `Δx = ${dx}, Δy = ${dy}
+d = √(${dx}² + ${dy}²) = √${squared}
+Distance?`,
+    kind: "choice",
+    choices,
   };
 }
-function genDist(): Problem {
+function genDistForLevel(level = 3): Problem {
   const [a0, b0, c0] = pick(TRIPLES);
-  const k = ri(1, Math.max(1, Math.floor(50 / c0)));
+  // Early levels teach the four primitive triples. Later levels may scale
+  // once, but the squared sum is shown and answers are multiple choice.
+  const k = level <= 3 ? 1 : ri(1, Math.min(2, Math.max(1, Math.floor(50 / c0))));
   const [dx, dy] = [a0 * k * pick([1, -1]), b0 * k * pick([1, -1])];
-  const x1 = ri(-9, 9);
-  const y1 = ri(-9, 9);
-  return makeDist(x1, y1, x1 + dx, y1 + dy);
+  const pointRange = level === 3 ? 4 : 9;
+  const x1 = ri(-pointRange, pointRange);
+  const y1 = ri(-pointRange, pointRange);
+  return makeDist(x1, y1, x1 + dx, y1 + dy, level);
 }
+const genDist = (): Problem => genDistForLevel(3);
 
 // special right triangle (30-60-90): short leg s, hypotenuse 2s (closed set)
 function makeSrt(given: "short" | "hyp", s: number): Problem {
@@ -753,21 +808,26 @@ function makeSqrtBig(root: number): Problem {
 }
 const genSqrtBig = () => makeSqrtBig(ri(12, 30));
 
-// midpoint x-coordinate — pick coords whose x-sum is even (integer answer)
+// full midpoint coordinates — pick endpoints whose coordinate sums are even
 function makeMidpoint(x1: number, y1: number, x2: number, y2: number): Problem {
   return {
     topic: "midpoint",
     key: `midpoint:${x1},${y1},${x2},${y2}`,
-    prompt: `What is the x-coordinate of the midpoint of (${x1}, ${y1}) and (${x2}, ${y2})?`,
-    answer: String((x1 + x2) / 2),
+    prompt: `Midpoint of (${x1}, ${y1}) and (${x2}, ${y2})`,
+    answer: `${(x1 + x2) / 2},${(y1 + y2) / 2}`,
     kind: "numeric",
+    entry: "two-numbers",
+    rule: "pair-ordered",
   };
 }
 function genMidpoint(): Problem {
   const x1 = ri(-9, 9);
   let x2 = ri(-9, 9);
   if ((x1 + x2) % 2 !== 0) x2 += x2 < 9 ? 1 : -1;
-  return makeMidpoint(x1, ri(-9, 9), x2, ri(-9, 9));
+  const y1 = ri(-9, 9);
+  let y2 = ri(-9, 9);
+  if ((y1 + y2) % 2 !== 0) y2 += y2 < 9 ? 1 : -1;
+  return makeMidpoint(x1, y1, x2, y2);
 }
 
 /* ---------- P4 · trig / precalc / calc (gauntletcontent.md) ---------- */
@@ -1142,7 +1202,7 @@ function makeSlope2(x1: number, y1: number, x2: number, y2: number): Problem {
 function genSlope2(): Problem {
   for (let i = 0; i < 30; i++) {
     const q = ri(2, 9); // run (denominator), slope non-integer
-    let p = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const p = pick([-9, -8, -7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     if (Math.abs(p) % q === 0) continue; // integer slope — excluded band
     if (gcd(Math.abs(p), q) !== 1) continue; // keep the stated pair in lowest terms
     const x1 = ri(-9, 9 - q);
@@ -1536,12 +1596,11 @@ const genExpsolve = (): Problem => makeExpsolve(pick([2, 3, 4, 5, 10]), ri(2, 6)
 
 // alg2.log-product-rule — log₆ 4 + log₆ 9 → 2 (sum of logs = log of the product)
 function makeLogrule(b: number, m: number, n: number): Problem {
-  const k = Math.round(Math.log(m * n) / Math.log(b));
   return {
     topic: "logrule",
     key: `logrule:${b},${Math.min(m, n)},${Math.max(m, n)}`,
-    prompt: `log${subs(b)} ${m} + log${subs(b)} ${n} = ?`,
-    answer: String(k),
+    prompt: `log${subs(b)} ${m} + log${subs(b)} ${n} = log${subs(b)} (?)`,
+    answer: String(m * n),
     kind: "numeric",
   };
 }
@@ -1578,7 +1637,7 @@ function makeSuppcomp(kind: "supp" | "comp", theta: number): Problem {
   return {
     topic: "suppcomp",
     key: `suppcomp:${kind},${theta}`,
-    prompt: `What is the ${kind === "supp" ? "supplement" : "complement"} of ${theta}°?`,
+    prompt: `What angle is ${kind === "supp" ? "supplementary" : "complementary"} to ${theta}°?`,
     answer: String((kind === "supp" ? 180 : 90) - theta),
     kind: "numeric",
   };
@@ -1775,13 +1834,16 @@ function genVeloc(): Problem {
 
 // calcab.antiderivative-power-rule — ∫xⁿ dx = xᵐ/m + C; asking for m keeps it one digit
 function makeAntipow(n: number): Problem {
+  const next = n + 1;
   return {
     topic: "antipow",
     key: `antipow:${n}`,
-    prompt: `∫x${n === 1 ? "" : sup(n)} dx = xⁿ/n + C
-n = ?`,
-    answer: String(n + 1),
+    prompt: `∫x${n === 1 ? "" : sup(n)} dx`,
+    answer: `x^${next}/${next}+C`,
     kind: "numeric",
+    entry: "short-expression",
+    rule: "expr-commutative-ws",
+    alphabet: ["x", "^", "/", "+", "C"],
   };
 }
 const genAntipow = (): Problem => makeAntipow(ri(1, 8));
@@ -1987,6 +2049,36 @@ export function problemFromKey(key: string): Problem | null {
       case "denom": {
         const [d1, d2] = rest.split(",").map(Number);
         return makeDenom(ri(1, d1 - 1), d1, ri(1, d2 - 1), d2);
+      }
+      case "congruence": {
+        if (!CONGRUENCE_ANSWERS.includes(rest as (typeof CONGRUENCE_ANSWERS)[number])) return null;
+        return makeCongruence(rest as (typeof CONGRUENCE_ANSWERS)[number]);
+      }
+      case "slope": {
+        const [x1, y1, x2, y2] = rest.split(",").map(Number);
+        return makeSlope(x1, y1, x2, y2);
+      }
+      case "linfn": {
+        const [a, b, x0] = rest.split(",").map(Number);
+        return makeLinfn(a, b, x0);
+      }
+      case "evalquad": {
+        const [b, c, x0] = rest.split(",").map(Number);
+        return makeEvalquad(b, c, x0);
+      }
+      case "expquot":
+        return makeExpQuot(restParts[0], Number(restParts[1]), Number(restParts[2]));
+      case "disc": {
+        const [a, b, c] = rest.split(",").map(Number);
+        return makeDisc(a, b, c);
+      }
+      case "dist": {
+        const [x1, y1, x2, y2] = rest.split(",").map(Number);
+        return makeDist(x1, y1, x2, y2);
+      }
+      case "midpoint": {
+        const [x1, y1, x2, y2] = rest.split(",").map(Number);
+        return makeMidpoint(x1, y1, x2, y2);
       }
       case "srt":
         return makeSrt(restParts[0] as "short" | "hyp", Number(restParts[1]));
@@ -2453,10 +2545,18 @@ export function nextProblem(
   topics: TopicId[],
   band: Band,
   facts: Record<string, FactStat> = {},
-  recent: string[] = []
+  recent: string[] = [],
+  difficultyLevel?: number
 ): Problem {
   const topic: TopicId = topics.length ? pick(topics) : "mul";
   const limit = masteryMsFor(topic);
+  if (topic === "dist" && difficultyLevel) {
+    for (let i = 0; i < 8; i++) {
+      const problem = genDistForLevel(difficultyLevel);
+      if (!recent.includes(problem.key)) return problem;
+    }
+    return genDistForLevel(difficultyLevel);
+  }
 
   const set = factSetFor(topic, band);
   // No-repeat window scales down for small sets so candidates never run dry

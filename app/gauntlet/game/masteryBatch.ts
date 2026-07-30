@@ -13,12 +13,13 @@
  *     (the caller stamps `crypto.randomUUID()`) so the diff stays deterministic
  *     and unit-testable without touching global randomness.
  *
- * The band the run was played in travels with each fact; the server weights it
- * (masteryWeight.ts) and de-dupes per (user_id, fact_key) so a fact credits
- * exactly once. This is separate from and additive to the casual cloud save.
+ * New callers resolve every key through the canonical fact registry, and the
+ * server independently repeats that canonicalization before weighting it.
+ * Events de-dupe per (user_id, season_id, fact_key).
  */
 
 import { isMastered, type FactStat } from "./mastery";
+import { canonicalFactBand } from "./factRegistry";
 import type { Band } from "./problems";
 
 export interface MasteryBatchFact {
@@ -60,4 +61,20 @@ export function buildMasteryBatch(
     batch_id: batchId,
     facts: factKeys.map((fact_key) => ({ fact_key, band })),
   };
+}
+
+/**
+ * Build a scoring batch using the canonical band owned by each fact instead of
+ * one caller-selected run band. Unknown/non-round-trippable keys are omitted.
+ */
+export function buildCanonicalMasteryBatch(
+  factKeys: string[],
+  batchId: string
+): MasteryBatch {
+  const facts: MasteryBatchFact[] = [];
+  for (const fact_key of [...new Set(factKeys)]) {
+    const band = canonicalFactBand(fact_key);
+    if (band) facts.push({ fact_key, band });
+  }
+  return { batch_id: batchId, facts };
 }

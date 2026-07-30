@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
 import { entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
@@ -9,6 +9,12 @@ import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../ga
 import BossSprite from "./BossSprite";
 import TriangleFigure from "./TriangleFigure";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
+import {
+  nextRaidBeat,
+  raidBeatCopy,
+  type RaidBeat,
+  type RaidSource,
+} from "../game/encounters";
 
 export const RAID_SECONDS = 120;
 const PLAYER_MAX_HP = 100;
@@ -18,9 +24,24 @@ const SPEED_BONUS_MAX = 30;
 const SPEED_WINDOW_MS = 6000;
 const PAR_MS = 4000; // time beyond this counts as "waste"
 const REVEAL_MS = 1500;
+const PUZZLE_SECONDS = 15;
 export const streakMult = (s: number) => (s >= 15 ? 3 : s >= 10 ? 2.5 : s >= 5 ? 2 : s >= 3 ? 1.5 : 1);
+export const strikePowerDamage = (bossMaxHp: number) =>
+  Math.max(120, Math.round(bossMaxHp * 0.14));
+export const strikePowerMode = (
+  bossHp: number,
+  bossMaxHp: number
+): "charged" | "finisher" =>
+  bossHp <= strikePowerDamage(bossMaxHp) ? "finisher" : "charged";
 
-export type ProblemResult = { key: string; prompt: string; answer: string; ms: number; correct: boolean };
+export type ProblemResult = {
+  key: string;
+  prompt: string;
+  answer: string;
+  ms: number;
+  correct: boolean;
+  encounter?: "quickfire" | "armor";
+};
 export type BattleStats = {
   correct: number;
   wrong: number;
@@ -29,6 +50,8 @@ export type BattleStats = {
   wasteMs: number;
   activeMs: number;
   timeLeft: number;
+  puzzlesSolved: number;
+  powersUsed: number;
 };
 
 export default function Battle({
@@ -36,6 +59,9 @@ export default function Battle({
   topics,
   band,
   facts,
+  quickfireSources,
+  puzzleSource,
+  raidLevel = 1,
   instantSubmit = false,
   onFinish,
 }: {
@@ -43,6 +69,12 @@ export default function Battle({
   topics: TopicId[];
   band: Band;
   facts: Record<string, FactStat>;
+  /** Earlier recall skills used to create a readable warmup/recovery rhythm. */
+  quickfireSources?: RaidSource[];
+  /** The selected slower/visual skill, served as a fixed-effect Armor Break. */
+  puzzleSource?: RaidSource;
+  /** Boss ladder level, used for skill-specific scaffolding. */
+  raidLevel?: number;
   /** opt-in speedrun mode: number answers auto-fire at full length */
   instantSubmit?: boolean;
   onFinish: (won: boolean, stats: BattleStats, results: ProblemResult[]) => void;
@@ -50,12 +82,34 @@ export default function Battle({
   const [bossHp, setBossHp] = useState(boss.hp);
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [timeLeft, setTimeLeft] = useState(RAID_SECONDS);
-  const recentRef = useRef<string[]>([]);
-  const [problem, setProblem] = useState<Problem>(() => {
-    const p = nextProblem(topics, band, facts, recentRef.current);
-    recentRef.current = [p.key];
-    return p;
-  });
+  const sources = useMemo(
+    () =>
+      quickfireSources?.length
+        ? quickfireSources
+        : topics.map((topic) => ({ topic, band })),
+    [band, quickfireSources, topics]
+  );
+  const initialSource = useMemo(
+    () => sources[0] ?? { topic: topics[0] ?? "mul", band },
+    [band, sources, topics]
+  );
+  const openingSource = puzzleSource ?? initialSource;
+  const [beat, setBeat] = useState<RaidBeat>(puzzleSource ? "puzzle" : "warmup");
+  const [problem, setProblem] = useState<Problem>(() =>
+    nextProblem(
+      [openingSource.topic],
+      openingSource.band,
+      facts,
+      [],
+      raidLevel
+    )
+  );
+  const recentRef = useRef<string[]>([problem.key]);
+  const problemFromSource = useCallback(
+    (source: RaidSource) =>
+      nextProblem([source.topic], source.band, facts, recentRef.current, raidLevel),
+    [facts, raidLevel]
+  );
   const [input, setInput] = useState("");
   const [streak, setStreak] = useState(0);
   const [fx, setFx] = useState<null | { dmg: number; crit: boolean; angle: number; n: number }>(null);
@@ -64,26 +118,51 @@ export default function Battle({
   const [rightPulse, setRightPulse] = useState(0);
   const [wrongFlash, setWrongFlash] = useState(false);
   const [reveal, setReveal] = useState<null | { answer: string }>(null);
+  const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_SECONDS);
+  const [powerReady, setPowerReady] = useState(false);
+  const [chargedStrike, setChargedStrike] = useState(false);
+  const [effectCallout, setEffectCallout] = useState<string | null>(null);
   const [dying, setDying] = useState(false);
   const [entering, setEntering] = useState(true);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [answerCounts, setAnswerCounts] = useState({ correct: 0, wrong: 0 });
   // C1 · boss personality: a taunt at half HP, an enrage roar under 25%
   const [bark, setBark] = useState<string | null>(null);
   const barkFiredRef = useRef({ half: false, low: false });
   const enraged = bossHp > 0 && bossHp / boss.hp <= 0.25;
   const coarse = useCoarsePointer(); // A3: touch devices get the game pad, not the OS keyboard
 
-  const statsRef = useRef<BattleStats>({ correct: 0, wrong: 0, damage: 0, bestStreak: 0, wasteMs: 0, activeMs: 0, timeLeft: 0 });
+  const statsRef = useRef<BattleStats>({
+    correct: 0,
+    wrong: 0,
+    damage: 0,
+    bestStreak: 0,
+    wasteMs: 0,
+    activeMs: 0,
+    timeLeft: 0,
+    puzzlesSolved: 0,
+    powersUsed: 0,
+  });
   const resultsRef = useRef<ProblemResult[]>([]);
-  const askedAt = useRef(Date.now());
+  const wrongStreakRef = useRef(0);
+  const askedAt = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
-  const endAtRef = useRef(Date.now() + RAID_SECONDS * 1000);
+  const endAtRef = useRef(0);
   const lastTickRef = useRef(RAID_SECONDS);
+  const powerPauseAtRef = useRef(0);
+  const powerReadyRef = useRef(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    powerReadyRef.current = powerReady;
+  }, [powerReady]);
+
+  useEffect(() => {
+    const now = Date.now();
+    askedAt.current = now;
+    endAtRef.current = now + RAID_SECONDS * 1000;
     sfxEnter();
     // The parent banner above the game pushes the page 1 banner-height past
     // 100vh — scroll the arena flush so the pad's bottom row isn't cut off.
@@ -104,7 +183,7 @@ export default function Battle({
     };
     document.addEventListener("visibilitychange", onVis);
     const t = setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || powerReadyRef.current) return;
       const s = Math.max(0, Math.ceil((endAtRef.current - Date.now()) / 1000));
       setTimeLeft(s);
       if (s <= 10 && s > 0 && s !== lastTickRef.current) sfxTick();
@@ -126,16 +205,20 @@ export default function Battle({
     [onFinish]
   );
 
-  // End conditions. Victory waits for the death animation.
+  const beginVictory = useCallback(() => {
+    if (doneRef.current) return;
+    setDying(true);
+    window.setTimeout(() => finish(true), 950);
+  }, [finish]);
+
+  // Defeat has no animation delay. Victory is started by the hit/power event
+  // that reduced boss HP to zero, so no effect needs to derive display state.
   useEffect(() => {
     if (doneRef.current || dying) return;
-    if (bossHp <= 0) {
-      setDying(true);
-      setTimeout(() => finish(true), 950);
-    } else if (timeLeft <= 0 || playerHp <= 0) {
+    if (timeLeft <= 0 || playerHp <= 0) {
       finish(false);
     }
-  }, [bossHp, timeLeft, playerHp, dying, finish]);
+  }, [timeLeft, playerHp, dying, finish]);
 
   // C1: bark once at half HP, roar once on enrage
   useEffect(() => {
@@ -155,21 +238,40 @@ export default function Battle({
     }
   }, [bossHp, boss.hp, boss.taunt, boss.name]);
 
-  const record = (correct: boolean, ms: number) => {
-    resultsRef.current.push({ key: problem.key, prompt: problem.prompt, answer: problem.answer, ms, correct });
+  const record = useCallback((correct: boolean, ms: number) => {
+    resultsRef.current.push({
+      key: problem.key,
+      prompt: problem.prompt,
+      answer: problem.answer,
+      ms,
+      correct,
+      encounter: beat === "puzzle" ? "armor" : "quickfire",
+    });
     statsRef.current.activeMs += ms;
-    if (ms > PAR_MS) statsRef.current.wasteMs += ms - PAR_MS;
-  };
+    if (beat !== "puzzle" && ms > PAR_MS) statsRef.current.wasteMs += ms - PAR_MS;
+  }, [beat, problem.answer, problem.key, problem.prompt]);
 
   const advance = useCallback(() => {
-    const p = nextProblem(topics, band, facts, recentRef.current);
+    const nextBeat = nextRaidBeat({
+      answered: statsRef.current.correct + statsRef.current.wrong,
+      wrongStreak: wrongStreakRef.current,
+      bossRatio: bossHp / boss.hp,
+      hasPuzzle: !!puzzleSource,
+    });
+    const source =
+      nextBeat === "puzzle" && puzzleSource
+        ? puzzleSource
+        : sources[Math.floor(Math.random() * sources.length)] ?? initialSource;
+    const p = problemFromSource(source);
     recentRef.current = [...recentRef.current.slice(-7), p.key];
+    setBeat(nextBeat);
     setProblem(p);
     setInput("");
     setReveal(null);
+    setPuzzleTimeLeft(PUZZLE_SECONDS);
     askedAt.current = Date.now();
     inputRef.current?.focus();
-  }, [topics, band, facts]);
+  }, [boss.hp, bossHp, initialSource, problemFromSource, puzzleSource, sources]);
 
   // The focus() in advance() is a no-op after a miss: the reveal freeze
   // disables the input, the browser drops focus, and the element is still
@@ -182,6 +284,7 @@ export default function Battle({
   const handleCorrect = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
     record(true, elapsed);
+    const isPuzzle = beat === "puzzle";
     // Later-grade skills take longer per answer, so both the speed-bonus
     // window and the damage scale with the topic's mastery window — a slow
     // topic's raid is still winnable in the same 2-minute clock.
@@ -189,13 +292,41 @@ export default function Battle({
     const speedWindow = Math.max(SPEED_WINDOW_MS, 2 * topicMs);
     const speed = Math.max(0, 1 - elapsed / speedWindow);
     const mult = streakMult(streak + 1);
-    const dmg = Math.round((BASE_DAMAGE + SPEED_BONUS_MAX * speed) * mult * (topicMs / 3000));
-    const crit = mult >= 2;
+    const baseDamage = isPuzzle
+      ? Math.max(90, Math.round(boss.hp * 0.12))
+      : Math.round((BASE_DAMAGE + SPEED_BONUS_MAX * speed) * mult * (topicMs / 3000));
+    const chargedDamage = chargedStrike ? strikePowerDamage(boss.hp) : 0;
+    const dmg = baseDamage + chargedDamage;
+    const crit = chargedStrike || isPuzzle || mult >= 2;
+    const nextStreak = streak + 1;
+    const nextBossHp = Math.max(0, bossHp - dmg);
     statsRef.current.correct++;
+    setAnswerCounts({
+      correct: statsRef.current.correct,
+      wrong: statsRef.current.wrong,
+    });
     statsRef.current.damage += dmg;
-    statsRef.current.bestStreak = Math.max(statsRef.current.bestStreak, streak + 1);
+    if (isPuzzle) statsRef.current.puzzlesSolved++;
+    statsRef.current.bestStreak = Math.max(statsRef.current.bestStreak, nextStreak);
+    wrongStreakRef.current = 0;
     setStreak((s) => s + 1);
-    setBossHp((h) => Math.max(0, h - dmg));
+    setBossHp(nextBossHp);
+    if (chargedStrike) {
+      setChargedStrike(false);
+      setEffectCallout(
+        isPuzzle
+          ? `CHARGED ARMOR BREAK -${dmg} · +8 HP`
+          : `CHARGED STRIKE -${dmg}`
+      );
+      setTimeout(() => setEffectCallout(null), 1300);
+    } else if (isPuzzle) {
+      setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 8));
+      setEffectCallout(`ARMOR BREAK -${dmg} · +8 HP`);
+      setTimeout(() => setEffectCallout(null), 1300);
+    }
+    if (chargedStrike && isPuzzle) {
+      setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 8));
+    }
     setFx({ dmg, crit, angle: (Math.random() < 0.5 ? -1 : 1) * (28 + Math.random() * 24), n: statsRef.current.correct });
     setHitFlash((n) => n + 1);
     setRightPulse((n) => n + 1);
@@ -204,15 +335,32 @@ export default function Battle({
     if (crit) sfxCrit();
     setTimeout(() => setShake(""), crit ? 420 : 360);
     setTimeout(() => setFx(null), 700);
-    advance();
-  }, [advance, streak, problem.topic]);
+    if (nextBossHp <= 0) {
+      beginVictory();
+    } else if (nextStreak % 5 === 0) {
+      powerPauseAtRef.current = Date.now();
+      setPowerReady(true);
+    } else {
+      advance();
+    }
+  }, [advance, beat, beginVictory, boss.hp, bossHp, chargedStrike, problem.topic, record, streak]);
 
   const handleWrong = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
     record(false, elapsed);
     statsRef.current.wrong++;
+    setAnswerCounts({
+      correct: statsRef.current.correct,
+      wrong: statsRef.current.wrong,
+    });
+    wrongStreakRef.current++;
     setStreak(0);
-    setPlayerHp((h) => Math.max(0, h - WRONG_PENALTY));
+    if (beat !== "puzzle") {
+      setPlayerHp((h) => Math.max(0, h - WRONG_PENALTY));
+    } else {
+      setEffectCallout("ARMOR HELD · NO HP LOST");
+      setTimeout(() => setEffectCallout(null), 1300);
+    }
     setWrongFlash(true);
     sfxWrong();
     setTimeout(() => setWrongFlash(false), 450);
@@ -221,7 +369,63 @@ export default function Battle({
     setTimeout(() => {
       if (!doneRef.current) advance();
     }, REVEAL_MS);
-  }, [advance, problem.answer]);
+  }, [advance, beat, problem.answer, record]);
+
+  useEffect(() => {
+    if (beat !== "puzzle" || reveal || powerReady || doneRef.current) return;
+    const timer = setInterval(() => {
+      const remaining = Math.max(
+        0,
+        Math.ceil((PUZZLE_SECONDS * 1000 - (Date.now() - askedAt.current)) / 1000)
+      );
+      setPuzzleTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        handleWrong();
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  }, [beat, handleWrong, powerReady, reveal]);
+
+  const choosePower = (power: "smash" | "heal" | "freeze") => {
+    if (!powerReady) return;
+    endAtRef.current += Math.max(0, Date.now() - powerPauseAtRef.current);
+    statsRef.current.powersUsed++;
+    let shouldAdvance = true;
+    if (power === "smash") {
+      const damage = strikePowerDamage(boss.hp);
+      if (strikePowerMode(bossHp, boss.hp) === "finisher") {
+        statsRef.current.damage += damage;
+        setBossHp(0);
+        setFx({
+          dmg: damage,
+          crit: true,
+          angle: -38,
+          n: statsRef.current.correct + statsRef.current.powersUsed,
+        });
+        setEffectCallout(`FINISHING BLOW -${damage}`);
+        sfxCrit();
+        shouldAdvance = false;
+        beginVictory();
+      } else {
+        setChargedStrike(true);
+        setEffectCallout("STRIKE CHARGED · NEXT CORRECT ANSWER");
+      }
+    } else if (power === "heal") {
+      setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 25));
+      setEffectCallout("SECOND WIND +25 HP");
+    } else {
+      endAtRef.current += 10_000;
+      setTimeLeft((seconds) => seconds + 10);
+      setEffectCallout("TIME FREEZE +10s");
+    }
+    setPowerReady(false);
+    setTimeout(() => {
+      setEffectCallout(null);
+      setFx(null);
+    }, 1100);
+    if (shouldAdvance) advance();
+  };
 
   // ⚡ instant (default): number facts fire at full length, right OR wrong —
   // instant AND committal. Built answers (fractions/expressions/pairs) always
@@ -232,7 +436,7 @@ export default function Battle({
   const auto = isAutoSubmit(entry) && instantSubmit;
 
   const onType = (v: string) => {
-    if (reveal) return;
+    if (reveal || powerReady) return;
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
@@ -243,21 +447,21 @@ export default function Battle({
   };
 
   const submit = () => {
-    if (reveal || !input.trim()) return;
+    if (reveal || powerReady || !input.trim()) return;
     ensureAudio();
     if (judgeAnswer(problem, input)) handleCorrect();
     else handleWrong();
   };
 
   const choose = (c: string) => {
-    if (reveal) return;
+    if (reveal || powerReady) return;
     ensureAudio();
     if (c === problem.answer) handleCorrect();
     else handleWrong();
   };
 
-  const total = statsRef.current.correct + statsRef.current.wrong;
-  const accuracy = total === 0 ? 100 : Math.round((statsRef.current.correct / total) * 100);
+  const total = answerCounts.correct + answerCounts.wrong;
+  const accuracy = total === 0 ? 100 : Math.round((answerCounts.correct / total) * 100);
   const mm = Math.floor(Math.max(0, timeLeft) / 60);
   const ss = String(Math.max(0, timeLeft) % 60).padStart(2, "0");
   const mult = streakMult(streak);
@@ -303,6 +507,11 @@ export default function Battle({
           <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-white/45">
             Accuracy {accuracy}%
           </p>
+          {chargedStrike && (
+            <p className="mt-1 rounded-full border border-amber-300/35 bg-amber-300/10 px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200">
+              ⚡ Charged · next correct answer
+            </p>
+          )}
         </div>
 
         <div className="w-full max-w-md">
@@ -335,7 +544,7 @@ export default function Battle({
       </div>
 
       {/* Boss stage — shorter when the pad claims screen space */}
-      <div className={`relative flex flex-1 items-center justify-center ${coarse ? "min-h-[112px]" : "min-h-[260px]"}`}>
+      <div className={`relative flex flex-1 items-center justify-center ${coarse ? "min-h-[112px]" : "min-h-[clamp(120px,28dvh,260px)]"}`}>
         <div className="absolute h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: boss.glow }} />
         <div className={dying ? "mr-death" : entering ? "mr-enter" : shake || "mr-float"}>
           <span
@@ -351,6 +560,11 @@ export default function Battle({
         {bark && (
           <div className="mr-enter pointer-events-none absolute top-2 z-10 max-w-xs rounded-2xl border border-white/25 bg-black/75 px-4 py-2 text-center font-mono text-sm font-bold text-white backdrop-blur">
             {bark}
+          </div>
+        )}
+        {effectCallout && (
+          <div className="mr-enter pointer-events-none absolute bottom-3 z-10 rounded-full border border-amber-300/50 bg-amber-300/15 px-4 py-2 font-mono text-sm font-bold text-amber-200 backdrop-blur">
+            {effectCallout}
           </div>
         )}
 
@@ -401,13 +615,41 @@ export default function Battle({
 
       {/* Problem card */}
       <div className={`mx-auto w-full max-w-xl px-4 sm:mb-8 sm:px-5 ${coarse ? "mb-3" : "mb-5"}`}>
-        <div key={rightPulse} className={`rounded-2xl border backdrop-blur-md sm:p-6 ${coarse ? "p-3" : "p-4"} ${rightPulse ? "mr-right" : ""} ${reveal ? "border-red-400/60 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
+        <div key={rightPulse} className={`min-w-0 overflow-hidden rounded-2xl border backdrop-blur-md sm:p-6 ${coarse ? "p-3" : "p-4"} ${rightPulse ? "mr-right" : ""} ${
+          reveal
+            ? "border-red-400/60 bg-red-950/40"
+            : beat === "puzzle"
+              ? "border-amber-300/60 bg-amber-950/35"
+              : "border-white/15 bg-black/45"
+        }`}>
+          <div className="mb-3 flex min-w-0 items-center justify-between gap-3 font-mono">
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-[0.12em] ${
+              beat === "puzzle"
+                ? "bg-amber-300 text-black"
+                : beat === "recovery"
+                  ? "bg-emerald-400/20 text-emerald-300"
+                  : "bg-cyan-400/15 text-cyan-300"
+            }`}>
+              {raidBeatCopy[beat].label}
+            </span>
+            <span className="min-w-0 text-right text-[10px] text-white/50">
+              {raidBeatCopy[beat].hint}
+            </span>
+          </div>
+          {beat === "puzzle" && (
+            <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-white/10" aria-label={`${puzzleTimeLeft} seconds left`}>
+              <div
+                className="h-full rounded-full bg-amber-300 transition-[width] duration-100"
+                style={{ width: `${(puzzleTimeLeft / PUZZLE_SECONDS) * 100}%` }}
+              />
+            </div>
+          )}
           {problem.triangle && (
-            <div className="mb-3">
+            <div className="mx-auto mb-2 w-full max-w-sm">
               <TriangleFigure pair={problem.triangle} />
             </div>
           )}
-          <p className={`whitespace-pre-line text-center font-bold ${problem.prompt.length > 24 ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"}`}>
+          <p className={`max-w-full whitespace-pre-line break-words text-center font-bold leading-tight [overflow-wrap:anywhere] ${problem.prompt.length > 24 ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"}`}>
             {problem.prompt}
             {/* only append "= ?" when the prompt doesn't already ask its own question */}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && (
@@ -428,7 +670,7 @@ export default function Battle({
             coarse ? (
               <>
                 <div
-                  className={`mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border px-4 py-2 text-center text-2xl font-bold tracking-wider text-white ${reveal ? "border-white/20 bg-white/5 opacity-50" : "border-cyan-400/40 bg-white/5"}`}
+                  className={`mt-3 flex min-h-[3rem] w-full min-w-0 items-center justify-center overflow-hidden rounded-xl border px-4 py-2 text-center text-2xl font-bold tracking-wider text-white [overflow-wrap:anywhere] ${reveal ? "border-white/20 bg-white/5 opacity-50" : "border-cyan-400/40 bg-white/5"}`}
                 >
                   {input || (
                     <span className="text-base font-normal text-white/30">{reveal ? "" : "Tap the answer!"}</span>
@@ -478,16 +720,18 @@ export default function Battle({
               className={
                 problem.choices!.length <= 2
                   ? "mt-4 flex justify-center gap-3" // True/False: two large centered buttons
-                  : "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"
+                  : "mt-4 grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 sm:grid-cols-5"
               }
             >
               {problem.choices!.map((c) => (
                 <button
                   key={c}
                   onClick={() => choose(c)}
-                  disabled={!!reveal}
+                  disabled={!!reveal || powerReady}
                   className={`rounded-xl border font-mono font-medium text-white transition-colors disabled:opacity-60 ${
-                    problem.choices!.length <= 2 ? "px-10 py-4 text-lg" : "px-2 py-3 text-sm"
+                    problem.choices!.length <= 2
+                      ? "min-w-0 whitespace-normal break-words px-6 py-4 text-lg leading-tight [overflow-wrap:anywhere]"
+                      : "min-w-0 whitespace-normal break-words px-2 py-3 text-sm leading-tight [overflow-wrap:anywhere]"
                   } ${
                     reveal && c === problem.answer
                       ? "border-emerald-400 bg-emerald-400/25"
@@ -501,6 +745,52 @@ export default function Battle({
           )}
         </div>
       </div>
+
+      {powerReady && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-amber-300/45 bg-[#101525] p-5 text-center shadow-2xl">
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">
+              5-answer streak · choose your power
+            </p>
+            <h3 className="mt-2 text-3xl font-bold">Make the streak matter.</h3>
+            <p className="mt-1 text-sm text-white/55">The raid clock is paused while you choose.</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <button
+                onClick={() => choosePower("smash")}
+                className="rounded-2xl border border-red-400/35 bg-red-400/10 p-4 hover:bg-red-400/20"
+              >
+                <span className="block text-3xl">⚔</span>
+                <span className="mt-2 block font-mono text-sm font-bold text-red-200">
+                  {strikePowerMode(bossHp, boss.hp) === "finisher"
+                    ? "FINISHING BLOW"
+                    : "CHARGE STRIKE"}
+                </span>
+                <span className="mt-1 block text-xs text-white/50">
+                  {strikePowerMode(bossHp, boss.hp) === "finisher"
+                    ? "Defeat the boss now"
+                    : "Next correct answer hits harder"}
+                </span>
+              </button>
+              <button
+                onClick={() => choosePower("heal")}
+                className="rounded-2xl border border-emerald-400/35 bg-emerald-400/10 p-4 hover:bg-emerald-400/20"
+              >
+                <span className="block text-3xl">+</span>
+                <span className="mt-2 block font-mono text-sm font-bold text-emerald-200">SECOND WIND</span>
+                <span className="mt-1 block text-xs text-white/50">Restore 25 HP</span>
+              </button>
+              <button
+                onClick={() => choosePower("freeze")}
+                className="rounded-2xl border border-cyan-400/35 bg-cyan-400/10 p-4 hover:bg-cyan-400/20"
+              >
+                <span className="block text-3xl">❄</span>
+                <span className="mt-2 block font-mono text-sm font-bold text-cyan-200">TIME FREEZE</span>
+                <span className="mt-1 block text-xs text-white/50">Add 10 seconds</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Leave confirm (D3) */}
       {confirmLeave && (

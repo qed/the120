@@ -35,7 +35,6 @@ export default function FoundingBoard() {
 
   useEffect(() => {
     let dead = false;
-    setRows(null);
     fetchTournamentLeaderboard(band).then((r) => !dead && setRows(r));
     return () => {
       dead = true;
@@ -48,7 +47,10 @@ export default function FoundingBoard() {
         {PRIZE_BANDS.map((b) => (
           <button
             key={b.id}
-            onClick={() => setBand(b.id)}
+            onClick={() => {
+              setRows(null);
+              setBand(b.id);
+            }}
             className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-all ${
               band === b.id
                 ? "border-amber-400 bg-amber-400/20 text-amber-200"

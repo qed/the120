@@ -3,20 +3,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { entryOf, judgeAnswer, masteryMsFor, nextProblem, problemFromKey, factSetFor, type Problem } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
-import { AREAS, gradePlacementPassed, PATHWAY, placementGrades, skillGrade, skillsOfGrade } from "../game/pathway";
+import {
+  adaptivePlacementTail,
+  AREAS,
+  PATHWAY,
+  placementGrades,
+  skillGrade,
+  skillsOfGrade,
+  summarizePlacement,
+  type PlacementSummary,
+  type PlacementStationResult,
+} from "../game/pathway";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
 import TriangleFigure from "./TriangleFigure";
 
 /**
  * P1 — placement as a GRADE STAIRCASE (tester feedback: probing all 80
- * skills ran 8+ minutes). Each grade is one station: two probes sampling
- * two different skills of that grade; both clean → the whole grade (and
- * everything below) is credited and you climb. One slip earns a tiebreaker
- * on a third skill; two fails end placement — you land at that grade's
- * first skill. Ten stations max ≈ 2–3 minutes, and you watch your grade
- * climb as you go. Skill-level gaps surface later through raids/trials;
- * placement's job is your LEVEL, fast.
+ * skills ran 8+ minutes). Each grade is one station: two clean probes prove
+ * the grade, while one clean + one miss earns a tiebreaker. Two misses mark
+ * a gap but NEVER set the player's ceiling. After two consecutive unproved
+ * grades, the route becomes adaptive: three spaced higher anchors check for
+ * advanced knowledge without making a struggling player walk to Grade 12.
  */
 
 const PASS_SLACK_MS = 3000; // on top of the topic's mastery window
@@ -41,49 +49,63 @@ function sampleSkills(grade: number, n: number): number[] {
   return pool.slice(0, Math.max(1, Math.min(n, pool.length)));
 }
 
+const PLACEMENT_GRADES = placementGrades();
+
 export default function PlacementTrial({
   instantSubmit = false,
+  onToggleInstant,
   onDone,
   onSkip,
 }: {
-  /** opt-in speedrun mode: number answers auto-fire at full length */
+  /** speedrun mode: number answers auto-fire at full length */
   instantSubmit?: boolean;
+  onToggleInstant: () => void;
   /** passed = pathway indexes cleanly placed past; landing = where CONTINUE starts */
   onDone: (passed: number[], landing: number) => void;
   onSkip: () => void;
 }) {
   const coarse = useCoarsePointer();
-  const gradesRef = useRef<number[]>(placementGrades());
+  const grades = PLACEMENT_GRADES;
 
-  const [stationIdx, setStationIdx] = useState(0); // index into gradesRef
+  const [route, setRoute] = useState<number[]>(grades);
+  const [stationIdx, setStationIdx] = useState(0); // index into the adaptive route
   const [probeNum, setProbeNum] = useState(1); // 1..3 within the station
-  const stationSkillsRef = useRef<number[]>(sampleSkills(gradesRef.current[0], 3));
+  const [initialSkills] = useState(() => sampleSkills(grades[0], 3));
+  const stationSkillsRef = useRef<number[]>(initialSkills);
   const passesRef = useRef(0);
   const failsRef = useRef(0);
-  const [skillPos, setSkillPos] = useState(stationSkillsRef.current[0]);
-  const [problem, setProblem] = useState<Problem>(() => probeFor(stationSkillsRef.current[0]));
+  const [skillPos, setSkillPos] = useState(initialSkills[0]);
+  const [problem, setProblem] = useState<Problem>(() => probeFor(initialSkills[0]));
   const [input, setInput] = useState("");
-  const [landing, setLanding] = useState<number | null>(null);
+  const [summary, setSummary] = useState<PlacementSummary | null>(null);
   const [speedPct, setSpeedPct] = useState(100);
   const [missFlash, setMissFlash] = useState(false); // red pulse on a failed probe
-  const askedAt = useRef(Date.now());
+  const askedAt = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
-  const passedSkillsRef = useRef<number[]>([]);
-  const gapsRef = useRef<number[]>([]); // kept for the result copy (first failed grade's skill)
+  const stationPassedRef = useRef<number[]>([]);
+  const stationFailedRef = useRef<number[]>([]);
+  const stationResultsRef = useRef<PlacementStationResult[]>([]);
+  const consecutiveGapGradesRef = useRef(0);
+  const adaptiveModeRef = useRef(false);
+  const [adaptiveMode, setAdaptiveMode] = useState(false);
+  const [stationOutcomes, setStationOutcomes] = useState<Record<number, "passed" | "gap">>({});
 
-  const grades = gradesRef.current;
-  const grade = grades[Math.min(stationIdx, grades.length - 1)];
+  const grade = route[Math.min(stationIdx, route.length - 1)];
   const skill = PATHWAY[skillPos];
   const area = AREAS.find((a) => a.id === skill.area)!;
   const entry = entryOf(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
   const passMs = masteryMsFor(problem.topic) + PASS_SLACK_MS;
 
-  const finish = useCallback((landingIdx: number) => {
+  useEffect(() => {
+    askedAt.current = Date.now();
+  }, []);
+
+  const finish = useCallback((result: PlacementSummary) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    setLanding(landingIdx);
+    setSummary(result);
   }, []);
 
   const serve = useCallback((skillIdx: number, probe: number) => {
@@ -91,6 +113,7 @@ export default function PlacementTrial({
     setProbeNum(probe);
     setProblem(probeFor(skillIdx));
     setInput("");
+    setSpeedPct(100);
     askedAt.current = Date.now();
     inputRef.current?.focus();
   }, []);
@@ -98,36 +121,67 @@ export default function PlacementTrial({
   const advance = useCallback(
     (passed: boolean) => {
       if (doneRef.current) return;
-      const failGrade = () => {
-        // land at this grade's first skill; everything below is credited
-        passedSkillsRef.current = gradePlacementPassed(grade);
-        const landIdx = skillsOfGrade(grade)[0];
-        gapsRef.current = [landIdx];
-        finish(landIdx);
-      };
-      const passGrade = () => {
-        if (stationIdx + 1 >= grades.length) {
-          passedSkillsRef.current = gradePlacementPassed(null); // clean full run
-          finish(PATHWAY.length - 1);
+      const nextPasses = passed
+        ? [...stationPassedRef.current, skillPos]
+        : stationPassedRef.current;
+      const nextFails = passed
+        ? stationFailedRef.current
+        : [...stationFailedRef.current, skillPos];
+      stationPassedRef.current = nextPasses;
+      stationFailedRef.current = nextFails;
+
+      const completeGrade = (gradePassed: boolean) => {
+        const result: PlacementStationResult = {
+          grade,
+          passed: nextPasses,
+          failed: nextFails,
+        };
+        const results = [...stationResultsRef.current, result];
+        stationResultsRef.current = results;
+        setStationOutcomes((prev) => ({ ...prev, [grade]: gradePassed ? "passed" : "gap" }));
+
+        consecutiveGapGradesRef.current = gradePassed
+          ? 0
+          : consecutiveGapGradesRef.current + 1;
+
+        let nextRoute = route;
+        if (!adaptiveModeRef.current && consecutiveGapGradesRef.current >= 2) {
+          const adaptiveTail = adaptivePlacementTail(grade, grades);
+          const fullTail = nextRoute.slice(stationIdx + 1);
+          if (adaptiveTail.length < fullTail.length) {
+            nextRoute = [...nextRoute.slice(0, stationIdx + 1), ...adaptiveTail];
+            setRoute(nextRoute);
+            adaptiveModeRef.current = true;
+            setAdaptiveMode(true);
+          }
+        }
+
+        if (stationIdx + 1 >= nextRoute.length) {
+          const summary = summarizePlacement(results);
+          finish(summary);
           return;
         }
-        const nextGrade = grades[stationIdx + 1];
+
+        const nextGrade = nextRoute[stationIdx + 1];
         stationSkillsRef.current = sampleSkills(nextGrade, 3);
         passesRef.current = 0;
         failsRef.current = 0;
+        stationPassedRef.current = [];
+        stationFailedRef.current = [];
         setStationIdx(stationIdx + 1);
         serve(stationSkillsRef.current[0], 1);
       };
+
       if (passed) {
         passesRef.current += 1;
         if (passesRef.current >= 2) {
-          passGrade();
+          completeGrade(true);
           return;
         }
       } else {
         failsRef.current += 1;
         if (failsRef.current >= 2) {
-          failGrade();
+          completeGrade(false);
           return;
         }
       }
@@ -135,12 +189,12 @@ export default function PlacementTrial({
       const next = stationSkillsRef.current[Math.min(probeNum, stationSkillsRef.current.length - 1)];
       serve(next, probeNum + 1);
     },
-    [finish, serve, stationIdx, probeNum, grade, grades]
+    [finish, serve, stationIdx, probeNum, grade, grades, route, skillPos]
   );
 
   // speed bar + hard cap
   useEffect(() => {
-    if (landing !== null) return;
+    if (summary !== null) return;
     const t = setInterval(() => {
       const elapsed = Date.now() - askedAt.current;
       setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
@@ -152,9 +206,9 @@ export default function PlacementTrial({
       }
     }, 120);
     return () => clearInterval(t);
-  }, [advance, landing, passMs]);
+  }, [advance, summary, passMs]);
 
-  const answer = (v: string) => {
+  const answer = useCallback((v: string) => {
     const ms = Date.now() - askedAt.current;
     const correct = problem.kind === "choice" ? v === problem.answer : judgeAnswer(problem, v);
     const passed = correct && ms <= passMs;
@@ -165,7 +219,7 @@ export default function PlacementTrial({
       setTimeout(() => setMissFlash(false), 450);
     }
     advance(passed);
-  };
+  }, [advance, passMs, problem]);
 
   const onType = (v: string) => {
     ensureAudio();
@@ -183,35 +237,43 @@ export default function PlacementTrial({
   };
 
   /* ---------- result screen ---------- */
-  if (landing !== null) {
-    const startSkill = PATHWAY[landing];
+  if (summary !== null) {
+    const startSkill = PATHWAY[summary.landing];
     const startArea = AREAS.find((a) => a.id === startSkill.area)!;
-    const passedCount = passedSkillsRef.current.length;
-    const gaps = gapsRef.current;
+    const passedCount = summary.passed.length;
+    const gaps = summary.gaps;
+    const frontierGrade = summary.frontierGrade;
+    const fullRoadOpen = passedCount === PATHWAY.length;
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Placement complete</p>
         <p className="mt-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-6 py-3 font-mono text-xl font-bold text-white">
-          📐 Grade {skillGrade(startSkill.id)} Fast Math
+          📐 Demonstrated frontier: Grade {frontierGrade}
         </p>
         <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
-          You start at <span className="text-amber-300">{startSkill.label}</span>
+          {fullRoadOpen ? (
+            "You opened the full pathway"
+          ) : (
+            <>
+              First gap: <span className="text-amber-300">{startSkill.label}</span>
+            </>
+          )}
         </h2>
         <p className="mt-2 font-mono text-sm text-white/60">
-          {startArea.icon} {startArea.label}
+          {!fullRoadOpen && `${startArea.icon} ${startArea.label} · Grade ${skillGrade(startSkill.id)}`}
           {passedCount > 0 && ` · ${passedCount} ${passedCount === 1 ? "skill" : "skills"} placed behind you`}
         </p>
-        {gaps.length > 1 && (
+        {gaps.length > 0 && (
           <p className="mt-2 max-w-md font-mono text-xs text-amber-300/90">
             🔧 Gaps to fill: {gaps.map((g) => PATHWAY[g].label).join(" · ")}
           </p>
         )}
         <p className="mt-4 max-w-sm text-sm text-white/55">
-          Everything you passed stays open — fill your gaps to lock in the road behind you, then keep
-          climbing. The pathway serves what you haven&apos;t mastered yet.
+          Your misses did not lower your frontier. Everything you proved stays open; Continue starts
+          with the earliest gap, and you can jump back to higher unlocked skills anytime.
         </p>
         <button
-          onClick={() => onDone(passedSkillsRef.current, landing)}
+          onClick={() => onDone(summary.passed, summary.landing)}
           className="mt-8 rounded-xl bg-cyan-400 px-8 py-3.5 font-mono text-sm font-bold text-black hover:bg-cyan-300"
         >
           START THE PATHWAY
@@ -224,31 +286,51 @@ export default function PlacementTrial({
   return (
     <div className={`flex min-h-dvh flex-col ${missFlash ? "mr-wrong" : ""}`}>
       <div className="mx-auto w-full max-w-xl px-4 pt-6">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-start justify-between gap-3">
           <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Finding your start</p>
-          <button onClick={onSkip} className="font-mono text-[11px] text-white/40 hover:text-white/70">
-            skip — start from the beginning
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onToggleInstant}
+              title="On (default): number facts fire as soon as the full answer is typed. Built answers still use Enter."
+              className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] transition-colors ${
+                instantSubmit
+                  ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
+                  : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
+              }`}
+            >
+              ⚡ instant mode: {instantSubmit ? "on" : "off"}
+            </button>
+            <button onClick={onSkip} className="font-mono text-[11px] text-white/40 hover:text-white/70">
+              skip
+            </button>
+          </div>
         </div>
         {/* the grade staircase — watch your grade climb */}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {grades.map((g, i) => (
-            <span
-              key={g}
-              className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-bold ${
-                i < stationIdx
-                  ? "bg-emerald-400/20 text-emerald-300"
-                  : i === stationIdx
-                    ? "bg-cyan-400/25 text-cyan-200 ring-1 ring-cyan-400/60"
-                    : "bg-white/5 text-white/30"
-              }`}
-            >
-              {i < stationIdx ? `G${g} ✓` : `G${g}`}
-            </span>
-          ))}
+          {grades.map((g) => {
+            const outcome = stationOutcomes[g];
+            return (
+              <span
+                key={g}
+                className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-bold ${
+                  outcome === "passed"
+                    ? "bg-emerald-400/20 text-emerald-300"
+                    : outcome === "gap"
+                      ? "bg-amber-400/20 text-amber-300"
+                      : g === grade
+                        ? "bg-cyan-400/25 text-cyan-200 ring-1 ring-cyan-400/60"
+                        : "bg-white/5 text-white/30"
+                }`}
+              >
+                {outcome === "passed" ? `G${g} ✓` : outcome === "gap" ? `G${g} gap` : `G${g}`}
+              </span>
+            );
+          })}
         </div>
         <p className="mt-2 font-mono text-sm text-white/70">
           Grade {grade} · {area.icon} {area.label} · <span className="text-white">{skill.label}</span>
+          {adaptiveMode && <span className="text-cyan-300"> · adaptive check</span>}
           {probeNum === 3 && <span className="text-amber-300"> · tiebreaker</span>}
         </p>
         {/* answer-speed bar: full = fast pass, empty = too slow */}
@@ -261,13 +343,13 @@ export default function PlacementTrial({
       </div>
 
       <div className="mx-auto mb-8 mt-auto w-full max-w-xl px-4 pt-8">
-        <div className={`rounded-2xl border p-4 backdrop-blur-md sm:p-6 ${missFlash ? "border-red-400/70 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
+        <div className={`min-w-0 overflow-hidden rounded-2xl border p-4 backdrop-blur-md sm:p-6 ${missFlash ? "border-red-400/70 bg-red-950/40" : "border-white/15 bg-black/45"}`}>
           {problem.triangle && (
-            <div className="mb-3">
+            <div className="mx-auto mb-2 w-full max-w-sm">
               <TriangleFigure pair={problem.triangle} />
             </div>
           )}
-          <p className={`whitespace-pre-line text-center font-bold ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
+          <p className={`max-w-full whitespace-pre-line break-words text-center font-bold leading-tight [overflow-wrap:anywhere] ${problem.prompt.length > 24 ? "text-xl" : "text-3xl"}`}>
             {problem.prompt}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && (
               <span className="text-cyan-300"> = ?</span>
@@ -276,7 +358,7 @@ export default function PlacementTrial({
           {problem.kind === "numeric" ? (
             coarse ? (
               <>
-                <div className="mt-3 flex min-h-[3rem] w-full items-center justify-center rounded-xl border border-cyan-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white">
+                <div className="mt-3 flex min-h-[3rem] w-full min-w-0 items-center justify-center overflow-hidden rounded-xl border border-cyan-400/40 bg-white/5 px-4 py-2 text-center text-2xl font-bold tracking-wider text-white [overflow-wrap:anywhere]">
                   {input || <span className="text-base font-normal text-white/30">Tap the answer!</span>}
                   {!auto && (
                     <span className="ml-2 rounded-md border border-white/25 px-1.5 font-mono text-sm font-normal text-white/40">⏎</span>
@@ -321,7 +403,7 @@ export default function PlacementTrial({
               className={
                 problem.choices!.length <= 2
                   ? "mt-4 flex justify-center gap-3"
-                  : "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"
+                  : "mt-4 grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 sm:grid-cols-5"
               }
             >
               {problem.choices!.map((c) => (
@@ -332,7 +414,9 @@ export default function PlacementTrial({
                     answer(c);
                   }}
                   className={`rounded-xl border border-white/20 bg-white/5 font-mono font-medium text-white transition-colors hover:border-cyan-400 hover:bg-cyan-400/15 ${
-                    problem.choices!.length <= 2 ? "px-10 py-4 text-lg" : "px-2 py-3 text-sm"
+                    problem.choices!.length <= 2
+                      ? "min-w-0 whitespace-normal break-words px-6 py-4 text-lg leading-tight [overflow-wrap:anywhere]"
+                      : "min-w-0 whitespace-normal break-words px-2 py-3 text-sm leading-tight [overflow-wrap:anywhere]"
                   }`}
                 >
                   {c}
@@ -342,7 +426,7 @@ export default function PlacementTrial({
           )}
         </div>
         <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Two clean answers pass a grade — one slip gets a tiebreaker, two set your start · ~2 min
+          Two gap grades trigger 3 higher checks · one miss never sets your ceiling · usually ~1–2 min
         </p>
       </div>
     </div>

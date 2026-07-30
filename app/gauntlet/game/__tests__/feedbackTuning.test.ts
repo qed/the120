@@ -28,9 +28,10 @@ describe("masteryMsFor", () => {
     expect(masteryMsFor("critpt")).toBe(6000);
   });
   it("doc-rated upper-Medium / figure-scan topics get 9s", () => {
-    // distance: "Medium's ceiling, 5–8s"; congruence: figure-reading counts
-    // as thinking time (the doc's own calibration anchor)
-    expect(masteryMsFor("dist")).toBe(9000);
+    // Congruence figure-reading counts as thinking time (the doc's own
+    // calibration anchor). Distance now supplies Δx/Δy and drills only the
+    // Pythagorean-triple kernel, so it uses the normal Medium window.
+    expect(masteryMsFor("dist")).toBe(6000);
     expect(masteryMsFor("congruence")).toBe(9000);
     expect(masteryMsFor("defint")).toBe(9000);
     expect(masteryMsFor("dsecond")).toBe(9000);

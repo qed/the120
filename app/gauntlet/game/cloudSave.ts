@@ -8,6 +8,7 @@
  */
 
 import { supabaseBrowser } from "@/app/lib/supabase/client";
+import { TOURNAMENT_WINDOW } from "@/app/lib/tournament";
 
 const configured = () =>
   typeof process.env.NEXT_PUBLIC_SUPABASE_URL === "string" &&
@@ -92,9 +93,9 @@ export async function fetchLeaderboard(band: string | null): Promise<LeaderRow[]
 /**
  * Tournament (prize-band) top-20, ranked by difficulty-weighted mastery.
  * Mirrors `fetchLeaderboard`'s guest/env/error degradation → `[]`. All args
- * optional: `prizeBand` null = all bands; the window bounds scope the score to
- * the tournament window (defaults null → the RPC's own default window). The RPC
- * inner-joins to mastery events, so a brand-new 0-fact entrant does not appear.
+ * `prizeBand` is optional (null = all bands). The canonical window is always
+ * sent unless an explicit test/ops window is supplied, so pre-season events
+ * can never leak onto the live board through the RPC's nullable defaults.
  */
 export async function fetchTournamentLeaderboard(
   prizeBand?: string,
@@ -107,8 +108,8 @@ export async function fetchTournamentLeaderboard(
       "gauntlet_tournament_leaderboard",
       {
         prize_band_in: prizeBand ?? null,
-        window_start: windowStart ?? null,
-        window_end: windowEnd ?? null,
+        window_start: windowStart ?? TOURNAMENT_WINDOW.startIso,
+        window_end: windowEnd ?? TOURNAMENT_WINDOW.endIso,
       }
     );
     if (error) return [];

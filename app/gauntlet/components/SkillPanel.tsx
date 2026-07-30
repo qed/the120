@@ -13,6 +13,7 @@ import {
   type Skill,
 } from "../game/pathway";
 import BossSprite from "./BossSprite";
+import { encounterCopy, encounterKind } from "../game/encounters";
 
 /**
  * P3 — one skill's home: its 5-boss ladder and its mastery grid. The grid is
@@ -106,6 +107,7 @@ export default function SkillPanel({
   const mastery = skillMastery(skill, facts);
   const starts = locked ? [] : startableLevels({ [skill.id]: level }, skill.id);
   const answered = set ? null : Object.keys(facts).filter((k) => k.startsWith(`${skill.topic}:`)).length;
+  const encounter = encounterCopy(skill.topic);
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center" onClick={onClose}>
@@ -126,6 +128,19 @@ export default function SkillPanel({
           <button onClick={onClose} aria-label="Close" className="rounded-md px-2 py-1 text-white/50 hover:bg-white/10 hover:text-white">
             ✕
           </button>
+        </div>
+
+        <div
+          className={`mt-4 rounded-xl border px-3 py-2 ${
+            encounterKind(skill.topic) === "puzzle"
+              ? "border-amber-300/25 bg-amber-300/10"
+              : "border-cyan-300/25 bg-cyan-300/10"
+          }`}
+        >
+          <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-white">
+            {encounter.label}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-white/55">{encounter.detail}</p>
         </div>
 
         {/* Boss ladder (P2) */}

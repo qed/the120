@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { type Boss } from "./game/bosses";
-import { BANDS, factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
+import { factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
 import BossSprite from "./components/BossSprite";
 import { MASTERY_MS, type FactStat } from "./game/mastery";
 import {
@@ -27,12 +27,14 @@ import {
   unlockedTopics,
   type SkillProgress,
 } from "./game/pathway";
-import { buildMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
-import { ensureAudio, isMuted, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
+import { buildCanonicalMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
+import { ensureAudio, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
 import PlacementTrial from "./components/PlacementTrial";
 import SkillPanel from "./components/SkillPanel";
+import DailySprint from "./components/DailySprint";
+import FoundingBoard from "./components/FoundingBoard";
 import { useCoarsePointer } from "./components/NumberPad";
 import {
   buildShareCard,
@@ -43,15 +45,25 @@ import {
   type ShareData,
 } from "./game/shareCard";
 import TournamentEntryModal from "./components/TournamentEntryModal";
-import type { TournamentState } from "@/app/lib/tournament";
+import { TOURNAMENT_SEASON_ID, type TournamentState } from "@/app/lib/tournament";
 import JoinButton from "@/app/components/JoinButton";
 import {
   cloudUser,
-  fetchLeaderboard,
   loadCloudSave,
   pushCloudSave,
-  type LeaderRow,
 } from "./game/cloudSave";
+import { encounterKind, type RaidSource } from "./game/encounters";
+import {
+  practiceGhosts,
+  SPRINT_BRACKETS,
+  sprintBracketForGrade,
+  sprintBestKey,
+  type SprintBest,
+  type SprintBoardRow,
+  type SprintBracket,
+  type SprintReservation,
+  type SprintRun,
+} from "./game/dailySprint";
 
 /** Share button: phones get the native sheet; desktop gets an in-app preview
  *  with copy-to-clipboard (paste into Discord/iMessage) — no OS popup. */
@@ -134,6 +146,9 @@ type Save = {
   seenHelp: boolean;
   daily: { date: string; count: number };
   facts: Record<string, FactStat>;
+  /** Season-only proof is separate from durable learning mastery. */
+  seasonId: string;
+  seasonFacts: Record<string, FactStat>;
   trialBest: number;
   /** self-chosen leaderboard handle (kid-safe; never a real name) */
   handle: string;
@@ -154,6 +169,8 @@ type Save = {
   /** last date a placement was completed — one per day (the staircase samples
    *  2 skills per grade, so retake-spamming could luck past grades) */
   lastPlacement: string;
+  /** Official first Daily Sprint run per UTC date and grade bracket. */
+  sprintBests: Record<string, SprintBest>;
 };
 
 const SAVE_KEY = "the120.raiders.v2";
@@ -167,6 +184,8 @@ const EMPTY_SAVE: Save = {
   seenHelp: false,
   daily: { date: "", count: 0 },
   facts: {},
+  seasonId: TOURNAMENT_SEASON_ID,
+  seasonFacts: {},
   trialBest: 0,
   handle: "",
   topics: ["mul"],
@@ -175,6 +194,7 @@ const EMPTY_SAVE: Save = {
   instantSubmit: true,
   records: {},
   lastPlacement: "",
+  sprintBests: {},
 };
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
@@ -182,6 +202,13 @@ function mergeSaves(a: Save, b: Save): Save {
   const facts: Record<string, FactStat> = { ...a.facts };
   for (const [k, f] of Object.entries(b.facts)) {
     facts[k] = !facts[k] || f.n > facts[k].n ? f : facts[k];
+  }
+  const seasonFacts: Record<string, FactStat> = {};
+  for (const source of [a, b]) {
+    if (source.seasonId !== TOURNAMENT_SEASON_ID) continue;
+    for (const [k, f] of Object.entries(source.seasonFacts ?? {})) {
+      seasonFacts[k] = !seasonFacts[k] || f.n > seasonFacts[k].n ? f : seasonFacts[k];
+    }
   }
   const medals: Record<string, number> = { ...a.medals };
   for (const [k, m] of Object.entries(b.medals)) {
@@ -195,6 +222,14 @@ function mergeSaves(a: Save, b: Save): Save {
   for (const [k, v] of Object.entries(b.records ?? {})) {
     records[k] = records[k] === undefined ? v : Math.min(records[k], v); // fastest wins
   }
+  const sprintBests: Record<string, SprintBest> = { ...(a.sprintBests ?? {}) };
+  for (const [key, value] of Object.entries(b.sprintBests ?? {})) {
+    // An official Sprint attempt is immutable; merging another device must
+    // never replace it with a later practice/better-score run.
+    if (!sprintBests[key]) {
+      sprintBests[key] = value;
+    }
+  }
   return {
     xp: Math.max(a.xp, b.xp),
     bossesBeaten: [...new Set([...a.bossesBeaten, ...b.bossesBeaten])],
@@ -205,6 +240,8 @@ function mergeSaves(a: Save, b: Save): Save {
     seenHelp: a.seenHelp || b.seenHelp,
     daily: a.daily.date >= b.daily.date ? a.daily : b.daily,
     facts,
+    seasonId: TOURNAMENT_SEASON_ID,
+    seasonFacts,
     trialBest: Math.max(a.trialBest, b.trialBest),
     handle: a.handle || b.handle,
     topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
@@ -213,12 +250,21 @@ function mergeSaves(a: Save, b: Save): Save {
     instantSubmit: a.instantSubmit ?? b.instantSubmit ?? true, // local preference wins
     records,
     lastPlacement: (a.lastPlacement ?? "") >= (b.lastPlacement ?? "") ? (a.lastPlacement ?? "") : (b.lastPlacement ?? ""),
+    sprintBests,
   };
 }
 
 const loadSave = (): Save => {
   try {
-    return { ...EMPTY_SAVE, ...JSON.parse(localStorage.getItem(SAVE_KEY) || "{}") };
+    const loaded = {
+      ...EMPTY_SAVE,
+      ...JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"),
+    } as Save;
+    if (loaded.seasonId !== TOURNAMENT_SEASON_ID) {
+      loaded.seasonId = TOURNAMENT_SEASON_ID;
+      loaded.seasonFacts = {};
+    }
+    return loaded;
   } catch {
     return EMPTY_SAVE;
   }
@@ -285,7 +331,15 @@ const titleOf = (level: number) => TITLES.find(([l]) => level >= l)![1];
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
-type Phase = "menu" | "placement" | "battle" | "trial" | "victory" | "defeat" | "trialEnd";
+type Phase =
+  | "menu"
+  | "placement"
+  | "battle"
+  | "trial"
+  | "sprint"
+  | "victory"
+  | "defeat"
+  | "trialEnd";
 
 export default function GauntletGame({ tournament }: { tournament: TournamentState }) {
   const [phase, setPhase] = useState<Phase>("menu");
@@ -306,7 +360,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [lastNewRecord, setLastNewRecord] = useState(false);
   const [lastRecap, setLastRecap] = useState<{ tested: number; total: number } | null>(null);
   const [challenge, setChallenge] = useState<{ skillId: string; level: number; t: number; h?: string } | null>(null);
-  const challengeRunRef = useRef(false); // the current battle is a challenge attempt
+  const [challengeRun, setChallengeRun] = useState(false);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
@@ -333,43 +387,45 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   }, [userId, openAccountModal]);
 
   useEffect(() => {
-    // Demo mode (?demo=1): seed a rich mid-progress player so the whole
-    // product (grade badge, gaps, grids, records) shows in one screen —
-    // built for the GT Alpha walkthrough. Local-only; overwrites this
-    // browser's save deliberately.
-    if (new URLSearchParams(window.location.search).get("demo") === "1") {
-      const demo = buildDemoSave();
-      localStorage.setItem(SAVE_KEY, JSON.stringify(demo));
-    }
-    const s = loadSave();
-    // Returning players from before the pathway: credit levels their fact
-    // stats already prove, so nobody restarts a road they've walked (P1).
-    if (!s.placed && Object.keys(s.facts).length > 0) {
-      s.skillProgress = { ...seedProgressFromFacts(s.facts), ...s.skillProgress };
-      s.placed = true;
-    }
-    setSave(s);
-    setMuted(s.muted);
-    setLoaded(true);
-    if (!s.seenHelp) setShowHelp(true);
-    // challenge link (?c=base64 payload): validated hard — id must exist on the
-    // pathway, level 1–5, time positive; handle re-sanitized (kid-safe chars)
-    try {
-      const c = new URLSearchParams(window.location.search).get("c");
-      if (c) {
-        const d = JSON.parse(atob(c)) as { s?: unknown; l?: unknown; t?: unknown; h?: unknown };
-        const idx = PATHWAY.findIndex((sk) => sk.id === d.s);
-        const level = Math.floor(Number(d.l));
-        const t = Math.floor(Number(d.t));
-        if (idx >= 0 && level >= 1 && level <= SKILL_LEVELS && t > 0 && t <= RAID_SECONDS) {
-          const h =
-            typeof d.h === "string" ? d.h.replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12) : undefined;
-          setChallenge({ skillId: d.s as string, level, t, h: h || undefined });
-        }
+    // Defer client-only hydration work one task so the effect synchronizes
+    // with storage without a synchronous set-state cascade.
+    const timer = window.setTimeout(() => {
+      // Demo mode (?demo=1): seed a rich mid-progress player so the whole
+      // product (grade badge, gaps, grids, records) shows in one screen.
+      if (new URLSearchParams(window.location.search).get("demo") === "1") {
+        const demo = buildDemoSave();
+        localStorage.setItem(SAVE_KEY, JSON.stringify(demo));
       }
-    } catch {
-      /* malformed link — ignore */
-    }
+      const s = loadSave();
+      // Returning players from before the pathway: credit levels their fact
+      // stats already prove, so nobody restarts a road they've walked (P1).
+      if (!s.placed && Object.keys(s.facts).length > 0) {
+        s.skillProgress = { ...seedProgressFromFacts(s.facts), ...s.skillProgress };
+        s.placed = true;
+      }
+      setSave(s);
+      setMuted(s.muted);
+      setLoaded(true);
+      if (!s.seenHelp) setShowHelp(true);
+      // Challenge link payload: validate skill, level, time, and kid-safe handle.
+      try {
+        const c = new URLSearchParams(window.location.search).get("c");
+        if (c) {
+          const d = JSON.parse(atob(c)) as { s?: unknown; l?: unknown; t?: unknown; h?: unknown };
+          const idx = PATHWAY.findIndex((sk) => sk.id === d.s);
+          const level = Math.floor(Number(d.l));
+          const t = Math.floor(Number(d.t));
+          if (idx >= 0 && level >= 1 && level <= SKILL_LEVELS && t > 0 && t <= RAID_SECONDS) {
+            const h =
+              typeof d.h === "string" ? d.h.replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12) : undefined;
+            setChallenge({ skillId: d.s as string, level, t, h: h || undefined });
+          }
+        }
+      } catch {
+        /* malformed link — ignore */
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => {
     if (loaded) localStorage.setItem(SAVE_KEY, JSON.stringify(save));
@@ -429,12 +485,43 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const skill = PATHWAY[skillIdx];
   const boss: Boss = bossForLevel(battleLevel);
   const curIdx = currentSkillIdx(save.skillProgress);
-  const trialTopics = unlockedTopics(save.skillProgress);
-  const trialBand = PATHWAY[curIdx].band;
+  const trialSources = useMemo(
+    () =>
+      PATHWAY.filter((_, idx) => isUnlocked(save.skillProgress, idx)).map(
+        ({ topic, band }) => ({ topic, band })
+      ),
+    [save.skillProgress]
+  );
   const fmGrade = fastMathGrade(save.skillProgress).grade;
+  const sprintDate = todayStr();
+  const sprintBand = sprintBracketForGrade(fmGrade);
+  const sprintBest = save.sprintBests[sprintBestKey(sprintDate, sprintBand)];
+  const raidSetup = useMemo((): {
+    quickfireSources: RaidSource[];
+    puzzleSource?: RaidSource;
+  } => {
+    const target: RaidSource = { topic: skill.topic, band: skill.band };
+    if (encounterKind(skill.topic) === "quickfire") {
+      return { quickfireSources: [target] };
+    }
+    const earlier = PATHWAY.slice(0, skillIdx)
+      .reverse()
+      .filter((candidate) => encounterKind(candidate.topic) === "quickfire");
+    const sameBand = earlier.filter((candidate) => candidate.band === skill.band);
+    const warmupSkills = (sameBand.length ? sameBand : earlier).slice(0, 4);
+    return {
+      quickfireSources: warmupSkills.length
+        ? warmupSkills.map(({ topic, band }) => ({ topic, band }))
+        : [{ topic: "add", band: "g34" }],
+      puzzleSource: target,
+    };
+  }, [skill.band, skill.topic, skillIdx]);
 
-  const applyResults = useCallback((prev: Save, results: ProblemResult[]): Record<string, FactStat> => {
-    const facts = { ...prev.facts };
+  const applyResultsToFacts = useCallback((
+    previousFacts: Record<string, FactStat>,
+    results: ProblemResult[]
+  ): Record<string, FactStat> => {
+    const facts = { ...previousFacts };
     for (const r of results) {
       const f = facts[r.key] ?? { n: 0, miss: 0, avgMs: 0, fastStreak: 0 };
       const n = f.n + 1;
@@ -444,7 +531,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         avgMs: f.avgMs + (r.ms - f.avgMs) / n,
         // mastery = correct under the TOPIC'S limit, twice in a row —
         // 3s for number facts, wider for later-grade skills + typed formats
-        fastStreak: r.correct && r.ms <= masteryMsFor(topicOfKey(r.key)) ? (f.fastStreak ?? 0) + 1 : 0,
+        fastStreak:
+          r.correct &&
+          r.ms <= (r.encounter === "armor" ? 15_000 : masteryMsFor(topicOfKey(r.key)))
+            ? (f.fastStreak ?? 0) + 1
+            : 0,
       };
     }
     return facts;
@@ -459,7 +550,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 
   const startSkillBattle = (idx: number, level: number, isChallenge = false) => {
     ensureAudio();
-    challengeRunRef.current = isChallenge;
+    setChallengeRun(isChallenge);
     setSkillIdx(idx);
     setBattleLevel(level);
     setOpenSkill(null);
@@ -472,29 +563,35 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   // Challenge a friend: encode this win as a link (skill + level + time to
   // beat + kid-safe handle only — no PII). navigator.share on phones,
   // clipboard on desktop.
-  const shareChallenge = useCallback(async (): Promise<boolean> => {
+  const shareChallenge = useCallback(async (): Promise<{ copied: boolean; text: string }> => {
     const payload = { s: skill.id, l: battleLevel, t: lastElapsed, h: save.handle || undefined };
     const url = `${window.location.origin}/gauntlet/beta?c=${btoa(JSON.stringify(payload))}`;
     const text = `⚔️ Beat my time: ${skill.label} boss L${battleLevel} in ${lastElapsed}s — The Gauntlet`;
+    const shareText = `${text} ${url}`;
+    const coarsePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
     try {
-      if (navigator.share) {
+      // Keep desktop players inside the game. Edge exposes navigator.share,
+      // but it opens a separate Windows panel; only phones/tablets use it.
+      if (coarsePointer && navigator.share) {
         await navigator.share({ title: "The Gauntlet", text, url });
-        return true;
+        return { copied: true, text: shareText };
       }
     } catch {
       /* user cancelled the sheet — fall through to clipboard */
     }
     try {
-      await navigator.clipboard.writeText(`${text} ${url}`);
-      return true;
+      await navigator.clipboard.writeText(shareText);
+      return { copied: true, text: shareText };
     } catch {
-      return false;
+      return { copied: false, text: shareText };
     }
   }, [skill.id, skill.label, battleLevel, lastElapsed, save.handle]);
 
   // Challenge verdict line for the result screen
   const challengeNote = (() => {
-    if (!challengeRunRef.current || !challenge) return undefined;
+    if (!challengeRun || !challenge) return undefined;
     const who = challenge.h ?? "your rival";
     if (phase === "victory") {
       return lastElapsed <= challenge.t
@@ -507,7 +604,8 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   // Mid-raid/trial the page chrome above the game (parent banner) hides via
   // this body class (globals.css) so the arena gets the whole viewport.
   useEffect(() => {
-    const playing = phase === "battle" || phase === "trial" || phase === "placement";
+    const playing =
+      phase === "battle" || phase === "trial" || phase === "placement" || phase === "sprint";
     document.body.classList.toggle("gauntlet-playing", playing);
     return () => document.body.classList.remove("gauntlet-playing");
   }, [phase]);
@@ -525,11 +623,12 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   // also gates on a confirmed entry + session, so a 403 is fine to ignore and
   // never blocks play. The casual `pushCloudSave` path stays untouched.
   const postTournamentMastery = useCallback(
-    (before: Record<string, FactStat>, after: Record<string, FactStat>, band: Band) => {
+    (before: Record<string, FactStat>, after: Record<string, FactStat>) => {
       if (!tournament.isLive || !userId) return;
       const keys = newlyMasteredKeys(before, after);
       if (keys.length === 0) return;
-      const batch = buildMasteryBatch(keys, band, crypto.randomUUID());
+      const batch = buildCanonicalMasteryBatch(keys, crypto.randomUUID());
+      if (batch.facts.length === 0) return;
       void fetch("/api/gauntlet/tournament/mastery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -544,7 +643,8 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       const total = stats.correct + stats.wrong;
       const acc = total ? stats.correct / total : 0;
       const medal = won ? (acc >= 0.9 && stats.timeLeft >= 30 ? 3 : acc >= 0.75 ? 2 : 1) : 0;
-      const after = applyResults(save, results);
+      const after = applyResultsToFacts(save.facts, results);
+      const seasonAfter = applyResultsToFacts(save.seasonFacts, results);
       const elapsed = RAID_SECONDS - stats.timeLeft;
       setLastStats(stats);
       setLastResults(results);
@@ -560,7 +660,10 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         bossesBeaten: won && !prev.bossesBeaten.includes(boss.id) ? [...prev.bossesBeaten, boss.id] : prev.bossesBeaten,
         bestStreak: Math.max(prev.bestStreak, stats.bestStreak),
         medals: medal > (prev.medals[boss.id] ?? 0) ? { ...prev.medals, [boss.id]: medal } : prev.medals,
-        facts: applyResults(prev, results),
+        facts: applyResultsToFacts(prev.facts, results),
+        seasonFacts: tournament.isLive
+          ? applyResultsToFacts(prev.seasonFacts, results)
+          : prev.seasonFacts,
         daily: bumpDaily(prev, won),
         // P2: a win claims the skill's boss level (never regresses)
         skillProgress:
@@ -574,19 +677,22 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             : prev.records,
       }));
       setPhase(won ? "victory" : "defeat");
-      postTournamentMastery(save.facts, after, skill.band);
+      postTournamentMastery(save.seasonFacts, seasonAfter);
     },
-    [boss.id, skill.id, skill.band, battleLevel, applyResults, countNewlyMastered, postTournamentMastery, save]
+    [boss.id, skill.id, battleLevel, applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive]
   );
 
   const finishTrial = useCallback(
     (score: number, results: ProblemResult[]) => {
-      const after = applyResults(save, results);
+      const after = applyResultsToFacts(save.facts, results);
+      const seasonAfter = applyResultsToFacts(save.seasonFacts, results);
       setTrialScore(score);
       setLastResults(results);
       setLastMastered(countNewlyMastered(save.facts, after));
       // C4 recap: how much of the reachable fact universe did this trial touch
-      const universe = new Set(trialTopics.flatMap((t) => factSetFor(t, trialBand) ?? []));
+      const universe = new Set(
+        trialSources.flatMap(({ topic, band }) => factSetFor(topic, band) ?? [])
+      );
       const tested = new Set(results.map((r) => r.key).filter((k) => universe.has(k))).size;
       setLastRecap(universe.size > 0 ? { tested, total: universe.size } : null);
       sfxDefeat();
@@ -594,13 +700,102 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         ...prev,
         xp: prev.xp + score * 2,
         trialBest: Math.max(prev.trialBest, score),
-        facts: applyResults(prev, results),
+        facts: applyResultsToFacts(prev.facts, results),
+        seasonFacts: tournament.isLive
+          ? applyResultsToFacts(prev.seasonFacts, results)
+          : prev.seasonFacts,
         daily: bumpDaily(prev, score >= 10),
       }));
       setPhase("trialEnd");
-      postTournamentMastery(save.facts, after, trialBand);
+      postTournamentMastery(save.seasonFacts, seasonAfter);
     },
-    [applyResults, countNewlyMastered, postTournamentMastery, save, trialBand, trialTopics]
+    [applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive, trialSources]
+  );
+
+  const reserveSprint = useCallback(async (): Promise<SprintReservation> => {
+    if (!userId || !save.handle) {
+      return { reserved: false, reason: "sign_in_required" };
+    }
+    try {
+      const response = await fetch("/api/gauntlet/daily-sprint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "start",
+          date: sprintDate,
+          band: sprintBand,
+          handle: save.handle,
+        }),
+      });
+      const body = (await response.json()) as SprintReservation;
+      return body.reserved && body.attemptId
+        ? { reserved: true, attemptId: body.attemptId }
+        : {
+            reserved: false,
+            reason:
+              body.reason === "ranked_attempt_used" ||
+              body.reason === "sign_in_required"
+                ? body.reason
+                : "unavailable",
+          };
+    } catch {
+      return { reserved: false, reason: "unavailable" };
+    }
+  }, [save.handle, sprintBand, sprintDate, userId]);
+
+  const finishSprint = useCallback(
+    async (run: SprintRun): Promise<SprintBoardRow[]> => {
+      if (run.ranked) {
+        const rankedBest: SprintBest = {
+          date: run.date,
+          band: run.band,
+          correct: run.correct,
+          wrong: run.wrong,
+          elapsedMs: run.elapsedMs,
+          score: run.score,
+        };
+        setSave((prev) => {
+          const key = sprintBestKey(run.date, run.band);
+          // The first ranked attempt is final. Practice never replaces it.
+          if (prev.sprintBests[key]) return prev;
+          return {
+            ...prev,
+            xp: prev.xp + run.correct * 2,
+            daily: bumpDaily(prev, run.correct >= 10),
+            sprintBests: { ...prev.sprintBests, [key]: rankedBest },
+          };
+        });
+      }
+
+      try {
+        const canPost =
+          run.ranked &&
+          !!run.attemptId &&
+          !!userId &&
+          !!save.handle;
+        const response = await fetch(
+          `/api/gauntlet/daily-sprint?date=${encodeURIComponent(run.date)}&band=${run.band}`,
+          canPost
+            ? {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "complete",
+                  date: run.date,
+                  band: run.band,
+                  attemptId: run.attemptId,
+                  answers: run.answers,
+                }),
+              }
+            : undefined
+        );
+        const body = (await response.json()) as { rows?: SprintBoardRow[] };
+        return Array.isArray(body.rows) ? body.rows : [];
+      } catch {
+        return [];
+      }
+    },
+    [save.handle, userId]
   );
 
   const toggleMute = () => {
@@ -626,7 +821,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         onClick={toggleMute}
         aria-label={save.muted ? "Unmute" : "Mute"}
         className={`fixed z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-mono text-sm text-white/70 backdrop-blur hover:bg-white/20 ${
-          phase === "battle" || phase === "trial"
+          phase === "battle" || phase === "trial" || phase === "sprint"
             ? coarse
               ? "left-3 top-[38%]" // pad owns bottom-left on touch; park over the arena's clear left edge
               : "bottom-4 left-4"
@@ -668,7 +863,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             if (lvl) startSkillBattle(curIdx, lvl);
           }}
           onSkill={(idx) => setOpenSkill(idx)}
-          onToggleEnter={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
+          onToggleInstant={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
           onPlacement={() => {
             ensureAudio();
             setPhase("placement");
@@ -677,6 +872,11 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             ensureAudio();
             setPhase("trial");
           }}
+          onSprint={() => {
+            ensureAudio();
+            setPhase("sprint");
+          }}
+          sprintBest={sprintBest}
           onHelp={() => setShowHelp(true)}
           onBoard={() => setShowBoard(true)}
           tournamentLive={tournament.isLive}
@@ -686,6 +886,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       {phase === "placement" && (
         <PlacementTrial
           instantSubmit={save.instantSubmit}
+          onToggleInstant={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
           onDone={(passed) => {
             setSave((p) => {
               // max-merge: placement can raise levels, never lower them
@@ -722,7 +923,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       )}
       {showBoard && (
         <LeaderboardPanel
-          band={save.band}
+          band={sprintBand}
           ownHandle={save.handle}
           onClose={() => setShowBoard(false)}
           tournamentLive={tournament.isLive}
@@ -746,12 +947,29 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           topics={[skill.topic]}
           band={skill.band}
           facts={save.facts}
+          quickfireSources={raidSetup.quickfireSources}
+          puzzleSource={raidSetup.puzzleSource}
+          raidLevel={battleLevel}
           instantSubmit={save.instantSubmit}
           onFinish={finishBattle}
         />
       )}
+      {phase === "sprint" && (
+        <DailySprint
+          date={sprintDate}
+          band={sprintBand}
+          bandLabel={
+            SPRINT_BRACKETS.find((candidate) => candidate.id === sprintBand)?.label ?? sprintBand
+          }
+          personalBest={sprintBest}
+          officialEligible={!!userId && !!save.handle}
+          onReserve={reserveSprint}
+          onComplete={finishSprint}
+          onExit={() => setPhase("menu")}
+        />
+      )}
       {phase === "trial" && (
-        <Trial topics={trialTopics} band={trialBand} instantSubmit={save.instantSubmit} onFinish={finishTrial} />
+        <Trial sources={trialSources} instantSubmit={save.instantSubmit} onFinish={finishTrial} />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result
@@ -767,7 +985,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           challengeNote={challengeNote}
           onChallenge={phase === "victory" ? shareChallenge : undefined}
           onMenu={() => setPhase("menu")}
-          onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRunRef.current)}
+          onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRun)}
           onNext={
             phase === "victory" && battleLevel < SKILL_LEVELS
               ? () => startSkillBattle(skillIdx, battleLevel + 1)
@@ -816,9 +1034,11 @@ function Menu({
   setHandle,
   onContinue,
   onSkill,
-  onToggleEnter,
+  onToggleInstant,
   onPlacement,
   onTrial,
+  onSprint,
+  sprintBest,
   onHelp,
   onBoard,
   tournamentLive,
@@ -832,9 +1052,11 @@ function Menu({
   setHandle: (h: string) => void;
   onContinue: () => void;
   onSkill: (idx: number) => void;
-  onToggleEnter: () => void;
+  onToggleInstant: () => void;
   onPlacement: () => void;
   onTrial: () => void;
+  onSprint: () => void;
+  sprintBest?: SprintBest;
   onHelp: () => void;
   onBoard: () => void;
   tournamentLive: boolean;
@@ -877,8 +1099,12 @@ function Menu({
         <span className="bg-gradient-to-r from-indigo-400 to-blue-500 bg-clip-text text-transparent">THE</span>{" "}
         <span className="bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent">GAUNTLET</span>
       </h1>
-      <p className="mt-2 text-center text-white/70">
+      <p className="hidden">
         Answer fast. Every correct answer strikes the boss — speed and streaks hit harder.
+      </p>
+      <p className="mt-2 text-center text-white/70">
+        Quickfire builds damage. Armor Break questions crack the boss&apos;s shield. Streaks
+        unlock powers.
       </p>
 
       {/* XP + title + daily (C3/C4/D5) */}
@@ -949,22 +1175,24 @@ function Menu({
         </div>
       )}
 
-      {/* Fast Math grade — the number a student carries (GT Alpha ask) */}
+      {/* Lead with proven reach; an earlier gap is a next target, not a ceiling. */}
       {!fresh && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-3">
           <span className="text-3xl">📐</span>
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/80">
-              Your Fast Math grade
+              Your Fast Math progress
             </p>
             <p className="font-mono text-2xl font-bold text-white">
-              {fm.complete ? "Grade 12 — COMPLETE 👑" : `Grade ${fm.grade}`}
-              {!fm.complete && fm.frontierGrade > fm.grade && (
-                <span className="ml-2 text-sm font-normal text-white/50">
-                  · frontier Grade {fm.frontierGrade}
-                </span>
-              )}
+              {fm.complete
+                ? "Grade 12 — COMPLETE 👑"
+                : `Highest cleared: Grade ${fm.frontierGrade}`}
             </p>
+            {!fm.complete && (
+              <p className="mt-1 font-mono text-xs text-white/50">
+                Current training: Grade {fm.grade}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -979,10 +1207,22 @@ function Menu({
         </button>
         {fresh ? (
           <p className="text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
-            A quick placement finds your start on the pathway — answer fast and clean to place higher
+            Adaptive placement finds your start — usually 1–2 min, with higher-grade safety checks
           </p>
         ) : (
           <>
+            <button
+              onClick={onSprint}
+              className="rounded-xl border border-cyan-400/40 bg-cyan-400/10 px-6 py-3 font-mono text-xs font-bold text-cyan-200 transition-colors hover:bg-cyan-400/20"
+            >
+              ⚡ DAILY SPRINT — SAME 20 FOR EVERYONE
+              {sprintBest && (
+                <span className="mt-1 block text-[10px] font-normal text-white/45">
+                  today&apos;s best {sprintBest.correct}/20 ·{" "}
+                  {(sprintBest.elapsedMs / 1000).toFixed(1)}s
+                </span>
+              )}
+            </button>
             <button
               onClick={onTrial}
               className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-2.5 font-mono text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/20"
@@ -1002,20 +1242,20 @@ function Menu({
                   🎯 take the placement test — it can only move you up
                 </button>
               )}
-              <button
-                onClick={onToggleEnter}
-                title="On (default): number facts fire at full length; built answers (marked ⏎) commit with Enter. Off: Enter/⏎ submits everything."
-                className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
-                  save.instantSubmit
-                    ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
-                    : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
-                }`}
-              >
-                ⚡ instant submit: {save.instantSubmit ? "on" : "off"}
-              </button>
             </div>
           </>
         )}
+        <button
+          onClick={onToggleInstant}
+          title="On (default): number facts fire at full length; built answers (marked ⏎) commit with Enter. Off: Enter/⏎ submits everything."
+          className={`mx-auto rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
+            save.instantSubmit
+              ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
+              : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
+          }`}
+        >
+          ⚡ instant mode: {save.instantSubmit ? "on" : "off"}
+        </button>
       </div>
 
       {/* The pathway map (P1/P2/P3): seven areas, one road. */}
@@ -1073,7 +1313,7 @@ function Menu({
                     <button
                       key={s.id}
                       onClick={() => onSkill(i)}
-                      className={`rounded-xl border px-2.5 py-1.5 text-left transition-all ${
+                      className={`max-w-full min-w-0 rounded-xl border px-2.5 py-1.5 text-left transition-all ${
                         current
                           ? "border-cyan-400 bg-cyan-400/15 ring-1 ring-cyan-400/50"
                           : mastered
@@ -1087,7 +1327,7 @@ function Menu({
                                   : "border-white/15 bg-white/5 hover:border-white/40"
                       }`}
                     >
-                      <span className="font-mono text-[11px] text-white/85">
+                      <span className="block max-w-full break-words font-mono text-[11px] leading-tight text-white/85 [overflow-wrap:anywhere]">
                         {mastered ? "👑 " : gap ? "🔧 " : locked ? "🔒 " : current ? "▶ " : ""}
                         {s.label}
                       </span>
@@ -1110,7 +1350,7 @@ function Menu({
                 {(COMING_SOON[area.id] ?? []).map((p) => (
                   <span
                     key={p}
-                    className="self-center rounded-xl border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] text-white/30"
+                    className="max-w-full self-center whitespace-normal break-words rounded-xl border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] leading-tight text-white/30 [overflow-wrap:anywhere]"
                   >
                     {p} · soon
                   </span>
@@ -1181,7 +1421,7 @@ function Result({
   newRecord: boolean;
   grade: number;
   challengeNote?: string;
-  onChallenge?: () => Promise<boolean>;
+  onChallenge?: () => Promise<{ copied: boolean; text: string }>;
   onMenu: () => void;
   onRetry: () => void;
   onNext?: () => void;
@@ -1191,6 +1431,7 @@ function Result({
   const waste = stats.activeMs ? Math.round((stats.wasteMs / stats.activeMs) * 100) : 0;
   const train = trainList(results);
   const [challengeState, setChallengeState] = useState<"idle" | "busy" | "sent">("idle");
+  const [challengeFallback, setChallengeFallback] = useState<string | null>(null);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center justify-center px-6 py-10 text-center">
@@ -1214,6 +1455,12 @@ function Result({
         <Stat label="Best streak" value={`×${stats.bestStreak}`} />
         <Stat label="Waste" value={`${waste}%`} />
       </div>
+      {(stats.puzzlesSolved > 0 || stats.powersUsed > 0) && (
+        <p className="mt-3 font-mono text-xs text-cyan-200/70">
+          {stats.puzzlesSolved} armor break{stats.puzzlesSolved === 1 ? "" : "s"} ·{" "}
+          {stats.powersUsed} streak power{stats.powersUsed === 1 ? "" : "s"} used
+        </p>
+      )}
 
       {won && (
         <p className={`mt-3 font-mono text-sm ${newRecord ? "font-bold text-amber-300" : "text-white/60"}`}>
@@ -1269,7 +1516,9 @@ function Result({
           <button
             onClick={async () => {
               setChallengeState("busy");
-              setChallengeState((await onChallenge()) ? "sent" : "idle");
+              const shared = await onChallenge();
+              setChallengeFallback(shared.copied ? null : shared.text);
+              setChallengeState(shared.copied ? "sent" : "idle");
             }}
             disabled={challengeState === "busy"}
             className="rounded-xl border border-amber-400/50 bg-amber-400/15 px-6 py-3 font-mono text-sm font-bold text-amber-200 hover:bg-amber-400/25 disabled:opacity-60"
@@ -1289,6 +1538,22 @@ function Result({
           MENU
         </button>
       </div>
+      {challengeFallback && (
+        <div className="mt-4 w-full max-w-md rounded-2xl border border-amber-400/35 bg-amber-400/10 p-4 text-left">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-300">
+            Copy your challenge
+          </p>
+          <textarea
+            readOnly
+            value={challengeFallback}
+            onFocus={(event) => event.currentTarget.select()}
+            className="mt-2 h-24 w-full resize-none rounded-xl border border-white/20 bg-black/30 p-3 text-xs text-white outline-none focus:border-amber-300"
+          />
+          <p className="mt-2 text-xs text-white/55">
+            Select the text, then press Ctrl+C. Everything stays inside the game window.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1384,44 +1649,96 @@ function LeaderboardPanel({
   tournamentLive,
   onEnter,
 }: {
-  band: Band;
+  band: SprintBracket;
   ownHandle: string;
   onClose: () => void;
   tournamentLive: boolean;
   onEnter: () => void;
 }) {
-  const [filter, setFilter] = useState<string | null>(band);
-  const [rows, setRows] = useState<LeaderRow[] | null>(null);
+  const [filter, setFilter] = useState<SprintBracket>(band);
+  const [rows, setRows] = useState<SprintBoardRow[] | null>(null);
 
   useEffect(() => {
+    if (tournamentLive) return;
     let dead = false;
-    setRows(null);
-    fetchLeaderboard(filter).then((r) => !dead && setRows(r));
+    fetch(
+      `/api/gauntlet/daily-sprint?date=${todayStr()}&band=${encodeURIComponent(filter)}`
+    )
+      .then((response) => response.json())
+      .then((body: { rows?: SprintBoardRow[] }) => {
+        if (!dead) setRows(Array.isArray(body.rows) ? body.rows : []);
+      })
+      .catch(() => !dead && setRows([]));
     return () => {
       dead = true;
     };
-  }, [filter]);
+  }, [filter, tournamentLive]);
 
-  const bandLabel = (b: string) => BANDS.find((x) => x.id === b)?.label ?? b;
+  const bandLabel = (b: string) =>
+    SPRINT_BRACKETS.find((candidate) => candidate.id === b)?.label ?? b;
+  const displayRows =
+    rows === null
+      ? null
+      : rows.length
+        ? rows
+        : [...practiceGhosts(todayStr(), filter)].sort((a, b) => a.rank - b.rank);
+
+  if (tournamentLive) {
+    return (
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+        <div className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/15 bg-[#0d1322] p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-2xl font-bold">🏆 Summer Tournament leaderboard</h3>
+              <p className="mt-1 font-mono text-[11px] text-white/50">
+                Master distinct facts · harder facts earn more · ranked inside your grade bracket
+              </p>
+            </div>
+            <button onClick={onClose} aria-label="Close" className="rounded-full px-2 text-white/50 hover:text-white">✕</button>
+          </div>
+          <div className="mt-4">
+            <FoundingBoard />
+          </div>
+          <button
+            onClick={() => {
+              onClose();
+              onEnter();
+            }}
+            className="mt-4 w-full rounded-xl bg-red px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.04em] text-white transition-all hover:bg-red-dark"
+          >
+            ⚔️ Enter the Summer Tournament
+          </button>
+          <p className="mt-3 text-center font-mono text-[10px] text-white/35">
+            Mastery Trial bests stay personal; this is the prize board.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0d1322] p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-2xl font-bold">🏆 Mastery Trial leaderboard</h3>
+          <div>
+            <h3 className="text-2xl font-bold">⚡ Daily Sprint leaderboard</h3>
+            <p className="mt-1 font-mono text-[10px] text-white/45">
+              Today&apos;s same 20 quickfire questions · accuracy first, time second
+            </p>
+          </div>
           <button onClick={onClose} aria-label="Close" className="rounded-full px-2 text-white/50 hover:text-white">✕</button>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          {[null, ...BANDS.map((b) => b.id)].map((f) => (
+          {SPRINT_BRACKETS.map((candidate) => candidate.id).map((f) => (
             <button
-              key={f ?? "all"}
+              key={f}
               onClick={() => setFilter(f)}
               className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-all ${
                 filter === f ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-white/20 text-white/55 hover:border-white/50"
               }`}
             >
-              {f ? bandLabel(f) : "All"}
+              {bandLabel(f)}
             </button>
           ))}
         </div>
@@ -1429,13 +1746,15 @@ function LeaderboardPanel({
         <div className="mt-4 min-h-[200px]">
           {rows === null ? (
             <p className="py-10 text-center font-mono text-xs text-white/40">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="py-10 text-center font-mono text-xs text-white/40">
-              No scores yet — run the Mastery Trial and claim the top spot.
-            </p>
           ) : (
-            <ol className="space-y-1">
-              {rows.map((r, i) => {
+            <>
+              {rows.length === 0 && (
+                <p className="mb-3 text-center font-mono text-[10px] text-white/40">
+                  No public times yet — showing clearly-labelled practice paces.
+                </p>
+              )}
+              <ol className="space-y-1">
+              {displayRows?.map((r, i) => {
                 const mine = ownHandle && r.handle === ownHandle;
                 return (
                   <li
@@ -1446,31 +1765,25 @@ function LeaderboardPanel({
                   >
                     <span className="flex items-center gap-3">
                       <span className={`w-6 text-right ${i < 3 ? "text-amber-300" : "text-white/40"}`}>
-                        {i + 1}
+                        {r.rank}
                       </span>
                       <span className="font-bold">{r.handle}</span>
-                      <span className="text-[10px] uppercase text-white/35">{bandLabel(r.band)}</span>
+                      <span className="text-[10px] uppercase text-white/35">
+                        {(r.elapsedMs / 1000).toFixed(1)}s
+                      </span>
                     </span>
-                    <span className="text-lg font-bold text-white">{r.trial_best}</span>
+                    <span className="text-lg font-bold text-white">{r.correct}/20</span>
                   </li>
                 );
               })}
-            </ol>
+              </ol>
+            </>
           )}
         </div>
 
-        {tournamentLive ? (
-          <button
-            onClick={onEnter}
-            className="mt-4 w-full rounded-xl bg-red px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.04em] text-white transition-all hover:bg-red-dark"
-          >
-            ⚔️ Enter the Summer Tournament
-          </button>
-        ) : (
-          <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-            Free account + a handle puts you on the board
-          </p>
-        )}
+        <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
+          Free account + a handle puts you on the board
+        </p>
       </div>
     </div>
   );
@@ -1492,8 +1805,17 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             press Enter to lock them in.
           </li>
           <li>
-            ⚡ <strong>Speed and streaks hit harder.</strong> Fast answers do bonus damage; 3+ in a row
-            multiplies it. Miss and the boss strikes you back.
+            ⚡ <strong>Quickfire rewards speed.</strong> Short recall and one-step answers build
+            streak damage. Formula and visual questions are marked Armor Break instead.
+          </li>
+          <li>
+            🧩 <strong>Armor Break rewards the solve.</strong> You get 15 seconds, no raw speed
+            bonus, and a correct answer breaks armor and restores HP.
+          </li>
+          <li>
+            🔥 <strong>Every 5-answer streak unlocks a choice:</strong> charge your next correct
+            answer, restore HP, or add 10 seconds. A charged strike only finishes the boss
+            immediately when it is clearly labeled Finishing Blow.
           </li>
           <li>
             ⏱ <strong>Bring the boss to zero before the clock runs out</strong> — 2 minutes, one raid.
@@ -1520,7 +1842,7 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
           }}
           className="mt-6 w-full rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300"
         >
-          LET'S RAID
+          LET&apos;S RAID
         </button>
       </div>
     </div>

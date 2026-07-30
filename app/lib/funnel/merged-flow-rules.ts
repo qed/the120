@@ -243,13 +243,23 @@ export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] 
  */
 export function mergedInitialStep(facts: MergedFlowFacts): MergedStep {
   if (!facts.mergeFlagOn) return initialStepForFacts(facts);
+  // The RESUME landing is one step BACK from the next-new step (Peter,
+  // 2026-07-30): the parent re-lands on the LAST screen they completed —
+  // "showing this page a second time is a good thing, it reminds the user
+  // where they were" — and the screen's own CTA advances into new
+  // territory. First step stays itself; the review-from-the-top cells
+  // (submitted+/offered/legacy locked) are untouched.
+  const lastCompleted = (next: MergedStep): MergedStep =>
+    mergedStepNeighbour(next, "back", facts) ?? next;
   switch (facts.applicantState) {
     case "added":
-      return initialStepForFacts(facts);
+      return lastCompleted(initialStepForFacts(facts));
     case "project_created":
-      return facts.formProgress ? facts.firstIncompleteFormStep : "seam";
+      return facts.formProgress ? lastCompleted(facts.firstIncompleteFormStep) : "seam";
     case null:
-      return facts.status === "draft" ? facts.firstIncompleteFormStep : FIRST_FORM_STEP;
+      return facts.status === "draft"
+        ? lastCompleted(facts.firstIncompleteFormStep)
+        : FIRST_FORM_STEP;
     case "submitted":
     case "in_review":
     case "offered":

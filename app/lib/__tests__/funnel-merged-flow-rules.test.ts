@@ -238,14 +238,15 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
       lands: "handoff",
     },
     {
-      name: "pre-application, door confirmed → templates",
+      // 2026-07-30: resume lands one step BACK (the last completed screen).
+      name: "pre-application, door confirmed → doors (last completed, one back from templates)",
       over: { applicantState: "added", doorConfirmed: true },
-      lands: "templates",
+      lands: "doors",
     },
     {
-      name: "pre-application, project row → compose (initialStepForFacts verbatim)",
+      name: "pre-application, project row → quiz (last completed, one back from compose)",
       over: { applicantState: "added", doorConfirmed: true, hasProject: true },
-      lands: "compose",
+      lands: "quiz",
     },
     {
       name: "project_created, NO form progress → the seam (C3)",
@@ -253,14 +254,14 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
       lands: "seam",
     },
     {
-      name: "mid-form (project_created + progress) → first incomplete form step",
+      name: "mid-form (project_created + progress) → last completed form step (one back)",
       over: {
         applicantState: "project_created",
         hasProject: true,
         formProgress: true,
         firstIncompleteFormStep: "academics",
       },
-      lands: "academics",
+      lands: "group",
     },
     {
       name: "offered → FIRST form step, even mid-form (R3: review from the top)",
@@ -298,9 +299,9 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
       lands: "basics",
     },
     {
-      name: "legacy draft → firstIncompleteStep resume (I2: no regression)",
+      name: "legacy draft → last completed form step (one back from firstIncompleteStep)",
       over: { status: "draft", firstIncompleteFormStep: "group" },
-      lands: "group",
+      lands: "basics",
     },
     {
       name: "legacy locked (submitted) → first form step",
@@ -380,10 +381,11 @@ describe("resolveMergedStep — a step outside the child's list resolves as if a
   });
 
   it("a next-step id on an UNLOCKED child keeps the plain clamp (no review shortcut)", () => {
-    // A legacy draft is not locked — the demotion arm must not fire.
+    // A legacy draft is not locked — the demotion arm must not fire. (The
+    // re-landing is the one-back resume: basics, one back from group.)
     expect(
       resolveMergedStep("goal", facts({ status: "draft", firstIncompleteFormStep: "group" }))
-    ).toBe("group");
+    ).toBe("basics");
     // A pre-application funnel child is not locked either.
     expect(resolveMergedStep("seat", facts({ applicantState: "added" }))).toBe("handoff");
   });
@@ -391,7 +393,7 @@ describe("resolveMergedStep — a step outside the child's list resolves as if a
   it("?step=doors for a legacy child clamps (build steps absent from the list)", () => {
     expect(
       resolveMergedStep("doors", facts({ status: "draft", firstIncompleteFormStep: "group" }))
-    ).toBe("group");
+    ).toBe("basics");
   });
 
   it("demotion refresh: standing on goal, gate revoked mid-walk → lands on review, the arm that explains", () => {

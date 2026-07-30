@@ -116,10 +116,10 @@ describe("assembly audit — the swapped composites, one pinned fact each", () =
     ).toBe("basics");
   });
 
-  it("legacy draft entry: the plain href resumes at the first incomplete form step (I2, no regression)", () => {
+  it("legacy draft entry: the plain href re-lands on the LAST COMPLETED form step (2026-07-30 one-back resume)", () => {
     expect(
       mergedInitialStep(liveFacts({ status: "draft", firstIncompleteFormStep: "group" }))
-    ).toBe("group");
+    ).toBe("basics");
   });
 
   it("the full gated walk assembles build + seam + form + next-steps, in order, under the LIVE flag", () => {

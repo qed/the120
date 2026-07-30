@@ -69,8 +69,17 @@ export default function DashboardApp({
    *  register — both render the 0 floor (the dashboard always renders). */
   verifiedTaskCounts?: Record<string, number> | null;
 }) {
-  const { ready, session, parent, children, deposits, composedChildIds, refreshDeposits, signOut } =
-    useDashboard();
+  const {
+    ready,
+    session,
+    parent,
+    children,
+    deposits,
+    composedChildIds,
+    projectNames,
+    refreshDeposits,
+    signOut,
+  } = useDashboard();
   // Returning from Stripe Checkout: the banner derives from the URL ONCE at
   // mount (lazy initializer — no setState-in-effect, the React Compiler
   // rule); the effect below handles only the side effects.
@@ -347,7 +356,12 @@ export default function DashboardApp({
           {children.map((c) => {
             const skin = cardSkin(c.grade);
             const group = groups.find((g) => g.slug === c.groupSlug)?.name ?? "";
-            const verdict = cardVerdict(c, depositsFor(c.id), composedChildIds.has(c.id));
+            const verdict = cardVerdict(
+              c,
+              depositsFor(c.id),
+              composedChildIds.has(c.id),
+              projectNames.get(c.id) ?? null
+            );
             const arrived = c.arrivedAt != null;
             const header = (
               <div className="flex items-center gap-3">
@@ -601,7 +615,12 @@ export default function DashboardApp({
                 // Reconnect U3: funnel children (non-NULL applicant_state)
                 // render the state-aware card; NULL children fall through to
                 // the legacy card below, byte-for-byte as before.
-                const verdict = cardVerdict(c, childDeposits, composedChildIds.has(c.id));
+                const verdict = cardVerdict(
+                  c,
+                  childDeposits,
+                  composedChildIds.has(c.id),
+                  projectNames.get(c.id) ?? null
+                );
                 if (verdict.kind === "funnel") {
                   const statusTone =
                     verdict.tone === "green" ? "text-crm-green" : "text-red";

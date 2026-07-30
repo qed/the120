@@ -98,6 +98,22 @@ describe("cardVerdict — one verdict per ladder state", () => {
     });
   });
 
+  it("the dossier cell's status line is the PROJECT'S NAME when it is known (2026-07-30)", () => {
+    const named = funnel(cardVerdict(child("project_created"), none, true, "Maple Lemonade Stand"));
+    expect(named.statusLine).toBe("Maple Lemonade Stand");
+    // Read-failure armor: a null/blank name falls back to the generic line.
+    expect(funnel(cardVerdict(child("project_created"), none, true, null)).statusLine).toBe(
+      "PROJECT CREATED"
+    );
+    expect(funnel(cardVerdict(child("project_created"), none, true, "  ")).statusLine).toBe(
+      "PROJECT CREATED"
+    );
+    // The re-compose cell (no active project) never claims a name.
+    expect(funnel(cardVerdict(child("project_created"), none, false, "Stale Name")).statusLine).toBe(
+      "PROJECT CREATED"
+    );
+  });
+
   it("project_created WITHOUT a project (invalidated) → CONTINUE APPLICATION into the mini-app compose", () => {
     // The one deliberate exception to post-compose-means-dashboard: the
     // re-compose obligation lives in the mini-app (childNextScreen's cell).

@@ -260,7 +260,9 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
       app.indexOf("const renderPathHome"),
       app.indexOf("min-h-screen bg-hq-canvas")
     );
-    expect(home).toMatch(/cardVerdict\(c, depositsFor\(c\.id\), composedChildIds\.has\(c\.id\)\)/);
+    expect(home).toMatch(
+      /cardVerdict\(\s*c,\s*depositsFor\(c\.id\),\s*composedChildIds\.has\(c\.id\),\s*projectNames\.get\(c\.id\) \?\? null,?\s*\)/
+    );
     expect(home).toMatch(/verdict\.statusLine/);
     // The reserve block is the ONE shared renderReserveCta — the dispute-
     // evidence posture (inline policy + tick) must not fork per register.

@@ -251,7 +251,13 @@ export type CardVerdict =
 export function cardVerdict(
   child: Pick<Child, "id" | "status" | "applicantState">,
   deposits: { status: string }[],
-  hasComposedProject: boolean
+  hasComposedProject: boolean,
+  /** The ACTIVE project's name (2026-07-30): when the card's cell is the
+   *  composed-project dossier, the status line says THIS instead of the
+   *  generic "PROJECT CREATED". Null/empty falls back to the generic line
+   *  (the name always exists in the row — compose inserts the fallback name
+   *  before the model runs — so the fallback here is read-failure armor). */
+  activeProjectName: string | null = null
 ): CardVerdict {
   const liveDeposit = hasPaidDeposit(deposits);
   const next = childNextScreen({
@@ -334,7 +340,9 @@ export function cardVerdict(
       // Only `dossier` reaches here — `legacy` and `enrolled` returned above.
       return {
         kind: "funnel",
-        statusLine: "PROJECT CREATED",
+        // The child's composed project exists on this cell, so the status
+        // line is its NAME (the render sites uppercase via CSS).
+        statusLine: activeProjectName?.trim() || "PROJECT CREATED",
         tone: "red",
         primaryCta: { kind: "continue_dossier", label: "Continue application", href: miniAppHref },
       };

@@ -38,6 +38,11 @@ type Store = {
    *  RLS-scoped active-projects read (reconnect U3), never a second query.
    *  Feeds `cardVerdict`'s hasComposedProject axis. */
   composedChildIds: ReadonlySet<string>;
+  /** child id → the ACTIVE project's name, from the same read (2026-07-30):
+   *  the card's status line says the project's name, never "Project
+   *  created". The name always exists — compose inserts the row with the
+   *  canned fallback name before the model ever runs. */
+  projectNames: ReadonlyMap<string, string>;
   refreshDeposits: () => Promise<void>;
   signOut: () => void;
 };
@@ -120,6 +125,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   const [children, setChildren] = useState<Child[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [composedChildIds, setComposedChildIds] = useState<ReadonlySet<string>>(new Set());
+  const [projectNames, setProjectNames] = useState<ReadonlyMap<string, string>>(new Map());
 
   const loadFamily = useCallback(async (activeSession: Session) => {
     const supabase = getSupabase();
@@ -133,7 +139,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         // RLS scopes the read to this family's children (the U10 policy),
         // and the live-row scoping (`status='active'`) stays. The prefill
         // that used to consume this read moved to the flow's loader (U9).
-        supabase.from("projects").select("child_id").eq("status", "active"),
+        supabase.from("projects").select("child_id,name").eq("status", "active"),
       ]);
     let parentRow = parentRes.data;
     if (!parentRow && user.user_metadata?.first_name) {
@@ -169,9 +175,13 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         ? { firstName: parentRow.first_name, lastName: parentRow.last_name, email: parentRow.email }
         : null
     );
-    setComposedChildIds(
-      new Set(
-        ((projectRows as { child_id: string }[]) ?? []).map((row) => String(row.child_id))
+    const activeProjects = (projectRows as { child_id: string; name: string | null }[]) ?? [];
+    setComposedChildIds(new Set(activeProjects.map((row) => String(row.child_id))));
+    setProjectNames(
+      new Map(
+        activeProjects
+          .filter((row) => typeof row.name === "string" && row.name.trim() !== "")
+          .map((row) => [String(row.child_id), String(row.name)])
       )
     );
     // The RAW rows, exactly as persisted (U9): the meter reads what the CRM
@@ -204,6 +214,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         setChildren([]);
         setDeposits([]);
         setComposedChildIds(new Set());
+        setProjectNames(new Map());
       }
     });
     return () => subscription.unsubscribe();
@@ -232,6 +243,7 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         children,
         deposits,
         composedChildIds,
+        projectNames,
         refreshDeposits,
         signOut,
       }}

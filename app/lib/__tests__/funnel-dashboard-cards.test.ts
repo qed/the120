@@ -101,14 +101,32 @@ describe("cardVerdict — one verdict per ladder state", () => {
     });
   });
 
-  it("submitted → SUBMITTED FOR REVIEW, no primary CTA, review link", () => {
+  it("submitted → SUBMITTED FOR REVIEW, no primary CTA, review LINK (not pill)", () => {
     const v = funnel(cardVerdict(child("submitted"), none, true));
     expect(v.statusLine).toBe("SUBMITTED FOR REVIEW");
     expect(v.primaryCta).toBeUndefined();
     expect(v.secondaryReviewLink).toEqual({
       label: "Review application",
       href: "/start/child/kid-1",
+      presentation: "link",
     });
+  });
+
+  it("offered → the review entry is the outlined PILL twin (unified-flow R1), beside Reserve", () => {
+    const v = funnel(cardVerdict(child("offered"), none, true));
+    expect(v.primaryCta).toEqual({ kind: "reserve", label: "Reserve seat · $250" });
+    expect(v.secondaryReviewLink).toEqual({
+      label: "Review application",
+      href: "/start/child/kid-1",
+      presentation: "pill",
+    });
+  });
+
+  it("offered + pending debit → Reserve suppressed but the pill survives ALONE (R1a)", () => {
+    const v = funnel(cardVerdict(child("offered"), [{ status: "pending" }], true));
+    expect(v.primaryCta).toBeUndefined();
+    expect(v.note).toBeDefined();
+    expect(v.secondaryReviewLink?.presentation).toBe("pill");
   });
 
   it("in_review → UNDER REVIEW, no primary CTA", () => {

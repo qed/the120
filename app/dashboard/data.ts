@@ -208,8 +208,10 @@ export type CardVerdict =
       note?: string;
       primaryCta?: FunnelCardCta;
       /** The R13 review-walk entry: read-only mini-app, `submitted`+ only.
-       *  Deliberately small/secondary. */
-      secondaryReviewLink?: { label: string; href: string };
+       *  `presentation` is the unified-flow R1 split: the offered/re-reserve
+       *  card promotes it to an outlined pill twin beside Reserve; every
+       *  other submitted+ card keeps the small underlined link. */
+      secondaryReviewLink?: { label: string; href: string; presentation: "pill" | "link" };
     };
 
 /**
@@ -270,7 +272,7 @@ export function cardVerdict(
     next.surface !== "mini_app" &&
     !(next.surface === "dashboard" && next.intent === "dossier");
   const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: miniAppHref }
+    ? { label: "Review application", href: miniAppHref, presentation: "link" as const }
     : undefined;
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).
@@ -375,7 +377,13 @@ export function cardVerdict(
         tone: "red",
         note: pendingNote,
         primaryCta: reserveCta,
-        secondaryReviewLink,
+        // R1: the offered/re-reserve card carries the outlined pill twin —
+        // beside Reserve when it renders, alone (R1a) when reserve is
+        // suppressed (pending debit / gate refusal).
+        secondaryReviewLink: secondaryReviewLink && {
+          ...secondaryReviewLink,
+          presentation: "pill" as const,
+        },
       };
     case "arrival":
       // Unreachable: `arrival` exists only with a live deposit, which the

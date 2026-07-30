@@ -156,30 +156,42 @@ export default function DashboardApp({
   // paid one exists (the gate + paid banner would then disagree with the API).
   const depositsFor = (childId: string) => deposits.filter((d) => d.childId === childId);
 
-  // The reserve entry (R50) — next-steps link, then the checkout button.
+  // The reserve entry (unified-flow R1) — two pills of ONE button family:
+  // filled Reserve leading, outlined "Review application" twin beside it.
   // ONE block shared by the legacy card and the funnel `offered`/re-reserve
   // cards. The refund policy renders at checkout, not here (2026-07-30).
+  // The pair wraps to stacked on narrow cards; both disable while a
+  // checkout is opening so a double-navigation can't race the redirect.
   const renderReserveCta = (c: Child) => (
     <>
-      {/* R50: the three swipes are the offer's front door. */}
-      <a
-        href={`/start/next-steps?child=${c.id}`}
-        className="mb-3 inline-block rounded font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue underline hover:text-red"
-      >
-        See your next steps →
-      </a>
-      <button
-        onClick={() => reserveSeat(c.id)}
-        disabled={reservingId === c.id}
-        className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => reserveSeat(c.id)}
+          disabled={reservingId === c.id}
+          className="inline-flex h-10 items-center justify-center rounded-full bg-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {reservingId === c.id ? "Opening checkout…" : "Reserve seat · $250"}
+        </button>
+        <a
+          href={`/start/child/${c.id}`}
+          aria-disabled={reservingId === c.id}
+          className={`inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5 ${
+            reservingId === c.id ? "pointer-events-none opacity-60" : ""
+          }`}
+        >
+          Review application
+        </a>
+      </div>
       <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
         Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
       </p>
     </>
   );
+
+  // R1a: the reserve-suppressed offered card (pending debit / gate refusal)
+  // keeps the outlined twin alone — never an empty CTA row.
+  const reviewPillClass =
+    "inline-flex h-10 items-center justify-center rounded-full border border-blue px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-blue transition-colors hover:bg-blue/5";
 
   // Auth gate: everything below assumes a signed-in parent. Signed out
   // always renders the application-register SignIn (the server computed the
@@ -438,16 +450,26 @@ export default function DashboardApp({
                       ) : null}
                     </div>
                   )}
-                  {verdict.kind === "funnel" && verdict.secondaryReviewLink && (
-                    <p className="mt-3">
-                      <a
-                        href={verdict.secondaryReviewLink.href}
-                        className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
-                      >
-                        {verdict.secondaryReviewLink.label} →
-                      </a>
-                    </p>
-                  )}
+                  {/* R1: the reserve block already carries the pill twin;
+                      render here only when it did not. */}
+                  {verdict.kind === "funnel" &&
+                    verdict.secondaryReviewLink &&
+                    cta?.kind !== "reserve" && (
+                      <p className="mt-3">
+                        {verdict.secondaryReviewLink.presentation === "pill" ? (
+                          <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                            {verdict.secondaryReviewLink.label}
+                          </a>
+                        ) : (
+                          <a
+                            href={verdict.secondaryReviewLink.href}
+                            className="font-path-mono text-[0.55rem] uppercase tracking-[0.1em] text-hq-ink-muted underline hover:text-hq-ink"
+                          >
+                            {verdict.secondaryReviewLink.label} →
+                          </a>
+                        )}
+                      </p>
+                    )}
                 </div>
               </div>
             );
@@ -668,14 +690,22 @@ export default function DashboardApp({
                             ) : null}
                           </div>
                         )}
-                        {verdict.secondaryReviewLink && (
+                        {/* R1: the reserve block already carries the pill
+                            twin; render here only when it did not. */}
+                        {verdict.secondaryReviewLink && cta?.kind !== "reserve" && (
                           <p className="mt-3">
-                            <a
-                              href={verdict.secondaryReviewLink.href}
-                              className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
-                            >
-                              {verdict.secondaryReviewLink.label} →
-                            </a>
+                            {verdict.secondaryReviewLink.presentation === "pill" ? (
+                              <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
+                                {verdict.secondaryReviewLink.label}
+                              </a>
+                            ) : (
+                              <a
+                                href={verdict.secondaryReviewLink.href}
+                                className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted underline hover:text-ink"
+                              >
+                                {verdict.secondaryReviewLink.label} →
+                              </a>
+                            )}
                           </p>
                         )}
                       </div>

@@ -84,10 +84,14 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.secondaryReviewLink).toBeUndefined();
   });
 
-  it("project_created WITH a composed project → CONTINUE opens the dossier editor (no URL)", () => {
+  it("project_created WITH a composed project → CONTINUE links into the merged flow (U9: the landing rule picks the step, no ?step=)", () => {
     const v = funnel(cardVerdict(child("project_created"), none, true));
     expect(v.statusLine).toBe("PROJECT CREATED");
-    expect(v.primaryCta).toEqual({ kind: "continue_dossier", label: "Continue" });
+    expect(v.primaryCta).toEqual({
+      kind: "continue_dossier",
+      label: "Continue",
+      href: "/start/child/kid-1",
+    });
   });
 
   it("project_created WITHOUT a project (invalidated) → CONTINUE into the mini-app compose", () => {
@@ -408,6 +412,23 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     expect(src).toContain("cardVerdict(");
     expect(src).toContain("reserveRefusalMessage(");
     expect(src).toContain("bandNote(");
+  });
+
+  it("U9: the embedded editor views are unreachable — every entry point is a link into the flow", () => {
+    const src = read("app/dashboard/DashboardApp.tsx");
+    // The view state machine and its consumers are gone…
+    expect(src).not.toContain("setView");
+    expect(src).not.toContain("openEditor");
+    expect(src).not.toContain("DossierEditor");
+    expect(src).not.toContain("DossierPreview");
+    // …and the flow href is built once, with no ?step= (the server landing
+    // rule owns the step; R5).
+    expect(src).toContain("const flowHref = (id: string) => `/start/child/${id}`");
+    expect(src).not.toMatch(/\/start\/child\/[^`"']*\?step=/);
+    // ADD A CHILD routes to the funnel's add-child flow (server-action
+    // creation — the store's local-first addChild is retired).
+    expect(src).toContain('const ADD_CHILD_HREF = "/start/children"');
+    expect(src).not.toContain("addChild(");
   });
 
   it("the store reads applicant_state through parseApplicantState (fail-closed)", () => {

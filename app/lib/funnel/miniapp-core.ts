@@ -11,7 +11,10 @@ import "server-only";
  * not own").
  *
  * ── The write discipline (R35, the plan's trap list) ──
- * `confirmDoor` is the ONLY write in this module, and taps never reach it.
+ * `confirmDoor` is the only USER-INTENT write in this module, and taps never
+ * reach it. (`persistPrefillCore`, unified-flow U9, is the one other write:
+ * the seeding responsibility that moved here from the dashboard store —
+ * additive, idempotent, drafts only. See its header.)
  * Door switching is client state; confirm persists `children.group_slug`
  * once. The seeding trigger early-returns on `status = 'draft'` — verified
  * against the trigger source, and the funnel keeps children draft until C2 —
@@ -30,7 +33,8 @@ import {
   parseApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
 import type { ApplicantState } from "@/app/lib/funnel/applicant-rules";
-import { parseAcademics, type Academic } from "@/app/dashboard/data";
+import { emptyChild, parseAcademics, type Academic } from "@/app/dashboard/data";
+import { prefillDraft, type FunnelProjectSeed } from "@/app/dashboard/wizard-rules";
 
 export type MiniAppChild = {
   id: string;
@@ -629,5 +633,101 @@ export async function loadMergedFlowChild(
   } catch (err) {
     console.error("[funnel/miniapp] merged-flow load exception:", err);
     return { kind: "failed" };
+  }
+}
+
+/* ───────────── prefill-persist (unified-flow U9; R46/R47, the U12 invariant) ───────────── */
+
+/**
+ * The prefill derivations for a loaded child — `prefillDraft`'s output
+ * (birth year from grade, project pitch from the composed project) diffed
+ * into a snake_case children patch. `null` = nothing to seed. PURE: the ONE
+ * derivation stays `prefillDraft` (wizard-rules), never a re-implementation —
+ * the never-overwrite semantics (only empty fields fill; a partial project
+ * seeds no pitch) ride along by construction.
+ *
+ * Ownership note (Unit 9): this responsibility MOVED here from the dashboard
+ * store's `loadFamily` (whose copy was removed in the same change) — the
+ * write has exactly one owner and never zero. Persisting (not just
+ * in-memory prefilling) is what keeps the parent meter, the CRM queue, and
+ * the stall-nudge cron row-honest: all three read the RAW row (the U12
+ * adversarial finding — "finish your application" mailed to a dashboard
+ * showing 100%).
+ */
+export function prefillPatchForFields(
+  f: Pick<MergedFlowFields, "id" | "grade" | "birthYear" | "projectPitch">,
+  project: FunnelProjectSeed | null
+): { birth_year?: string; project_pitch?: string } | null {
+  const base = {
+    ...emptyChild(f.id),
+    grade: f.grade ?? ("" as const),
+    birthYear: f.birthYear,
+    projectPitch: f.projectPitch,
+  };
+  const filled = prefillDraft(base, project);
+  if (filled === base) return null;
+  const patch: { birth_year?: string; project_pitch?: string } = {};
+  if (filled.birthYear !== f.birthYear) patch.birth_year = filled.birthYear;
+  if (filled.projectPitch !== f.projectPitch) patch.project_pitch = filled.projectPitch;
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+export type PrefillPersistDeps = {
+  session: () => Promise<{
+    userId: string | null;
+    /** ONE UPDATE of the derived columns, id-scoped under RLS AND
+     *  `status = 'draft'` — the draft scope closes the race with a
+     *  concurrent submit, and RLS makes a foreign id a zero-row no-op. */
+    writePrefill: (
+      childId: string,
+      patch: { birth_year?: string; project_pitch?: string }
+    ) => Promise<"written" | "failed">;
+  }>;
+};
+
+function prefillPersistRealDeps(): PrefillPersistDeps {
+  return {
+    session: async () => {
+      const supabase = await supabaseServer();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return {
+        userId: user?.id ?? null,
+        writePrefill: async (childId, patch) => {
+          const { error } = await supabase
+            .from("children")
+            .update({ ...patch, updated_at: new Date().toISOString() })
+            .eq("id", childId)
+            .eq("status", "draft");
+          return error ? "failed" : "written";
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Persist the prefill derivations for a DRAFT child — BEST-EFFORT: the write
+ * is additive and idempotent (the same load re-derives the same patch), so a
+ * failure only defers the seed to the next visit; it never blocks or fails
+ * the page load, and it never throws. Content columns only — `status`,
+ * `submitted_at`, and `applicant_state` are not expressible in the patch
+ * type (the childToRow rule, carried over from the retired store).
+ */
+export async function persistPrefillCore(
+  input: {
+    childId: string;
+    patch: { birth_year?: string; project_pitch?: string };
+  },
+  deps: PrefillPersistDeps = prefillPersistRealDeps()
+): Promise<"written" | "skipped" | "failed"> {
+  try {
+    const session = await deps.session();
+    if (!session.userId) return "skipped";
+    return await session.writePrefill(input.childId, input.patch);
+  } catch (err) {
+    console.error("[funnel/miniapp] prefill persist exception:", err);
+    return "failed";
   }
 }

@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { loadMergedFlowChild, type MiniAppChild } from "@/app/lib/funnel/miniapp-core";
+import { supabaseServer } from "@/app/lib/supabase/server";
+import {
+  loadMergedFlowChild,
+  persistPrefillCore,
+  prefillPatchForFields,
+  type MergedFlowChild,
+  type MiniAppChild,
+} from "@/app/lib/funnel/miniapp-core";
+import { navCardIdentityName } from "@/app/lib/funnel/nav-card-rules";
 import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import {
   initialStepForFacts,
@@ -33,10 +41,15 @@ import { MiniAppShell } from "./MiniAppShell";
  * Unified-flow Unit 6: the route loads through `loadMergedFlowChild` — a
  * strict superset of `loadMiniAppChild` (same RLS refusal shapes, same
  * first-child derivation, plus the wizard field set and the deposit fact) —
- * so ONE loader serves both the dark path and the merged flow. The merged
- * facts feed `resolveMergedStep`/`stepListForChild` only while
- * `MERGED_FLOW_ENABLED` is on; dark, resolution stays `resolveStep` and the
- * behaviour is byte-identical to before.
+ * so ONE loader serves both flag arms. The merged facts feed
+ * `resolveMergedStep`/`stepListForChild` while `MERGED_FLOW_ENABLED` is on
+ * (LIVE since Unit 9); the flag-off arm keeps the pre-merge `resolveStep`
+ * resolution, compiled as the documented fallback shape.
+ *
+ * Unified-flow Unit 9: the prefill-persist responsibility (R46/R47) lives
+ * HERE now — the dashboard store's copy was removed in the same change, so
+ * the write has exactly one owner and never zero (the U12 row-honesty
+ * invariant: meter, CRM queue, and stall cron all read the raw row).
  */
 
 export const dynamic = "force-dynamic";
@@ -88,6 +101,32 @@ export default async function MiniAppPage({
   const projectLoad = await loadActiveProjectViewCore(childId);
   const initialProject = projectLoad.kind === "ok" ? projectLoad.view : null;
 
+  // Unified-flow U9 (R46/R47): the prefill derivations — birth year from
+  // grade, project pitch from the composed project — applied IN MEMORY for
+  // this render (as the store always did) and PERSISTED for drafts through
+  // one best-effort UPDATE (empty→value fields only, `prefillDraft`'s
+  // never-overwrite semantics by construction). One owner: the store's copy
+  // is gone; failure defers the seed to the next visit, never the load.
+  const prefill = prefillPatchForFields(
+    loaded.child,
+    initialProject
+      ? {
+          name: initialProject.project.name,
+          description: initialProject.project.description,
+        }
+      : null
+  );
+  const fields: MergedFlowChild = prefill
+    ? {
+        ...loaded.child,
+        birthYear: prefill.birth_year ?? loaded.child.birthYear,
+        projectPitch: prefill.project_pitch ?? loaded.child.projectPitch,
+      }
+    : loaded.child;
+  if (prefill && loaded.child.status === "draft") {
+    await persistPrefillCore({ childId, patch: prefill });
+  }
+
   // Unit 5: with no `?step=` at all, land on the furthest step the server
   // can PROVE (confirmed door → templates, composed project → compose)
   // instead of always handoff. A `?step=` in the URL still wins — the
@@ -102,16 +141,16 @@ export default async function MiniAppPage({
   // (`nextStepsReachable` is the R11 predicate verbatim; the resume rule is
   // the wizard's own `firstIncompleteStep`).
   const facts: MergedFlowFacts = {
-    applicantState: loaded.child.applicantState,
-    status: loaded.child.status as SeatStatus,
-    doorConfirmed: isDoorConfirmed(loaded.child.groupSlug),
+    applicantState: fields.applicantState,
+    status: fields.status as SeatStatus,
+    doorConfirmed: isDoorConfirmed(fields.groupSlug),
     hasProject: initialProject !== null,
     nextStepsReachable: nextStepsReachable({
-      applicantState: loaded.child.applicantState,
-      status: loaded.child.status,
+      applicantState: fields.applicantState,
+      status: fields.status,
     }),
-    formProgress: formProgress(loaded.child),
-    firstIncompleteFormStep: firstIncompleteStep(checklistChildForFields(loaded.child)),
+    formProgress: formProgress(fields),
+    firstIncompleteFormStep: firstIncompleteStep(checklistChildForFields(fields)),
     mergeFlagOn: MERGED_FLOW_ENABLED,
   };
 
@@ -146,13 +185,32 @@ export default async function MiniAppPage({
     : isEditLocked(loaded.child.applicantState);
 
   const child: MiniAppChild = {
-    id: loaded.child.id,
-    firstName: loaded.child.firstName,
-    grade: loaded.child.grade ?? 0,
-    groupSlug: loaded.child.groupSlug,
-    applicantState: loaded.child.applicantState,
-    isFirstChild: loaded.child.isFirstChild,
+    id: fields.id,
+    firstName: fields.firstName,
+    grade: fields.grade ?? 0,
+    groupSlug: fields.groupSlug,
+    applicantState: fields.applicantState,
+    isFirstChild: fields.isFirstChild,
   };
+
+  // Unified-flow U9: the nav card's identity line for the form/next-steps
+  // zone — the same parents read the next-steps page makes. A failed read
+  // degrades to null (SIGN OUT alone), never a blocked page.
+  const supabase = await supabaseServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: parentRow } = user
+    ? await supabase
+        .from("parents")
+        .select("first_name,last_name")
+        .eq("id", user.id)
+        .maybeSingle()
+    : { data: null };
+  const parentIdentity = navCardIdentityName(
+    String(parentRow?.first_name ?? ""),
+    String(parentRow?.last_name ?? "")
+  );
 
   return (
     <MiniAppShell
@@ -161,7 +219,8 @@ export default async function MiniAppPage({
       initialProject={initialProject}
       serverInitialStep={serverInitialStep}
       locked={locked}
-      merged={{ facts, fields: loaded.child, depositPaid: loaded.depositPaid }}
+      parentIdentity={parentIdentity}
+      merged={{ facts, fields, depositPaid: loaded.depositPaid }}
     />
   );
 }

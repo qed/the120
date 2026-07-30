@@ -3,14 +3,27 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
-import { type Child, type Parent, emptyChild, parseAcademics } from "./data";
+import { type Child, type Parent, parseAcademics } from "./data";
 import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
-import { prefillDraft } from "./wizard-rules";
 
 /**
- * S1/S2: Supabase-backed dashboard store (replaces localStorage V1).
- * Auth session gates the dashboard; children rows persist with a short
- * debounce so typing in the dossier editor doesn't spam the network.
+ * S1/S2: Supabase-backed dashboard store — READ SIDE ONLY since unified-flow
+ * Unit 9. The dashboard is a launcher now: it loads the family (parent,
+ * children, deposits, composed-project facts) and offers sign-out + deposit
+ * refresh; every application write lives in the merged flow's server actions
+ * (`form-step-core` — save-on-Next, dual lock check, echo-verified submit)
+ * and child creation lives in `/start/children` (`children-core`).
+ *
+ * Retired write machinery (the wizard's owners, gone WITH the wizard so form
+ * state never has two owners): the debounced per-child upsert chains, the
+ * row serializer and the submit-status patch, tombstones, addChild/
+ * updateChild/removeChild/saveChildNow — and the `loadFamily` prefill block,
+ * whose responsibility MOVED to the flow's loader
+ * (`prefillPatchForFields`/`persistPrefillCore`, miniapp-core) in the same
+ * change: the seeding write has exactly one owner and never zero (the U12
+ * row-honesty invariant — meter, CRM queue, and stall cron all read the raw
+ * row). The ONE write left here is the parents-profile creation on a
+ * confirm-email first visit, which was never wizard state.
  */
 
 export type Deposit = { childId: string; status: string };
@@ -21,17 +34,10 @@ type Store = {
   parent: Parent | null;
   children: Child[];
   deposits: Deposit[];
-  /** Children holding a composed (active) project — derived from the SAME
-   *  projects load the prefill uses (reconnect U3), never a second query.
+  /** Children holding a composed (active) project — derived from the
+   *  RLS-scoped active-projects read (reconnect U3), never a second query.
    *  Feeds `cardVerdict`'s hasComposedProject axis. */
   composedChildIds: ReadonlySet<string>;
-  addChild: () => string;
-  updateChild: (id: string, patch: Partial<Child>) => void;
-  removeChild: (id: string) => void;
-  saveChildNow: (
-    id: string,
-    opts?: { includeStatus?: boolean }
-  ) => Promise<{ ok: boolean; error?: string }>;
   refreshDeposits: () => Promise<void>;
   signOut: () => void;
 };
@@ -44,7 +50,7 @@ export function useDashboard() {
   return ctx;
 }
 
-/* ---------- row mapping (snake_case DB ↔ camelCase app) ---------- */
+/* ---------- row mapping (snake_case DB → camelCase app; read-only) ---------- */
 
 export type ChildRow = {
   id: string;
@@ -69,8 +75,8 @@ export type ChildRow = {
    *  The `select("*")` load already carries it. */
   applicant_state: string | null;
   /** The sticky arrival fact (reconnect U11) — non-null iff this child has
-   *  EVER completed arrival. Server-stamped (provision driver), monotonic,
-   *  never written by this store (`childToRow` omits it on purpose). */
+   *  EVER completed arrival. Server-stamped (provision driver), monotonic —
+   *  and since U9 the store holds NO children write path at all. */
   arrived_at: string | null;
 };
 
@@ -101,66 +107,6 @@ export function rowToChild(r: ChildRow): Child {
   };
 }
 
-export function childToRow(c: Child, parentId: string) {
-  return {
-    id: c.id,
-    parent_id: parentId,
-    first_name: c.firstName,
-    last_name: c.lastName,
-    grade: c.grade === "" ? null : c.grade,
-    birth_year: c.birthYear,
-    current_school: c.currentSchool,
-    photo: c.photo ?? null,
-    group_slug: c.groupSlug,
-    academics: c.academics,
-    // `subjects` round-trips state truth so the Academics prefill can clear
-    // legacy entries once and have the clear persist (new rows insert []).
-    // test_scores is retired (R3): never read or written — the column's
-    // stored values are purged post-deploy (see the purge migration).
-    subjects: c.subjects,
-    workshop_ids: c.workshopIds,
-    interests: c.interests,
-    project_pitch: c.projectPitch,
-    portfolio_links: c.portfolioLinks,
-    child_email: c.childEmail,
-    child_email_none: c.childEmailNone,
-    // status/submitted_at are NEVER serialized into an upsert row. A
-    // PostgREST upsert is INSERT ... ON CONFLICT DO UPDATE; the status
-    // guard's BEFORE INSERT branch coerces any non-draft status on the
-    // proposed row, and Postgres reflects BEFORE INSERT trigger effects in
-    // EXCLUDED — so an upsert carrying status='submitted' lands as 'draft'
-    // even when the row already exists. The explicit submit writes status
-    // via submitStatusPatch in a targeted UPDATE instead (enqueueWrite).
-    updated_at: new Date().toISOString(),
-  };
-}
-
-/** The submit path's status flip — a targeted UPDATE payload, deliberately
- *  separate from childToRow so status can never ride along in an upsert.
- *  'submitted' is hardcoded: this patch has exactly one legitimate value,
- *  and passing through local state would let a future caller silently
- *  write whatever a stale tab holds. */
-export function submitStatusPatch(c: Child) {
-  return {
-    status: "submitted" as const,
-    submitted_at: c.submittedAt ?? new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-}
-
-/** Map DB-guard error messages to parent-friendly copy. The deposit-lock
- *  guard's message is already human-written and passes through unchanged. */
-function friendlySaveError(message?: string): string {
-  if (!message) return "Could not save.";
-  if (message.includes("children_academics_shape")) {
-    return "One of the academics answers is too long — try shortening it.";
-  }
-  if (message.includes("children_group_slug_allowed")) {
-    return "That group choice isn't valid.";
-  }
-  return message;
-}
-
 /* ---------- provider ---------- */
 
 export default function DashboardProvider({ children: reactChildren }: { children: React.ReactNode }) {
@@ -174,127 +120,6 @@ export default function DashboardProvider({ children: reactChildren }: { childre
   const [children, setChildren] = useState<Child[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [composedChildIds, setComposedChildIds] = useState<ReadonlySet<string>>(new Set());
-  const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const childrenRef = useRef<Child[]>([]);
-  /** Per-child promise chains: at most one in-flight write per child, and a
-   *  later write always executes after (and with newer state than) an earlier
-   *  one — no stale debounce can overwrite an explicit save. */
-  const writeChains = useRef<Map<string, Promise<unknown>>>(new Map());
-  /** Tombstones: ids removed locally; chained writes no-op for these so an
-   *  in-flight upsert can never resurrect a just-deleted child. */
-  const deletedIds = useRef<Set<string>>(new Set());
-
-  /** Single write path for children state: the ref is the always-fresh source
-   *  and the React state mirrors it (kept in lockstep here, nowhere else). */
-  const applyChildren = useCallback((next: Child[]) => {
-    childrenRef.current = next;
-    setChildren(next);
-  }, []);
-
-  /**
-   * Enqueue one child's upsert onto its per-child write chain. The row
-   * snapshot is read from `childrenRef` at the moment the chained write
-   * EXECUTES (not at enqueue time), so a queued write always carries the
-   * newest state; tombstoned ids no-op. The returned promise never rejects,
-   * keeping the chain healthy for the next write.
-   */
-  const enqueueWrite = useCallback(
-    (id: string, opts?: { includeStatus?: boolean }): Promise<{ ok: boolean; error?: string }> => {
-      const chains = writeChains.current;
-      const prev = chains.get(id) ?? Promise.resolve();
-      const next = prev.then(async (): Promise<{ ok: boolean; error?: string }> => {
-        if (deletedIds.current.has(id)) return { ok: true };
-        const current = childrenRef.current.find((c) => c.id === id);
-        if (!current) return { ok: false, error: "Child not found" };
-        try {
-          const {
-            data: { user },
-          } = await getSupabase().auth.getUser();
-          if (!user) return { ok: false, error: "Not signed in" };
-          if (opts?.includeStatus) {
-            // Submit path: two writes, deliberately NOT one upsert. An upsert
-            // carrying status='submitted' ALWAYS lands as 'draft': its INSERT
-            // arm fires the status guard's BEFORE INSERT coercion on the
-            // proposed row, EXCLUDED inherits the coerced 'draft', and the
-            // DO UPDATE writes that back even when the row already exists —
-            // so every retry failed identically (the Clay Kliman bug).
-            // Instead: persist content with the ordinary status-free upsert,
-            // then flip status in a targeted UPDATE, which fires only the
-            // guard's UPDATE branch (draft → submitted is permitted).
-            const { error: rowError } = await getSupabase()
-              .from("children")
-              .upsert(childToRow(current, user.id));
-            if (rowError) {
-              console.error("[dashboard] save failed:", rowError.message);
-              return { ok: false, error: rowError.message };
-            }
-            // Verify the DB's status echo: the guard COERCES (never raises)
-            // non-service-role writes, so a silently-kept status must surface
-            // as a retryable failure, not fake success. maybeSingle: zero
-            // rows (RLS-invisible / missing) falls through to the mismatch.
-            const patch = submitStatusPatch(current);
-            let echoed: Child["status"] | undefined;
-            try {
-              const { data, error } = await getSupabase()
-                .from("children")
-                .update(patch)
-                .eq("id", id)
-                .select("status")
-                .maybeSingle();
-              if (error) throw new Error(error.message);
-              echoed = (data as { status: Child["status"] } | null)?.status;
-            } catch (e) {
-              // Two-request submit hazard: the UPDATE can commit while its
-              // response is lost. Reporting failure would unlock the wizard
-              // against a row staff already see as submitted — re-read once
-              // and adopt the row's real status before giving up.
-              const message = e instanceof Error ? e.message : "Could not save.";
-              console.error("[dashboard] save failed:", message);
-              const { data: reread } = await getSupabase()
-                .from("children")
-                .select("status")
-                .eq("id", id)
-                .maybeSingle();
-              echoed = (reread as { status: Child["status"] } | null)?.status;
-              if (!echoed || echoed === "draft") {
-                return { ok: false, error: message };
-              }
-            }
-            if (echoed && echoed !== patch.status && echoed !== "draft") {
-              // Staff advanced the row past 'submitted' in the race window —
-              // the write is fine and the row is further along than the
-              // client thinks. Adopt the authoritative status: reporting
-              // failure here would revert the local status to draft and
-              // unlock the whole wizard against a dossier already in review.
-              applyChildren(
-                childrenRef.current.map((c) => (c.id === id ? { ...c, status: echoed } : c))
-              );
-              return { ok: true };
-            }
-            if (echoed !== patch.status) {
-              return { ok: false, error: "The submission didn't go through" };
-            }
-            return { ok: true };
-          }
-          const { error } = await getSupabase()
-            .from("children")
-            .upsert(childToRow(current, user.id));
-          if (error) {
-            console.error("[dashboard] save failed:", error.message);
-            return { ok: false, error: error.message };
-          }
-          return { ok: true };
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "Could not save.";
-          console.error("[dashboard] save failed:", message);
-          return { ok: false, error: message };
-        }
-      });
-      chains.set(id, next);
-      return next;
-    },
-    [applyChildren]
-  );
 
   const loadFamily = useCallback(async (activeSession: Session) => {
     const supabase = getSupabase();
@@ -304,9 +129,11 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         supabase.from("parents").select("first_name,last_name,email").eq("id", user.id).maybeSingle(),
         supabase.from("children").select("*").order("created_at"),
         supabase.from("deposits").select("child_id,status"),
-        // R46: the funnel's projects pre-fill the Project step. RLS scopes
-        // the read to this family's children (the U10 policy).
-        supabase.from("projects").select("child_id,name,description").eq("status", "active"),
+        // The composed-project fact for the card verdicts (reconnect U3);
+        // RLS scopes the read to this family's children (the U10 policy),
+        // and the live-row scoping (`status='active'`) stays. The prefill
+        // that used to consume this read moved to the flow's loader (U9).
+        supabase.from("projects").select("child_id").eq("status", "active"),
       ]);
     let parentRow = parentRes.data;
     if (!parentRow && user.user_metadata?.first_name) {
@@ -342,34 +169,23 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         ? { firstName: parentRow.first_name, lastName: parentRow.last_name, email: parentRow.email }
         : null
     );
-    // R46/R47: prefill at load, then PERSIST what changed through the normal
-    // per-child write chain (status-free upsert). In-memory-only prefill made
-    // the parent meter disagree with the CRM queue and the stall nudge —
-    // whose cron reads the RAW row — for exactly the families the nudge
-    // targets (the U12 adversarial finding: "finish your dossier" mailed to
-    // a dashboard showing 100%). The write is additive, idempotent, and only
-    // fires for drafts whose prefill actually changed something.
-    const projectByChild = new Map(
-      ((projectRows as { child_id: string; name: string; description: string }[]) ?? []).map(
-        (row) => [String(row.child_id), { name: row.name ?? "", description: row.description ?? "" }]
+    setComposedChildIds(
+      new Set(
+        ((projectRows as { child_id: string }[]) ?? []).map((row) => String(row.child_id))
       )
     );
-    const loaded = ((childRows as ChildRow[]) ?? []).map(rowToChild);
-    const prefilled = loaded.map((c) => prefillDraft(c, projectByChild.get(c.id) ?? null));
-    // The composed-project fact for the card verdicts, from the load already
-    // in hand (the same active-projects read the prefill consumes).
-    setComposedChildIds(new Set(projectByChild.keys()));
-    applyChildren(prefilled);
-    prefilled.forEach((c, i) => {
-      if (c !== loaded[i] && c.status === "draft") void enqueueWrite(c.id);
-    });
+    // The RAW rows, exactly as persisted (U9): the meter reads what the CRM
+    // queue and the stall cron read — no in-memory prefill can make the
+    // dashboard disagree with the row (the U12 row-honesty invariant; the
+    // seeding itself happens in the flow's loader now).
+    setChildren(((childRows as ChildRow[]) ?? []).map(rowToChild));
     setDeposits(
       ((depositRows as { child_id: string; status: string }[]) ?? []).map((d) => ({
         childId: d.child_id,
         status: d.status,
       }))
     );
-  }, [applyChildren, enqueueWrite]);
+  }, []);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -385,96 +201,13 @@ export default function DashboardProvider({ children: reactChildren }: { childre
       if (newSession) await loadFamily(newSession);
       else {
         setParent(null);
-        applyChildren([]);
+        setChildren([]);
         setDeposits([]);
         setComposedChildIds(new Set());
       }
     });
     return () => subscription.unsubscribe();
-  }, [loadFamily, applyChildren]);
-
-
-  /** Persist one child row soon (fire-and-forget; RLS scopes to this parent). */
-  const persistChild = useCallback(
-    (id: string) => {
-      void enqueueWrite(id);
-    },
-    [enqueueWrite]
-  );
-
-  /** Explicit awaited save (wizard Next/Submit): flush any pending debounce
-   *  for this child and enqueue the write now, so the caller can gate on the
-   *  result. `includeStatus` (submit only) additionally flips status +
-   *  submitted_at via a targeted UPDATE after the content upsert. */
-  const saveChildNow = useCallback(
-    async (
-      id: string,
-      opts?: { includeStatus?: boolean }
-    ): Promise<{ ok: boolean; error?: string }> => {
-      const timers = saveTimers.current;
-      const pending = timers.get(id);
-      if (pending) {
-        clearTimeout(pending);
-        timers.delete(id);
-      }
-      const res = await enqueueWrite(id, opts);
-      return res.ok ? res : { ok: false, error: friendlySaveError(res.error) };
-    },
-    [enqueueWrite]
-  );
-
-  const schedulePersist = useCallback(
-    (id: string) => {
-      const timers = saveTimers.current;
-      const existing = timers.get(id);
-      if (existing) clearTimeout(existing);
-      timers.set(
-        id,
-        setTimeout(() => {
-          timers.delete(id);
-          persistChild(id);
-        }, 700)
-      );
-    },
-    [persistChild]
-  );
-
-  const addChild = () => {
-    const id = crypto.randomUUID();
-    applyChildren([...childrenRef.current, emptyChild(id)]);
-    // Create the row immediately so it exists even if the parent types nothing
-    // (the ref is already fresh, so the write sees the new child).
-    persistChild(id);
-    return id;
-  };
-
-  const updateChild = (id: string, patch: Partial<Child>) => {
-    applyChildren(childrenRef.current.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-    schedulePersist(id);
-  };
-
-  const removeChild = (id: string) => {
-    deletedIds.current.add(id);
-    applyChildren(childrenRef.current.filter((c) => c.id !== id));
-    const timers = saveTimers.current;
-    const timer = timers.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timers.delete(id);
-    }
-    // Chain the delete behind any in-flight upsert for this child so the
-    // upsert can't land after (and undo) the delete; queued-but-unstarted
-    // writes no-op on the tombstone.
-    const chains = writeChains.current;
-    const prev = chains.get(id) ?? Promise.resolve();
-    chains.set(
-      id,
-      prev.then(async () => {
-        const { error } = await getSupabase().from("children").delete().eq("id", id);
-        if (error) console.error("[dashboard] delete failed:", error.message);
-      })
-    );
-  };
+  }, [loadFamily]);
 
   const refreshDeposits = useCallback(async () => {
     const { data } = await getSupabase().from("deposits").select("child_id,status");
@@ -499,10 +232,6 @@ export default function DashboardProvider({ children: reactChildren }: { childre
         children,
         deposits,
         composedChildIds,
-        addChild,
-        updateChild,
-        removeChild,
-        saveChildNow,
         refreshDeposits,
         signOut,
       }}

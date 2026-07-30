@@ -9,7 +9,7 @@ import {
   parseAcademics,
   planLabel,
 } from "../data";
-import { type ChildRow, childToRow, rowToChild, submitStatusPatch } from "../store";
+import { type ChildRow, rowToChild } from "../store";
 import { dossierChecklist, dossierCompleteness as crmCompleteness } from "@/app/crm/lib/reviews-rules";
 import { dossierCompleteness as nurtureCompleteness } from "@/app/lib/nurture/rules";
 
@@ -134,31 +134,13 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     ...overrides,
   });
 
-  it("childToRow round-trips `subjects` (state truth — the prefill-clear must persist)", () => {
-    const r = childToRow(child({ subjects: ["Math", "Reading"] }), "parent-1");
-    expect(r.subjects).toEqual(["Math", "Reading"]);
-    expect(childToRow(child(), "parent-1").subjects).toEqual([]);
-    expect(r.group_slug).toBe("makers");
-    expect(r.academics).toEqual([{ subject: "Math", plan: "reach-ahead", goal: "Finish grade 7 math" }]);
-  });
-
-  it("childToRow NEVER emits status/submitted_at — upserts must not carry them (the guard's INSERT arm poisons EXCLUDED.status to 'draft')", () => {
-    const r = childToRow(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }), "parent-1");
-    expect("status" in r).toBe(false);
-    expect("submitted_at" in r).toBe(false);
-  });
-
-  it("submitStatusPatch always emits 'submitted' (never passes through local state)", () => {
-    const p = submitStatusPatch(child({ status: "submitted", submittedAt: "2026-07-01T00:00:00Z" }));
-    expect(p.status).toBe("submitted");
-    expect(p.submitted_at).toBe("2026-07-01T00:00:00Z");
-    expect(typeof p.updated_at).toBe("string");
-    // A stale/misused caller can't smuggle another status into the flip,
-    // and submitted_at is never null alongside status='submitted'.
-    const draft = submitStatusPatch(child());
-    expect(draft.status).toBe("submitted");
-    expect(typeof draft.submitted_at).toBe("string");
-  });
+  /* childToRow / submitStatusPatch are RETIRED (unified-flow U9): the store
+   * writes no children rows any more. The invariants those pins protected
+   * moved server-side WITH the write path and stay pinned there
+   * (app/lib/__tests__/funnel-form-step-core.test.ts): content patches never
+   * carry status / submitted_at / applicant_state, and the submit patch
+   * hardcodes 'submitted' with echo verification. The read-only-store fact
+   * itself is pinned in funnel-dashboard-register.test.ts. */
 
   it("rowToChild maps group_slug and academics", () => {
     const c = rowToChild(row());
@@ -174,12 +156,10 @@ describe("store row mapping (group_slug / academics cutover)", () => {
     expect(rowToChild(row({ group_slug: undefined as unknown as string })).groupSlug).toBe("");
   });
 
-  it("a hand-built child round-trips preserving group + academics + the child email pair (R48)", () => {
-    const original = scholarsChild({ childEmail: "kid@example.com", childEmailNone: false });
-    const back = rowToChild({ ...row(), ...childToRow(original, "parent-1") } as ChildRow);
-    expect(back.groupSlug).toBe(original.groupSlug);
-    expect(back.academics).toEqual(original.academics);
-    expect(back.workshopIds).toEqual(original.workshopIds);
+  it("a row carrying the child-email pair maps it faithfully (R48)", () => {
+    const back = rowToChild(row({ child_email: "kid@example.com", child_email_none: false }));
+    expect(back.groupSlug).toBe("scholars");
+    expect(back.workshopIds).toEqual(["competitive-chess"]);
     expect(back.childEmail).toBe("kid@example.com");
     expect(back.childEmailNone).toBe(false);
   });

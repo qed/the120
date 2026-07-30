@@ -14,12 +14,13 @@
  * `submitted` rungs exactly as `wizardProgressStep` already does. No ladder
  * recut, no change to `MINIAPP_STEPS` or its coupling.
  *
- * ── The dark flag (Units 6–8 ship dark) ──
- * While `mergeFlagOn` is false, `stepListForChild` returns exactly
- * `MINIAPP_STEPS` and the landing defers to `initialStepForFacts` — the
- * two-owner form-state window (a stale dashboard tab's debounced full-row
- * upsert clobbering per-step action saves) never opens in production. Unit 9
- * flips the flag, retires the wizard, and deletes the flag in one deploy.
+ * ── The merge flag (LIVE since Unit 9) ──
+ * Units 6–8 shipped dark behind `mergeFlagOn`; Unit 9 flipped it in the same
+ * change that retired the dashboard wizard and the store's write paths, so
+ * the two-owner form-state window (a stale dashboard tab's debounced
+ * full-row upsert clobbering per-step action saves) never opened in
+ * production. The flag-off arms stay compiled and pinned as the documented
+ * fallback shape.
  */
 
 import {
@@ -41,23 +42,24 @@ import type { WizardStepId } from "@/app/dashboard/wizard-rules";
 import { emptyChild, type Child, type SeatStatus } from "@/app/dashboard/data";
 import type { Skin } from "@/app/lib/funnel/child-rules";
 
-/* ─────────────────────────────── the merge flag (Units 6–8 ship dark) ─────────────────────────────── */
+/* ─────────────────────────────── the merge flag (LIVE since Unit 9) ─────────────────────────────── */
 
 /**
- * THE merge flag (unified-flow Unit 6). While `false`, `/start/child`
- * behaviour is byte-identical to today: `stepListForChild` returns exactly
- * `MINIAPP_STEPS`, the landing defers to `initialStepForFacts`, and none of
- * the seam/form/next-steps screens is reachable — so the two-owner
- * form-state window (a stale dashboard tab's debounced full-row upsert
- * clobbering per-step action saves) never opens in production. Unit 9 flips
- * this to `true`, retires the wizard, and DELETES the flag in one deploy.
+ * THE merge flag (unified-flow Unit 6; FLIPPED by Unit 9, 2026-07-30). While
+ * it was `false`, Units 6–8 shipped dark: `/start/child` behaviour stayed
+ * byte-identical to the pre-merge mini-app and the two-owner form-state
+ * window (a stale dashboard tab's debounced full-row upsert clobbering
+ * per-step action saves) never opened in production. Unit 9 flipped it to
+ * `true` IN THE SAME CHANGE that retired the dashboard wizard
+ * (DossierEditor/DossierPreview/wizard/) and the store's write paths — so
+ * `main` never had two owners of form state, and never none.
  *
- * Typed `boolean` deliberately: a `false` literal type would let the
- * compiler prune the flag-on arms as dead code (TS2367 on every merged-step
- * comparison), and the whole point is that both arms stay compiled and
- * tested until Unit 9 chooses one.
+ * Typed `boolean` deliberately: a `true` literal type would let the compiler
+ * prune the flag-off arms as dead code (TS2367 on every dark-path
+ * comparison), and the dark arms stay compiled and pinned as the documented
+ * fallback shape.
  */
-export const MERGED_FLOW_ENABLED: boolean = false;
+export const MERGED_FLOW_ENABLED: boolean = true;
 
 /* ─────────────────────────────── the merged step union ─────────────────────────────── */
 
@@ -213,9 +215,9 @@ export type MergedFlowFacts = {
  * The steps THIS child's walk contains, in order. Build steps + seam only
  * for funnel children (`applicantState !== null` — a legacy child's list
  * simply lacks them, not greyed, per the scope boundary); form steps for
- * every cohort; next-steps appended only when the gate passes. Dark flag →
- * exactly today's `MINIAPP_STEPS` (Units 6–8 ship dark; nothing new is
- * reachable until Unit 9 flips the flag).
+ * every cohort; next-steps appended only when the gate passes. Flag off (the
+ * pre-Unit-9 dark shape, kept compiled) → exactly the pre-merge
+ * `MINIAPP_STEPS`.
  */
 export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] {
   if (!facts.mergeFlagOn) return MINIAPP_STEPS;

@@ -43,8 +43,9 @@ import {
   shareCardSvg,
 } from "@/app/lib/funnel/reveal-rules";
 import type { MergedFlowFields, MiniAppChild } from "@/app/lib/funnel/miniapp-core";
-// Unified-flow U6: the merged ladder — DARK while MERGED_FLOW_ENABLED is
-// false (the two-owner form-state window must never open before Unit 9).
+// Unified-flow U6: the merged ladder — LIVE since Unit 9 flipped
+// MERGED_FLOW_ENABLED (the wizard retired in the same change, so form state
+// never had two owners).
 import {
   MERGED_FLOW_ENABLED,
   isMergedFormStep,
@@ -196,6 +197,7 @@ export function MiniAppShell({
   initialProject,
   serverInitialStep,
   locked,
+  parentIdentity,
   merged,
 }: {
   child: MiniAppChild;
@@ -215,8 +217,12 @@ export function MiniAppShell({
    *  passes the DUAL `mergedLockVerdict` here instead — one treatment for
    *  both vocabularies.) */
   locked: boolean;
+  /** Unified-flow U9: the parent's nav-card identity line (NAME · SIGN OUT)
+   *  for the form/next-steps zone — `navCardIdentityName` output, null when
+   *  nothing usable was captured (the card degrades to SIGN OUT alone). */
+  parentIdentity: string | null;
   /** Unified-flow U6: the merged flow's facts + full field set + deposit
-   *  fact. Consumed ONLY while MERGED_FLOW_ENABLED — the dark path never
+   *  fact. Consumed ONLY while MERGED_FLOW_ENABLED — the flag-off arm never
    *  reads past `merged.facts.mergeFlagOn === false`. */
   merged: {
     facts: MergedFlowFacts;
@@ -666,14 +672,14 @@ export function MiniAppShell({
             card over the child's canvas, so no per-skin variant exists here. */}
         {/* Unified-flow U6: build steps keep miniAppNavCard verbatim (a
             build rung maps to itself, so the two are identical there); the
-            merged-only steps (seam/form/next-steps) take the merged mapper.
-            TODO(unified-flow Unit 9): thread the parent identity into
-            mergedNavCard when the form phase becomes reachable. */}
+            merged-only steps (seam/form/next-steps) take the merged mapper
+            with the parent identity threaded in (U9) — NAME · SIGN OUT from
+            the form zone on, exactly the retired wizard's treatment. */}
         <ProgressNavCard
           model={
             isMiniAppStep(step)
               ? miniAppNavCard(step)
-              : mergedNavCard(step, null, isLocked)
+              : mergedNavCard(step, parentIdentity, isLocked)
           }
         />
 
@@ -1448,7 +1454,7 @@ export function MiniAppShell({
           );
         })()}
 
-        {/* ── Unified-flow U6 (DARK until Unit 9 flips MERGED_FLOW_ENABLED) ── */}
+        {/* ── Unified-flow U6 (LIVE since Unit 9 flipped MERGED_FLOW_ENABLED) ── */}
 
         {/* The R6a seam: reveal → hand the device BACK → basics. Build
             cohort only (only their step list contains it), child-addressed,
@@ -1526,8 +1532,8 @@ export function MiniAppShell({
             progress/goal/seat re-homed past review, in the APPLICATION
             register (parent screens, same nested-register swap as the form
             steps). Only a nextStepsReachable list contains them (the gate ran
-            in the step-list builder; the clamp re-lands any deep link), and
-            they stay DARK until Unit 9 flips MERGED_FLOW_ENABLED. Deliberately
+            in the step-list builder; the clamp re-lands any deep link) —
+            LIVE since Unit 9 flipped MERGED_FLOW_ENABLED. Deliberately
             NOT key={step}: one mounted section carries the goal draft across
             the three screens, exactly as the standalone NextStepsFlow does. */}
         {isMergedNextStep(step) && (
@@ -1553,8 +1559,8 @@ export function MiniAppShell({
  * after reveal), explicitly actionable: ONE CTA advancing to basics, never
  * an auto-advance. Renders in the child's skin (the device is still in
  * their hands); the application register begins on the next screen. Copy
- * from `seamCopy` (merged-flow-rules) so it stays sweepable. DARK until
- * Unit 9 flips MERGED_FLOW_ENABLED.
+ * from `seamCopy` (merged-flow-rules) so it stays sweepable. LIVE since
+ * Unit 9 flipped MERGED_FLOW_ENABLED.
  */
 function SeamHandback({
   child,
@@ -1592,9 +1598,9 @@ function SeamHandback({
 
 /**
  * Unified-flow Unit 8 (R10/R11): the three next-steps screens — progress /
- * goal / seat — re-homed to the end of the walk. DARK until Unit 9 flips
- * MERGED_FLOW_ENABLED; the standalone NextStepsFlow keeps serving the live
- * route until then (the shim takes over at the flip).
+ * goal / seat — re-homed to the end of the walk. LIVE since Unit 9 flipped
+ * MERGED_FLOW_ENABLED; /start/next-steps is now the pure-GET shim redirecting
+ * into this walk (the emailed URL survives forever).
  *
  * - Copy/caps/CTA come from deposit-rules (`NEXT_STEPS`, `GOAL_MAX_CHARS`,
  *   `holdSeatCta`) and the write is the SAME `saveGoalAction` — imported,

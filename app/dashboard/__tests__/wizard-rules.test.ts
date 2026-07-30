@@ -12,7 +12,6 @@ import {
   childEmailPatch,
   firstIncompleteStep,
   prefillDraft,
-  resolveStep,
   stepForChecklistLabel,
   stepsForGroup,
   wizardProgressStep,
@@ -81,19 +80,10 @@ describe("firstIncompleteStep (resume, R3)", () => {
   });
 });
 
-describe("resolveStep (stale stored step ids)", () => {
-  it("a pre-U12 'workshops' step id routes to its successor, Project & Interests — for every group", () => {
-    for (const slug of ["makers", "scholars", ""]) {
-      expect(resolveStep("workshops", slug)).toBe("project");
-    }
-  });
-
-  it("leaves valid steps untouched and routes garbage to project", () => {
-    expect(resolveStep("academics", "makers")).toBe("academics");
-    expect(resolveStep("review", "")).toBe("review");
-    expect(resolveStep("nonsense", "makers")).toBe("project");
-  });
-});
+/* The wizard's own `resolveStep` (stale stored step ids) is RETIRED with the
+ * wizard components (unified-flow U9): the merged flow resolves steps through
+ * `resolveMergedStep` (merged-flow-rules), whose clamp covers unknown ids —
+ * pinned in app/lib/__tests__/funnel-merged-flow-rules.test.ts. */
 
 describe("the workshop catalog stays for read-only legacy display", () => {
   it("workshopById resolves live and retired ids; unknown ids are undefined", () => {

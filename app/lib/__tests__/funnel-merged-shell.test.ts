@@ -52,16 +52,16 @@ const facts = (over: Partial<MergedFlowFacts> = {}): MergedFlowFacts => ({
   ...over,
 });
 
-/* ─────────────── the dark flag (Units 6–8 ship dark) ─────────────── */
+/* ─────────────── the merge flag (LIVE — Unit 9 flipped it) ─────────────── */
 
-describe("the merge flag is DARK — Unit 9 flips it and deletes it", () => {
-  it("MERGED_FLOW_ENABLED is false", () => {
-    expect(MERGED_FLOW_ENABLED).toBe(false);
+describe("the merge flag is LIVE — Unit 9 flipped it in the same change that retired the wizard", () => {
+  it("MERGED_FLOW_ENABLED is true (the merged walk is the production path)", () => {
+    expect(MERGED_FLOW_ENABLED).toBe(true);
   });
 
-  it("dark-path identity: the step list IS today's MINIAPP_STEPS, by reference", () => {
-    // Byte-identical /start/child behaviour while dark: no seam, no form
-    // steps, no next-steps in any cohort's list.
+  it("flag-off arm (historical dark shape, kept compiled): the step list IS the pre-merge MINIAPP_STEPS, by reference", () => {
+    // The dark arm stays the documented fallback: no seam, no form steps,
+    // no next-steps in any cohort's list while mergeFlagOn is false.
     expect(stepListForChild(facts({ mergeFlagOn: false }))).toBe(MINIAPP_STEPS);
     expect(
       stepListForChild(
@@ -463,7 +463,7 @@ describe("the flow's endings by state — terminalTreatment drives the review st
 
   it("the shell passes status through the facts and never re-derives the terminal; Back stays live at terminals", () => {
     const page = stripComments(read(PAGE));
-    expect(page).toContain("status: loaded.child.status as SeatStatus");
+    expect(page).toContain("status: fields.status as SeatStatus");
     const shell = stripComments(read(SHELL));
     // The endings render in the review section ONLY — the shell's Back slot
     // (outside the section) carries no terminal condition, so the read-only

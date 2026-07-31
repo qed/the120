@@ -3,6 +3,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { getSeatsRemaining } from "@/app/lib/seats";
+import { ProgressNavCard } from "@/app/components/funnel/ProgressNavCard";
+import {
+  navCardIdentityName,
+  navCardIdentityOnly,
+} from "@/app/lib/funnel/nav-card-rules";
 import {
   REVIEW_SCREEN,
   SEATS_FULL_REVIEW_NOTE,
@@ -75,8 +80,24 @@ export default async function ReviewPage({
   const inReview = justSubmitted ? [justSubmitted] : allInReview;
   const offered = resolved.filter((c) => c.destination === "dashboard" && c.name);
 
+  // Item 53 (2026-07-30): the received page carries the same floating nav
+  // card as the rest of the flow — identity + SIGN OUT, home-nav geometry.
+  // A failed parents read degrades to null (SIGN OUT alone), never a
+  // blocked page.
+  const { data: parentRow } = await supabase
+    .from("parents")
+    .select("first_name,last_name")
+    .eq("id", user.id)
+    .maybeSingle();
+  const parentName = navCardIdentityName(
+    String(parentRow?.first_name ?? ""),
+    String(parentRow?.last_name ?? "")
+  );
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center bg-paper px-6 py-14 text-ink">
+    <div className="min-h-screen bg-paper text-ink">
+    <ProgressNavCard model={navCardIdentityOnly(parentName)} />
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-6 py-14">
       <p className="font-mono text-[0.65rem] uppercase tracking-[0.14em] text-red">
         {REVIEW_SCREEN.kicker}
       </p>
@@ -127,5 +148,6 @@ export default async function ReviewPage({
         ← Back to the dashboard
       </Link>
     </main>
+    </div>
   );
 }

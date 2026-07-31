@@ -760,8 +760,8 @@ export function MiniAppShell({
               {LOCKED_NOTICE_LABEL}
             </p>
             <p className="mt-1.5 text-[14px] leading-6 opacity-80">
-              This application is submitted. It can&apos;t be edited here. Need to
-              change something? Email{" "}
+              This is a read-only walkthrough of the application. Move through
+              it with Continue and Back. Need to change something? Email{" "}
               <a href="mailto:admissions@the120.school" className="underline">
                 admissions@the120.school
               </a>

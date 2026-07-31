@@ -293,7 +293,13 @@ function mergedInitialStepRaw(facts: MergedFlowFacts): MergedStep {
     case "added":
       return lastCompleted(initialStepForFacts(facts));
     case "project_created":
-      return facts.formProgress ? lastCompleted(facts.firstIncompleteFormStep) : "seam";
+      // Item 44 (2026-07-30): resume lands on the COMPANY PAGE the build
+      // produced — "take me back to the page where the AZEAP information
+      // was submitted" — and the family walks forward from there (compose →
+      // tasks → reveal → seam → the form). With the project invalidated
+      // there is nothing to show yet; compose is still the right landing
+      // (its recovery arm re-composes).
+      return "compose";
     case null:
       return facts.status === "draft"
         ? lastCompleted(facts.firstIncompleteFormStep)

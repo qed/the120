@@ -271,7 +271,10 @@ describe("read-only walks and the group step's window", () => {
 
   it("the shell renders NO second locked notice for form steps — the one card covers the walk", () => {
     const shell = stripComments(read(SHELL));
-    expect((shell.match(/This application is submitted\./g) ?? []).length).toBe(1);
+    // Item 43: the notice body frames the read-only walkthrough.
+    expect(
+      (shell.match(/This is a read-only walkthrough of the application\./g) ?? []).length
+    ).toBe(1);
     expect(sections).not.toContain("APPLICATION SUBMITTED");
   });
 });

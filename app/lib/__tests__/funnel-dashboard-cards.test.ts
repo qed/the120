@@ -151,7 +151,7 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.primaryCta).toBeUndefined();
     expect(v.secondaryReviewLink).toEqual({
       label: "Review application",
-      href: "/start/child/kid-1/review",
+      href: "/start/child/kid-1",
     });
   });
 
@@ -160,7 +160,7 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.primaryCta).toEqual({ kind: "reserve", label: "Reserve seat · $250" });
     expect(v.secondaryReviewLink).toEqual({
       label: "Review application",
-      href: "/start/child/kid-1/review",
+      href: "/start/child/kid-1",
     });
   });
 
@@ -258,8 +258,8 @@ describe("cardVerdict — one verdict per ladder state", () => {
       const expected = APPLICANT_STATES.indexOf(state) >= submittedIdx;
       expect(!!v.secondaryReviewLink, state).toBe(expected);
       if (v.secondaryReviewLink) {
-        // 2026-07-30: review opens the one-page summary page.
-        expect(v.secondaryReviewLink.href).toBe("/start/child/kid-1/review");
+        // Item 43: review opens the read-only walkthrough of the flow.
+        expect(v.secondaryReviewLink.href).toBe("/start/child/kid-1");
       }
     }
   });

@@ -798,12 +798,15 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
     // Counted on comment-stripped source — the micro-spec block quotes the
     // copy too, and that prose must not read as a second render.
     expect(shellCode).toContain("APPLICATION SUBMITTED");
-    expect((shellCode.match(/This application is submitted\./g) ?? []).length).toBe(1);
+    // Item 43 (2026-07-30): the body frames the READ-ONLY WALKTHROUGH.
+    expect(
+      (shellCode.match(/This is a read-only walkthrough of the application\./g) ?? []).length
+    ).toBe(1);
     expect(shellCode).toContain('href="mailto:admissions@the120.school"');
     expect(shellCode).toContain("Need to");
     // Copy rules: no em dash anywhere in the locked notice block.
     const notice = shellCode.slice(
-      shellCode.indexOf("This application is submitted"),
+      shellCode.indexOf("This is a read-only walkthrough"),
       shellCode.indexOf("admissions@the120.school")
     );
     expect(notice).not.toContain("—");

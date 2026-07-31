@@ -279,10 +279,11 @@ export function cardVerdict(
   const submittedPlus =
     next.surface !== "mini_app" &&
     !(next.surface === "dashboard" && next.intent === "dossier");
-  // 2026-07-30 (Peter's pick): the review entry opens the ONE-PAGE summary
-  // at /start/child/<id>/review, never the locked form walk.
+  // 2026-07-30 (item 43, superseding item 17): the review entry opens the
+  // READ-ONLY WALKTHROUGH of the application flow — forward/back only, the
+  // landing rule starts it at the top. The one-page summary is retired.
   const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: `${miniAppHref}/review` }
+    ? { label: "Review application", href: miniAppHref }
     : undefined;
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).

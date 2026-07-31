@@ -254,21 +254,21 @@ describe("mergedInitialStep — the bucket table, one row per bucket", () => {
       lands: "quiz",
     },
     {
-      name: "project_created, NO form progress → the seam (C3)",
+      // Item 44 (2026-07-30): project_created resumes on the COMPANY PAGE
+      // the build produced, and walks forward from there.
+      name: "project_created, NO form progress → compose (the company page)",
       over: { applicantState: "project_created", hasProject: true, doorConfirmed: true },
-      lands: "seam",
+      lands: "compose",
     },
     {
-      // One back from academics is BASICS for the build cohort (2026-07-30:
-      // their walk skips the group step — the door already chose it).
-      name: "mid-form (project_created + progress) → last completed form step (one back)",
+      name: "mid-form (project_created + progress) → compose too (item 44: the company page first)",
       over: {
         applicantState: "project_created",
         hasProject: true,
         formProgress: true,
         firstIncompleteFormStep: "academics",
       },
-      lands: "basics",
+      lands: "compose",
     },
     {
       name: "offered → FIRST form step, even mid-form (R3: review from the top)",

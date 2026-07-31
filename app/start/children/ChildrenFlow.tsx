@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { addChildAction } from "@/app/lib/funnel/actions/children";
 import {
   CHILD_FIELD_MESSAGES,
@@ -87,7 +88,10 @@ export function ChildrenFlow({
    *  only (R36) — siblings pick cold. */
   hintSlug: string | null;
 }) {
-  const [children, setChildren] = useState<FunnelChild[]>(initialChildren);
+  const router = useRouter();
+  // No setter (item 46): the only add path navigates away, so the list
+  // never needs to re-render in place.
+  const [children] = useState<FunnelChild[]>(initialChildren);
   const selectedId = useSyncExternalStore(
     activeChildStore.subscribe,
     activeChildStore.get,
@@ -98,6 +102,10 @@ export function ChildrenFlow({
   const [errors, setErrors] = useState<ChildFieldError[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Item 46 (2026-07-30): once the add lands we are LEAVING — the button
+  // holds its busy look until the flow page mounts, and no local state
+  // re-renders the form (that re-render was the glitchy flash).
+  const [leaving, setLeaving] = useState(false);
 
   const persistSelection = useCallback((id: string) => activeChildStore.set(id), []);
 
@@ -109,7 +117,6 @@ export function ChildrenFlow({
     startTransition(async () => {
       const result = await addChildAction({ firstName, grade });
       if (result.kind === "added") {
-        setChildren(result.children);
         // R31: adding a sibling must not move the active child — INCLUDING an
         // implicitly-active one. `active?.id`, never the raw stored value:
         // on a fresh device the store is null while the furthest-progressed
@@ -117,17 +124,20 @@ export function ChildrenFlow({
         // hand the brand-new sibling the active slot (both reviewers,
         // independently). Only a genuinely FIRST child becomes active.
         persistSelection(activeChildAfterAdd(active?.id ?? null, result.childId));
-        setFirstName("");
-        setGrade("");
-        setErrors([]);
+        // Item 46: navigate CLIENT-SIDE, touching no other state — clearing
+        // the form here re-rendered this page (the glitchy flash) before a
+        // full-load navigation blanked it again. router.push transitions
+        // smoothly into the flow; `leaving` holds the button's busy look.
         // Straight into the unified application flow for the child just
-        // added (2026-07-30): the server landing rule picks the first step.
-        // The `?g=` hint rides only for the family's FIRST-BORN (R36 —
-        // `children` here is the pre-add snapshot, so empty means first).
-        window.location.href =
+        // added: the server landing rule picks the first step. The `?g=`
+        // hint rides only for the family's FIRST-BORN (R36 — `children`
+        // here is the pre-add snapshot, so empty means first).
+        setLeaving(true);
+        router.push(
           hintSlug && children.length === 0
             ? `/start/child/${result.childId}?g=${encodeURIComponent(hintSlug)}`
-            : `/start/child/${result.childId}`;
+            : `/start/child/${result.childId}`
+        );
         return;
       }
       if (result.kind === "invalid") {
@@ -240,12 +250,13 @@ export function ChildrenFlow({
             per-child CTAs keep the red (handoff addchild spec). */}
         <button
           onClick={submit}
-          disabled={pending}
+          disabled={pending || leaving}
           className="mt-1 inline-flex h-11 items-center justify-center rounded-full bg-red px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-red-dark disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start"
         >
           {/* ONE promise (2026-07-30): the submit adds the child AND enters
-              the unified flow, so the label says where it goes. */}
-          {pending ? "Adding…" : "Start building →"}
+              the unified flow, so the label says where it goes. The busy
+              look HOLDS through the navigation (item 46, no flash). */}
+          {leaving ? "Opening…" : pending ? "Adding…" : "Start building →"}
         </button>
       </div>
     </main>

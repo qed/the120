@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import Cta from "@/app/components/Cta";
 import Footer from "@/app/components/Footer";
@@ -69,6 +70,17 @@ export const PROOF_POINTS = [
  */
 export const FOUNDING_COHORT_LINE = "FOUNDING COHORT · FALL 2026 · TORONTO";
 
+/** The hero photography that has actually SHIPPED (2026-07-30, item 33):
+ *  the five group images. A hero path outside this set (first-profit, whose
+ *  art doesn't exist yet) keeps the blue slot — never a broken image. */
+const SHIPPED_HEROES = new Set([
+  "/landing/heroes/athletes.jpg",
+  "/landing/heroes/founders.jpg",
+  "/landing/heroes/givers.jpg",
+  "/landing/heroes/makers.jpg",
+  "/landing/heroes/scholars.jpg",
+]);
+
 export type LandingContent = {
   headline: string;
   subhead: string;
@@ -119,7 +131,19 @@ export default function LandingPage({
       {/* Full-bleed hero (R20). The photography is an external content
           dependency — the slot ships, blue shows until the art lands, and the
           gradient guarantees the lightbox text survives either way. */}
-      <section className="relative flex min-h-[92vh] flex-col justify-end bg-blue">
+      <section className="relative flex min-h-[92vh] flex-col justify-end overflow-hidden bg-blue">
+        {/* The hero photography (2026-07-30, item 33): full-bleed under the
+            gradient. Blue still shows for any hero whose art hasn't landed. */}
+        {SHIPPED_HEROES.has(content.hero) && (
+          <Image
+            src={content.hero}
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover"
+          />
+        )}
         {/* U10 fidelity (audit drift 9/1b): the handoff's gradient stops,
             byte for byte — .30 → .06 → .10 → .82. */}
         <div
@@ -129,7 +153,11 @@ export default function LandingPage({
               "linear-gradient(rgba(19,20,22,0.30) 0%, rgba(19,20,22,0.06) 30%, rgba(19,20,22,0.10) 55%, rgba(19,20,22,0.82) 100%)",
           }}
         />
-        <div className="relative z-10 mx-auto w-full max-w-[1080px] px-6 pb-10 pt-40 sm:px-8">
+        {/* Item 33 (2026-07-30): the text block is COMPACT — roughly a
+            quarter of the hero's height — so the photography is front and
+            center. Chrome (gradient, lightbox card, content order) is the
+            handoff's, unchanged. */}
+        <div className="relative z-10 mx-auto w-full max-w-[1080px] px-6 pb-8 pt-10 sm:px-8">
           {/* The text lightbox (drift 9, README screen 1): rgba(19,20,22,.55),
               14px radius, backdrop-blur 2px, padding 16/18 — seats line,
               headline, divider, subhead + cohort line, CTA, in the
@@ -145,28 +173,28 @@ export default function LandingPage({
             <p className="font-mono text-[11px] tracking-[0.1em] text-white/85">
               {seatsDisplay(seatsRemaining)}
             </p>
-            <h1 className="display mt-3 max-w-[820px] text-4xl text-white sm:text-[64px] sm:leading-[1.04]">
+            <h1 className="display mt-2 max-w-[820px] text-2xl text-white sm:text-[34px] sm:leading-[1.1]">
               {content.headline}{" "}
               <span className="accent-blush italic">{LANDING_HEADLINE_LINE_2}</span>
             </h1>
-            <div className="my-4 h-px max-w-[820px] bg-white/45" />
+            <div className="my-3 h-px max-w-[820px] bg-white/45" />
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <p className="max-w-[560px] text-[15px] leading-[1.6] text-white sm:text-[17px]">
+              <p className="max-w-[560px] text-[13px] leading-[1.5] text-white sm:text-[14px]">
                 {content.subhead}
               </p>
               <span className="whitespace-nowrap font-mono text-[10px] tracking-[0.08em] text-white/85">
                 {FOUNDING_COHORT_LINE}
               </span>
             </div>
-            <div className="mt-5">
+            <div className="mt-4">
               <SessionCtaSwap
                 signedIn={
-                  <Cta href="/dashboard" className="px-7 py-4 text-sm">
+                  <Cta href="/dashboard" className="px-5 py-2.5 text-xs">
                     My dashboard
                   </Cta>
                 }
                 signedOut={
-                  <StartCta source={content.source} group={content.group} className="px-7 py-4 text-sm" />
+                  <StartCta source={content.source} group={content.group} className="px-5 py-2.5 text-xs" />
                 }
               />
             </div>

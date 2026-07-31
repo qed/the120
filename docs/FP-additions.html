@@ -128,9 +128,13 @@
     </li>
     <li>
       <div class="row"><span class="title">54 · Cedric's dossier missing from /crm/dossiers</span>
-        <span class="badge pending">Not started</span></div>
-      <p class="note">Cedric Kuperman's dossier does not appear at /crm/dossiers. Diagnose
-        and fix.</p>
+        <span class="badge done">Done</span></div>
+      <p class="note">Root cause: a stale staff-side <code>child_reviews</code> row still said
+        <code>draft</code> (left over from the earlier application reset), and the staff row
+        deliberately outranks the parent-visible status in the dossier queue. Data fix in
+        prod — the row now says <code>submitted</code>; no code change needed. Refresh
+        /crm/dossiers and Cedric appears.</p>
+      <p class="stamp">Fixed in prod · 2026-07-30 · no deploy needed</p>
     </li>
     <li>
       <div class="row"><span class="title">53 · Floating nav on the application-received page</span>

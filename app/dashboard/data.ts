@@ -354,17 +354,22 @@ export function cardVerdict(
       };
     case "status_only":
       switch (next.intent) {
+        // 2026-07-30 (item 37): once the company exists, its NAME is the
+        // card's status line through the review states too — "Grade 8 ·
+        // Maple Lemonade Stand", not "Submitted for Review". The actionable
+        // states below (waitlisted/offered/reserved/enrolled) keep their
+        // status words.
         case "submitted":
           return {
             kind: "funnel",
-            statusLine: "SUBMITTED FOR REVIEW",
+            statusLine: activeProjectName?.trim() || "SUBMITTED FOR REVIEW",
             tone: "red",
             secondaryReviewLink,
           };
         case "in_review":
           return {
             kind: "funnel",
-            statusLine: "UNDER REVIEW",
+            statusLine: activeProjectName?.trim() || "UNDER REVIEW",
             tone: "red",
             secondaryReviewLink,
           };

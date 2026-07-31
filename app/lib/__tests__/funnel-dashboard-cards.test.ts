@@ -98,6 +98,26 @@ describe("cardVerdict — one verdict per ladder state", () => {
     });
   });
 
+  it("the review states carry the company name too (item 37): submitted/in_review read the NAME when known", () => {
+    expect(
+      funnel(cardVerdict(child("submitted"), none, true, "Maple Lemonade Stand")).statusLine
+    ).toBe("Maple Lemonade Stand");
+    expect(
+      funnel(cardVerdict(child("in_review"), none, true, "Maple Lemonade Stand")).statusLine
+    ).toBe("Maple Lemonade Stand");
+    // Null-state name → the status words stand in.
+    expect(funnel(cardVerdict(child("submitted"), none, true, null)).statusLine).toBe(
+      "SUBMITTED FOR REVIEW"
+    );
+    // Actionable states keep their status words even with a name.
+    expect(
+      funnel(cardVerdict(child("waitlisted"), none, true, "Maple Lemonade Stand")).statusLine
+    ).toBe("WAITLISTED");
+    expect(
+      funnel(cardVerdict(child("offered"), none, true, "Maple Lemonade Stand")).statusLine
+    ).toBe("OFFERED A SEAT");
+  });
+
   it("the dossier cell's status line is the PROJECT'S NAME when it is known (2026-07-30)", () => {
     const named = funnel(cardVerdict(child("project_created"), none, true, "Maple Lemonade Stand"));
     expect(named.statusLine).toBe("Maple Lemonade Stand");

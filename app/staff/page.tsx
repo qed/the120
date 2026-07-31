@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Nav from "@/app/components/Nav";
 import { requireStaff } from "@/app/crm/lib/auth";
-import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { getSeatsRemaining } from "@/app/lib/seats";
 import { SEATS_REMAINING } from "@/app/lib/site";
 import { withFwTimeout } from "@/app/fp/lib/fw-call";
-import { listFwActiveWeekends } from "@/app/fp/lib/fw-ops-core";
-import { crmCardLine, fwCardLine, fwCardModel } from "@/app/staff/lib/hub-rules";
+import { crmCardLine } from "@/app/staff/lib/hub-rules";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row
@@ -56,19 +55,22 @@ async function loadHub() {
   // the fetch's `revalidate: 60` — seats.ts's "ISR-cached" comment is true on the
   // marketing pages, not here; every hub load pays the RPC, which the timeout
   // caps.)
-  const [seatsRaced, weekends] = await Promise.all([
-    withFwTimeout(getSeatsRemaining(), "hub seats read"),
-    listFwActiveWeekends(supabaseAdmin()),
-  ]);
+  // 2026-07-30 (item 34): the FW read is retired with the card's live line —
+  // the tracker card reads "Coming Soon" and loads nothing.
+  void nowMs;
+  const seatsRaced = await withFwTimeout(getSeatsRemaining(), "hub seats read");
   const seats = seatsRaced.timedOut ? SEATS_REMAINING : seatsRaced.value;
-  return { seats, fw: fwCardModel(weekends, nowMs) };
+  return { seats };
 }
 
 export default async function StaffHubPage() {
   await requireStaff();
-  const { seats, fw } = await loadHub();
+  const { seats } = await loadHub();
 
   return (
+    <>
+    {/* Item 35 (2026-07-30): the ONE global floating nav, same as home. */}
+    <Nav />
     <main className="mx-auto w-full max-w-3xl px-6 py-12">
       <h1 className="font-path-display text-2xl text-hq-ink">Staff</h1>
       <p className="mt-2 text-sm text-hq-ink-soft">
@@ -95,17 +97,14 @@ export default async function StaffHubPage() {
           href="/fp/fw/ops"
           className="block rounded-xl border border-hq-border bg-hq-surface p-5 shadow-hq transition-colors hover:border-hq-border-strong"
         >
+          {/* Item 34 (2026-07-30): renamed from Founders Weekend. */}
           <span className="block font-path-display text-lg text-hq-ink">
-            Founders Weekend
+            First Profit Tracker
           </span>
-          <span className="mt-1 block text-sm text-hq-ink-soft">
-            Weekend cohorts, rosters, and guide access.
-          </span>
-          <span className="mt-3 block font-path-mono text-[13px] text-hq-ink-soft">
-            {fwCardLine(fw)}
-          </span>
+          <span className="mt-1 block text-sm text-hq-ink-soft">Coming Soon</span>
         </Link>
       </nav>
     </main>
+    </>
   );
 }

@@ -450,7 +450,9 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     const src = read("app/dashboard/DashboardApp.tsx");
     expect(src).toContain("cardVerdict(");
     expect(src).toContain("reserveRefusalMessage(");
-    expect(src).toContain("bandNote(");
+    // Item 45 (2026-07-30): the band note left the cards — one
+    // right-justified button, same position on every card.
+    expect(src).not.toContain("bandNote(");
   });
 
   it("U9: the embedded editor views are unreachable — every entry point is a link into the flow", () => {

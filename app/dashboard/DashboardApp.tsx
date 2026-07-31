@@ -8,7 +8,6 @@ import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
 import {
   type Child,
   PATH_TASK_TOTAL,
-  bandNote,
   canReserveSeat,
   cardVerdict,
   childName,
@@ -672,10 +671,10 @@ export default function DashboardApp({
                         {cta?.kind === "reserve" ? (
                           renderReserveCta(c, verdict.secondaryReviewLink)
                         ) : (
-                          <div className="flex items-end justify-between gap-4">
-                            <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                              {bandNote(c.grade)}
-                            </p>
+                          // Item 45 (2026-07-30): the band note is gone —
+                          // ONE right-justified button, same position on
+                          // every card.
+                          <div className="flex items-end justify-end gap-4">
                             {cta?.kind === "start" ||
                             cta?.kind === "compose" ||
                             cta?.kind === "continue_dossier" ? (

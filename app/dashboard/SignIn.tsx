@@ -6,7 +6,7 @@ import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { requestParentPasswordResetAction } from "@/app/lib/auth/actions/reset";
 import { requestResumeLinkAction } from "@/app/lib/funnel/actions/resume";
 import { RETURN_TO_PARAM, safeReturnTo } from "@/app/lib/funnel/return-to-rules";
-import JoinButton from "@/app/components/JoinButton";
+import Cta from "@/app/components/Cta";
 import Wordmark from "@/app/components/Wordmark";
 
 /** S1: email + password sign-in for returning parents (with self-serve
@@ -282,7 +282,12 @@ export default function SignIn() {
         <div className="mt-6 border-t border-line pt-5 text-center">
           <p className="text-sm text-ink-soft">New to The 120?</p>
           <div className="mt-3 flex justify-center">
-            <JoinButton className="px-7 py-3.5 text-sm">Create an account</JoinButton>
+            {/* 2026-07-30 (item 39): creating an account IS starting the
+                application — straight to step 1 of the unified flow, never
+                the account modal. */}
+            <Cta href="/start" className="px-7 py-3.5 text-sm">
+              Create an account
+            </Cta>
           </div>
         </div>
       </div>

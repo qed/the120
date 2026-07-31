@@ -27,14 +27,14 @@ const sources = () =>
     .filter((f) => !f.includes("__tests__"));
 
 /**
- * The three call sites that deliberately KEEP the account modal.
+ * The call sites that deliberately KEEP the account modal.
  *
- * Not "marketing surfaces we forgot": each is load-bearing. `SignIn.tsx` is
- * the app's only remaining `signUp()` (R9 preserves it), and the Gauntlet's
- * two are a functional tournament-entry gate, a stated non-goal of the reroute.
+ * Not "marketing surfaces we forgot": the Gauntlet's two are a functional
+ * tournament-entry gate, a stated non-goal of the reroute. `SignIn.tsx` left
+ * this list 2026-07-30 (item 39): "Create an account" on the sign-in page
+ * now routes to /start — creating an account IS starting the application.
  */
 const PRESERVED = [
-  "app/dashboard/SignIn.tsx",
   "app/gauntlet/ComingSoon.tsx",
   "app/gauntlet/GauntletGame.tsx",
 ];
@@ -75,10 +75,9 @@ describe("R10 — no marketing surface opens the account modal", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("keeps all three preserved sites — asserted BY COUNT so a sweep cannot thin them", () => {
+  it("keeps the preserved sites — asserted BY COUNT so a sweep cannot thin them", () => {
     // A later "remove the last JoinButtons" pass would otherwise delete the
-    // app's only signUp() path and the Gauntlet's entry gate without a test
-    // noticing.
+    // Gauntlet's entry gate without a test noticing.
     for (const f of PRESERVED) {
       const code = stripComments(read(f));
       expect(

@@ -64,11 +64,13 @@ import {
   staffBarIdentityLabel,
   staffBarQueueChip,
   staffBarShowsHubLink,
+  staffBarShowsLogoLockup,
   staffBarSkin,
   type StaffBarApplication,
   type StaffBarIdentity,
   type StaffBarQueueState,
 } from "./bar-rules";
+import { SEATS_TOTAL } from "@/app/lib/site";
 
 /** Where the offline copy of the bar's identity lives. Cleared on sign-out and
  *  whenever the account changes, so a previous operator's address can never outlive
@@ -217,11 +219,16 @@ function writePersistedIdentity(identity: StaffBarIdentity | null): void {
 export function StaffBar({
   application,
   actorUserId,
+  seatsRemaining,
 }: {
   application: StaffBarApplication;
   /** The signed-in user id. Opaque, role-free, and the scope every queue decision
    *  needs before identity has resolved. */
   actorUserId: string;
+  /** Item 60: the ONE-row backend nav's seats line (/staff and /crm). A
+   *  public programme count, never identity or role (the cached-payload
+   *  rule), and absent on /fp/fw. */
+  seatsRemaining?: number;
 }) {
   const barRef = useRef<HTMLElement | null>(null);
   const [live, setLive] = useState<StaffBarIdentity | null>(null);
@@ -497,6 +504,18 @@ export function StaffBar({
     // print:hidden — staff chrome never belongs on a printed dossier.
     <header ref={barRef} className={`sticky top-0 z-30 print:hidden ${skin.bar}`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-2.5 sm:px-7">
+        {/* Item 60: the 120 lockup opens the row on /staff and /crm — always
+            a link to the hub. The rule (not an inline branch) says who. */}
+        {staffBarShowsLogoLockup(application) && (
+          <Link href={STAFF_HUB_PATH} className="flex items-center gap-2.5">
+            <span className="bg-white px-2 py-[5px] text-[15px] font-bold leading-none tracking-[-0.04em] text-crm-blue">
+              120
+            </span>
+            <span className="whitespace-nowrap text-[15px] font-bold tracking-[-0.02em] text-crm-card">
+              The 120
+            </span>
+          </Link>
+        )}
         <span className={skin.label}>{staffBarApplicationLabel(application)}</span>
 
         {staffBarShowsHubLink({ application, identity }) && (
@@ -520,6 +539,11 @@ export function StaffBar({
         )}
 
         <span className="ml-auto flex items-center gap-3 pl-4">
+          {seatsRemaining !== undefined && (
+            <span className="whitespace-nowrap font-mono text-[10.5px] tracking-[0.06em] text-white/75">
+              {SEATS_TOTAL - seatsRemaining} SEATS FILLED · {seatsRemaining} REMAIN
+            </span>
+          )}
           <span className={skin.email}>{staffBarIdentityLabel(identity)}</span>
           {/* R23: rendered unconditionally. Never gated on `identity`. */}
           <button

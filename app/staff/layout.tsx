@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
+import { getSeatsRemaining } from "@/app/lib/seats";
 import { StaffBar } from "@/app/lib/staff-bar/StaffBar";
 
 export const metadata: Metadata = {
@@ -38,15 +39,20 @@ export default async function StaffLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const staff = await requireStaff();
+  const seatsRemaining = await getSeatsRemaining();
 
   return (
     <div className="min-h-screen bg-hq-canvas font-path-body text-hq-ink">
-      {/* Item 40 (2026-07-30): ONE floating blue backend nav — the home
-          nav's floating-card geometry with the CRM's blue skin, so staff
-          know they've left the parent site. No marketing links here. */}
+      {/* Item 60 (2026-07-30): the EXACT same one-row blue card as /crm —
+          logo (→ /staff), seats line, identity/sign-out. No marketing
+          links here. */}
       <div className="sticky top-[18px] z-40 mx-5 mt-[18px] print:hidden">
         <div className="overflow-hidden rounded-[14px] bg-crm-blue shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-          <StaffBar application="staff" actorUserId={staff.staffId} />
+          <StaffBar
+            application="staff"
+            actorUserId={staff.staffId}
+            seatsRemaining={seatsRemaining}
+          />
         </div>
       </div>
       {children}

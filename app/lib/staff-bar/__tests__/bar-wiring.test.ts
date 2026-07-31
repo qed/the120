@@ -476,15 +476,20 @@ describe("the bar mounts exactly once per page (R15, R18)", () => {
     // the three call sites — leaves a cached shell that differs between a staff and a
     // non-staff visit. The component's own props block is pinned at the top of this
     // file; this pins the call sites, which is the half a component signature cannot.
-    for (const relative of [
-      "../../../staff/layout.tsx",
-      "../../../crm/(app)/layout.tsx",
-      "../../../fp/fw/(app)/layout.tsx",
-    ]) {
+    // Item 60 (2026-07-30): /staff and /crm additionally hand the bar the
+    // seats count for the one-row chrome. A PROGRAMME fact (a public
+    // number), not identity or role, so the cached-payload rule is intact.
+    // `/fp/fw` stays two-prop.
+    const expected: Record<string, string[]> = {
+      "../../../staff/layout.tsx": ["actorUserId", "application", "seatsRemaining"],
+      "../../../crm/(app)/layout.tsx": ["actorUserId", "application", "seatsRemaining"],
+      "../../../fp/fw/(app)/layout.tsx": ["actorUserId", "application"],
+    };
+    for (const relative of Object.keys(expected)) {
       const tag = stripComments(read(relative)).match(/<StaffBar\b([\s\S]*?)\/>/);
       expect(tag, relative).not.toBeNull();
       const attributes = [...tag![1].matchAll(/(\w+)\s*=/g)].map((m) => m[1]).sort();
-      expect(attributes, relative).toEqual(["actorUserId", "application"]);
+      expect(attributes, relative).toEqual(expected[relative]);
     }
   });
 });

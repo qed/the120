@@ -76,6 +76,16 @@ export function staffBarApplicationLabel(application: StaffBarApplication): stri
   return APPLICATION_LABELS[application];
 }
 
+/**
+ * Item 60 (2026-07-30): /staff and /crm render the ONE-row backend nav —
+ * the 120 logo lockup (→ the hub) at the row's start. The FW bar stays
+ * thin: guides are not staff, and the lockup links to a page that would
+ * 404 them (the R12 sharp edge, same reason the hub link gates).
+ */
+export function staffBarShowsLogoLockup(application: StaffBarApplication): boolean {
+  return application === "staff" || application === "crm";
+}
+
 /* ══════════════════════════════════════════ R8/R9/R10/R12 — the hub link ══ */
 
 /** The hub. Every spoke links here; spokes never link to each other (R10). */

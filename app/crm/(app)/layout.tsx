@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { getSeatsRemaining } from "@/app/lib/seats";
-import CrmChrome from "@/app/crm/components/CrmChrome";
+import CrmTabs from "@/app/crm/components/CrmTabs";
 import ToastProvider from "@/app/crm/components/Toast";
 import { StaffBar } from "@/app/lib/staff-bar/StaffBar";
 
@@ -36,13 +36,18 @@ export default async function CrmAppLayout({
   return (
     <ToastProvider>
       <div className="flex min-h-screen flex-col bg-crm-bg text-crm-ink">
-        {/* Item 40 (2026-07-30): ONE floating blue backend nav — the home
-            nav's floating-card geometry, the CRM's blue, both former bars
-            (staff identity row + CRM band + tabs) combined inside it. */}
+        {/* Item 60 (2026-07-30): ONE blue row — the 120 logo (→ /staff),
+            the seats line, and the bar's identity/sign-out cluster, all in
+            the StaffBar's single line. The old CRM band is retired; the
+            section tabs stay as the slim white row below. */}
         <div className="sticky top-[18px] z-40 mx-5 mt-[18px] print:hidden">
           <div className="overflow-hidden rounded-[14px] bg-crm-blue shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
-            <StaffBar application="crm" actorUserId={staff.staffId} />
-            <CrmChrome seatsRemaining={seatsRemaining} />
+            <StaffBar
+              application="crm"
+              actorUserId={staff.staffId}
+              seatsRemaining={seatsRemaining}
+            />
+            <CrmTabs />
           </div>
         </div>
         <main className="flex-1">{children}</main>

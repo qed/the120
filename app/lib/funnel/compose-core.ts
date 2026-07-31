@@ -133,7 +133,10 @@ export type ComposeDeps = {
     ) => Promise<boolean | "locked" | "conflict">;
     saveEdit: (
       projectId: string,
-      project: ComposedProject
+      project: ComposedProject,
+      /** Item 51: the fully-merged quiz_answers record to store, or
+       *  undefined to leave the column untouched. */
+      quizAnswers?: Record<string, string>
     ) => Promise<boolean | "locked" | "conflict">;
     advanceToProjectCreated: (childId: string) => Promise<boolean>;
   }>;
@@ -302,7 +305,7 @@ function realDeps(): ComposeDeps {
           }
           return (data ?? []).length > 0 ? true : "conflict";
         },
-        saveEdit: async (projectId, project) => {
+        saveEdit: async (projectId, project, quizAnswers) => {
           // Same active-row scoping as saveDraft: a family edit must never
           // "save" onto a retired row and report success.
           const { data, error } = await supabase
@@ -312,6 +315,9 @@ function realDeps(): ComposeDeps {
               description: project.description,
               offer_sketch: project.offerSketch,
               first_customer_hypothesis: project.firstCustomerHypothesis,
+              // Item 51: the what/spark cards are editable — the merged
+              // record arrives from the core, moderated.
+              ...(quizAnswers !== undefined ? { quiz_answers: quizAnswers } : {}),
               family_edited: true,
               updated_at: new Date().toISOString(),
             })
@@ -885,10 +891,15 @@ export async function regenerateProjectCore(
 const editInputSchema = z.object({
   projectId: z.uuid(),
   project: composedProjectSchema,
+  /** Item 51 (2026-07-30): the Product v1 ("what") and Why ("spark") cards
+   *  are editable — their edits merge into the stored quiz_answers. */
+  quizAnswers: z
+    .object({ what: z.string().max(2000), spark: z.string().max(2000) })
+    .optional(),
 });
 
 export type EditResult =
-  | { kind: "saved"; project: ComposedProject }
+  | { kind: "saved"; project: ComposedProject; quizAnswers: Record<string, string> }
   /** Reconnect U8: the row was retired under this edit (door change in
    *  another tab) — the active-scoped save matched zero rows. Refresh
    *  guidance, never success. */
@@ -930,13 +941,27 @@ export async function recordProjectEditCore(
           : parsed.data.project.firstCustomerHypothesis.replace(/[⟦⟧]/g, ""),
     };
     const clean = sanitizeComposed(stripped);
-    const saved = await session.saveEdit(project.id, clean);
+    // Item 51: quiz-answer edits (Product v1 / Why) merge into the stored
+    // record, fence-stripped and storage-moderated like everything else.
+    let mergedAnswers: Record<string, string> | undefined;
+    if (parsed.data.quizAnswers) {
+      mergedAnswers = moderateAnswers({
+        ...project.quizAnswers,
+        what: parsed.data.quizAnswers.what.replace(/[⟦⟧]/g, ""),
+        spark: parsed.data.quizAnswers.spark.replace(/[⟦⟧]/g, ""),
+      }).clean as Record<string, string>;
+    }
+    const saved = await session.saveEdit(project.id, clean, mergedAnswers);
     if (saved === "locked") return { kind: "locked" };
     // Retired under the edit (reconnect U8): zero rows is a conflict —
     // the family's words are still in their textarea; refresh, not retry.
     if (saved === "conflict") return { kind: "conflict" };
     if (!saved) return { kind: "failed" };
-    return { kind: "saved", project: clean };
+    return {
+      kind: "saved",
+      project: clean,
+      quizAnswers: mergedAnswers ?? project.quizAnswers,
+    };
   } catch (err) {
     console.error("[funnel/compose] edit exception:", err);
     return { kind: "failed" };

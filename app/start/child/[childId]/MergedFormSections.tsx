@@ -129,6 +129,14 @@ function StepCard({
   );
 }
 
+/** Item 48 (2026-07-30): a REQUIRED box that still needs filling carries a
+ *  bold border; it relaxes to the normal border once 3+ characters are in.
+ *  Applied only while the walk is editable — a read-only walkthrough must
+ *  not nag. */
+const needsFillCls = "border-2 border-ink";
+const stillNeedsFill = (required: boolean, value: string, frozen: boolean) =>
+  required && !frozen && value.trim().length < 3;
+
 function Field({
   label,
   value,
@@ -136,6 +144,7 @@ function Field({
   placeholder,
   maxLength,
   frozen,
+  required = false,
 }: {
   label: string;
   value: string;
@@ -143,6 +152,8 @@ function Field({
   placeholder?: string;
   maxLength?: number;
   frozen: boolean;
+  /** Item 48: bold border until 3+ characters are entered. */
+  required?: boolean;
 }) {
   return (
     <label className="block">
@@ -153,7 +164,7 @@ function Field({
         maxLength={maxLength}
         disabled={frozen}
         onChange={(e) => onChange(e.target.value)}
-        className={inputCls}
+        className={`${inputCls} ${stillNeedsFill(required, value, frozen) ? needsFillCls : ""}`}
       />
     </label>
   );
@@ -167,6 +178,7 @@ function Area({
   rows = 4,
   maxLength,
   frozen,
+  required = false,
 }: {
   label: string;
   value: string;
@@ -175,6 +187,8 @@ function Area({
   rows?: number;
   maxLength?: number;
   frozen: boolean;
+  /** Item 48: bold border until 3+ characters are entered. */
+  required?: boolean;
 }) {
   return (
     <label className="block">
@@ -186,7 +200,7 @@ function Area({
         placeholder={placeholder}
         disabled={frozen}
         onChange={(e) => onChange(e.target.value)}
-        className={textareaCls}
+        className={`${textareaCls} ${stillNeedsFill(required, value, frozen) ? needsFillCls : ""}`}
       />
     </label>
   );
@@ -477,6 +491,7 @@ function BasicsSection({
           onChange={(v) => set({ firstName: v })}
           maxLength={80}
           frozen={frozen}
+          required
         />
         <Field
           label="Last name"
@@ -484,6 +499,7 @@ function BasicsSection({
           onChange={(v) => set({ lastName: v })}
           maxLength={80}
           frozen={frozen}
+          required
         />
         <label className="block">
           <span className={labelCls}>Grade (Fall 2026)</span>
@@ -516,6 +532,7 @@ function BasicsSection({
           onChange={(v) => set({ birthYear: v.replace(/\D/g, "").slice(0, 4) })}
           placeholder="2016"
           frozen={frozen}
+          required
         />
         <div className="sm:col-span-2">
           <Field
@@ -525,6 +542,7 @@ function BasicsSection({
             placeholder="Where they go today"
             maxLength={200}
             frozen={frozen}
+            required
           />
         </div>
         {/* R48: the child's email, with "Don't have one" recording the flag
@@ -980,8 +998,8 @@ function ProjectSection({
   return (
     <StepCard
       n={n}
-      title="Project & interests"
-      hint="Thank you and your child for brainstorming a project. The details are below."
+      title="First Profit Idea #1"
+      hint="Learn to make money before you drive a car. Or at least how to run a healthy business."
     >
       {project && (project.name.trim() !== "" || project.description.trim() !== "") ? (
         <>

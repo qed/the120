@@ -383,9 +383,11 @@ const OWN_IDEA_FALLBACK_NAME: Record<GroupSlug, string> = {
  * start in their NULL state ("" — the column defaults) so the AI-once rule
  * has something to key on; the offer and first-customers cards are the
  * child's OWN moderated answers (no model involved), with the R39b null
- * branch when the who-answer is empty. A TEMPLATE start ships the
- * template's own title/pitch — those exist already, so the AI calls are
- * skipped for template children by the same non-empty rule.
+ * branch when the who-answer is empty. Item 63 (2026-07-30): a TEMPLATE
+ * start ALSO null-starts the name and blurb — every company idea gets the
+ * AI treatment, and the template's title/pitch reach the model as prompt
+ * context ("Starting template: …"), never as the shipped copy. Only the
+ * offer/first-customer seeds carry over.
  */
 export function initialProject(
   templateId: string | null,
@@ -395,8 +397,8 @@ export function initialProject(
   const template = templateId ? TEMPLATES.find((t) => t.id === templateId) : null;
   if (template) {
     return sanitizeComposed({
-      name: template.title,
-      description: template.pitch,
+      name: "",
+      description: "",
       offerSketch: template.seeds.offer ?? template.pitch,
       firstCustomerHypothesis: template.firstCustomers,
     });

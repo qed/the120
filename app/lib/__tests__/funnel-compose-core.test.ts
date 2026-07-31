@@ -231,7 +231,8 @@ describe("composeProjectCore — gates", () => {
     // drift. This is the deferred plan decision, landed as construction.
     const h = harness({
       child: { ...child, applicantState: "project_created" },
-      modelResults: [respond(goodObject)],
+      // Item 63: a template start makes the same TWO calls as an own idea.
+      modelResults: [nameResp, blurbResp],
     });
     const result = await composeProjectCore(composeInput, h.deps);
     expect(result.kind).toBe("composed");
@@ -290,15 +291,19 @@ describe("composeProjectCore — claim before spend (split calls, 2026-07-30)", 
     expect(JSON.stringify(h.inserted[0].quizAnswers)).not.toContain("kid@gmail.com");
   });
 
-  it("a TEMPLATE start ships the template's own copy — ZERO model calls (both fields already exist)", async () => {
-    const h = harness({ child });
+  it("a TEMPLATE start gets the SAME AI treatment as an own idea (item 63) — two calls, custom copy", async () => {
+    // The template's title/pitch are prompt CONTEXT ("Starting template:"),
+    // never the shipped copy — every company idea gets an AI-invented name
+    // and blurb. Only the offer/first-customer seeds carry over.
+    const h = harness({ child, modelResults: [nameResp, blurbResp] });
     const result = await composeProjectCore(composeInput, h.deps);
     expect(result.kind).toBe("composed");
     if (result.kind !== "composed") return;
-    expect(h.generateCalls).toHaveLength(0);
-    expect(h.events).toEqual(["insert", "advance"]);
-    expect(result.view.project.name.length).toBeGreaterThan(0);
-    expect(result.view.project.description.length).toBeGreaterThan(0);
+    expect(h.generateCalls).toHaveLength(2);
+    expect(result.view.project.name).toBe("The Saturday Skills Clinic");
+    expect(result.view.project.description).toContain("coach younger kids");
+    // The row still went in FIRST with the NULL-state name — the AI-once key.
+    expect(h.inserted[0].projectName).toBe("");
   });
 
   it("a FAILED insert costs zero model calls", async () => {

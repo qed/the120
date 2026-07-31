@@ -843,8 +843,10 @@ describe("the locked shell (reconnect U7, R13) — what only a source scan can p
   });
 
   it("locked disables the mutating surface but never the Back slot", () => {
-    // Inputs and mutating CTAs consult isLocked…
-    expect((shellCode.match(/disabled=\{isLocked\}/g) ?? []).length).toBeGreaterThanOrEqual(8);
+    // Inputs and mutating CTAs consult isLocked… (item 56 retired the four
+    // answer cards' textareas — name, pitch, and the door/quiz surfaces
+    // remain.)
+    expect((shellCode.match(/disabled=\{isLocked\}/g) ?? []).length).toBeGreaterThanOrEqual(4);
     expect(shellCode).toMatch(/disabled=\{!selected \|\| pending \|\| isLocked\}/);
     expect(shellCode).toMatch(/disabled=\{pending \|\| isLocked\}/);
     // …while the Back slot's disabled conditions stay pending-only: the

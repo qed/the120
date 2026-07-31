@@ -482,24 +482,18 @@ export const canRegenerate = (count: number): boolean =>
 /**
  * The prototype's compose-screen chrome, verbatim, in the rules module so
  * the copy sweep and the fidelity pins reach it (JSX literals dodge both).
- * The screen is a project PAGE (2026-07-30 shape): loading state, the
- * AI-named business as an always-editable name field, the elevator-pitch
- * paragraph, FOUR cards ("The Offer" / "First Customers" / "Product v1" /
- * "Why am I building this?") each carrying its own edit icon in the upper
- * right (the bottom "Edit This" toggle and "Start over" are retired — Back
- * works from every page), the gold founders-pivot note, and the (out of
- * 25) CTA.
+ * The screen is a project PAGE (item 56 shape, 2026-07-30): loading state,
+ * the AI-named business as an always-editable name field, the elevator-pitch
+ * paragraph (the four answer cards are retired), the PROMINENT gold First
+ * Profit note (Peter's copy), and the blue "Finish my application" CTA that
+ * lands on 01 Basics.
  */
 export const COMPOSE_UI_COPY = {
   loadingTitle: "Shaping your project…",
   loadingBody: "Your words are becoming a company page. A few seconds.",
-  eyebrow: "Your project",
+  eyebrow: "First Profit Idea #1",
   pitchLabel: "The pitch",
-  offerLabel: "The Offer",
-  customersLabel: "First Customers",
-  productLabel: "Product v1",
-  whyLabel: "Why am I building this?",
   goldNote:
-    "This project is yours. You can change it any time, and you can hold up to five. Founders pivot. That's normal here.",
-  cta: "See your first 3 tasks (out of 25) →",
+    "Learn how to make money before you drive a car. You come to First Profit with an idea. You leave with a real business and a clear plan to make your first $10,000. And then we help you execute.",
+  cta: "Finish my application",
 } as const;

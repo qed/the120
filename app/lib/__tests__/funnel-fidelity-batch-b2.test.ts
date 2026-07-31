@@ -176,15 +176,15 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(COMPOSE_UI_COPY.loadingBody).toBe(
       "Your words are becoming a company page. A few seconds."
     );
-    expect(COMPOSE_UI_COPY.offerLabel).toBe("The Offer");
-    expect(COMPOSE_UI_COPY.customersLabel).toBe("First Customers");
-    expect(COMPOSE_UI_COPY.productLabel).toBe("Product v1");
-    expect(COMPOSE_UI_COPY.whyLabel).toBe("Why am I building this?");
+    // Item 56 (2026-07-30): the eyebrow names the step, the gold note is
+    // Peter's First Profit pitch verbatim, and the CTA finishes the
+    // application. The four card labels are retired with their cards.
+    expect(COMPOSE_UI_COPY.eyebrow).toBe("First Profit Idea #1");
     expect(COMPOSE_UI_COPY.pitchLabel).toBe("The pitch");
     expect(COMPOSE_UI_COPY.goldNote).toBe(
-      "This project is yours. You can change it any time, and you can hold up to five. Founders pivot. That's normal here."
+      "Learn how to make money before you drive a car. You come to First Profit with an idea. You leave with a real business and a clear plan to make your first $10,000. And then we help you execute."
     );
-    expect(COMPOSE_UI_COPY.cta).toBe("See your first 3 tasks (out of 25) →");
+    expect(COMPOSE_UI_COPY.cta).toBe("Finish my application");
     for (const copy of Object.values(COMPOSE_UI_COPY)) {
       expect(copy, copy).not.toContain("—");
       expect(copy.toLowerCase(), copy).not.toMatch(/\bfail(ed|ure)?\b/);
@@ -198,26 +198,24 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(shell).toContain("{COMPOSE_UI_COPY.loadingBody}");
   });
 
-  it("the composed project renders as a PAGE with per-section edit icons, not a bare form", () => {
-    // 2026-07-30: the business name is an always-editable field styled as
-    // the heading (placeholder for the null state), the pitch renders as
-    // prose, and all FOUR cards render — The Offer / First Customers /
-    // Product v1 / Why am I building this? (the latter two off the composed
-    // row's quiz answers). The editable sections each carry their own edit
-    // icon in the upper right.
+  it("the composed project renders as a PAGE: name, pitch, no answer cards (item 56)", () => {
+    // Item 56 (2026-07-30): the business name is an always-editable field
+    // styled as the heading (placeholder for the null state) and the pitch
+    // renders as prose with its own edit icon. The four answer cards (The
+    // Offer / First Customers / Product v1 / Why am I building this?) are
+    // RETIRED — the page moves the family to the application, not a review
+    // of their answers.
     expect(shell).toContain('aria-label="Business name"');
     expect(shell).toMatch(/value=\{composeDraft\.name\}/);
     expect(shell).toContain('placeholder="Name your company"');
-    expect(shell).toContain("{COMPOSE_UI_COPY.offerLabel}");
-    expect(shell).toContain("{COMPOSE_UI_COPY.customersLabel}");
-    expect(shell).toContain("{COMPOSE_UI_COPY.productLabel}");
-    expect(shell).toContain("{COMPOSE_UI_COPY.whyLabel}");
-    expect(shell).toContain("composeView.quizAnswers.what");
-    expect(shell).toContain("composeView.quizAnswers.spark");
-    // One icon per editable section, exactly one section editing at a time.
+    expect(shell).not.toContain("The Offer");
+    expect(shell).not.toContain("First Customers");
+    expect(shell).not.toContain("Product v1");
+    expect(shell).not.toContain("Why am I building this?");
+    expect(shell).not.toContain("composeView.quizAnswers.what");
+    expect(shell).not.toContain("composeView.quizAnswers.spark");
+    // The pitch keeps its edit icon, exactly one section editing at a time.
     expect(shell).toMatch(/sectionEditButton\("description", COMPOSE_UI_COPY\.pitchLabel\)/);
-    expect(shell).toMatch(/sectionEditButton\("offer", COMPOSE_UI_COPY\.offerLabel\)/);
-    expect(shell).toMatch(/sectionEditButton\("customers", COMPOSE_UI_COPY\.customersLabel\)/);
     expect(shell).toMatch(/setEditingSection\(\(s\) => \(s === section \? null : section\)\)/);
   });
 
@@ -240,10 +238,13 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(shell).toContain("animate-spin");
   });
 
-  it("the gold founders-pivot note and the (out of 25) CTA render", () => {
-    expect(shell).toContain("border-gold-leaf/30 bg-gold-leaf/10");
+  it("the gold note is PROMINENT and the blue CTA finishes the application (item 56)", () => {
+    expect(shell).toContain("border-2 border-gold-leaf/50 bg-gold-leaf/20");
     expect(shell).toContain("{COMPOSE_UI_COPY.goldNote}");
     expect(shell).toContain("COMPOSE_UI_COPY.cta}");
+    // Blue, and it lands on 01 Basics.
+    expect(shell).toMatch(/bg-blue[\s\S]{0,400}COMPOSE_UI_COPY\.cta\}/);
+    expect(shell).toMatch(/go\("basics"\);/);
   });
 });
 

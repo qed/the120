@@ -28,7 +28,6 @@ import {
 import type { ProjectView } from "@/app/lib/funnel/compose-core";
 import {
   COMPOSE_UI_COPY,
-  CUSTOMER_ASK_AGAIN_PLACEHOLDER,
   type ComposedProject,
 } from "@/app/lib/funnel/compose-rules";
 import {
@@ -344,15 +343,9 @@ export function MiniAppShell({
   // exactly one section edits at a time. Client state only — the draft
   // itself already lives in composeDraft. Declared before the
   // reconciliation block below, which resets it.
-  const [editingSection, setEditingSection] = useState<
-    "description" | "offer" | "customers" | "product" | "why" | null
-  >(null);
-  // Item 51 (2026-07-30): the Product v1 ("what") and Why ("spark") cards
-  // are editable — this is their working copy, saved through keepProject.
-  const [quizDraft, setQuizDraft] = useState<{ what: string; spark: string }>(() => ({
-    what: initialProject?.quizAnswers.what ?? "",
-    spark: initialProject?.quizAnswers.spark ?? "",
-  }));
+  // Item 56 (2026-07-30): the four answer cards are retired — the pitch is
+  // the one pencil-edited section left.
+  const [editingSection, setEditingSection] = useState<"description" | null>(null);
   const [seededProjectKey, setSeededProjectKey] = useState(serverProjectKey);
   if (serverProjectKey !== seededProjectKey) {
     setSeededProjectKey(serverProjectKey);
@@ -365,10 +358,6 @@ export function MiniAppShell({
     if (clientKey !== serverProjectKey) {
       setComposeView(initialProject);
       setComposeDraft(initialProject?.project ?? null);
-      setQuizDraft({
-        what: initialProject?.quizAnswers.what ?? "",
-        spark: initialProject?.quizAnswers.spark ?? "",
-      });
       // The edit state is scoped by the same fact as the draft it edits —
       // a reconciled project must not arrive under a stale open editor.
       setEditingSection(null);
@@ -447,7 +436,6 @@ export function MiniAppShell({
     setSeededFrom(null);
     setComposeView(null);
     setComposeDraft(null);
-    setQuizDraft({ what: "", spark: "" });
     setComposeNotice(null);
     setEditingSection(null);
     setShaping(null);
@@ -604,10 +592,6 @@ export function MiniAppShell({
       if (result.kind === "composed" || result.kind === "exists") {
         setComposeView(result.view);
         setComposeDraft(result.view.project);
-        setQuizDraft({
-          what: result.view.quizAnswers.what ?? "",
-          spark: result.view.quizAnswers.spark ?? "",
-        });
         // Item 42: hold at the "See the results →" gate — the navigation to
         // the company page is the gate's, not this handler's.
         setShaping("done");
@@ -649,20 +633,14 @@ export function MiniAppShell({
       go(stepNeighbour("compose", "next"));
       return;
     }
-    const quizChanged =
-      quizDraft.what !== (composeView.quizAnswers.what ?? "") ||
-      quizDraft.spark !== (composeView.quizAnswers.spark ?? "");
     const changed =
-      JSON.stringify(composeDraft) !== JSON.stringify(composeView.project) ||
-      quizChanged;
+      JSON.stringify(composeDraft) !== JSON.stringify(composeView.project);
     startTransition(async () => {
       if (changed) {
         // R40: the edit is RECORDED (family_edited), not just displayed.
-        // Item 51: the Product v1 / Why card edits ride the same save.
         const saved = await recordProjectEditAction({
           projectId: composeView.id,
           project: composeDraft,
-          quizAnswers: quizDraft,
         });
         if (saved.kind === "locked") {
           setLockDiscovered(true);
@@ -681,18 +659,12 @@ export function MiniAppShell({
           setComposeNotice("Saving your edits didn't work. Try again.");
           return;
         }
-        setComposeView({
-          ...composeView,
-          project: saved.project,
-          quizAnswers: saved.quizAnswers,
-        });
+        setComposeView({ ...composeView, project: saved.project });
         setComposeDraft(saved.project);
-        setQuizDraft({
-          what: saved.quizAnswers.what ?? "",
-          spark: saved.quizAnswers.spark ?? "",
-        });
       }
-      go(stepNeighbour("compose", "next"));
+      // Item 56: "Finish my application" lands on 01 Basics — the form is
+      // the next move, not the task list.
+      go("basics");
     });
   };
 
@@ -1158,7 +1130,7 @@ export function MiniAppShell({
             are retired — Back works from every page. */}
         {step === "compose" && confirmedSlug && composeView && composeDraft && (() => {
           const sectionEditButton = (
-            section: "description" | "offer" | "customers" | "product" | "why",
+            section: "description",
             label: string
           ) => (
             <button
@@ -1215,118 +1187,25 @@ export function MiniAppShell({
               )}
               {sectionEditButton("description", COMPOSE_UI_COPY.pitchLabel)}
             </div>
-            <div className="mt-4 flex flex-col gap-2.5">
-              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
-                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                  {COMPOSE_UI_COPY.offerLabel}
-                </p>
-                {editingSection === "offer" ? (
-                  <textarea
-                    value={composeDraft.offerSketch}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setComposeDraft({ ...composeDraft, offerSketch: e.target.value.slice(0, 600) })
-                    }
-                    rows={2}
-                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
-                  />
-                ) : (
-                  <p className="mt-1 text-[13px] leading-5">{composeDraft.offerSketch}</p>
-                )}
-                {sectionEditButton("offer", COMPOSE_UI_COPY.offerLabel)}
-              </div>
-              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
-                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                  {COMPOSE_UI_COPY.customersLabel}
-                </p>
-                {editingSection === "customers" ? (
-                  <textarea
-                    value={composeDraft.firstCustomerHypothesis ?? ""}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setComposeDraft({
-                        ...composeDraft,
-                        // R39b's null branch survives the edit box: empty =
-                        // "we don't know yet", stored as null, never a
-                        // made-up name.
-                        firstCustomerHypothesis:
-                          e.target.value.trim().length === 0
-                            ? null
-                            : e.target.value.slice(0, 600),
-                      })
-                    }
-                    placeholder={CUSTOMER_ASK_AGAIN_PLACEHOLDER}
-                    rows={2}
-                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
-                  />
-                ) : (
-                  <p className="mt-1 text-[13px] leading-5">
-                    {composeDraft.firstCustomerHypothesis ?? CUSTOMER_ASK_AGAIN_PLACEHOLDER}
-                  </p>
-                )}
-                {sectionEditButton("customers", COMPOSE_UI_COPY.customersLabel)}
-              </div>
-              {/* The child's own answers as cards: Product v1 = the "what"
-                  answer, Why am I building this? = the "spark" answer.
-                  EDITABLE since item 51 — the drafts save through
-                  keepProject and merge into the stored quiz answers. */}
-              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
-                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                  {COMPOSE_UI_COPY.productLabel}
-                </p>
-                {editingSection === "product" ? (
-                  <textarea
-                    value={quizDraft.what}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setQuizDraft({ ...quizDraft, what: e.target.value.slice(0, 2000) })
-                    }
-                    rows={2}
-                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
-                  />
-                ) : (
-                  <p className={`mt-1 text-[13px] leading-5 ${quizDraft.what.trim() ? "" : "opacity-50"}`}>
-                    {quizDraft.what.trim() || "What is the product? Tap the pencil to write it."}
-                  </p>
-                )}
-                {sectionEditButton("product", COMPOSE_UI_COPY.productLabel)}
-              </div>
-              <div className="relative rounded-2xl border border-black/10 bg-white/70 px-4 py-3 pr-10">
-                <p className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-phase-sell">
-                  {COMPOSE_UI_COPY.whyLabel}
-                </p>
-                {editingSection === "why" ? (
-                  <textarea
-                    value={quizDraft.spark}
-                    disabled={isLocked}
-                    onChange={(e) =>
-                      setQuizDraft({ ...quizDraft, spark: e.target.value.slice(0, 2000) })
-                    }
-                    rows={2}
-                    className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-[13px] leading-5 outline-none focus:border-current"
-                  />
-                ) : (
-                  <p className={`mt-1 text-[13px] leading-5 ${quizDraft.spark.trim() ? "" : "opacity-50"}`}>
-                    {quizDraft.spark.trim() || "Why are you building this? Tap the pencil to say."}
-                  </p>
-                )}
-                {sectionEditButton("why", COMPOSE_UI_COPY.whyLabel)}
-              </div>
-            </div>
-            {/* The gold founders-pivot note, verbatim. */}
-            <div className="mt-4 rounded-[13px] border border-gold-leaf/30 bg-gold-leaf/10 px-3.5 py-3">
-              <p className="text-[12px] leading-5">{COMPOSE_UI_COPY.goldNote}</p>
+            {/* Item 56: the four answer cards are retired — the page is the
+                name, the pitch, and the PROMINENT gold First Profit note
+                (Peter's copy, verbatim). */}
+            <div className="mt-6 rounded-[16px] border-2 border-gold-leaf/50 bg-gold-leaf/20 px-5 py-4">
+              <p className="text-[15px] font-semibold leading-[1.65]">
+                {COMPOSE_UI_COPY.goldNote}
+              </p>
             </div>
             {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
-            <Button
-              skin={skin}
-              size="lg"
+            {/* Item 56: the CTA is BLUE and lands on 01 Basics — finishing
+                the application is the next move, not the task list. */}
+            <button
+              type="button"
               onClick={keepProject}
               disabled={pending}
-              className="mt-6 w-full"
+              className="mt-6 inline-flex h-12 w-full items-center justify-center rounded-full bg-blue px-6 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-white transition-colors hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pending ? "Saving…" : COMPOSE_UI_COPY.cta}
-            </Button>
+            </button>
           </section>
           );
         })()}

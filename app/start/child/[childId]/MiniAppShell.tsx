@@ -1446,6 +1446,16 @@ export function MiniAppShell({
               facts={merged.facts}
               depositPaid={merged.depositPaid}
               projectGroupSlug={initialProject?.groupSlug ?? null}
+              // The composed business for the project step's display (item
+              // 31): the client view is freshest; the server prop backs it.
+              project={
+                (composeView ?? initialProject)
+                  ? {
+                      name: (composeView ?? initialProject)!.project.name,
+                      description: (composeView ?? initialProject)!.project.description,
+                    }
+                  : null
+              }
               pending={pending}
               run={(task) => startTransition(task)}
               onLocked={() => setLockDiscovered(true)}

@@ -62,8 +62,8 @@ describe("firstIncompleteStep (resume, R3)", () => {
     expect(firstIncompleteStep(emptyChild("kid-1"))).toBe("basics");
   });
 
-  it("a child missing only the pitch resumes at Project & Interests", () => {
-    expect(firstIncompleteStep(child({ projectPitch: "" }))).toBe("project");
+  it("a missing pitch no longer blocks resume (2026-07-30: pitch retired from the checklist)", () => {
+    expect(firstIncompleteStep(child({ projectPitch: "" }))).toBe("review");
   });
 
   it("a complete draft resumes at Review — a Scholars draft too, with NO workshop pick", () => {
@@ -143,7 +143,7 @@ describe("prefillDraft (R46/R47 — the funnel's work arrives pre-done)", () => 
     expect(prefillDraft(typed, project)).toBe(typed);
   });
 
-  it("a direct applicant (no funnel project) gets no pitch prefill — Group and Project arrive NOT done", () => {
+  it("a direct applicant (no funnel project) gets no pitch prefill — Group arrives NOT done", () => {
     const direct = prefillDraft(
       child({ groupSlug: "", birthYear: "", projectPitch: "", grade: "" }),
       null
@@ -151,16 +151,19 @@ describe("prefillDraft (R46/R47 — the funnel's work arrives pre-done)", () => 
     expect(direct.projectPitch).toBe("");
     expect(direct.birthYear).toBe("");
     expect(checklist(direct).find((i) => i.label === "A group")!.done).toBe(false);
-    expect(checklist(direct).find((i) => i.label === "A project pitch")!.done).toBe(false);
+    // 2026-07-30: the pitch is no longer a checklist item.
+    expect(checklist(direct).find((i) => i.label === "A project pitch")).toBeUndefined();
   });
 
-  it("a funnel child arrives with Group and Project marked done (the plan's integration scenario)", () => {
+  it("a funnel child arrives with Group marked done (the plan's integration scenario)", () => {
     const funnelChild = prefillDraft(
       child({ groupSlug: "athletes", projectPitch: "", birthYear: "" }),
       project
     );
     expect(checklist(funnelChild).find((i) => i.label === "A group")!.done).toBe(true);
-    expect(checklist(funnelChild).find((i) => i.label === "A project pitch")!.done).toBe(true);
+    // The pitch still prefills from the composed project for display, but it
+    // is no longer a checklist item (2026-07-30).
+    expect(checklist(funnelChild).find((i) => i.label === "A project pitch")).toBeUndefined();
   });
 });
 

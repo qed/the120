@@ -440,7 +440,7 @@ export const ACADEMIC_SUBJECTS = [
 
 export const ACADEMIC_PLANS: { id: Exclude<Academic["plan"], "">; label: string; blurb: string }[] = [
   { id: "catch-up", label: "Catch-Up", blurb: "Close the gaps and get back to grade level." },
-  { id: "reach-ahead", label: "Reach Ahead", blurb: "Accelerate past grade level — mastery with no ceiling." },
+  { id: "reach-ahead", label: "Reach Ahead", blurb: "Go past grade level via mastery based learning" },
   { id: "get-solid", label: "Get Solid", blurb: "Lock in the fundamentals until they're automatic." },
 ];
 
@@ -1020,14 +1020,14 @@ export function emptyChild(id: string): Child {
 
 /**
  * Dossier checklist drives the per-child completeness meter (§13.3.2).
- * EIGHT items for EVERY group since the Workshops removal (funnel U12,
- * R46): the Scholars-only workshops item is gone — leaving it would strand
- * every Scholars child at 8/9 = 89% with `canSubmit` requiring 100, making
- * C2 unreachable for a fifth of applicants (the plan's named trap). Legacy
- * `workshopIds` on stored rows are simply ignored here; the catalog and
- * `workshopById` stay for read-only display of old picks. The academics
- * item keeps a legacy fallback on `subjects` so pre-cutover drafts don't
- * lose credit. Child email (R48) is deliberately NOT a checklist item.
+ * SIX items for EVERY group since 2026-07-30 (the interests and
+ * project-pitch inputs are retired from the form — the composed business
+ * carries the project story now; leaving them here would strand every new
+ * applicant below 100% with `canSubmit` requiring 100). The Workshops item
+ * went earlier (funnel U12, R46). Legacy `workshopIds`, `interests` and
+ * `projectPitch` on stored rows are simply ignored here. The academics item
+ * keeps a legacy fallback on `subjects` so pre-cutover drafts don't lose
+ * credit. Child email (R48) is deliberately NOT a checklist item.
  *
  * LOCKSTEP MIRRORS (R14): this definition is duplicated in
  * `app/lib/nurture/rules.ts` (dossierCompleteness — stall nudge) and
@@ -1045,8 +1045,6 @@ export function checklist(c: Child): { label: string; done: boolean }[] {
       label: "Academics (a subject + plan)",
       done: c.academics.some(academicComplete) || c.subjects.length >= 1,
     },
-    { label: "The kid's interests", done: c.interests.trim().length >= 3 },
-    { label: "A project pitch", done: c.projectPitch.trim().length >= 10 },
   ];
 }
 

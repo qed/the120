@@ -165,8 +165,8 @@ export function dossierCompleteness(c: NurtureChildRow): number {
     Boolean(c.current_school?.trim()),
     groupSlug !== "",
     academics.some(academicEntryComplete) || (c.subjects ?? []).length >= 1,
-    (c.interests ?? "").trim().length >= 3,
-    (c.project_pitch ?? "").trim().length >= 10,
+    // 2026-07-30: interests and project-pitch retired from the form and
+    // from all three checklist mirrors (data.ts / here / reviews-rules).
   ];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }

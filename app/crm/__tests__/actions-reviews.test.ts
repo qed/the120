@@ -209,10 +209,10 @@ const emptyDossier: DossierFields = {
 };
 
 describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
-  it("counts 8 checklist items for EVERY group since the Workshops removal (U12/R46)", () => {
-    expect(dossierChecklist(fullDossier)).toHaveLength(8);
-    expect(dossierChecklist({ ...fullDossier, groupSlug: "makers" })).toHaveLength(8);
-    expect(dossierChecklist(emptyDossier)).toHaveLength(8);
+  it("counts 6 checklist items for EVERY group since 2026-07-30 (interests + pitch retired)", () => {
+    expect(dossierChecklist(fullDossier)).toHaveLength(6);
+    expect(dossierChecklist({ ...fullDossier, groupSlug: "makers" })).toHaveLength(6);
+    expect(dossierChecklist(emptyDossier)).toHaveLength(6);
     // Legacy stored picks are ignored, not crashed on — a Scholars dossier
     // with NO workshop reaches 100 (pre-U12 it was stranded at 89).
     expect(dossierCompleteness({ ...fullDossier, workshopIds: [] })).toBe(100);
@@ -227,8 +227,8 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
   });
 
   it("half-done dossier rounds like the dashboard meter", () => {
-    // name + grade + school + academics (legacy subjects) done; birth year,
-    // group, interests, pitch missing → 4/8 = 50.
+    // name + grade + school + academics (legacy subjects) done; birth year
+    // and group missing → 4/6 = 67.
     const half: DossierFields = {
       ...emptyDossier,
       firstName: "Theo",
@@ -237,21 +237,19 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
       currentSchool: "Cottingham Jr PS",
       subjects: ["Math"],
     };
-    expect(dossierCompleteness(half)).toBe(50);
+    expect(dossierCompleteness(half)).toBe(67);
   });
 
   it("applies the dashboard's thresholds, not mere presence", () => {
     const thin: DossierFields = {
       ...fullDossier,
       birthYear: "13", // not 4 digits
-      interests: "ok", // < 3 chars
-      projectPitch: "too short", // < 10 chars
     };
     const items = dossierChecklist(thin);
     expect(items.find((i) => i.label === "Birth year")?.done).toBe(false);
-    expect(items.find((i) => i.label === "The kid's interests")?.done).toBe(false);
-    // "too short" is 9 chars — below the 10-char pitch threshold.
-    expect(items.find((i) => i.label === "A project pitch")?.done).toBe(false);
+    // 2026-07-30: interests and pitch are no longer checklist items.
+    expect(items.find((i) => i.label === "The kid's interests")).toBeUndefined();
+    expect(items.find((i) => i.label === "A project pitch")).toBeUndefined();
   });
 
   it("academics needs subject AND plan; legacy subjects satisfy via fallback", () => {
@@ -267,8 +265,8 @@ describe("dossierCompleteness (mirrors the parent dashboard checklist)", () => {
   });
 
   it("tolerates junk academics jsonb (non-array → no credit, no crash)", () => {
-    expect(dossierCompleteness({ ...fullDossier, academics: "garbage" })).toBe(88);
-    expect(dossierCompleteness({ ...fullDossier, academics: null })).toBe(88);
+    expect(dossierCompleteness({ ...fullDossier, academics: "garbage" })).toBe(83);
+    expect(dossierCompleteness({ ...fullDossier, academics: null })).toBe(83);
   });
 });
 
@@ -336,18 +334,18 @@ describe("dossierChecklist ≡ dashboard checklist (R14 lockstep)", () => {
     });
   }
 
-  it("tolerates fields without the new columns (old select) — 8 items, no crash", () => {
+  it("tolerates fields without the new columns (old select) — 6 items, no crash", () => {
     // Mirrors the nurture-rules missing-columns case: groupSlug/academics
     // keys absent entirely (pre-migration select), legacy subjects carry.
     const oldFields = { ...fullDossier, subjects: ["Math"] } as Partial<DossierFields>;
     delete oldFields.groupSlug;
     delete oldFields.academics;
     const items = dossierChecklist(oldFields as DossierFields);
-    expect(items).toHaveLength(8); // the one list every group gets (U12)
+    expect(items).toHaveLength(6); // the one list every group gets
     expect(items.find((i) => i.label === "A group")?.done).toBe(false);
     expect(items.find((i) => i.label === "Academics (a subject + plan)")?.done).toBe(true);
-    // Everything except the group item is satisfied → 7/8 = 88.
-    expect(dossierCompleteness(oldFields as DossierFields)).toBe(88);
+    // Everything except the group item is satisfied → 5/6 = 83.
+    expect(dossierCompleteness(oldFields as DossierFields)).toBe(83);
   });
 });
 

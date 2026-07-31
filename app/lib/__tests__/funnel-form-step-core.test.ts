@@ -419,11 +419,13 @@ describe("submitApplicationCore — gates before any write", () => {
   });
 
   it("incomplete checklist → incomplete with STATIC labels only, zero writes", async () => {
+    // 2026-07-30: interests is no longer a checklist item, so only the name
+    // gap blocks here.
     const h = harness({ child: fields({ lastName: "", interests: "" }) });
     const res = await submitApplicationCore({ childId: CHILD_ID }, h.deps);
     expect(res).toEqual({
       kind: "incomplete",
-      missing: ["Name", "The kid's interests"],
+      missing: ["Name"],
     });
     zeroWrites(h);
     // PII: the verdict carries checklist labels, never field values.

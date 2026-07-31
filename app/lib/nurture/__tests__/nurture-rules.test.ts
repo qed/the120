@@ -270,19 +270,20 @@ describe("stalled-dossier nudge", () => {
     expect(run({ families: [family()], children: [quietChild(2.5)] })).toHaveLength(0);
   });
 
-  it("requires completeness strictly above 80% (6/8 = 75 is not enough; 7/8 = 88 is)", () => {
-    const sixOfEight = quietChild(3.5, { academics: [], subjects: [], project_pitch: "" });
-    expect(dossierCompleteness(sixOfEight)).toBe(75);
-    expect(run({ families: [family()], children: [sixOfEight] })).toHaveLength(0);
+  it("requires completeness strictly above 80% (4/6 = 67 is not enough; 5/6 = 83 is)", () => {
+    // 2026-07-30: SIX items (interests and pitch retired with their inputs).
+    const fourOfSix = quietChild(3.5, { academics: [], subjects: [], current_school: "" });
+    expect(dossierCompleteness(fourOfSix)).toBe(67);
+    expect(run({ families: [family()], children: [fourOfSix] })).toHaveLength(0);
 
-    const sevenOfEight = quietChild(3.5, { current_school: "" });
-    expect(dossierCompleteness(sevenOfEight)).toBe(88);
-    expect(run({ families: [family()], children: [sevenOfEight] })).toHaveLength(1);
+    const fiveOfSix = quietChild(3.5, { current_school: "" });
+    expect(dossierCompleteness(fiveOfSix)).toBe(83);
+    expect(run({ families: [family()], children: [fiveOfSix] })).toHaveLength(1);
   });
 
-  it("non-Scholars missing one item (7/8 = 88) stays eligible", () => {
+  it("non-Scholars missing one item (5/6 = 83) stays eligible", () => {
     const makersMissingOne = quietChild(3.5, { group_slug: "makers", current_school: "" });
-    expect(dossierCompleteness(makersMissingOne)).toBe(88);
+    expect(dossierCompleteness(makersMissingOne)).toBe(83);
     expect(run({ families: [family()], children: [makersMissingOne] })).toHaveLength(1);
   });
 
@@ -371,17 +372,16 @@ describe("helpers", () => {
     ).toBe(0);
   });
 
-  it("EIGHT items for every group since the Workshops removal (U12) — picks ignored, Scholars unstranded", () => {
-    // Pre-U12 a Scholars child without a workshop sat at 8/9 = 89 forever.
+  it("SIX items for every group since 2026-07-30 — picks, interests and pitch all ignored", () => {
     expect(dossierCompleteness(child({ workshop_ids: [] }))).toBe(100);
     expect(dossierCompleteness(child({ workshop_ids: null }))).toBe(100);
-    expect(dossierCompleteness(child({ project_pitch: "" }))).toBe(88);
-    expect(dossierCompleteness(child({ group_slug: "makers", project_pitch: "" }))).toBe(88);
+    expect(dossierCompleteness(child({ project_pitch: "" }))).toBe(100);
+    expect(dossierCompleteness(child({ group_slug: "makers", interests: "" }))).toBe(100);
   });
 
   it("an academics entry needs subject AND plan; legacy subjects still complete", () => {
     const planless = child({ academics: [{ subject: "Math", plan: "", goal: "" }] });
-    expect(dossierCompleteness(planless)).toBe(88); // academics item undone (7/8)
+    expect(dossierCompleteness(planless)).toBe(83); // academics item undone (5/6)
     const legacy = child({ academics: [], subjects: ["Math"] });
     expect(dossierCompleteness(legacy)).toBe(100); // pre-cutover fallback
   });
@@ -390,11 +390,10 @@ describe("helpers", () => {
     const oldRow = child({ subjects: ["Math"] }) as Partial<NurtureChildRow>;
     delete oldRow.group_slug;
     delete oldRow.academics;
-    // 8-item list (no workshops item), group undone, academics via legacy
-    // subjects → 7/8 = 88.
-    expect(dossierCompleteness(oldRow as NurtureChildRow)).toBe(88);
+    // 6-item list, group undone, academics via legacy subjects → 5/6 = 83.
+    expect(dossierCompleteness(oldRow as NurtureChildRow)).toBe(83);
     const garbage = child({ academics: "garbage" });
-    expect(dossierCompleteness(garbage)).toBe(88); // non-array → [] → item undone (7/8)
+    expect(dossierCompleteness(garbage)).toBe(83); // non-array → [] → item undone (5/6)
   });
 });
 

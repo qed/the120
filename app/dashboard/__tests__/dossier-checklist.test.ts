@@ -34,22 +34,21 @@ const scholarsChild = (overrides: Partial<Child> = {}): Child =>
 const labels = (c: Child) => checklist(c).map((i) => i.label);
 const item = (c: Child, label: string) => checklist(c).find((i) => i.label === label)!;
 
-describe("checklist (EIGHT items for every group since the Workshops removal, U12/R46)", () => {
-  it("a complete non-Scholars child is 8/8 items, 100%", () => {
+describe("checklist (SIX items for every group since 2026-07-30 — interests and pitch retired with their inputs)", () => {
+  it("a complete non-Scholars child is 6/6 items, 100%", () => {
     const c = child();
-    expect(checklist(c)).toHaveLength(8);
+    expect(checklist(c)).toHaveLength(6);
     expect(checklist(c).every((i) => i.done)).toBe(true);
     expect(completeness(c)).toBe(100);
   });
 
   it("a Scholars child reaches 100% WITHOUT any workshop pick — the plan's named trap, closed", () => {
-    // Pre-U12: 9 items, stranded at 8/9 = 89 with canSubmit requiring 100.
     const c = scholarsChild({ workshopIds: [] });
-    expect(checklist(c)).toHaveLength(8);
+    expect(checklist(c)).toHaveLength(6);
     expect(completeness(c)).toBe(100);
   });
 
-  it("every group reaches 100% on the same 8 labels — characterized across the whole set", () => {
+  it("every group reaches 100% on the same 6 labels — characterized across the whole set", () => {
     for (const slug of ["athletes", "founders", "givers", "makers", "scholars"]) {
       const c = child({ groupSlug: slug });
       expect(labels(c), slug).toEqual([
@@ -59,17 +58,20 @@ describe("checklist (EIGHT items for every group since the Workshops removal, U1
         "Current school",
         "A group",
         "Academics (a subject + plan)",
-        "The kid's interests",
-        "A project pitch",
       ]);
       expect(completeness(c), slug).toBe(100);
     }
   });
 
-  it("a LEGACY Scholars row with stored workshop_ids (raw shape) still computes 8 items — picks ignored, not crashed on", () => {
+  it("a LEGACY Scholars row with stored workshop_ids (raw shape) still computes 6 items — picks ignored, not crashed on", () => {
     const c = scholarsChild({ workshopIds: ["the-peace-table", "competitive-chess"] });
-    expect(checklist(c)).toHaveLength(8);
+    expect(checklist(c)).toHaveLength(6);
     expect(labels(c)).not.toContain("A workshop of interest");
+    expect(completeness(c)).toBe(100);
+  });
+
+  it("a child with EMPTY interests and pitch still reaches 100% — the retired items cannot strand anyone", () => {
+    const c = child({ interests: "", projectPitch: "" });
     expect(completeness(c)).toBe(100);
   });
 
@@ -93,18 +95,18 @@ describe("checklist (EIGHT items for every group since the Workshops removal, U1
     const c = child({ groupSlug: "" });
     expect(item(c, "A group").done).toBe(false);
     expect(labels(c)).not.toContain("A workshop of interest");
-    expect(checklist(c)).toHaveLength(8);
+    expect(checklist(c)).toHaveLength(6);
   });
 });
 
 describe("completeness at the >80% stall-nudge boundary", () => {
-  it("any group missing one item → 7/8 = 88 (eligible); missing two → 75 (not eligible)", () => {
+  it("missing one item → 5/6 = 83 (eligible); missing two → 67 (not eligible)", () => {
     for (const slug of ["makers", "scholars"]) {
-      expect(completeness(child({ groupSlug: slug, projectPitch: "" })), slug).toBe(88);
+      expect(completeness(child({ groupSlug: slug, currentSchool: "" })), slug).toBe(83);
       expect(
-        completeness(child({ groupSlug: slug, projectPitch: "", interests: "" })),
+        completeness(child({ groupSlug: slug, currentSchool: "", birthYear: "" })),
         slug
-      ).toBe(75);
+      ).toBe(67);
     }
   });
 });
@@ -325,8 +327,8 @@ describe("raw-shape parity: the fixtures the plan demanded (not the sanitizer's 
       workshop_ids: [], interests: base.interests, project_pitch: base.projectPitch,
       status: "draft", updated_at: "2026-07-28T00:00:00Z",
     });
-    expect(parentPct).toBe(88);
-    expect(crmPct).toBe(88);
-    expect(nurturePct).toBe(88);
+    expect(parentPct).toBe(83);
+    expect(crmPct).toBe(83);
+    expect(nurturePct).toBe(83);
   });
 });

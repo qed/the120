@@ -119,11 +119,11 @@ export function queueCounts(items: { reviewStatus: ReviewStatus }[]): {
 /**
  * The dossier fields completeness counts — a 1:1 mirror of the parent
  * dashboard's checklist (`app/dashboard/data.ts` `checklist()`), so both
- * sides of the product report the same number. EIGHT items for EVERY group
- * since the Workshops removal (funnel U12, R46): name (first+last), grade,
- * birth year (4 digits), current school, a group, academics (an entry with
- * subject+plan, or legacy ≥1 subject), interests (≥3 chars), project pitch
- * (≥10 chars) — equal weight. Legacy stored workshop picks are ignored.
+ * sides of the product report the same number. SIX items for EVERY group
+ * since 2026-07-30 (interests and project pitch retired with their form
+ * inputs): name (first+last), grade, birth year (4 digits), current school,
+ * a group, academics (an entry with subject+plan, or legacy ≥1 subject) —
+ * equal weight. Legacy stored workshop picks are ignored.
  *
  * LOCKSTEP MIRRORS (R14): this definition is duplicated in
  * `app/dashboard/data.ts` (checklist — parent meter) and
@@ -192,8 +192,8 @@ export function dossierChecklist(
         asAcademics(f.academics).some(academicEntryComplete) ||
         f.subjects.length >= 1,
     },
-    { label: "The kid's interests", done: f.interests.trim().length >= 3 },
-    { label: "A project pitch", done: f.projectPitch.trim().length >= 10 },
+    // 2026-07-30: interests and project-pitch retired from the form and
+    // from all three checklist mirrors.
   ];
 }
 

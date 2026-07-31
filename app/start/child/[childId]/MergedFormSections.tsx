@@ -41,13 +41,14 @@
  * are complete Tailwind literals (the scanner rule).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   removeChildAction,
   saveFormStepAction,
   submitApplicationAction,
 } from "@/app/lib/funnel/actions/form-steps";
+import { askFullCoreAction } from "@/app/lib/funnel/actions/full-core";
 import { REVIEW_SCREEN, WAITLIST_SCREEN } from "@/app/lib/funnel/offer-rules";
 import {
   checklistChildForFields,
@@ -205,6 +206,9 @@ export type MergedFormSectionProps = {
   /** The composed project's door (server-loaded), for the group step's
    *  difference note. Null = no composed project. */
   projectGroupSlug: string | null;
+  /** The composed business itself (2026-07-30, item 31): the project step
+   *  displays its name and blurb. Null = not designed yet. */
+  project: { name: string; description: string } | null;
   /** The shell's single useTransition — one pending flag for the walk. */
   pending: boolean;
   run: (task: () => Promise<void>) => void;
@@ -392,13 +396,10 @@ export function MergedFormSection(props: MergedFormSectionProps) {
       return (
         <ProjectSection
           n={formStepNumber(step, facts)}
-          fields={fields}
-          frozen={frozen}
-          saveFrozen={saveFrozen}
+          project={props.project}
           pending={pending}
           notice={notice}
-          nextLabel={nextLabel}
-          onNext={saveThenGo}
+          onContinue={() => props.go(next)}
         />
       );
     case "review":
@@ -796,22 +797,33 @@ function AcademicsSection({
   nextLabel: string;
   onNext: (input: unknown) => void;
 }) {
-  // Legacy prefill (R14 old-shape drafts), IN-MEMORY: subjects seed the
-  // entries draft; the persisted `subjects` column is not writable through
-  // the per-step schema and retires with the store (Unit 9).
-  const [entries, setEntries] = useState<Academic[]>(() =>
-    fields.academics.length > 0
-      ? fields.academics
-      : fields.subjects.length > 0
-        ? fields.subjects.slice(0, 2).map((s) => ({ subject: s, plan: "", goal: "" }))
-        : [EMPTY_ENTRY]
+  // 2026-07-30 (items 29/30): Fast Math and Math are INCLUDED for every
+  // builder — preselected, locked; the family picks ONE plan for the pair.
+  // The other five subjects are the FULL ACADEMIC CORE: displayed in one
+  // card and asked about (email to admissions + CRM note), never picked
+  // here. The goal input, the add-another-subject bubble and the interests
+  // input are retired.
+  const [plan, setPlan] = useState<Academic["plan"]>(
+    () => fields.academics.find((a) => a.plan !== "")?.plan ?? ""
   );
-  const [interests, setInterests] = useState(fields.interests);
+  const [askState, setAskState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  useEffect(() => {
+    if (askState !== "sent") return;
+    // The green toast dissolves after a few seconds.
+    const t = setTimeout(() => setAskState("idle"), 4000);
+    return () => clearTimeout(t);
+  }, [askState]);
 
-  const updateEntry = (i: number, patch: Partial<Academic>) =>
-    setEntries((es) => es.map((e, j) => (j === i ? { ...e, ...patch } : e)));
-  const addEntry = () => setEntries((es) => [...es, EMPTY_ENTRY]);
-  const removeEntry = (i: number) => setEntries((es) => es.filter((_, j) => j !== i));
+  const ask = () => {
+    if (askState === "sending") return;
+    setAskState("sending");
+    void askFullCoreAction({ childId: fields.id })
+      .then((result) => setAskState(result.kind === "sent" ? "sent" : "error"))
+      .catch(() => setAskState("error"));
+  };
+
+  const corePair = ACADEMIC_SUBJECTS.slice(0, 2);
+  const fullCore = ACADEMIC_SUBJECTS.slice(2);
 
   return (
     <StepCard
@@ -819,132 +831,79 @@ function AcademicsSection({
       title="Academics"
       hint="We help you: Choose a subject (or 2) and a project the next year."
     >
-      <div className="space-y-5">
-        {entries.map((entry, i) => (
-          <div key={i} className="rounded-xl border border-line bg-paper-2/60 p-4">
-            <div className="flex items-center justify-between">
-              <p className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted">
-                Subject {i + 1} of 2
-              </p>
-              {entries.length > 1 && (
-                <button
-                  type="button"
-                  disabled={frozen}
-                  onClick={() => removeEntry(i)}
-                  aria-label={`Remove subject ${i + 1}`}
-                  className={`rounded font-mono text-xs text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
+      <div className="space-y-4">
+        {/* Line 1: the included pair — preselected, not editable. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {corePair.map((s) => (
+            <span
+              key={s}
+              aria-disabled
+              className="rounded-full border border-red bg-red px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] text-white"
+            >
+              {s} ✓
+            </span>
+          ))}
+          <span className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+            Included for every builder
+          </span>
+        </div>
 
-            {/* Subject pills in two rows (R4): math/science first, language
-                second — ACADEMIC_SUBJECTS is ordered to match. */}
-            <div className="mt-3 space-y-2">
-              {[ACADEMIC_SUBJECTS.slice(0, 3), ACADEMIC_SUBJECTS.slice(3)].map((row, r) => (
-                <div key={r} className="flex flex-wrap gap-2">
-                  {row.map((s) => {
-                    const on = entry.subject === s;
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        disabled={frozen}
-                        onClick={() => updateEntry(i, { subject: on ? "" : s })}
-                        aria-pressed={on}
-                        className={`rounded-full border px-3.5 py-1.5 font-mono text-xs uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${focusRing} ${
-                          on
-                            ? "border-red bg-red text-white"
-                            : "border-line-strong text-ink-soft hover:border-ink"
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-            <input
-              value={isListedSubject(entry.subject) ? "" : entry.subject}
-              disabled={frozen}
-              onChange={(e) => updateEntry(i, { subject: e.target.value })}
-              placeholder="Other subject…"
-              maxLength={120}
-              aria-label={`Other subject for entry ${i + 1}`}
-              className={`${inputCls} mt-3 h-10`}
-            />
-
-            {/* Plan cards — single-select within the entry */}
-            <div className="mt-4">
-              <span className={labelCls}>The plan</span>
-              <div
-                role="radiogroup"
-                aria-label={`Plan for subject ${i + 1}`}
-                className="grid gap-2 sm:grid-cols-3"
-              >
-                {ACADEMIC_PLANS.map((p) => {
-                  const on = entry.plan === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={on}
-                      disabled={frozen}
-                      onClick={() => updateEntry(i, { plan: p.id })}
-                      className={`rounded-xl border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${focusRing} ${
-                        on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
-                      }`}
-                    >
-                      <span className="font-display text-sm font-bold text-ink">{p.label}</span>
-                      <p className="mt-1 text-xs leading-5 text-ink-soft">{p.blurb}</p>
-                    </button>
-                  );
-                })}
-              </div>
-              {entry.subject.trim() !== "" && entry.plan === "" && (
-                <p className="mt-2 font-mono text-[0.7rem] text-red">
-                  Pick a plan to round out this subject.
-                </p>
-              )}
-            </div>
-
-            <div className="mt-4">
-              <Area
-                label="What do you want to accomplish with this Academic Project (optional)"
-                value={entry.goal}
-                onChange={(v) => updateEntry(i, { goal: v })}
-                placeholder="Where should this subject be a year from now?"
-                rows={2}
-                maxLength={500}
-                frozen={frozen}
-              />
-            </div>
-          </div>
-        ))}
-
-        {entries.length < 2 && (
+        {/* Line 2: the full academic core — one card, an ask not a pick. */}
+        <div className="rounded-xl border border-line bg-paper-2/60 p-4">
+          <p className="font-mono text-xs uppercase tracking-[0.08em] text-ink-soft">
+            {fullCore.join(" • ")}
+          </p>
           <button
             type="button"
-            disabled={frozen || entries[0].subject.trim() === ""}
-            onClick={addEntry}
-            className={`rounded-full border border-dashed border-line-strong px-4 py-2 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong ${focusRing}`}
+            onClick={ask}
+            disabled={pending || askState === "sending"}
+            className={`mt-3 inline-flex h-10 items-center justify-center rounded-full border border-red bg-white px-5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-red transition-colors hover:bg-red/5 disabled:cursor-wait disabled:opacity-60 ${focusRing}`}
           >
-            + Add another subject
+            {askState === "sending" ? "Sending…" : "Ask about the full academic core"}
           </button>
-        )}
+          {askState === "sent" && (
+            <p
+              role="status"
+              className="mt-3 rounded-xl border border-crm-green/40 bg-crm-green/10 px-4 py-2.5 text-sm font-semibold text-crm-green"
+            >
+              Message sent. We will reach out
+            </p>
+          )}
+          {askState === "error" && (
+            <p role="alert" className="mt-3 text-sm text-red">
+              That didn&apos;t send. Give it a moment and try again.
+            </p>
+          )}
+        </div>
 
-        <Area
-          label="What is your child into?"
-          value={interests}
-          onChange={setInterests}
-          placeholder="Dinosaurs, chess, building things, marine biology…"
-          rows={3}
-          maxLength={2000}
-          frozen={frozen}
-        />
+        {/* The ONE plan for the pair. */}
+        <div>
+          <span className={labelCls}>The plan</span>
+          <div role="radiogroup" aria-label="The plan" className="grid gap-2 sm:grid-cols-3">
+            {ACADEMIC_PLANS.map((p) => {
+              const on = plan === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  disabled={frozen}
+                  onClick={() => setPlan(p.id)}
+                  className={`rounded-xl border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${focusRing} ${
+                    on ? "border-red bg-red/5" : "border-line-strong bg-white hover:border-ink"
+                  }`}
+                >
+                  <span className="font-display text-sm font-bold text-ink">{p.label}</span>
+                  <p className="mt-1 text-xs leading-5 text-ink-soft">{p.blurb}</p>
+                </button>
+              );
+            })}
+          </div>
+          {plan === "" && (
+            <p className="mt-2 font-mono text-[0.7rem] text-red">Pick a plan for the pair.</p>
+          )}
+        </div>
       </div>
 
       {notice && (
@@ -959,10 +918,11 @@ function AcademicsSection({
           onNext({
             step: "academics",
             childId: fields.id,
-            academics: entries.filter(
-              (e) => e.subject.trim() !== "" || e.plan !== "" || e.goal.trim() !== ""
-            ),
-            interests,
+            // The locked pair, each carrying the ONE plan (goal retired).
+            academics: corePair.map((s) => ({ subject: s, plan, goal: "" })),
+            // The interests input is retired; the stored value passes
+            // through untouched.
+            interests: fields.interests,
           })
         }
         className={nextBtnCls}
@@ -1002,102 +962,49 @@ const GROUP_PROJECT_EXAMPLES: Record<string, string[]> = {
 
 function ProjectSection({
   n,
-  fields,
-  frozen,
-  saveFrozen,
+  project,
   pending,
   notice,
-  nextLabel,
-  onNext,
+  onContinue,
 }: {
   /** The per-child "0N" chip (2026-07-30: the build cohort skips group). */
   n: string;
-  fields: MergedFlowFields;
-  frozen: boolean;
-  saveFrozen: boolean;
+  project: { name: string; description: string } | null;
   pending: boolean;
   notice: string | null;
-  nextLabel: string;
-  onNext: (input: unknown) => void;
+  onContinue: () => void;
 }) {
-  const [pitch, setPitch] = useState(fields.projectPitch);
-  const [links, setLinks] = useState(fields.portfolioLinks);
-  const slug = fields.groupSlug ?? "";
-  const scholars = slug === "scholars";
-  const group = groupBySlug(slug);
-  const examples = GROUP_PROJECT_EXAMPLES[slug];
-
+  // 2026-07-30 (item 31): this step DISPLAYS the brainstormed business —
+  // the example-projects card, the 4–8 week idea input and the portfolio
+  // links input are retired. Pure navigation; nothing to save here.
   return (
     <StepCard
       n={n}
       title="Project & interests"
-      hint={
-        scholars
-          ? "The kid's own words are encouraged."
-          : "We'll help build projects based on your kid's interests. Enter a topic or interest area and an idea for a 4–8 week (or longer) project, working a few hours a week. We'll put together the answers from all the parents and build something amazing for you and your cohort."
-      }
+      hint="Thank you and your child for brainstorming a project. The details are below."
     >
-      <div className="space-y-4">
-        {!scholars && group && examples && (
-          <div className="rounded-xl border border-line bg-paper-2/60 p-4">
-            <p className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-muted">
-              Example projects for {group.name}
-            </p>
-            <ul className="mt-2 space-y-1.5">
-              {examples.map((ex) => (
-                <li key={ex} className="flex gap-2 text-sm leading-6 text-ink-soft">
-                  <span aria-hidden className="text-red">
-                    ·
-                  </span>
-                  {ex}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <Area
-          label={scholars ? "A year-long project idea" : "A 4–8 week project idea"}
-          value={pitch}
-          onChange={setPitch}
-          placeholder={
-            scholars
-              ? "One super interesting thing they'd love to spend a year building, researching, or shipping."
-              : "One super interesting thing they'd love to spend a few hours a week building, researching, or shipping."
-          }
-          rows={4}
-          maxLength={4000}
-          frozen={frozen}
-        />
-        <Field
-          label="Portfolio / achievement links (optional)"
-          value={links}
-          onChange={setLinks}
-          placeholder="A website, a video, a competition result…"
-          maxLength={2000}
-          frozen={frozen}
-        />
-      </div>
+      {project && (project.name.trim() !== "" || project.description.trim() !== "") ? (
+        <>
+          <h4 className="display text-2xl text-ink">
+            {project.name.trim() || "Your company"}
+          </h4>
+          {project.description.trim() !== "" && (
+            <p className="mt-2 text-sm leading-6 text-ink-soft">{project.description}</p>
+          )}
+        </>
+      ) : (
+        <p className="text-sm leading-6 text-ink-soft">
+          Your child&apos;s business appears here once it&apos;s designed in the build steps.
+        </p>
+      )}
 
       {notice && (
         <p role="alert" className="mt-4 text-sm text-red">
           {notice}
         </p>
       )}
-      <button
-        type="button"
-        disabled={pending || saveFrozen}
-        onClick={() =>
-          onNext({
-            step: "project",
-            childId: fields.id,
-            projectPitch: pitch,
-            portfolioLinks: links,
-          })
-        }
-        className={nextBtnCls}
-      >
-        {nextLabel}
+      <button type="button" disabled={pending} onClick={onContinue} className={nextBtnCls}>
+        Continue →
       </button>
     </StepCard>
   );
@@ -1111,7 +1018,9 @@ function ProjectSection({
  * Unit 5 schema split.
  */
 function formStepForLabel(label: string): MergedFormStep {
-  if (label === "The kid's interests") return "academics";
+  // 2026-07-30 (item 32): the First Profit row points at the project step,
+  // which displays the designed business.
+  if (label === "First Profit Idea #1") return "project";
   return stepForChecklistLabel(label);
 }
 
@@ -1136,7 +1045,12 @@ function ReviewSection({
   // SERVER truth only: the checklist reads the loaded row, so unsaved
   // keystrokes cannot fake completeness (the submit core applies the same
   // rule server-side — this render is its presentation).
-  const items = checklist(checklistChildForFields(fields));
+  // 2026-07-30 (item 32): the designed business renders as its own row —
+  // "First Profit Idea #1", checked off the hasProject fact.
+  const items = [
+    ...checklist(checklistChildForFields(fields)),
+    { label: "First Profit Idea #1", done: facts.hasProject },
+  ];
   const missing = items.filter((i) => !i.done);
   const complete = missing.length === 0;
   const terminal = terminalTreatment(facts);

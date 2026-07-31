@@ -185,16 +185,12 @@ export default function DashboardApp({
   const renderReserveCta = (c: Child, review?: { label: string; href: string }) => {
     const link = review ?? { label: "Review application", href: `/start/child/${c.id}` };
     const reserving = reservingId === c.id;
+    // Item 55 (2026-07-30): the outlined Review twin leads and the filled
+    // Reserve pill sits in the bottom-right — the primary CTA holds the same
+    // right-justified spot as every other card's single button (item 45).
     return (
       <>
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => reserveSeat(c.id)}
-            disabled={reserving}
-            className={`${bluePillClass} disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            {reserving ? "Opening checkout…" : "Reserve seat · $250"}
-          </button>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <a
             href={link.href}
             aria-disabled={reserving}
@@ -206,8 +202,15 @@ export default function DashboardApp({
           >
             {link.label}
           </a>
+          <button
+            onClick={() => reserveSeat(c.id)}
+            disabled={reserving}
+            className={`${bluePillClass} disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {reserving ? "Opening checkout…" : "Reserve seat · $250"}
+          </button>
         </div>
-        <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+        <p className="mt-2 text-right font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
           Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
         </p>
       </>

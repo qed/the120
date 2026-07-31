@@ -169,7 +169,9 @@ describe("every form-section control is pending-guarded (the shell's single useT
     const raw = read(SECTIONS);
     const controls = (raw.match(/<(input|select|textarea|button)\b/g) ?? []).length;
     const guards = (raw.match(/disabled=\{(frozen|pending)/g) ?? []).length;
-    expect(controls).toBeGreaterThan(15); // the port is not vacuous
+    // Item 57 shortened the form (email/photo/remove retired) — the balance
+    // rule is the invariant, not the count.
+    expect(controls).toBeGreaterThan(10); // the port is not vacuous
     expect(controls).toBe(guards);
   });
 
@@ -280,41 +282,21 @@ describe("read-only walks and the group step's window", () => {
   });
 });
 
-/* ─────────────── child removal (the retired StepReview capability) ─────────────── */
+/* ─────────────── child removal — RETIRED (item 57) ─────────────── */
 
-describe("the quiet remove control — basics only, unlocked walks only, confirm-then-act", () => {
+describe("the remove control is retired (item 57, 2026-07-30)", () => {
   const raw = read(SECTIONS);
-  const sections = stripComments(raw);
 
-  it("renders on the BASICS section only", () => {
-    expect((raw.match(/Remove this child/g) ?? []).length).toBe(1);
-    const basicsArm = raw.slice(
-      raw.indexOf("function BasicsSection("),
-      raw.indexOf("function GroupSection(")
-    );
-    expect(basicsArm).toContain("Remove this child");
-    expect(basicsArm).toContain("{canRemove && (");
-  });
-
-  it("only unlocked walks get the control (draft vocabulary, both kinds)", () => {
-    expect(sections).toContain("canRemove={!lockVerdict}");
-  });
-
-  it("confirm-then-act (the retired StepReview idiom), pending-guarded, admissions copy on refusal", () => {
-    const remove = sections.slice(
-      sections.indexOf("const remove = ()"),
-      sections.indexOf("const nextLabel")
-    );
-    expect(remove.length).toBeGreaterThan(0);
-    expect(remove).toMatch(/if \(pending\) return;/);
-    expect(remove).toContain("window.confirm(");
-    expect(remove).toContain("This cannot be undone.");
-    expect(remove).toContain("removeChildAction({ childId: fields.id })");
-    // Success leaves through a FULL navigation — this child's flow URL just
-    // died, so a client push into the dead route is the wrong tool.
-    expect(remove).toContain('window.location.assign("/dashboard")');
-    // The guard's refusal points at admissions — never retry copy.
-    expect(remove).toContain("Contact admissions@the120.school");
+  it("no remove control, no removeChildAction, no email/photo inputs", () => {
+    expect(raw).not.toContain("Remove this child");
+    expect(raw).not.toContain("removeChildAction");
+    expect(raw).not.toContain("Child's email");
+    expect(raw).not.toContain("FileReader");
+    // The stored values still pass through the basics save untouched — the
+    // schema keeps its fields, the family just no longer edits them here.
+    expect(raw).toContain("photo: fields.photo");
+    expect(raw).toContain("childEmail: fields.childEmail");
+    expect(raw).toContain("childEmailNone: fields.childEmailNone");
   });
 });
 

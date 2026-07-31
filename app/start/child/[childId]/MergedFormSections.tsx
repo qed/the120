@@ -44,7 +44,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  removeChildAction,
   saveFormStepAction,
   submitApplicationAction,
 } from "@/app/lib/funnel/actions/form-steps";
@@ -72,7 +71,6 @@ import {
 } from "@/app/dashboard/data";
 import {
   birthYearForGrade,
-  childEmailPatch,
   stepForChecklistLabel,
 } from "@/app/dashboard/wizard-rules";
 import { groupBySlug, groups } from "@/app/lib/site";
@@ -132,8 +130,8 @@ function StepCard({
 /** Item 48 (2026-07-30): a REQUIRED box that still needs filling carries a
  *  bold border; it relaxes to the normal border once 3+ characters are in.
  *  Applied only while the walk is editable — a read-only walkthrough must
- *  not nag. */
-const needsFillCls = "border-2 border-ink";
+ *  not nag. Item 57: pure BLACK so the unfilled boxes really stand out. */
+const needsFillCls = "border-2 border-black";
 const stillNeedsFill = (required: boolean, value: string, frozen: boolean) =>
   required && !frozen && value.trim().length < 3;
 
@@ -321,33 +319,49 @@ export function MergedFormSection(props: MergedFormSectionProps) {
   };
 
   /**
-   * Child removal (the retired StepReview capability, restored): confirm()
-   * then act — the quiet-destructive idiom — pending-guarded through the
-   * shell's one transition. Success navigates with a FULL load
-   * (window.location.assign): this child's flow URL just died, so a client
-   * push into the dead route is the wrong tool. The DB delete guard is the
-   * guarantee; `refused` renders the admissions off-ramp, never retry copy.
+   * Item 58 (2026-07-30): 02 Academics is the LAST editable step — its CTA
+   * saves the step and then submits the application in one motion, landing
+   * on the received page. Server completeness still rules: an incomplete
+   * dossier bounces with the same notice the review step used. On a
+   * read-only walk the button stays pure navigation.
    */
-  const remove = () => {
+  const saveThenSubmit = (input: unknown) => {
     if (pending) return;
-    if (
-      !window.confirm(
-        `Remove ${fields.firstName.trim() || "this child"}'s application? This cannot be undone.`
-      )
-    ) {
+    if (!editable) {
+      props.go(next);
       return;
     }
     setNotice(null);
     props.run(async () => {
       try {
-        const result = await removeChildAction({ childId: fields.id });
-        if (result.kind === "removed") {
-          window.location.assign("/dashboard");
+        const saved = await saveFormStepAction(input);
+        if (saved.kind === "locked") {
+          props.onLocked();
           return;
         }
-        if (result.kind === "refused") {
-          setNotice(
-            "This application is in review or has a paid deposit. Contact admissions@the120.school to remove it."
+        if (saved.kind !== "saved") {
+          setNotice(saved.kind === "unauthenticated" ? SESSION_COPY : RETRY_COPY);
+          return;
+        }
+        const result = await submitApplicationAction({ childId: fields.id });
+        if (result.kind === "submitted") {
+          props.onSubmitted();
+          return;
+        }
+        if (result.kind === "locked") {
+          props.onLocked();
+          return;
+        }
+        if (result.kind === "incomplete") {
+          setNotice("A few items still need finishing before the application can go in.");
+          return;
+        }
+        if (result.kind === "finish_build") {
+          props.go(
+            initialStepForFacts({
+              doorConfirmed: facts.doorConfirmed,
+              hasProject: facts.hasProject,
+            })
           );
           return;
         }
@@ -367,15 +381,11 @@ export function MergedFormSection(props: MergedFormSectionProps) {
           fields={fields}
           frozen={frozen}
           saveFrozen={saveFrozen}
+          editable={editable}
           pending={pending}
           notice={notice}
           nextLabel={nextLabel}
           onNext={saveThenGo}
-          // The quiet remove control renders on the basics step only, and
-          // only while the walk is NOT locked (draft vocabulary, both
-          // kinds) — a locked walk's off-ramp is admissions, not a delete.
-          canRemove={!lockVerdict}
-          onRemove={remove}
         />
       );
     case "group":
@@ -400,10 +410,10 @@ export function MergedFormSection(props: MergedFormSectionProps) {
           fields={fields}
           frozen={frozen}
           saveFrozen={saveFrozen}
+          editable={editable}
           pending={pending}
           notice={notice}
-          nextLabel={nextLabel}
-          onNext={saveThenGo}
+          onNext={saveThenSubmit}
         />
       );
     case "project":
@@ -437,50 +447,41 @@ function BasicsSection({
   fields,
   frozen,
   saveFrozen,
+  editable,
   pending,
   notice,
   nextLabel,
   onNext,
-  canRemove,
-  onRemove,
 }: {
   fields: MergedFlowFields;
   frozen: boolean;
   saveFrozen: boolean;
+  editable: boolean;
   pending: boolean;
   notice: string | null;
   nextLabel: string;
   onNext: (input: unknown) => void;
-  canRemove: boolean;
-  onRemove: () => void;
 }) {
+  // Item 57 (2026-07-30): child's email, photo, and the remove-this-child
+  // control are retired — the application is shorter. The stored values
+  // pass through the save untouched.
   const [draft, setDraft] = useState(() => ({
     firstName: fields.firstName,
     lastName: fields.lastName,
     grade: (fields.grade ?? "") as number | "",
     birthYear: fields.birthYear,
     currentSchool: fields.currentSchool,
-    photo: fields.photo,
-    childEmail: fields.childEmail,
-    childEmailNone: fields.childEmailNone,
   }));
   const set = (patch: Partial<typeof draft>) => setDraft((d) => ({ ...d, ...patch }));
-  // A FileReader read is ASYNC: Save & continue racing an in-flight read
-  // would persist the draft WITHOUT the photo the family just picked —
-  // silently. `photoReading` holds the Next button until onload/onerror
-  // resolves (the disabled state is the whole treatment; nothing fancy).
-  const [photoReading, setPhotoReading] = useState(false);
-  const onPhoto = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    setPhotoReading(true);
-    reader.onload = () => {
-      set({ photo: String(reader.result) });
-      setPhotoReading(false);
-    };
-    reader.onerror = () => setPhotoReading(false);
-    reader.readAsDataURL(file);
-  };
+  // Item 59: Save & continue stays greyed until every required field is
+  // filled (the same facts the server checklist verifies). Read-only walks
+  // keep the button live — there it is pure navigation.
+  const complete =
+    draft.firstName.trim() !== "" &&
+    draft.lastName.trim() !== "" &&
+    draft.grade !== "" &&
+    /^\d{4}$/.test(draft.birthYear.trim()) &&
+    draft.currentSchool.trim() !== "";
 
   return (
     <StepCard n="01" title="Basics" hint="Who is this candidate for the 120?">
@@ -545,63 +546,6 @@ function BasicsSection({
             required
           />
         </div>
-        {/* R48: the child's email, with "Don't have one" recording the flag
-            without an address. Deliberately not a checklist item. */}
-        <div className="sm:col-span-2">
-          <Field
-            label="Child's email (optional)"
-            value={draft.childEmail}
-            onChange={(v) => set(childEmailPatch({ email: v }, draft))}
-            placeholder="Their own address, if they have one"
-            frozen={frozen}
-          />
-          <label className="mt-2 flex items-center gap-2 text-sm text-ink-soft">
-            <input
-              type="checkbox"
-              checked={draft.childEmailNone}
-              disabled={frozen}
-              onChange={(e) => set(childEmailPatch({ none: e.target.checked }, draft))}
-              className="h-4 w-4 accent-red"
-            />
-            Don&apos;t have one
-          </label>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <span className={labelCls}>Photo (optional)</span>
-        <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
-            {draft.photo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={draft.photo} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <span className="font-mono text-lg">
-                {(draft.firstName[0] || "?").toUpperCase()}
-              </span>
-            )}
-          </div>
-          <label className="cursor-pointer rounded-full border border-line-strong px-4 py-2 font-mono text-xs uppercase tracking-[0.1em] text-ink-soft hover:border-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue">
-            {draft.photo ? "Replace" : "Upload"}
-            <input
-              type="file"
-              accept="image/*"
-              disabled={frozen}
-              className="sr-only"
-              onChange={(e) => onPhoto(e.target.files?.[0])}
-            />
-          </label>
-          {draft.photo && (
-            <button
-              type="button"
-              disabled={frozen}
-              onClick={() => set({ photo: null })}
-              className={`rounded font-mono text-xs uppercase tracking-[0.1em] text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
-            >
-              Remove
-            </button>
-          )}
-        </div>
       </div>
 
       {notice && (
@@ -611,7 +555,7 @@ function BasicsSection({
       )}
       <button
         type="button"
-        disabled={pending || saveFrozen || photoReading}
+        disabled={pending || saveFrozen || (editable && !complete)}
         onClick={() =>
           onNext({
             step: "basics",
@@ -621,31 +565,17 @@ function BasicsSection({
             grade: draft.grade === "" ? null : draft.grade,
             birthYear: draft.birthYear,
             currentSchool: draft.currentSchool,
-            photo: draft.photo,
-            childEmail: draft.childEmail,
-            childEmailNone: draft.childEmailNone,
+            // Item 57: the email/photo inputs are retired — stored values
+            // pass through untouched.
+            photo: fields.photo,
+            childEmail: fields.childEmail,
+            childEmailNone: fields.childEmailNone,
           })
         }
         className={nextBtnCls}
       >
         {nextLabel}
       </button>
-
-      {/* The quiet-destructive remove (the retired StepReview's idiom):
-          basics only, unlocked walks only — confirm() lives in the
-          dispatcher's handler, the act is pending-guarded. */}
-      {canRemove && (
-        <div className="mt-8 border-t border-line pt-4">
-          <button
-            type="button"
-            disabled={pending}
-            onClick={onRemove}
-            className={`rounded font-mono text-[0.7rem] uppercase tracking-[0.1em] text-muted hover:text-red disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
-          >
-            Remove this child
-          </button>
-        </div>
-      )}
     </StepCard>
   );
 }
@@ -800,9 +730,9 @@ function AcademicsSection({
   fields,
   frozen,
   saveFrozen,
+  editable,
   pending,
   notice,
-  nextLabel,
   onNext,
 }: {
   /** The per-child "0N" chip (2026-07-30: the build cohort skips group). */
@@ -810,9 +740,9 @@ function AcademicsSection({
   fields: MergedFlowFields;
   frozen: boolean;
   saveFrozen: boolean;
+  editable: boolean;
   pending: boolean;
   notice: string | null;
-  nextLabel: string;
   onNext: (input: unknown) => void;
 }) {
   // 2026-07-30 (items 29/30): Fast Math and Math are INCLUDED for every
@@ -847,7 +777,7 @@ function AcademicsSection({
     <StepCard
       n={n}
       title="Academics"
-      hint="We help you: Choose a subject (or 2) and a project the next year."
+      hint="Fast Math to be a better negotiator. General Math so you can think strategically about your business."
     >
       <div className="space-y-4">
         {/* Line 1: the included pair — preselected, not editable. */}
@@ -918,9 +848,6 @@ function AcademicsSection({
               );
             })}
           </div>
-          {plan === "" && (
-            <p className="mt-2 font-mono text-[0.7rem] text-red">Pick a plan for the pair.</p>
-          )}
         </div>
       </div>
 
@@ -929,9 +856,12 @@ function AcademicsSection({
           {notice}
         </p>
       )}
+      {/* Item 58: the last editable step submits. Item 59: greyed until the
+          plan is picked (the red nag line is retired — the disabled state
+          says it). Read-only walks keep pure navigation. */}
       <button
         type="button"
-        disabled={pending || saveFrozen}
+        disabled={pending || saveFrozen || (editable && plan === "")}
         onClick={() =>
           onNext({
             step: "academics",
@@ -945,7 +875,7 @@ function AcademicsSection({
         }
         className={nextBtnCls}
       >
-        {nextLabel}
+        {!editable ? "Continue →" : pending ? "Submitting…" : "Submit for review"}
       </button>
     </StepCard>
   );

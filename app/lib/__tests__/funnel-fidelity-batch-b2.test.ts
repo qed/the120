@@ -228,9 +228,16 @@ describe("drift 13: compose — loading state, page shape, controls, gold note, 
     expect(shell).not.toContain("Start over");
   });
 
-  it("the interstitial is gone: Shape my project composes directly; the no-view arm is recovery only", () => {
+  it("the interstitial is gone; Shape my project acknowledges IN PLACE and gates on See the results (item 42)", () => {
     expect(shell).not.toContain("Time to make it real");
-    expect(shell).toMatch(/go\(stepNeighbour\("quiz", "next"\)\);\s*if \(!composeView && !isLocked\) buildProject\(\);/);
+    // The click sets the working state and composes WITHOUT navigating —
+    // navigating mid-action could drop the AI response (the stuck-click
+    // report). The See-the-results gate owns the navigation.
+    expect(shell).toMatch(/setShaping\("working"\);\s*if \(!composeView\) buildProject\(\);/);
+    expect(shell).toContain("See the results →");
+    expect(shell).toMatch(/setShaping\(null\);\s*go\(stepNeighbour\("quiz", "next"\)\);/);
+    // The working screen carries a real animation.
+    expect(shell).toContain("animate-spin");
   });
 
   it("the gold founders-pivot note and the (out of 25) CTA render", () => {

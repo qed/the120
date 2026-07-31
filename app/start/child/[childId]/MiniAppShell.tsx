@@ -365,6 +365,13 @@ export function MiniAppShell({
     }
   }
   const [composeNotice, setComposeNotice] = useState<string | null>(null);
+  // Item 42 (2026-07-30): the Shape-my-project handshake. "working" renders
+  // the in-place animation the moment the click lands; "done" holds the
+  // "See the results →" gate. The navigation to the compose step happens
+  // ONLY from that gate — navigating while the server action was in flight
+  // could drop its response on the floor (Peter's stuck-click report; the
+  // compose itself succeeded server-side).
+  const [shaping, setShaping] = useState<null | "working" | "done">(null);
 
   // What the current `answers` were seeded FROM. Re-advancing through the
   // templates step with the SAME choice must not re-seed — a child who edited
@@ -432,6 +439,7 @@ export function MiniAppShell({
     setComposeDraft(null);
     setComposeNotice(null);
     setEditingSection(null);
+    setShaping(null);
   };
 
   /**
@@ -564,21 +572,33 @@ export function MiniAppShell({
     if (isLocked) return;
     setComposeNotice(null);
     startTransition(async () => {
-      const result = await composeProjectAction({
-        childId: child.id,
-        templateId: validTemplateId === OWN_IDEA.id ? null : validTemplateId,
-        answers: {
-          what: answers.what ?? "",
-          who: answers.who ?? "",
-          offer: answers.offer ?? "",
-          ...(answers.spark?.trim() ? { spark: answers.spark } : {}),
-        },
-      });
+      let result: Awaited<ReturnType<typeof composeProjectAction>>;
+      try {
+        result = await composeProjectAction({
+          childId: child.id,
+          templateId: validTemplateId === OWN_IDEA.id ? null : validTemplateId,
+          answers: {
+            what: answers.what ?? "",
+            who: answers.who ?? "",
+            offer: answers.offer ?? "",
+            ...(answers.spark?.trim() ? { spark: answers.spark } : {}),
+          },
+        });
+      } catch {
+        // A rejected action (network) must never strand the working screen.
+        setShaping(null);
+        setComposeNotice("That didn't work. Give it a second and tap again.");
+        return;
+      }
       if (result.kind === "composed" || result.kind === "exists") {
         setComposeView(result.view);
         setComposeDraft(result.view.project);
+        // Item 42: hold at the "See the results →" gate — the navigation to
+        // the company page is the gate's, not this handler's.
+        setShaping("done");
         return;
       }
+      setShaping(null);
       if (result.kind === "input_rejected") {
         // Never "failed": the answer needs another look, that's all.
         setQuizNotice("A couple of answers need another look. Finish them and try again.");
@@ -936,7 +956,55 @@ export function MiniAppShell({
           </section>
         )}
 
-        {step === "quiz" && confirmedSlug && (
+        {/* Item 42 (2026-07-30): the Shape-my-project handshake, IN PLACE.
+            "working" acknowledges the click the instant it lands; "done"
+            holds the See-the-results gate. Navigation happens only from
+            the gate, so it can never race the AI action's response. */}
+        {step === "quiz" && confirmedSlug && shaping === "working" && (
+          <section className="flex flex-col items-center py-16 text-center">
+            <span className="flex h-14 w-14 animate-pulse items-center justify-center rounded-2xl bg-current">
+              <Image src="/path-logo.svg" alt="" width={30} height={28} unoptimized />
+            </span>
+            <span
+              aria-hidden
+              className="mt-6 h-8 w-8 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70"
+            />
+            <h1 className="mt-5 font-path-display text-2xl font-semibold leading-tight">
+              {COMPOSE_UI_COPY.loadingTitle}
+            </h1>
+            <p className="mt-2 max-w-xs text-[13px] leading-5 opacity-75">
+              {COMPOSE_UI_COPY.loadingBody}
+            </p>
+          </section>
+        )}
+
+        {step === "quiz" && confirmedSlug && shaping === "done" && (
+          <section className="flex flex-col items-center py-16 text-center">
+            <span
+              aria-hidden
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-crm-green text-2xl text-white"
+            >
+              ✓
+            </span>
+            <h1 className="mt-5 font-path-display text-2xl font-semibold leading-tight">
+              Your company page is ready.
+            </h1>
+            <Button
+              skin={skin}
+              size="lg"
+              disabled={pending}
+              onClick={() => {
+                setShaping(null);
+                go(stepNeighbour("quiz", "next"));
+              }}
+              className="mt-7 w-full"
+            >
+              See the results →
+            </Button>
+          </section>
+        )}
+
+        {step === "quiz" && confirmedSlug && shaping === null && (
           <section>
             <h1 className="font-path-display text-3xl font-semibold leading-tight">
               Your four questions.
@@ -983,6 +1051,7 @@ export function MiniAppShell({
               })}
             </div>
             {quizNotice && <p className="mt-4 text-sm opacity-80">{quizNotice}</p>}
+            {composeNotice && <p className="mt-4 text-sm opacity-80">{composeNotice}</p>}
             <Button
               skin={skin}
               size="lg"
@@ -996,12 +1065,16 @@ export function MiniAppShell({
                   return;
                 }
                 setQuizNotice(null);
-                // Straight to the project page (2026-07-30): the interstitial
-                // "Time to make it real" stop is retired — Shape my project
-                // kicks the compose off and lands on the loading state, then
-                // the composed page.
-                go(stepNeighbour("quiz", "next"));
-                if (!composeView && !isLocked) buildProject();
+                // Item 42: the click is acknowledged IN PLACE — working
+                // animation, then the See-the-results gate. A locked review
+                // walk stays pure navigation.
+                if (isLocked) {
+                  go(stepNeighbour("quiz", "next"));
+                  return;
+                }
+                setShaping("working");
+                if (!composeView) buildProject();
+                else setShaping("done");
               }}
               className="mt-7 w-full"
             >

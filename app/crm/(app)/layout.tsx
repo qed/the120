@@ -36,8 +36,15 @@ export default async function CrmAppLayout({
   return (
     <ToastProvider>
       <div className="flex min-h-screen flex-col bg-crm-bg text-crm-ink">
-        <StaffBar application="crm" actorUserId={staff.staffId} />
-        <CrmChrome seatsRemaining={seatsRemaining} />
+        {/* Item 40 (2026-07-30): ONE floating blue backend nav — the home
+            nav's floating-card geometry, the CRM's blue, both former bars
+            (staff identity row + CRM band + tabs) combined inside it. */}
+        <div className="sticky top-[18px] z-40 mx-5 mt-[18px] print:hidden">
+          <div className="overflow-hidden rounded-[14px] bg-crm-blue shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
+            <StaffBar application="crm" actorUserId={staff.staffId} />
+            <CrmChrome seatsRemaining={seatsRemaining} />
+          </div>
+        </div>
         <main className="flex-1">{children}</main>
       </div>
     </ToastProvider>

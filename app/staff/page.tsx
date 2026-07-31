@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import Nav from "@/app/components/Nav";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { getSeatsRemaining } from "@/app/lib/seats";
 import { SEATS_REMAINING } from "@/app/lib/site";
@@ -69,8 +68,8 @@ export default async function StaffHubPage() {
 
   return (
     <>
-    {/* Item 35 (2026-07-30): the ONE global floating nav, same as home. */}
-    <Nav />
+    {/* Item 40 (2026-07-30): the nav is the layout's floating BLUE staff
+        bar — the white marketing nav (item 35) is retired here. */}
     <main className="mx-auto w-full max-w-3xl px-6 py-12">
       <h1 className="font-path-display text-2xl text-hq-ink">Staff</h1>
       <p className="mt-2 text-sm text-hq-ink-soft">

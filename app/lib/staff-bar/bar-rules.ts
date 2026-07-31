@@ -404,15 +404,17 @@ export type StaffBarSkin = {
  * one-line change to this table plus one line in the test, by design.
  */
 const STAFF_BAR_SKINS: Record<"crm" | "hq", StaffBarSkin> = {
+  // 2026-07-30 (item 40): the CRM row paints ON-BLUE — it now lives inside
+  // the floating blue backend card, one visual bar with the CRM band.
   crm: {
-    bar: "border-b border-crm-line bg-crm-card text-crm-ink",
-    label: "font-mono text-[11px] tracking-[0.12em] text-crm-muted",
-    link: "text-crm-muted hover:text-crm-ink focus-visible:outline-crm-blue",
-    email: "font-mono text-[10.5px] text-crm-faint",
-    signOut: "text-crm-muted hover:text-crm-red focus-visible:outline-crm-blue",
+    bar: "border-b border-crm-card/20 bg-crm-blue text-crm-card",
+    label: "font-mono text-[11px] tracking-[0.12em] text-crm-card/75",
+    link: "text-crm-card/75 hover:text-crm-card focus-visible:outline-crm-card",
+    email: "font-mono text-[10.5px] text-crm-card/75",
+    signOut: "text-crm-card/80 hover:text-crm-card focus-visible:outline-crm-card",
     chipQueued: "bg-crm-blush text-crm-ink",
     chipAttention: "bg-crm-red text-crm-card",
-    message: "text-crm-red",
+    message: "text-crm-blush",
   },
   hq: {
     bar: "border-b border-hq-border bg-hq-canvas/95 text-hq-ink backdrop-blur",
@@ -428,7 +430,9 @@ const STAFF_BAR_SKINS: Record<"crm" | "hq", StaffBarSkin> = {
 
 const APPLICATION_SKINS: Record<StaffBarApplication, "crm" | "hq"> = {
   crm: "crm",
-  staff: "hq",
+  // 2026-07-30 (item 40, the anticipated one-line move): /staff takes the
+  // CRM (blue backend) set so staff know they've left the parent site.
+  staff: "crm",
   fw: "hq",
 };
 

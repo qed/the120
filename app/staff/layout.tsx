@@ -41,7 +41,14 @@ export default async function StaffLayout({
 
   return (
     <div className="min-h-screen bg-hq-canvas font-path-body text-hq-ink">
-      <StaffBar application="staff" actorUserId={staff.staffId} />
+      {/* Item 40 (2026-07-30): ONE floating blue backend nav — the home
+          nav's floating-card geometry with the CRM's blue skin, so staff
+          know they've left the parent site. No marketing links here. */}
+      <div className="sticky top-[18px] z-40 mx-5 mt-[18px] print:hidden">
+        <div className="overflow-hidden rounded-[14px] bg-crm-blue shadow-[0_4px_18px_rgba(19,20,22,0.14)]">
+          <StaffBar application="staff" actorUserId={staff.staffId} />
+        </div>
+      </div>
       {children}
     </div>
   );

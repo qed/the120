@@ -127,9 +127,9 @@ export const PROGRESS_HEADING = "Examples of progress so far";
  *  far, replacing the earlier criterion-cited stats. */
 export function statStrip(): RevealStat[] {
   return [
-    { value: "60", label: "a 60 second pitch, perfected" },
-    { value: "40", label: "outreach attempts to non-family" },
-    { value: "20", label: "nos received, logged and learned from" },
+    { value: "65", label: "a 60 second pitch, perfected" },
+    { value: "37", label: "outreach attempts to non-family" },
+    { value: "23", label: "nos received, logged and learned from" },
   ];
 }
 

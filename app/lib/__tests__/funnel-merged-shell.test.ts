@@ -326,7 +326,10 @@ describe("the review step's Unit-6 modes and the per-cohort backward terminal", 
   it("submit mode: complete → submitApplicationAction; success navigates to /start/review", () => {
     expect(sections).toContain("submitApplicationAction({ childId: fields.id })");
     expect(sections).toContain("props.onSubmitted()");
-    expect(shell).toMatch(/onSubmitted=\{\(\) => router\.push\("\/start\/review"\)\}/);
+    // Item 50: the push carries WHO was just submitted (?child=<id>).
+    expect(shell).toMatch(
+      /onSubmitted=\{\(\) => router\.push\(`\/start\/review\?child=\$\{child\.id\}`\)\}/
+    );
     // The Next-16 learning's race is push()+refresh() PAIRED — the shell
     // must not pair them here.
     expect(shell).not.toMatch(/push\("\/start\/review"\);\s*router\.refresh/);

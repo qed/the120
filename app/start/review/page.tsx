@@ -27,7 +27,11 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "In Review — The 120" };
 
-export default async function ReviewPage() {
+export default async function ReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const supabase = await supabaseServer();
   const {
     data: { user },
@@ -36,13 +40,21 @@ export default async function ReviewPage() {
 
   const { data: rows } = await supabase
     .from("children")
-    .select("first_name, status, applicant_state")
+    .select("id, first_name, status, applicant_state")
     .neq("status", "draft");
   const children = rows ?? [];
   if (children.length === 0) redirect("/dashboard");
 
+  // Item 50 (2026-07-30): when arriving straight from a submit, ?child=
+  // names WHO was just submitted — the page speaks about that one child,
+  // even when a sibling's application is also in.
+  const params = await searchParams;
+  const justSubmittedId =
+    typeof params.child === "string" ? params.child : null;
+
   const seatsRemaining = await getSeatsRemaining();
   const resolved = children.map((c) => ({
+    id: String(c.id),
     name: String(c.first_name ?? "").trim(),
     destination: postSubmitDestination({
       applicantState: (c.applicant_state as string | null) ?? null,
@@ -57,7 +69,10 @@ export default async function ReviewPage() {
     );
   }
 
-  const inReview = resolved.filter((c) => c.destination === "review" && c.name);
+  const allInReview = resolved.filter((c) => c.destination === "review" && c.name);
+  // The one just submitted outranks the roll-call (item 50).
+  const justSubmitted = allInReview.find((c) => c.id === justSubmittedId);
+  const inReview = justSubmitted ? [justSubmitted] : allInReview;
   const offered = resolved.filter((c) => c.destination === "dashboard" && c.name);
 
   return (

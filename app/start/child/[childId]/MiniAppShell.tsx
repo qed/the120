@@ -1538,7 +1538,9 @@ export function MiniAppShell({
               // redirects server-side). The Next-16 race the 2026-07-28
               // learning names is push()+refresh() PAIRED — this is a bare
               // push to a force-dynamic route, the legitimate form.
-              onSubmitted={() => router.push("/start/review")}
+              // Item 50 (2026-07-30): carry WHO was just submitted, so the
+              // received page speaks about that one child only.
+              onSubmitted={() => router.push(`/start/review?child=${child.id}`)}
             />
           </div>
         )}

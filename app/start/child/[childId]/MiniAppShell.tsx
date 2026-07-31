@@ -694,7 +694,42 @@ export function MiniAppShell({
             in-flight confirm/compose resolves with an unconditional go(),
             which would silently override a Back the user just made. */}
         <div className="mb-6">
-          {step === "handoff" ? (
+          {/* Item 62 (2026-07-30): the read-only walkthrough gets the FULL
+              nav row in the Back slot — Back on the left, Back to Dashboard
+              in the middle, Next on the right. The walk's own neighbour
+              rules drive both ends; a missing neighbour hides its button. */}
+          {isLocked ? (
+            (() => {
+              const wBack = mergedStepNeighbour(step, "back", merged.facts);
+              const wNext = mergedStepNeighbour(step, "next", merged.facts);
+              return (
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    onClick={() => wBack && go(wBack)}
+                    disabled={pending || wBack === null}
+                    className={`${BACK_CLASSES} ${wBack === null ? "invisible" : ""}`}
+                  >
+                    ← BACK
+                  </button>
+                  <a
+                    href="/dashboard"
+                    aria-disabled={pending || undefined}
+                    tabIndex={pending ? -1 : undefined}
+                    className={`${BACK_CLASSES} ${pending ? "pointer-events-none opacity-30" : ""}`}
+                  >
+                    BACK TO DASHBOARD
+                  </a>
+                  <button
+                    onClick={() => wNext && go(wNext)}
+                    disabled={pending || wNext === null}
+                    className={`${BACK_CLASSES} ${wNext === null ? "invisible" : ""}`}
+                  >
+                    NEXT →
+                  </button>
+                </div>
+              );
+            })()
+          ) : step === "handoff" ? (
             <a
               href="/start/children"
               aria-disabled={pending || undefined}

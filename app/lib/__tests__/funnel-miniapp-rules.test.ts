@@ -754,9 +754,12 @@ describe("the shell's wiring — what only a source scan can pin here", () => {
     // gate's pre-compose redirect cohort — and unified-flow U8's
     // seat-screen CTA (holdSeatCta → the dashboard reserve block), which
     // only renders on a nextStepsReachable list (offered+), also never
-    // pre-compose. Any NEW pre-compose dashboard link must carry ?stay=1;
-    // this pins the count so adding one forces a decision.
-    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(2);
+    // pre-compose. THREE since item 62: the locked walkthrough's middle
+    // "BACK TO DASHBOARD" control — locked means submitted+, never a member
+    // of the pre-compose redirect cohort. Any NEW pre-compose dashboard
+    // link must carry ?stay=1; this pins the count so adding one forces a
+    // decision.
+    expect((shell.match(/\/dashboard/g) ?? []).length).toBe(3);
     expect(shell).toMatch(/href="\/dashboard"/);
   });
 

@@ -206,6 +206,12 @@ export type MergedFlowFacts = {
  * pre-Unit-9 dark shape, kept compiled) → exactly the pre-merge
  * `MINIAPP_STEPS`.
  */
+/** Item 52 (2026-07-30): the "First Profit Idea #1" form step is an extra
+ *  click — the compose page already shows the company — so NO walk contains
+ *  it. It stays in the wizard vocabulary (the lockstep contract) but never
+ *  in a child's list. */
+const FORM_STEPS_IN_WALK = MERGED_FORM_STEPS.filter((s) => s !== "project");
+
 export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] {
   if (!facts.mergeFlagOn) return MINIAPP_STEPS;
   const list: MergedStep[] = [];
@@ -214,9 +220,9 @@ export function stepListForChild(facts: MergedFlowFacts): readonly MergedStep[] 
     // 2026-07-30 (Peter): the door pick earlier in the flow IS the group
     // choice — the group form step is SKIPPED for the build cohort. Legacy
     // children (no build steps) keep it: it is their only group surface.
-    list.push(...MERGED_FORM_STEPS.filter((s) => s !== "group"));
+    list.push(...FORM_STEPS_IN_WALK.filter((s) => s !== "group"));
   } else {
-    list.push(...MERGED_FORM_STEPS);
+    list.push(...FORM_STEPS_IN_WALK);
   }
   if (facts.nextStepsReachable) list.push(...MERGED_NEXT_STEPS);
   return list;

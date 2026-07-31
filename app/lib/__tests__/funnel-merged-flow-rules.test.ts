@@ -197,35 +197,38 @@ describe("stepListForChild", () => {
     ).toBe(MINIAPP_STEPS);
   });
 
-  it("funnel child, gate closed: build + seam + form (group SKIPPED, 2026-07-30), no next-steps", () => {
+  it("funnel child, gate closed: build + seam + form (group AND project SKIPPED, items 52), no next-steps", () => {
     expect(stepListForChild(facts({ applicantState: "project_created" }))).toEqual([
       ...MINIAPP_STEPS,
       "seam",
-      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group" && s !== "project"),
     ]);
   });
 
-  it("funnel child, gate open: next-steps append after review (group still skipped)", () => {
+  it("funnel child, gate open: next-steps append after review (group + project still skipped)", () => {
     expect(
       stepListForChild(facts({ applicantState: "offered", nextStepsReachable: true }))
     ).toEqual([
       ...MINIAPP_STEPS,
       "seam",
-      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group" && s !== "project"),
       ...MERGED_NEXT_STEPS,
     ]);
   });
 
   it("legacy child: form steps only — build steps simply absent, not greyed", () => {
     expect(stepListForChild(facts({ status: "submitted" }))).toEqual([
-      ...MERGED_FORM_STEPS,
+      ...MERGED_FORM_STEPS.filter((s) => s !== "project"),
     ]);
   });
 
   it("legacy offered child: form + next-steps (gate spans both vocabularies)", () => {
     expect(
       stepListForChild(facts({ status: "offered", nextStepsReachable: true }))
-    ).toEqual([...MERGED_FORM_STEPS, ...MERGED_NEXT_STEPS]);
+    ).toEqual([
+      ...MERGED_FORM_STEPS.filter((s) => s !== "project"),
+      ...MERGED_NEXT_STEPS,
+    ]);
   });
 });
 

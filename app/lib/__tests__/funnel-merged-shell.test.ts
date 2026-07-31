@@ -132,11 +132,12 @@ describe("every MergedStep has a render arm when the flag is on", () => {
     const full = stepListForChild(
       facts({ applicantState: "offered", nextStepsReachable: true })
     );
-    // 2026-07-30: the build cohort's walk skips the group form step.
+    // 2026-07-30: the build cohort's walk skips the group form step; item 52
+    // dropped the project step from EVERY walk.
     expect([...full]).toEqual([
       ...MINIAPP_STEPS,
       "seam",
-      ...MERGED_FORM_STEPS.filter((s) => s !== "group"),
+      ...MERGED_FORM_STEPS.filter((s) => s !== "group" && s !== "project"),
       ...MERGED_NEXT_STEPS,
     ]);
     // Every member of that walk is either a shell arm, a section case, or

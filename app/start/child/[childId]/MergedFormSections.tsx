@@ -1035,10 +1035,10 @@ function ProjectSection({
  * saves (and renders) on the academics section in the merged flow, per the
  * Unit 5 schema split.
  */
-function formStepForLabel(label: string): MergedFormStep {
-  // 2026-07-30 (item 32): the First Profit row points at the project step,
-  // which displays the designed business.
-  if (label === "First Profit Idea #1") return "project";
+function formStepForLabel(label: string): MergedStep {
+  // Item 52 (2026-07-30): the project form step is gone — the First Profit
+  // row jumps to the compose page (the build cohort's business page).
+  if (label === "First Profit Idea #1") return "compose";
   return stepForChecklistLabel(label);
 }
 
@@ -1064,10 +1064,15 @@ function ReviewSection({
   // keystrokes cannot fake completeness (the submit core applies the same
   // rule server-side — this render is its presentation).
   // 2026-07-30 (item 32): the designed business renders as its own row —
-  // "First Profit Idea #1", checked off the hasProject fact.
+  // "First Profit Idea #1", checked off the hasProject fact. Item 52: the
+  // project FORM step is gone, so the row appears only for the build cohort
+  // (its jump target is the compose page) — a legacy child's submit must
+  // never be blocked by a row they have no step to fill.
   const items = [
     ...checklist(checklistChildForFields(fields)),
-    { label: "First Profit Idea #1", done: facts.hasProject },
+    ...(facts.applicantState !== null
+      ? [{ label: "First Profit Idea #1", done: facts.hasProject }]
+      : []),
   ];
   const missing = items.filter((i) => !i.done);
   const complete = missing.length === 0;

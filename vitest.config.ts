@@ -21,6 +21,10 @@ export default defineConfig({
       // remembered: app/lib/__tests__/vitest-include-coverage.test.ts fails if
       // any test file in the repo is left outside this list.
       "app/staff/**/__tests__/**/*.test.{ts,tsx}",
+      // Machine-bound scripts (R28 erase-entrypoint Unit). Added in the same
+      // commit as the first scripts/ test so the allowlist tripwire
+      // (app/lib/__tests__/vitest-include-coverage.test.ts) stays green.
+      "scripts/**/__tests__/**/*.test.{ts,tsx}",
     ],
   },
   resolve: {

@@ -45,6 +45,11 @@ export async function GET(req: Request) {
   const db = supabaseAdmin();
 
   const [familiesRes, childrenRes, depositsRes, sendsRes, reviewsRes] = await Promise.all([
+    // TODO(unranged-selects, pre-existing / out of Unit 6 scope): these
+    // cross-family reads are not `.range()`-paginated and PostgREST truncates at
+    // 1000 rows, so a large real population would silently drop families from a
+    // run. Flagged here; the fix (paginate, like the provisioning taken-set reads)
+    // is a separate unit — do NOT widen Unit 6 to chase it.
     excludeTestFamilies(
       db
         .from("families")

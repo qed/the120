@@ -27,7 +27,7 @@ import "server-only";
  *     the population whose base-keying could entangle with ours.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
 import {
@@ -139,6 +139,15 @@ async function directoryClient(): Promise<DirectoryClient> {
   }
   return cachedDirectory;
 }
+
+/** A NON-reversible tag for a mailbox address, for erase logs that must never
+ *  print a minor's full @the120.school address (FIX 6a). Hashes the local part
+ *  (before the @) so the same child is correlatable across log lines without the
+ *  PII. Best-effort: a malformed input still yields a stable short digest. */
+const localPartTag = (email: string): string => {
+  const local = (email.split("@")[0] ?? "").trim().toLowerCase();
+  return createHash("sha256").update(local).digest("hex").slice(0, 12);
+};
 
 const googleStatus = (err: unknown): number | null => {
   const e = err as { code?: unknown; response?: { status?: unknown } };
@@ -910,6 +919,17 @@ export async function sweepSuspendPendingClaims(): Promise<
  * in normal build/test — the one live exercise is Unit 11). 404 → "missing" so a
  * re-run over an already-deleted mailbox is idempotent, mirroring the suspend
  * sweep's `googleStatus(err) === 404` branch.
+ *
+ * ⚠ SECURITY (forward-guard): these deps drive an unconditional hard-delete of a
+ * whole family (accounts + mailboxes + consent evidence). eraseFamily performs NO
+ * authorization; the Unit 11 call site that wires this MUST be SERVICE-ROLE /
+ * ADMIN-GATED and FAIL-CLOSED — a GET behind CRON_SECRET (or an equivalent admin
+ * gate) — so a normal principal can never reach it. See the boxed note on
+ * eraseFamily.
+ *
+ * Erase logs here NEVER print a child's full mailbox address (PII): the failure
+ * branches log a hashed local_part tag (`localPartTag`) and the HTTP status, not
+ * the @the120.school address (FIX 6a).
  */
 export function realEraseFamilyDeps(): EraseFamilyDeps {
   const db = supabaseAdmin();
@@ -935,7 +955,11 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
         return "suspended";
       } catch (err) {
         if (googleStatus(err) === 404) return "missing";
-        console.error("[erase] workspace suspend failed:", err);
+        // FIX 6a: never log the full minor mailbox address — a hashed local_part
+        // tag + the HTTP status is enough to correlate/triage.
+        console.error(
+          `[erase] workspace suspend failed (local_part#${localPartTag(email)}, status ${googleStatus(err)})`
+        );
         return "error";
       }
     },
@@ -946,7 +970,9 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
         return "deleted";
       } catch (err) {
         if (googleStatus(err) === 404) return "missing";
-        console.error("[erase] workspace delete failed:", err);
+        console.error(
+          `[erase] workspace delete failed (local_part#${localPartTag(email)}, status ${googleStatus(err)})`
+        );
         return "error";
       }
     },

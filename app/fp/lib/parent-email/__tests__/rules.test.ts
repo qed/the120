@@ -122,6 +122,20 @@ describe("buildProgressDigest / digestHasContent", () => {
     expect(out.text).toContain("Kai: kept building.");
   });
 
+  it("single-child subject strips CR/LF via headerSafe (SMTP header injection)", () => {
+    // The single-child branch interpolates the child's firstName straight into the
+    // subject — a newline in that name must never survive into the header.
+    const out = buildProgressDigest({
+      children: [{ firstName: "Kai\r\nInjected", tasksCompleted: 1, criteriaPassed: 0 }],
+      signInUrl: "https://firstprofit.school",
+    });
+    // CR/LF collapsed to a space — the header can no longer be split, so the
+    // "Injected" fragment lands harmlessly inline, never as its own header line.
+    expect(out.subject).not.toMatch(/[\r\n]/);
+    expect(out.subject).toContain("Kai");
+    expect(out.subject).toBe("Kai Injected's First Profit progress");
+  });
+
   it("escapes html, has no em dashes", () => {
     const out = buildProgressDigest({
       children: [{ firstName: "A&B", tasksCompleted: 1, criteriaPassed: 0 }],

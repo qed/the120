@@ -18,10 +18,25 @@
  *   - NEVER throws — returns a typed summary with an ordered operation log and a
  *     `stranded` list for any delete that failed (logged loudly, like the child-
  *     core compensation's STRANDED markers), so an operator can re-run or triage.
+ *
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║ ⚠ SECURITY — CALLER AUTHORIZATION IS NOT PERFORMED HERE (forward-guard). ║
+ * ║ eraseFamily does NO authz of its own and is deliberately NOT yet wired to ║
+ * ║ any route. The Unit 11 call site MUST be SERVICE-ROLE / ADMIN-GATED and   ║
+ * ║ FAIL-CLOSED — a GET behind CRON_SECRET (or an equivalent admin gate), so  ║
+ * ║ a normal principal can NEVER reach it. It hard-deletes an entire family's ║
+ * ║ accounts, mailboxes, and consent evidence keyed ONLY on the ids passed in;║
+ * ║ there is no ownership check inside. Do NOT expose it on a principal-       ║
+ * ║ reachable path. (See the matching note on realEraseFamilyDeps.)           ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { dedupeAuthUserIds, hasWorkspaceMailbox } from "./erase-family-rules";
+import {
+  dedupeAuthUserIds,
+  hasWorkspaceMailbox,
+  RELEASED_CLAIM_PII_COLUMNS,
+} from "./erase-family-rules";
 
 export type EraseFamilyDeps = {
   /** Service-role client — every read + delete + the auth-account deletes. */
@@ -69,6 +84,10 @@ export type EraseFamilySummary = {
     fp_signup_attempts: number;
   };
   workspace: { suspended: number; deleted: number; missing: number; skipped: number; errored: number };
+  /** Released provisioning claims whose residual PII was scrubbed after the child
+   *  delete (row + local_part preserved; email/attempted-email/supabase_user_id
+   *  nulled). See RELEASED_CLAIM_PII_COLUMNS. */
+  scrubbedReleasedClaims: number;
   parentAccountDeleted: boolean;
   /** Ordered table-level operation log for auditing / order assertions. */
   order: string[];
@@ -107,6 +126,9 @@ type ChildRow = {
   profileIds: string[];
   authUserIds: string[];
   workspaceEmail: string | null;
+  /** The provisioning claim's stable row id (path b only), used to SCRUB its PII
+   *  after the child delete releases it. `null` for a path-a child (no claim). */
+  claimId: string | null;
 };
 
 /** Enumerate one child's owned rows across the FP + path graph. */
@@ -114,16 +136,32 @@ async function enumerateChild(db: Db, childId: string): Promise<ChildRow> {
   const [pp, psp, prov] = await Promise.all([
     db.from("fp_player_profiles").select("id, user_id").eq("child_id", childId),
     db.from("path_student_profiles").select("id, user_id").eq("child_id", childId),
-    db.from("funnel_student_provisioning").select("email, state").eq("child_id", childId).maybeSingle(),
+    db
+      .from("funnel_student_provisioning")
+      .select("id, email, supabase_user_id, state")
+      .eq("child_id", childId)
+      .maybeSingle(),
   ]);
   const ppRows = (pp.data ?? []) as { id: string; user_id: string | null }[];
   const pspRows = (psp.data ?? []) as { id: string; user_id: string | null }[];
-  const provEmail = (prov.data as { email?: string | null } | null)?.email ?? null;
+  const provRow =
+    (prov.data as { id?: string | null; email?: string | null; supabase_user_id?: string | null } | null) ??
+    null;
   return {
     childId,
     profileIds: ppRows.map((r) => r.id),
-    authUserIds: dedupeAuthUserIds([...ppRows.map((r) => r.user_id), ...pspRows.map((r) => r.user_id)]),
-    workspaceEmail: provEmail,
+    // RESUMABILITY (FIX 1b): fold the claim's `supabase_user_id` into the auth-id
+    // set. It is the path-b account's DURABLE handle — it survives the profile
+    // deletes (steps 3-4), so a re-run after a mid-erase failure can still tear
+    // the account down instead of orphaning it once the profile user_id rows are
+    // gone. dedupe collapses it against the profile user_ids when both are present.
+    authUserIds: dedupeAuthUserIds([
+      ...ppRows.map((r) => r.user_id),
+      ...pspRows.map((r) => r.user_id),
+      provRow?.supabase_user_id ?? null,
+    ]),
+    workspaceEmail: provRow?.email ?? null,
+    claimId: (provRow?.id as string | null) ?? null,
   };
 }
 
@@ -131,6 +169,11 @@ async function enumerateChild(db: Db, childId: string): Promise<ChildRow> {
  * Erase a family (or a scoped subset of its children) in FK-safe order. Returns
  * a detailed summary; never throws. Re-runnable to completion after a partial
  * failure.
+ *
+ * CONCURRENCY: there is no cross-run lock. Two concurrent erasures of the same
+ * family are ACCEPTABLE — every effect is an idempotent delete/scrub (a no-op on
+ * already-gone rows), and RESTRICT keeps the order consistent — so a race yields
+ * duplicated harmless work, never corruption. A lock is deliberately not added.
  */
 export async function eraseFamily(
   deps: EraseFamilyDeps,
@@ -153,6 +196,7 @@ export async function eraseFamily(
       fp_signup_attempts: 0,
     },
     workspace: { suspended: 0, deleted: 0, missing: 0, skipped: 0, errored: 0 },
+    scrubbedReleasedClaims: 0,
     parentAccountDeleted: false,
     order: [],
     stranded: [],
@@ -177,6 +221,11 @@ export async function eraseFamily(
     //    then the child's own auth accounts, then the roster row.
     for (const childId of childIds) {
       const child = await enumerateChild(db, childId);
+      // RESUMABILITY GUARD (FIX 1): any stranded marker this child accrues (a
+      // failed auth delete, a workspace error, or a RESTRICT-blocked leaf delete)
+      // must BLOCK the `children` anchor delete below, so a re-run re-enumerates
+      // the survivor and summary.ok stays false. Snapshot the count to detect it.
+      const strandedBefore = summary.stranded.length;
 
       // 1-2: ledger + saves (both RESTRICT -> fp_player_profiles) — must precede
       //      the profile delete. Keyed on the profile ids.
@@ -231,14 +280,62 @@ export async function eraseFamily(
         }
       }
 
-      // 7: the roster row (CASCADE-removes funnel_student_provisioning + deposits).
-      //    Child-scoped consent evidence is removed here, while child_id still
+      // FIX 1c: a child still present with ZERO resolvable auth identities is a
+      // partial-erasure resume (profiles already deleted, no claim to recover the
+      // account from) or a corrupt row — NEVER anchor-delete it, or its orphaned
+      // auth account would survive forever under a falsely ok:true summary. A
+      // normally-erasable child always has at least one identity, so this only
+      // fires on the anomaly. Fail-closed: strand it for triage.
+      if (child.authUserIds.length === 0) {
+        console.error(
+          `[erase] STRANDED: child ${childId} has no resolvable auth identity while its anchor persists — preserving the anchor for re-enumeration`
+        );
+        summary.stranded.push(`children:no_identity:${childId}`);
+      }
+
+      // FIX 1a / FIX 4: if this child accrued ANY stranded marker (auth-delete not
+      // ok, workspace error, RESTRICT-blocked leaf delete, or the no-identity guard
+      // above), do NOT delete its `children` anchor. Leave it so a re-run
+      // re-enumerates the survivor; summary.ok is already false.
+      if (summary.stranded.length > strandedBefore) {
+        summary.order.push(`children:stranded(${childId})`);
+        continue;
+      }
+
+      // 7: the roster row. deposits CASCADE away; the provisioning claim does NOT —
+      //    its child_id FK is ON DELETE SET NULL + a trigger flips it to released/
+      //    child_deleted (the row + local_part SURVIVE, never-reissue ledger). The
+      //    child-scoped consent evidence is removed here, while child_id still
       //    links, BEFORE the row is gone (the SET-NULL FK would otherwise unbind).
       if (childScoped) {
         summary.deleted.fp_parental_consent += await del(db, "fp_parental_consent", "child_id", childId, summary, `child:${childId}`);
       }
       summary.deleted.children += await del(db, "children", "id", childId, summary, `child:${childId}`);
       summary.childrenErased++;
+
+      // 7b (FIX 2): the child delete released the provisioning claim (child_id →
+      //    null, state → released) but PRESERVED the row for never-reissue. A true
+      //    erasure scrubs the residual PII off that surviving row — null email,
+      //    workspace_attempted_email, supabase_user_id — while KEEPING local_part.
+      //    Targeted by the claim's stable id (child_id is now null, so it can no
+      //    longer be found by child).
+      if (child.claimId) {
+        const scrub: Record<string, null> = {};
+        for (const col of RELEASED_CLAIM_PII_COLUMNS) scrub[col] = null;
+        const { error } = await db
+          .from("funnel_student_provisioning")
+          .update(scrub)
+          .eq("id", child.claimId);
+        if (error) {
+          console.error(
+            `[erase] STRANDED: released-claim PII scrub failed for claim ${child.claimId}: ${error.message}`
+          );
+          summary.stranded.push(`funnel_student_provisioning:scrub:${child.claimId}:${error.message}`);
+        } else {
+          summary.scrubbedReleasedClaims++;
+          summary.order.push(`funnel_student_provisioning:scrubbed(${childId})`);
+        }
+      }
     }
 
     // ── Family-level erasure only (childIds omitted): the deliberate final
@@ -247,20 +344,41 @@ export async function eraseFamily(
     //    handle if a prior partial run already nulled parent_id).
     if (!childScoped) {
       // 8: consent evidence — the EXPLICIT, deliberate final removal (see
-      //    erase-family-rules.ts). fp_parental_consent by parent_id; the
-      //    attempts by parent_id OR the stable parent_email.
+      //    erase-family-rules.ts). fp_parental_consent by parent_id.
       summary.deleted.fp_parental_consent += await del(db, "fp_parental_consent", "parent_id", input.parentUserId, summary, "family");
-      const attemptsByParent = await del(db, "fp_signup_attempts", "parent_id", input.parentUserId, summary, "family:parent_id");
-      const attemptsByEmail = await del(db, "fp_signup_attempts", "parent_email", input.parentEmail, summary, "family:parent_email");
-      summary.deleted.fp_signup_attempts += attemptsByParent + attemptsByEmail;
 
-      // 9: the parent auth account (CASCADE-removes parents + any residue).
-      const res = await deps.deleteAuthUser(input.parentUserId);
-      if (res.ok) {
-        summary.parentAccountDeleted = true;
-        summary.order.push(`auth_users:parent(${input.parentUserId})`);
+      // FIX 3 (security): fp_signup_attempts is deleted by parent_id — the
+      // principal-scoped key. The parent_email scope is a FALLBACK used ONLY when
+      // the parent_id delete matched nothing (a prior partial run already
+      // SET-NULLed parent_id), NEVER as an unconditional second sweep: an unscoped
+      // parent_email delete would destroy a DIFFERENT principal's attempt/consent
+      // evidence that merely reused this email.
+      const attemptsByParent = await del(db, "fp_signup_attempts", "parent_id", input.parentUserId, summary, "family:parent_id");
+      summary.deleted.fp_signup_attempts += attemptsByParent;
+      if (attemptsByParent === 0) {
+        const attemptsByEmail = await del(db, "fp_signup_attempts", "parent_email", input.parentEmail, summary, "family:parent_email_fallback");
+        summary.deleted.fp_signup_attempts += attemptsByEmail;
+      }
+
+      // 9: the parent auth account (CASCADE-removes parents -> children -> ...).
+      //    RESUMABILITY GUARD (FIX 1): if ANY child was stranded above, its
+      //    `children` anchor was deliberately preserved — but deleting the parent
+      //    account here would CASCADE that anchor away (orphaning the account we
+      //    could not delete). So skip the parent delete entirely while anything is
+      //    stranded; the re-run finishes the children first, then removes the parent.
+      if (summary.stranded.length > 0) {
+        console.error(
+          `[erase] parent account ${input.parentUserId} NOT deleted — ${summary.stranded.length} stranded item(s) still hold preserved anchors; re-run after triage`
+        );
+        summary.order.push(`auth_users:parent:deferred(${input.parentUserId})`);
       } else {
-        summary.stranded.push(`auth_users:parent:${input.parentUserId}`);
+        const res = await deps.deleteAuthUser(input.parentUserId);
+        if (res.ok) {
+          summary.parentAccountDeleted = true;
+          summary.order.push(`auth_users:parent(${input.parentUserId})`);
+        } else {
+          summary.stranded.push(`auth_users:parent:${input.parentUserId}`);
+        }
       }
     }
 

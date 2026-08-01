@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // (no real mail to a test address / an unsubscribed family) and inspect the
 // payload when it IS. `vi.hoisted` makes the mock fn available inside the hoisted
 // factory without a temporal-dead-zone error.
-const { sendEmailMock } = vi.hoisted(() => ({ sendEmailMock: vi.fn(async () => ({ ok: true as const })) }));
+const { sendEmailMock } = vi.hoisted(() => ({
+  sendEmailMock: vi.fn(
+    async (): Promise<{ ok: true } | { ok: false; error?: string }> => ({ ok: true })
+  ),
+}));
 vi.mock("@/app/lib/email", () => ({ sendEmail: sendEmailMock }));
 
 import { sendProgressDigest, sendSignupRecap } from "../send";
@@ -84,6 +88,16 @@ describe("sendSignupRecap suppression", () => {
     const out = await sendSignupRecap(fakeDb(null, { error: true }), base);
     expect(out.status).toBe("error");
     expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("is NON-FATAL on a mailer failure — returns send_failed, never throws (child route stays 200)", async () => {
+    // The child route awaits this in a try/catch and only logs on a non-sent,
+    // non-suppressed status; a send_failed must be a clean typed return (not a
+    // throw) so the already-minted, playable child still yields a 200.
+    sendEmailMock.mockResolvedValueOnce({ ok: false as const, error: "resend 503" });
+    const out = await sendSignupRecap(fakeDb(realFamily), base);
+    expect(out).toEqual({ status: "send_failed", error: "resend 503" });
+    expect(sendEmailMock).toHaveBeenCalledOnce();
   });
 });
 

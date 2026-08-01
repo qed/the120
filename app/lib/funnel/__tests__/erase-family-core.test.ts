@@ -4,13 +4,16 @@ import {
   CHILD_LEAF_DELETE_ORDER,
   ERASURE_PRESERVED_TABLES,
   FAMILY_EVIDENCE_DELETE_ORDER,
+  RELEASED_CLAIM_PII_COLUMNS,
+  RELEASED_CLAIM_PRESERVED_COLUMN,
   dedupeAuthUserIds,
   hasWorkspaceMailbox,
 } from "../erase-family-rules";
 
 /**
  * A stateful in-memory Postgres-ish fake that ENFORCES the three RESTRICT FKs and
- * the children CASCADE / consent SET-NULL, so a WRONG deletion order actually
+ * the children CASCADE (deposits) / SET-NULL (consent, attempts, AND the
+ * provisioning claim + its released trigger), so a WRONG deletion order actually
  * raises 23503 (proving the order the core uses is the one that works). It records
  * every delete in call order for the "each table emptied in order" assertion.
  */
@@ -45,23 +48,53 @@ function makeDb(seed: Tables) {
     // Apply the delete.
     t[table] = rows.filter((r) => !matches(r, filters));
     deleteLog.push(`${table}(${doomed.length})`);
-    // children CASCADE + SET NULL side effects.
+    // children side effects: deposits CASCADE; consent/attempts SET NULL; the
+    // provisioning claim SET NULL + the released trigger (row SURVIVES).
     if (table === "children") {
       for (const r of doomed) {
         const cid = r.id;
-        t.funnel_student_provisioning = (t.funnel_student_provisioning ?? []).filter((x) => x.child_id !== cid);
         t.deposits = (t.deposits ?? []).filter((x) => x.child_id !== cid);
         for (const c of t.fp_parental_consent ?? []) if (c.child_id === cid) c.child_id = null;
         for (const a of t.fp_signup_attempts ?? []) if (a.child_id === cid) a.child_id = null;
+        // NOT cascade: the claim's child_id → children is ON DELETE SET NULL, and
+        // funnel_provisioning_child_deleted flips the orphan to released/child_deleted.
+        for (const p of t.funnel_student_provisioning ?? []) {
+          if (p.child_id === cid) {
+            p.child_id = null;
+            if (p.state !== "released") {
+              p.state = "released";
+              p.released_reason = p.released_reason ?? "child_deleted";
+            }
+            p.lease_owner = null;
+            p.lease_expires_at = null;
+          }
+        }
       }
     }
     return { data: doomed, error: null };
   }
 
-  type State = { table: string; op: "select" | "delete"; filters: { col: string; val: unknown; kind: "eq" | "in" }[] };
+  function runUpdate(
+    table: string,
+    patch: Record<string, unknown>,
+    filters: { col: string; val: unknown; kind: "eq" | "in" }[]
+  ) {
+    const rows = t[table] ?? [];
+    const hit = rows.filter((r) => matches(r, filters));
+    for (const r of hit) Object.assign(r, patch);
+    return { data: hit, error: null };
+  }
+
+  type State = {
+    table: string;
+    op: "select" | "delete" | "update";
+    filters: { col: string; val: unknown; kind: "eq" | "in" }[];
+    patch?: Record<string, unknown>;
+  };
   function builder(state: State): Record<string, unknown> {
     const exec = () => {
       if (state.op === "delete") return runDelete(state.table, state.filters);
+      if (state.op === "update") return runUpdate(state.table, state.patch ?? {}, state.filters);
       const rows = (t[state.table] ?? []).filter((r) => matches(r, state.filters));
       return { data: rows, error: null };
     };
@@ -71,6 +104,9 @@ function makeDb(seed: Tables) {
       },
       delete() {
         return builder({ ...state, op: "delete" });
+      },
+      update(patch: Record<string, unknown>) {
+        return builder({ ...state, op: "update", patch });
       },
       eq(col: string, val: unknown) {
         return builder({ ...state, filters: [...state.filters, { col, val, kind: "eq" }] });
@@ -95,7 +131,8 @@ function makeDb(seed: Tables) {
 function seedFamily(): Tables {
   return {
     // path-a child (childA): one shared auth account authA (both profiles ref it)
-    // path-b child (childB): auth authB + a provisioned mailbox
+    // path-b child (childB): auth authB + a provisioned mailbox (claim carries the
+    // durable supabase_user_id + a burned local_part).
     children: [
       { id: "childA", parent_id: "parentU" },
       { id: "childB", parent_id: "parentU" },
@@ -114,7 +151,17 @@ function seedFamily(): Tables {
       { id: "pspA", user_id: "authA", child_id: "childA" },
       { id: "pspB", user_id: "authB", child_id: "childB" },
     ],
-    funnel_student_provisioning: [{ child_id: "childB", email: "childb@the120.school", state: "pending" }],
+    funnel_student_provisioning: [
+      {
+        id: "claimB",
+        child_id: "childB",
+        email: "childb@the120.school",
+        workspace_attempted_email: "childb@the120.school",
+        local_part: "childb",
+        supabase_user_id: "authB",
+        state: "complete",
+      },
+    ],
     fp_parental_consent: [
       { id: "c1", parent_id: "parentU", child_id: "childA", signup_attempt_id: "a1" },
       { id: "c2", parent_id: "parentU", child_id: "childB", signup_attempt_id: "a2" },
@@ -127,15 +174,55 @@ function seedFamily(): Tables {
   };
 }
 
+/** A single path-b child, for the resumability strand/resume scenario (its auth
+ *  account is recoverable across the profile deletion via the claim's
+ *  supabase_user_id). */
+function seedPathBOnly(): Tables {
+  return {
+    children: [{ id: "childB", parent_id: "parentU" }],
+    parents: [{ id: "parentU" }],
+    fp_player_profiles: [{ id: "ppB", user_id: "authB", child_id: "childB" }],
+    fp_player_saves: [{ profile_id: "ppB" }],
+    fp_ledger: [],
+    path_student_profiles: [{ id: "pspB", user_id: "authB", child_id: "childB" }],
+    funnel_student_provisioning: [
+      {
+        id: "claimB",
+        child_id: "childB",
+        email: "childb@the120.school",
+        workspace_attempted_email: "childb@the120.school",
+        local_part: "childb",
+        supabase_user_id: "authB",
+        state: "complete",
+      },
+    ],
+    fp_parental_consent: [{ id: "c2", parent_id: "parentU", child_id: "childB", signup_attempt_id: "a2" }],
+    fp_signup_attempts: [
+      { id: "a2", parent_id: "parentU", parent_email: "fam@test.the120.invalid", child_id: "childB" },
+    ],
+    deposits: [],
+  };
+}
+
 /** Deps whose auth delete enforces RESTRICT (fails while a profile still refs the
- *  user) and cascades the parent's `parents` row — plus a Workspace call log. */
-function makeDeps(t: Tables, opts: { workspaceConfigured?: boolean } = {}) {
+ *  user) and cascades the parent's `parents` row — plus a Workspace call log.
+ *  `authFails` forces every auth delete to report not-ok; `suspendResult` overrides
+ *  the suspend outcome (for the workspace-error strand path). */
+function makeDeps(
+  t: Tables,
+  opts: {
+    workspaceConfigured?: boolean;
+    authFails?: boolean;
+    suspendResult?: "suspended" | "missing" | "error";
+  } = {}
+) {
   const wsCalls: string[] = [];
   const deletedAuth: string[] = [];
   const deps: EraseFamilyDeps = {
     db: undefined as never, // filled by caller
     workspaceConfigured: opts.workspaceConfigured ?? true,
     deleteAuthUser: vi.fn(async (userId: string) => {
+      if (opts.authFails) return { ok: false };
       if ((t.fp_player_profiles ?? []).some((x) => x.user_id === userId) || (t.path_student_profiles ?? []).some((x) => x.user_id === userId)) {
         return { ok: false }; // RESTRICT: a profile still references this account
       }
@@ -148,7 +235,7 @@ function makeDeps(t: Tables, opts: { workspaceConfigured?: boolean } = {}) {
     }),
     suspendWorkspaceUser: vi.fn(async (email: string) => {
       wsCalls.push(`suspend:${email}`);
-      return "suspended" as const;
+      return (opts.suspendResult ?? "suspended") as "suspended" | "missing" | "error";
     }),
     deleteWorkspaceUser: vi.fn(async (email: string) => {
       wsCalls.push(`delete:${email}`);
@@ -160,7 +247,7 @@ function makeDeps(t: Tables, opts: { workspaceConfigured?: boolean } = {}) {
 }
 
 describe("eraseFamily — full family, FK-safe order", () => {
-  it("empties every table in the correct order and deletes the parent account", async () => {
+  it("erases every table in order, deletes the parent, and scrubs (not deletes) the released claim", async () => {
     const { db, t, deleteLog } = makeDb(seedFamily());
     const { deps, wsCalls } = makeDeps(t, { workspaceConfigured: true });
     deps.db = db;
@@ -173,7 +260,7 @@ describe("eraseFamily — full family, FK-safe order", () => {
     expect(out.childrenErased).toBe(2);
     expect(out.parentAccountDeleted).toBe(true);
 
-    // Every FP/path/CRM table is empty.
+    // Every FP, Path, and CRM table is empty.
     for (const table of [
       "fp_ledger",
       "fp_player_saves",
@@ -183,16 +270,23 @@ describe("eraseFamily — full family, FK-safe order", () => {
       "parents",
       "fp_parental_consent",
       "fp_signup_attempts",
-      "funnel_student_provisioning",
       "deposits",
     ]) {
       expect(t[table], `${table} should be empty`).toHaveLength(0);
     }
 
+    // The provisioning claim SURVIVES (SET NULL + released, never cascaded away):
+    // its local_part is preserved (never-reissue) while the PII is scrubbed.
+    expect(t.funnel_student_provisioning).toHaveLength(1);
+    const claim = t.funnel_student_provisioning[0] as Record<string, unknown>;
+    expect(claim[RELEASED_CLAIM_PRESERVED_COLUMN]).toBe("childb"); // local_part kept
+    for (const col of RELEASED_CLAIM_PII_COLUMNS) expect(claim[col], `${col} scrubbed`).toBeNull();
+    expect(claim.state).toBe("released");
+    expect(out.scrubbedReleasedClaims).toBe(1);
+
     // Per-child order: ledger + saves BEFORE the profile, profile + psp BEFORE
     // the children row. Assert for childA (which has ledger rows).
     const idx = (frag: string) => deleteLog.findIndex((s) => s.startsWith(frag));
-    // childA's leaves are deleted before its children row.
     const ledgerAt = deleteLog.indexOf("fp_ledger(2)");
     const profilesFirstAt = idx("fp_player_profiles");
     const pspFirstAt = idx("path_student_profiles");
@@ -203,7 +297,6 @@ describe("eraseFamily — full family, FK-safe order", () => {
     expect(pspFirstAt).toBeLessThan(childrenFirstAt);
 
     // Consent evidence removed as the deliberate final step (after all children).
-    // In family mode both consent rows are removed at once (by parent_id).
     const lastChildrenAt = deleteLog.lastIndexOf("children(1)");
     const consentFamilyAt = deleteLog.findIndex((s) => s.startsWith("fp_parental_consent"));
     expect(consentFamilyAt).toBeGreaterThan(lastChildrenAt);
@@ -255,6 +348,66 @@ describe("eraseFamily — full family, FK-safe order", () => {
   });
 });
 
+describe("eraseFamily — resumability strand guard (FIX 1)", () => {
+  it("run 1: an auth-delete + workspace failure STRANDS the child, PRESERVES its anchor + the parent, ok:false", async () => {
+    const { db, t } = makeDb(seedPathBOnly());
+    const { deps } = makeDeps(t, { workspaceConfigured: true, authFails: true, suspendResult: "error" });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(false);
+    // The child anchor SURVIVES so a re-run re-enumerates it.
+    expect((t.children as { id: string }[]).map((c) => c.id)).toEqual(["childB"]);
+    expect(out.childrenErased).toBe(0);
+    // Both failures are recorded as stranded, keyed on the child.
+    expect(out.stranded).toContain("auth_users:authB");
+    expect(out.stranded).toContain("workspace:suspend:childB");
+    // The parent account is NOT deleted while an anchor is preserved (deleting it
+    // would CASCADE the preserved anchor away, orphaning the account).
+    expect(out.parentAccountDeleted).toBe(false);
+    expect(t.parents).toHaveLength(1);
+    // The claim is untouched (child not deleted → not released → not scrubbed).
+    const claim = t.funnel_student_provisioning[0] as Record<string, unknown>;
+    expect(claim.supabase_user_id).toBe("authB");
+    expect(out.scrubbedReleasedClaims).toBe(0);
+  });
+
+  it("run 2 (now healthy) recovers the auth id from the claim, completes teardown, clears stranded → ok:true", async () => {
+    const { db, t } = makeDb(seedPathBOnly());
+    // Run 1 strands.
+    const { deps: d1 } = makeDeps(t, { workspaceConfigured: true, authFails: true, suspendResult: "error" });
+    d1.db = db;
+    const first = await eraseFamily(d1, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+    expect(first.ok).toBe(false);
+    // Profiles are gone after run 1 — the ONLY remaining handle to authB is the
+    // claim's supabase_user_id (the resumability recovery under test).
+    expect(t.fp_player_profiles).toHaveLength(0);
+    expect(t.path_student_profiles).toHaveLength(0);
+
+    // Run 2 with healthy deps.
+    const { deps: d2, wsCalls: ws2, deletedAuth } = makeDeps(t, { workspaceConfigured: true });
+    d2.db = db;
+    const second = await eraseFamily(d2, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(second.ok).toBe(true);
+    expect(second.stranded).toEqual([]);
+    expect(second.childrenErased).toBe(1);
+    // authB was recovered from the claim and finally deleted.
+    expect(deletedAuth).toContain("authB");
+    // The mailbox suspend+delete ran on resume (recovered email).
+    expect(ws2).toEqual(["suspend:childb@the120.school", "delete:childb@the120.school"]);
+    // Child anchor gone; the claim survives, scrubbed, local_part intact.
+    expect(t.children).toHaveLength(0);
+    const claim = t.funnel_student_provisioning[0] as Record<string, unknown>;
+    expect(claim.local_part).toBe("childb");
+    expect(claim.supabase_user_id).toBeNull();
+    expect(claim.email).toBeNull();
+    expect(second.scrubbedReleasedClaims).toBe(1);
+    expect(second.parentAccountDeleted).toBe(true);
+  });
+});
+
 describe("eraseFamily — Workspace gating + scoping", () => {
   it("SKIPS the Google legs entirely when workspace is unconfigured (no real call)", async () => {
     const { db, t } = makeDb(seedFamily());
@@ -292,6 +445,66 @@ describe("eraseFamily — Workspace gating + scoping", () => {
   });
 });
 
+describe("eraseFamily — attempt delete is scoped by parent_id (FIX 3)", () => {
+  it("does NOT delete a DIFFERENT principal's attempt row that reused the same parent_email", async () => {
+    // Family A (parentA) and Family B (parentB) share the parent_email; B has no
+    // children/profiles here — only its attempt evidence, which must survive an
+    // erasure of A.
+    const seed: Tables = {
+      children: [{ id: "childA", parent_id: "parentA" }],
+      parents: [{ id: "parentA" }, { id: "parentB" }],
+      fp_player_profiles: [{ id: "ppA", user_id: "authA", child_id: "childA" }],
+      fp_player_saves: [{ profile_id: "ppA" }],
+      fp_ledger: [],
+      path_student_profiles: [{ id: "pspA", user_id: "authA", child_id: "childA" }],
+      funnel_student_provisioning: [],
+      fp_parental_consent: [{ id: "cA", parent_id: "parentA", child_id: "childA" }],
+      fp_signup_attempts: [
+        { id: "atA", parent_id: "parentA", parent_email: "shared@example.com", child_id: "childA" },
+        { id: "atB", parent_id: "parentB", parent_email: "shared@example.com", child_id: null },
+      ],
+      deposits: [],
+    };
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentA", parentEmail: "shared@example.com" });
+
+    expect(out.ok).toBe(true);
+    // A's attempt is gone; B's attempt (same email, different principal) SURVIVES.
+    expect((t.fp_signup_attempts as { id: string }[]).map((a) => a.id)).toEqual(["atB"]);
+    expect(out.deleted.fp_signup_attempts).toBe(1);
+  });
+
+  it("falls back to the parent_email scope ONLY when the parent_id delete matched nothing", async () => {
+    // A prior partial run already SET-NULLed parent_id on the attempt; the
+    // parent_id-scoped delete now matches nothing, so the email fallback runs.
+    const seed: Tables = {
+      children: [],
+      parents: [{ id: "parentA" }],
+      fp_player_profiles: [],
+      fp_player_saves: [],
+      fp_ledger: [],
+      path_student_profiles: [],
+      funnel_student_provisioning: [],
+      fp_parental_consent: [],
+      fp_signup_attempts: [
+        { id: "atA", parent_id: null, parent_email: "solo@example.com", child_id: null },
+      ],
+      deposits: [],
+    };
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentA", parentEmail: "solo@example.com" });
+
+    expect(out.deleted.fp_signup_attempts).toBe(1);
+    expect(t.fp_signup_attempts).toHaveLength(0);
+  });
+});
+
 describe("erase-family-rules pure helpers", () => {
   it("dedupeAuthUserIds collapses the shared account and drops blanks", () => {
     expect(dedupeAuthUserIds(["a", "a", null, "b", undefined, ""])).toEqual(["a", "b"]);
@@ -303,7 +516,7 @@ describe("erase-family-rules pure helpers", () => {
     expect(hasWorkspaceMailbox("not-an-email")).toBe(false);
   });
 
-  it("documents the FK-safe order: ledger + saves before the profiles", () => {
+  it("documents the FK-safe order + the released-claim scrub posture", () => {
     // fp_ledger and fp_player_saves precede fp_player_profiles (both RESTRICT).
     expect(CHILD_LEAF_DELETE_ORDER.indexOf("fp_ledger")).toBeLessThan(
       CHILD_LEAF_DELETE_ORDER.indexOf("fp_player_profiles")
@@ -314,5 +527,10 @@ describe("erase-family-rules pure helpers", () => {
     expect(FAMILY_EVIDENCE_DELETE_ORDER).toContain("fp_parental_consent");
     // The never-reissue alias ledger is preserved, never erased.
     expect(ERASURE_PRESERVED_TABLES).toContain("funnel_released_aliases");
+    // The released-claim scrub keeps local_part but nulls the PII columns.
+    expect(RELEASED_CLAIM_PRESERVED_COLUMN).toBe("local_part");
+    expect(RELEASED_CLAIM_PII_COLUMNS).toContain("email");
+    expect(RELEASED_CLAIM_PII_COLUMNS).toContain("supabase_user_id");
+    expect(RELEASED_CLAIM_PII_COLUMNS).not.toContain("local_part");
   });
 });

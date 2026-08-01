@@ -30,6 +30,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
+import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
 import {
   deriveStudentLocalBaseFromFirstName,
   DRIVABLE_PROVISION_STATES,
@@ -102,6 +103,13 @@ function cleanParts(rows: unknown[] | null | undefined): string[] | "error" {
 
 const saKeyRaw = () => process.env.GOOGLE_WORKSPACE_SA_KEY ?? "";
 const studentOu = () => process.env.GOOGLE_WORKSPACE_STUDENT_OU ?? "/Students";
+/** Workspace admin to impersonate for Directory (user create/update/delete) via
+ *  domain-wide delegation. When unset, the SA authenticates as itself (requires a
+ *  directly-assigned admin role). See workspace-auth.ts. */
+const adminSubject = () => process.env.GOOGLE_WORKSPACE_ADMIN_SUBJECT ?? "";
+
+const DIRECTORY_SCOPES = ["https://www.googleapis.com/auth/admin.directory.user"] as const;
+const GMAIL_SETTINGS_SCOPES = ["https://www.googleapis.com/auth/gmail.settings.sharing"] as const;
 
 type DirectoryClient = {
   users: {
@@ -126,12 +134,12 @@ async function directoryClient(): Promise<DirectoryClient> {
   if (!cachedDirectory) {
     cachedDirectory = (async () => {
       const { google } = await import("googleapis");
-      const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
-      const auth = new google.auth.JWT({
-        email: creds.client_email,
-        key: creds.private_key,
-        scopes: ["https://www.googleapis.com/auth/admin.directory.user"],
-      });
+      // Directory user management via DWD impersonates a Workspace ADMIN when
+      // GOOGLE_WORKSPACE_ADMIN_SUBJECT is set (the standard path); otherwise the
+      // SA authenticates as itself (requires a directly-assigned admin role).
+      const auth = new google.auth.JWT(
+        buildWorkspaceJwtConfig(saKeyRaw(), DIRECTORY_SCOPES, adminSubject())
+      );
       return google.admin({ version: "directory_v1", auth }) as unknown as DirectoryClient;
     })();
     cachedDirectory.catch(() => {
@@ -1017,13 +1025,10 @@ type GmailClient = {
  *  module-level cache — forwarding volume is a trickle. */
 async function gmailClientFor(studentEmail: string): Promise<GmailClient> {
   const { google } = await import("googleapis");
-  const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
-  const auth = new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: ["https://www.googleapis.com/auth/gmail.settings.sharing"],
-    subject: studentEmail,
-  });
+  // The one deliberate STUDENT DWD impersonation, scoped to gmail.settings.sharing.
+  const auth = new google.auth.JWT(
+    buildWorkspaceJwtConfig(saKeyRaw(), GMAIL_SETTINGS_SCOPES, studentEmail)
+  );
   return google.gmail({ version: "v1", auth }) as unknown as GmailClient;
 }
 

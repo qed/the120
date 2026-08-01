@@ -30,6 +30,7 @@ import {
   SIGNUP_IP_RATE_LIMIT,
   SIGNUP_RATE_LIMIT,
 } from "../signup-rules";
+import { classifyAuthError } from "../../login/login-rules";
 import { verifyCompletion, type SignupCoreDeps } from "../signup-core";
 
 export const dynamic = "force-dynamic";
@@ -119,8 +120,13 @@ export async function POST(req: Request): Promise<Response> {
     const deps: SignupCoreDeps = {
       db: admin,
       provisionAccount: async () => ({ kind: "failed", reason: "exception" }), // unused
-      setParentPassword: async () => ({ ok: false }), // unused
-      cleanupAccount: async () => {}, // unused
+      // The parent's chosen password is set HERE, only after inbox proof (P0).
+      setParentPassword: async (userId, password) => {
+        const res = await admin.auth.admin.updateUserById(userId, { password });
+        if (res.error) console.error(`[fp/signup/verify] set password failed: ${res.error.message}`);
+        return { ok: !res.error };
+      },
+      cleanupAccount: async () => ({ ok: true }), // unused
       signInParent: async (signInEmail, password) => {
         // Stateless client (no cookies), forwarding the attested client IP so
         // Supabase's own /token limits attribute to the parent's network.
@@ -137,7 +143,12 @@ export async function POST(req: Request): Promise<Response> {
             email: signInEmail,
             password,
           });
-          if (res.error || !res.data.session) return { ok: false };
+          // A wrong password / unconfirmed account is a genuine failed attempt
+          // (strike stands); a 429/5xx/network fault is an outage (release the
+          // strike), mirroring /api/fp/login's classifyAuthError-driven release.
+          if (res.error || !res.data.session) {
+            return { ok: false, outage: res.error ? classifyAuthError(res.error) === "outage" : false };
+          }
           return {
             ok: true,
             accessToken: res.data.session.access_token,
@@ -147,7 +158,7 @@ export async function POST(req: Request): Promise<Response> {
           console.error(
             `[fp/signup/verify] sign-in threw: ${err instanceof Error ? err.message : String(err)}`
           );
-          return { ok: false };
+          return { ok: false, outage: classifyAuthError(err) === "outage" };
         }
       },
       sendMail: (await import("@/app/lib/email")).sendEmail, // unused
@@ -161,9 +172,10 @@ export async function POST(req: Request): Promise<Response> {
       password: parsed.data.password,
     });
     if (!result.ok) {
-      // A wrong password / bad token is a genuine failed attempt — the strike
-      // stands. (There is no cheap way to tell an outage from a bad guess here;
-      // failing closed is the safe direction for a brute-force backstop.)
+      // An outage (redeem/DB fault or a 5xx/429 sign-in) is not a real attempt —
+      // hand the strike back, mirroring /api/fp/login. A wrong password / bad or
+      // expired token is a genuine failed attempt: the strike stands.
+      if (result.reason === "outage") releaseStrikes();
       return refuse();
     }
 

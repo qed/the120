@@ -148,6 +148,39 @@ export async function loadVerifiedTestAttemptByEmail(
   return { ok: true, attempt: res.data ? toAttempt(res.data) : null };
 }
 
+/**
+ * Read the most-recent PENDING REAL attempt for an email — the lost-response
+ * resume path. When provisionOrRecognizeAccount reports `existing_account` but a
+ * prior in-flight attempt for this email is still live (state 'started', a token
+ * minted, unexpired, unverified), the retry is almost certainly the SAME family
+ * whose first START succeeded but whose response was lost — not a returning
+ * parent. `excludeId` skips the just-inserted duplicate row of the current call.
+ */
+export async function loadPendingRealAttemptByEmail(
+  db: SupabaseClient,
+  email: string,
+  nowIso: string,
+  excludeId: string
+): Promise<{ ok: true; attempt: StoredAttempt | null } | { ok: false }> {
+  const res = await db
+    .from("fp_signup_attempts")
+    .select("id, parent_email, parent_id, is_test, verified_at, verification_expires_at")
+    .eq("parent_email", email.trim().toLowerCase())
+    .eq("state", "started")
+    .is("verified_at", null)
+    .not("verification_token_hash", "is", null)
+    .gt("verification_expires_at", nowIso)
+    .neq("id", excludeId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) {
+    console.error(`[fp/signup] pending-attempt load failed: ${res.error.message}`);
+    return { ok: false };
+  }
+  return { ok: true, attempt: res.data ? toAttempt(res.data) : null };
+}
+
 function toAttempt(row: unknown): StoredAttempt {
   const r = row as Record<string, unknown>;
   return {

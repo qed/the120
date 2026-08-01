@@ -103,15 +103,6 @@ export async function POST(req: Request): Promise<Response> {
     if (!parsed.ok) return refuse("malformed_request");
     const data = parsed.data;
 
-    // CODE-LEVEL LAUNCH GATE (Rev 3, P0). A refused non-test signup is the SAME
-    // generic refusal as any other — no gate oracle. is_test rides through to
-    // the attempt row (server-side determination, never client input).
-    const gate = launchGateVerdict(data.parentEmail, {
-      FP_SIGNUP_TEST_ONLY: process.env.FP_SIGNUP_TEST_ONLY,
-      FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST,
-    });
-    if (!gate.allowed) return refuse("gate_refused");
-
     const ip = extractClientIp(req.headers);
     const email = data.parentEmail.trim().toLowerCase();
     const { emailKey, ipKey } = deriveSignupRateLimitKeys(ip, email);
@@ -121,14 +112,27 @@ export async function POST(req: Request): Promise<Response> {
       releaseRateLimitEvent(ipKey);
     };
 
-    // Gate FIRST — atomically, before any DB I/O. Both buckets record before the
-    // verdict (a short-circuit would freeze the IP backstop). Refusal is the
-    // SAME generic 401, never a 429.
+    // Rate-limit FIRST — atomically, BEFORE the launch gate and any DB I/O
+    // (review P2). Recording the strike before the gate check bounds gate
+    // probing (a gate-refused request is still counted) and removes the
+    // gate-allowed-vs-refused timing gap as a cheap test-allowlist oracle. Both
+    // buckets record before either verdict (a short-circuit would freeze the IP
+    // backstop). Refusal is the SAME generic 401, never a 429.
     const emailCheck = checkAndRecordRateLimit(emailKey, SIGNUP_RATE_LIMIT);
     const ipCheck = checkAndRecordRateLimit(ipKey, SIGNUP_IP_RATE_LIMIT);
     if (!emailCheck.allowed || !ipCheck.allowed) {
       return refuse("rate_limited");
     }
+
+    // CODE-LEVEL LAUNCH GATE (Rev 3, P0). A refused non-test signup is the SAME
+    // generic refusal as any other — no gate oracle. The strike above stands
+    // (gate-refused is a real, bounded attempt). is_test rides through to the
+    // attempt row (server-side determination, never client input).
+    const gate = launchGateVerdict(data.parentEmail, {
+      FP_SIGNUP_TEST_ONLY: process.env.FP_SIGNUP_TEST_ONLY,
+      FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST,
+    });
+    if (!gate.allowed) return refuse("gate_refused");
 
     const admin = supabaseAdmin();
     const { firstName, lastName } = splitParentName(data.parentName);
@@ -148,18 +152,17 @@ export async function POST(req: Request): Promise<Response> {
             auth: { signInWithPassword: async () => ({ error: null }) },
           }),
         }),
-      setParentPassword: async (userId, password) => {
-        const res = await admin.auth.admin.updateUserById(userId, { password });
-        if (res.error) console.error(`[fp/signup] set password failed: ${res.error.message}`);
-        return { ok: !res.error };
-      },
+      // Unused on the start path — the parent's chosen password is set only at
+      // verify-completion, after inbox proof (review P0).
+      setParentPassword: async () => ({ ok: false }),
       cleanupAccount: async (userId) => {
         const del = await admin.auth.admin.deleteUser(userId);
         if (del.error) {
           console.error(`[fp/signup] cleanup deleteUser failed for ${userId}: ${del.error.message}`);
         }
+        return { ok: !del.error };
       },
-      signInParent: async () => ({ ok: false }), // unused on the start path
+      signInParent: async () => ({ ok: false, outage: false }), // unused on the start path
       sendMail: (await import("@/app/lib/email")).sendEmail,
       mintToken: () => randomBytes(32).toString("base64url"),
       now: () => Date.now(),

@@ -37,6 +37,8 @@ import {
   SIGNUP_RATE_LIMIT,
 } from "../signup-rules";
 import { createChild, type CreateChildDeps } from "../child-core";
+import { sendSignupRecap } from "@/app/fp/lib/parent-email/send";
+import type { RecapChild } from "@/app/fp/lib/parent-email/rules";
 
 export const dynamic = "force-dynamic";
 
@@ -187,6 +189,39 @@ export async function POST(req: Request): Promise<Response> {
       // wrong/expired token) keeps it. Every case is the SAME generic 401.
       if (result.reason === "outage") releaseStrikes();
       return refuse();
+    }
+
+    // R26 recap: after a fully-minted, playable child, email the verified parent
+    // a recap (what was created + how the child logs in + a reset link + next
+    // steps). BEST-EFFORT — the mint already succeeded, so a recap failure must
+    // never change the 200 response. sendSignupRecap suppresses guarded test
+    // families and unsubscribed families internally, and never throws. Idempotent
+    // at Resend (key = fp-recap:<familyId>), so multiple children created in one
+    // signup collapse to one delivery within the 24h window.
+    try {
+      const who = await supabaseParentToken(token).auth.getUser();
+      const parentId = who.data?.user?.id;
+      if (parentId) {
+        const child: RecapChild =
+          data.credentialChoice === "provision_workspace"
+            ? // Path b: the mailbox is provisioned asynchronously (gated off in
+              // this build → pending); the recap says the address is on its way.
+              { firstName: data.childFirstName, loginPath: "provision_workspace", provisionPending: true }
+            : { firstName: data.childFirstName, loginPath: "existing_credential" };
+        const recap = await sendSignupRecap(admin, {
+          parentId,
+          children: [child],
+          signInUrl: verdict.origin,
+          resetUrl: `${verdict.origin}/reset`,
+        });
+        if (recap.status !== "sent" && recap.status !== "suppressed") {
+          console.error(`[fp/signup/child] recap not delivered: ${recap.status} ${"error" in recap ? recap.error ?? "" : ""}`);
+        }
+      }
+    } catch (recapErr) {
+      console.error(
+        `[fp/signup/child] recap send threw (non-fatal): ${recapErr instanceof Error ? recapErr.message : String(recapErr)}`
+      );
     }
 
     return new Response(

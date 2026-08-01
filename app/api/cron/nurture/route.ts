@@ -9,6 +9,10 @@ import {
 } from "@/app/lib/nurture/rules";
 import { renderNurtureEmail } from "@/app/lib/nurture/copy";
 import { sendNurtureEmail } from "@/app/lib/nurture/send";
+// Slice B Unit 6 (Plan Rev 10): exclude guarded test families from the nurture
+// selection so a test signup is NEVER really emailed (this is the one Category-A
+// read that actually SENDS mail) and never inflates the funnel.
+import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
 
 /**
  * GTM-1: daily nurture cron (vercel.json schedules this at 13:05 UTC —
@@ -41,12 +45,14 @@ export async function GET(req: Request) {
   const db = supabaseAdmin();
 
   const [familiesRes, childrenRes, depositsRes, sendsRes, reviewsRes] = await Promise.all([
-    db
-      .from("families")
-      .select(
-        "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at,deposit_asked_referral,consent_expires_at"
-      )
-      .is("merged_into_id", null),
+    excludeTestFamilies(
+      db
+        .from("families")
+        .select(
+          "id,email,parent_id,parent_name,consent_given,consent_revoked_at,merged_into_id,signup_at,dossier_submitted_at,deposit_asked_referral,consent_expires_at"
+        )
+        .is("merged_into_id", null)
+    ),
     db
       .from("children")
       .select(

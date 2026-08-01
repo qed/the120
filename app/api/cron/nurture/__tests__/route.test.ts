@@ -32,13 +32,24 @@ class FakeDb {
     return {
       select: (cols: string) => {
         this.selects[table] = cols;
-        const rows = this.tables[table] ?? [];
-        // The route only chains filters that narrow rows the fakes already
-        // model correctly (merged_into_id null; offer stamp not null).
-        return Object.assign(Promise.resolve(result(rows)), {
-          is: () => Promise.resolve(result(rows.filter((r) => r.merged_into_id === null))),
-          not: () => Promise.resolve(result(rows.filter((r) => r.offer_email_sent_at !== null))),
-        });
+        // A composable filter chain: is()/not() each narrow `rows` and return a
+        // thenable so the route can chain them in any order (families now chains
+        // .is("merged_into_id", null).not("is_test","is",true) — the Slice B Unit
+        // 6 test-family exclusion; child_reviews chains .not(offer_stamp)).
+        let rows = this.tables[table] ?? [];
+        const chain = (): unknown =>
+          Object.assign(Promise.resolve(result(rows)), {
+            is: (col: string, val: unknown) => {
+              rows = rows.filter((r) => r[col] === val);
+              return chain();
+            },
+            not: (col: string) => {
+              if (col === "is_test") rows = rows.filter((r) => r.is_test !== true);
+              else if (col === "offer_email_sent_at") rows = rows.filter((r) => r.offer_email_sent_at !== null);
+              return chain();
+            },
+          });
+        return chain();
       },
       insert: (row: Row) => {
         // The unique (family_id, sequence, step) claim.

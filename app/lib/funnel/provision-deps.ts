@@ -55,6 +55,7 @@ import {
   sweepSuspendPending,
 } from "@/app/lib/funnel/provision-core";
 import { fpProvisioningConsentVerdict } from "@/app/api/fp/signup/consent-rules";
+import type { EraseFamilyDeps } from "@/app/lib/funnel/erase-family-core";
 import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
 import {
   FORWARDING_TOTAL_ALERT_DAYS,
@@ -106,6 +107,9 @@ type DirectoryClient = {
     get: (params: Record<string, unknown>) => Promise<{ data: { isMailboxSetup?: boolean } }>;
     insert: (params: Record<string, unknown>) => Promise<unknown>;
     update: (params: Record<string, unknown>) => Promise<unknown>;
+    // R28 erasure (Slice B Unit 6): the delete leg of a data-rights erasure.
+    // Same DWD scope (admin.directory.user) as insert/update — no scope change.
+    delete: (params: Record<string, unknown>) => Promise<unknown>;
   };
 };
 
@@ -889,6 +893,65 @@ export async function sweepSuspendPendingClaims(): Promise<
   { closed: number; skipped: number } | "skipped"
 > {
   return sweepSuspendPending(realSuspendSweepDeps());
+}
+
+/* ─────────────────────────── R28 erasure deps (Slice B Unit 6) ─────────────────────────── */
+
+/**
+ * The real effects for a service-role R28 data-rights erasure. The sequencing +
+ * FK-safe order live in the pure/injected core (`erase-family-core.ts`); this
+ * factory only supplies the service-role DB client and the two credential-gated
+ * Workspace primitives (suspend, then delete) plus the auth-account delete.
+ *
+ * ── The delete primitive is gated EXACTLY like users.insert ── `deleteWorkspace
+ * User` calls `dir.users.delete` only through `directoryClient()`, which needs
+ * `GOOGLE_WORKSPACE_SA_KEY`; the core consults `workspaceConfigured` and SKIPS
+ * the Google call entirely when the credential is absent (no real Directory call
+ * in normal build/test — the one live exercise is Unit 11). 404 → "missing" so a
+ * re-run over an already-deleted mailbox is idempotent, mirroring the suspend
+ * sweep's `googleStatus(err) === 404` branch.
+ */
+export function realEraseFamilyDeps(): EraseFamilyDeps {
+  const db = supabaseAdmin();
+  return {
+    db,
+    workspaceConfigured: saKeyRaw().length > 0,
+    deleteAuthUser: async (userId) => {
+      const res = await db.auth.admin.deleteUser(userId);
+      if (res.error) {
+        // A 404 (already gone) is success for an idempotent erasure; anything
+        // else is a real failure the core records as stranded.
+        const status = googleStatus(res.error);
+        if (status === 404) return { ok: true };
+        console.error(`[erase] deleteUser failed for ${userId}: ${res.error.message}`);
+        return { ok: false };
+      }
+      return { ok: true };
+    },
+    suspendWorkspaceUser: async (email) => {
+      try {
+        const dir = await directoryClient();
+        await dir.users.update({ userKey: email, requestBody: { suspended: true } });
+        return "suspended";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        console.error("[erase] workspace suspend failed:", err);
+        return "error";
+      }
+    },
+    deleteWorkspaceUser: async (email) => {
+      try {
+        const dir = await directoryClient();
+        await dir.users.delete({ userKey: email });
+        return "deleted";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        console.error("[erase] workspace delete failed:", err);
+        return "error";
+      }
+    },
+    now: () => Date.now(),
+  };
 }
 
 /* ─────────────────────────── forwarding (W14, U7) ─────────────────────────── */

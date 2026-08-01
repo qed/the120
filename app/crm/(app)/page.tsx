@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter"; // Slice B Unit 6: keep test families out of dashboard tallies
 import { getSeatsRemaining } from "@/app/lib/seats";
 import {
   deriveNextMove,
@@ -120,7 +121,7 @@ export default async function CrmDashboardPage() {
     libraryItemsRes,
     seatsRemaining,
   ] = await Promise.all([
-    db.from("families").select(FAMILY_COLS).is("merged_into_id", null),
+    excludeTestFamilies(db.from("families").select(FAMILY_COLS).is("merged_into_id", null)),
     db.from("parents").select("id, first_name, last_name"),
     db.from("children").select("id, parent_id, status, submitted_at"),
     db

@@ -6,7 +6,7 @@ import { currentPolicyHash, FP_CONSENT_POLICY } from "../consent-rules";
  * consent-core driven through a chainable, thenable service-role client fake
  * (same shape as signup-core.test). No real DB is touched. The handler decides
  * each terminal call's result from the recorded builder state; `calls` lets a
- * test assert exactly what was written (the bound snapshot).
+ * test assert exactly what was written / claimed.
  */
 type Result = { data?: unknown; error?: unknown };
 type State = {
@@ -41,6 +41,9 @@ function makeDb(handle: (s: State) => Result) {
       is(col: string, val: unknown) {
         return builder({ ...state, filters: { ...state.filters, [`is:${col}`]: val } });
       },
+      or(filter: string) {
+        return builder({ ...state, filters: { ...state.filters, or: filter } });
+      },
       maybeSingle() {
         return Promise.resolve(record({ ...state, terminal: "maybeSingle" }));
       },
@@ -62,12 +65,15 @@ type DbCfg = {
   /** the fp_signup_attempts freshness read result */
   attempt?: unknown;
   attemptError?: boolean;
-  /** the fp_parental_consent insert result */
+  /** the fp_parental_consent insert result (recordConsent) */
   insertId?: string;
   insertError?: { code?: string; message?: string };
-  /** the fp_parental_consent gate read result */
-  consent?: unknown;
-  consentError?: boolean;
+  /** the fp_parental_consent CAS-claim result (consentGate update) */
+  claimRows?: unknown[];
+  claimError?: boolean;
+  /** the fp_parental_consent classify result (consentGate select) */
+  existingRows?: unknown[];
+  existingError?: boolean;
 };
 
 function cfgDb(cfg: DbCfg = {}) {
@@ -83,16 +89,26 @@ function cfgDb(cfg: DbCfg = {}) {
           ? { data: null, error: cfg.insertError }
           : { data: { id: cfg.insertId ?? "consent1" }, error: null };
       }
-      // select (gate read)
-      return cfg.consentError
-        ? { data: null, error: { message: "gate boom" } }
-        : { data: cfg.consent ?? null, error: null };
+      if (s.op === "update") {
+        return cfg.claimError
+          ? { data: null, error: { message: "claim boom" } }
+          : { data: cfg.claimRows ?? [], error: null };
+      }
+      // select (classify read)
+      return cfg.existingError
+        ? { data: null, error: { message: "classify boom" } }
+        : { data: cfg.existingRows ?? [], error: null };
     }
     return { data: null, error: null };
   });
 }
 
-const verifiedAttempt = { id: "att1", parent_id: "u1", state: "verified" };
+const verifiedAttempt = {
+  id: "att1",
+  parent_id: "u1",
+  parent_email: "dana@example.com",
+  state: "verified",
+};
 
 const recordInput = {
   attemptId: "att1",
@@ -103,7 +119,6 @@ const recordInput = {
   childAgeBand: "under_13" as const,
   childDob: "2016-04-01",
   jurisdiction: "US-CA",
-  parentIdentity: { name: "Dana Rivera", email: "dana@example.com" },
   ip: "203.0.113.9",
   ua: "jsdom",
 };
@@ -122,14 +137,13 @@ describe("recordConsent", () => {
     // Bound to (parent_id, signup_attempt_id).
     expect(row.signup_attempt_id).toBe("att1");
     expect(row.parent_id).toBe("u1");
-    // Snapshots the SERVER's current policy, NOT the echoed strings.
+    // Snapshots the SERVER's current policy.
     expect(row.policy_version).toBe(FP_CONSENT_POLICY.version);
     expect(row.policy_hash).toBe(currentPolicyHash());
     expect(row.rendered_text).toBe(FP_CONSENT_POLICY.text);
     expect(row.child_age_band).toBe("under_13");
     expect(row.child_dob).toBe("2016-04-01");
     expect(row.jurisdiction).toBe("US-CA");
-    expect(row.parent_identity).toEqual({ name: "Dana Rivera", email: "dana@example.com" });
     // The echo proof rides along in the evidence blob.
     expect(row.evidence).toMatchObject({
       echoed_version: FP_CONSENT_POLICY.version,
@@ -137,11 +151,22 @@ describe("recordConsent", () => {
     });
   });
 
+  it("parent_identity is derived SERVER-SIDE from the verified attempt row, not from any input field", async () => {
+    const { db, calls } = cfgDb({
+      attempt: { ...verifiedAttempt, parent_email: "server-truth@example.com" },
+    });
+    // The request carries NO parentIdentity (the type has none); even a body that
+    // smuggled one could not reach the row. The stored identity is the attempt's.
+    const res = await recordConsent(db, recordInput);
+    expect(res.ok).toBe(true);
+    const row = calls.find((c) => c.op === "insert")!.row as Record<string, unknown>;
+    expect(row.parent_identity).toEqual({ email: "server-truth@example.com" });
+  });
+
   it("echoed OLD version: refuses (stale) before any freshness read or write", async () => {
     const { db, calls } = cfgDb({ attempt: verifiedAttempt });
     const res = await recordConsent(db, { ...recordInput, echoedVersion: "2026-07-31.1" });
     expect(res).toEqual({ ok: false, reason: "stale" });
-    // Short-circuits: never reads the attempt, never inserts.
     expect(calls).toEqual([]);
   });
 
@@ -198,72 +223,163 @@ describe("recordConsent", () => {
 
 /* --------------------------------------------------------------- consentGate */
 
-describe("consentGate", () => {
-  const activeConsent = {
-    id: "consent1",
-    signup_attempt_id: "att1",
-    child_id: null,
-    policy_version: FP_CONSENT_POLICY.version,
-    revoked_at: null,
-  };
+describe("consentGate (atomic claim)", () => {
+  const claimRow = { id: "consent1", policy_version: FP_CONSENT_POLICY.version };
 
-  it("ok: an active, current-version consent bound to this attempt (child not yet bound)", async () => {
-    const { db, calls } = cfgDb({ consent: activeConsent });
+  it("ok: atomically CLAIMS the active consent for this child (CAS update, not a read)", async () => {
+    const { db, calls } = cfgDb({ claimRows: [claimRow] });
     const res = await consentGate(db, { attemptId: "att1", childId: "child1" });
     expect(res).toEqual({ ok: true, consentId: "consent1" });
-    // Only reads ACTIVE consent (revoked_at is null).
-    const read = calls.find((c) => c.table === "fp_parental_consent");
-    expect(read!.filters["is:revoked_at"]).toBe(null);
-    expect(read!.filters.signup_attempt_id).toBe("att1");
+
+    // The gate MUTATES: an UPDATE setting child_id, scoped to the active row and
+    // the (unbound OR ours) arm — that is what makes one-consent-one-child a write.
+    const cas = calls.find((c) => c.table === "fp_parental_consent" && c.op === "update");
+    expect(cas).toBeTruthy();
+    expect(cas!.row).toEqual({ child_id: "child1" });
+    expect(cas!.filters.signup_attempt_id).toBe("att1");
+    expect(cas!.filters["is:revoked_at"]).toBe(null);
+    expect(String(cas!.filters.or)).toContain("child_id.is.null");
+    expect(String(cas!.filters.or)).toContain("child_id.eq.child1");
   });
 
-  it("ok: consent already bound to the SAME child passes", async () => {
-    const { db } = cfgDb({ consent: { ...activeConsent, child_id: "child1" } });
-    expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
-      ok: true,
-      consentId: "consent1",
-    });
-  });
-
-  it("missing: no active consent for the attempt → gate refuses (no child is minted)", async () => {
-    const { db } = cfgDb({ consent: null });
+  it("missing: no active consent for the attempt → refuses (no child is minted)", async () => {
+    const { db } = cfgDb({ claimRows: [], existingRows: [] });
     expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
       ok: false,
       reason: "missing",
     });
   });
 
-  it("child_mismatch: an active consent bound to a DIFFERENT child → refuses (anti-mis-attach)", async () => {
-    const { db } = cfgDb({ consent: { ...activeConsent, child_id: "other_child" } });
+  it("child_mismatch: an active consent the CAS could not claim is bound to ANOTHER child", async () => {
+    const { db } = cfgDb({ claimRows: [], existingRows: [{ id: "consent1" }] });
     expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
       ok: false,
       reason: "child_mismatch",
     });
   });
 
-  it("stale: an active consent below the min version anchor → refuses", async () => {
-    const { db } = cfgDb({ consent: { ...activeConsent, policy_version: "2026-07-01.1" } });
+  it("stale: a claimed consent below the min version anchor → refuses", async () => {
+    const { db } = cfgDb({ claimRows: [{ id: "consent1", policy_version: "2026-07-01.1" }] });
     expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
       ok: false,
       reason: "stale",
     });
   });
 
-  it("a revoked consent is invisible to the gate (read filters revoked_at is null) → missing", async () => {
-    // The gate query filters revoked_at is null, so a revoked row never returns;
-    // the fake honors that by yielding null when only a revoked row exists.
-    const { db } = cfgDb({ consent: null });
+  it("ambiguous: the CAS claims >1 active consent (invariant broken — index not applied) → refuses, not outage", async () => {
+    const { db } = cfgDb({
+      claimRows: [
+        { id: "consent1", policy_version: FP_CONSENT_POLICY.version },
+        { id: "consent2", policy_version: FP_CONSENT_POLICY.version },
+      ],
+    });
     expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
       ok: false,
-      reason: "missing",
+      reason: "ambiguous",
     });
   });
 
-  it("a gate read fault is an outage", async () => {
-    const { db } = cfgDb({ consentError: true });
+  it("ambiguous: a multi-row classify read (two other-child consents) → refuses, not outage", async () => {
+    const { db } = cfgDb({ claimRows: [], existingRows: [{ id: "a" }, { id: "b" }] });
+    expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
+      ok: false,
+      reason: "ambiguous",
+    });
+  });
+
+  it("a CAS fault is an outage", async () => {
+    const { db } = cfgDb({ claimError: true });
     expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
       ok: false,
       reason: "outage",
     });
+  });
+
+  it("a classify read fault is an outage", async () => {
+    const { db } = cfgDb({ claimRows: [], existingError: true });
+    expect(await consentGate(db, { attemptId: "att1", childId: "child1" })).toEqual({
+      ok: false,
+      reason: "outage",
+    });
+  });
+});
+
+/* ---------- consentGate: the atomic-claim SEQUENCE against a stateful store ---------- */
+
+/**
+ * A stateful fp_parental_consent fake whose CAS actually mutates child_id, so we
+ * can prove one consent binds to exactly one child across successive gate calls:
+ * child X claims the (initially unbound) row; child Y is then refused; re-gating
+ * child X is idempotent ok.
+ */
+function statefulConsentDb(rows: Array<Record<string, unknown>>) {
+  const store = rows.map((r) => ({ ...r }));
+  const matchesActive = (r: Record<string, unknown>, attemptId: unknown): boolean =>
+    r.signup_attempt_id === attemptId && r.revoked_at == null;
+  const parseOrChild = (or: unknown): string | null => {
+    const m = /child_id\.eq\.([^,]+)/.exec(String(or ?? ""));
+    return m ? m[1] : null;
+  };
+  function builder(state: State): Record<string, unknown> {
+    return {
+      select(columns: string) {
+        return builder({ ...state, op: state.op ?? "select", columns });
+      },
+      update(row: Record<string, unknown>) {
+        return builder({ ...state, op: "update", row });
+      },
+      eq(col: string, val: unknown) {
+        return builder({ ...state, filters: { ...state.filters, [col]: val } });
+      },
+      is(col: string, val: unknown) {
+        return builder({ ...state, filters: { ...state.filters, [`is:${col}`]: val } });
+      },
+      or(filter: string) {
+        return builder({ ...state, filters: { ...state.filters, or: filter } });
+      },
+      then(resolve: (v: Result) => unknown, reject?: (e: unknown) => unknown) {
+        const attemptId = state.filters.signup_attempt_id;
+        if (state.op === "update") {
+          const orChild = parseOrChild(state.filters.or);
+          const claimed = store.filter(
+            (r) => matchesActive(r, attemptId) && (r.child_id == null || r.child_id === orChild)
+          );
+          const newChild = (state.row as { child_id: unknown }).child_id;
+          for (const r of claimed) r.child_id = newChild;
+          const data = claimed.map((r) => ({ id: r.id, policy_version: r.policy_version }));
+          return Promise.resolve({ data, error: null }).then(resolve, reject);
+        }
+        // classify select
+        const found = store.filter((r) => matchesActive(r, attemptId));
+        return Promise.resolve({ data: found.map((r) => ({ id: r.id })), error: null }).then(resolve, reject);
+      },
+    };
+  }
+  return { from: (_table: string) => builder({ table: _table, filters: {} }) } as never;
+}
+
+describe("consentGate: one consent authorizes exactly one child", () => {
+  it("child X claims; a different child Y is refused; re-gating X is idempotent ok", async () => {
+    const db = statefulConsentDb([
+      {
+        id: "consent1",
+        signup_attempt_id: "attA",
+        child_id: null,
+        policy_version: FP_CONSENT_POLICY.version,
+        revoked_at: null,
+      },
+    ]);
+
+    // 1. Child X claims the initially-unbound consent.
+    const first = await consentGate(db, { attemptId: "attA", childId: "childX" });
+    expect(first).toEqual({ ok: true, consentId: "consent1" });
+
+    // 2. A DIFFERENT child Y cannot claim the now-bound consent.
+    const second = await consentGate(db, { attemptId: "attA", childId: "childY" });
+    expect(second).toEqual({ ok: false, reason: "child_mismatch" });
+
+    // 3. Re-gating the SAME child X re-claims idempotently (a retry is safe).
+    const third = await consentGate(db, { attemptId: "attA", childId: "childX" });
+    expect(third).toEqual({ ok: true, consentId: "consent1" });
   });
 });

@@ -11,8 +11,8 @@
  *                      re-check session freshness (the caller must still be the
  *                      just-verified parent) + write the bound consent row.
  *   - consentGate    — the mint-time verdict Units 4/5 call before creating the
- *                      child: is there an ACTIVE consent bound to THIS attempt,
- *                      not stale, not already bound to a different child?
+ *                      child: ATOMICALLY CLAIM the active consent for THIS
+ *                      attempt on THIS child, and refuse otherwise.
  *
  * ── bind-to-rendered (echo + refuse stale) ──
  * recordConsent recomputes the verdict from the version+hash the client echoed
@@ -25,15 +25,27 @@
  * A consent is only meaningful if the caller is the parent who just proved inbox
  * control. recordConsent re-reads the attempt and refuses unless its state is
  * 'verified' AND its parent_id matches the caller's parentId — a replayed or
- * cross-account attest cannot record consent against someone else's attempt.
+ * cross-account attest cannot record consent against someone else's attempt. The
+ * parent_identity snapshot is derived from THAT server-side row (the attempt's
+ * parent_email), never from client-supplied JSON, so the legal-evidence record
+ * cannot be spoofed by the request body.
  *
  * ── the (parent_id, signup_attempt_id) binding + the DB invariant ──
  * The row is written bound to (parent_id, signup_attempt_id). At most ONE active
- * consent per attempt is a DB invariant (a partial unique index on
- * signup_attempt_id where revoked_at is null — the hardening migration), not an
- * app assumption: a duplicate active-consent insert fails with 23505, which we
- * classify as `duplicate` rather than papering over. consentGate then reads the
- * single active row with confidence there can never be an ambiguous pair.
+ * consent per attempt is a DB INVARIANT enforced by the partial unique index in
+ * migration 20260830120000 (on signup_attempt_id WHERE revoked_at IS NULL) —
+ * NOT an app assumption. recordConsent's 23505 handling and consentGate's
+ * single-row expectation BOTH rely on that index being applied (it is applied at
+ * the migration gate, before Unit 4 wires the gate). Until then the code still
+ * degrades sanely: a duplicate insert that somehow lands is classified, and a
+ * multi-row read is refused as `ambiguous` rather than a generic outage.
+ *
+ * ── one consent authorizes exactly one child (atomic claim) ──
+ * consentGate is NOT a read-only check. A read-only gate returns ok for ANY
+ * childId while child_id is still NULL, so one parental consent could authorize
+ * minting TWO different children. Instead the gate performs an atomic
+ * compare-and-set: it binds child_id iff the row is unbound OR already this
+ * child. "One consent -> one child" is thus enforced by the WRITE, not assumed.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -46,6 +58,10 @@ import {
   type ConsentMethod,
 } from "./consent-rules";
 import type { ChildAgeBand } from "./signup-rules";
+
+/** Server-derived identity snapshot (never client JSON). Email always present
+ *  (from the attempt row); name optional (not carried on the attempt today). */
+export type ParentIdentitySnapshot = { name?: string; email: string };
 
 /* ------------------------------------------------------------------- record */
 
@@ -61,8 +77,6 @@ export type RecordConsentInput = {
   /** ISO YYYY-MM-DD, optional. */
   childDob?: string | null;
   jurisdiction: string;
-  /** Name/email snapshot of the verified parent at consent time (jsonb). */
-  parentIdentity: Record<string, unknown>;
   ip: string;
   ua: string;
 };
@@ -85,23 +99,29 @@ export async function recordConsent(
   if (verdict !== "ok") return { ok: false, reason: verdict };
 
   // 2. Session freshness: the caller must still be the just-verified parent of
-  //    THIS attempt. Re-read the attempt rather than trusting the request.
+  //    THIS attempt. Re-read the attempt rather than trusting the request. The
+  //    parent_email read here is ALSO the source of the identity snapshot below.
   const attempt = await db
     .from("fp_signup_attempts")
-    .select("id, parent_id, state")
+    .select("id, parent_id, parent_email, state")
     .eq("id", input.attemptId)
     .maybeSingle();
   if (attempt.error) {
     console.error(`[fp/consent] attempt freshness read failed: ${attempt.error.message}`);
     return { ok: false, reason: "outage" };
   }
-  const row = attempt.data as { parent_id: string | null; state: string | null } | null;
+  const row = attempt.data as
+    | { parent_id: string | null; parent_email: string | null; state: string | null }
+    | null;
   if (!row || row.state !== "verified") return { ok: false, reason: "not_verified" };
   if (!row.parent_id || row.parent_id !== input.parentId) return { ok: false, reason: "parent_mismatch" };
 
+  // The identity evidence is derived SERVER-SIDE from the verified attempt row,
+  // never from the request body — a client cannot spoof whose consent this is.
+  const parentIdentity: ParentIdentitySnapshot = { email: String(row.parent_email ?? "") };
+
   // 3. Write the consent row bound to (parent_id, signup_attempt_id), snapshotting
-  //    the SERVER's current version/hash/text (never the echoed strings). The
-  //    partial unique index makes "one active consent per attempt" a DB invariant.
+  //    the SERVER's current version/hash/text (never the echoed strings).
   const inserted = await db
     .from("fp_parental_consent")
     .insert({
@@ -115,7 +135,7 @@ export async function recordConsent(
       child_age_band: input.childAgeBand,
       child_dob: input.childDob ?? null,
       jurisdiction: input.jurisdiction,
-      parent_identity: input.parentIdentity,
+      parent_identity: parentIdentity,
       ip: input.ip,
       ua: input.ua,
       // Extensible legal-evidence blob: the echo proof rides along so a later
@@ -130,8 +150,11 @@ export async function recordConsent(
     .single();
 
   if (inserted.error) {
-    // 23505 = the partial unique index tripped: an active consent already exists
-    // for this attempt (a duplicate submit). Not an outage — the invariant held.
+    // 23505 = the partial unique index (migration 20260830120000) tripped: an
+    // active consent already exists for this attempt (a duplicate submit). Not an
+    // outage — the invariant held. This classification RELIES on that index being
+    // applied; until then two concurrent inserts could both land (see the gate's
+    // `ambiguous` handling, which is the read-side degrade for that same window).
     if ((inserted.error as { code?: string }).code === "23505") {
       return { ok: false, reason: "duplicate" };
     }
@@ -146,47 +169,79 @@ export async function recordConsent(
 
 export type ConsentGateInput = {
   attemptId: string;
-  /** The child about to be minted. If an active consent is already bound to a
-   *  DIFFERENT child, refuse (anti-mis-attachment). */
+  /** The child about to be minted. The gate atomically CLAIMS the consent for
+   *  this child; a consent already claimed by a DIFFERENT child is refused. */
   childId: string;
 };
 
 export type ConsentGateResult =
   | { ok: true; consentId: string }
-  | { ok: false; reason: "missing" | "stale" | "child_mismatch" | "outage" };
+  | { ok: false; reason: "missing" | "stale" | "child_mismatch" | "ambiguous" | "outage" };
 
 /**
- * The mint-time gate Units 4/5 call before creating the child. Find the single
- * ACTIVE (revoked_at null) consent bound to this attempt — the partial unique
- * index guarantees at most one — and confirm it is usable:
- *   - none found                     → `missing` (no consent, no child)
- *   - already bound to another child → `child_mismatch`
- *   - version below the min anchor   → `stale`
- *   - otherwise                       → ok (returns the consent id to bind).
+ * The mint-time gate Units 4/5 call before creating the child. It ATOMICALLY
+ * CLAIMS the active consent for this child rather than merely reading it:
+ *
+ *   UPDATE fp_parental_consent SET child_id = :childId
+ *    WHERE signup_attempt_id = :attemptId AND revoked_at IS NULL
+ *      AND (child_id IS NULL OR child_id = :childId)
+ *   RETURNING id, policy_version
+ *
+ * so "one consent -> one child" is a WRITE guarantee. Outcomes:
+ *   - claim returns >1 rows → `ambiguous` (the single-active invariant is
+ *     violated — only possible if the 20260830120000 unique index is not yet
+ *     applied and two concurrent recordConsent inserts both landed).
+ *   - claim returns 1 row  → check the policy version; below the min anchor is
+ *     `stale`, otherwise ok (returns the consent id to bind).
+ *   - claim returns 0 rows → classify: no active consent at all is `missing`;
+ *     an active consent that the CAS could not claim is bound to ANOTHER child
+ *     (`child_mismatch`). Idempotent: re-gating the SAME child re-claims (the
+ *     `child_id = :childId` arm matches) and returns ok again.
  */
 export async function consentGate(
   db: SupabaseClient,
   input: ConsentGateInput
 ): Promise<ConsentGateResult> {
-  const found = await db
+  const claimed = await db
     .from("fp_parental_consent")
-    .select("id, signup_attempt_id, child_id, policy_version, revoked_at")
+    .update({ child_id: input.childId })
     .eq("signup_attempt_id", input.attemptId)
     .is("revoked_at", null)
-    .maybeSingle();
-  if (found.error) {
-    console.error(`[fp/consent] gate read failed: ${found.error.message}`);
+    // (child_id IS NULL OR child_id = :childId) — unbound, or already ours.
+    .or(`child_id.is.null,child_id.eq.${input.childId}`)
+    .select("id, policy_version");
+  if (claimed.error) {
+    console.error(`[fp/consent] gate claim failed: ${claimed.error.message}`);
     return { ok: false, reason: "outage" };
   }
-  const row = found.data as
-    | { id: unknown; child_id: string | null; policy_version: string | null }
-    | null;
-  if (!row) return { ok: false, reason: "missing" };
-  if (row.child_id && row.child_id !== input.childId) {
-    return { ok: false, reason: "child_mismatch" };
+  const rows = (claimed.data as Array<{ id: unknown; policy_version: string | null }> | null) ?? [];
+  if (rows.length > 1) {
+    // More than one active consent for one attempt: refuse rather than mint
+    // against an ambiguous pair (the index is the fix; this is the safe degrade).
+    console.error(`[fp/consent] gate saw ${rows.length} active consents for attempt ${input.attemptId} — ambiguous`);
+    return { ok: false, reason: "ambiguous" };
   }
-  if (!policyVersionAtLeast(row.policy_version, FP_CONSENT_MIN_VERSION)) {
-    return { ok: false, reason: "stale" };
+  if (rows.length === 1) {
+    const claim = rows[0];
+    if (!policyVersionAtLeast(claim.policy_version, FP_CONSENT_MIN_VERSION)) {
+      return { ok: false, reason: "stale" };
+    }
+    return { ok: true, consentId: String(claim.id) };
   }
-  return { ok: true, consentId: String(row.id) };
+
+  // 0 rows claimed: either there is NO active consent (missing), or the active
+  // consent is bound to a DIFFERENT child (the CAS's child_id arm excluded it).
+  const existing = await db
+    .from("fp_parental_consent")
+    .select("id")
+    .eq("signup_attempt_id", input.attemptId)
+    .is("revoked_at", null);
+  if (existing.error) {
+    console.error(`[fp/consent] gate classify read failed: ${existing.error.message}`);
+    return { ok: false, reason: "outage" };
+  }
+  const exRows = (existing.data as unknown[] | null) ?? [];
+  if (exRows.length > 1) return { ok: false, reason: "ambiguous" };
+  if (exRows.length === 0) return { ok: false, reason: "missing" };
+  return { ok: false, reason: "child_mismatch" };
 }

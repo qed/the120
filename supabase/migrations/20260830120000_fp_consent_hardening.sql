@@ -15,13 +15,24 @@
 --   ledger is the only truth (another lane's migration may be applied-but-
 --   unmerged). Apply via the Management API playbook, per supabase/MIGRATION-LOCK.md.
 --
--- SAFETY: every statement is idempotent and additive-only. The consent table has
---   NO rows yet (this unit's core is its first writer), so the NOT NULL tighten
---   and the non-empty CHECK cannot fail on existing data; they are authored as
---   NOT VALID then VALIDATE regardless, so the pattern stays non-blocking even if
---   a stray row lands before apply. Tables stay service-role-only (RLS on, zero
---   policies) — this migration adds no policies and grants nothing to the client
---   roles.
+-- SAFETY RESTS ON THE TABLE BEING EMPTY AT APPLY TIME. fp_parental_consent has
+--   NO rows yet (Unit 3's core is its first writer, and Unit 4 — which mints the
+--   first real child/consent — lands AFTER this migration is applied at the
+--   gate). So `add constraint ... check (...)` and `alter column ... set not
+--   null` both run instantly with no data to scan. We deliberately do NOT use the
+--   NOT VALID + VALIDATE split: the whole file is POSTed as ONE Management-API
+--   query = one implicit transaction, so a later VALIDATE would run under the
+--   ACCESS EXCLUSIVE lock the ADD CONSTRAINT already took — the split buys no
+--   concurrency here and only adds moving parts. On an empty table the direct
+--   form is correct and instant. (If this ever had to run against a POPULATED
+--   table, the constraints would instead be added NOT VALID in one migration and
+--   VALIDATE'd in a SEPARATE later one so they are not in the same transaction.)
+--
+-- Idempotent throughout: ALTER TABLE ADD CONSTRAINT is NOT idempotent, so each is
+--   guarded by a pg_constraint existence check (the repo idiom); SET NOT NULL is a
+--   no-op when already set. Additive-only. Tables stay service-role-only (RLS on,
+--   zero policies) — this migration adds no policies and grants nothing to the
+--   client roles.
 
 -- --------------------------------------------------------------------------
 -- (a) The anti-mis-attachment DB INVARIANT: at most ONE ACTIVE consent per
@@ -30,8 +41,8 @@
 --     submit or a retry could otherwise leave mint-time code with two candidate
 --     consents and no rule — the exact mis-attachment the binding exists to
 --     prevent. `where revoked_at is null` still permits a revoke-then-re-consent
---     history. recordConsent relies on this: a second active insert fails 23505,
---     which the core classifies as `duplicate` rather than papering over.
+--     history. Both recordConsent (23505 -> `duplicate`) and consentGate (which
+--     expects a single active row) rely on THIS index.
 create unique index if not exists fp_parental_consent_attempt_active_uidx
   on public.fp_parental_consent (signup_attempt_id)
   where revoked_at is null and signup_attempt_id is not null;
@@ -41,20 +52,18 @@ create unique index if not exists fp_parental_consent_attempt_active_uidx
 --      field, a caller bug must not be able to silently persist a NULL age band
 --      into an unretrofittable regulated column (COPPA under-13 vs 13-16 hinges
 --      on it, and it cannot be re-collected without re-contacting parents).
---      Add the constraint NOT VALID (instant, no scan), VALIDATE it (non-blocking
---      on existing rows), then SET NOT NULL — Postgres reuses the validated CHECK
---      instead of re-scanning, so the column is NOT NULL in the catalog.
+--      Instant on the empty table; guarded so a re-run is a no-op.
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'fp_parental_consent_age_band_present') then
     alter table public.fp_parental_consent
       add constraint fp_parental_consent_age_band_present
-      check (child_age_band is not null) not valid;
+      check (child_age_band is not null);
   end if;
 end $$;
 
-alter table public.fp_parental_consent validate constraint fp_parental_consent_age_band_present;
-
+-- Belt and suspenders: NOT NULL in the catalog, not merely CHECK-guarded.
+-- Instant on the empty table; a no-op if already set.
 alter table public.fp_parental_consent alter column child_age_band set not null;
 
 -- --------------------------------------------------------------------------
@@ -62,15 +71,12 @@ alter table public.fp_parental_consent alter column child_age_band set not null;
 --      check forbids that sentinel from being PERSISTED, so a caller that omits
 --      jurisdiction fails loudly at write time rather than banking an empty,
 --      unretrofittable legal field. recordConsent already validates non-empty in
---      the rules layer; this makes it a DB guarantee too. NOT VALID then VALIDATE
---      keeps it non-blocking on any pre-existing rows.
+--      the rules layer; this makes it a DB guarantee too.
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'fp_parental_consent_jurisdiction_nonempty') then
     alter table public.fp_parental_consent
       add constraint fp_parental_consent_jurisdiction_nonempty
-      check (jurisdiction <> '') not valid;
+      check (jurisdiction <> '');
   end if;
 end $$;
-
-alter table public.fp_parental_consent validate constraint fp_parental_consent_jurisdiction_nonempty;

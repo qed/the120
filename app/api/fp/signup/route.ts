@@ -194,10 +194,18 @@ export async function POST(req: Request): Promise<Response> {
       return refuse("outage");
     }
 
-    return new Response(JSON.stringify({ ok: true, status: "verification_pending" }), {
-      status: 200,
-      headers,
-    });
+    // Return the attempt id so the cross-origin SPA can carry it through the
+    // email-verify wait to the authenticated child-mint call (Unit 9); it is an
+    // opaque handle, not a credential (the child-mint route re-checks that the
+    // attempt is 'verified' and owned by the Bearer parent), so surfacing it is
+    // safe. `started` and a `tryResumePending` re-send both carry an attemptId.
+    return new Response(
+      JSON.stringify({ ok: true, status: "verification_pending", attemptId: result.attemptId }),
+      {
+        status: 200,
+        headers,
+      }
+    );
   } catch (err) {
     console.error(
       `[fp/signup] unexpected error: ${err instanceof Error ? err.message : String(err)}`

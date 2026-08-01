@@ -223,5 +223,28 @@ export function decideMode(parsed: ParsedArgs, input: EraseFamilyInput): ModeDec
     };
   }
 
+  // P2 (security review): a FULL-FAMILY real erase (childIds omitted) leans on the
+  // eraseFamily fp_signup_attempts parent_email FALLBACK when the parent_id delete
+  // matched nothing (a resumed run after parent_id was SET NULL). An empty/invalid
+  // --parent-email there (1) matches nothing, so an orphaned attempt row is LEFT
+  // BEHIND while summary.ok stays true and the script reports success — an
+  // incomplete erasure reported as complete; and (2) is a broad cross-family-keyed
+  // filter fed by an empty value. So a full-family real run REQUIRES a real email.
+  // Child-scoped real runs never use that fallback and keep email optional; dry-run
+  // never reaches here.
+  if (input.childIds === undefined) {
+    const email = input.parentEmail.trim();
+    if (email.length === 0 || !email.includes("@")) {
+      return {
+        mode: "refuse",
+        reason:
+          "A full-family real erase requires --parent-email <email> (a real, @-valid address). " +
+          "It is the stable handle eraseFamily uses to finish removing fp_signup_attempts when a " +
+          "resumed run has already SET NULL the parent_id; without it an orphaned attempt row is " +
+          "left behind yet the run reports success. Pass --parent-email, or scope with --child-ids.",
+      };
+    }
+  }
+
   return { mode: "real" };
 }

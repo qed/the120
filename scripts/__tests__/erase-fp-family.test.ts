@@ -12,6 +12,7 @@ const PARENT = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 const CHILD_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CHILD_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const EMAIL = "erase@example.com";
 
 function build(argv: string[], env: Record<string, string | undefined> = {}) {
   const parsed = parseArgs(argv, env);
@@ -113,8 +114,15 @@ describe("decideMode", () => {
     if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("dry-run");
   });
 
-  it("goes real when --confirm re-states the exact target id", () => {
-    const { parsed, built } = build(["--parent-user-id", PARENT, "--confirm", PARENT]);
+  it("goes real when --confirm re-states the exact target id (full-family, with email)", () => {
+    const { parsed, built } = build([
+      "--parent-user-id",
+      PARENT,
+      "--parent-email",
+      EMAIL,
+      "--confirm",
+      PARENT,
+    ]);
     expect(built.ok).toBe(true);
     if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("real");
   });
@@ -141,10 +149,101 @@ describe("decideMode", () => {
   });
 
   it("goes real with R28_CONFIRM=erase AND a matching --confirm id", () => {
-    const { parsed, built } = build(["--parent-user-id", PARENT, "--confirm", PARENT], {
-      R28_CONFIRM: "erase",
-    });
+    const { parsed, built } = build(
+      ["--parent-user-id", PARENT, "--parent-email", EMAIL, "--confirm", PARENT],
+      { R28_CONFIRM: "erase" }
+    );
     expect(built.ok).toBe(true);
     if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("real");
+  });
+});
+
+describe("buildInput — child-ids present-but-empty (P3)", () => {
+  it("refuses when --child-ids is present but empty ([])", () => {
+    // `--child-ids` with no value → flag present, list []. Must refuse (not be
+    // silently treated as a full-family erase).
+    const { parsed, built } = build(["--parent-user-id", PARENT, "--child-ids"]);
+    expect(parsed.childIds).toEqual([]);
+    expect(built.ok).toBe(false);
+    if (!built.ok) expect(built.error).toMatch(/--child-ids was empty/i);
+  });
+});
+
+describe("decideMode — confirm value trimming (P3)", () => {
+  it("still matches the target when the --confirm value is whitespace-padded (trimmed)", () => {
+    // decideMode trims the restated id, so padding around a correct id still
+    // authorizes the erase (child-scoped here, so no email is required).
+    const { parsed, built } = build([
+      "--parent-user-id",
+      PARENT,
+      "--child-ids",
+      CHILD_A,
+      "--confirm",
+      `  ${PARENT}  `,
+    ]);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("real");
+  });
+});
+
+describe("decideMode — child-scoped real decision (P3)", () => {
+  it("goes real for a child-scoped run with a matching --confirm and NO email", () => {
+    const { parsed, built } = build([
+      "--parent-user-id",
+      PARENT,
+      "--child-ids",
+      `${CHILD_A},${CHILD_B}`,
+      "--confirm",
+      PARENT,
+    ]);
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.input.childIds).toEqual([CHILD_A, CHILD_B]);
+      expect(decideMode(parsed, built.input).mode).toBe("real");
+    }
+  });
+});
+
+describe("decideMode — full-family real requires a parent email (P2)", () => {
+  it("refuses a full-family real run with NO --parent-email", () => {
+    const { parsed, built } = build(["--parent-user-id", PARENT, "--confirm", PARENT]);
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      const d = decideMode(parsed, built.input);
+      expect(d.mode).toBe("refuse");
+      if (d.mode === "refuse") expect(d.reason).toMatch(/requires --parent-email/i);
+    }
+  });
+
+  it("allows a full-family real run WITH a valid --parent-email", () => {
+    const { parsed, built } = build([
+      "--parent-user-id",
+      PARENT,
+      "--parent-email",
+      EMAIL,
+      "--confirm",
+      PARENT,
+    ]);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("real");
+  });
+
+  it("allows a child-scoped real run WITHOUT a --parent-email (fallback not used)", () => {
+    const { parsed, built } = build([
+      "--parent-user-id",
+      PARENT,
+      "--child-ids",
+      CHILD_A,
+      "--confirm",
+      PARENT,
+    ]);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("real");
+  });
+
+  it("still previews (dry-run) a full-family run with no email and no confirm", () => {
+    const { parsed, built } = build(["--parent-user-id", PARENT]);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(decideMode(parsed, built.input).mode).toBe("dry-run");
   });
 });

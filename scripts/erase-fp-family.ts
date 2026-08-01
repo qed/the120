@@ -59,7 +59,12 @@ import { loadSupabaseEnv } from "./load-env";
 import { buildInput, decideMode, parseArgs } from "./erase-fp-family-args";
 import type { EraseFamilyInput, EraseFamilySummary } from "@/app/lib/funnel/erase-family-core";
 import { eraseFamily } from "@/app/lib/funnel/erase-family-core";
-import { realEraseFamilyDeps } from "@/app/lib/funnel/provision-deps";
+// SCRIPT-SAFE deps (security review P1): NOT realEraseFamilyDeps from
+// provision-deps.ts — that module's `@/app/lib/supabase/admin` import begins with
+// `import "server-only"`, which is a Next.js runtime alias (not an installed
+// package) and crashes at module load under `tsx` before main() runs. See
+// scripts/erase-fp-family-deps.ts for the mirrored, server-only-free factory.
+import { scriptEraseFamilyDeps } from "./erase-fp-family-deps";
 
 /** Print only the local-part of a mailbox address (never the full PII address). */
 const localPartOnly = (email: string | null): string =>
@@ -154,7 +159,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const deps = realEraseFamilyDeps();
+  const deps = scriptEraseFamilyDeps();
   const scopeLabel = input.childIds !== undefined ? `child-scoped (${input.childIds.length} id[s])` : "full family";
   console.log(
     `[erase-fp-family] target parent ${input.parentUserId} — ${scopeLabel}; ` +

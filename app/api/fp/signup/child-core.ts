@@ -116,7 +116,9 @@ export type CreateChildRefusal =
   | "outage";
 
 export type CreateChildResult =
-  | { ok: true; childId: string; playerProfileId: string }
+  // playerProfileId is present on a fresh mint; the idempotent-replay success
+  // (attempt already 'child_created') carries only the existing childId.
+  | { ok: true; childId: string; playerProfileId?: string }
   | {
       ok: false;
       reason: CreateChildRefusal;
@@ -150,18 +152,39 @@ export async function createChild(
 
   // 2. Freshness: the attempt must be verified AND belong to this parent (the
   //    just-verified-parent invariant, re-read server-side — never trusted from
-  //    the request body).
+  //    the request body). NOTE (launch gate): child creation has NO launch gate
+  //    of its own — it is gated TRANSITIVELY, because an attempt can only reach
+  //    state='verified' by first clearing the signup-start launch gate.
   const attempt = await admin
     .from("fp_signup_attempts")
-    .select("id, parent_id, state")
+    .select("id, parent_id, state, child_id")
     .eq("id", input.attemptId)
     .maybeSingle();
   if (attempt.error) {
     console.error(`[fp/signup/child] attempt read failed: ${attempt.error.message}`);
     return { ok: false, reason: "outage" };
   }
-  const row = attempt.data as { parent_id: string | null; state: string | null } | null;
-  if (!row || row.state !== "verified") return { ok: false, reason: "not_verified" };
+  const row = attempt.data as
+    | { parent_id: string | null; state: string | null; child_id: string | null }
+    | null;
+  if (!row) return { ok: false, reason: "not_verified" };
+
+  // Idempotent replay (a lost response): the child was ALREADY minted for THIS
+  // attempt, so its state is 'child_created'. The state==='verified' freshness
+  // check below would otherwise mis-refuse a genuine, playable child as
+  // not_verified and hand the SPA a generic 401. Return the existing child_id
+  // WITHOUT minting again. Still FAIL-CLOSED on ownership: a child_created
+  // attempt owned by a different parent must never leak its child.
+  if (row.state === "child_created") {
+    if (!row.parent_id || row.parent_id !== parentId) {
+      return { ok: false, reason: "parent_mismatch" };
+    }
+    if (row.child_id) return { ok: true, childId: row.child_id };
+    // 'child_created' with no bound child_id is a corrupt marker, not a replay.
+    return { ok: false, reason: "not_verified" };
+  }
+
+  if (row.state !== "verified") return { ok: false, reason: "not_verified" };
   if (!row.parent_id || row.parent_id !== parentId) return { ok: false, reason: "parent_mismatch" };
 
   // 3. Validate the pure inputs BEFORE any side effect: a bad name, a bad grade,
@@ -196,7 +219,12 @@ export async function createChild(
 
   try {
     // 4. Enforce the per-family cap under the PARENT-TOKEN client (RLS-scoped —
-    //    the parent sees only their own children).
+    //    the parent sees only their own children). This is a NON-load-bearing
+    //    stuck-loop / runaway-script guard: a deliberate check-then-act (NOT a
+    //    post-write-verify), so a rare concurrent double-submit could momentarily
+    //    exceed the cap. That has no compliance consequence — the cap is a courtesy
+    //    ceiling nobody legitimately reaches, not a consent/verification invariant —
+    //    so the simpler pre-write check is intentional.
     const listed = await pc.from("children").select("id").limit(MAX_CHILDREN_PER_FAMILY + 1);
     if (listed.error) {
       console.error(`[fp/signup/child] cap list failed: ${listed.error.message}`);
@@ -233,6 +261,14 @@ export async function createChild(
     const gate = await consentGate(admin, { attemptId: input.attemptId, childId });
     if (!gate.ok) {
       await compensate("consent-gate");
+      // A TRANSIENT/infra gate outcome — a PostgREST blip on the CAS ("outage")
+      // or an ambiguous multi-active read ("ambiguous") — is OUR fault, not a
+      // missing consent. Map it to child-core's "outage" so the route releases
+      // the rate-limit strike. Only a genuine consent problem
+      // (missing | stale | child_mismatch) is terminal `consent_required`.
+      if (gate.reason === "outage" || gate.reason === "ambiguous") {
+        return { ok: false, reason: "outage" };
+      }
       return { ok: false, reason: "consent_required", detail: gate.reason };
     }
 
@@ -348,18 +384,39 @@ async function runCompensation(
 ): Promise<void> {
   const { admin } = deps;
 
-  if (created.playerProfileId) {
-    const saves = await admin.from("fp_player_saves").delete().eq("profile_id", created.playerProfileId);
-    if (saves.error) {
+  // FP player profile + its seeded save. Torn down by the KNOWN child_id (UNIQUE
+  // on fp_player_profiles) rather than the captured playerProfileId, because
+  // ensurePlayerProfile INSERTS the profile row BEFORE it seeds the save and, on
+  // a save-seed error, returns save_seed_failed with NO profileId — leaving the
+  // profile row committed but never captured in `created`. Keying the teardown on
+  // child_id still removes that orphan; otherwise its ON DELETE RESTRICT FKs to
+  // auth.users and children would block the auth-user and child deletes below,
+  // stranding the minor's auth account and leaving the consent bound (its SET
+  // NULL never fires) — which wedges every retry on consentGate child_mismatch.
+  if (created.childId) {
+    const found = await admin
+      .from("fp_player_profiles")
+      .select("id")
+      .eq("child_id", created.childId)
+      .maybeSingle();
+    if (found.error) {
       console.error(
-        `[fp/signup/child] STRANDED: fp_player_saves delete failed for profile ${created.playerProfileId}: ${saves.error.message}`
+        `[fp/signup/child] STRANDED: fp_player_profiles lookup by child ${created.childId} failed: ${found.error.message}`
       );
-    }
-    const prof = await admin.from("fp_player_profiles").delete().eq("id", created.playerProfileId);
-    if (prof.error) {
-      console.error(
-        `[fp/signup/child] STRANDED: fp_player_profiles delete failed for ${created.playerProfileId}: ${prof.error.message}`
-      );
+    } else if (found.data && typeof (found.data as { id?: unknown }).id === "string") {
+      const profileId = String((found.data as { id: unknown }).id);
+      const saves = await admin.from("fp_player_saves").delete().eq("profile_id", profileId);
+      if (saves.error) {
+        console.error(
+          `[fp/signup/child] STRANDED: fp_player_saves delete failed for profile ${profileId}: ${saves.error.message}`
+        );
+      }
+      const prof = await admin.from("fp_player_profiles").delete().eq("id", profileId);
+      if (prof.error) {
+        console.error(
+          `[fp/signup/child] STRANDED: fp_player_profiles delete failed for ${profileId}: ${prof.error.message}`
+        );
+      }
     }
   }
 

@@ -37,7 +37,11 @@ export const dynamic = "force-dynamic";
 
 const childSchema = z
   .object({
-    attemptId: z.string().min(1).max(200),
+    // A UUID, not just a bounded string: a non-UUID would otherwise reach
+    // Postgres, error 22P02, be classified `outage`, and REFUND the rate-limit
+    // strike — letting a valid-token caller loop malformed ids for free. A
+    // malformed id now collapses to the same pre-DB generic 401, strike standing.
+    attemptId: z.uuid(),
     childFirstName: z.string().trim().min(1).max(80),
     // Optional: FP captures an age band, not a grade. Accepted as a number or a
     // numeric string; the core coerces it through the funnel gradeVerdict guard.

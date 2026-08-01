@@ -50,6 +50,7 @@ import {
   MAX_LOCAL_PART_ATTEMPTS,
   pickStudentLocalPart,
   studentEmailForLocalPart,
+  WORKSPACE_UNCONFIGURED_PENDING_REASON,
   type ConsentVerdict,
   type ForwardingState,
   type ProvisionState,
@@ -397,7 +398,7 @@ export async function driveProvisioning(
         state: "pending",
         supabaseUserId,
         consentPolicyVersion: consent.version,
-        pendingReason: "workspace credential not configured",
+        pendingReason: WORKSPACE_UNCONFIGURED_PENDING_REASON,
       },
       { kind: "pending_config" }
     );
@@ -838,7 +839,16 @@ export async function alertStaleClaims(
   try {
     const stale = await deps.listStaleClaims(STALE_CLAIM_ALERT_MINUTES);
     if (stale === "error") return "skipped";
-    const fresh = stale.filter((c) => c.opsAlertedAt === null);
+    const fresh = stale.filter(
+      (c) =>
+        c.opsAlertedAt === null &&
+        // A claim parked ONLY on the missing Workspace credential is a known
+        // designed cohort, re-parked every hour by the FP re-drive. Paging ops
+        // about it every hour would desensitize the alert (FIX 3); the core
+        // already parks it quietly (nobody paged), so the human backstop stays
+        // consistent. Genuine stalls (any other reason, or none) still page once.
+        c.pendingReason !== WORKSPACE_UNCONFIGURED_PENDING_REASON
+    );
     if (fresh.length === 0) return "none";
     await deps.notifyOps(
       "Student provisioning stalled — paid families waiting",

@@ -6,13 +6,18 @@ import {
   type FpRedriveDeps,
   type ProvisionClaim,
   type ProvisionDeps,
+  type ProvisionOutcome,
 } from "@/app/lib/funnel/provision-core";
 import {
   FP_CONSENT_MIN_VERSION,
   FP_CONSENT_POLICY,
   fpProvisioningConsentVerdict,
 } from "@/app/api/fp/signup/consent-rules";
-import { readFpAcceptedPolicyVersion } from "@/app/lib/funnel/provision-deps";
+import {
+  provisionFpChildInlineCore,
+  readFpAcceptedPolicyVersion,
+  type FpInlineDeps,
+} from "@/app/lib/funnel/provision-deps";
 
 /**
  * Slice B Unit 5 — First Profit signup provisioning (path b). The funnel
@@ -272,5 +277,146 @@ describe("sweepFpPendingProvisioning", () => {
       drive: async () => {},
     };
     expect(await sweepFpPendingProvisioning(deps)).toEqual({ driven: 0, skipped: 0 });
+  });
+});
+
+/* ---------------------- provisionFpChildInlineCore (path-b inline step) ---------------------- */
+
+/**
+ * The inline enqueue→drive→read-back step child creation calls on path (b). The
+ * point of these is the FAILURE contract: the drive OUTCOME is inspected (not
+ * inferred from a success-only read), a minted identity is always SURFACED so a
+ * compensating caller tears it down (FIX 1), and a concurrent-owner lease_refused
+ * is distinguished from a genuine no-identity park (FIX 2).
+ */
+type InlineOver = {
+  enqueue?: boolean;
+  outcome?: ProvisionOutcome;
+  /** A queue of readClaim results, consumed in order (models a first-read error
+   *  followed by a recovery read). A single value is reused for every call. */
+  reads?: Array<{ supabaseUserId: string | null; state: string | null } | "error">;
+};
+
+function inlineHarness(over: InlineOver = {}) {
+  const reads = [...(over.reads ?? [{ supabaseUserId: "fp-auth-1", state: "pending" }])];
+  const seen: string[] = [];
+  const deps: FpInlineDeps = {
+    ensureClaim: async () => {
+      seen.push("ensureClaim");
+      return over.enqueue ?? true;
+    },
+    drive: async () => {
+      seen.push("drive");
+      return over.outcome ?? { kind: "pending_config" };
+    },
+    readClaim: async () => {
+      seen.push("readClaim");
+      return reads.length > 1 ? (reads.shift() as never) : reads[0];
+    },
+  };
+  return { deps, seen };
+}
+
+describe("provisionFpChildInlineCore", () => {
+  it("workspace-unconfigured park with a minted identity → ok, surfacing the identity", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "pending_config" },
+      reads: [{ supabaseUserId: "fp-auth-1", state: "pending" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: true,
+      supabaseUserId: "fp-auth-1",
+      state: "pending",
+    });
+  });
+
+  it("enqueue failure → outage, no identity (never drives)", async () => {
+    const { deps, seen } = inlineHarness({ enqueue: false });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "outage",
+      state: null,
+      supabaseUserId: null,
+    });
+    expect(seen).toEqual(["ensureClaim"]); // no drive, no read
+  });
+
+  it("consent-gap park (no identity minted) → no_identity, nothing to surface", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "consent_parked", reason: "consent gate: consent_missing — x" },
+      reads: [{ supabaseUserId: null, state: "pending" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "no_identity",
+      state: "pending",
+      supabaseUserId: null,
+    });
+  });
+
+  it("FIX 1 — the orphan window: an identity was minted on the claim but the post-drive read errors → ok:false, yet the identity is STILL SURFACED for teardown", async () => {
+    const { deps } = inlineHarness({
+      // The drive completed the identity leg (recorded supabase_user_id on the
+      // claim) but the first read-back blips; the recovery read finds the id.
+      outcome: { kind: "pending_config" },
+      reads: ["error", { supabaseUserId: "minted-orphan", state: "pending" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "outage",
+      state: null,
+      supabaseUserId: "minted-orphan", // surfaced → the caller can tear it down
+    });
+  });
+
+  it("both reads error → outage with no recoverable identity (runCompensation's by-child_id backstop covers it)", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "pending_config" },
+      reads: ["error", "error"],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "outage",
+      state: null,
+      supabaseUserId: null,
+    });
+  });
+
+  it("FIX 2 — lease_refused with the concurrent owner's identity already minted → ok (never compensate; use the id)", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "lease_refused", state: "in_progress" },
+      reads: [{ supabaseUserId: "cron-minted", state: "pending" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: true,
+      supabaseUserId: "cron-minted",
+      state: "pending",
+    });
+  });
+
+  it("FIX 2 — lease_refused, the owner has not minted the identity yet → lease_pending (caller must NOT compensate)", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "lease_refused", state: "in_progress" },
+      reads: [{ supabaseUserId: null, state: "in_progress" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "lease_pending",
+      state: "in_progress",
+      supabaseUserId: null,
+    });
+  });
+
+  it("FIX 7 — an identity was minted but the claim landed `exception` → not a usable child; surfaces the id for teardown", async () => {
+    const { deps } = inlineHarness({
+      outcome: { kind: "exception", reason: "underivable name" },
+      reads: [{ supabaseUserId: "minted-then-excepted", state: "exception" }],
+    });
+    expect(await provisionFpChildInlineCore(deps, CHILD, OWNER)).toEqual({
+      ok: false,
+      reason: "exception",
+      state: "exception",
+      supabaseUserId: "minted-then-excepted",
+    });
   });
 });

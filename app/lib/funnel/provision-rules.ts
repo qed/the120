@@ -263,6 +263,26 @@ export function isTerminalState(state: ProvisionState): boolean {
   return state === "complete" || state === "exception" || state === "released";
 }
 
+/**
+ * The non-terminal, DRIVABLE provisioning states — a claim in one of these can
+ * still be advanced by a (re-)drive. ONE canonical allowlist, shared by the
+ * re-drive scan and the stale sweep instead of hand-typed lists that drift: a
+ * claim whose prior drive CRASHED holding the lease sits in `in_progress`, and
+ * omitting it there strands it un-re-driven forever (takeLease still refuses a
+ * LIVE lease, so including it is safe). `suspend_pending` is deliberately absent
+ * — a leaving family is never re-provisioned. */
+export const DRIVABLE_PROVISION_STATES = ["pending", "in_progress", "identity_only"] as const;
+
+/**
+ * The staff-visible pending reason a claim carries when it parked ONLY because
+ * the Google Workspace credential has not landed yet (GOOGLE_WORKSPACE_SA_KEY
+ * absent). A KNOWN designed cohort, not an incident — the core parks it quietly
+ * (nobody paged) and the human stale-claim backstop excludes it, so the hourly
+ * FP re-drive re-parking it can never desensitize ops. Kept as one exported
+ * constant so the writer (provision-core) and the reader (the stale sweep) can
+ * never drift apart. */
+export const WORKSPACE_UNCONFIGURED_PENDING_REASON = "workspace credential not configured";
+
 /** Forwarding is its OWN dimension, never folded into the state above: a
  *  mailbox can be perfectly deliverable while forwarding is still
  *  unverified, and conflating them would make `complete` mean two things. */

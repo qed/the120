@@ -30,7 +30,11 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
-import { PROVISION_STATES, type ProvisionState } from "@/app/lib/funnel/provision-rules";
+import {
+  DRIVABLE_PROVISION_STATES,
+  PROVISION_STATES,
+  type ProvisionState,
+} from "@/app/lib/funnel/provision-rules";
 import type {
   ForwardingClaim,
   ForwardingDeps,
@@ -543,7 +547,42 @@ export async function driveFpProvisioningForChild(
 
 export type FpProvisionInline =
   | { ok: true; supabaseUserId: string; state: string }
-  | { ok: false; reason: "no_identity" | "outage"; state: string | null };
+  | {
+      ok: false;
+      /**
+       * `no_identity`  — the drive never minted a Supabase identity (a consent
+       *                  gap, or a read failure before the mint): compensate.
+       * `outage`       — a transient failure (claim enqueue or post-drive read):
+       *                  compensate, but see supabaseUserId below.
+       * `exception`    — an identity WAS minted, but the claim then landed
+       *                  `exception` (needs a human): not a usable child (FIX 7).
+       * `lease_pending`— a CONCURRENT owner (the hourly re-drive cron) holds the
+       *                  lease and is finishing THIS claim. NOT our failure — the
+       *                  caller must NOT compensate/delete the child out from
+       *                  under the in-flight mint (FIX 2). Retry/let the cron land.
+       */
+      reason: "no_identity" | "outage" | "exception" | "lease_pending";
+      state: string | null;
+      /**
+       * The Supabase identity the drive MINTED (recorded on the claim) even
+       * though this call is not ok — surfaced so a compensating caller tears it
+       * down by this stable handle instead of ORPHANING it in auth.users (the
+       * Unit-4 compound learning; FIX 1). `null` when none was minted (or could
+       * not be recovered); runCompensation's delete-by-child_id is the backstop.
+       */
+      supabaseUserId: string | null;
+    };
+
+/** The impure legs of the inline step, injected so the sequencing is testable
+ *  against fakes without a live DB, Supabase, or the whole drive composition. */
+export type FpInlineDeps = {
+  ensureClaim: (childId: string) => Promise<boolean>;
+  drive: (childId: string, owner: string) => Promise<ProvisionOutcome>;
+  /** Read the minted identity + landed state off the claim. */
+  readClaim: (
+    childId: string
+  ) => Promise<{ supabaseUserId: string | null; state: string | null } | "error">;
+};
 
 /**
  * Path (b) child-creation's inline provisioning step — the arrival-route enqueue
@@ -556,32 +595,93 @@ export type FpProvisionInline =
  *
  * Best-effort by contract: a park at `pending` (Workspace unconfigured — the
  * normal Slice-B state) is a SUCCESS here as long as the identity leg ran, since
- * the mailbox completes later on the re-drive cron. Only a claim that never
- * reached the identity (a consent gap, or a transient read failure before the
- * Supabase mint) returns `no_identity`, letting the caller compensate cleanly
- * rather than leave a child with no login account.
+ * the mailbox completes later on the re-drive cron. The failure returns SURFACE
+ * any identity the drive minted (FIX 1) and distinguish a concurrent-owner
+ * `lease_refused` (FIX 2) from a genuine no-identity park, so the caller never
+ * orphans an identity nor deletes a child the cron is mid-mint on.
+ *
+ * The composition is INSPECTED via the drive OUTCOME (not inferred from a
+ * success-only read): pure sequencing, exported for direct unit coverage.
  */
+export async function provisionFpChildInlineCore(
+  deps: FpInlineDeps,
+  childId: string,
+  owner: string
+): Promise<FpProvisionInline> {
+  const enqueued = await deps.ensureClaim(childId);
+  if (!enqueued) return { ok: false, reason: "outage", state: null, supabaseUserId: null };
+
+  const outcome = await deps.drive(childId, owner);
+  const readback = await deps.readClaim(childId);
+
+  // FIX 2 — a concurrent owner (the re-drive cron) won the lease for this
+  // just-created child and is finishing the mint. NOT a failure: the child +
+  // claim are valid. If that owner has already minted the identity, surface it
+  // and proceed; if not yet, report lease_pending so the caller leaves the child
+  // for the cron to finish (never compensate/delete it out from under the mint).
+  if (outcome.kind === "lease_refused") {
+    if (readback !== "error" && readback.supabaseUserId) {
+      return { ok: true, supabaseUserId: readback.supabaseUserId, state: readback.state ?? "pending" };
+    }
+    return {
+      ok: false,
+      reason: "lease_pending",
+      state: readback === "error" ? null : readback.state,
+      supabaseUserId: null,
+    };
+  }
+
+  if (readback === "error") {
+    // Post-drive read failed → we cannot confirm a usable child, so this is a
+    // (retryable) outage. But the drive may have already MINTED an identity onto
+    // the claim; recover it best-effort (a second read) and SURFACE it so the
+    // caller tears it down rather than orphaning it (FIX 1).
+    const recovered = await deps.readClaim(childId);
+    return {
+      ok: false,
+      reason: "outage",
+      state: null,
+      supabaseUserId: recovered === "error" ? null : recovered.supabaseUserId,
+    };
+  }
+
+  const { supabaseUserId, state } = readback;
+  if (!supabaseUserId) return { ok: false, reason: "no_identity", state, supabaseUserId: null };
+  // FIX 7 — an identity that then landed `exception` is not a usable child.
+  // Surface the id so compensation still tears it down (never orphan it).
+  if (state === "exception") return { ok: false, reason: "exception", state, supabaseUserId };
+  return { ok: true, supabaseUserId, state: state ?? "pending" };
+}
+
+/** The wired inline step: the real claim enqueue, drive, and claim read-back. */
 export async function provisionFpChildInline(
   childId: string,
   owner: string
 ): Promise<FpProvisionInline> {
-  const enqueued = await ensureProvisionClaim(childId);
-  if (!enqueued) return { ok: false, reason: "outage", state: null };
-  await driveFpProvisioningForChild(childId, owner);
   const db = supabaseAdmin();
-  const { data, error } = await db
-    .from(CLAIM_TABLE)
-    .select("supabase_user_id, state")
-    .eq("child_id", childId)
-    .maybeSingle();
-  if (error) {
-    console.error(`[fp/provision] post-drive claim read failed for ${childId}: ${error.message}`);
-    return { ok: false, reason: "outage", state: null };
-  }
-  const supabaseUserId = (data?.supabase_user_id as string | null) ?? null;
-  const state = data?.state ? String(data.state) : null;
-  if (!supabaseUserId) return { ok: false, reason: "no_identity", state };
-  return { ok: true, supabaseUserId, state: state ?? "pending" };
+  return provisionFpChildInlineCore(
+    {
+      ensureClaim: ensureProvisionClaim,
+      drive: driveFpProvisioningForChild,
+      readClaim: async (id) => {
+        const { data, error } = await db
+          .from(CLAIM_TABLE)
+          .select("supabase_user_id, state")
+          .eq("child_id", id)
+          .maybeSingle();
+        if (error) {
+          console.error(`[fp/provision] post-drive claim read failed for ${id}: ${error.message}`);
+          return "error";
+        }
+        return {
+          supabaseUserId: (data?.supabase_user_id as string | null) ?? null,
+          state: data?.state ? String(data.state) : null,
+        };
+      },
+    },
+    childId,
+    owner
+  );
 }
 
 /**
@@ -594,37 +694,72 @@ export async function provisionFpChildInline(
  * never touched. Idempotent and lease-arbitrated; bounded. Wired into the hourly
  * funnel-lifecycle cron.
  */
+export const FP_REDRIVE_CONSENT_SCAN_LIMIT = 500;
+export const FP_REDRIVE_CLAIM_SCAN_LIMIT = 200;
+
 export function realFpRedriveDeps(): FpRedriveDeps {
   const db = supabaseAdmin();
   return {
     listDrivableFpChildIds: async () => {
       // FP-origin = a child with an active fp_parental_consent. Funnel children
       // never carry one, so this is a clean population split (no marker column
-      // needed on the shared claim table).
+      // needed on the shared claim table). DETERMINISTIC oldest-first order so a
+      // backlog beyond the page cap drains head-first instead of being silently
+      // and randomly truncated (the postgrest-max-rows learning). FIX 6: pin the
+      // namespace the read adapter uses, for consistency/future-proofing.
       const { data: consents, error: cErr } = await db
         .from("fp_parental_consent")
         .select("child_id")
+        .eq("policy_namespace", "fp_parental_consent")
         .not("child_id", "is", null)
         .is("revoked_at", null)
-        .limit(500);
+        .order("accepted_at", { ascending: true })
+        .limit(FP_REDRIVE_CONSENT_SCAN_LIMIT);
       if (cErr) {
         console.error(`[fp/provision] re-drive consent scan failed: ${cErr.message}`);
         return "error";
       }
-      const childIds = [...new Set((consents ?? []).map((r) => String(r.child_id)))];
+      const consentRows = consents ?? [];
+      if (consentRows.length >= FP_REDRIVE_CONSENT_SCAN_LIMIT) {
+        // A full page: children beyond the cap exist and are NOT driven this
+        // pass. Never a silent sub-cap truncation — make the backlog visible.
+        console.error(
+          `[fp/provision] re-drive consent scan hit the ${FP_REDRIVE_CONSENT_SCAN_LIMIT}-row cap — backlog not fully driven`
+        );
+        await notifyOps(
+          "FP provisioning re-drive backlog",
+          `The consent scan returned a full ${FP_REDRIVE_CONSENT_SCAN_LIMIT}-row page; ` +
+            `FP children beyond it are not driven this pass. Investigate the pending backlog.`
+        );
+      }
+      const childIds = [...new Set(consentRows.map((r) => String(r.child_id)))];
       if (childIds.length === 0) return [];
       const { data: claims, error: clErr } = await db
         .from(CLAIM_TABLE)
-        .select("child_id, state")
-        // Drivable = non-terminal (never complete/exception/released/suspend).
+        .select("child_id, state, created_at")
         .in("child_id", childIds)
-        .in("state", ["pending", "identity_only"])
-        .limit(200);
+        // Drivable = the canonical non-terminal allowlist, incl. `in_progress`
+        // (FIX 5): a claim whose prior drive crashed holding the lease must be
+        // re-driven — takeLease still refuses a LIVE lease, so this is safe.
+        .in("state", [...DRIVABLE_PROVISION_STATES])
+        .order("created_at", { ascending: true })
+        .limit(FP_REDRIVE_CLAIM_SCAN_LIMIT);
       if (clErr) {
         console.error(`[fp/provision] re-drive claim scan failed: ${clErr.message}`);
         return "error";
       }
-      return (claims ?? []).map((c) => String(c.child_id));
+      const claimRows = claims ?? [];
+      if (claimRows.length >= FP_REDRIVE_CLAIM_SCAN_LIMIT) {
+        console.error(
+          `[fp/provision] re-drive claim scan hit the ${FP_REDRIVE_CLAIM_SCAN_LIMIT}-row cap — backlog not fully driven`
+        );
+        await notifyOps(
+          "FP provisioning re-drive backlog",
+          `The claim scan returned a full ${FP_REDRIVE_CLAIM_SCAN_LIMIT}-row page; ` +
+            `some drivable FP claims are not driven this pass. Investigate the pending backlog.`
+        );
+      }
+      return claimRows.map((c) => String(c.child_id));
     },
     drive: async (childId) => {
       await driveFpProvisioningForChild(childId, `fp-cron:${childId}`);
@@ -646,7 +781,7 @@ export function realStaleSweepDeps(): StaleSweepDeps {
       const { data, error } = await db
         .from(CLAIM_TABLE)
         .select("child_id, state, updated_at, ops_alerted_at, pending_reason")
-        .in("state", ["pending", "in_progress", "identity_only"])
+        .in("state", [...DRIVABLE_PROVISION_STATES])
         .not("child_id", "is", null)
         .lt("updated_at", cutoff)
         .limit(200);

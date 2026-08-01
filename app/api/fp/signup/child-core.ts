@@ -105,7 +105,16 @@ export type CreateChildDeps = {
    */
   provisionWorkspace: (input: { childId: string }) => Promise<
     | { ok: true; supabaseUserId: string; state: string }
-    | { ok: false; reason: "no_identity" | "outage"; state: string | null }
+    | {
+        // `lease_pending` = a concurrent owner (the re-drive cron) is finishing
+        // this claim; the caller must NOT compensate. Every other reason is a
+        // genuine no-mint/failure. `supabaseUserId` surfaces an identity the drive
+        // DID mint so compensation tears it down instead of orphaning it (FIX 1).
+        ok: false;
+        reason: "no_identity" | "outage" | "exception" | "lease_pending";
+        state: string | null;
+        supabaseUserId?: string | null;
+      }
   >;
   /** Compensation: delete the child auth account THIS call minted (path a's
    *  `.invalid` account OR path b's provisioned Supabase identity). Returns
@@ -329,16 +338,31 @@ export async function createChild(
       // lease-arbitrated drive); its Supabase identity leg mints the child's auth
       // account on the derived @the120.school address. The mailbox itself lands
       // later, gated on GOOGLE_WORKSPACE_SA_KEY (this build burns none). The claim
-      // is enqueued AFTER the child row is durably inserted, so a compensation
-      // that deletes the child cascades the claim away
-      // (funnel_student_provisioning.child_id is ON DELETE CASCADE) — no strand.
+      // is enqueued AFTER the child row is durably inserted. On a compensating
+      // delete the claim does NOT cascade away: its child_id FK is ON DELETE SET
+      // NULL (migration 20260818120000), and a trigger flips the orphaned row to
+      // state=released / released_reason=child_deleted — the local_part is retired
+      // (never re-issued) and no LIVE claim is stranded. The provisioned identity,
+      // however, is torn down explicitly below (surfaced + delete-by-child_id).
       const prov = await deps.provisionWorkspace({ childId });
       if (!prov.ok) {
-        // Parked BEFORE the identity (a consent gap or a transient read failure):
-        // the child would have no login account, so unwind cleanly rather than
-        // leave a half-provisioned child. A NORMAL mailbox-pending park is NOT
-        // this branch — it carries a supabaseUserId and returns ok:true. The
-        // enqueued claim (if any) cascades on the child delete below.
+        // FIX 2 — `lease_pending`: a concurrent owner (the hourly re-drive cron)
+        // holds the lease and is finishing THIS claim. Deleting the child now
+        // would orphan the cron's in-flight mint, so do NOT compensate — leave
+        // the child + claim for the cron to complete. Retryable outage.
+        if (prov.reason === "lease_pending") {
+          console.error(
+            `[fp/signup/child] provisioning lease held by a concurrent owner for child ${childId} — leaving the child intact for the re-drive cron`
+          );
+          return { ok: false, reason: "outage" };
+        }
+        // Parked BEFORE a usable identity (consent gap / read failure / an
+        // exception after minting): the child would have no usable login, so
+        // unwind cleanly. A NORMAL mailbox-pending park is NOT this branch — it
+        // carries a supabaseUserId and returns ok:true. FIX 1 — surface any
+        // identity the drive DID mint so compensation tears it down by the stable
+        // handle instead of orphaning it in auth.users.
+        if (prov.supabaseUserId) created.authUserId = prov.supabaseUserId;
         await compensate("provision-identity");
         return { ok: false, reason: "outage" };
       }
@@ -504,18 +528,44 @@ async function runCompensation(
     }
   }
 
-  if (created.authUserId) {
-    const del = await deps.deleteAuthUser(created.authUserId);
+  // Tear down the child's auth identity. Prefer the handle THIS call surfaced
+  // (created.authUserId — path a's `.invalid` account, or a path-b identity the
+  // drive surfaced on its failure return). DEFENSE-IN-DEPTH (FIX 1): if we never
+  // captured one — e.g. path-b provisioning minted an identity, recorded it on
+  // the claim, but a post-drive read hid it — recover it by reading the claim's
+  // supabase_user_id BY CHILD_ID (the Unit-4 delete-by-stable-identity pattern),
+  // so a provisioned identity is never orphaned in auth.users. This must run
+  // BEFORE the child delete below, which SET-NULLs child_id and breaks the lookup.
+  let authUserId = created.authUserId;
+  if (!authUserId && created.childId) {
+    const claim = await admin
+      .from("funnel_student_provisioning")
+      .select("supabase_user_id")
+      .eq("child_id", created.childId)
+      .maybeSingle();
+    if (claim.error) {
+      console.error(
+        `[fp/signup/child] STRANDED: provisioning claim read by child ${created.childId} failed during compensation: ${claim.error.message}`
+      );
+    } else {
+      const recovered = (claim.data as { supabase_user_id?: unknown } | null)?.supabase_user_id;
+      if (typeof recovered === "string" && recovered.length > 0) authUserId = recovered;
+    }
+  }
+  if (authUserId) {
+    const del = await deps.deleteAuthUser(authUserId);
     if (!del.ok) {
       console.error(
-        `[fp/signup/child] STRANDED ACCOUNT ${created.authUserId}: deleteUser failed during compensation — needs manual cleanup`
+        `[fp/signup/child] STRANDED ACCOUNT ${authUserId}: deleteUser failed during compensation — needs manual cleanup`
       );
     }
   }
 
   if (created.childId) {
     // Service-role delete: the roster row's RESTRICT referrers (both profiles)
-    // are gone above, and the consent FK is ON DELETE SET NULL (unbinds).
+    // are gone above, and the consent FK is ON DELETE SET NULL (unbinds). The
+    // provisioning claim's child_id FK is ALSO SET NULL (+ trigger → released/
+    // child_deleted): the claim survives as a placeholder, never cascaded away.
     const child = await admin.from("children").delete().eq("id", created.childId);
     if (child.error) {
       console.error(

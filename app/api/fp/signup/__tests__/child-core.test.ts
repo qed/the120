@@ -101,7 +101,16 @@ type Cfg = {
   // Workspace-unconfigured Slice-B state).
   provisionResult?:
     | { ok: true; supabaseUserId: string; state: string }
-    | { ok: false; reason: "no_identity" | "outage"; state: string | null };
+    | {
+        ok: false;
+        reason: "no_identity" | "outage" | "exception" | "lease_pending";
+        state: string | null;
+        supabaseUserId?: string | null;
+      };
+  // The supabase_user_id the provisioning claim carries (read by runCompensation's
+  // delete-by-child_id backstop, FIX 1). Undefined = no claim row / no id.
+  claimSupabaseUserId?: string;
+  claimReadError?: boolean;
 };
 
 const verifiedAttempt = { id: "att1", parent_id: "u1", state: "verified" };
@@ -201,6 +210,16 @@ function build(cfg: Cfg = {}) {
     }
     if (s.table === "children") {
       return { error: null }; // compensation delete (admin)
+    }
+    if (s.table === "funnel_student_provisioning") {
+      // runCompensation's defense-in-depth read of the claim's supabase_user_id
+      // by child_id (FIX 1). Errors when configured; otherwise returns the
+      // configured id (or none).
+      if (cfg.claimReadError) return { data: null, error: { message: "claim read boom" } };
+      return {
+        data: cfg.claimSupabaseUserId ? { supabase_user_id: cfg.claimSupabaseUserId } : null,
+        error: null,
+      };
     }
     return { data: null, error: null };
   };
@@ -607,15 +626,16 @@ describe("createChild — path (b) provision_workspace", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("provisioning that never reached the identity (no_identity) compensates the child and returns outage — no stranded claim (child delete cascades it)", async () => {
+  it("provisioning that never reached the identity (no_identity) compensates the child and returns outage — the claim survives as a released placeholder (SET NULL + trigger, NOT a cascade)", async () => {
     const { deps, calls, authDeleted } = build({
       provisionResult: { ok: false, reason: "no_identity", state: "pending" },
     });
     const res = await createChild(deps, inputB);
     expect(res).toEqual({ ok: false, reason: "outage" });
 
-    // The child row is torn down (its ON DELETE CASCADE removes the claim — no
-    // separate claim delete is needed, and none is stranded).
+    // The child row is torn down. Its child_id FK on the claim is ON DELETE SET
+    // NULL (+ trigger → released/child_deleted), so the claim is NOT cascaded
+    // away and no LIVE claim is stranded.
     expect(del(calls, "admin", "children")).toBe(true);
     // No provisioned identity existed, so nothing to delete as an auth account.
     expect(authDeleted).toEqual([]);
@@ -630,8 +650,50 @@ describe("createChild — path (b) provision_workspace", () => {
     expect(res).toEqual({ ok: false, reason: "outage" });
     // The provisioned Supabase identity is deleted in compensation ...
     expect(authDeleted).toEqual(["prov-user-1"]);
-    // ... and the child row (which cascades the claim) is deleted.
+    // ... and the child row is deleted (the claim survives as a released
+    // placeholder via SET NULL + trigger — never cascaded away).
     expect(del(calls, "admin", "children")).toBe(true);
     expect(del(calls, "admin", "path_student_profiles")).toBe(true);
+  });
+
+  it("FIX 1 — provisioning minted an identity but returned ok:false (post-read outage) SURFACING it → compensation tears that identity down by the surfaced handle, so it is never orphaned", async () => {
+    const { deps, calls, authDeleted } = build({
+      provisionResult: { ok: false, reason: "outage", state: null, supabaseUserId: "surfaced-orphan" },
+    });
+    const res = await createChild(deps, inputB);
+    expect(res).toEqual({ ok: false, reason: "outage" });
+    // The surfaced identity is deleted (never left orphaned in auth.users) ...
+    expect(authDeleted).toEqual(["surfaced-orphan"]);
+    // ... and the child is torn down.
+    expect(del(calls, "admin", "children")).toBe(true);
+  });
+
+  it("FIX 1 defense-in-depth — provisioning did NOT surface an identity, but the claim carries one → runCompensation recovers it BY CHILD_ID and deletes it", async () => {
+    const { deps, calls, authDeleted } = build({
+      provisionResult: { ok: false, reason: "outage", state: null, supabaseUserId: null },
+      claimSupabaseUserId: "claim-orphan",
+    });
+    const res = await createChild(deps, inputB);
+    expect(res).toEqual({ ok: false, reason: "outage" });
+    // Recovered from the claim (child_id lookup) and deleted — no orphan remains.
+    const claimLookup = calls.find(
+      (c) => c.table === "funnel_student_provisioning" && c.op === "select"
+    );
+    expect(claimLookup?.filters.child_id).toBe("child1");
+    expect(authDeleted).toEqual(["claim-orphan"]);
+    expect(del(calls, "admin", "children")).toBe(true);
+  });
+
+  it("FIX 2 — a lease_pending result (a concurrent re-drive cron owns the claim) does NOT compensate: the child is left intact for the cron to finish", async () => {
+    const { deps, calls, authDeleted } = build({
+      provisionResult: { ok: false, reason: "lease_pending", state: "in_progress", supabaseUserId: null },
+    });
+    const res = await createChild(deps, inputB);
+    expect(res).toEqual({ ok: false, reason: "outage" });
+    // NO compensation — the child + claim survive for the cron's in-flight mint.
+    expect(del(calls, "admin", "children")).toBe(false);
+    expect(authDeleted).toEqual([]);
+    // And no claim read happened (we never entered the compensation path).
+    expect(calls.some((c) => c.table === "funnel_student_provisioning")).toBe(false);
   });
 });

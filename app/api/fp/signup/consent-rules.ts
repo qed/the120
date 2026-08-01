@@ -28,6 +28,11 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 // Reuse the parse-based comparator ONLY — not the refund-policy version space.
 import { policyVersionAtLeast } from "@/app/lib/funnel/deposit-rules";
+// Type-only: the provisioning core's verdict shape, so the FP provisioning
+// consent adapter (Unit 5) speaks the exact contract driveProvisioning expects.
+// Type-only import — no runtime coupling, no import cycle (provision-rules does
+// not import this module).
+import type { ConsentVerdict as ProvisioningConsentVerdict } from "@/app/lib/funnel/provision-rules";
 // The child age bands are defined once, on the signup surface, and mirror the
 // fp_parental_consent.child_age_band check constraint. Importing them here keeps
 // the consent payload from drifting from what signup already validated.
@@ -138,6 +143,54 @@ export function consentVerdict(input: {
     return "stale";
   }
   return "version_mismatch";
+}
+
+/* ---------------------------------------- the provisioning-time consent verdict */
+
+/**
+ * The verdict the funnel provisioning core applies to a First-Profit child's
+ * accepted consent version (Slice B Unit 5, Rev 2). Injected into
+ * driveProvisioning via `ProvisionDeps.consentVerdict` so an fp_parental_consent
+ * version — which lives in THIS namespace and is deliberately NOT a member of
+ * the Stripe-refund/deposit registry — is judged against the parental-consent
+ * registry rather than the deposit one (the default `consentVerdict` would
+ * reject every FP version as `consent_unknown`).
+ *
+ * This is a SECOND gate: consentGate already bound + freshness-checked the
+ * consent at child creation. Re-checking here catches a REVOCATION between
+ * creation and the (possibly much later, cron-driven) mailbox mint — a revoked
+ * or missing consent reads as `consent_missing` and parks the claim `pending`,
+ * exactly as a missing deposit acceptance does on the funnel path. Same shape,
+ * same reasons, so no core branch is needed — only the namespace differs.
+ */
+export function fpProvisioningConsentVerdict(
+  version: string | null | undefined
+): ProvisioningConsentVerdict {
+  if (!version || version.trim().length === 0) {
+    return {
+      ok: false,
+      reason: "consent_missing",
+      detail: "no active fp_parental_consent bound to this child",
+    };
+  }
+  const accepted = version.trim();
+  // Ordering alone is not proof: require a version we actually published in the
+  // parental-consent namespace (mirrors the deposit verdict's own guard).
+  if (!isPublishedConsentVersion(accepted)) {
+    return {
+      ok: false,
+      reason: "consent_unknown",
+      detail: `accepted "${accepted}", which is not a published fp_parental_consent version — refusing to infer consent from a version number alone`,
+    };
+  }
+  if (!policyVersionAtLeast(accepted, FP_CONSENT_MIN_VERSION)) {
+    return {
+      ok: false,
+      reason: "consent_stale",
+      detail: `accepted ${accepted}, which predates the minimum consent version (${FP_CONSENT_MIN_VERSION}) — needs a re-consent touch before minting`,
+    };
+  }
+  return { ok: true };
 }
 
 /* --------------------------------------------------- accept-payload validation */

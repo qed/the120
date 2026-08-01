@@ -13,6 +13,18 @@
  * mapping (the ensurePlayerProfile PRECONDITION), and the FP player profile +
  * seeded save. The whole mint is GATED on verifiable parental consent.
  *
+ * Path (b) (Slice B Unit 5; R12b, R13) = the parent requests a PROVISIONED
+ * Google Workspace address instead. Everything is the same EXCEPT the identity
+ * step (7): no `.invalid` account is minted; instead the funnel provisioning
+ * machinery is enqueued (`ensureProvisionClaim`, idempotent by child_id) and
+ * driven inline, and its Supabase identity leg — minting the child's auth
+ * account on the derived @the120.school address — supplies the
+ * path_student_profiles.user_id. The Workspace mailbox itself is gated on
+ * GOOGLE_WORKSPACE_SA_KEY and lands `pending` during this build (the re-drive
+ * cron completes it once the credential is configured; no mailbox is burned
+ * here). Consent still gates the mint, now read from fp_parental_consent by the
+ * provisioning consent adapter (Rev 2).
+ *
  * ── the sequence (consent gates the MINT) ──
  *   1. resolve the caller's parent id from their Bearer token (getUser on the
  *      token-scoped client — this also proves the token is a genuine parent JWT);
@@ -74,13 +86,29 @@ export type CreateChildDeps = {
    *  and the family cap-listing run under THIS client so `auth.uid() =
    *  parent_id` authorizes them — never the service-role client. */
   parentClient: (accessToken: string) => SupabaseClient;
-  /** Mint the child auth account on the derived `.invalid` address with
-   *  email_confirm:true (the route wires buildStudentCreateUserPayload). */
+  /** Path (a) only: mint the child auth account on the derived `.invalid`
+   *  address with email_confirm:true (the route wires
+   *  buildStudentCreateUserPayload). Unused on path (b). */
   createAuthUser: (input: {
     childId: string;
     password: string;
   }) => Promise<{ ok: true; userId: string } | { ok: false }>;
-  /** Compensation: delete the child auth account THIS call minted. Returns
+  /**
+   * Path (b) only (Slice B Unit 5): enqueue the provisioning claim and drive it
+   * inline, returning the Supabase identity the provisioning machinery minted on
+   * the derived @the120.school address — used as this child's
+   * path_student_profiles.user_id in place of a path-a `.invalid` account. The
+   * mailbox itself lands later (gated on GOOGLE_WORKSPACE_SA_KEY); a park at
+   * `pending` with an identity is `ok:true`. Only a claim that never reached the
+   * identity (consent gap / transient read failure) returns ok:false, so the
+   * caller can compensate rather than leave a child with no login account.
+   */
+  provisionWorkspace: (input: { childId: string }) => Promise<
+    | { ok: true; supabaseUserId: string; state: string }
+    | { ok: false; reason: "no_identity" | "outage"; state: string | null }
+  >;
+  /** Compensation: delete the child auth account THIS call minted (path a's
+   *  `.invalid` account OR path b's provisioned Supabase identity). Returns
    *  ok:false when the delete itself failed so the caller can mark it stranded. */
   deleteAuthUser: (userId: string) => Promise<{ ok: boolean }>;
   now: () => number;
@@ -92,6 +120,17 @@ export type CreateChildInput = {
   attemptId: string;
   /** The parent's access token (Bearer), scoping the RLS child-row insert. */
   parentToken: string;
+  /**
+   * Which child-credential path the parent chose (R12). `existing_credential`
+   * (path a, the default and Unit 4's behavior) mints the `.invalid` account
+   * from `childPassword`. `provision_workspace` (path b, Unit 5) mints NO
+   * `.invalid` account — it enqueues Google Workspace provisioning and uses the
+   * provisioned Supabase identity. The choice is threaded through the request,
+   * not persisted as its own column: the durable artifacts (a `.invalid` account
+   * vs. a provisioning claim + @the120.school identity) already record which
+   * path a child took, so no fp_signup_attempts migration is warranted.
+   */
+  credentialChoice?: "existing_credential" | "provision_workspace";
   /** The child's display first name (also the derived-handle seed). */
   firstName: string;
   /**
@@ -101,8 +140,10 @@ export type CreateChildInput = {
    * gradeVerdict guard (3-12 or refuse — never clamp).
    */
   grade?: number | string | null;
-  /** The child's chosen password — validated against the R29 student floor. */
-  childPassword: string;
+  /** The child's chosen password — validated against the R29 student floor.
+   *  Required for path (a); ignored (and may be omitted) for path (b), whose
+   *  credential is the provisioned Workspace account, not a parent-set password. */
+  childPassword?: string;
 };
 
 export type CreateChildRefusal =
@@ -199,8 +240,15 @@ export async function createChild(
     if (!verdict.ok) return { ok: false, reason: "invalid_child" };
     grade = verdict.grade;
   }
-  const pw = validateStudentPassword(input.childPassword, { studentName: firstName });
-  if (!pw.ok) return { ok: false, reason: "weak_password", detail: pw.error };
+  const credentialChoice = input.credentialChoice ?? "existing_credential";
+  // Path (a) validates the parent-set password up front (a weak password should
+  // never leave a child row to compensate). Path (b) has no parent-set password
+  // — its credential is the provisioned Workspace account — so the floor check is
+  // skipped entirely.
+  if (credentialChoice === "existing_credential") {
+    const pw = validateStudentPassword(input.childPassword ?? "", { studentName: firstName });
+    if (!pw.ok) return { ok: false, reason: "weak_password", detail: pw.error };
+  }
 
   // Track exactly what THIS call creates, for reverse-order compensation.
   const created: {
@@ -272,14 +320,41 @@ export async function createChild(
       return { ok: false, reason: "consent_required", detail: gate.reason };
     }
 
-    // 7. Mint the child auth account (email_confirm:true is inside the payload
-    //    the route builds — mandatory on the non-deliverable address).
-    const auth = await deps.createAuthUser({ childId, password: input.childPassword });
-    if (!auth.ok) {
-      await compensate("auth-create");
-      return { ok: false, reason: "outage" };
+    // 7. Establish the child's login identity — the ONE step that differs by
+    //    credential path (both yield an auth.users id used below).
+    let authUserId: string;
+    if (credentialChoice === "provision_workspace") {
+      // Path (b): DO NOT mint a `.invalid` password account. Enqueue + drive the
+      // Workspace provisioning machinery (idempotent claim by child_id, then a
+      // lease-arbitrated drive); its Supabase identity leg mints the child's auth
+      // account on the derived @the120.school address. The mailbox itself lands
+      // later, gated on GOOGLE_WORKSPACE_SA_KEY (this build burns none). The claim
+      // is enqueued AFTER the child row is durably inserted, so a compensation
+      // that deletes the child cascades the claim away
+      // (funnel_student_provisioning.child_id is ON DELETE CASCADE) — no strand.
+      const prov = await deps.provisionWorkspace({ childId });
+      if (!prov.ok) {
+        // Parked BEFORE the identity (a consent gap or a transient read failure):
+        // the child would have no login account, so unwind cleanly rather than
+        // leave a half-provisioned child. A NORMAL mailbox-pending park is NOT
+        // this branch — it carries a supabaseUserId and returns ok:true. The
+        // enqueued claim (if any) cascades on the child delete below.
+        await compensate("provision-identity");
+        return { ok: false, reason: "outage" };
+      }
+      authUserId = prov.supabaseUserId;
+    } else {
+      // Path (a): the parent set the credential — mint the `.invalid` account
+      // (email_confirm:true is inside the payload the route builds — mandatory on
+      // the non-deliverable address).
+      const auth = await deps.createAuthUser({ childId, password: input.childPassword ?? "" });
+      if (!auth.ok) {
+        await compensate("auth-create");
+        return { ok: false, reason: "outage" };
+      }
+      authUserId = auth.userId;
     }
-    created.authUserId = auth.userId;
+    created.authUserId = authUserId;
 
     // 8. Create the path_student_profiles child->user row — the precondition
     //    ensurePlayerProfile assumes and does NOT create. family_id is NOT NULL,
@@ -306,7 +381,7 @@ export async function createChild(
     const insProfile = await admin
       .from("path_student_profiles")
       .insert({
-        user_id: auth.userId,
+        user_id: authUserId,
         child_id: childId,
         program_version_id: programVersionId,
         family_id: fam.familyId,
@@ -325,7 +400,7 @@ export async function createChild(
 
     // 9. The FP player profile + seeded save (the precondition row now exists).
     const player = await ensurePlayerProfile(admin, {
-      userId: auth.userId,
+      userId: authUserId,
       childId,
       firstName,
     });

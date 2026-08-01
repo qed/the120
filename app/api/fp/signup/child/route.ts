@@ -1,10 +1,14 @@
 /**
- * /api/fp/signup/child — First Profit CHILD CREATION, path (a) (Slice B Unit 4;
- * R12a, R9). The AUTHENTICATED cross-origin POST the SPA makes after the parent
- * has verified their email AND recorded consent: it carries the parent's Bearer
- * access token (obtained from /api/fp/signup/verify, Rev 1), the child input,
- * the child password, and the attemptId, and mints the child (roster row + auth
- * account + path_student_profiles mapping + FP player profile), consent-gated.
+ * /api/fp/signup/child — First Profit CHILD CREATION, paths (a) AND (b) (Slice B
+ * Units 4/5; R12, R9, R13). The AUTHENTICATED cross-origin POST the SPA makes
+ * after the parent has verified their email AND recorded consent: it carries the
+ * parent's Bearer access token (obtained from /api/fp/signup/verify, Rev 1), the
+ * child input, `credentialChoice`, an optional child password (path a), and the
+ * attemptId, and mints the child (roster row + auth account + path_student_profiles
+ * mapping + FP player profile), consent-gated. `credentialChoice ===
+ * 'provision_workspace'` mints no `.invalid` account — it enqueues + drives the
+ * Google Workspace provisioning machinery (real users.insert gated off during the
+ * build) and uses the provisioned Supabase identity.
  *
  * CORS MIRROR of /api/fp/login + ../route.ts + ../verify/route.ts: OPTIONS 204
  * with the echoed origin, 403 for a bad Origin, one generic 401 for EVERY
@@ -17,6 +21,7 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
+import { provisionFpChildInline } from "@/app/lib/funnel/provision-deps";
 import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
 import {
   checkAndRecordRateLimit,
@@ -46,7 +51,12 @@ const childSchema = z
     // Optional: FP captures an age band, not a grade. Accepted as a number or a
     // numeric string; the core coerces it through the funnel gradeVerdict guard.
     childGrade: z.union([z.number(), z.string().max(4)]).optional(),
-    childPassword: z.string().min(1).max(200),
+    // R12 path selector. Absent = path (a), preserving Unit 4's contract for any
+    // caller that predates this field.
+    credentialChoice: z.enum(["existing_credential", "provision_workspace"]).optional(),
+    // Required for path (a); optional for path (b), whose credential is the
+    // provisioned Workspace account (the core skips the password floor there).
+    childPassword: z.string().min(1).max(200).optional(),
   })
   .strict();
 
@@ -147,6 +157,11 @@ export async function POST(req: Request): Promise<Response> {
         }
         return { ok: true, userId: res.data.user.id };
       },
+      // Path (b): enqueue + drive the Workspace provisioning machinery inline.
+      // The real users.insert is gated OFF here (GOOGLE_WORKSPACE_SA_KEY absent →
+      // parks pending after the Supabase identity leg) for the whole Slice B
+      // build; the one live acceptance run is Unit 11.
+      provisionWorkspace: ({ childId }) => provisionFpChildInline(childId, `fp-child:${childId}`),
       deleteAuthUser: async (userId) => {
         const res = await admin.auth.admin.deleteUser(userId);
         if (res.error) {
@@ -160,6 +175,7 @@ export async function POST(req: Request): Promise<Response> {
     const result = await createChild(deps, {
       attemptId: data.attemptId,
       parentToken: token,
+      credentialChoice: data.credentialChoice,
       firstName: data.childFirstName,
       grade: data.childGrade,
       childPassword: data.childPassword,

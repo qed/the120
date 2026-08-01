@@ -50,6 +50,7 @@ import {
   MAX_LOCAL_PART_ATTEMPTS,
   pickStudentLocalPart,
   studentEmailForLocalPart,
+  type ConsentVerdict,
   type ForwardingState,
   type ProvisionState,
 } from "@/app/lib/funnel/provision-rules";
@@ -141,6 +142,19 @@ export type ProvisionDeps = {
   readAcceptedPolicyVersion: (
     childId: string
   ) => Promise<{ version: string | null } | "refunded" | "error">;
+  /**
+   * The verdict function applied to the accepted version — the ONE seam that
+   * lets a caller supply a DIFFERENT consent NAMESPACE without forking this
+   * core (Slice B Rev 2). The funnel deps omit it and get the default
+   * (`consentVerdict`, the Stripe-refund/deposit registry). The First-Profit
+   * signup deps inject an fp_parental_consent verdict instead, because an
+   * FP consent version (own namespace) is deliberately NOT a member of the
+   * deposit registry and the default would (correctly) reject it as
+   * `consent_unknown`. The gate still runs at the SAME point — before any
+   * external effect — so the read-vs-verdict split changes only WHICH
+   * namespace decides, never WHEN the gate fires.
+   */
+  consentVerdict?: (version: string | null | undefined) => ConsentVerdict;
   /* identity leg (Supabase auth) */
   findAuthUserIdByEmail: (email: string) => Promise<string | null | "unknown">;
   createAuthUser: (email: string) => Promise<{ id: string } | "error">;
@@ -266,7 +280,7 @@ export async function driveProvisioning(
     }
     return outcome;
   }
-  const verdict = consentVerdict(consent.version);
+  const verdict = (deps.consentVerdict ?? consentVerdict)(consent.version);
   if (!verdict.ok) {
     const reason = `consent gate: ${verdict.reason} — ${verdict.detail}`;
     return land(
@@ -744,6 +758,51 @@ export async function sweepSuspendPending(
     );
   }
   return { closed, skipped };
+}
+
+/* ───────────── the First-Profit re-drive sweep (Slice B Unit 5) ───────────── */
+
+/**
+ * The funnel path drives provisioning from the Stripe-arrival page; a
+ * First-Profit-signup child has NO arrival page, so a claim parked
+ * `pending` (Workspace unconfigured during the build) would never be
+ * re-driven — the plan's "arrival-only-drive gap". This sweep is the
+ * reproduction of that ready-to-drive signal on a schedule: it enumerates
+ * the drivable FP claims and drives each. Idempotent and lease-arbitrated
+ * (the drive itself is), so re-running is always safe; a no-op while
+ * Workspace is unconfigured (each claim re-parks pending, no mailbox
+ * burned), and the thing that finally advances FP claims to `complete`
+ * once GOOGLE_WORKSPACE_SA_KEY lands.
+ *
+ * Injected-deps shape (the house pattern, mirroring alertStaleClaims): the
+ * SELECTION of drivable FP children and the drive itself are the impure
+ * legs; this core only sequences them, one try/catch per child so one
+ * failure never starves the rest.
+ */
+export type FpRedriveDeps = {
+  /** The drivable FP-origin claims: children carrying an active
+   *  fp_parental_consent whose claim is non-terminal (pending/identity_only). */
+  listDrivableFpChildIds: () => Promise<string[] | "error">;
+  drive: (childId: string) => Promise<void>;
+};
+
+export async function sweepFpPendingProvisioning(
+  deps: FpRedriveDeps
+): Promise<{ driven: number; skipped: number } | "skipped"> {
+  const ids = await deps.listDrivableFpChildIds();
+  if (ids === "error") return "skipped";
+  let driven = 0;
+  let skipped = 0;
+  for (const childId of ids) {
+    try {
+      await deps.drive(childId);
+      driven += 1;
+    } catch (err) {
+      console.error(`[provision] fp re-drive threw for ${childId}:`, err);
+      skipped += 1;
+    }
+  }
+  return { driven, skipped };
 }
 
 /* ───────────────────── the stale-claim backstop ───────────────────── */

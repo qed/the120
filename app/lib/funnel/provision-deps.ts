@@ -34,6 +34,7 @@ import { PROVISION_STATES, type ProvisionState } from "@/app/lib/funnel/provisio
 import type {
   ForwardingClaim,
   ForwardingDeps,
+  FpRedriveDeps,
   LeaseResult,
   ProvisionClaim,
   ProvisionDeps,
@@ -46,8 +47,10 @@ import type {
 import {
   driveProvisioning,
   alertStaleClaims,
+  sweepFpPendingProvisioning,
   sweepSuspendPending,
 } from "@/app/lib/funnel/provision-core";
+import { fpProvisioningConsentVerdict } from "@/app/api/fp/signup/consent-rules";
 import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
 import {
   FORWARDING_TOTAL_ALERT_DAYS,
@@ -470,6 +473,169 @@ export async function driveProvisioningForChild(
   owner: string
 ): Promise<ProvisionOutcome> {
   return driveProvisioning(realProvisionDeps(owner), childId, owner);
+}
+
+/* ───────────── First Profit signup provisioning (Slice B Unit 5, path b) ───────────── */
+
+/**
+ * The First-Profit-signup consent adapter (Rev 2). The funnel path reads the
+ * acceptance off the fulfilled Stripe deposit; First Profit has NO deposit
+ * (payments are mock in Slice B), so the accepted policy version is read from
+ * the first-class fp_parental_consent record instead — the ACTIVE row bound to
+ * this child (child_id match, revoked_at IS NULL, the fp_parental_consent
+ * namespace). Missing OR revoked → {version:null}, which the FP verdict maps to
+ * `consent_missing` and the core parks `pending`. There is no "refunded" lane
+ * here (no deposits), so it is never returned. Exported for direct unit testing
+ * against a from()-only fake db.
+ */
+export async function readFpAcceptedPolicyVersion(
+  db: ReturnType<typeof supabaseAdmin>,
+  childId: string
+): Promise<{ version: string | null } | "error"> {
+  const { data, error } = await db
+    .from("fp_parental_consent")
+    .select("policy_version")
+    .eq("child_id", childId)
+    .eq("policy_namespace", "fp_parental_consent")
+    .is("revoked_at", null)
+    // Newest active acceptance wins if more than one ever coexists (the partial
+    // unique index makes that a single row per attempt, but a child could carry
+    // acceptances across attempts in principle — take the freshest).
+    .order("accepted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(`[fp/provision] consent read failed for ${childId}: ${error.message}`);
+    return "error";
+  }
+  return { version: (data?.policy_version as string | null) ?? null };
+}
+
+/**
+ * The First-Profit provisioning deps: the REAL provisioning deps with the
+ * consent READ and the consent VERDICT swapped for the fp_parental_consent
+ * namespace (Rev 2). Everything else — the lease fencing, the local-part
+ * arbiter, the Supabase identity leg, the Workspace mailbox leg gated on
+ * GOOGLE_WORKSPACE_SA_KEY — is byte-for-byte the funnel machinery. This is a
+ * MODIFICATION of provision-deps (two injected functions), NOT a fork of
+ * provision-core.
+ */
+export function fpProvisionDeps(owner: string): ProvisionDeps {
+  const db = supabaseAdmin();
+  return {
+    ...realProvisionDeps(owner),
+    readAcceptedPolicyVersion: (childId) => readFpAcceptedPolicyVersion(db, childId),
+    consentVerdict: fpProvisioningConsentVerdict,
+  };
+}
+
+/** Drive one First-Profit-signup child's provisioning. With
+ *  GOOGLE_WORKSPACE_SA_KEY absent, `workspaceConfigured` is false and the core
+ *  parks `pending` after the Supabase identity leg WITHOUT calling
+ *  dir.users.insert — no Google mailbox is burned (the Unit 5 build invariant;
+ *  the one live acceptance run is Unit 11). */
+export async function driveFpProvisioningForChild(
+  childId: string,
+  owner: string
+): Promise<ProvisionOutcome> {
+  return driveProvisioning(fpProvisionDeps(owner), childId, owner);
+}
+
+export type FpProvisionInline =
+  | { ok: true; supabaseUserId: string; state: string }
+  | { ok: false; reason: "no_identity" | "outage"; state: string | null };
+
+/**
+ * Path (b) child-creation's inline provisioning step — the arrival-route enqueue
+ * reproduced for the FP path, which has no Stripe webhook and no arrival page to
+ * drive it (the plan's "arrival-only-drive gap"). It does exactly what the
+ * arrival route does — `ensureProvisionClaim` (idempotent by child_id) then a
+ * single bounded `driveProvisioning` under the lease — and then reads back the
+ * minted Supabase identity, because path (b) uses that identity (not a path-a
+ * `.invalid` account) as the child's `path_student_profiles.user_id`.
+ *
+ * Best-effort by contract: a park at `pending` (Workspace unconfigured — the
+ * normal Slice-B state) is a SUCCESS here as long as the identity leg ran, since
+ * the mailbox completes later on the re-drive cron. Only a claim that never
+ * reached the identity (a consent gap, or a transient read failure before the
+ * Supabase mint) returns `no_identity`, letting the caller compensate cleanly
+ * rather than leave a child with no login account.
+ */
+export async function provisionFpChildInline(
+  childId: string,
+  owner: string
+): Promise<FpProvisionInline> {
+  const enqueued = await ensureProvisionClaim(childId);
+  if (!enqueued) return { ok: false, reason: "outage", state: null };
+  await driveFpProvisioningForChild(childId, owner);
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from(CLAIM_TABLE)
+    .select("supabase_user_id, state")
+    .eq("child_id", childId)
+    .maybeSingle();
+  if (error) {
+    console.error(`[fp/provision] post-drive claim read failed for ${childId}: ${error.message}`);
+    return { ok: false, reason: "outage", state: null };
+  }
+  const supabaseUserId = (data?.supabase_user_id as string | null) ?? null;
+  const state = data?.state ? String(data.state) : null;
+  if (!supabaseUserId) return { ok: false, reason: "no_identity", state };
+  return { ok: true, supabaseUserId, state: state ?? "pending" };
+}
+
+/**
+ * The re-drive sweep for First-Profit-signup provisioning claims (the cron half
+ * of the arrival-only-drive gap fix). A path-b child enqueued at signup parks
+ * `pending` while Workspace is unconfigured; nothing re-drives it (there is no
+ * arrival page), so once GOOGLE_WORKSPACE_SA_KEY lands this sweep advances those
+ * claims to `complete`. Scoped to FP-origin children — those carrying an active
+ * fp_parental_consent — so funnel claims (driven by their own arrival page) are
+ * never touched. Idempotent and lease-arbitrated; bounded. Wired into the hourly
+ * funnel-lifecycle cron.
+ */
+export function realFpRedriveDeps(): FpRedriveDeps {
+  const db = supabaseAdmin();
+  return {
+    listDrivableFpChildIds: async () => {
+      // FP-origin = a child with an active fp_parental_consent. Funnel children
+      // never carry one, so this is a clean population split (no marker column
+      // needed on the shared claim table).
+      const { data: consents, error: cErr } = await db
+        .from("fp_parental_consent")
+        .select("child_id")
+        .not("child_id", "is", null)
+        .is("revoked_at", null)
+        .limit(500);
+      if (cErr) {
+        console.error(`[fp/provision] re-drive consent scan failed: ${cErr.message}`);
+        return "error";
+      }
+      const childIds = [...new Set((consents ?? []).map((r) => String(r.child_id)))];
+      if (childIds.length === 0) return [];
+      const { data: claims, error: clErr } = await db
+        .from(CLAIM_TABLE)
+        .select("child_id, state")
+        // Drivable = non-terminal (never complete/exception/released/suspend).
+        .in("child_id", childIds)
+        .in("state", ["pending", "identity_only"])
+        .limit(200);
+      if (clErr) {
+        console.error(`[fp/provision] re-drive claim scan failed: ${clErr.message}`);
+        return "error";
+      }
+      return (claims ?? []).map((c) => String(c.child_id));
+    },
+    drive: async (childId) => {
+      await driveFpProvisioningForChild(childId, `fp-cron:${childId}`);
+    },
+  };
+}
+
+export async function sweepPendingFpProvisioningClaims(): Promise<
+  { driven: number; skipped: number } | "skipped"
+> {
+  return sweepFpPendingProvisioning(realFpRedriveDeps());
 }
 
 export function realStaleSweepDeps(): StaleSweepDeps {

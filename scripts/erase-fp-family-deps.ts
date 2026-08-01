@@ -28,6 +28,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import type { EraseFamilyDeps } from "@/app/lib/funnel/erase-family-core";
+import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
 
 const saKeyRaw = (): string => process.env.GOOGLE_WORKSPACE_SA_KEY ?? "";
 
@@ -48,12 +49,15 @@ async function directoryClient(): Promise<DirectoryClient> {
   if (!cachedDirectory) {
     cachedDirectory = (async () => {
       const { google } = await import("googleapis");
-      const creds = JSON.parse(saKeyRaw()) as { client_email: string; private_key: string };
-      const auth = new google.auth.JWT({
-        email: creds.client_email,
-        key: creds.private_key,
-        scopes: ["https://www.googleapis.com/auth/admin.directory.user"],
-      });
+      // DWD: impersonate a Workspace admin when GOOGLE_WORKSPACE_ADMIN_SUBJECT is
+      // set (standard path), else SA-as-itself (direct role). Mirrors provision-deps.
+      const auth = new google.auth.JWT(
+        buildWorkspaceJwtConfig(
+          saKeyRaw(),
+          ["https://www.googleapis.com/auth/admin.directory.user"],
+          process.env.GOOGLE_WORKSPACE_ADMIN_SUBJECT ?? ""
+        )
+      );
       return google.admin({ version: "directory_v1", auth }) as unknown as DirectoryClient;
     })();
     cachedDirectory.catch(() => {

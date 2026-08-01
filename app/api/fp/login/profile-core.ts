@@ -20,12 +20,39 @@
  *   - identity agreement with path_student_profiles is checked here as the
  *     friendly path; the DB trigger (fp_player_profiles_identity_guard) is the
  *     mechanism.
+ *
+ * PRECONDITION (see ensurePlayerProfile): the caller has ALREADY resolved this
+ * user's child_id through the gate — a `path_student_profiles` lookup by
+ * user_id — and passes it as `input.childId`. So the user→child_id direction
+ * is established; this core does not re-run that identical query, only the
+ * child→user direction the gate did not cover.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { classifyInsertConflict, deriveHandle, HANDLE_PATTERN } from "./login-rules";
+import { randomUUID } from "node:crypto";
+import {
+  classifyInsertConflict,
+  deriveHandle,
+  deriveHandleWithSuffix,
+  HANDLE_PATTERN,
+} from "./profile-rules";
 
-const MAX_HANDLE_ATTEMPTS = 5;
+// Sequential base..base5 attempts, then a few crypto-random-suffix attempts so
+// a 6th same-base-handle child's FIRST login can never wedge on handle
+// exhaustion. The random tail is what makes the effective budget collision-
+// resistant rather than merely larger.
+const MAX_HANDLE_SEQUENTIAL = 5;
+const MAX_HANDLE_RANDOM = 4;
+const MAX_HANDLE_ATTEMPTS = MAX_HANDLE_SEQUENTIAL + MAX_HANDLE_RANDOM;
+
+/**
+ * 4 hex chars from a v4 UUID — lowercase `[0-9a-f]`, always satisfies
+ * HANDLE_PATTERN. Minted HERE (the impure boundary), never inside a pure
+ * function; injectable so tests are deterministic.
+ */
+function defaultRandomSuffix(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 4);
+}
 
 export type EnsureProfileResult =
   | { ok: true; profileId: string; handle: string }
@@ -43,7 +70,17 @@ type ProfileRow = { id: string; handle: string; child_id?: string };
 
 export async function ensurePlayerProfile(
   db: SupabaseClient,
-  input: { userId: string; childId: string; firstName: string }
+  input: {
+    userId: string;
+    childId: string;
+    firstName: string;
+    /**
+     * Test seam only: mints the random handle-suffix fallback. Production
+     * callers omit it and get the crypto-backed default; a test injects a
+     * deterministic generator to exercise the fallback path.
+     */
+    randomSuffix?: () => string;
+  }
 ): Promise<EnsureProfileResult> {
   // 1. Existing profile → adopt as-is (handle is minted once, never re-derived).
   //    But first assert its child_id still agrees with the freshly-gated child:
@@ -70,25 +107,14 @@ export async function ensurePlayerProfile(
     return seedSave(db, existing.data);
   }
 
-  // 2. Identity agreement with path_student_profiles, both directions: neither
-  //    this user bound to a different child, nor this child bound to a
-  //    different user. (The DB trigger enforces this too — this is the
-  //    friendly path that returns a clean refusal instead of a raise.)
-  const byUser = await db
-    .from("path_student_profiles")
-    .select("child_id")
-    .eq("user_id", input.userId)
-    .maybeSingle();
-  if (byUser.error) {
-    console.error(`[fp/login] identity check failed: ${byUser.error.message}`);
-    return { ok: false, reason: "load_failed" };
-  }
-  if (byUser.data && byUser.data.child_id !== input.childId) {
-    console.error(
-      `[fp/login] identity mismatch: user ${input.userId} maps to a different child in path_student_profiles`
-    );
-    return { ok: false, reason: "identity_mismatch" };
-  }
+  // 2. Identity agreement with path_student_profiles, the child→user direction
+  //    ONLY: this child must not already be bound to a DIFFERENT user. The
+  //    user→child direction is a precondition (the caller's gate resolved
+  //    input.childId from this user_id via the identical query), so re-running
+  //    `select child_id where user_id` here would just re-confirm what the gate
+  //    already established — dead I/O on every new-player login. (The DB trigger
+  //    enforces both directions regardless; this is the friendly path that
+  //    returns a clean refusal instead of a raise.)
   const byChild = await db
     .from("path_student_profiles")
     .select("user_id")
@@ -105,9 +131,16 @@ export async function ensurePlayerProfile(
     return { ok: false, reason: "identity_mismatch" };
   }
 
-  // 3. Insert with bounded handle uniquification.
+  // 3. Insert with bounded handle uniquification: the sequential base..base5
+  //    first, then crypto-random-suffix candidates so a same-base-handle child
+  //    beyond the numeric run still resolves to a free handle instead of
+  //    wedging on handle_exhausted forever.
+  const randomSuffix = input.randomSuffix ?? defaultRandomSuffix;
   for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
-    const handle = deriveHandle(input.firstName, attempt);
+    const handle =
+      attempt < MAX_HANDLE_SEQUENTIAL
+        ? deriveHandle(input.firstName, attempt)
+        : deriveHandleWithSuffix(input.firstName, randomSuffix());
     if (!HANDLE_PATTERN.test(handle)) {
       // deriveHandle guarantees this; belt-and-suspenders against drift from
       // the DB check constraint (which would reject the insert anyway).

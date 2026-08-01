@@ -54,6 +54,7 @@ import {
 import {
   buildAllowedOrigins,
   checkOrigin,
+  classifyAuthError,
   classifyIdentifier,
   deriveRateLimitKeys,
   extractClientIp,
@@ -205,11 +206,39 @@ export async function POST(req: Request): Promise<Response> {
     );
 
     for (const candidate of candidates) {
-      const attempt = await authClient.auth.signInWithPassword({
-        email: deriveStudentEmail(candidate.childId),
-        password: parsed.password,
-      });
-      if (attempt.error || !attempt.data.session || !attempt.data.user) continue;
+      // A wrong password and an AUTH OUTAGE must NOT be treated alike. Supabase
+      // signs a bad guess back as a returned {error}; a network failure REJECTS
+      // (throws). Catch the throw here — never let it bubble to the outer catch,
+      // which returns "outage" WITHOUT releasing strikes — and classify both
+      // paths the same way: a genuine invalid-credentials answer advances to the
+      // next candidate (strike stands); a 5xx / 429 / network fault breaks out,
+      // releases the provisional strikes, and refuses generically.
+      let attempt: Awaited<ReturnType<typeof authClient.auth.signInWithPassword>>;
+      try {
+        attempt = await authClient.auth.signInWithPassword({
+          email: deriveStudentEmail(candidate.childId),
+          password: parsed.password,
+        });
+      } catch (err) {
+        console.error(
+          `[fp/login] auth call threw: ${err instanceof Error ? err.message : String(err)}`
+        );
+        if (classifyAuthError(err) === "outage") {
+          releaseStrikes();
+          return refuse("outage");
+        }
+        continue;
+      }
+      if (attempt.error) {
+        if (classifyAuthError(attempt.error) === "outage") {
+          // An outage is not a failed guess: release the provisional strikes.
+          console.error(`[fp/login] auth outage: ${attempt.error.message}`);
+          releaseStrikes();
+          return refuse("outage");
+        }
+        continue; // invalid credentials for this candidate → next
+      }
+      if (!attempt.data.session || !attempt.data.user) continue;
       const session = attempt.data.session;
       const userId = attempt.data.user.id;
 
@@ -245,15 +274,30 @@ export async function POST(req: Request): Promise<Response> {
       if (!profile.ok) {
         // No player profile → no playable session. Revoke what we just minted
         // (scoped) and collapse into the generic refusal; the reason is in the
-        // server log only. A DB-fault reason releases the strikes (correct
-        // password, no guess); a genuine identity refusal leaves them.
+        // server log only. The mapping is EXHAUSTIVE over EnsureProfileResult's
+        // reasons (a `never` default forces a compile decision if one is added):
+        // only a genuine identity refusal leaves the strikes standing — every
+        // DB/system fault (load, insert, handle exhaustion, save-seed) is an
+        // outage, not a guess, so it releases them. The password was correct.
         console.error(`[fp/login] profile ensure refused: ${profile.reason}`);
         await revokeMintedSession(admin, session.access_token);
-        if (profile.reason === "load_failed" || profile.reason === "save_seed_failed") {
-          releaseStrikes();
-          return refuse("outage");
+        switch (profile.reason) {
+          case "identity_mismatch":
+            return refuse("not_child");
+          case "load_failed":
+          case "save_seed_failed":
+          case "insert_failed":
+          case "handle_exhausted":
+            releaseStrikes();
+            return refuse("outage");
+          default: {
+            const _exhaustive: never = profile.reason;
+            void _exhaustive;
+            // Unreachable by construction; fail toward release + generic refusal.
+            releaseStrikes();
+            return refuse("outage");
+          }
         }
-        return refuse("not_child");
       }
 
       // The account owner proved themselves; the (ip,name) strikes serve nothing
@@ -292,10 +336,19 @@ async function revokeMintedSession(
   admin: ReturnType<typeof supabaseAdmin>,
   accessToken: string
 ): Promise<void> {
-  const { error } = await admin.auth.admin.signOut(accessToken, "local");
-  if (error) {
-    // Log the failure but never the token. The session will still age out;
-    // the caller already refused the login.
-    console.error(`[fp/login] scoped session revoke failed: ${error.message}`);
+  // Truly best-effort: signOut can REJECT (network throw), not only return an
+  // {error}. If that reject propagated it would skip the releaseStrikes() the
+  // caller runs immediately after this — so it is swallowed here. The session
+  // still ages out; the caller has already refused the login. Never log the
+  // token.
+  try {
+    const { error } = await admin.auth.admin.signOut(accessToken, "local");
+    if (error) {
+      console.error(`[fp/login] scoped session revoke failed: ${error.message}`);
+    }
+  } catch (err) {
+    console.error(
+      `[fp/login] scoped session revoke threw: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }

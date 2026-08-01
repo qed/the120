@@ -176,47 +176,38 @@ export function deriveRateLimitKeys(
   };
 }
 
-/* ------------------------------------------------------------ handle rules */
+/* ------------------------------------------------ auth error classification */
 
-/** Must match the fp_player_profiles.handle check constraint exactly. */
-export const HANDLE_PATTERN = /^[a-z0-9]{1,30}$/;
-
-const HANDLE_MAX_LENGTH = 30;
-const HANDLE_FALLBACK = "player";
+export type AuthErrorClass = "invalid" | "outage";
 
 /**
- * Derive the public-looking handle from the child's first name: NFKD-fold
- * accents away, keep lowercase alphanumerics, bound to 30. `attempt` 0 is the
- * bare base; attempt N>0 appends the numeric suffix N+1 (maya, maya2, maya3 —
- * the plan's uniquification shape), truncating the base so the result always
- * satisfies HANDLE_PATTERN. A name with no usable characters falls back to a
- * neutral base rather than an invalid empty handle.
+ * Classify a Supabase Auth error from signInWithPassword as either a genuine
+ * failed guess or a fault — so the route can tell a WRONG PASSWORD from an
+ * AUTH OUTAGE and never treat the two the same (an outage is not a guess):
+ *
+ *   - `invalid`  → wrong password / unknown account. Advance to the next
+ *                  candidate; the provisional strike stands.
+ *   - `outage`   → a transient network throw, a 5xx, or Supabase's own /token
+ *                  429 (rate-limited). The caller breaks out, releases the
+ *                  strikes, and returns the one generic refusal.
+ *
+ * supabase-js `AuthApiError` exposes `status` (HTTP) and `code`: invalid
+ * credentials are a 400 with code `invalid_credentials`, a rate-limit is 429,
+ * a server fault is 5xx. Anything WITHOUT a recognizable invalid-credentials
+ * shape — including a thrown non-Auth error carrying no status — is treated as
+ * an outage. That is the release-strikes direction on purpose: a real child
+ * must never be locked out by a fault we could not positively classify as a
+ * guess.
  */
-export function deriveHandle(firstName: string, attempt: number): string {
-  const base =
-    firstName
-      .normalize("NFKD")
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "")
-      .slice(0, HANDLE_MAX_LENGTH) || HANDLE_FALLBACK;
-  if (attempt <= 0) return base;
-  const suffix = String(attempt + 1);
-  return base.slice(0, HANDLE_MAX_LENGTH - suffix.length) + suffix;
-}
-
-/* ---------------------------------------------------- 23505 classification */
-
-export type InsertConflictKind = "handle" | "identity" | "unknown";
-
-/**
- * Classify a fp_player_profiles unique-violation message (PostgREST surfaces
- * the constraint name): `handle` → re-derive with the next suffix and retry
- * (bounded); `identity` (user_id/child_id) → a concurrent login already
- * created the row — re-select and ADOPT it, never update it; anything else →
- * fail, don't guess.
- */
-export function classifyInsertConflict(message: string): InsertConflictKind {
-  if (message.includes("handle")) return "handle";
-  if (message.includes("user_id") || message.includes("child_id")) return "identity";
-  return "unknown";
+export function classifyAuthError(error: unknown): AuthErrorClass {
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (code === "invalid_credentials") return "invalid";
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === "number") {
+      if (status === 429 || status >= 500) return "outage";
+      if (status === 400) return "invalid";
+    }
+  }
+  return "outage";
 }

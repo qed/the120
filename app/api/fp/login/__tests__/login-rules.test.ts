@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAllowedOrigins,
   checkOrigin,
+  classifyAuthError,
   classifyIdentifier,
-  classifyInsertConflict,
-  deriveHandle,
   deriveRateLimitKeys,
   extractClientIp,
   parseLoginRequest,
@@ -257,64 +256,33 @@ describe("deriveRateLimitKeys", () => {
   });
 });
 
-/* ------------------------------------------------------------ handle rules */
+/* ------------------------------------------------ auth error classification */
 
-const HANDLE_SHAPE = /^[a-z0-9]{1,30}$/; // the DB check constraint, verbatim
-
-describe("deriveHandle", () => {
-  it("derives a lowercase alphanumeric handle from the first name", () => {
-    expect(deriveHandle("Maya", 0)).toBe("maya");
-    expect(deriveHandle("Zoë", 0)).toBe("zoe");
-    expect(deriveHandle("Mary Jane", 0)).toBe("maryjane");
+describe("classifyAuthError", () => {
+  it("classifies a genuine wrong-password answer as an invalid guess", () => {
+    // supabase-js AuthApiError for a bad sign-in: 400 + invalid_credentials.
+    expect(classifyAuthError({ status: 400, code: "invalid_credentials" })).toBe("invalid");
+    // The code alone is sufficient even if the status shape ever drifts.
+    expect(classifyAuthError({ code: "invalid_credentials" })).toBe("invalid");
+    // Any other 400 on this endpoint is still the bad-credentials answer.
+    expect(classifyAuthError({ status: 400 })).toBe("invalid");
   });
 
-  it("collision retries produce valid, distinct handles", () => {
-    const seen = new Set<string>();
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const handle = deriveHandle("Maya", attempt);
-      expect(handle).toMatch(HANDLE_SHAPE);
-      expect(seen.has(handle)).toBe(false);
-      seen.add(handle);
-    }
-    expect(deriveHandle("Maya", 1)).toBe("maya2");
+  it("classifies a rate-limit or 5xx as an outage — not a failed guess", () => {
+    expect(classifyAuthError({ status: 429, code: "over_request_rate_limit" })).toBe("outage");
+    expect(classifyAuthError({ status: 500 })).toBe("outage");
+    expect(classifyAuthError({ status: 503 })).toBe("outage");
   });
 
-  it("satisfies the DB constraint even for hostile or long names", () => {
-    for (const name of ["", "!!!", "尚美", "x".repeat(60), " A "]) {
-      for (const attempt of [0, 1, 4]) {
-        expect(deriveHandle(name, attempt)).toMatch(HANDLE_SHAPE);
-      }
-    }
-    // Long base + suffix still fits inside the 30-char cap and stays distinct.
-    expect(deriveHandle("x".repeat(60), 0)).not.toBe(deriveHandle("x".repeat(60), 1));
-  });
-});
-
-/* ---------------------------------------------------- 23505 classification */
-
-describe("classifyInsertConflict", () => {
-  it("classifies a handle-unique violation as retryable", () => {
-    expect(
-      classifyInsertConflict(
-        'duplicate key value violates unique constraint "fp_player_profiles_handle_key"'
-      )
-    ).toBe("handle");
+  it("treats a thrown network error (no status) as an outage — the release direction", () => {
+    expect(classifyAuthError(new TypeError("fetch failed"))).toBe("outage");
+    expect(classifyAuthError(new Error("ECONNRESET"))).toBe("outage");
   });
 
-  it("classifies user_id / child_id violations as adopt-the-existing-row", () => {
-    expect(
-      classifyInsertConflict(
-        'duplicate key value violates unique constraint "fp_player_profiles_user_id_key"'
-      )
-    ).toBe("identity");
-    expect(
-      classifyInsertConflict(
-        'duplicate key value violates unique constraint "fp_player_profiles_child_id_key"'
-      )
-    ).toBe("identity");
-  });
-
-  it("returns unknown for anything else — the caller must fail, not guess", () => {
-    expect(classifyInsertConflict("some other error")).toBe("unknown");
+  it("treats an unclassifiable / non-object value as an outage (fail toward release)", () => {
+    expect(classifyAuthError(null)).toBe("outage");
+    expect(classifyAuthError(undefined)).toBe("outage");
+    expect(classifyAuthError("boom")).toBe("outage");
+    expect(classifyAuthError({})).toBe("outage");
   });
 });

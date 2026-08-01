@@ -9,7 +9,9 @@ import {
   SPRINT_SECONDS,
   sprintScore,
   type SprintAnswer,
+  type SprintBoardRow,
   type SprintBracket,
+  type SprintStanding,
 } from "@/app/gauntlet/game/dailySprint";
 import { judgeAnswer } from "@/app/gauntlet/game/problems";
 
@@ -35,6 +37,68 @@ const validAttemptId = (value: unknown): value is string =>
     value
   );
 
+type SprintDbRow = {
+  handle: string;
+  sprint_date: string;
+  band: SprintBracket;
+  correct: number;
+  wrong: number;
+  elapsed_ms: number;
+  score: number;
+  status?: "started" | "completed";
+};
+
+class SprintDataError extends Error {
+  constructor(
+    readonly stage: string,
+    readonly code?: string
+  ) {
+    super(`Daily Sprint data failure at ${stage}`);
+  }
+}
+
+function failData(stage: string, error: unknown): never {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : undefined;
+  throw new SprintDataError(stage, code);
+}
+
+function logSprintFailure(
+  operation: string,
+  error: unknown,
+  context: { date?: string | null; band?: SprintBracket | null } = {}
+) {
+  const dataError = error instanceof SprintDataError ? error : null;
+  console.error("[gauntlet.daily-sprint] request failed", {
+    operation,
+    stage: dataError?.stage ?? "unexpected",
+    code: dataError?.code,
+    date: context.date,
+    band: context.band,
+  });
+}
+
+const previousUtcDate = (date: string) => {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+};
+
+function mapBoardRow(row: SprintDbRow, rank: number): SprintBoardRow {
+  return {
+    rank,
+    handle: row.handle,
+    date: row.sprint_date,
+    band: row.band,
+    correct: row.correct,
+    wrong: row.wrong,
+    elapsedMs: row.elapsed_ms,
+    score: row.score,
+  };
+}
+
 async function boardRows(date: string, band: SprintBracket) {
   const { data, error } = await supabaseAdmin()
     .from("gauntlet_daily_sprints")
@@ -45,17 +109,102 @@ async function boardRows(date: string, band: SprintBracket) {
     .order("score", { ascending: false })
     .order("elapsed_ms", { ascending: true })
     .limit(100);
-  if (error) return [];
-  return (data ?? []).map((row, index) => ({
-    rank: index + 1,
-    handle: row.handle,
-    date: row.sprint_date,
-    band: row.band,
-    correct: row.correct,
-    wrong: row.wrong,
-    elapsedMs: row.elapsed_ms,
-    score: row.score,
-  }));
+  if (error) failData("board-read", error);
+  return (data ?? []).map((row, index) => mapBoardRow(row as SprintDbRow, index + 1));
+}
+
+async function rankForRow(row: SprintDbRow): Promise<number> {
+  const db = supabaseAdmin();
+  const base = () =>
+    db
+      .from("gauntlet_daily_sprints")
+      .select("user_id", { count: "exact", head: true })
+      .eq("sprint_date", row.sprint_date)
+      .eq("band", row.band)
+      .eq("status", "completed");
+  const [better, tiedFaster] = await Promise.all([
+    base().gt("score", row.score),
+    base().eq("score", row.score).lt("elapsed_ms", row.elapsed_ms),
+  ]);
+  if (better.error) failData("standing-rank-better", better.error);
+  if (tiedFaster.error) failData("standing-rank-tie", tiedFaster.error);
+  return 1 + (better.count ?? 0) + (tiedFaster.count ?? 0);
+}
+
+async function previousRankForUser(
+  userId: string,
+  date: string,
+  band: SprintBracket
+): Promise<number | undefined> {
+  const { data, error } = await supabaseAdmin()
+    .from("gauntlet_daily_sprints")
+    .select("handle,sprint_date,band,correct,wrong,elapsed_ms,score,status")
+    .eq("user_id", userId)
+    .eq("sprint_date", previousUtcDate(date))
+    .eq("band", band)
+    .eq("status", "completed")
+    .maybeSingle();
+  if (error) failData("previous-standing-read", error);
+  return data ? rankForRow(data as SprintDbRow) : undefined;
+}
+
+async function standingForUser(
+  userId: string,
+  date: string,
+  band: SprintBracket
+): Promise<{ attemptUsed: boolean; standing?: SprintStanding }> {
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from("gauntlet_daily_sprints")
+    .select("handle,sprint_date,band,correct,wrong,elapsed_ms,score,status")
+    .eq("user_id", userId)
+    .eq("sprint_date", date)
+    .eq("band", band)
+    .maybeSingle();
+  if (error) failData("own-standing-read", error);
+  if (!data) return { attemptUsed: false };
+  if (data.status !== "completed") return { attemptUsed: true };
+
+  const own = data as SprintDbRow;
+  const [rank, tiedAheadResult, higherAheadResult, previousRank] = await Promise.all([
+    rankForRow(own),
+    db
+      .from("gauntlet_daily_sprints")
+      .select("handle,sprint_date,band,correct,wrong,elapsed_ms,score")
+      .eq("sprint_date", date)
+      .eq("band", band)
+      .eq("status", "completed")
+      .eq("score", own.score)
+      .lt("elapsed_ms", own.elapsed_ms)
+      .order("elapsed_ms", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db
+      .from("gauntlet_daily_sprints")
+      .select("handle,sprint_date,band,correct,wrong,elapsed_ms,score")
+      .eq("sprint_date", date)
+      .eq("band", band)
+      .eq("status", "completed")
+      .gt("score", own.score)
+      .order("score", { ascending: true })
+      .order("elapsed_ms", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    previousRankForUser(userId, date, band),
+  ]);
+  if (tiedAheadResult.error) failData("standing-target-tie", tiedAheadResult.error);
+  if (higherAheadResult.error) failData("standing-target-higher", higherAheadResult.error);
+  const aheadData = tiedAheadResult.data ?? higherAheadResult.data;
+  return {
+    attemptUsed: true,
+    standing: {
+      me: mapBoardRow(own, rank),
+      ahead: aheadData
+        ? mapBoardRow(aheadData as SprintDbRow, Math.max(1, rank - 1))
+        : null,
+      previousRank,
+    },
+  };
 }
 
 export async function GET(request: Request) {
@@ -63,41 +212,49 @@ export async function GET(request: Request) {
   const date = url.searchParams.get("date");
   const band = url.searchParams.get("band") as SprintBracket | null;
   if (!validDate(date) || !band || !VALID_BANDS.includes(band)) {
-    return NextResponse.json({ rows: [], attemptUsed: false }, { status: 400 });
+    return NextResponse.json(
+      { rows: [], attemptUsed: false, available: false },
+      { status: 400 }
+    );
   }
   if (!configured()) {
-    return NextResponse.json({ rows: [], attemptUsed: false });
+    logSprintFailure("get", new SprintDataError("configuration"), { date, band });
+    return NextResponse.json(
+      { rows: [], attemptUsed: false, available: false },
+      { status: 503 }
+    );
   }
 
   try {
     const rows = await boardRows(date, band);
     let attemptUsed = false;
+    let standing: SprintStanding | undefined;
     if (url.searchParams.get("mine") === "1") {
       const auth = await supabaseServer();
       const {
         data: { user },
       } = await auth.auth.getUser();
       if (user) {
-        const { data } = await supabaseAdmin()
-          .from("gauntlet_daily_sprints")
-          .select("attempt_id")
-          .eq("user_id", user.id)
-          .eq("sprint_date", date)
-          .eq("band", band)
-          .maybeSingle();
-        attemptUsed = !!data;
+        const own = await standingForUser(user.id, date, band);
+        attemptUsed = own.attemptUsed;
+        standing = own.standing;
       }
     }
-    return NextResponse.json({ rows, attemptUsed });
-  } catch {
-    return NextResponse.json({ rows: [], attemptUsed: false });
+    return NextResponse.json({ rows, attemptUsed, standing, available: true });
+  } catch (error) {
+    logSprintFailure("get", error, { date, band });
+    return NextResponse.json(
+      { rows: [], attemptUsed: false, available: false },
+      { status: 503 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   if (!configured()) {
+    logSprintFailure("post", new SprintDataError("configuration"));
     return NextResponse.json(
-      { reserved: false, posted: false, reason: "unavailable", rows: [] },
+      { reserved: false, posted: false, reason: "unavailable", rows: [], available: false },
       { status: 503 }
     );
   }
@@ -163,19 +320,17 @@ export async function POST(request: Request) {
         updated_at: now,
       });
       if (!error) {
-        return NextResponse.json({ reserved: true, attemptId });
+        return NextResponse.json({ reserved: true, attemptId, available: true });
       }
       if (error.code === "23505") {
         return NextResponse.json({
           reserved: false,
           reason: "ranked_attempt_used",
           rows: await boardRows(date, band),
+          available: true,
         });
       }
-      return NextResponse.json(
-        { reserved: false, reason: "unavailable", rows: [] },
-        { status: 503 }
-      );
+      failData("attempt-reserve", error);
     }
 
     if (
@@ -193,8 +348,8 @@ export async function POST(request: Request) {
       .eq("sprint_date", date)
       .eq("band", band)
       .maybeSingle();
+    if (attemptError) failData("attempt-read", attemptError);
     if (
-      attemptError ||
       !attempt ||
       attempt.status !== "started" ||
       attempt.attempt_id !== raw.attemptId
@@ -203,6 +358,7 @@ export async function POST(request: Request) {
         posted: false,
         reason: "ranked_attempt_used",
         rows: await boardRows(date, band),
+        available: true,
       });
     }
 
@@ -259,20 +415,23 @@ export async function POST(request: Request) {
       .select("attempt_id")
       .maybeSingle();
     if (error || !completed) {
-      return NextResponse.json(
-        { posted: false, reason: "unavailable", rows: [] },
-        { status: 503 }
-      );
+      failData("attempt-complete", error ?? new Error("completion row missing"));
     }
+
+    const own = await standingForUser(user.id, date, band);
 
     return NextResponse.json({
       posted: true,
       official: { correct, wrong, elapsedMs, score },
       rows: await boardRows(date, band),
+      standing: own.standing,
+      attemptUsed: own.attemptUsed,
+      available: true,
     });
-  } catch {
+  } catch (error) {
+    logSprintFailure("post", error);
     return NextResponse.json(
-      { reserved: false, posted: false, reason: "unavailable", rows: [] },
+      { reserved: false, posted: false, reason: "unavailable", rows: [], available: false },
       { status: 503 }
     );
   }

@@ -6,10 +6,14 @@ import {
   dailySprintKeys,
   dailySprintProblem,
   nearbyTarget,
+  personalBestCopy,
   practiceGhosts,
+  rankMovementCopy,
   SPRINT_SECONDS,
   sprintScore,
-  type SprintBoardRow,
+  standingGapCopy,
+  type SprintBest,
+  type SprintBoardSnapshot,
   type SprintBracket,
   type SprintReservation,
   type SprintRun,
@@ -27,6 +31,7 @@ export default function DailySprint({
   band,
   bandLabel,
   personalBest,
+  previousBest,
   officialEligible,
   onReserve,
   onComplete,
@@ -36,9 +41,10 @@ export default function DailySprint({
   band: SprintBracket;
   bandLabel: string;
   personalBest?: { correct: number; elapsedMs: number; score: number };
+  previousBest?: SprintBest;
   officialEligible: boolean;
   onReserve: () => Promise<SprintReservation>;
-  onComplete: (run: SprintRun) => Promise<SprintBoardRow[]>;
+  onComplete: (run: SprintRun) => Promise<SprintBoardSnapshot>;
   onExit: () => void;
 }) {
   const rankedKeys = useMemo(() => dailySprintKeys(date, band), [date, band]);
@@ -53,7 +59,7 @@ export default function DailySprint({
   const [displayWrong, setDisplayWrong] = useState(0);
   const [flash, setFlash] = useState<"" | "right" | "wrong">("");
   const [result, setResult] = useState<SprintRun | null>(null);
-  const [board, setBoard] = useState<SprintBoardRow[] | null>(null);
+  const [snapshot, setSnapshot] = useState<SprintBoardSnapshot | null>(null);
   const [startPending, setStartPending] = useState(false);
   const [startError, setStartError] = useState("");
   const [runningRanked, setRunningRanked] = useState(false);
@@ -87,8 +93,10 @@ export default function DailySprint({
       `/api/gauntlet/daily-sprint?date=${encodeURIComponent(date)}&band=${band}&mine=1`
     )
       .then((response) => response.json())
-      .then((body: { attemptUsed?: boolean }) => {
-        if (!dead && body.attemptUsed) setRankedAttemptUsed(true);
+      .then((body: SprintBoardSnapshot) => {
+        if (dead) return;
+        if (body.attemptUsed) setRankedAttemptUsed(true);
+        setSnapshot(body);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -120,7 +128,7 @@ export default function DailySprint({
     };
     setResult(run);
     setMode("result");
-    setBoard(await onComplete(run));
+    setSnapshot(await onComplete(run));
   }, [band, date, onComplete]);
 
   useEffect(() => {
@@ -213,7 +221,7 @@ export default function DailySprint({
     setDisplayWrong(0);
     setFlash("");
     setResult(null);
-    setBoard(null);
+    setSnapshot(null);
     setMode("running");
   };
 
@@ -301,6 +309,14 @@ export default function DailySprint({
             Today&apos;s official run: {personalBest.correct}/20 in {(personalBest.elapsedMs / 1000).toFixed(1)}s
           </p>
         )}
+        {snapshot?.standing && (
+          <p className="mt-2 font-mono text-xs text-amber-200">
+            Current rank #{snapshot.standing.me.rank}
+            {snapshot.standing.ahead
+              ? ` · next: ${snapshot.standing.ahead.handle}`
+              : " · top of your bracket"}
+          </p>
+        )}
         <button
           onClick={() => void start(false)}
           disabled={checkingAttempt || startPending}
@@ -329,25 +345,49 @@ export default function DailySprint({
   }
 
   if (mode === "result" && result) {
-    const shownRows = board && board.length ? board : practiceGhosts(date, band);
-    const target = nearbyTarget(shownRows, result.score);
-    const publicBoard = !!board?.length;
+    const standing = result.ranked ? snapshot?.standing : undefined;
+    const scoredResult = standing?.me ?? result;
+    const boardRows = snapshot?.rows ?? [];
+    const shownRows = boardRows.length ? boardRows : practiceGhosts(date, band);
+    const target = standing?.ahead ?? nearbyTarget(shownRows, result.score);
+    const publicBoard = !!standing || boardRows.length > 0;
+    const movement = standing ? rankMovementCopy(standing) : null;
+    const gap = standing ? standingGapCopy(standing) : null;
+    const improvement = result.ranked
+      ? personalBestCopy(scoredResult, previousBest)
+      : null;
     return (
       <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col items-center justify-center px-5 py-10 text-center">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300">
           {result.ranked ? "Ranked Sprint complete" : "Practice run complete"}
         </p>
-        <h2 className="mt-2 text-6xl font-bold text-white">{result.correct}<span className="text-2xl text-white/35">/20</span></h2>
+        <h2 className="mt-2 text-6xl font-bold text-white">{scoredResult.correct}<span className="text-2xl text-white/35">/20</span></h2>
         <p className="mt-2 font-mono text-sm text-white/60">
-          {result.wrong} missed · {(result.elapsedMs / 1000).toFixed(1)}s
+          {scoredResult.wrong} missed · {(scoredResult.elapsedMs / 1000).toFixed(1)}s
         </p>
+        {improvement && (
+          <p className="mt-3 rounded-full bg-emerald-400/15 px-4 py-2 font-mono text-xs text-emerald-300">
+            {improvement}
+          </p>
+        )}
         {!result.ranked && (
           <p className="mt-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 font-mono text-xs text-white/55">
             PRACTICE ONLY · LEADERBOARD AND XP UNCHANGED
           </p>
         )}
+        {standing && (
+          <div className="mt-6 grid w-full grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-cyan-400/35 bg-cyan-400/10 p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-300">Your rank</p>
+              <p className="mt-1 text-4xl font-bold">#{standing.me.rank}</p>
+            </div>
+            <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-4 font-mono text-xs text-white/65">
+              {movement ?? "First ranked finish in this bracket"}
+            </div>
+          </div>
+        )}
         {target ? (
-          <div className="mt-6 w-full rounded-2xl border border-amber-400/35 bg-amber-400/10 p-4">
+          <div className={`${standing ? "mt-3" : "mt-6"} w-full rounded-2xl border border-amber-400/35 bg-amber-400/10 p-4`}>
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-300">
               {result.ranked
                 ? publicBoard
@@ -359,15 +399,21 @@ export default function DailySprint({
             <p className="font-mono text-xs text-white/55">
               {target.correct}/20 · {(target.elapsedMs / 1000).toFixed(1)}s
             </p>
+            {gap && <p className="mt-2 text-sm font-medium text-amber-100">{gap}</p>}
           </div>
         ) : (
           <p className="mt-6 rounded-full bg-emerald-400/15 px-4 py-2 font-mono text-sm text-emerald-300">
-            You cleared every target on this board.
+            {standing ? "You are currently #1 in your bracket." : "You cleared every target on this board."}
           </p>
         )}
-        {!publicBoard && (
+        {!publicBoard && snapshot?.available !== false && (
           <p className="mt-3 text-xs text-white/45">
             Practice ghosts are local pacing targets. Sign in and set a handle to post to the public board.
+          </p>
+        )}
+        {snapshot?.available === false && (
+          <p className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-2 text-xs text-red-200">
+            The public board is temporarily unavailable. Your practice result still works normally.
           </p>
         )}
         <div className="mt-7 flex flex-wrap justify-center gap-3">

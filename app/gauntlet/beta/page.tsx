@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import GauntletGame from "../GauntletGame";
 import { PATHWAY } from "../game/pathway";
+import { parseChallenge } from "../game/challenge";
 import { resolveTournamentState } from "@/app/lib/tournament";
 
 export const dynamic = "force-dynamic";
@@ -26,20 +27,12 @@ export async function generateMetadata({
   try {
     const { c } = await searchParams;
     if (!c) return base;
-    const d = JSON.parse(Buffer.from(c, "base64").toString("utf8")) as {
-      s?: unknown;
-      l?: unknown;
-      t?: unknown;
-      h?: unknown;
-    };
-    const skill = PATHWAY.find((sk) => sk.id === d.s);
-    const level = Math.floor(Number(d.l));
-    const t = Math.floor(Number(d.t));
-    if (!skill || level < 1 || level > 5 || !(t > 0)) return base;
-    const h =
-      typeof d.h === "string" ? d.h.replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12) : "";
-    const title = `⚔️ ${h || "A rival"} challenges you — The Gauntlet`;
-    const description = `Beat ${skill.label} boss L${level} in under ${t}s. Free to play — The 120.`;
+    const challenge = parseChallenge(c, PATHWAY.map((skill) => skill.id), 5, 120);
+    if (!challenge) return base;
+    const skill = PATHWAY.find((candidate) => candidate.id === challenge.skillId);
+    if (!skill) return base;
+    const title = `⚔️ ${challenge.handle || "A rival"} challenges you — The Gauntlet`;
+    const description = `Beat ${skill.label} boss L${challenge.level} in under ${challenge.time}s on the same question deck. Free to play — The 120.`;
     return {
       ...base,
       title,

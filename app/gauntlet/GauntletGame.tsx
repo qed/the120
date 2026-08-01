@@ -6,7 +6,7 @@ import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { type Boss } from "./game/bosses";
 import { factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
 import BossSprite from "./components/BossSprite";
-import { MASTERY_MS, type FactStat } from "./game/mastery";
+import { type FactStat } from "./game/mastery";
 import {
   AREAS,
   areaGradeSpan,
@@ -34,6 +34,7 @@ import Trial from "./components/Trial";
 import PlacementTrial from "./components/PlacementTrial";
 import SkillPanel from "./components/SkillPanel";
 import DailySprint from "./components/DailySprint";
+import MistakeRematch from "./components/MistakeRematch";
 import FoundingBoard from "./components/FoundingBoard";
 import { useCoarsePointer } from "./components/NumberPad";
 import {
@@ -55,15 +56,26 @@ import {
 import { encounterKind, type RaidSource } from "./game/encounters";
 import {
   practiceGhosts,
+  rankMovementCopy,
   SPRINT_BRACKETS,
   sprintBracketForGrade,
   sprintBestKey,
+  standingGapCopy,
   type SprintBest,
+  type SprintBoardSnapshot,
   type SprintBoardRow,
   type SprintBracket,
   type SprintReservation,
   type SprintRun,
 } from "./game/dailySprint";
+import {
+  challengeDeckFromResults,
+  encodeChallenge,
+  parseChallenge,
+  type ChallengeQuestion,
+  type GauntletChallenge,
+} from "./game/challenge";
+import { rematchKeysFromResults } from "./game/rematch";
 
 /** Share button: phones get the native sheet; desktop gets an in-app preview
  *  with copy-to-clipboard (paste into Discord/iMessage) — no OS popup. */
@@ -336,6 +348,7 @@ type Phase =
   | "placement"
   | "battle"
   | "trial"
+  | "rematch"
   | "sprint"
   | "victory"
   | "defeat"
@@ -359,8 +372,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [lastElapsed, setLastElapsed] = useState(0);
   const [lastNewRecord, setLastNewRecord] = useState(false);
   const [lastRecap, setLastRecap] = useState<{ tested: number; total: number } | null>(null);
-  const [challenge, setChallenge] = useState<{ skillId: string; level: number; t: number; h?: string } | null>(null);
+  const [challenge, setChallenge] = useState<GauntletChallenge | null>(null);
   const [challengeRun, setChallengeRun] = useState(false);
+  const [battleDeck, setBattleDeck] = useState<ChallengeQuestion[] | undefined>(undefined);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
@@ -409,17 +423,16 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       if (!s.seenHelp) setShowHelp(true);
       // Challenge link payload: validate skill, level, time, and kid-safe handle.
       try {
-        const c = new URLSearchParams(window.location.search).get("c");
-        if (c) {
-          const d = JSON.parse(atob(c)) as { s?: unknown; l?: unknown; t?: unknown; h?: unknown };
-          const idx = PATHWAY.findIndex((sk) => sk.id === d.s);
-          const level = Math.floor(Number(d.l));
-          const t = Math.floor(Number(d.t));
-          if (idx >= 0 && level >= 1 && level <= SKILL_LEVELS && t > 0 && t <= RAID_SECONDS) {
-            const h =
-              typeof d.h === "string" ? d.h.replace(/[^A-Z0-9-]/gi, "").toUpperCase().slice(0, 12) : undefined;
-            setChallenge({ skillId: d.s as string, level, t, h: h || undefined });
-          }
+        const encodedChallenge = new URLSearchParams(window.location.search).get("c");
+        if (encodedChallenge) {
+          setChallenge(
+            parseChallenge(
+              encodedChallenge,
+              PATHWAY.map((candidate) => candidate.id),
+              SKILL_LEVELS,
+              RAID_SECONDS
+            )
+          );
         }
       } catch {
         /* malformed link — ignore */
@@ -496,6 +509,17 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const sprintDate = todayStr();
   const sprintBand = sprintBracketForGrade(fmGrade);
   const sprintBest = save.sprintBests[sprintBestKey(sprintDate, sprintBand)];
+  const previousSprintBest = useMemo(
+    () =>
+      Object.values(save.sprintBests)
+        .filter((best) => best.band === sprintBand && best.date !== sprintDate)
+        .sort((a, b) => b.score - a.score)[0],
+    [save.sprintBests, sprintBand, sprintDate]
+  );
+  const rematchKeys = useMemo(
+    () => rematchKeysFromResults(lastResults),
+    [lastResults]
+  );
   const raidSetup = useMemo((): {
     quickfireSources: RaidSource[];
     puzzleSource?: RaidSource;
@@ -548,9 +572,15 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     return { date: t, count: prev.daily.date === yesterdayStr() ? prev.daily.count + 1 : 1 };
   };
 
-  const startSkillBattle = (idx: number, level: number, isChallenge = false) => {
+  const startSkillBattle = (
+    idx: number,
+    level: number,
+    isChallenge = false,
+    fixedDeck?: ChallengeQuestion[]
+  ) => {
     ensureAudio();
     setChallengeRun(isChallenge);
+    setBattleDeck(fixedDeck);
     setSkillIdx(idx);
     setBattleLevel(level);
     setOpenSkill(null);
@@ -564,8 +594,15 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   // beat + kid-safe handle only — no PII). navigator.share on phones,
   // clipboard on desktop.
   const shareChallenge = useCallback(async (): Promise<{ copied: boolean; text: string }> => {
-    const payload = { s: skill.id, l: battleLevel, t: lastElapsed, h: save.handle || undefined };
-    const url = `${window.location.origin}/gauntlet/beta?c=${btoa(JSON.stringify(payload))}`;
+    const deck = challengeDeckFromResults(lastResults);
+    const encoded = encodeChallenge({
+      skillId: skill.id,
+      level: battleLevel,
+      time: lastElapsed,
+      handle: save.handle || undefined,
+      deck,
+    });
+    const url = `${window.location.origin}/gauntlet/beta?c=${encoded}`;
     const text = `⚔️ Beat my time: ${skill.label} boss L${battleLevel} in ${lastElapsed}s — The Gauntlet`;
     const shareText = `${text} ${url}`;
     const coarsePointer =
@@ -587,25 +624,29 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     } catch {
       return { copied: false, text: shareText };
     }
-  }, [skill.id, skill.label, battleLevel, lastElapsed, save.handle]);
+  }, [skill.id, skill.label, battleLevel, lastElapsed, lastResults, save.handle]);
 
   // Challenge verdict line for the result screen
   const challengeNote = (() => {
     if (!challengeRun || !challenge) return undefined;
-    const who = challenge.h ?? "your rival";
+    const who = challenge.handle ?? "your rival";
     if (phase === "victory") {
-      return lastElapsed <= challenge.t
-        ? `🏆 Challenge beaten — ${lastElapsed}s vs ${who}'s ${challenge.t}s!`
-        : `⚔️ Cleared in ${lastElapsed}s — ${who}'s ${challenge.t}s still stands`;
+      return lastElapsed <= challenge.time
+        ? `🏆 Challenge beaten — ${lastElapsed}s vs ${who}'s ${challenge.time}s!`
+        : `⚔️ Cleared in ${lastElapsed}s — ${who}'s ${challenge.time}s still stands`;
     }
-    return `⚔️ ${who}'s ${challenge.t}s challenge stands — run it back`;
+    return `⚔️ ${who}'s ${challenge.time}s challenge stands — run it back`;
   })();
 
   // Mid-raid/trial the page chrome above the game (parent banner) hides via
   // this body class (globals.css) so the arena gets the whole viewport.
   useEffect(() => {
     const playing =
-      phase === "battle" || phase === "trial" || phase === "placement" || phase === "sprint";
+      phase === "battle" ||
+      phase === "trial" ||
+      phase === "placement" ||
+      phase === "sprint" ||
+      phase === "rematch";
     document.body.classList.toggle("gauntlet-playing", playing);
     return () => document.body.classList.remove("gauntlet-playing");
   }, [phase]);
@@ -712,6 +753,28 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     [applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive, trialSources]
   );
 
+  const finishRematch = useCallback(
+    (results: ProblemResult[]) => {
+      // The round shows the answer after a miss, so a quick retry is useful
+      // practice but not fresh speed-mastery proof or tournament credit.
+      const learningResults = results.map((result) => ({
+        ...result,
+        ms: result.correct
+          ? Math.max(result.ms, masteryMsFor(topicOfKey(result.key)) + 1)
+          : result.ms,
+      }));
+      const cleared = new Set(
+        results.filter((result) => result.correct).map((result) => result.key)
+      ).size;
+      setSave((previous) => ({
+        ...previous,
+        xp: previous.xp + cleared,
+        facts: applyResultsToFacts(previous.facts, learningResults),
+      }));
+    },
+    [applyResultsToFacts]
+  );
+
   const reserveSprint = useCallback(async (): Promise<SprintReservation> => {
     if (!userId || !save.handle) {
       return { reserved: false, reason: "sign_in_required" };
@@ -744,7 +807,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   }, [save.handle, sprintBand, sprintDate, userId]);
 
   const finishSprint = useCallback(
-    async (run: SprintRun): Promise<SprintBoardRow[]> => {
+    async (run: SprintRun): Promise<SprintBoardSnapshot> => {
       if (run.ranked) {
         const rankedBest: SprintBest = {
           date: run.date,
@@ -774,7 +837,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           !!userId &&
           !!save.handle;
         const response = await fetch(
-          `/api/gauntlet/daily-sprint?date=${encodeURIComponent(run.date)}&band=${run.band}`,
+          `/api/gauntlet/daily-sprint?date=${encodeURIComponent(run.date)}&band=${run.band}&mine=1`,
           canPost
             ? {
                 method: "POST",
@@ -789,10 +852,19 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
               }
             : undefined
         );
-        const body = (await response.json()) as { rows?: SprintBoardRow[] };
-        return Array.isArray(body.rows) ? body.rows : [];
+        const body = (await response.json()) as Partial<SprintBoardSnapshot>;
+        return {
+          rows: Array.isArray(body.rows) ? body.rows : [],
+          standing: body.standing,
+          attemptUsed: body.attemptUsed ?? run.ranked,
+          available: body.available === true,
+        };
       } catch {
-        return [];
+        return {
+          rows: [],
+          attemptUsed: run.ranked,
+          available: false,
+        };
       }
     },
     [save.handle, userId]
@@ -821,7 +893,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
         onClick={toggleMute}
         aria-label={save.muted ? "Unmute" : "Mute"}
         className={`fixed z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-mono text-sm text-white/70 backdrop-blur hover:bg-white/20 ${
-          phase === "battle" || phase === "trial" || phase === "sprint"
+          phase === "battle" || phase === "trial" || phase === "sprint" || phase === "rematch"
             ? coarse
               ? "left-3 top-[38%]" // pad owns bottom-left on touch; park over the arena's clear left edge
               : "bottom-4 left-4"
@@ -838,17 +910,18 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           challenge={
             challenge
               ? {
-                  label: PATHWAY.find((s) => s.id === challenge.skillId)?.label ?? "?",
-                  level: challenge.level,
-                  t: challenge.t,
-                  h: challenge.h,
+                   label: PATHWAY.find((s) => s.id === challenge.skillId)?.label ?? "?",
+                   level: challenge.level,
+                   time: challenge.time,
+                   handle: challenge.handle,
+                   fixed: !!challenge.deck?.length,
                 }
               : null
           }
           onAcceptChallenge={() => {
             if (!challenge) return;
             const idx = PATHWAY.findIndex((s) => s.id === challenge.skillId);
-            if (idx >= 0) startSkillBattle(idx, challenge.level, true);
+            if (idx >= 0) startSkillBattle(idx, challenge.level, true, challenge.deck);
           }}
           onDismissChallenge={() => setChallenge(null)}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
@@ -949,6 +1022,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           facts={save.facts}
           quickfireSources={raidSetup.quickfireSources}
           puzzleSource={raidSetup.puzzleSource}
+          challengeDeck={battleDeck}
           raidLevel={battleLevel}
           instantSubmit={save.instantSubmit}
           onFinish={finishBattle}
@@ -962,9 +1036,18 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
             SPRINT_BRACKETS.find((candidate) => candidate.id === sprintBand)?.label ?? sprintBand
           }
           personalBest={sprintBest}
+          previousBest={previousSprintBest}
           officialEligible={!!userId && !!save.handle}
           onReserve={reserveSprint}
           onComplete={finishSprint}
+          onExit={() => setPhase("menu")}
+        />
+      )}
+      {phase === "rematch" && (
+        <MistakeRematch
+          keys={rematchKeys}
+          instantSubmit={save.instantSubmit}
+          onRoundComplete={finishRematch}
           onExit={() => setPhase("menu")}
         />
       )}
@@ -984,8 +1067,9 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           grade={fmGrade}
           challengeNote={challengeNote}
           onChallenge={phase === "victory" ? shareChallenge : undefined}
+          onRematch={rematchKeys.length ? () => setPhase("rematch") : undefined}
           onMenu={() => setPhase("menu")}
-          onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRun)}
+          onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRun, battleDeck)}
           onNext={
             phase === "victory" && battleLevel < SKILL_LEVELS
               ? () => startSkillBattle(skillIdx, battleLevel + 1)
@@ -1001,6 +1085,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           results={lastResults}
           recap={lastRecap}
           grade={fmGrade}
+          onRematch={rematchKeys.length ? () => setPhase("rematch") : undefined}
           onMenu={() => setPhase("menu")}
           onRetry={() => {
             ensureAudio();
@@ -1046,7 +1131,13 @@ function Menu({
 }: {
   save: Save;
   userId: string | null;
-  challenge: { label: string; level: number; t: number; h?: string } | null;
+  challenge: {
+    label: string;
+    level: number;
+    time: number;
+    handle?: string;
+    fixed: boolean;
+  } | null;
   onAcceptChallenge: () => void;
   onDismissChallenge: () => void;
   setHandle: (h: string) => void;
@@ -1157,10 +1248,11 @@ function Menu({
           <span className="text-2xl">⚔️</span>
           <div className="flex-1">
             <p className="font-mono text-xs font-bold text-amber-200">
-              {challenge.h ?? "A rival"} challenges you!
+              {challenge.handle ?? "A rival"} challenges you!
             </p>
             <p className="font-mono text-[11px] text-white/70">
-              Beat {challenge.label} boss L{challenge.level} in under {challenge.t}s
+              Beat {challenge.label} boss L{challenge.level} in under {challenge.time}s
+              {challenge.fixed && " · same question deck"}
             </p>
           </div>
           <button
@@ -1377,22 +1469,18 @@ function Menu({
 
 /** "Train these" (B3): misses first, then slowest correct answers. */
 function trainList(results: ProblemResult[]): { prompt: string; answer: string; note: string }[] {
-  const misses = results.filter((r) => !r.correct);
-  const slow = results
-    .filter((r) => r.correct && r.ms > MASTERY_MS)
-    .sort((a, b) => b.ms - a.ms);
-  const seen = new Set<string>();
-  const out: { prompt: string; answer: string; note: string }[] = [];
-  for (const r of [...misses, ...slow]) {
-    if (seen.has(r.key) || out.length >= 5) continue;
-    seen.add(r.key);
-    out.push({
-      prompt: r.prompt.length > 30 ? "Triangle congruence" : r.prompt,
-      answer: r.answer,
-      note: r.correct ? `${(r.ms / 1000).toFixed(1)}s` : "missed",
-    });
-  }
-  return out;
+  return rematchKeysFromResults(results).flatMap((key) => {
+    const matching = results.filter((result) => result.key === key);
+    const result =
+      matching.find((candidate) => !candidate.correct) ??
+      [...matching].sort((a, b) => b.ms - a.ms)[0];
+    if (!result) return [];
+    return [{
+      prompt: result.prompt.length > 30 ? "Triangle congruence" : result.prompt,
+      answer: result.answer,
+      note: result.correct ? `${(result.ms / 1000).toFixed(1)}s` : "missed",
+    }];
+  });
 }
 
 function Result({
@@ -1407,6 +1495,7 @@ function Result({
   grade,
   challengeNote,
   onChallenge,
+  onRematch,
   onMenu,
   onRetry,
   onNext,
@@ -1422,6 +1511,7 @@ function Result({
   grade: number;
   challengeNote?: string;
   onChallenge?: () => Promise<{ copied: boolean; text: string }>;
+  onRematch?: () => void;
   onMenu: () => void;
   onRetry: () => void;
   onNext?: () => void;
@@ -1526,6 +1616,14 @@ function Result({
             {challengeState === "sent" ? "LINK COPIED ✓" : "⚔️ CHALLENGE A FRIEND"}
           </button>
         )}
+        {onRematch && (
+          <button
+            onClick={onRematch}
+            className="rounded-xl bg-emerald-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-300"
+          >
+            FIX MY MISSES · {train.length}
+          </button>
+        )}
         {won && onNext && (
           <button onClick={onNext} className="rounded-xl bg-emerald-500 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-400">
             NEXT BOSS →
@@ -1565,6 +1663,7 @@ function TrialResult({
   results,
   recap,
   grade,
+  onRematch,
   onMenu,
   onRetry,
 }: {
@@ -1574,6 +1673,7 @@ function TrialResult({
   results: ProblemResult[];
   recap: { tested: number; total: number } | null;
   grade: number;
+  onRematch?: () => void;
   onMenu: () => void;
   onRetry: () => void;
 }) {
@@ -1618,6 +1718,14 @@ function TrialResult({
 
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         {score > 0 && <ShareButton data={{ kind: "trial", score, best, grade }} />}
+        {onRematch && (
+          <button
+            onClick={onRematch}
+            className="rounded-xl bg-emerald-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-300"
+          >
+            FIX MY MISSES · {train.length}
+          </button>
+        )}
         <button onClick={onRetry} className="rounded-xl bg-amber-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-amber-300">
           RUN IT BACK
         </button>
@@ -1657,18 +1765,30 @@ function LeaderboardPanel({
 }) {
   const [filter, setFilter] = useState<SprintBracket>(band);
   const [rows, setRows] = useState<SprintBoardRow[] | null>(null);
+  const [standing, setStanding] = useState<SprintBoardSnapshot["standing"]>();
+  const [boardAvailable, setBoardAvailable] = useState(true);
 
   useEffect(() => {
     if (tournamentLive) return;
     let dead = false;
     fetch(
-      `/api/gauntlet/daily-sprint?date=${todayStr()}&band=${encodeURIComponent(filter)}`
+      `/api/gauntlet/daily-sprint?date=${todayStr()}&band=${encodeURIComponent(filter)}&mine=1`
     )
       .then((response) => response.json())
-      .then((body: { rows?: SprintBoardRow[] }) => {
-        if (!dead) setRows(Array.isArray(body.rows) ? body.rows : []);
+      .then((body: Partial<SprintBoardSnapshot>) => {
+        if (!dead) {
+          setRows(Array.isArray(body.rows) ? body.rows : []);
+          setStanding(body.standing);
+          setBoardAvailable(body.available === true);
+        }
       })
-      .catch(() => !dead && setRows([]));
+      .catch(() => {
+        if (!dead) {
+          setRows([]);
+          setStanding(undefined);
+          setBoardAvailable(false);
+        }
+      });
     return () => {
       dead = true;
     };
@@ -1682,6 +1802,8 @@ function LeaderboardPanel({
       : rows.length
         ? rows
         : [...practiceGhosts(todayStr(), filter)].sort((a, b) => a.rank - b.rank);
+  const movement = standing ? rankMovementCopy(standing) : null;
+  const gap = standing ? standingGapCopy(standing) : null;
 
   if (tournamentLive) {
     return (
@@ -1718,7 +1840,7 @@ function LeaderboardPanel({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0d1322] p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/15 bg-[#0d1322] p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-2xl font-bold">⚡ Daily Sprint leaderboard</h3>
@@ -1733,7 +1855,11 @@ function LeaderboardPanel({
           {SPRINT_BRACKETS.map((candidate) => candidate.id).map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f)}
+              onClick={() => {
+                setRows(null);
+                setStanding(undefined);
+                setFilter(f);
+              }}
               className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-all ${
                 filter === f ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-white/20 text-white/55 hover:border-white/50"
               }`}
@@ -1743,17 +1869,46 @@ function LeaderboardPanel({
           ))}
         </div>
 
+        {standing && (
+          <div className="mt-4 rounded-2xl border border-cyan-400/35 bg-cyan-400/10 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-300">Your standing</p>
+                <p className="mt-1 text-3xl font-bold">#{standing.me.rank}</p>
+              </div>
+              <p className="max-w-[12rem] text-right font-mono text-[11px] text-white/60">
+                {movement ?? "First ranked finish in this bracket"}
+              </p>
+            </div>
+            {standing.ahead ? (
+              <p className="mt-3 border-t border-white/10 pt-3 text-sm text-cyan-100">
+                Next: <strong>{standing.ahead.handle}</strong>
+                {gap && <span className="mt-1 block text-xs text-white/60">{gap}</span>}
+              </p>
+            ) : (
+              <p className="mt-3 border-t border-white/10 pt-3 text-sm text-emerald-300">
+                You are currently #1 in this bracket.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 min-h-[200px]">
           {rows === null ? (
             <p className="py-10 text-center font-mono text-xs text-white/40">Loading…</p>
           ) : (
             <>
-              {rows.length === 0 && (
+              {!boardAvailable && (
+                <p className="mb-3 rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-2 text-center font-mono text-[10px] text-red-200">
+                  Public standings are temporarily unavailable.
+                </p>
+              )}
+              {boardAvailable && rows.length === 0 && (
                 <p className="mb-3 text-center font-mono text-[10px] text-white/40">
                   No public times yet — showing clearly-labelled practice paces.
                 </p>
               )}
-              <ol className="space-y-1">
+              <ol className="max-h-[45dvh] space-y-1 overflow-y-auto pr-1">
               {displayRows?.map((r, i) => {
                 const mine = ownHandle && r.handle === ownHandle;
                 return (

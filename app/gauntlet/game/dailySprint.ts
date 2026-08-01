@@ -1,6 +1,6 @@
 import {
+  canonicalProblemFromKey,
   factSetFor,
-  problemFromKey,
   type Band,
   type Problem,
   type TopicId,
@@ -41,6 +41,18 @@ export type SprintRun = SprintScore & {
 };
 export type SprintBest = SprintScore;
 export type SprintBoardRow = SprintScore & { rank: number; handle: string };
+export type SprintStanding = {
+  me: SprintBoardRow;
+  ahead: SprintBoardRow | null;
+  /** Final rank from the previous UTC day in the same bracket, when available. */
+  previousRank?: number;
+};
+export type SprintBoardSnapshot = {
+  rows: SprintBoardRow[];
+  standing?: SprintStanding;
+  attemptUsed: boolean;
+  available: boolean;
+};
 export type SprintReservation = {
   reserved: boolean;
   attemptId?: string;
@@ -77,19 +89,14 @@ function seededRandom(seed: number) {
 
 /** Canonical presentation as well as canonical identity for a fair board. */
 export function dailySprintProblem(key: string): Problem | null {
-  const problem = problemFromKey(key);
+  const problem = canonicalProblemFromKey(key);
   if (!problem) return null;
   const [topic, rest] = key.split(":");
   const prompt =
     topic === "mul" || topic === "add"
       ? rest
       : problem.prompt;
-  const choices = problem.choices
-    ? [...problem.choices].sort(
-        (a, b) => hashSeed(`${key}:${a}`) - hashSeed(`${key}:${b}`)
-      )
-    : undefined;
-  return { ...problem, prompt, choices };
+  return { ...problem, prompt };
 }
 
 export function dailySprintKeys(
@@ -156,6 +163,48 @@ export function nearbyTarget(
       .filter((row) => row.score > ownScore)
       .sort((a, b) => a.score - b.score)[0] ?? null
   );
+}
+
+export function standingGapCopy(standing: SprintStanding): string | null {
+  const { me, ahead } = standing;
+  if (!ahead) return null;
+  const correctGap = ahead.correct - me.correct;
+  if (correctGap > 0) {
+    return `${correctGap} more correct ${correctGap === 1 ? "answer" : "answers"} to match ${ahead.handle}'s accuracy`;
+  }
+  const missGap = me.wrong - ahead.wrong;
+  if (missGap > 0) {
+    return `${missGap} fewer ${missGap === 1 ? "miss" : "misses"} to close on ${ahead.handle}`;
+  }
+  const timeGap = Math.max(100, me.elapsedMs - ahead.elapsedMs);
+  return `${(timeGap / 1000).toFixed(1)}s faster to pass ${ahead.handle}`;
+}
+
+export function rankMovementCopy(standing: SprintStanding): string | null {
+  if (!standing.previousRank) return null;
+  const movement = standing.previousRank - standing.me.rank;
+  if (movement > 0) return `▲ ${movement} rank${movement === 1 ? "" : "s"} vs yesterday`;
+  if (movement < 0) return `▼ ${Math.abs(movement)} rank${movement === -1 ? "" : "s"} vs yesterday`;
+  return "Same rank as yesterday";
+}
+
+export function personalBestCopy(
+  current: Pick<SprintScore, "correct" | "wrong" | "elapsedMs" | "score">,
+  previous?: Pick<SprintScore, "correct" | "wrong" | "elapsedMs" | "score">
+): string | null {
+  if (!previous || current.score <= previous.score) return null;
+  const correctGain = current.correct - previous.correct;
+  if (correctGain > 0) {
+    return `Personal best · +${correctGain} correct`;
+  }
+  const missGain = previous.wrong - current.wrong;
+  if (missGain > 0) {
+    return `Personal best · ${missGain} fewer ${missGain === 1 ? "miss" : "misses"}`;
+  }
+  const fasterMs = previous.elapsedMs - current.elapsedMs;
+  return fasterMs > 0
+    ? `Personal best · ${(fasterMs / 1000).toFixed(1)}s faster`
+    : "New personal best";
 }
 
 /** Clearly-labelled offline targets keep the result useful before sign-in. */

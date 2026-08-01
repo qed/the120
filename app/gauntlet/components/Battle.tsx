@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
-import { entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import { canonicalProblemFromKey, entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
@@ -15,6 +15,7 @@ import {
   type RaidBeat,
   type RaidSource,
 } from "../game/encounters";
+import type { ChallengeQuestion } from "../game/challenge";
 
 export const RAID_SECONDS = 120;
 const PLAYER_MAX_HP = 100;
@@ -61,6 +62,7 @@ export default function Battle({
   facts,
   quickfireSources,
   puzzleSource,
+  challengeDeck,
   raidLevel = 1,
   instantSubmit = false,
   onFinish,
@@ -73,6 +75,8 @@ export default function Battle({
   quickfireSources?: RaidSource[];
   /** The selected slower/visual skill, served as a fixed-effect Armor Break. */
   puzzleSource?: RaidSource;
+  /** Exact question/encounter order from a v2 friend challenge. */
+  challengeDeck?: ChallengeQuestion[];
   /** Boss ladder level, used for skill-specific scaffolding. */
   raidLevel?: number;
   /** opt-in speedrun mode: number answers auto-fire at full length */
@@ -94,8 +98,24 @@ export default function Battle({
     [band, sources, topics]
   );
   const openingSource = puzzleSource ?? initialSource;
-  const [beat, setBeat] = useState<RaidBeat>(puzzleSource ? "puzzle" : "warmup");
+  const fixedOpening = useMemo(
+    () =>
+      challengeDeck?.[0]
+        ? canonicalProblemFromKey(challengeDeck[0].key)
+        : null,
+    [challengeDeck]
+  );
+  const [beat, setBeat] = useState<RaidBeat>(
+    fixedOpening
+      ? challengeDeck?.[0]?.encounter === "armor"
+        ? "puzzle"
+        : "warmup"
+      : puzzleSource
+        ? "puzzle"
+        : "warmup"
+  );
   const [problem, setProblem] = useState<Problem>(() =>
+    fixedOpening ??
     nextProblem(
       [openingSource.topic],
       openingSource.band,
@@ -104,6 +124,7 @@ export default function Battle({
       raidLevel
     )
   );
+  const challengeIndexRef = useRef(fixedOpening ? 1 : 0);
   const recentRef = useRef<string[]>([problem.key]);
   const problemFromSource = useCallback(
     (source: RaidSource) =>
@@ -252,17 +273,30 @@ export default function Battle({
   }, [beat, problem.answer, problem.key, problem.prompt]);
 
   const advance = useCallback(() => {
-    const nextBeat = nextRaidBeat({
+    let nextBeat = nextRaidBeat({
       answered: statsRef.current.correct + statsRef.current.wrong,
       wrongStreak: wrongStreakRef.current,
       bossRatio: bossHp / boss.hp,
       hasPuzzle: !!puzzleSource,
     });
-    const source =
-      nextBeat === "puzzle" && puzzleSource
-        ? puzzleSource
-        : sources[Math.floor(Math.random() * sources.length)] ?? initialSource;
-    const p = problemFromSource(source);
+    let p: Problem;
+    if (challengeDeck?.length) {
+      const question = challengeDeck[challengeIndexRef.current % challengeDeck.length];
+      challengeIndexRef.current += 1;
+      const fixed = canonicalProblemFromKey(question.key);
+      if (fixed) {
+        p = fixed;
+        nextBeat = question.encounter === "armor" ? "puzzle" : "pressure";
+      } else {
+        p = problemFromSource(initialSource);
+      }
+    } else {
+      const source =
+        nextBeat === "puzzle" && puzzleSource
+          ? puzzleSource
+          : sources[Math.floor(Math.random() * sources.length)] ?? initialSource;
+      p = problemFromSource(source);
+    }
     recentRef.current = [...recentRef.current.slice(-7), p.key];
     setBeat(nextBeat);
     setProblem(p);
@@ -271,7 +305,7 @@ export default function Battle({
     setPuzzleTimeLeft(PUZZLE_SECONDS);
     askedAt.current = Date.now();
     inputRef.current?.focus();
-  }, [boss.hp, bossHp, initialSource, problemFromSource, puzzleSource, sources]);
+  }, [boss.hp, bossHp, challengeDeck, initialSource, problemFromSource, puzzleSource, sources]);
 
   // The focus() in advance() is a no-op after a miss: the reveal freeze
   // disables the input, the browser drops focus, and the element is still

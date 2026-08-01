@@ -2267,6 +2267,88 @@ export function problemFromKey(key: string): Problem | null {
   return null;
 }
 
+function stableTextHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Rebuild a fact with presentation that never depends on Math.random().
+ * Ranked Sprints and shared challenge decks use this so two players see the
+ * same operand order and the same multiple-choice order, not merely the same
+ * underlying answer.
+ */
+export function canonicalProblemFromKey(key: string): Problem | null {
+  const [topic, ...restParts] = key.split(":");
+  const rest = restParts.join(":");
+  let problem: Problem | null;
+  try {
+    if (topic === "mul") {
+      const [a, b] = rest.split("×").map(Number);
+      problem = makeMul(a, b);
+    } else if (topic === "add") {
+      const [a, b] = rest.split("+").map(Number);
+      problem = makeAdd(a, b);
+    } else if (topic === "binom") {
+      const [a, b] = rest.split(",").map(Number);
+      problem = makeBinom(a, b);
+    } else if (topic === "logrule") {
+      const [base, m, n] = rest.split(",").map(Number);
+      problem = makeLogrule(base, m, n);
+    } else {
+      problem = problemFromKey(key);
+    }
+  } catch {
+    return null;
+  }
+  if (!problem) return null;
+  const choices = problem.choices
+    ? [...problem.choices].sort(
+        (a, b) =>
+          stableTextHash(`${key}:${a}`) - stableTextHash(`${key}:${b}`) ||
+          a.localeCompare(b)
+      )
+    : undefined;
+  let triangle = problem.triangle;
+  if (topic === "congruence" && triangle) {
+    const hash = stableTextHash(key);
+    const sides: [number, number, number] = [
+      60 + (hash % 31),
+      70 + ((hash >>> 5) % 31),
+      80 + ((hash >>> 10) % 31),
+    ];
+    const offset = (hash >>> 15) % 3;
+    const side = (index: number) => `s${(index + offset) % 3}`;
+    const angle = (index: number) => `A${(index + offset) % 3}`;
+    const marksFor: Record<string, string[]> = {
+      SSS: [side(0), side(1), side(2)],
+      SAS: [side(0), angle(1), side(1)],
+      ASA: [angle(0), side(1), angle(1)],
+      AAS: [angle(0), angle(1), side(2)],
+      "Not enough info": [
+        [side(0), side(1)],
+        [angle(0), angle(1)],
+        [side(0), angle(2)],
+      ][(hash >>> 18) % 3],
+    };
+    const marks = marksFor[rest] ?? [];
+    triangle = {
+      a: { sides, marks, rotate: -25 + ((hash >>> 20) % 51) },
+      b: {
+        sides,
+        marks,
+        rotate:
+          -25 + ((hash >>> 25) % 51) + [0, 90, 180][(hash >>> 12) % 3],
+      },
+    };
+  }
+  return { ...problem, choices, triangle };
+}
+
 /* ---------- fact sets (mastery model) ---------- */
 
 /** Above this size a topic is treated as open-ended (no mastery set). */

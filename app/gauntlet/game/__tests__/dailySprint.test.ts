@@ -4,8 +4,11 @@ import {
   dailySprintProblem,
   nearbyTarget,
   officialSprintElapsed,
+  personalBestCopy,
+  rankMovementCopy,
   sprintBracketForGrade,
   sprintScore,
+  standingGapCopy,
   type SprintBoardRow,
 } from "../dailySprint";
 
@@ -87,5 +90,52 @@ describe("daily sprint", () => {
       elapsedMs: 1,
     })) as SprintBoardRow[];
     expect(nearbyTarget(rows, 650)?.handle).toBe("R2");
+  });
+
+  it("turns a personal standing into an understandable next target", () => {
+    const me = {
+      rank: 18,
+      handle: "ME",
+      date: "2026-07-28",
+      band: "g34" as const,
+      correct: 12,
+      wrong: 2,
+      elapsedMs: 49_000,
+      score: sprintScore(12, 2, 49_000),
+    };
+    const ahead = {
+      ...me,
+      rank: 17,
+      handle: "RIVAL-7",
+      correct: 14,
+      wrong: 1,
+      score: sprintScore(14, 1, 47_000),
+    };
+    const standing = { me, ahead, previousRank: 22 };
+    expect(standingGapCopy(standing)).toBe(
+      "2 more correct answers to match RIVAL-7's accuracy"
+    );
+    expect(rankMovementCopy(standing)).toBe("▲ 4 ranks vs yesterday");
+  });
+
+  it("describes a real personal-best improvement without inventing one", () => {
+    const previous = {
+      correct: 15,
+      wrong: 2,
+      elapsedMs: 51_000,
+      score: sprintScore(15, 2, 51_000),
+    };
+    expect(
+      personalBestCopy(
+        {
+          correct: 16,
+          wrong: 1,
+          elapsedMs: 50_000,
+          score: sprintScore(16, 1, 50_000),
+        },
+        previous
+      )
+    ).toBe("Personal best · +1 correct");
+    expect(personalBestCopy(previous, previous)).toBeNull();
   });
 });

@@ -186,6 +186,16 @@ describe("extractClientIp", () => {
     ).toBe("203.0.113.9");
   });
 
+  it("returns an IPv6 address unmangled (the realistic production case)", () => {
+    expect(
+      extractClientIp(headersOf({ "x-vercel-forwarded-for": "2001:db8::1" }))
+    ).toBe("2001:db8::1");
+    // IPv6 in the rightmost x-forwarded-for hop, past spoofed IPv4 prefixes.
+    expect(
+      extractClientIp(headersOf({ "x-forwarded-for": "6.6.6.6, 2001:db8::1" }))
+    ).toBe("2001:db8::1");
+  });
+
   it("a client-prepended x-forwarded-for hop cannot select the rate-limit key", () => {
     // The attacker controls the LEFT side of x-forwarded-for; the platform
     // appends the true peer on the right. Two requests from the same peer with
@@ -227,6 +237,22 @@ describe("deriveRateLimitKeys", () => {
     );
     expect(deriveRateLimitKeys("1.2.3.4", "maya").nameKey).not.toBe(
       deriveRateLimitKeys("5.6.7.8", "maya").nameKey
+    );
+  });
+
+  it("is injective when ip or name contains a colon (IPv6, delimiter safety)", () => {
+    // A raw `${ip}:${name}` join would collide these two distinct pairs into one
+    // bucket; encoding the segments must keep them separate.
+    expect(deriveRateLimitKeys("2001:db8", ":x").nameKey).not.toBe(
+      deriveRateLimitKeys("2001:db8:", "x").nameKey
+    );
+    // A full IPv6 address plus an ordinary name is stable and distinct per-ip.
+    expect(deriveRateLimitKeys("2001:db8::1", "maya").nameKey).not.toBe(
+      deriveRateLimitKeys("2001:db8::2", "maya").nameKey
+    );
+    // The ip aggregate for one IPv6 address is stable regardless of name.
+    expect(deriveRateLimitKeys("2001:db8::1", "maya").ipKey).toBe(
+      deriveRateLimitKeys("2001:db8::1", "leo").ipKey
     );
   });
 });

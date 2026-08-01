@@ -119,133 +119,167 @@ export async function POST(req: Request): Promise<Response> {
     return new Response(shaped.body, { status: shaped.status, headers });
   };
 
-  let body: unknown;
+  // Everything past the Origin gate is wrapped: an unhandled throw (a supabase-js
+  // rejection, an unexpected null-deref) must surface as the SAME byte-identical
+  // 401, never Next's default error page — a different response SHAPE is an
+  // oracle. Rate-limit release for the outage case is handled at each I/O site;
+  // a throw here fails closed (strikes stand), which is the safe direction.
   try {
-    body = await req.json();
-  } catch {
-    return refuse("malformed_request");
-  }
-  const parsed = parseLoginRequest(body);
-  if (!parsed.ok) return refuse("malformed_request");
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return refuse("malformed_request");
+    }
+    const parsed = parseLoginRequest(body);
+    if (!parsed.ok) return refuse("malformed_request");
 
-  const classified = classifyIdentifier(parsed.identifier);
-  if (classified.kind === "refuse") return refuse(classified.reason);
+    const classified = classifyIdentifier(parsed.identifier);
+    if (classified.kind === "refuse") return refuse(classified.reason);
 
-  // Attested IP only (pure module pins the rule: x-vercel-forwarded-for first
-  // value, else RIGHTMOST x-forwarded-for hop — never the spoofable leftmost).
-  const ip = extractClientIp(req.headers);
-  const { nameKey, ipKey } = deriveRateLimitKeys(ip, classified.normalized);
+    // Attested IP only (pure module pins the rule: x-vercel-forwarded-for first
+    // value, else RIGHTMOST x-forwarded-for hop — never the spoofable leftmost).
+    const ip = extractClientIp(req.headers);
+    const { nameKey, ipKey } = deriveRateLimitKeys(ip, classified.normalized);
 
-  // Gate FIRST — atomically, before any DB I/O (house limiter discipline).
-  // Same budgets as /fp sign-in: (ip,name) 5/15min + ip 40/15min. The refusal
-  // is the SAME generic 401 as bad credentials — never a distinct 429.
-  if (!checkAndRecordRateLimit(nameKey, SIGN_IN_RATE_LIMIT).allowed) {
-    return refuse("rate_limited");
-  }
-  if (!checkAndRecordRateLimit(ipKey, SIGN_IN_IP_RATE_LIMIT).allowed) {
-    return refuse("rate_limited");
-  }
+    // Release both provisional strikes — a DB outage is not a failed guess.
+    const releaseStrikes = (): void => {
+      releaseRateLimitEvent(nameKey);
+      releaseRateLimitEvent(ipKey);
+    };
 
-  const admin = supabaseAdmin();
+    // Gate FIRST — atomically, before any DB I/O (house limiter discipline).
+    // Same budgets as /fp sign-in: (ip,name) 5/15min + ip 40/15min. Record BOTH
+    // buckets before the verdict: a short-circuit on the name bucket would let
+    // the per-IP aggregate (the volume backstop) stop accumulating for a
+    // saturated name. The refusal is the SAME generic 401 — never a 429.
+    const nameCheck = checkAndRecordRateLimit(nameKey, SIGN_IN_RATE_LIMIT);
+    const ipCheck = checkAndRecordRateLimit(ipKey, SIGN_IN_IP_RATE_LIMIT);
+    if (!nameCheck.allowed || !ipCheck.allowed) {
+      return refuse("rate_limited");
+    }
 
-  // Candidate scan — same posture as signInStudent (full scan, symmetric JS
-  // normalization, deterministic order, max 5). The normalized-name column +
-  // index is tracked pre-public-launch carry-forward work, not Slice A's.
-  const res = await admin
-    .from("path_student_profiles")
-    .select("id, user_id, child_id, family_id, children!inner(first_name)")
-    .order("created_at", { ascending: true });
-  if (res.error) {
-    console.error(`[fp/login] candidate load failed: ${res.error.message}`);
-    // An outage is not a failed guess: release the provisional strikes so a
-    // DB blip never locks a name or an IP. The response stays the one generic
-    // refusal — this surface never explains itself.
-    releaseRateLimitEvent(nameKey);
-    releaseRateLimitEvent(ipKey);
+    const admin = supabaseAdmin();
+
+    // Candidate scan — same posture as signInStudent (full scan, symmetric JS
+    // normalization, deterministic order, max 5). The normalized-name column +
+    // index is tracked pre-public-launch carry-forward work, not Slice A's.
+    const res = await admin
+      .from("path_student_profiles")
+      .select("id, user_id, child_id, family_id, children!inner(first_name)")
+      .order("created_at", { ascending: true });
+    if (res.error) {
+      console.error(`[fp/login] candidate load failed: ${res.error.message}`);
+      // An outage is not a failed guess: release the provisional strikes so a
+      // DB blip never locks a name or an IP. The response stays the one generic
+      // refusal — this surface never explains itself.
+      releaseStrikes();
+      return refuse("outage");
+    }
+
+    const candidates: SignInCandidate[] = [];
+    for (const row of res.data ?? []) {
+      const candidate = parseCandidateRow(row);
+      if (!candidate) {
+        // Fail-closed narrowing with a trace — a malformed profile⋈children row
+        // must never make a real student silently vanish from the candidate set.
+        console.error(
+          `[fp/login] dropped malformed candidate row: id=${String((row as { id?: unknown }).id)}`
+        );
+        continue;
+      }
+      if (studentNameMatches(candidate.firstName, parsed.identifier)) candidates.push(candidate);
+      if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
+    }
+
+    // Stateless auth client: no cookies, no persistence, and the attested child
+    // IP forwarded so Supabase's /token rate limits see the real source instead
+    // of pooling every student behind Vercel's egress IP.
+    const authClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { "x-forwarded-for": ip } },
+      }
+    );
+
+    for (const candidate of candidates) {
+      const attempt = await authClient.auth.signInWithPassword({
+        email: deriveStudentEmail(candidate.childId),
+        password: parsed.password,
+      });
+      if (attempt.error || !attempt.data.session || !attempt.data.user) continue;
+      const session = attempt.data.session;
+      const userId = attempt.data.user.id;
+
+      // Child gate: the authenticated user must map to a children row via
+      // path_student_profiles — the mapping the candidate was built from, but
+      // re-resolved from the AUTHENTICATED identity, service-role side. This is
+      // the gate the future email branch will lean on; today it also catches a
+      // candidate row that changed between scan and auth.
+      const gate = await admin
+        .from("path_student_profiles")
+        .select("child_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (gate.error) {
+        // DB fault, not a non-child account: the password was correct, so this
+        // is not a guess — revoke the minted session, release the strikes, and
+        // return the generic refusal (distinguishable only in the server log).
+        console.error(`[fp/login] child gate query failed: ${gate.error.message}`);
+        await revokeMintedSession(admin, session.access_token);
+        releaseStrikes();
+        return refuse("outage");
+      }
+      if (!gate.data || typeof gate.data.child_id !== "string") {
+        await revokeMintedSession(admin, session.access_token);
+        return refuse("not_child");
+      }
+
+      const profile = await ensurePlayerProfile(admin, {
+        userId,
+        childId: gate.data.child_id,
+        firstName: candidate.firstName,
+      });
+      if (!profile.ok) {
+        // No player profile → no playable session. Revoke what we just minted
+        // (scoped) and collapse into the generic refusal; the reason is in the
+        // server log only. A DB-fault reason releases the strikes (correct
+        // password, no guess); a genuine identity refusal leaves them.
+        console.error(`[fp/login] profile ensure refused: ${profile.reason}`);
+        await revokeMintedSession(admin, session.access_token);
+        if (profile.reason === "load_failed" || profile.reason === "save_seed_failed") {
+          releaseStrikes();
+          return refuse("outage");
+        }
+        return refuse("not_child");
+      }
+
+      // The account owner proved themselves; the (ip,name) strikes serve nothing
+      // (the IP aggregate stands and ages out).
+      clearRateLimitBucket(nameKey);
+      return new Response(
+        JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          profile: { handle: profile.handle, firstName: candidate.firstName },
+        }),
+        { status: 200, headers }
+      );
+    }
+
+    // Unknown name (empty candidate set) and wrong password land here together:
+    // strike already recorded at the gate, one body, indistinguishable outside.
+    return refuse("bad_credentials");
+  } catch (err) {
+    // Any unexpected throw collapses into the one generic refusal — never a
+    // distinct error shape. Strikes stand (fail closed).
+    console.error(
+      `[fp/login] unexpected error: ${err instanceof Error ? err.message : String(err)}`
+    );
     return refuse("outage");
   }
-
-  const candidates: SignInCandidate[] = [];
-  for (const row of res.data ?? []) {
-    const candidate = parseCandidateRow(row);
-    if (!candidate) {
-      // Fail-closed narrowing with a trace — a malformed profile⋈children row
-      // must never make a real student silently vanish from the candidate set.
-      console.error(
-        `[fp/login] dropped malformed candidate row: id=${String((row as { id?: unknown }).id)}`
-      );
-      continue;
-    }
-    if (studentNameMatches(candidate.firstName, parsed.identifier)) candidates.push(candidate);
-    if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
-  }
-
-  // Stateless auth client: no cookies, no persistence, and the attested child
-  // IP forwarded so Supabase's /token rate limits see the real source instead
-  // of pooling every student behind Vercel's egress IP.
-  const authClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { "x-forwarded-for": ip } },
-    }
-  );
-
-  for (const candidate of candidates) {
-    const attempt = await authClient.auth.signInWithPassword({
-      email: deriveStudentEmail(candidate.childId),
-      password: parsed.password,
-    });
-    if (attempt.error || !attempt.data.session || !attempt.data.user) continue;
-    const session = attempt.data.session;
-    const userId = attempt.data.user.id;
-
-    // Child gate: the authenticated user must map to a children row via
-    // path_student_profiles — the mapping the candidate was built from, but
-    // re-resolved from the AUTHENTICATED identity, service-role side. This is
-    // the gate the future email branch will lean on; today it also catches a
-    // candidate row that changed between scan and auth.
-    const gate = await admin
-      .from("path_student_profiles")
-      .select("child_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (gate.error || !gate.data || typeof gate.data.child_id !== "string") {
-      await revokeMintedSession(admin, session.access_token);
-      return refuse("not_child");
-    }
-
-    const profile = await ensurePlayerProfile(admin, {
-      userId,
-      childId: gate.data.child_id,
-      firstName: candidate.firstName,
-    });
-    if (!profile.ok) {
-      // No player profile → no playable session. Revoke what we just minted
-      // (scoped) and collapse into the generic refusal; the reason is in the
-      // server log only.
-      console.error(`[fp/login] profile ensure refused: ${profile.reason}`);
-      await revokeMintedSession(admin, session.access_token);
-      return refuse("not_child");
-    }
-
-    // The account owner proved themselves; the (ip,name) strikes serve nothing
-    // (the IP aggregate stands and ages out).
-    clearRateLimitBucket(nameKey);
-    return new Response(
-      JSON.stringify({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        profile: { handle: profile.handle, firstName: candidate.firstName },
-      }),
-      { status: 200, headers }
-    );
-  }
-
-  // Unknown name (empty candidate set) and wrong password land here together:
-  // strike already recorded at the gate, one body, indistinguishable outside.
-  return refuse("bad_credentials");
 }
 
 /**

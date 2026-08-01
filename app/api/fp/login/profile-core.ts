@@ -39,16 +39,21 @@ export type EnsureProfileResult =
         | "save_seed_failed";
     };
 
-type ProfileRow = { id: string; handle: string };
+type ProfileRow = { id: string; handle: string; child_id?: string };
 
 export async function ensurePlayerProfile(
   db: SupabaseClient,
   input: { userId: string; childId: string; firstName: string }
 ): Promise<EnsureProfileResult> {
   // 1. Existing profile → adopt as-is (handle is minted once, never re-derived).
+  //    But first assert its child_id still agrees with the freshly-gated child:
+  //    the DB identity trigger only fires on INSERT/UPDATE of user_id/child_id,
+  //    so a plain adopt would otherwise silently return a stale profile (and its
+  //    save/ledger) if an admin ever re-pointed the path_student_profiles
+  //    mapping after this row was created.
   const existing = await db
     .from("fp_player_profiles")
-    .select("id, handle")
+    .select("id, handle, child_id")
     .eq("user_id", input.userId)
     .maybeSingle();
   if (existing.error) {
@@ -56,6 +61,12 @@ export async function ensurePlayerProfile(
     return { ok: false, reason: "load_failed" };
   }
   if (existing.data && isProfileRow(existing.data)) {
+    if (existing.data.child_id !== input.childId) {
+      console.error(
+        `[fp/login] identity mismatch: existing profile for user ${input.userId} binds a different child_id than the gate resolved`
+      );
+      return { ok: false, reason: "identity_mismatch" };
+    }
     return seedSave(db, existing.data);
   }
 
@@ -160,6 +171,6 @@ async function seedSave(db: SupabaseClient, profile: ProfileRow): Promise<Ensure
   return { ok: true, profileId: profile.id, handle: profile.handle };
 }
 
-function isProfileRow(row: { id?: unknown; handle?: unknown }): row is ProfileRow {
+function isProfileRow(row: { id?: unknown; handle?: unknown; child_id?: unknown }): row is ProfileRow {
   return typeof row.id === "string" && typeof row.handle === "string";
 }

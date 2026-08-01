@@ -157,14 +157,22 @@ export function extractClientIp(headers: HeaderReader): string {
  * Mirrors signInStudent's key discipline — (ip, normalizedName) bucket plus an
  * IP aggregate — in a distinct `fp-login` namespace so this route's strikes
  * never interact with /fp's buckets.
+ *
+ * Both segments are `encodeURIComponent`-escaped before joining on `:`. This
+ * matters: a real production IP is often IPv6 (colons), and normalizeStudentName
+ * does not strip `:` from a typed name — so a raw `${ip}:${name}` join is
+ * ambiguous (ip='2001:db8', name=':x' and ip='2001:db8:', name='x' would
+ * collide into one bucket, letting a chosen name alias onto another IP's
+ * bucket). Encoding turns every `:` into `%3A`, making the key injective.
  */
 export function deriveRateLimitKeys(
   ip: string,
   normalizedName: string
 ): { nameKey: string; ipKey: string } {
+  const ipEnc = encodeURIComponent(ip);
   return {
-    nameKey: `fp-login:${ip}:${normalizedName}`,
-    ipKey: `fp-login-ip:${ip}`,
+    nameKey: `fp-login:${ipEnc}:${encodeURIComponent(normalizedName)}`,
+    ipKey: `fp-login-ip:${ipEnc}`,
   };
 }
 

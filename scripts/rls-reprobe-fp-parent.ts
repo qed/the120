@@ -20,17 +20,19 @@
  *     (e.g. the JSON tokens /api/fp/signup/verify returns). Do not use a real
  *     family's token.
  *   - To prove CROSS-FAMILY isolation (0 rows on ANOTHER family's rows), supply
- *     ids from a DIFFERENT family via the optional env below. Without them the
- *     script still runs the own-visibility + service-role-only probes and clearly
- *     reports the cross-family checks as SKIPPED.
+ *     ids from a DIFFERENT family via the RLS_OTHER_* env below. These are
+ *     REQUIRED for a green run: a SKIPPED cross-family check exits NON-ZERO
+ *     (P3c), because cross-family isolation is the core property and a run that
+ *     never probed it must not look like a pass.
  *
  * ENV:
  *   FP_PARENT_SESSION   (required)  the throwaway parent access token
- *   RLS_OTHER_CHILD_ID  (optional)  a children.id owned by a DIFFERENT family
- *   RLS_OTHER_DEPOSIT_ID(optional)  a deposits.id owned by a DIFFERENT family
- *   RLS_OTHER_PROJECT_ID(optional)  a projects.id owned by a DIFFERENT family
+ *   RLS_OTHER_CHILD_ID  (required for a green run)  a children.id of a DIFFERENT family
+ *   RLS_OTHER_DEPOSIT_ID(required for a green run)  a deposits.id of a DIFFERENT family
+ *   RLS_OTHER_PROJECT_ID(required for a green run)  a projects.id of a DIFFERENT family
  *
- * Prints PASS / FAIL / SKIP per check and exits non-zero if ANY check FAILs.
+ * Prints PASS / FAIL / SKIP per check and exits non-zero if ANY check FAILs OR if
+ * any cross-family check is SKIPPED (cross-family isolation left unexercised).
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -44,6 +46,11 @@ function record(name: string, verdict: Verdict, detail: string): void {
   console.log(`[${mark}] ${name} — ${detail}`);
 }
 
+/** The cross-family isolation checks are the only skippable probes; a SKIP of one
+ *  means cross-family isolation was NEVER exercised, so the run must NOT look
+ *  green (P3c). Tracked here and turned into a non-zero exit in the summary. */
+let crossFamilySkipped = 0;
+
 /** A cross-family isolation probe: selecting a row that belongs to ANOTHER
  *  family MUST return 0 rows under RLS (never the row, never an error we would
  *  misread as access). */
@@ -54,7 +61,12 @@ async function probeCrossFamilyZero(
   name: string
 ): Promise<void> {
   if (!otherId) {
-    record(name, "SKIP", `no other-family id supplied (set the RLS_OTHER_* env to run this)`);
+    crossFamilySkipped += 1;
+    record(
+      name,
+      "SKIP",
+      `no other-family id supplied — cross-family isolation NOT verified (set the RLS_OTHER_* env to run this)`
+    );
     return;
   }
   const { data, error } = await db.from(table).select("id").eq("id", otherId);
@@ -175,12 +187,19 @@ async function main(): Promise<void> {
     for (const f of fails) console.error(`  - ${f.name}: ${f.detail}`);
     process.exit(1);
   }
-  if (skips.length > 0) {
-    console.warn(
-      "\nRLS re-probe PASSED, but cross-family checks were SKIPPED. For a complete confirmation, " +
-        "re-run with RLS_OTHER_CHILD_ID / RLS_OTHER_DEPOSIT_ID / RLS_OTHER_PROJECT_ID set to a " +
-        "DIFFERENT family's ids."
+  // P3c — a SKIPPED cross-family check means cross-family isolation was NEVER
+  // actually probed. Exit NON-ZERO (a loud FAIL-TO-VERIFY), so an ad-hoc run
+  // without the RLS_OTHER_* envs can never look green while the core isolation
+  // property went unexercised. The go-live checklist §D passes those envs, so a
+  // real run never trips this.
+  if (crossFamilySkipped > 0) {
+    console.error(
+      `\nRLS RE-PROBE FAIL-TO-VERIFY — ${crossFamilySkipped} cross-family isolation check(s) were ` +
+        "SKIPPED, so cross-family isolation was NEVER exercised. This is NOT a pass. Re-run with " +
+        "RLS_OTHER_CHILD_ID / RLS_OTHER_DEPOSIT_ID / RLS_OTHER_PROJECT_ID set to a DIFFERENT family's " +
+        "ids (the go-live checklist §D supplies them)."
     );
+    process.exit(1);
   }
   console.log("\nRLS re-probe complete — the Unit 0 parent-principal audit holds post-build.");
 }

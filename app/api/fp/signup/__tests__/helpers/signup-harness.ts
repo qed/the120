@@ -23,7 +23,11 @@
  */
 
 import { driveProvisioning, type ProvisionClaim, type ProvisionDeps } from "@/app/lib/funnel/provision-core";
-import { WORKSPACE_UNCONFIGURED_PENDING_REASON } from "@/app/lib/funnel/provision-rules";
+import {
+  deriveStudentLocalBaseFromFirstName,
+  WORKSPACE_UNCONFIGURED_PENDING_REASON,
+} from "@/app/lib/funnel/provision-rules";
+import { provisionFpChildInlineCore } from "@/app/lib/funnel/provision-deps";
 import { fpProvisioningConsentVerdict } from "../../consent-rules";
 import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
 import type { SignupCoreDeps } from "../../signup-core";
@@ -39,6 +43,14 @@ export type HarnessOptions = {
   signInOutage?: boolean;
   /** Force the verification mail send to fail (strands the parent → compensate). */
   mailFails?: boolean;
+  /**
+   * Model GOOGLE_WORKSPACE_SA_KEY being CONFIGURED: the provision core reaches the
+   * Workspace mailbox leg, `createWorkspaceUser` (the users.insert SPY) succeeds,
+   * and the claim advances to `complete`. Default false = the Slice-B steady state
+   * (credential unset → parks `pending`, users.insert never called, no mailbox
+   * burned). The one live exercise of the configured path is the acceptance run.
+   */
+  workspaceConfigured?: boolean;
 };
 
 export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}) {
@@ -134,9 +146,14 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
   };
 
   /* ─────────────────── path (b): real provision deps ─────────────────── */
-  // A ProvisionDeps over the shared store with Workspace UNCONFIGURED. The
-  // mailbox-leg fakes are spies; the core parks `pending_config` before any of
-  // them, so createWorkspaceUser (users.insert) must never be called.
+  // A ProvisionDeps over the shared store. Default: Workspace UNCONFIGURED — the
+  // mailbox-leg fakes are spies and the core parks `pending_config` before any of
+  // them, so createWorkspaceUser (users.insert) must never be called. With
+  // opts.workspaceConfigured the mailbox leg is reached and the insert SPY
+  // succeeds so the claim advances to `complete`. FP-flavored: the base deriver is
+  // the FIRST-NAME-ONLY variant (children are created first-name-only), exactly as
+  // fpProvisionDeps injects it.
+  const wsConfigured = opts.workspaceConfigured ?? false;
   const provisionDeps = (owner: string): ProvisionDeps => {
     const claimFor = (childId: string): Row | undefined =>
       store.funnel_student_provisioning.find((r) => r.child_id === childId);
@@ -224,6 +241,8 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
         return { version: (rows[0]?.policy_version as string | null) ?? null };
       },
       consentVerdict: fpProvisioningConsentVerdict,
+      // FP path derives the student address from the FIRST NAME ALONE.
+      deriveLocalBase: (firstName) => deriveStudentLocalBaseFromFirstName(firstName),
       findAuthUserIdByEmail: async (email) => {
         const rec = authByEmail.get(email.trim().toLowerCase());
         return rec ? rec.id : null;
@@ -234,16 +253,17 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
         return { id: made.id };
       },
       alignAuthUserEmail: async () => true,
-      workspaceConfigured: false, // GOOGLE_WORKSPACE_SA_KEY unset (Slice B build)
+      workspaceConfigured: wsConfigured, // GOOGLE_WORKSPACE_SA_KEY unset by default (Slice B build)
       findWorkspaceUser: async () => null,
       classifyWorkspaceUser: async () => "missing",
       createWorkspaceUser: async ({ email }) => {
-        // THE users.insert SPY. Reaching here means a mailbox was burned — the
-        // tests assert this array stays empty while Workspace is unconfigured.
+        // THE users.insert SPY. While Workspace is UNCONFIGURED the core parks
+        // before reaching here, so this array must stay empty (no mailbox burned);
+        // with it CONFIGURED the insert succeeds and the mailbox is created.
         workspaceInserts.push({ email });
-        return "error";
+        return wsConfigured ? "created" : "error";
       },
-      isMailboxReady: async () => false,
+      isMailboxReady: async () => wsConfigured,
       notifyOps: async (subject, body) => {
         opsAlerts.push({ subject, body });
       },
@@ -275,28 +295,42 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
       childAuthEmails.set(childId, email);
       return { ok: true, userId: made.id };
     },
-    // Path (b): reproduce the arrival enqueue (provisionFpChildInlineCore's
-    // sequencing) over the shared store, driving the REAL provision core.
+    // Path (b): the REAL provisionFpChildInlineCore, injected with a store-backed
+    // ensureClaim / drive / readClaim (P3a — call the real inline sequencing
+    // rather than reimplementing it, so lease_pending / identity-surfacing /
+    // post-drive-read-error branches get end-to-end coverage). `drive` composes
+    // the REAL driveProvisioning over the shared store.
     provisionWorkspace: async ({ childId }) => {
       const owner = `fp-child:${childId}`;
-      // ensureProvisionClaim: idempotent upsert by child_id, starts `pending`.
-      if (!store.funnel_student_provisioning.some((r) => r.child_id === childId)) {
-        store.funnel_student_provisioning.push({
-          id: `claim-${childId}`,
-          child_id: childId,
-          state: "pending",
-          local_part: null,
-          email: null,
-          supabase_user_id: null,
-        });
-      }
-      await driveProvisioning(provisionDeps(owner), childId, owner);
-      const r = store.funnel_student_provisioning.find((x) => x.child_id === childId);
-      const supabaseUserId = (r?.supabase_user_id as string | null) ?? null;
-      const state = r?.state ? String(r.state) : null;
-      if (!supabaseUserId) return { ok: false, reason: "no_identity", state, supabaseUserId: null };
-      if (state === "exception") return { ok: false, reason: "exception", state, supabaseUserId };
-      return { ok: true, supabaseUserId, state: state ?? "pending" };
+      return provisionFpChildInlineCore(
+        {
+          ensureClaim: async (id) => {
+            // ensureProvisionClaim: idempotent upsert by child_id, starts `pending`.
+            if (!store.funnel_student_provisioning.some((r) => r.child_id === id)) {
+              store.funnel_student_provisioning.push({
+                id: `claim-${id}`,
+                child_id: id,
+                state: "pending",
+                local_part: null,
+                email: null,
+                supabase_user_id: null,
+              });
+            }
+            return true;
+          },
+          drive: (id, own) => driveProvisioning(provisionDeps(own), id, own),
+          readClaim: async (id) => {
+            const r = store.funnel_student_provisioning.find((x) => x.child_id === id);
+            if (!r) return { supabaseUserId: null, state: null };
+            return {
+              supabaseUserId: (r.supabase_user_id as string | null) ?? null,
+              state: r.state ? String(r.state) : null,
+            };
+          },
+        },
+        childId,
+        owner
+      );
     },
     deleteAuthUser: async (userId) => ({ ok: deleteAuth(userId) }),
     now: () => BASE_NOW,

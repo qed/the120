@@ -13,7 +13,11 @@
  * inverted to default-deny (`app/lib/auth-mail-guard.ts`).
  */
 
-import { buildFwLocalBase, isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
+import {
+  buildFwLocalBase,
+  buildFwLocalBaseFromFirstName,
+  isFwStudentAddress,
+} from "@/app/fp/lib/fw-provision-rules";
 import { STAFF_AUTH_MAIL_ALLOWLIST, STUDENT_MAIL_DOMAIN } from "@/app/lib/auth-mail-guard";
 import {
   CONSENT_MIN_POLICY_VERSION,
@@ -53,6 +57,30 @@ export type LocalPartDerivation =
 export function deriveStudentLocalBase(firstName: string, lastName: string): LocalPartDerivation {
   try {
     return { ok: true, base: buildFwLocalBase(firstName, lastName) };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "underivable",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * The FIRST-NAME-ONLY derivation verdict — the single-part sibling of
+ * `deriveStudentLocalBase`, for the First-Profit signup path whose children are
+ * created first-name-only (the child route has no last-name field;
+ * `children.last_name` is NULL). It wraps `buildFwLocalBaseFromFirstName` in the
+ * SAME throw→`underivable` verdict, so a cron/inline caller never errors on a
+ * genuinely empty first name; everything downstream (the taken-set, the
+ * collision suffixer, the DB unique arbiter) is byte-for-byte the two-part path.
+ *
+ * Scoped to the FP path via `ProvisionDeps.deriveLocalBase`; the funnel (deposit)
+ * path keeps `deriveStudentLocalBase` (first.last) untouched.
+ */
+export function deriveStudentLocalBaseFromFirstName(firstName: string): LocalPartDerivation {
+  try {
+    return { ok: true, base: buildFwLocalBaseFromFirstName(firstName) };
   } catch (err) {
     return {
       ok: false,
@@ -129,8 +157,12 @@ export function pickStudentLocalPart(input: {
   firstName: string;
   lastName: string;
   taken: ReadonlySet<string>;
+  /** The base deriver, injectable so the FP first-name-only path reuses this
+   *  whole pick/suffix/reserve mechanism unchanged. Defaults to the two-part
+   *  `deriveStudentLocalBase` (the funnel deposit path). */
+  derive?: (firstName: string, lastName: string) => LocalPartDerivation;
 }): LocalPartPick {
-  const derived = deriveStudentLocalBase(input.firstName, input.lastName);
+  const derived = (input.derive ?? deriveStudentLocalBase)(input.firstName, input.lastName);
   if (!derived.ok) return derived;
 
   const reserved = new Set(staffLocalParts());

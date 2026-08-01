@@ -207,18 +207,42 @@ export function buildNormalizedFwName(firstName: string, lastName: string): stri
  * collide every unnameable student onto one account.
  */
 export function buildFwLocalBase(firstName: string, lastName: string): string {
-  const part = (raw: string, label: string) => {
-    const folded = foldToAscii(raw, label)
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, FW_NAME_PART_MAX)
-      .replace(/-+$/g, ""); // a cap landing mid-separator must not leave a trailing dash
-    if (folded.length === 0) {
-      throw new Error(`buildFwLocalBase: ${label} has no address-safe characters`);
-    }
-    return folded;
-  };
-  return `${part(firstName, "first name")}.${part(lastName, "last name")}`;
+  return `${foldNamePart(firstName, "first name")}.${foldNamePart(lastName, "last name")}`;
+}
+
+/**
+ * One folded, address-safe name fragment — the shared unit of `buildFwLocalBase`
+ * (which joins two with a dot) and `buildFwLocalBaseFromFirstName` (which uses
+ * one alone). Runs `foldToAscii`'s homoglyph/control-char guard, levels
+ * separators to a single dash, trims, and caps at FW_NAME_PART_MAX. THROWS when
+ * the fragment folds to nothing — a truly unnameable part is a real invalid
+ * input, never a base to mint a colliding `.chen`/`maya.`-shaped address from.
+ */
+function foldNamePart(raw: string, label: string): string {
+  const folded = foldToAscii(raw, label)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, FW_NAME_PART_MAX)
+    .replace(/-+$/g, ""); // a cap landing mid-separator must not leave a trailing dash
+  if (folded.length === 0) {
+    throw new Error(`buildFwLocalBase: ${label} has no address-safe characters`);
+  }
+  return folded;
+}
+
+/**
+ * The FIRST-NAME-ONLY local base — a single-part variant of `buildFwLocalBase`
+ * that produces a bare `<slug(firstName)>` (no dot, no last name), so the email
+ * builder yields `<slug>@the120.school`. This is the FP-signup path's deriver:
+ * First-Profit children are created first-name-only (the child route schema has
+ * no last name; `children.last_name` is NULL), and the two-part base would throw
+ * on the empty last name. It runs the first name through the SAME `foldToAscii`
+ * homoglyph/control-char guard, still refuses a truly empty / no-address-safe
+ * first name cleanly (a real invalid input, not a normal case), and is still
+ * collision-suffixed downstream by the taken-set/suffix mechanism (alex, alex2…).
+ */
+export function buildFwLocalBaseFromFirstName(firstName: string): string {
+  return foldNamePart(firstName, "first name");
 }
 
 /** `maya.chen` → `maya.chen.fw@the120.school`. */

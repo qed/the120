@@ -53,6 +53,7 @@ import {
   WORKSPACE_UNCONFIGURED_PENDING_REASON,
   type ConsentVerdict,
   type ForwardingState,
+  type LocalPartDerivation,
   type ProvisionState,
 } from "@/app/lib/funnel/provision-rules";
 
@@ -156,6 +157,18 @@ export type ProvisionDeps = {
    * namespace decides, never WHEN the gate fires.
    */
   consentVerdict?: (version: string | null | undefined) => ConsentVerdict;
+  /**
+   * The name→local-base deriver — the ONE seam that lets the First-Profit signup
+   * path derive the student address from the FIRST NAME ALONE without forking
+   * this core (Slice B Unit 11). The funnel (deposit) deps omit it and get the
+   * default two-part `deriveStudentLocalBase` (first.last); the FP deps inject
+   * the first-name-only variant, because FP children are created first-name-only
+   * (`children.last_name` is NULL) and the two-part deriver would throw →
+   * `underivable` → a parked `exception` → a failed signup. Same verdict shape,
+   * same collision suffixer, same DB arbiter — only WHICH base is derived changes,
+   * so the gate/pick/claim sequencing below is untouched.
+   */
+  deriveLocalBase?: (firstName: string, lastName: string) => LocalPartDerivation;
   /* identity leg (Supabase auth) */
   findAuthUserIdByEmail: (email: string) => Promise<string | null | "unknown">;
   createAuthUser: (email: string) => Promise<{ id: string } | "error">;
@@ -300,6 +313,10 @@ export async function driveProvisioning(
   }
 
   /* ── the address: derive, pick, claim under the DB arbiter ── */
+  // The deriver is the injectable seam: the funnel path uses two-part first.last;
+  // the FP signup path injects a first-name-only variant (children are created
+  // first-name-only). Everything else in this block is identical for both.
+  const deriveLocalBase = deps.deriveLocalBase ?? deriveStudentLocalBase;
   let localPart = claim.localPart;
   let email = claim.email;
   // The advisory taken-set, shared by the initial pick and any Workspace-
@@ -314,7 +331,7 @@ export async function driveProvisioning(
   };
 
   if (!localPart || !email) {
-    const derived = deriveStudentLocalBase(child.firstName, child.lastName);
+    const derived = deriveLocalBase(child.firstName, child.lastName);
     if (!derived.ok) {
       return parkException(`underivable name: ${derived.detail}`);
     }
@@ -330,6 +347,7 @@ export async function driveProvisioning(
         firstName: child.firstName,
         lastName: child.lastName,
         taken: takenSet,
+        derive: deriveLocalBase,
       });
       if (!pick.ok) return parkException(`no address available: ${pick.detail}`);
       const res = await deps.claimLocalPart(childId, pick.localPart, pick.email);
@@ -467,7 +485,7 @@ export async function driveProvisioning(
       // COLLISION: hand-created outside the system — advance, never adopt.
       // (A staff-assigned part for an underivable name re-parks here: the
       // re-derivation fails and a human decides again — the safe direction.)
-      const rederived = deriveStudentLocalBase(child.firstName, child.lastName);
+      const rederived = deriveLocalBase(child.firstName, child.lastName);
       if (!rederived.ok) {
         return parkException(
           `workspace collision on a staff-assigned address: ${rederived.detail}`
@@ -480,6 +498,7 @@ export async function driveProvisioning(
         firstName: child.firstName,
         lastName: child.lastName,
         taken: takenSet,
+        derive: deriveLocalBase,
       });
       if (!pick.ok) {
         return parkException(`workspace collisions exhausted candidates: ${pick.detail}`);

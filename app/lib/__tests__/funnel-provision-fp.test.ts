@@ -18,6 +18,7 @@ import {
   readFpAcceptedPolicyVersion,
   type FpInlineDeps,
 } from "@/app/lib/funnel/provision-deps";
+import { deriveStudentLocalBaseFromFirstName } from "@/app/lib/funnel/provision-rules";
 
 /**
  * Slice B Unit 5 — First Profit signup provisioning (path b). The funnel
@@ -48,6 +49,9 @@ type Over = {
   acceptedVersion?: string | null;
   workspaceConfigured?: boolean;
   claim?: ProvisionClaim;
+  /** Model a FIRST-NAME-ONLY child (last_name NULL) plus the FP first-name-only
+   *  deriver the real fpProvisionDeps inject — the Unit 11 review seam. */
+  firstNameOnly?: boolean;
 };
 
 type Harness = {
@@ -81,7 +85,12 @@ function fpHarness(over: Over = {}): Harness {
     },
     holdsLease: async () => true,
     readTakenSet: async () => ({ live: [], released: [], fwBases: [] }),
-    readChildName: async () => ({ firstName: "Dana", lastName: "Ng" }),
+    readChildName: async () =>
+      over.firstNameOnly ? { firstName: "Sasha", lastName: "" } : { firstName: "Dana", lastName: "Ng" },
+    // The FP deps inject the first-name-only deriver; model that when requested.
+    ...(over.firstNameOnly
+      ? { deriveLocalBase: (firstName: string) => deriveStudentLocalBaseFromFirstName(firstName) }
+      : {}),
     // The FP consent adapter's shape: a version (or null = missing).
     readAcceptedPolicyVersion: async () => {
       calls.push("readConsent");
@@ -179,6 +188,28 @@ describe("driveProvisioning through FP deps", () => {
     const out = await driveProvisioning(h.deps, CHILD, OWNER);
     expect(out).toMatchObject({ kind: "complete", email: "dana.ng@the120.school" });
     expect(h.calls).toContain("createWsUser:dana.ng@the120.school");
+    expect(h.finished.at(-1)?.state).toBe("complete");
+  });
+
+  it("FIRST-NAME-ONLY child (Unit 11 review): derives the BARE first-name address, not an underivable park", async () => {
+    // The bug the E2E surfaced: a first-name-only child (last_name NULL) drove the
+    // shared two-part deriver to throw → `exception`. With the FP first-name-only
+    // deriver injected, the same child derives `sasha@the120.school` and — with
+    // Workspace unconfigured — parks pending WITH an identity (no mailbox burned).
+    const h = fpHarness({ firstNameOnly: true, workspaceConfigured: false });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toEqual({ kind: "pending_config" });
+    expect(h.calls).toContain("claim:sasha"); // the BARE first-name local part
+    expect(h.calls).toContain("createAuthUser");
+    expect(h.calls.some((c) => c.startsWith("createWsUser"))).toBe(false);
+    expect(h.finished.at(-1)?.state).toBe("pending");
+  });
+
+  it("FIRST-NAME-ONLY child, Workspace CONFIGURED: derives the bare address and drives to complete", async () => {
+    const h = fpHarness({ firstNameOnly: true, workspaceConfigured: true });
+    const out = await driveProvisioning(h.deps, CHILD, OWNER);
+    expect(out).toMatchObject({ kind: "complete", email: "sasha@the120.school" });
+    expect(h.calls).toContain("createWsUser:sasha@the120.school");
     expect(h.finished.at(-1)?.state).toBe("complete");
   });
 });

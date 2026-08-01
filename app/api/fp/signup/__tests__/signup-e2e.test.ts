@@ -186,20 +186,18 @@ describe("signup E2E — PATH A (existing credential)", () => {
   });
 });
 
-describe("signup E2E — PATH B (provision workspace, Workspace UNCONFIGURED)", () => {
-  // ── FINDING (Unit 11 confirmation audit) ────────────────────────────────
-  // The FP child route/schema and child-core create children FIRST-NAME-ONLY
-  // (there is no last-name field on the signup surface). The path-b provisioning
-  // machinery derives the student @the120.school address from first+last via the
-  // shared `buildFwLocalBase`, which THROWS on an empty last name. Unit 5's own
-  // provisioning test masked this by canning `readChildName` to return a last
-  // name ("Ng"); over real end-to-end state the last name is empty, so the drive
-  // parks at `exception` (underivable) and the child mint compensates. This is
-  // exactly the per-unit-mock seam the E2E exists to expose. The two tests below
-  // pin BOTH the current (compensating) reality AND — with a derivable child —
-  // the intended parks-pending / no-mailbox-burned mechanism, so the fix (derive
-  // from first name alone, or capture a last name) can be verified against them.
-  it("full sequence, first-name-only child: consent IS claimed, but the underivable student address parks the drive and the mint compensates — and users.insert is NEVER called (no mailbox burned)", async () => {
+describe("signup E2E — PATH B (provision workspace)", () => {
+  // ── RESOLVED (Unit 11 review) ───────────────────────────────────────────
+  // The FP child route/schema create children FIRST-NAME-ONLY (there is no
+  // last-name field on the signup surface). The path-b provisioning machinery now
+  // derives the student @the120.school address from the FIRST NAME ALONE (the FP
+  // deps inject `deriveStudentLocalBaseFromFirstName`), so a normally-named
+  // first-name-only child IS derivable — `Sasha` → `sasha@the120.school`. The two
+  // tests below pin that seam directly: with Workspace UNCONFIGURED the whole
+  // sequence completes and the claim parks `pending` with an identity (no mailbox
+  // burned); with Workspace CONFIGURED (fake dir client) the same address drives
+  // to `complete`. Both assert the derived local base is the bare first-name slug.
+  it("full sequence, first-name-only child (Workspace UNCONFIGURED): derives the bare first-name address, the whole mint SUCCEEDS, the claim parks PENDING with an identity, and users.insert is NEVER called (no mailbox burned)", async () => {
     const h = makeHarness();
     const { attemptId, parentToken, parentId } = await startAndVerify(h);
     await recordConsent(h.db, consentInput(attemptId, parentId));
@@ -210,36 +208,75 @@ describe("signup E2E — PATH B (provision workspace, Workspace UNCONFIGURED)", 
       credentialChoice: "provision_workspace",
       firstName: "Sasha", // first name only — the real signup shape
     });
-    // The consent gate claimed the consent (proving the gate ran) BEFORE the
-    // provisioning step; then the drive could not derive an address and parked
-    // `exception`, so child-core compensates and reports a retryable outage.
-    expect(minted).toEqual({ ok: false, reason: "outage" });
+    // First-name-only is now derivable, so the drive parks `pending` (Workspace
+    // unconfigured) WITH a minted identity → provisionWorkspace is ok:true → the
+    // whole child mint succeeds.
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) throw new Error("mint failed");
+    const childId = minted.childId;
 
-    // Consent was recorded before the mint and claimed by the gate before the
-    // drive (consent-before-provision holds); the compensation then UNBOUND it
-    // (ON DELETE SET NULL) so the row survives, re-claimable by a clean retry.
-    const consent = consentRowFor(h.store, attemptId);
-    expect(consent).toBeTruthy();
-    expect(consent?.child_id ?? null).toBeNull();
+    // Consent recorded before the mint and CLAIMED (bound to this child) by the
+    // gate before the drive — consent-before-provision holds, and this time it
+    // stays bound because the mint completed.
+    expect(consentRowFor(h.store, attemptId)?.child_id).toBe(childId);
 
-    // The claim was enqueued and the drive parked it `exception` (underivable),
-    // NOT a mailbox park — but crucially the users.insert SPY was NEVER called.
+    // The claim parked `pending` on the missing Workspace credential, carrying the
+    // derived address (the BARE first-name slug — no dot, no last name) and the
+    // minted Supabase identity.
     const claim = h.store.funnel_student_provisioning[0];
-    expect(claim?.state).toBe("exception");
-    expect(h.workspaceInserts.length).toBe(0); // no mailbox burned
+    expect(claim?.state).toBe("pending");
+    expect(claim?.pending_reason).toBe(h.WORKSPACE_UNCONFIGURED_PENDING_REASON);
+    expect(claim?.local_part).toBe("sasha"); // first-name slug, the path-b seam
+    expect(claim?.email).toBe("sasha@the120.school");
+    expect(typeof claim?.supabase_user_id).toBe("string");
 
-    // Fail-closed: the child row was torn down, no path-a `.invalid` account was
-    // minted, and the attempt never advanced to child_created.
-    expect(h.store.children.length).toBe(0);
-    expect(h.childAuthEmails.size).toBe(0);
-    expect(h.store.fp_signup_attempts[0].state).toBe("verified");
+    // The path_student_profiles row maps to that provisioned identity, and the
+    // attempt advanced to child_created.
+    const psp = h.store.path_student_profiles.find((r) => r.child_id === childId);
+    expect(psp?.user_id).toBe(claim?.supabase_user_id);
+    expect(h.store.fp_signup_attempts[0]).toMatchObject({
+      state: "child_created",
+      child_id: childId,
+    });
+
+    // The load-bearing invariant: NO mailbox burned while Workspace is unconfigured.
+    expect(h.workspaceInserts.length).toBe(0);
   });
 
-  it("mechanism (derivable child): claim enqueued + consent read via the Rev-2 adapter + parks PENDING with an identity + users.insert NEVER called", async () => {
-    // Isolate the provisioning mechanism from the name-derivation gap above by
-    // driving a child that DOES carry a last name, with a real recorded consent
-    // bound to it — the exact shape a fixed FP child would present. This proves
-    // the "parks pending, no mailbox burned" invariant the plan names for path b.
+  it("full sequence, first-name-only child (Workspace CONFIGURED, fake dir client): derives the bare first-name address and drives to COMPLETE, minting exactly one mailbox at that address", async () => {
+    // The complement of the test above: flip GOOGLE_WORKSPACE_SA_KEY on (the fake
+    // dir client) so the mailbox leg is reached. The same first-name-only child
+    // derives `sasha@the120.school` and the drive advances the claim to `complete`,
+    // creating exactly one mailbox at the derived address.
+    const h = makeHarness(undefined, { workspaceConfigured: true });
+    const { attemptId, parentToken, parentId } = await startAndVerify(h);
+    await recordConsent(h.db, consentInput(attemptId, parentId));
+
+    const minted = await createChild(h.childDeps, {
+      attemptId,
+      parentToken,
+      credentialChoice: "provision_workspace",
+      firstName: "Sasha",
+    });
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) throw new Error("mint failed");
+
+    const claim = h.store.funnel_student_provisioning[0];
+    expect(claim?.local_part).toBe("sasha"); // first-name slug
+    expect(claim?.email).toBe("sasha@the120.school");
+    expect(claim?.state).toBe("complete");
+
+    // Exactly one mailbox minted, at the derived first-name address.
+    expect(h.workspaceInserts).toEqual([{ email: "sasha@the120.school" }]);
+  });
+
+  it("mechanism (derivable child with a last name): claim enqueued + consent read via the Rev-2 adapter + parks PENDING with an identity + users.insert NEVER called", async () => {
+    // P3b — this `last_name:"Ng"` re-seed is a DELIBERATE complementary probe: a
+    // child that happens to carry a last name still provisions cleanly (the
+    // first-name-only deriver simply ignores the last name). It is kept alongside
+    // the first-name-only tests above, which are the REAL path-b seam coverage. It
+    // drives provisionWorkspace directly (bypassing createChild) to isolate the
+    // provisioning mechanism, proving "parks pending, no mailbox burned".
     const h = makeHarness();
     const childId = "child-derivable-1";
     h.store.children.push({

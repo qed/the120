@@ -8,6 +8,7 @@ import {
   composeState,
   consentVerdict,
   deriveStudentLocalBase,
+  deriveStudentLocalBaseFromFirstName,
   isReservedAddress,
   isTerminalState,
   legVerdict,
@@ -60,6 +61,36 @@ describe("deriving a student's local part", () => {
   });
 });
 
+describe("deriveStudentLocalBaseFromFirstName — the FP first-name-only verdict (Unit 11 review)", () => {
+  it("derives a BARE first-name base — no dot, no last name", () => {
+    const d = deriveStudentLocalBaseFromFirstName("Sasha");
+    expect(d.ok && d.base).toBe("sasha");
+    expect(studentEmailForLocalPart("sasha")).toBe("sasha@the120.school");
+    const dana = deriveStudentLocalBaseFromFirstName("Dana");
+    expect(dana.ok && dana.base).not.toContain(".");
+  });
+
+  it("folds diacritics / separators the same way, still address-safe", () => {
+    for (const [first, expected] of [
+      ["José", "jose"],
+      ["Ann-Marie", "ann-marie"],
+      ["Zoë", "zoe"],
+    ] as const) {
+      const d = deriveStudentLocalBaseFromFirstName(first);
+      expect(d.ok && d.base, first).toBe(expected);
+    }
+  });
+
+  it("an empty/unfoldable first name is a VERDICT (underivable), never a throw", () => {
+    for (const bad of ["", "   ", "Мария", "!!!"]) {
+      const d = deriveStudentLocalBaseFromFirstName(bad);
+      expect(d.ok, bad).toBe(false);
+      if (!d.ok) expect(d.reason).toBe("underivable");
+    }
+    expect(() => deriveStudentLocalBaseFromFirstName("Мария")).not.toThrow();
+  });
+});
+
 describe("picking an address nobody else holds", () => {
   it("gives the first child of a name the clean address", () => {
     const p = pickStudentLocalPart({ firstName: "Maya", lastName: "Chen", taken: taken() });
@@ -74,6 +105,39 @@ describe("picking an address nobody else holds", () => {
       taken: taken("maya.chen", "maya.chen2"),
     });
     expect(p.ok && p.localPart).toBe("maya.chen3");
+  });
+
+  it("honors an INJECTED deriver (the FP first-name-only path) and still collision-suffixes it", () => {
+    // The FP signup path passes a first-name-only deriver; the whole pick/suffix/
+    // reserve mechanism is reused unchanged, only the base changes (bare `alex`).
+    const first = pickStudentLocalPart({
+      firstName: "Alex",
+      lastName: "", // FP children are first-name-only
+      taken: taken(),
+      derive: deriveStudentLocalBaseFromFirstName,
+    });
+    expect(first.ok && first.localPart).toBe("alex");
+    expect(first.ok && first.email).toBe("alex@the120.school");
+
+    // Same base already taken → suffixed alex2 (the shared suffixer, one string).
+    const second = pickStudentLocalPart({
+      firstName: "Alex",
+      lastName: "",
+      taken: taken("alex"),
+      derive: deriveStudentLocalBaseFromFirstName,
+    });
+    expect(second.ok && second.localPart).toBe("alex2");
+  });
+
+  it("an underivable first name under the injected deriver is a verdict, not a throw", () => {
+    const p = pickStudentLocalPart({
+      firstName: "",
+      lastName: "",
+      taken: taken(),
+      derive: deriveStudentLocalBaseFromFirstName,
+    });
+    expect(p.ok).toBe(false);
+    if (!p.ok) expect(p.reason).toBe("underivable");
   });
 
   it("never re-issues a RELEASED address — the promise someone may still hold", () => {

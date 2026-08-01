@@ -88,18 +88,27 @@ The rule lives in ONE place: `app/crm/lib/test-family-filter.ts`
       (`workspace credential not configured`) — expected while the credential is
       off; the FP re-drive re-parks them quietly (no ops page for that reason).
 - [ ] Watch the stale-claim sweep: any NON-workspace-unconfigured park pages ops
-      once. Investigate `exception` parks (incl. the underivable-name finding
-      below).
+      once. Investigate any `exception` parks (the path-b underivable-name blocker
+      is resolved — see §G — so an `exception` now signals a genuinely unnameable
+      first name or an exhausted collision search, not the first-name-only shape).
 - [ ] Confirm no unexpected `users.insert` after the acceptance run (credential
       should be unset again).
 
-## G. Known Unit 11 FINDING to resolve before real path-b usage
+## G. Unit 11 FINDING — RESOLVED (path b is derivable first-name-only)
 
-- [ ] **FP path-b children are created first-name-only, but the student-address
-      deriver needs a last name.** The full-sequence E2E surfaced that a path-b
-      mint over real end-to-end state parks the drive at `exception`
-      (underivable) and compensates — Unit 5's own test masked this by canning
-      `readChildName` to return a last name. Resolve (derive the student address
-      from the first name alone, or capture/synthesize a last name) before
-      enabling real Workspace provisioning for path-b signups. Until then, path-a
-      (existing-credential) signups are unaffected.
+- [x] **FP path-b children are created first-name-only, and the student-address
+      deriver now derives from the first name alone.** The full-sequence E2E
+      surfaced that the shared two-part `buildFwLocalBase` threw on the empty last
+      name, parking the drive at `exception` (underivable) so the mint
+      compensated. RESOLVED (Slice B Unit 11 review): the FP provisioning deps
+      inject a first-name-only deriver (`deriveStudentLocalBaseFromFirstName`),
+      producing a bare `<slug(firstName)>@the120.school` (e.g. `sasha@the120.school`),
+      still `foldToAscii`-guarded and still collision-suffixed (alex, alex2, …).
+      The E2E now asserts a first-name-only path-b child derives the bare address
+      and parks `pending` with an identity (Workspace unconfigured, no mailbox
+      burned) — and drives to `complete` when Workspace is configured. The one
+      live provisioning acceptance run (§E.2) may therefore proceed on path b; no
+      manual last-name workaround is needed. A residual `exception` now signals a
+      genuinely unnameable first name (empty / non-Latin / homoglyph) or an
+      exhausted collision search — a real invalid input, not the normal shape.
+      Path-a (existing-credential) signups were always unaffected.

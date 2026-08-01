@@ -31,6 +31,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
 import {
+  deriveStudentLocalBaseFromFirstName,
   DRIVABLE_PROVISION_STATES,
   PROVISION_STATES,
   type ProvisionState,
@@ -539,10 +540,24 @@ export async function readFpAcceptedPolicyVersion(
  */
 export function fpProvisionDeps(owner: string): ProvisionDeps {
   const db = supabaseAdmin();
+  const base = realProvisionDeps(owner);
   return {
-    ...realProvisionDeps(owner),
+    ...base,
     readAcceptedPolicyVersion: (childId) => readFpAcceptedPolicyVersion(db, childId),
     consentVerdict: fpProvisioningConsentVerdict,
+    // FP children are created FIRST-NAME-ONLY (children.last_name is NULL), so the
+    // student address is derived from the first name alone — a bare
+    // `<slug(firstName)>@the120.school`. The two-part `deriveStudentLocalBase`
+    // would throw on the empty last name and park the claim `exception` (Slice B
+    // Unit 11 review); this is the only change to the derivation seam.
+    deriveLocalBase: (firstName) => deriveStudentLocalBaseFromFirstName(firstName),
+    // The (credential-gated) Workspace insert needs a non-empty familyName — Google
+    // rejects an empty one. An FP student has no last name, so supply a fixed,
+    // non-PII placeholder ("Student"); givenName stays the child's first name. Only
+    // reached when GOOGLE_WORKSPACE_SA_KEY is configured (the one live acceptance
+    // run); the steady-state build parks `pending` before this.
+    createWorkspaceUser: (input) =>
+      base.createWorkspaceUser({ ...input, lastName: input.lastName.trim() || "Student" }),
   };
 }
 

@@ -67,12 +67,14 @@ before any Google call.
         with a `supabase_user_id` already set (identity minted, mailbox pending).
 - [ ] Record the two `child_id`s and the parent `user_id` for Phase 4.
 
-> Note the Unit 11 confirmation-audit FINDING: FP children are created
-> **first-name-only**, but the student address deriver needs a last name. Before
-> this run can advance a path-b child to `complete`, confirm the child carries a
-> derivable name (the follow-up fix, or a manually-set `children.last_name` on
-> the test child). If the drive parks `exception` with an "underivable name"
-> reason, STOP and resolve the name before enabling the credential.
+> Unit 11 FINDING — RESOLVED: FP children are created **first-name-only**, and the
+> path-b student-address deriver now derives from the **first name alone** (a bare
+> `<slug(firstName)>@the120.school`, e.g. `sasha@the120.school`), so a
+> normally-named path-b child is derivable with NO manual `children.last_name`
+> workaround. This run may proceed on path b directly. A drive parking
+> `exception` with an "underivable name" reason now means a genuinely unnameable
+> first name (empty / non-Latin / homoglyph) — if that happens, STOP and retype
+> the child's first name in Latin letters before enabling the credential.
 
 ## Phase 2 — Enable the credential and drive the ONE mailbox
 

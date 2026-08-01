@@ -216,7 +216,7 @@ export default function Trial({
       <div className="mx-auto w-full max-w-xl px-4 pt-5">
         <div className="flex items-baseline justify-between">
           <p className="font-mono text-xs uppercase tracking-[0.14em] text-amber-300">
-            Mastery Trial · Wave {wave + 1}
+            Mixed Review · Wave {wave + 1}
           </p>
           <p className={`font-mono text-2xl font-bold tabular-nums ${seconds <= 5 ? "mr-timer-low" : "text-white"}`}>
             {seconds}s

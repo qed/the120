@@ -131,7 +131,7 @@ async function drawCard(data: ShareData): Promise<HTMLCanvasElement> {
     cx.fillText(String(data.score), W / 2, 640);
     cx.font = "500 40px 'IBM Plex Mono', monospace";
     cx.fillStyle = "rgba(255,255,255,0.8)";
-    cx.fillText("MASTERY TRIAL SCORE", W / 2, 710);
+    cx.fillText("MIXED REVIEW SCORE", W / 2, 710);
     if (data.score >= data.best && data.score > 0) {
       cx.fillStyle = "#34d399";
       cx.font = "700 44px 'Space Grotesk', sans-serif";

@@ -52,5 +52,5 @@ export async function generateMetadata({
  */
 export default function GauntletBetaPage() {
   const tournament = resolveTournamentState();
-  return <GauntletGame tournament={tournament} />;
+  return <GauntletGame tournament={tournament} basePath="/gauntlet/beta" />;
 }

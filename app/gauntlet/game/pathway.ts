@@ -361,7 +361,9 @@ export function currentSkillIdx(progress: SkillProgress): number {
  */
 export function startableLevels(progress: SkillProgress, id: string): number[] {
   const lvl = skillLevel(progress, id);
-  if (lvl >= SKILL_LEVELS) return [];
+  // Boss N (the fifth/crown proof) is reserved for passing a grade
+  // checkpoint. Students actively working through a grade top out at N-1.
+  if (lvl >= SKILL_LEVELS - 1) return [];
   const next = lvl + 1;
   return lvl === 0 && next < PASS_LEVEL ? [next, PASS_LEVEL] : [next];
 }

@@ -26,7 +26,7 @@ export default function GauntletPage() {
   return (
     <>
       <ParentBanner bannerLine={tournament.bannerLine} visible={tournament.visible} />
-      <GauntletGame tournament={tournament} />
+      <GauntletGame tournament={tournament} basePath="/gauntlet" />
     </>
   );
 }

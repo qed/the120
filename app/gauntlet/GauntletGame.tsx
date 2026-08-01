@@ -8,31 +8,38 @@ import { factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from ".
 import BossSprite from "./components/BossSprite";
 import { type FactStat } from "./game/mastery";
 import {
-  AREAS,
-  areaGradeSpan,
   bossForLevel,
-  COMING_SOON,
-  currentSkillIdx,
-  fastMathGrade,
-  highestPassedIdx,
-  isUnlocked,
   PASS_LEVEL,
   PATHWAY,
-  placementProgress,
   seedProgressFromFacts,
   SKILL_LEVELS,
-  skillLevel,
-  skillMastery,
-  startableLevels,
+  skillGrade,
   unlockedTopics,
   type SkillProgress,
 } from "./game/pathway";
+import {
+  applyGradeCheckpoint,
+  assignmentFor,
+  assignmentLevel,
+  assignmentsOfGrade,
+  currentGradeSkillIdx,
+  gradeProgress,
+  gradeTrackStatus,
+  mergeGradeAssignmentProgress,
+  mergeGradeTracks,
+  normalizeGradeTrack,
+  preferredGradeMissionLevel,
+  seedGradeAssignmentProgress,
+  TRACK_GRADES,
+  WORKING_GRADE_BOSS_CAP,
+  type GradeAssignmentProgress,
+  type GradeTrackState,
+} from "./game/gradeTrack";
 import { buildCanonicalMasteryBatch, newlyMasteredKeys } from "./game/masteryBatch";
 import { ensureAudio, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
 import PlacementTrial from "./components/PlacementTrial";
-import SkillPanel from "./components/SkillPanel";
 import DailySprint from "./components/DailySprint";
 import MistakeRematch from "./components/MistakeRematch";
 import FoundingBoard from "./components/FoundingBoard";
@@ -168,6 +175,8 @@ type Save = {
   topics: TopicId[];
   /** pathway progression (P2): skill id -> highest boss level beaten (0–5) */
   skillProgress: SkillProgress;
+  /** Grade-scoped progression for concepts that can repeat across grades. */
+  assignmentProgress: GradeAssignmentProgress;
   /** placement done, skipped, or seeded — gates the first-run assessment */
   placed: boolean;
   /** DEFAULT ON (immersion): number facts fire at full length, right or
@@ -178,9 +187,10 @@ type Save = {
   instantSubmit: boolean;
   /** per-skill fastest boss clear, in seconds (personal records) */
   records: Record<string, number>;
-  /** last date a placement was completed — one per day (the staircase samples
-   *  2 skills per grade, so retake-spamming could luck past grades) */
+  /** Last completed grade checkpoint date (history only; no daily cooldown). */
   lastPlacement: string;
+  /** Sequential grade checkpoint and remediation state. */
+  gradeTrack: GradeTrackState;
   /** Official first Daily Sprint run per UTC date and grade bracket. */
   sprintBests: Record<string, SprintBest>;
 };
@@ -202,10 +212,12 @@ const EMPTY_SAVE: Save = {
   handle: "",
   topics: ["mul"],
   skillProgress: {},
+  assignmentProgress: {},
   placed: false,
   instantSubmit: true,
   records: {},
   lastPlacement: "",
+  gradeTrack: normalizeGradeTrack(null, {}),
   sprintBests: {},
 };
 
@@ -230,6 +242,11 @@ function mergeSaves(a: Save, b: Save): Save {
   for (const [k, v] of Object.entries(b.skillProgress ?? {})) {
     skillProgress[k] = Math.max(skillProgress[k] ?? 0, v);
   }
+  const assignmentProgress = mergeGradeAssignmentProgress(
+    a.assignmentProgress,
+    b.assignmentProgress,
+    skillProgress
+  );
   const records: Record<string, number> = { ...(a.records ?? {}) };
   for (const [k, v] of Object.entries(b.records ?? {})) {
     records[k] = records[k] === undefined ? v : Math.min(records[k], v); // fastest wins
@@ -242,6 +259,11 @@ function mergeSaves(a: Save, b: Save): Save {
       sprintBests[key] = value;
     }
   }
+  const gradeTrack = mergeGradeTracks(
+    a.gradeTrack,
+    b.gradeTrack,
+    assignmentProgress
+  );
   return {
     xp: Math.max(a.xp, b.xp),
     bossesBeaten: [...new Set([...a.bossesBeaten, ...b.bossesBeaten])],
@@ -258,24 +280,35 @@ function mergeSaves(a: Save, b: Save): Save {
     handle: a.handle || b.handle,
     topics: a.topics?.length ? a.topics : b.topics?.length ? b.topics : ["mul"],
     skillProgress,
+    assignmentProgress,
     placed: (a.placed ?? false) || (b.placed ?? false),
     instantSubmit: a.instantSubmit ?? b.instantSubmit ?? true, // local preference wins
     records,
     lastPlacement: (a.lastPlacement ?? "") >= (b.lastPlacement ?? "") ? (a.lastPlacement ?? "") : (b.lastPlacement ?? ""),
+    gradeTrack,
     sprintBests,
   };
 }
 
 const loadSave = (): Save => {
   try {
+    const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}") as Partial<Save>;
     const loaded = {
       ...EMPTY_SAVE,
-      ...JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"),
+      ...raw,
     } as Save;
     if (loaded.seasonId !== TOURNAMENT_SEASON_ID) {
       loaded.seasonId = TOURNAMENT_SEASON_ID;
       loaded.seasonFacts = {};
     }
+    loaded.assignmentProgress = seedGradeAssignmentProgress(
+      raw.assignmentProgress,
+      loaded.skillProgress ?? {}
+    );
+    loaded.gradeTrack = normalizeGradeTrack(
+      raw.gradeTrack,
+      loaded.assignmentProgress
+    );
     return loaded;
   } catch {
     return EMPTY_SAVE;
@@ -325,7 +358,12 @@ function buildDemoSave(): Save {
     trialBest: 38,
     handle: "DEMO-RAIDER",
     skillProgress,
+    assignmentProgress: seedGradeAssignmentProgress(null, skillProgress),
     placed: true,
+    gradeTrack: normalizeGradeTrack(
+      null,
+      seedGradeAssignmentProgress(null, skillProgress)
+    ),
     records: { "times-1": 41, "div-facts": 58, "squares": 49, "one-step-eq": 66 },
   };
 }
@@ -354,14 +392,19 @@ type Phase =
   | "defeat"
   | "trialEnd";
 
-export default function GauntletGame({ tournament }: { tournament: TournamentState }) {
+export default function GauntletGame({
+  tournament,
+  basePath = "/gauntlet",
+}: {
+  tournament: TournamentState;
+  basePath?: "/gauntlet" | "/gauntlet/beta";
+}) {
   const [phase, setPhase] = useState<Phase>("menu");
   const coarse = useCoarsePointer(); // A3: the touch number pad owns bottom-left in battle/trial
   const [save, setSave] = useState<Save>(EMPTY_SAVE);
   const [loaded, setLoaded] = useState(false);
   const [skillIdx, setSkillIdx] = useState(0); // pathway skill being raided
   const [battleLevel, setBattleLevel] = useState(1); // boss level within the skill (1–5)
-  const [openSkill, setOpenSkill] = useState<number | null>(null); // SkillPanel
   const [lastStats, setLastStats] = useState<BattleStats | null>(null);
   const [lastResults, setLastResults] = useState<ProblemResult[]>([]);
   const [lastMedal, setLastMedal] = useState(0);
@@ -377,7 +420,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   const [battleDeck, setBattleDeck] = useState<ChallengeQuestion[] | undefined>(undefined);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [cloudOk, setCloudOk] = useState(false); // true once a cloud write succeeds
+  const [cloudStatus, setCloudStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showBoard, setShowBoard] = useState(false);
   const [showEntry, setShowEntry] = useState(false); // GPF-5 tournament gate
   const { openAccountModal } = useAccountModal();
@@ -415,8 +458,13 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       // stats already prove, so nobody restarts a road they've walked (P1).
       if (!s.placed && Object.keys(s.facts).length > 0) {
         s.skillProgress = { ...seedProgressFromFacts(s.facts), ...s.skillProgress };
+        s.assignmentProgress = seedGradeAssignmentProgress(
+          s.assignmentProgress,
+          s.skillProgress
+        );
         s.placed = true;
       }
+      s.gradeTrack = normalizeGradeTrack(s.gradeTrack, s.assignmentProgress);
       setSave(s);
       setMuted(s.muted);
       setLoaded(true);
@@ -456,7 +504,20 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       const remote = await loadCloudSave(uid);
       if (cancelled) return;
       if (remote && remote.save && typeof remote.save === "object") {
-        setSave((local) => mergeSaves(local, { ...EMPTY_SAVE, ...(remote.save as Partial<Save>) }));
+        const remoteSave = remote.save as Partial<Save>;
+        const remoteAssignmentProgress = seedGradeAssignmentProgress(
+          remoteSave.assignmentProgress,
+          remoteSave.skillProgress ?? {}
+        );
+        setSave((local) => mergeSaves(local, {
+          ...EMPTY_SAVE,
+          ...remoteSave,
+          assignmentProgress: remoteAssignmentProgress,
+          gradeTrack: normalizeGradeTrack(
+            remoteSave.gradeTrack,
+            remoteAssignmentProgress
+          ),
+        }));
       }
     };
     void check();
@@ -472,13 +533,14 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
   useEffect(() => {
     if (!userId || !loaded || save === EMPTY_SAVE) return;
     const t = setTimeout(() => {
+      setCloudStatus("saving");
       void pushCloudSave(userId, {
         handle: save.handle,
         band: save.band,
         trial_best: save.trialBest,
         xp: save.xp,
         save,
-      }).then((ok) => setCloudOk(ok)); // banner only claims sync when writes really land
+      }).then((ok) => setCloudStatus(ok ? "saved" : "error"));
     }, 2500);
     return () => clearTimeout(t);
   }, [save, userId, loaded]);
@@ -497,15 +559,26 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 
   const skill = PATHWAY[skillIdx];
   const boss: Boss = bossForLevel(battleLevel);
-  const curIdx = currentSkillIdx(save.skillProgress);
+  const curIdx = currentGradeSkillIdx(save.gradeTrack, save.assignmentProgress);
+  const fmGrade = save.gradeTrack.activeGrade;
   const trialSources = useMemo(
-    () =>
-      PATHWAY.filter((_, idx) => isUnlocked(save.skillProgress, idx)).map(
-        ({ topic, band }) => ({ topic, band })
-      ),
-    [save.skillProgress]
+    () => {
+      const reached = PATHWAY.filter(
+        (candidate) => {
+          if (skillGrade(candidate.id) < fmGrade) return true;
+          const assignment = assignmentFor(fmGrade, candidate.id);
+          return assignment
+            ? assignmentLevel(save.assignmentProgress, assignment) > 0
+            : false;
+        }
+      );
+      const sources = reached.length ? reached : PATHWAY.filter(
+        (candidate) => skillGrade(candidate.id) === fmGrade
+      ).slice(0, 1);
+      return sources.map(({ topic, band }) => ({ topic, band }));
+    },
+    [fmGrade, save.assignmentProgress]
   );
-  const fmGrade = fastMathGrade(save.skillProgress).grade;
   const sprintDate = todayStr();
   const sprintBand = sprintBracketForGrade(fmGrade);
   const sprintBest = save.sprintBests[sprintBestKey(sprintDate, sprintBand)];
@@ -583,7 +656,6 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
     setBattleDeck(fixedDeck);
     setSkillIdx(idx);
     setBattleLevel(level);
-    setOpenSkill(null);
     // band follows the pathway frontier (leaderboard band + mastery weight);
     // topics mirrors unlocked skills for cloud-merge back-compat
     setSave((p) => ({ ...p, band: PATHWAY[idx].band, topics: unlockedTopics(p.skillProgress) }));
@@ -711,6 +783,21 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           won && battleLevel > (prev.skillProgress[skill.id] ?? 0)
             ? { ...prev.skillProgress, [skill.id]: battleLevel }
             : prev.skillProgress,
+        assignmentProgress: (() => {
+          const assignment = assignmentFor(prev.gradeTrack.activeGrade, skill.id);
+          if (
+            !won ||
+            challengeRun ||
+            !assignment ||
+            battleLevel <= (prev.assignmentProgress[assignment.id] ?? 0)
+          ) {
+            return prev.assignmentProgress;
+          }
+          return {
+            ...prev.assignmentProgress,
+            [assignment.id]: Math.min(battleLevel, assignment.bossCap),
+          };
+        })(),
         // personal record: fastest winning clear per skill
         records:
           won && (RAID_SECONDS - stats.timeLeft) < (prev.records[skill.id] ?? Infinity)
@@ -720,7 +807,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       setPhase(won ? "victory" : "defeat");
       postTournamentMastery(save.seasonFacts, seasonAfter);
     },
-    [boss.id, skill.id, battleLevel, applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive]
+    [boss.id, skill.id, battleLevel, challengeRun, applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive]
   );
 
   const finishTrial = useCallback(
@@ -888,25 +975,24 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           : undefined
       }
     >
-      {/* mute toggle — everywhere */}
-      <button
-        onClick={toggleMute}
-        aria-label={save.muted ? "Unmute" : "Mute"}
-        className={`fixed z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-mono text-sm text-white/70 backdrop-blur hover:bg-white/20 ${
-          phase === "battle" || phase === "trial" || phase === "sprint" || phase === "rematch"
-            ? coarse
-              ? "left-3 top-[38%]" // pad owns bottom-left on touch; park over the arena's clear left edge
-              : "bottom-4 left-4"
-            : "right-4 top-4"
-        }`}
-      >
-        {save.muted ? "🔇" : "🔊"}
-      </button>
+      {phase !== "menu" && phase !== "placement" && (
+        <button
+          onClick={toggleMute}
+          aria-label={save.muted ? "Unmute" : "Mute"}
+          className={`fixed z-30 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-mono text-sm text-white/70 backdrop-blur hover:bg-white/20 ${
+            coarse ? "left-3 top-[38%]" : "bottom-4 left-4"
+          }`}
+        >
+          {save.muted ? "🔇" : "🔊"}
+        </button>
+      )}
 
       {phase === "menu" && (
         <Menu
           save={save}
-          userId={cloudOk ? userId : null}
+          userId={userId}
+          cloudStatus={cloudStatus}
+          basePath={basePath}
           challenge={
             challenge
               ? {
@@ -926,21 +1012,26 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           onDismissChallenge={() => setChallenge(null)}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
           onContinue={() => {
-            if (!save.placed) {
+            const status = gradeTrackStatus(save.gradeTrack, save.assignmentProgress);
+            if (status === "checkpoint") {
               ensureAudio();
               setPhase("placement");
               return;
             }
+            if (status === "complete") {
+              ensureAudio();
+              setPhase("trial");
+              return;
+            }
             const target = PATHWAY[curIdx];
-            const lvl = startableLevels(save.skillProgress, target.id)[0];
+            const assignment = assignmentFor(save.gradeTrack.activeGrade, target.id);
+            const lvl = assignment
+              ? preferredGradeMissionLevel(save.assignmentProgress, assignment)
+              : undefined;
             if (lvl) startSkillBattle(curIdx, lvl);
           }}
-          onSkill={(idx) => setOpenSkill(idx)}
           onToggleInstant={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
-          onPlacement={() => {
-            ensureAudio();
-            setPhase("placement");
-          }}
+          onToggleMute={toggleMute}
           onTrial={() => {
             ensureAudio();
             setPhase("trial");
@@ -958,40 +1049,44 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
       )}
       {phase === "placement" && (
         <PlacementTrial
+          key={save.gradeTrack.activeGrade}
+          grade={save.gradeTrack.activeGrade}
           instantSubmit={save.instantSubmit}
-          onToggleInstant={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
-          onDone={(passed) => {
+          onDone={(result) => {
+            const expectedAssignments = assignmentsOfGrade(result.grade).length;
+            const passedGrade =
+              result.failed.length === 0 &&
+              new Set(result.passed).size === expectedAssignments;
             setSave((p) => {
-              // max-merge: placement can raise levels, never lower them
-              const merged = { ...p.skillProgress };
-              for (const [k, v] of Object.entries(placementProgress(passed))) {
-                merged[k] = Math.max(merged[k] ?? 0, v);
+              if (p.gradeTrack.activeGrade !== result.grade) return p;
+              const applied = applyGradeCheckpoint(
+                p.gradeTrack,
+                p.assignmentProgress,
+                result
+              );
+              const legacyProgress = { ...p.skillProgress };
+              for (const index of result.passed) {
+                const candidate = PATHWAY[index];
+                if (!candidate) continue;
+                legacyProgress[candidate.id] = Math.max(
+                  legacyProgress[candidate.id] ?? 0,
+                  applied.passedGrade ? SKILL_LEVELS : PASS_LEVEL
+                );
               }
               return {
                 ...p,
                 placed: true,
-                lastPlacement: todayStr(), // one placement per day
-                skillProgress: merged,
-                topics: unlockedTopics(merged),
+                lastPlacement: todayStr(),
+                gradeTrack: applied.track,
+                skillProgress: legacyProgress,
+                assignmentProgress: applied.progress,
+                topics: unlockedTopics(legacyProgress),
               };
             });
-            setPhase("menu");
+            const lastGrade = TRACK_GRADES[TRACK_GRADES.length - 1];
+            if (!passedGrade || result.grade >= lastGrade) setPhase("menu");
           }}
-          onSkip={() => {
-            setSave((p) => ({ ...p, placed: true }));
-            setPhase("menu");
-          }}
-        />
-      )}
-      {openSkill !== null && phase === "menu" && (
-        <SkillPanel
-          skill={PATHWAY[openSkill]}
-          level={skillLevel(save.skillProgress, PATHWAY[openSkill].id)}
-          locked={!isUnlocked(save.skillProgress, openSkill)}
-          facts={save.facts}
-          record={save.records[PATHWAY[openSkill].id]}
-          onStart={(lvl) => startSkillBattle(openSkill, lvl)}
-          onClose={() => setOpenSkill(null)}
+          onExit={() => setPhase("menu")}
         />
       )}
       {showBoard && (
@@ -1071,7 +1166,7 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
           onMenu={() => setPhase("menu")}
           onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRun, battleDeck)}
           onNext={
-            phase === "victory" && battleLevel < SKILL_LEVELS
+            phase === "victory" && !challengeRun && battleLevel < WORKING_GRADE_BOSS_CAP
               ? () => startSkillBattle(skillIdx, battleLevel + 1)
               : undefined
           }
@@ -1113,14 +1208,15 @@ export default function GauntletGame({ tournament }: { tournament: TournamentSta
 function Menu({
   save,
   userId,
+  cloudStatus,
+  basePath,
   challenge,
   onAcceptChallenge,
   onDismissChallenge,
   setHandle,
   onContinue,
-  onSkill,
   onToggleInstant,
-  onPlacement,
+  onToggleMute,
   onTrial,
   onSprint,
   sprintBest,
@@ -1131,6 +1227,8 @@ function Menu({
 }: {
   save: Save;
   userId: string | null;
+  cloudStatus: "idle" | "saving" | "saved" | "error";
+  basePath: "/gauntlet" | "/gauntlet/beta";
   challenge: {
     label: string;
     level: number;
@@ -1140,11 +1238,10 @@ function Menu({
   } | null;
   onAcceptChallenge: () => void;
   onDismissChallenge: () => void;
-  setHandle: (h: string) => void;
+  setHandle: (handle: string) => void;
   onContinue: () => void;
-  onSkill: (idx: number) => void;
   onToggleInstant: () => void;
-  onPlacement: () => void;
+  onToggleMute: () => void;
   onTrial: () => void;
   onSprint: () => void;
   sprintBest?: SprintBest;
@@ -1153,106 +1250,179 @@ function Menu({
   tournamentLive: boolean;
   onEnter: () => void;
 }) {
+  const progress = save.assignmentProgress;
+  const track = save.gradeTrack;
+  const status = gradeTrackStatus(track, progress);
+  const gradeState = gradeProgress(progress, track.activeGrade);
+  const currentIndex = currentGradeSkillIdx(track, progress);
+  const currentSkill = PATHWAY[currentIndex];
+  const currentAssignment = assignmentFor(track.activeGrade, currentSkill.id);
+  const nextLevel = currentAssignment
+    ? preferredGradeMissionLevel(progress, currentAssignment) ?? PASS_LEVEL
+    : PASS_LEVEL;
   const level = levelOf(save.xp);
-  const xpIntoLevel = save.xp - (level - 1) * 100;
-  const dailyActive = save.daily.date === todayStr();
-  const progress = save.skillProgress;
-  const curIdx = currentSkillIdx(progress);
-  const curSkill = PATHWAY[curIdx];
-  const nextLvl = startableLevels(progress, curSkill.id)[0] ?? SKILL_LEVELS;
-  const fresh = !save.placed;
-  const passedTotal = PATHWAY.filter((s) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
-  const frontier = highestPassedIdx(progress);
-  const fm = fastMathGrade(progress);
+  const identity = save.handle || (userId ? "RAIDER" : "GUEST");
+  const pathwayHref = `${basePath}/pathway`;
+  const checkpointRetry = track.attemptedGrades.includes(track.activeGrade);
+  const firstCheckpoint = track.activeGrade === TRACK_GRADES[0] && track.passedGrades.length === 0;
+
+  const primary = status === "checkpoint"
+    ? {
+        eyebrow: checkpointRetry
+          ? `Grade ${track.activeGrade} checkpoint ready`
+          : "Placement climb",
+        title: checkpointRetry
+          ? `Prove Grade ${track.activeGrade}`
+          : firstCheckpoint
+            ? "Find your starting grade"
+            : "Keep climbing",
+        detail: track.activeGrade < 12
+          ? `Clear Grade ${track.activeGrade} to move straight into the next checkpoint`
+          : "Pass to complete the Fast Math pathway",
+        button: checkpointRetry
+          ? `RETAKE THE GRADE ${track.activeGrade} CHECKPOINT`
+          : firstCheckpoint
+            ? "START PLACEMENT CLIMB"
+            : `CONTINUE PLACEMENT · GRADE ${track.activeGrade}`,
+      }
+    : status === "complete"
+      ? {
+          eyebrow: "Fast Math pathway complete",
+          title: "Keep your edge",
+          detail: "Review everything you have proved across Grades 3–12",
+          button: "START MIXED REVIEW",
+        }
+      : {
+          eyebrow: `Grade ${track.activeGrade} Fast Math`,
+          title: "Your next mission",
+          detail: `${currentSkill.label} · Boss ${nextLevel}`,
+          button: `CONTINUE GRADE ${track.activeGrade}`,
+        };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-6 py-8">
-      <div className="flex w-full items-center justify-between">
-        <Link href="/" className="font-mono text-[11px] tracking-[0.08em] text-white/50 transition-colors hover:text-white">
-          ← THE 120
+    <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-1 flex-col px-4 pb-8 sm:px-6">
+      <header className="flex min-h-16 w-full items-center justify-between border-b border-white/10 py-3">
+        <Link
+          href="/"
+          className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-white/65 transition-colors hover:text-white"
+        >
+          The Gauntlet
         </Link>
-        <span className="mr-12 flex items-center gap-2">
-          {tournamentLive && (
-            <button onClick={onEnter} className="rounded-full bg-red px-3 py-1 font-mono text-[11px] font-medium text-white hover:bg-red-dark">
-              ⚔️ Enter the Tournament
-            </button>
-          )}
-          <button onClick={onBoard} className="rounded-full bg-amber-400/15 px-3 py-1 font-mono text-[11px] text-amber-200 hover:bg-amber-400/25">
-            🏆 Leaderboard
-          </button>
-          <button onClick={onHelp} className="rounded-full bg-white/10 px-3 py-1 font-mono text-[11px] text-white/60 hover:bg-white/20">
-            ? How to play
-          </button>
-        </span>
-      </div>
+        <p className="hidden font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-200 sm:block">
+          Grade {track.activeGrade} Fast Math
+        </p>
 
-      <h1 className="mt-6 text-center text-5xl font-bold tracking-tight sm:text-6xl">
-        <span className="bg-gradient-to-r from-indigo-400 to-blue-500 bg-clip-text text-transparent">THE</span>{" "}
-        <span className="bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent">GAUNTLET</span>
-      </h1>
-      <p className="hidden">
-        Answer fast. Every correct answer strikes the boss — speed and streaks hit harder.
-      </p>
-      <p className="mt-2 text-center text-white/70">
-        Quickfire builds damage. Armor Break questions crack the boss&apos;s shield. Streaks
-        unlock powers.
-      </p>
+        <details className="group relative z-40">
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full border border-white/15 bg-black/30 py-1.5 pl-2.5 pr-2 font-mono text-[11px] text-white/75 backdrop-blur transition-colors hover:border-white/35 hover:text-white [&::-webkit-details-marker]:hidden">
+            <span className="max-w-24 truncate">{identity}</span>
+            {userId && cloudStatus === "saved" && (
+              <span title="Saved" aria-label="Progress saved" className="text-emerald-300">✓</span>
+            )}
+            {userId && cloudStatus === "saving" && (
+              <span title="Saving" aria-label="Saving progress" className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" />
+            )}
+            {cloudStatus === "error" && (
+              <span title="Save needs attention" aria-label="Save needs attention" className="h-1.5 w-1.5 rounded-full bg-red-400" />
+            )}
+            <span aria-hidden className="text-white/40">☰</span>
+          </summary>
 
-      {/* XP + title + daily (C3/C4/D5) */}
-      <div className="mt-5 w-full max-w-md">
-        <div className="flex items-baseline justify-between font-mono text-xs text-white/60">
-          <span>
-            LVL {level} · <span className="text-amber-300">{titleOf(level)}</span>
-          </span>
-          <span>
-            {dailyActive ? `🔥 Daily streak ${save.daily.count}` : "🕐 Raid today to keep your streak"}
-          </span>
-        </div>
-        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10">
-          <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-cyan-400" style={{ width: `${xpIntoLevel}%` }} />
-        </div>
-        <div className="mt-1 flex justify-between font-mono text-[10px] text-white/40">
-          <span>{Math.round(save.xp)} XP</span>
-          <span>best streak ×{save.bestStreak} · trial best {save.trialBest}</span>
-        </div>
+          <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-[#0c1422]/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/40">Profile</p>
+                <p className="mt-0.5 text-sm font-semibold text-white">{identity}</p>
+              </div>
+              <span className="rounded-full bg-amber-400/15 px-2.5 py-1 font-mono text-[10px] text-amber-200">
+                LVL {level} · {titleOf(level)}
+              </span>
+            </div>
 
-        {/* Cloud status: guest banner or handle editor (GTM-2) */}
-        {userId ? (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-emerald-300">
-              ☁ Progress saved to your account
-            </span>
-            <label className="flex items-center gap-2 font-mono text-[10px] text-white/60">
-              HANDLE
-              <input
-                value={save.handle}
-                onChange={(e) => setHandle(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12))}
-                placeholder="RAIDER-X"
-                className="w-28 rounded-lg border border-white/20 bg-white/5 px-2 py-1 text-center font-mono text-xs text-white outline-none placeholder:text-white/25 focus:border-amber-400/60"
-              />
-            </label>
+            {userId ? (
+              <label className="mt-4 block font-mono text-[10px] uppercase tracking-[0.1em] text-white/45">
+                Leaderboard handle
+                <input
+                  value={save.handle}
+                  onChange={(event) => setHandle(
+                    event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12)
+                  )}
+                  placeholder="RAIDER-X"
+                  className="mt-1.5 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-cyan-400/60"
+                />
+              </label>
+            ) : (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-xs text-white/55">Guest progress stays on this device.</p>
+                <JoinButton className="mt-2 !h-8 !px-3 !py-0 text-[10px]">Create free account</JoinButton>
+              </div>
+            )}
+
+            <div className="mt-4 space-y-1 border-t border-white/10 pt-3">
+              <Link
+                href={pathwayHref}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/75 hover:bg-white/8 hover:text-white"
+              >
+                <span>Full pathway</span><span aria-hidden>→</span>
+              </Link>
+              <button
+                onClick={onHelp}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/75 hover:bg-white/8 hover:text-white"
+              >
+                <span>How to play</span><span aria-hidden>?</span>
+              </button>
+              {tournamentLive && (
+                <button
+                  onClick={onEnter}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/75 hover:bg-white/8 hover:text-white"
+                >
+                  <span>Enter tournament</span><span aria-hidden>⚔</span>
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <p className="px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">Settings</p>
+              <button
+                onClick={onToggleInstant}
+                className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-white/8"
+              >
+                <span>
+                  <span className="block text-sm text-white/80">Instant answers</span>
+                  <span className="block text-[10px] text-white/40">Submit complete number answers automatically</span>
+                </span>
+                <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${
+                  save.instantSubmit ? "bg-cyan-400/20 text-cyan-200" : "bg-white/10 text-white/45"
+                }`}>
+                  {save.instantSubmit ? "ON" : "OFF"}
+                </span>
+              </button>
+              <button
+                onClick={onToggleMute}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white/80 hover:bg-white/8"
+              >
+                <span>Sound</span>
+                <span className="font-mono text-[10px] text-white/45">{save.muted ? "OFF" : "ON"}</span>
+              </button>
+            </div>
           </div>
-        ) : (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/55">
-              Playing as guest — progress saves to this device only
-            </span>
-            <JoinButton className="!h-8 !px-3 !py-0 text-[10px]">Free account</JoinButton>
-          </div>
-        )}
-      </div>
+        </details>
+      </header>
 
-      {/* Challenge banner: someone sent you a time to beat */}
+      {cloudStatus === "error" && userId && (
+        <div role="status" className="mx-auto mt-4 w-full max-w-2xl rounded-xl border border-red-400/35 bg-red-400/10 px-4 py-2.5 text-center text-xs text-red-100">
+          We could not sync this change yet. Your progress is still saved on this device and will retry automatically.
+        </div>
+      )}
+
       {challenge && (
-        <div className="mt-6 flex w-full max-w-md items-center gap-3 rounded-2xl border border-amber-400/50 bg-amber-400/10 px-4 py-3">
-          <span className="text-2xl">⚔️</span>
-          <div className="flex-1">
-            <p className="font-mono text-xs font-bold text-amber-200">
-              {challenge.handle ?? "A rival"} challenges you!
+        <div className="mx-auto mt-5 flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-amber-400/45 bg-amber-400/10 px-4 py-3">
+          <span className="text-2xl" aria-hidden>⚔</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-xs font-bold text-amber-100">
+              {challenge.handle ?? "A rival"} challenged you
             </p>
-            <p className="font-mono text-[11px] text-white/70">
-              Beat {challenge.label} boss L{challenge.level} in under {challenge.time}s
-              {challenge.fixed && " · same question deck"}
+            <p className="mt-0.5 truncate text-xs text-white/55">
+              {challenge.label} · Boss {challenge.level} · beat {challenge.time}s
             </p>
           </div>
           <button
@@ -1261,204 +1431,117 @@ function Menu({
           >
             FIGHT
           </button>
-          <button onClick={onDismissChallenge} aria-label="Dismiss challenge" className="px-1 text-white/40 hover:text-white">
-            ✕
-          </button>
+          <button onClick={onDismissChallenge} aria-label="Dismiss challenge" className="text-white/40 hover:text-white">×</button>
         </div>
       )}
 
-      {/* Lead with proven reach; an earlier gap is a next target, not a ceiling. */}
-      {!fresh && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-3">
-          <span className="text-3xl">📐</span>
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-300/80">
-              Your Fast Math progress
-            </p>
-            <p className="font-mono text-2xl font-bold text-white">
-              {fm.complete
-                ? "Grade 12 — COMPLETE 👑"
-                : `Highest cleared: Grade ${fm.frontierGrade}`}
-            </p>
-            {!fm.complete && (
-              <p className="mt-1 font-mono text-xs text-white/50">
-                Current training: Grade {fm.grade}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* P1 — one button. New players get placed; everyone else continues the road. */}
-      <div className="mt-7 flex w-full max-w-md flex-col items-stretch gap-2">
-        <button
-          onClick={onContinue}
-          className="rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-4 text-center font-mono text-base font-bold text-black shadow-lg shadow-cyan-500/20 transition-transform hover:scale-[1.02]"
-        >
-          {fresh ? "▶ START LEARNING" : `⚔️ CONTINUE — ${curSkill.label} · Level ${nextLvl}`}
-        </button>
-        {fresh ? (
-          <p className="text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
-            Adaptive placement finds your start — usually 1–2 min, with higher-grade safety checks
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-10 sm:py-14">
+        <section className={`rounded-[2rem] border p-5 text-center shadow-2xl backdrop-blur-md sm:p-9 ${
+          status === "checkpoint"
+            ? "border-cyan-300/45 bg-cyan-400/[0.09] shadow-cyan-950/30"
+            : status === "complete"
+              ? "border-amber-300/40 bg-amber-400/[0.08] shadow-amber-950/30"
+              : "border-white/15 bg-black/35 shadow-black/30"
+        }`}>
+          <p className={`font-mono text-[11px] font-bold uppercase tracking-[0.16em] ${
+            status === "complete" ? "text-amber-200" : "text-cyan-200"
+          }`}>
+            {primary.eyebrow}
           </p>
-        ) : (
-          <>
+          <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl">
+            {primary.title}
+          </h1>
+          <p className="mt-3 text-sm text-white/60 sm:text-base">{primary.detail}</p>
+
+          {status !== "complete" && (
+            <div className="mx-auto mt-6 max-w-md">
+              <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
+                <span>Grade {track.activeGrade} skills secure</span>
+                <span>{gradeState.secure}/{gradeState.total}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-[width]"
+                  style={{ width: `${gradeState.total ? (gradeState.secure / gradeState.total) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={onContinue}
+            className="mt-7 w-full rounded-2xl bg-gradient-to-r from-cyan-300 via-cyan-400 to-blue-500 px-6 py-5 font-mono text-sm font-black tracking-[0.04em] text-[#06101a] shadow-lg shadow-cyan-500/25 transition-transform hover:scale-[1.015] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:text-base"
+          >
+            {primary.button}
+            <span className="mt-1 block text-[10px] font-medium tracking-normal text-black/60 sm:text-xs">
+              {primary.detail}
+            </span>
+          </button>
+
+          {status === "checkpoint" && (
+            <p className="mt-3 text-xs text-white/40">
+              One short grade-only check. Any missed skills become your next missions.
+            </p>
+          )}
+        </section>
+
+        <section className="mt-8">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Play another way</h2>
+              <p className="mt-1 text-xs text-white/45">Optional activities that do not change your grade.</p>
+            </div>
+            <Link href={pathwayHref} className="font-mono text-[10px] uppercase tracking-[0.1em] text-cyan-200/70 hover:text-cyan-200">
+              View pathway →
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <button
               onClick={onSprint}
-              className="rounded-xl border border-cyan-400/40 bg-cyan-400/10 px-6 py-3 font-mono text-xs font-bold text-cyan-200 transition-colors hover:bg-cyan-400/20"
+              className="rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.07] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-300/50 hover:bg-cyan-400/12"
             >
-              ⚡ DAILY SPRINT — SAME 20 FOR EVERYONE
-              {sprintBest && (
-                <span className="mt-1 block text-[10px] font-normal text-white/45">
-                  today&apos;s best {sprintBest.correct}/20 ·{" "}
-                  {(sprintBest.elapsedMs / 1000).toFixed(1)}s
-                </span>
-              )}
+              <span className="text-2xl" aria-hidden>⚡</span>
+              <span className="mt-3 block font-mono text-xs font-bold uppercase tracking-[0.08em] text-cyan-100">Daily Sprint</span>
+              <span className="mt-1 block text-xs leading-relaxed text-white/45">
+                {sprintBest
+                  ? `Ranked run complete: ${sprintBest.correct}/20. Practice again anytime.`
+                  : userId && save.handle
+                    ? "Today’s ranked 20-question quickfire."
+                    : "Practice today’s 20; sign in and choose a handle to rank."}
+              </span>
             </button>
+
             <button
               onClick={onTrial}
-              className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-2.5 font-mono text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/20"
+              className="rounded-2xl border border-violet-400/25 bg-violet-400/[0.07] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-violet-400/12"
             >
-              🏆 MASTERY TRIAL — tests everything you&apos;ve reached · best {save.trialBest}
+              <span className="text-2xl" aria-hidden>↻</span>
+              <span className="mt-3 block font-mono text-xs font-bold uppercase tracking-[0.08em] text-violet-100">Mixed Review</span>
+              <span className="mt-1 block text-xs leading-relaxed text-white/45">
+                Revisit skills you have reached and keep them sharp. Best {save.trialBest}.
+              </span>
             </button>
-            <div className="flex items-center justify-center gap-4">
-              {save.lastPlacement === todayStr() ? (
-                <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/30">
-                  🎯 placement taken today — again tomorrow
-                </span>
-              ) : (
-                <button
-                  onClick={onPlacement}
-                  className="font-mono text-[10px] uppercase tracking-[0.1em] text-white/40 underline-offset-2 hover:text-white/70 hover:underline"
-                >
-                  🎯 take the placement test — it can only move you up
-                </button>
-              )}
-            </div>
-          </>
-        )}
-        <button
-          onClick={onToggleInstant}
-          title="On (default): number facts fire at full length; built answers (marked ⏎) commit with Enter. Off: Enter/⏎ submits everything."
-          className={`mx-auto rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
-            save.instantSubmit
-              ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
-              : "border-white/20 text-white/40 hover:border-white/40 hover:text-white/70"
-          }`}
-        >
-          ⚡ instant mode: {save.instantSubmit ? "on" : "off"}
-        </button>
-      </div>
 
-      {/* The pathway map (P1/P2/P3): seven areas, one road. */}
-      <div className="mt-8 w-full max-w-3xl">
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-mono text-xs uppercase tracking-[0.16em] text-white/50">The pathway</h2>
-          <span className="font-mono text-[10px] text-white/40">
-            {passedTotal}/{PATHWAY.length} skills passed
-          </span>
-        </div>
-        {AREAS.map((area) => {
-          const nodes = PATHWAY.map((s, i) => ({ s, i })).filter(({ s }) => s.area === area.id);
-          if (nodes.length === 0) {
-            const planned = COMING_SOON[area.id] ?? [];
-            return (
-              <div key={area.id} className="mt-4 opacity-50">
-                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/45">
-                  {area.icon} {area.label} <span className="text-white/30">· coming soon</span>
-                </p>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {planned.map((p) => (
-                    <span key={p} className="rounded-lg border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] text-white/35">
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          }
-          const areaPassed = nodes.filter(({ s }) => skillLevel(progress, s.id) >= PASS_LEVEL).length;
-          const span = areaGradeSpan(area.id);
-          return (
-            <div key={area.id} className="mt-4">
-              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/45">
-                {area.icon} {area.label}{" "}
-                {span && (
-                  <span className="text-cyan-300/60">
-                    · {span[0] === span[1] ? `Grade ${span[0]}` : `Grades ${span[0]}–${span[1]}`}
-                  </span>
-                )}{" "}
-                <span className={areaPassed === nodes.length ? "text-emerald-300" : "text-white/30"}>
-                  · {areaPassed}/{nodes.length}
-                </span>
-              </p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {nodes.map(({ s, i }) => {
-                  const lvl = skillLevel(progress, s.id);
-                  const locked = !isUnlocked(progress, i);
-                  const mastered = lvl >= SKILL_LEVELS;
-                  const passed = lvl >= PASS_LEVEL;
-                  const gap = !passed && !locked && i < frontier; // unpassed behind the frontier
-                  const current = i === curIdx && !fresh;
-                  const m = skillMastery(s, save.facts);
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => onSkill(i)}
-                      className={`max-w-full min-w-0 rounded-xl border px-2.5 py-1.5 text-left transition-all ${
-                        current
-                          ? "border-cyan-400 bg-cyan-400/15 ring-1 ring-cyan-400/50"
-                          : mastered
-                            ? "border-amber-400/50 bg-amber-400/10"
-                            : passed
-                              ? "border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10"
-                              : gap
-                                ? "border-amber-400/60 bg-amber-400/5 hover:bg-amber-400/15"
-                                : locked
-                                  ? "border-white/10 bg-white/[0.02] opacity-45"
-                                  : "border-white/15 bg-white/5 hover:border-white/40"
-                      }`}
-                    >
-                      <span className="block max-w-full break-words font-mono text-[11px] leading-tight text-white/85 [overflow-wrap:anywhere]">
-                        {mastered ? "👑 " : gap ? "🔧 " : locked ? "🔒 " : current ? "▶ " : ""}
-                        {s.label}
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1">
-                        {Array.from({ length: SKILL_LEVELS }, (_, k) => (
-                          <span
-                            key={k}
-                            className={`h-1.5 w-1.5 rounded-full ${k < lvl ? (mastered ? "bg-amber-400" : "bg-emerald-400") : "bg-white/15"}`}
-                          />
-                        ))}
-                        {m && (
-                          <span className="ml-1 font-mono text-[9px] text-white/40">
-                            {m.mastered}/{m.total}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-                {(COMING_SOON[area.id] ?? []).map((p) => (
-                  <span
-                    key={p}
-                    className="max-w-full self-center whitespace-normal break-words rounded-xl border border-dashed border-white/15 px-2.5 py-1.5 font-mono text-[10px] leading-tight text-white/30 [overflow-wrap:anywhere]"
-                  >
-                    {p} · soon
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-        <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          Master a fact: answer it fast twice in a row (3s for number facts, longer for harder skills) · pass a skill: clear boss level {PASS_LEVEL} · tap any skill for its facts
-        </p>
-      </div>
+            <button
+              onClick={onBoard}
+              className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-amber-300/50 hover:bg-amber-400/12"
+            >
+              <span className="text-2xl" aria-hidden>🏆</span>
+              <span className="mt-3 block font-mono text-xs font-bold uppercase tracking-[0.08em] text-amber-100">Leaderboard</span>
+              <span className="mt-1 block text-xs leading-relaxed text-white/45">
+                See today’s Sprint standings and the rivals ahead of you.
+              </span>
+            </button>
+          </div>
+        </section>
+      </main>
 
-      <p className="mt-auto pt-8 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">
-        FastMath training · part of membership in The 120
-      </p>
+      <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-white/8 pt-4 text-center font-mono text-[9px] uppercase tracking-[0.12em] text-white/30">
+        <span>Grade track: {TRACK_GRADES[0]}–{TRACK_GRADES[TRACK_GRADES.length - 1]}</span>
+        <span aria-hidden>·</span>
+        <span>{save.daily.date === todayStr() ? `Daily streak ${save.daily.count}` : "Come back tomorrow to build your streak"}</span>
+      </footer>
     </div>
   );
 }
@@ -1831,7 +1914,7 @@ function LeaderboardPanel({
             ⚔️ Enter the Summer Tournament
           </button>
           <p className="mt-3 text-center font-mono text-[10px] text-white/35">
-            Mastery Trial bests stay personal; this is the prize board.
+            Mixed Review bests stay personal; this is the prize board.
           </p>
         </div>
       </div>
@@ -1950,55 +2033,74 @@ function LeaderboardPanel({
 
 function HowToPlay({ onClose }: { onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-3xl border border-white/15 bg-[#0d1322] p-7">
-        <h3 className="text-2xl font-bold">How to play</h3>
-        <ul className="mt-4 space-y-3 text-sm leading-relaxed text-white/80">
-          <li>
-            ⚔️ <strong>Answer math problems to strike the boss.</strong> Number facts fire the moment
-            you type the last digit. Built answers — fractions, expressions, pairs — show a ⏎ badge:
-            press Enter to lock them in.
-          </li>
-          <li>
-            ⚡ <strong>Quickfire rewards speed.</strong> Short recall and one-step answers build
-            streak damage. Formula and visual questions are marked Armor Break instead.
-          </li>
-          <li>
-            🧩 <strong>Armor Break rewards the solve.</strong> You get 15 seconds, no raw speed
-            bonus, and a correct answer breaks armor and restores HP.
-          </li>
-          <li>
-            🔥 <strong>Every 5-answer streak unlocks a choice:</strong> charge your next correct
-            answer, restore HP, or add 10 seconds. A charged strike only finishes the boss
-            immediately when it is clearly labeled Finishing Blow.
-          </li>
-          <li>
-            ⏱ <strong>Bring the boss to zero before the clock runs out</strong> — 2 minutes, one raid.
-          </li>
-          <li>
-            🎯 <strong>Master every fact.</strong> Answer a fact fast twice in a row and it&apos;s
-            mastered (3s for number facts, more time for harder skills) — raids keep serving the
-            ones you haven&apos;t owned yet.
-          </li>
-          <li>
-            🛤 <strong>Climb the pathway.</strong> One road from arithmetic to calculus — a quick
-            placement finds your start, and your <strong>Fast Math grade</strong> climbs as you pass
-            each skill&apos;s bosses. Gaps get marked, not hidden.
-          </li>
-          <li>
-            🥇 <strong>Earn medals</strong>, set speed records, challenge friends to beat your times,
-            and chase your Mastery Trial best.
-          </li>
-        </ul>
-        <button
-          onClick={() => {
-            ensureAudio();
-            onClose();
-          }}
-          className="mt-6 w-full rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300"
-        >
-          LET&apos;S RAID
-        </button>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-2 backdrop-blur-sm sm:p-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gauntlet-help-title"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/15 bg-[#0d1322] shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-3xl"
+      >
+        <header className="shrink-0 border-b border-white/10 px-5 py-4 sm:px-6 sm:py-5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-300">The basics</p>
+          <h3 id="gauntlet-help-title" className="mt-1 text-2xl font-bold">Ready to raid?</h3>
+          <p className="mt-1 text-xs text-white/45">Four things to know. You&apos;ll learn the rest by playing.</p>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+          <ol className="space-y-3">
+            <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
+              <span className="text-xl" aria-hidden>⚔</span>
+              <p className="text-sm leading-relaxed text-white/70">
+                <strong className="text-white">Solve to attack.</strong> Correct answers damage the boss;
+                quick answers and streaks hit harder.
+              </p>
+            </li>
+            <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
+              <span className="text-xl" aria-hidden>⌨</span>
+              <p className="text-sm leading-relaxed text-white/70">
+                <strong className="text-white">Type or tap your answer.</strong> If you see ⏎, press Enter
+                to lock it in.
+              </p>
+            </li>
+            <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
+              <span className="text-xl" aria-hidden>🔥</span>
+              <p className="text-sm leading-relaxed text-white/70">
+                <strong className="text-white">Reach a 5-answer streak.</strong> Then choose a power:
+                more damage, healing, or extra time.
+              </p>
+            </li>
+            <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
+              <span className="text-xl" aria-hidden>↗</span>
+              <p className="text-sm leading-relaxed text-white/70">
+                <strong className="text-white">Follow Continue.</strong> Pass a grade checkpoint to move up;
+                missed skills become your next missions.
+              </p>
+            </li>
+          </ol>
+
+          <details className="mt-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+            <summary className="cursor-pointer font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-white/55 hover:text-white">
+              More battle details
+            </summary>
+            <ul className="mt-3 space-y-2 border-t border-white/10 pt-3 text-xs leading-relaxed text-white/50">
+              <li>• A raid lasts two minutes. Bring the boss to zero before time runs out.</li>
+              <li>• Armor Break problems give you 15 seconds and reward the solve, not raw speed.</li>
+              <li>• Answer a fact quickly twice in a row to mark it mastered.</li>
+            </ul>
+          </details>
+        </div>
+
+        <footer className="shrink-0 border-t border-white/10 bg-[#0d1322] px-4 py-3 sm:px-6 sm:py-4">
+          <button
+            onClick={() => {
+              ensureAudio();
+              onClose();
+            }}
+            className="w-full rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+          >
+            LET&apos;S RAID
+          </button>
+        </footer>
       </div>
     </div>
   );

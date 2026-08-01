@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter"; // Slice B Unit 6: keep test families out of sprint/GTM metrics
 import { fmtDay } from "@/app/crm/lib/dates";
 import { SPRINT_WEEKS, weekBounds, weekOf } from "@/app/crm/lib/week";
 import {
@@ -124,12 +125,14 @@ export default async function CrmSprintPage({
     staffRes,
     auditWeekRes,
   ] = await Promise.all([
-    db
-      .from("families")
-      .select(
-        "id, parent_id, consent_given, consent_revoked_at, signup_at, dossier_submitted_at, created_at, kid_count, engagement_signals"
-      )
-      .is("merged_into_id", null),
+    excludeTestFamilies(
+      db
+        .from("families")
+        .select(
+          "id, parent_id, consent_given, consent_revoked_at, signup_at, dossier_submitted_at, created_at, kid_count, engagement_signals"
+        )
+        .is("merged_into_id", null)
+    ),
     db.from("children").select("id, parent_id, status, submitted_at"),
     db
       .from("deposits")

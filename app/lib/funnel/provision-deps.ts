@@ -27,13 +27,19 @@ import "server-only";
  *     the population whose base-keying could entangle with ours.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
-import { PROVISION_STATES, type ProvisionState } from "@/app/lib/funnel/provision-rules";
+import {
+  deriveStudentLocalBaseFromFirstName,
+  DRIVABLE_PROVISION_STATES,
+  PROVISION_STATES,
+  type ProvisionState,
+} from "@/app/lib/funnel/provision-rules";
 import type {
   ForwardingClaim,
   ForwardingDeps,
+  FpRedriveDeps,
   LeaseResult,
   ProvisionClaim,
   ProvisionDeps,
@@ -46,8 +52,11 @@ import type {
 import {
   driveProvisioning,
   alertStaleClaims,
+  sweepFpPendingProvisioning,
   sweepSuspendPending,
 } from "@/app/lib/funnel/provision-core";
+import { fpProvisioningConsentVerdict } from "@/app/api/fp/signup/consent-rules";
+import type { EraseFamilyDeps } from "@/app/lib/funnel/erase-family-core";
 import { FORWARDING_STATES, type ForwardingState } from "@/app/lib/funnel/provision-rules";
 import {
   FORWARDING_TOTAL_ALERT_DAYS,
@@ -99,6 +108,9 @@ type DirectoryClient = {
     get: (params: Record<string, unknown>) => Promise<{ data: { isMailboxSetup?: boolean } }>;
     insert: (params: Record<string, unknown>) => Promise<unknown>;
     update: (params: Record<string, unknown>) => Promise<unknown>;
+    // R28 erasure (Slice B Unit 6): the delete leg of a data-rights erasure.
+    // Same DWD scope (admin.directory.user) as insert/update — no scope change.
+    delete: (params: Record<string, unknown>) => Promise<unknown>;
   };
 };
 
@@ -128,6 +140,15 @@ async function directoryClient(): Promise<DirectoryClient> {
   }
   return cachedDirectory;
 }
+
+/** A NON-reversible tag for a mailbox address, for erase logs that must never
+ *  print a minor's full @the120.school address (FIX 6a). Hashes the local part
+ *  (before the @) so the same child is correlatable across log lines without the
+ *  PII. Best-effort: a malformed input still yields a stable short digest. */
+const localPartTag = (email: string): string => {
+  const local = (email.split("@")[0] ?? "").trim().toLowerCase();
+  return createHash("sha256").update(local).digest("hex").slice(0, 12);
+};
 
 const googleStatus = (err: unknown): number | null => {
   const e = err as { code?: unknown; response?: { status?: unknown } };
@@ -472,6 +493,314 @@ export async function driveProvisioningForChild(
   return driveProvisioning(realProvisionDeps(owner), childId, owner);
 }
 
+/* ───────────── First Profit signup provisioning (Slice B Unit 5, path b) ───────────── */
+
+/**
+ * The First-Profit-signup consent adapter (Rev 2). The funnel path reads the
+ * acceptance off the fulfilled Stripe deposit; First Profit has NO deposit
+ * (payments are mock in Slice B), so the accepted policy version is read from
+ * the first-class fp_parental_consent record instead — the ACTIVE row bound to
+ * this child (child_id match, revoked_at IS NULL, the fp_parental_consent
+ * namespace). Missing OR revoked → {version:null}, which the FP verdict maps to
+ * `consent_missing` and the core parks `pending`. There is no "refunded" lane
+ * here (no deposits), so it is never returned. Exported for direct unit testing
+ * against a from()-only fake db.
+ */
+export async function readFpAcceptedPolicyVersion(
+  db: ReturnType<typeof supabaseAdmin>,
+  childId: string
+): Promise<{ version: string | null } | "error"> {
+  const { data, error } = await db
+    .from("fp_parental_consent")
+    .select("policy_version")
+    .eq("child_id", childId)
+    .eq("policy_namespace", "fp_parental_consent")
+    .is("revoked_at", null)
+    // Newest active acceptance wins if more than one ever coexists (the partial
+    // unique index makes that a single row per attempt, but a child could carry
+    // acceptances across attempts in principle — take the freshest).
+    .order("accepted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(`[fp/provision] consent read failed for ${childId}: ${error.message}`);
+    return "error";
+  }
+  return { version: (data?.policy_version as string | null) ?? null };
+}
+
+/**
+ * The First-Profit provisioning deps: the REAL provisioning deps with the
+ * consent READ and the consent VERDICT swapped for the fp_parental_consent
+ * namespace (Rev 2). Everything else — the lease fencing, the local-part
+ * arbiter, the Supabase identity leg, the Workspace mailbox leg gated on
+ * GOOGLE_WORKSPACE_SA_KEY — is byte-for-byte the funnel machinery. This is a
+ * MODIFICATION of provision-deps (two injected functions), NOT a fork of
+ * provision-core.
+ */
+export function fpProvisionDeps(owner: string): ProvisionDeps {
+  const db = supabaseAdmin();
+  const base = realProvisionDeps(owner);
+  return {
+    ...base,
+    readAcceptedPolicyVersion: (childId) => readFpAcceptedPolicyVersion(db, childId),
+    consentVerdict: fpProvisioningConsentVerdict,
+    // FP children are created FIRST-NAME-ONLY (children.last_name is NULL), so the
+    // student address is derived from the first name alone — a bare
+    // `<slug(firstName)>@the120.school`. The two-part `deriveStudentLocalBase`
+    // would throw on the empty last name and park the claim `exception` (Slice B
+    // Unit 11 review); this is the only change to the derivation seam.
+    deriveLocalBase: (firstName) => deriveStudentLocalBaseFromFirstName(firstName),
+    // The (credential-gated) Workspace insert needs a non-empty familyName — Google
+    // rejects an empty one. An FP student has no last name, so supply a fixed,
+    // non-PII placeholder ("Student"); givenName stays the child's first name. Only
+    // reached when GOOGLE_WORKSPACE_SA_KEY is configured (the one live acceptance
+    // run); the steady-state build parks `pending` before this.
+    createWorkspaceUser: (input) =>
+      base.createWorkspaceUser({ ...input, lastName: input.lastName.trim() || "Student" }),
+  };
+}
+
+/** Drive one First-Profit-signup child's provisioning. With
+ *  GOOGLE_WORKSPACE_SA_KEY absent, `workspaceConfigured` is false and the core
+ *  parks `pending` after the Supabase identity leg WITHOUT calling
+ *  dir.users.insert — no Google mailbox is burned (the Unit 5 build invariant;
+ *  the one live acceptance run is Unit 11). */
+export async function driveFpProvisioningForChild(
+  childId: string,
+  owner: string
+): Promise<ProvisionOutcome> {
+  return driveProvisioning(fpProvisionDeps(owner), childId, owner);
+}
+
+export type FpProvisionInline =
+  | { ok: true; supabaseUserId: string; state: string }
+  | {
+      ok: false;
+      /**
+       * `no_identity`  — the drive never minted a Supabase identity (a consent
+       *                  gap, or a read failure before the mint): compensate.
+       * `outage`       — a transient failure (claim enqueue or post-drive read):
+       *                  compensate, but see supabaseUserId below.
+       * `exception`    — an identity WAS minted, but the claim then landed
+       *                  `exception` (needs a human): not a usable child (FIX 7).
+       * `lease_pending`— a CONCURRENT owner (the hourly re-drive cron) holds the
+       *                  lease and is finishing THIS claim. NOT our failure — the
+       *                  caller must NOT compensate/delete the child out from
+       *                  under the in-flight mint (FIX 2). Retry/let the cron land.
+       */
+      reason: "no_identity" | "outage" | "exception" | "lease_pending";
+      state: string | null;
+      /**
+       * The Supabase identity the drive MINTED (recorded on the claim) even
+       * though this call is not ok — surfaced so a compensating caller tears it
+       * down by this stable handle instead of ORPHANING it in auth.users (the
+       * Unit-4 compound learning; FIX 1). `null` when none was minted (or could
+       * not be recovered); runCompensation's delete-by-child_id is the backstop.
+       */
+      supabaseUserId: string | null;
+    };
+
+/** The impure legs of the inline step, injected so the sequencing is testable
+ *  against fakes without a live DB, Supabase, or the whole drive composition. */
+export type FpInlineDeps = {
+  ensureClaim: (childId: string) => Promise<boolean>;
+  drive: (childId: string, owner: string) => Promise<ProvisionOutcome>;
+  /** Read the minted identity + landed state off the claim. */
+  readClaim: (
+    childId: string
+  ) => Promise<{ supabaseUserId: string | null; state: string | null } | "error">;
+};
+
+/**
+ * Path (b) child-creation's inline provisioning step — the arrival-route enqueue
+ * reproduced for the FP path, which has no Stripe webhook and no arrival page to
+ * drive it (the plan's "arrival-only-drive gap"). It does exactly what the
+ * arrival route does — `ensureProvisionClaim` (idempotent by child_id) then a
+ * single bounded `driveProvisioning` under the lease — and then reads back the
+ * minted Supabase identity, because path (b) uses that identity (not a path-a
+ * `.invalid` account) as the child's `path_student_profiles.user_id`.
+ *
+ * Best-effort by contract: a park at `pending` (Workspace unconfigured — the
+ * normal Slice-B state) is a SUCCESS here as long as the identity leg ran, since
+ * the mailbox completes later on the re-drive cron. The failure returns SURFACE
+ * any identity the drive minted (FIX 1) and distinguish a concurrent-owner
+ * `lease_refused` (FIX 2) from a genuine no-identity park, so the caller never
+ * orphans an identity nor deletes a child the cron is mid-mint on.
+ *
+ * The composition is INSPECTED via the drive OUTCOME (not inferred from a
+ * success-only read): pure sequencing, exported for direct unit coverage.
+ */
+export async function provisionFpChildInlineCore(
+  deps: FpInlineDeps,
+  childId: string,
+  owner: string
+): Promise<FpProvisionInline> {
+  const enqueued = await deps.ensureClaim(childId);
+  if (!enqueued) return { ok: false, reason: "outage", state: null, supabaseUserId: null };
+
+  const outcome = await deps.drive(childId, owner);
+  const readback = await deps.readClaim(childId);
+
+  // FIX 2 — a concurrent owner (the re-drive cron) won the lease for this
+  // just-created child and is finishing the mint. NOT a failure: the child +
+  // claim are valid. If that owner has already minted the identity, surface it
+  // and proceed; if not yet, report lease_pending so the caller leaves the child
+  // for the cron to finish (never compensate/delete it out from under the mint).
+  if (outcome.kind === "lease_refused") {
+    if (readback !== "error" && readback.supabaseUserId) {
+      return { ok: true, supabaseUserId: readback.supabaseUserId, state: readback.state ?? "pending" };
+    }
+    return {
+      ok: false,
+      reason: "lease_pending",
+      state: readback === "error" ? null : readback.state,
+      supabaseUserId: null,
+    };
+  }
+
+  if (readback === "error") {
+    // Post-drive read failed → we cannot confirm a usable child, so this is a
+    // (retryable) outage. But the drive may have already MINTED an identity onto
+    // the claim; recover it best-effort (a second read) and SURFACE it so the
+    // caller tears it down rather than orphaning it (FIX 1).
+    const recovered = await deps.readClaim(childId);
+    return {
+      ok: false,
+      reason: "outage",
+      state: null,
+      supabaseUserId: recovered === "error" ? null : recovered.supabaseUserId,
+    };
+  }
+
+  const { supabaseUserId, state } = readback;
+  if (!supabaseUserId) return { ok: false, reason: "no_identity", state, supabaseUserId: null };
+  // FIX 7 — an identity that then landed `exception` is not a usable child.
+  // Surface the id so compensation still tears it down (never orphan it).
+  if (state === "exception") return { ok: false, reason: "exception", state, supabaseUserId };
+  return { ok: true, supabaseUserId, state: state ?? "pending" };
+}
+
+/** The wired inline step: the real claim enqueue, drive, and claim read-back. */
+export async function provisionFpChildInline(
+  childId: string,
+  owner: string
+): Promise<FpProvisionInline> {
+  const db = supabaseAdmin();
+  return provisionFpChildInlineCore(
+    {
+      ensureClaim: ensureProvisionClaim,
+      drive: driveFpProvisioningForChild,
+      readClaim: async (id) => {
+        const { data, error } = await db
+          .from(CLAIM_TABLE)
+          .select("supabase_user_id, state")
+          .eq("child_id", id)
+          .maybeSingle();
+        if (error) {
+          console.error(`[fp/provision] post-drive claim read failed for ${id}: ${error.message}`);
+          return "error";
+        }
+        return {
+          supabaseUserId: (data?.supabase_user_id as string | null) ?? null,
+          state: data?.state ? String(data.state) : null,
+        };
+      },
+    },
+    childId,
+    owner
+  );
+}
+
+/**
+ * The re-drive sweep for First-Profit-signup provisioning claims (the cron half
+ * of the arrival-only-drive gap fix). A path-b child enqueued at signup parks
+ * `pending` while Workspace is unconfigured; nothing re-drives it (there is no
+ * arrival page), so once GOOGLE_WORKSPACE_SA_KEY lands this sweep advances those
+ * claims to `complete`. Scoped to FP-origin children — those carrying an active
+ * fp_parental_consent — so funnel claims (driven by their own arrival page) are
+ * never touched. Idempotent and lease-arbitrated; bounded. Wired into the hourly
+ * funnel-lifecycle cron.
+ */
+export const FP_REDRIVE_CONSENT_SCAN_LIMIT = 500;
+export const FP_REDRIVE_CLAIM_SCAN_LIMIT = 200;
+
+export function realFpRedriveDeps(): FpRedriveDeps {
+  const db = supabaseAdmin();
+  return {
+    listDrivableFpChildIds: async () => {
+      // FP-origin = a child with an active fp_parental_consent. Funnel children
+      // never carry one, so this is a clean population split (no marker column
+      // needed on the shared claim table). DETERMINISTIC oldest-first order so a
+      // backlog beyond the page cap drains head-first instead of being silently
+      // and randomly truncated (the postgrest-max-rows learning). FIX 6: pin the
+      // namespace the read adapter uses, for consistency/future-proofing.
+      const { data: consents, error: cErr } = await db
+        .from("fp_parental_consent")
+        .select("child_id")
+        .eq("policy_namespace", "fp_parental_consent")
+        .not("child_id", "is", null)
+        .is("revoked_at", null)
+        .order("accepted_at", { ascending: true })
+        .limit(FP_REDRIVE_CONSENT_SCAN_LIMIT);
+      if (cErr) {
+        console.error(`[fp/provision] re-drive consent scan failed: ${cErr.message}`);
+        return "error";
+      }
+      const consentRows = consents ?? [];
+      if (consentRows.length >= FP_REDRIVE_CONSENT_SCAN_LIMIT) {
+        // A full page: children beyond the cap exist and are NOT driven this
+        // pass. Never a silent sub-cap truncation — make the backlog visible.
+        console.error(
+          `[fp/provision] re-drive consent scan hit the ${FP_REDRIVE_CONSENT_SCAN_LIMIT}-row cap — backlog not fully driven`
+        );
+        await notifyOps(
+          "FP provisioning re-drive backlog",
+          `The consent scan returned a full ${FP_REDRIVE_CONSENT_SCAN_LIMIT}-row page; ` +
+            `FP children beyond it are not driven this pass. Investigate the pending backlog.`
+        );
+      }
+      const childIds = [...new Set(consentRows.map((r) => String(r.child_id)))];
+      if (childIds.length === 0) return [];
+      const { data: claims, error: clErr } = await db
+        .from(CLAIM_TABLE)
+        .select("child_id, state, created_at")
+        .in("child_id", childIds)
+        // Drivable = the canonical non-terminal allowlist, incl. `in_progress`
+        // (FIX 5): a claim whose prior drive crashed holding the lease must be
+        // re-driven — takeLease still refuses a LIVE lease, so this is safe.
+        .in("state", [...DRIVABLE_PROVISION_STATES])
+        .order("created_at", { ascending: true })
+        .limit(FP_REDRIVE_CLAIM_SCAN_LIMIT);
+      if (clErr) {
+        console.error(`[fp/provision] re-drive claim scan failed: ${clErr.message}`);
+        return "error";
+      }
+      const claimRows = claims ?? [];
+      if (claimRows.length >= FP_REDRIVE_CLAIM_SCAN_LIMIT) {
+        console.error(
+          `[fp/provision] re-drive claim scan hit the ${FP_REDRIVE_CLAIM_SCAN_LIMIT}-row cap — backlog not fully driven`
+        );
+        await notifyOps(
+          "FP provisioning re-drive backlog",
+          `The claim scan returned a full ${FP_REDRIVE_CLAIM_SCAN_LIMIT}-row page; ` +
+            `some drivable FP claims are not driven this pass. Investigate the pending backlog.`
+        );
+      }
+      return claimRows.map((c) => String(c.child_id));
+    },
+    drive: async (childId) => {
+      await driveFpProvisioningForChild(childId, `fp-cron:${childId}`);
+    },
+  };
+}
+
+export async function sweepPendingFpProvisioningClaims(): Promise<
+  { driven: number; skipped: number } | "skipped"
+> {
+  return sweepFpPendingProvisioning(realFpRedriveDeps());
+}
+
 export function realStaleSweepDeps(): StaleSweepDeps {
   const db = supabaseAdmin();
   return {
@@ -480,7 +809,7 @@ export function realStaleSweepDeps(): StaleSweepDeps {
       const { data, error } = await db
         .from(CLAIM_TABLE)
         .select("child_id, state, updated_at, ops_alerted_at, pending_reason")
-        .in("state", ["pending", "in_progress", "identity_only"])
+        .in("state", [...DRIVABLE_PROVISION_STATES])
         .not("child_id", "is", null)
         .lt("updated_at", cutoff)
         .limit(200);
@@ -588,6 +917,82 @@ export async function sweepSuspendPendingClaims(): Promise<
   { closed: number; skipped: number } | "skipped"
 > {
   return sweepSuspendPending(realSuspendSweepDeps());
+}
+
+/* ─────────────────────────── R28 erasure deps (Slice B Unit 6) ─────────────────────────── */
+
+/**
+ * The real effects for a service-role R28 data-rights erasure. The sequencing +
+ * FK-safe order live in the pure/injected core (`erase-family-core.ts`); this
+ * factory only supplies the service-role DB client and the two credential-gated
+ * Workspace primitives (suspend, then delete) plus the auth-account delete.
+ *
+ * ── The delete primitive is gated EXACTLY like users.insert ── `deleteWorkspace
+ * User` calls `dir.users.delete` only through `directoryClient()`, which needs
+ * `GOOGLE_WORKSPACE_SA_KEY`; the core consults `workspaceConfigured` and SKIPS
+ * the Google call entirely when the credential is absent (no real Directory call
+ * in normal build/test — the one live exercise is Unit 11). 404 → "missing" so a
+ * re-run over an already-deleted mailbox is idempotent, mirroring the suspend
+ * sweep's `googleStatus(err) === 404` branch.
+ *
+ * ⚠ SECURITY (forward-guard): these deps drive an unconditional hard-delete of a
+ * whole family (accounts + mailboxes + consent evidence). eraseFamily performs NO
+ * authorization; the Unit 11 call site that wires this MUST be SERVICE-ROLE /
+ * ADMIN-GATED and FAIL-CLOSED — a GET behind CRON_SECRET (or an equivalent admin
+ * gate) — so a normal principal can never reach it. See the boxed note on
+ * eraseFamily.
+ *
+ * Erase logs here NEVER print a child's full mailbox address (PII): the failure
+ * branches log a hashed local_part tag (`localPartTag`) and the HTTP status, not
+ * the @the120.school address (FIX 6a).
+ */
+export function realEraseFamilyDeps(): EraseFamilyDeps {
+  const db = supabaseAdmin();
+  return {
+    db,
+    workspaceConfigured: saKeyRaw().length > 0,
+    deleteAuthUser: async (userId) => {
+      const res = await db.auth.admin.deleteUser(userId);
+      if (res.error) {
+        // A 404 (already gone) is success for an idempotent erasure; anything
+        // else is a real failure the core records as stranded.
+        const status = googleStatus(res.error);
+        if (status === 404) return { ok: true };
+        console.error(`[erase] deleteUser failed for ${userId}: ${res.error.message}`);
+        return { ok: false };
+      }
+      return { ok: true };
+    },
+    suspendWorkspaceUser: async (email) => {
+      try {
+        const dir = await directoryClient();
+        await dir.users.update({ userKey: email, requestBody: { suspended: true } });
+        return "suspended";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        // FIX 6a: never log the full minor mailbox address — a hashed local_part
+        // tag + the HTTP status is enough to correlate/triage.
+        console.error(
+          `[erase] workspace suspend failed (local_part#${localPartTag(email)}, status ${googleStatus(err)})`
+        );
+        return "error";
+      }
+    },
+    deleteWorkspaceUser: async (email) => {
+      try {
+        const dir = await directoryClient();
+        await dir.users.delete({ userKey: email });
+        return "deleted";
+      } catch (err) {
+        if (googleStatus(err) === 404) return "missing";
+        console.error(
+          `[erase] workspace delete failed (local_part#${localPartTag(email)}, status ${googleStatus(err)})`
+        );
+        return "error";
+      }
+    },
+    now: () => Date.now(),
+  };
 }
 
 /* ─────────────────────────── forwarding (W14, U7) ─────────────────────────── */

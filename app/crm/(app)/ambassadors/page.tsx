@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
+import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter"; // Slice B Unit 6: keep test families out of ambassador tallies
 import {
   computeAmbassadorReport,
   type AmbassadorCode,
@@ -29,10 +30,9 @@ export default async function AmbassadorsPage() {
     db
       .from("ambassador_codes")
       .select("code, owner_name, note, created_at"),
-    db
-      .from("families")
-      .select("id, parent_id, referral_code")
-      .is("merged_into_id", null),
+    excludeTestFamilies(
+      db.from("families").select("id, parent_id, referral_code").is("merged_into_id", null)
+    ),
     db.from("deposits").select("parent_id, status"),
   ]);
 

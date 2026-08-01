@@ -6,6 +6,7 @@ import { buildProgramRows } from "@/app/fp/content/seed-rows";
 import {
   assertNoAuthMailToFwStudent,
   buildFwLocalBase,
+  buildFwLocalBaseFromFirstName,
   buildFwProgressRows,
   buildFwStudentCreateUserPayload,
   buildFwTombstoneEmail,
@@ -153,6 +154,37 @@ describe("name folding — accents, hyphens, apostrophes, and the fail-closed fl
     expect(() => buildFwLocalBase("Maya", "   ")).toThrow(/last name/);
     expect(() => buildFwLocalBase("маша", "陈")).toThrow(); // no ASCII-foldable characters
     expect(() => buildFwLocalBase("!!!", "???")).toThrow();
+  });
+});
+
+describe("buildFwLocalBaseFromFirstName — the FP first-name-only base", () => {
+  it("produces a BARE single-part slug (no dot, no last name)", () => {
+    expect(buildFwLocalBaseFromFirstName("Alex")).toBe("alex");
+    expect(buildFwLocalBaseFromFirstName("Sasha")).toBe("sasha");
+    // No dot anywhere — the whole point: it is one part, not first.last.
+    expect(buildFwLocalBaseFromFirstName("Dana")).not.toContain(".");
+  });
+
+  it("runs the SAME foldToAscii guard as buildFwLocalBase (accents, elisions, separators)", () => {
+    expect(buildFwLocalBaseFromFirstName("José")).toBe("jose");
+    expect(buildFwLocalBaseFromFirstName("Ann-Marie")).toBe("ann-marie");
+    expect(buildFwLocalBaseFromFirstName("Mary  Kate")).toBe("mary-kate");
+    expect(buildFwLocalBaseFromFirstName("Weiß")).toBe("weiss");
+    expect(buildFwLocalBaseFromFirstName("Zoë")).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  });
+
+  it("caps at FW_NAME_PART_MAX so `<slug>.fw@` still fits the 64-octet local part", () => {
+    const base = buildFwLocalBaseFromFirstName("Wolfeschlegelsteinhausenbergerdorff");
+    expect(base.length).toBeLessThanOrEqual(FW_NAME_PART_MAX);
+    expect(base).not.toMatch(/-$/); // a cap landing mid-separator leaves no trailing dash
+  });
+
+  it("FAILS CLOSED (throws) on a truly empty / unfoldable first name — a real invalid input", () => {
+    expect(() => buildFwLocalBaseFromFirstName("")).toThrow(/first name/);
+    expect(() => buildFwLocalBaseFromFirstName("   ")).toThrow(/first name/);
+    expect(() => buildFwLocalBaseFromFirstName("маша")).toThrow(); // non-Latin, no ASCII fold
+    expect(() => buildFwLocalBaseFromFirstName("Mаya")).toThrow(/cannot be folded/); // Cyrillic homoglyph
+    expect(() => buildFwLocalBaseFromFirstName("!!!")).toThrow();
   });
 });
 

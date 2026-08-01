@@ -7,6 +7,10 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { emailableReason, type EmailableReason } from "@/app/lib/welcome/welcome-rules";
+// Slice B Unit 6 (Plan Rev 10): the ONE shared test-family exclusion — every
+// cross-family reporting/selection read below routes `families` through it so a
+// guarded is_test signup never inflates a count or lands on an outreach list.
+import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
 import {
   buildCopilotSummary,
   deriveNextMove,
@@ -450,7 +454,7 @@ export async function fetchPipeline(
     sendsRes,
     itemsRes,
   ] = await Promise.all([
-    db.from("families").select(FAMILY_COLUMNS).is("merged_into_id", null),
+    excludeTestFamilies(db.from("families").select(FAMILY_COLUMNS).is("merged_into_id", null)),
     db.from("parents").select("id, first_name, last_name, email, phone"),
     db
       .from("children")
@@ -776,7 +780,7 @@ export async function fetchDossierQueue(): Promise<DossierItem[]> {
             "status, submitted_at, created_at"
         ),
       db.from("parents").select("id, first_name, last_name, email, phone"),
-      db.from("families").select("id, parent_id, email").is("merged_into_id", null),
+      excludeTestFamilies(db.from("families").select("id, parent_id, email").is("merged_into_id", null)),
       db
         .from("child_reviews")
         .select(
@@ -1330,12 +1334,14 @@ export async function fetchLibrary(): Promise<{
       .select(
         "id, type, title, body, concern, url, helpfulness_score, send_count"
       ),
-    db
-      .from("families")
-      .select(
-        "id, parent_id, parent_name, email, consent_given, consent_revoked_at, consent_source, consent_at"
-      )
-      .is("merged_into_id", null),
+    excludeTestFamilies(
+      db
+        .from("families")
+        .select(
+          "id, parent_id, parent_name, email, consent_given, consent_revoked_at, consent_source, consent_at"
+        )
+        .is("merged_into_id", null)
+    ),
     db.from("parents").select("id, first_name, last_name, email"),
   ]);
 

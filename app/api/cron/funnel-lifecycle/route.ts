@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { notifyOps } from "@/app/lib/ops-alert";
 import {
   sweepOverdueForwarding,
+  sweepPendingFpProvisioningClaims,
   sweepStaleProvisioningClaims,
   sweepSuspendPendingClaims,
 } from "@/app/lib/funnel/provision-deps";
@@ -52,6 +53,17 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error("[funnel/lifecycle] forwarding sweep threw:", err);
     sweeps.forwarding = "skipped";
+  }
+  try {
+    // Slice B Unit 5: re-drive First-Profit-signup provisioning claims parked
+    // `pending`. FP signup has no arrival page to drive them, so this is the
+    // reproduction of the arrival-route enqueue for the FP path. A no-op while
+    // Workspace is unconfigured (claims re-park pending, no mailbox burned);
+    // once GOOGLE_WORKSPACE_SA_KEY lands it advances them to complete.
+    sweeps.fpProvisioning = await sweepPendingFpProvisioningClaims();
+  } catch (err) {
+    console.error("[funnel/lifecycle] fp-provisioning re-drive threw:", err);
+    sweeps.fpProvisioning = "skipped";
   }
   try {
     // The U2 carry: standing capacity reconciliation, independent of any

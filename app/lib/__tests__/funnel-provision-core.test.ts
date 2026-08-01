@@ -15,6 +15,7 @@ import {
   type SuspendSweepDeps,
 } from "@/app/lib/funnel/provision-core";
 import { CONSENT_MIN_POLICY_VERSION } from "@/app/lib/funnel/deposit-rules";
+import { WORKSPACE_UNCONFIGURED_PENDING_REASON } from "@/app/lib/funnel/provision-rules";
 
 /**
  * Funnel wrap U6 part 2: the provisioning COMPOSITION is the test surface,
@@ -875,5 +876,56 @@ describe("alertStaleClaims — the human backstop", () => {
       notifyOps: async () => {},
     });
     expect(result).toBe("skipped");
+  });
+
+  it("FIX 3 — a workspace-unconfigured claim NEVER pages (even swept across two hours), while a genuine funnel stall still pages once", async () => {
+    // The workspace-unconfigured park is a known designed cohort re-parked hourly
+    // by the FP re-drive; the funnel claim is a real stall. Across two sweeps the
+    // workspace-unconfigured one pages ZERO times (excluded), the funnel one once.
+    const wsUnconfigured: StaleClaim = {
+      childId: "fp-pending",
+      state: "pending",
+      minutesStale: STALE_CLAIM_ALERT_MINUTES + 30,
+      opsAlertedAt: null,
+      pendingReason: WORKSPACE_UNCONFIGURED_PENDING_REASON,
+    };
+    const funnelStall: StaleClaim = {
+      childId: "funnel-stall",
+      state: "identity_only",
+      minutesStale: STALE_CLAIM_ALERT_MINUTES + 30,
+      opsAlertedAt: null,
+      pendingReason: null,
+    };
+
+    const paged: string[][] = [];
+    // A stateful stamp: once markOpsAlerted stamps a child, later sweeps see it.
+    const stamps = new Map<string, string>();
+    const withStamps = (c: StaleClaim): StaleClaim => ({
+      ...c,
+      opsAlertedAt: stamps.get(c.childId) ?? null,
+    });
+    const deps = {
+      listStaleClaims: async () => [withStamps(wsUnconfigured), withStamps(funnelStall)],
+      markOpsAlerted: async (ids: string[]) => {
+        for (const id of ids) stamps.set(id, "2026-08-01T00:00:00Z");
+      },
+      notifyOps: async (_s: string, body: string) => {
+        paged.push(
+          body
+            .split("\n")
+            .filter((l) => l.startsWith("child="))
+            .map((l) => l.split(" ")[0].replace("child=", ""))
+        );
+      },
+    };
+
+    // Hour 1: only the genuine funnel stall pages.
+    expect(await alertStaleClaims(deps)).toBe("alerted");
+    // Hour 2: the funnel stall is now stamped, the workspace one is still excluded
+    // → nothing fresh to page.
+    expect(await alertStaleClaims(deps)).toBe("none");
+
+    expect(paged).toEqual([["funnel-stall"]]);
+    expect(paged.flat()).not.toContain("fp-pending");
   });
 });

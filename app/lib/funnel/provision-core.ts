@@ -50,7 +50,10 @@ import {
   MAX_LOCAL_PART_ATTEMPTS,
   pickStudentLocalPart,
   studentEmailForLocalPart,
+  WORKSPACE_UNCONFIGURED_PENDING_REASON,
+  type ConsentVerdict,
   type ForwardingState,
+  type LocalPartDerivation,
   type ProvisionState,
 } from "@/app/lib/funnel/provision-rules";
 
@@ -141,6 +144,31 @@ export type ProvisionDeps = {
   readAcceptedPolicyVersion: (
     childId: string
   ) => Promise<{ version: string | null } | "refunded" | "error">;
+  /**
+   * The verdict function applied to the accepted version — the ONE seam that
+   * lets a caller supply a DIFFERENT consent NAMESPACE without forking this
+   * core (Slice B Rev 2). The funnel deps omit it and get the default
+   * (`consentVerdict`, the Stripe-refund/deposit registry). The First-Profit
+   * signup deps inject an fp_parental_consent verdict instead, because an
+   * FP consent version (own namespace) is deliberately NOT a member of the
+   * deposit registry and the default would (correctly) reject it as
+   * `consent_unknown`. The gate still runs at the SAME point — before any
+   * external effect — so the read-vs-verdict split changes only WHICH
+   * namespace decides, never WHEN the gate fires.
+   */
+  consentVerdict?: (version: string | null | undefined) => ConsentVerdict;
+  /**
+   * The name→local-base deriver — the ONE seam that lets the First-Profit signup
+   * path derive the student address from the FIRST NAME ALONE without forking
+   * this core (Slice B Unit 11). The funnel (deposit) deps omit it and get the
+   * default two-part `deriveStudentLocalBase` (first.last); the FP deps inject
+   * the first-name-only variant, because FP children are created first-name-only
+   * (`children.last_name` is NULL) and the two-part deriver would throw →
+   * `underivable` → a parked `exception` → a failed signup. Same verdict shape,
+   * same collision suffixer, same DB arbiter — only WHICH base is derived changes,
+   * so the gate/pick/claim sequencing below is untouched.
+   */
+  deriveLocalBase?: (firstName: string, lastName: string) => LocalPartDerivation;
   /* identity leg (Supabase auth) */
   findAuthUserIdByEmail: (email: string) => Promise<string | null | "unknown">;
   createAuthUser: (email: string) => Promise<{ id: string } | "error">;
@@ -266,7 +294,7 @@ export async function driveProvisioning(
     }
     return outcome;
   }
-  const verdict = consentVerdict(consent.version);
+  const verdict = (deps.consentVerdict ?? consentVerdict)(consent.version);
   if (!verdict.ok) {
     const reason = `consent gate: ${verdict.reason} — ${verdict.detail}`;
     return land(
@@ -285,6 +313,10 @@ export async function driveProvisioning(
   }
 
   /* ── the address: derive, pick, claim under the DB arbiter ── */
+  // The deriver is the injectable seam: the funnel path uses two-part first.last;
+  // the FP signup path injects a first-name-only variant (children are created
+  // first-name-only). Everything else in this block is identical for both.
+  const deriveLocalBase = deps.deriveLocalBase ?? deriveStudentLocalBase;
   let localPart = claim.localPart;
   let email = claim.email;
   // The advisory taken-set, shared by the initial pick and any Workspace-
@@ -299,7 +331,7 @@ export async function driveProvisioning(
   };
 
   if (!localPart || !email) {
-    const derived = deriveStudentLocalBase(child.firstName, child.lastName);
+    const derived = deriveLocalBase(child.firstName, child.lastName);
     if (!derived.ok) {
       return parkException(`underivable name: ${derived.detail}`);
     }
@@ -315,6 +347,7 @@ export async function driveProvisioning(
         firstName: child.firstName,
         lastName: child.lastName,
         taken: takenSet,
+        derive: deriveLocalBase,
       });
       if (!pick.ok) return parkException(`no address available: ${pick.detail}`);
       const res = await deps.claimLocalPart(childId, pick.localPart, pick.email);
@@ -383,7 +416,7 @@ export async function driveProvisioning(
         state: "pending",
         supabaseUserId,
         consentPolicyVersion: consent.version,
-        pendingReason: "workspace credential not configured",
+        pendingReason: WORKSPACE_UNCONFIGURED_PENDING_REASON,
       },
       { kind: "pending_config" }
     );
@@ -452,7 +485,7 @@ export async function driveProvisioning(
       // COLLISION: hand-created outside the system — advance, never adopt.
       // (A staff-assigned part for an underivable name re-parks here: the
       // re-derivation fails and a human decides again — the safe direction.)
-      const rederived = deriveStudentLocalBase(child.firstName, child.lastName);
+      const rederived = deriveLocalBase(child.firstName, child.lastName);
       if (!rederived.ok) {
         return parkException(
           `workspace collision on a staff-assigned address: ${rederived.detail}`
@@ -465,6 +498,7 @@ export async function driveProvisioning(
         firstName: child.firstName,
         lastName: child.lastName,
         taken: takenSet,
+        derive: deriveLocalBase,
       });
       if (!pick.ok) {
         return parkException(`workspace collisions exhausted candidates: ${pick.detail}`);
@@ -746,6 +780,51 @@ export async function sweepSuspendPending(
   return { closed, skipped };
 }
 
+/* ───────────── the First-Profit re-drive sweep (Slice B Unit 5) ───────────── */
+
+/**
+ * The funnel path drives provisioning from the Stripe-arrival page; a
+ * First-Profit-signup child has NO arrival page, so a claim parked
+ * `pending` (Workspace unconfigured during the build) would never be
+ * re-driven — the plan's "arrival-only-drive gap". This sweep is the
+ * reproduction of that ready-to-drive signal on a schedule: it enumerates
+ * the drivable FP claims and drives each. Idempotent and lease-arbitrated
+ * (the drive itself is), so re-running is always safe; a no-op while
+ * Workspace is unconfigured (each claim re-parks pending, no mailbox
+ * burned), and the thing that finally advances FP claims to `complete`
+ * once GOOGLE_WORKSPACE_SA_KEY lands.
+ *
+ * Injected-deps shape (the house pattern, mirroring alertStaleClaims): the
+ * SELECTION of drivable FP children and the drive itself are the impure
+ * legs; this core only sequences them, one try/catch per child so one
+ * failure never starves the rest.
+ */
+export type FpRedriveDeps = {
+  /** The drivable FP-origin claims: children carrying an active
+   *  fp_parental_consent whose claim is non-terminal (pending/identity_only). */
+  listDrivableFpChildIds: () => Promise<string[] | "error">;
+  drive: (childId: string) => Promise<void>;
+};
+
+export async function sweepFpPendingProvisioning(
+  deps: FpRedriveDeps
+): Promise<{ driven: number; skipped: number } | "skipped"> {
+  const ids = await deps.listDrivableFpChildIds();
+  if (ids === "error") return "skipped";
+  let driven = 0;
+  let skipped = 0;
+  for (const childId of ids) {
+    try {
+      await deps.drive(childId);
+      driven += 1;
+    } catch (err) {
+      console.error(`[provision] fp re-drive threw for ${childId}:`, err);
+      skipped += 1;
+    }
+  }
+  return { driven, skipped };
+}
+
 /* ───────────────────── the stale-claim backstop ───────────────────── */
 
 /** A paid family stuck in a non-terminal state must become staff-visible,
@@ -779,7 +858,16 @@ export async function alertStaleClaims(
   try {
     const stale = await deps.listStaleClaims(STALE_CLAIM_ALERT_MINUTES);
     if (stale === "error") return "skipped";
-    const fresh = stale.filter((c) => c.opsAlertedAt === null);
+    const fresh = stale.filter(
+      (c) =>
+        c.opsAlertedAt === null &&
+        // A claim parked ONLY on the missing Workspace credential is a known
+        // designed cohort, re-parked every hour by the FP re-drive. Paging ops
+        // about it every hour would desensitize the alert (FIX 3); the core
+        // already parks it quietly (nobody paged), so the human backstop stays
+        // consistent. Genuine stalls (any other reason, or none) still page once.
+        c.pendingReason !== WORKSPACE_UNCONFIGURED_PENDING_REASON
+    );
     if (fresh.length === 0) return "none";
     await deps.notifyOps(
       "Student provisioning stalled — paid families waiting",

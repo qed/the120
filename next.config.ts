@@ -74,6 +74,17 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
+      // First Profit API surface (fpv2 Slice A Unit 2) — session tokens ride
+      // POST /api/fp/login response bodies, so nothing under /api/fp may ever
+      // be cached by any intermediary. The route ALSO sets Cache-Control:
+      // no-store on its own Responses — belt and suspenders, same pattern as
+      // the /fp/fw/board feed above.
+      {
+        source: "/api/fp/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, must-revalidate" },
+        ],
+      },
     ];
   },
   async redirects() {

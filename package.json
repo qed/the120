@@ -13,6 +13,7 @@
     "seed:path-content": "tsx scripts/seed-path-content.ts",
     "seed:path-family": "tsx scripts/provision-path-family.ts",
     "rls:reprobe": "tsx scripts/rls-reprobe-fp-parent.ts",
+    "r28:erase": "tsx scripts/erase-fp-family.ts",
     "seed:fw-cohort": "tsx scripts/seed-fw-cohort.ts",
     "seed:fw-guide": "tsx scripts/seed-fw-guide.ts",
     "fw": "tsx scripts/fw-ops.ts",

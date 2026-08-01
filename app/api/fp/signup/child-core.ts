@@ -65,8 +65,19 @@ import { consentGate } from "./consent-core";
 import { ensurePlayerProfile } from "../login/profile-core";
 import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
 import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
+import { mintUsername } from "@/app/fp/lib/fp-username-rules";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
+
+/**
+ * How many times the child-row insert is re-attempted with a freshly-suffixed
+ * username after a unique-index (23505) conflict on `children.fp_username`. A
+ * concurrent create that grabbed our candidate first is the only realistic
+ * cause; a handful of retries is plenty, and the numeric suffixer walks forward
+ * deterministically (`alex` → `alex2` → …) each time. Exhausting it is an
+ * `outage`, not a stranded child — nothing was inserted on a conflicting try.
+ */
+export const MAX_USERNAME_INSERT_RETRIES = 5;
 
 /**
  * The funnel's own per-family cap (app/lib/funnel/children-core.ts
@@ -295,22 +306,79 @@ export async function createChild(
     //    `with check (auth.uid() = parent_id)` authorizes it. Mirrors the funnel
     //    insertChild shape (draft + entry applicant_state) so an FP-signup child
     //    is a normal draft roster row.
-    const insChild = await pc
-      .from("children")
-      .insert({
-        parent_id: parentId,
-        first_name: firstName,
-        grade,
-        status: "draft",
-        applicant_state: APPLICANT_ENTRY_STATE,
-      })
-      .select("id")
-      .single();
-    if (insChild.error || !insChild.data) {
+    //
+    //    (Slice B U12) The child gets a GLOBALLY-UNIQUE `fp_username` AT CREATION,
+    //    included in the insert (generate-before-insert is cleanest: a failed
+    //    username claim leaves no child to strand). Uniqueness is checked against
+    //    the whole `children.fp_username` space via the SERVICE-ROLE `admin`
+    //    client — the parent-token client can only SEE its own children under
+    //    RLS, so it cannot judge GLOBAL uniqueness; the partial-unique index is
+    //    the real arbiter and we CAS-retry on its 23505. The pre-seed is a
+    //    best-effort fast path that trims conflicts; a read error just means we
+    //    lean on the index + retry.
+    const taken = new Set<string>();
+    // Seed the taken-set from existing usernames sharing this child's base. The
+    // base is `mintUsername`'s own (empty predicate → attempt 1 → the bare base),
+    // which also applies the `student` fallback for an unfoldable first name, so
+    // the `base%` prefix probe stays cheap and index-friendly either way.
+    const seedBase = mintUsername({ firstName, isTaken: () => false });
+    if (seedBase.ok) {
+      const existing = await admin
+        .from("children")
+        .select("fp_username")
+        .ilike("fp_username", `${seedBase.base}%`);
+      if (!existing.error) {
+        for (const r of (existing.data as Array<{ fp_username?: unknown }> | null) ?? []) {
+          if (typeof r.fp_username === "string") taken.add(r.fp_username.toLowerCase());
+        }
+      } else {
+        console.error(
+          `[fp/signup/child] username pre-seed read failed (non-fatal, index arbitrates): ${existing.error.message}`
+        );
+      }
+    }
+
+    let childId: string | null = null;
+    for (let attempt = 0; attempt < MAX_USERNAME_INSERT_RETRIES; attempt += 1) {
+      const pick = mintUsername({ firstName, isTaken: (c) => taken.has(c) });
+      if (!pick.ok) {
+        console.error(`[fp/signup/child] username exhausted for attempt ${input.attemptId}`);
+        return { ok: false, reason: "outage" };
+      }
+      const insChild = await pc
+        .from("children")
+        .insert({
+          parent_id: parentId,
+          first_name: firstName,
+          grade,
+          status: "draft",
+          applicant_state: APPLICANT_ENTRY_STATE,
+          fp_username: pick.username,
+        })
+        .select("id")
+        .single();
+      if (!insChild.error && insChild.data) {
+        childId = String((insChild.data as { id: unknown }).id);
+        break;
+      }
+      // 23505 = the partial-unique index on fp_username fired (a concurrent
+      // create grabbed this handle first). Mark it taken and re-pick the next
+      // suffix; the failed insert committed no row, so there is nothing to
+      // compensate. Any OTHER insert error is a genuine outage.
+      const code = (insChild.error as { code?: unknown } | null)?.code;
+      if (code === "23505") {
+        taken.add(pick.username.toLowerCase());
+        continue;
+      }
       console.error(`[fp/signup/child] child insert failed: ${insChild.error?.message ?? "no row"}`);
       return { ok: false, reason: "outage" };
     }
-    const childId = String((insChild.data as { id: unknown }).id);
+    if (!childId) {
+      console.error(
+        `[fp/signup/child] child insert exhausted ${MAX_USERNAME_INSERT_RETRIES} username retries for attempt ${input.attemptId}`
+      );
+      return { ok: false, reason: "outage" };
+    }
     created.childId = childId;
 
     // 6. CONSENT GATE — atomically claim the active consent for THIS child. This

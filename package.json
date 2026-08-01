@@ -19,6 +19,7 @@
     "fw": "tsx scripts/fw-ops.ts",
     "backfill:families": "tsx scripts/backfill-families.ts",
     "backfill:welcome": "tsx scripts/backfill-welcome-email.ts",
+    "fp:backfill-usernames": "tsx scripts/backfill-fp-username.ts",
     "path:build": "tsx scripts/build-path-content.ts"
   },
   "dependencies": {

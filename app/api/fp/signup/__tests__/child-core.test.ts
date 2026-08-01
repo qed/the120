@@ -46,6 +46,9 @@ function makeClient(client: "admin" | "parent", handle: (s: State) => Result, ca
       eq(col: string, val: unknown) {
         return builder({ ...state, filters: { ...state.filters, [col]: val } });
       },
+      ilike(col: string, val: unknown) {
+        return builder({ ...state, filters: { ...state.filters, [`ilike:${col}`]: val } });
+      },
       is(col: string, val: unknown) {
         return builder({ ...state, filters: { ...state.filters, [`is:${col}`]: val } });
       },
@@ -84,6 +87,11 @@ type Cfg = {
   capRows?: unknown[];
   capError?: boolean;
   childInsertError?: boolean;
+  // (U12) fp_username: existing usernames the admin pre-seed read returns, and
+  // how many of the FIRST parent child-inserts should fail with a 23505 (the
+  // partial-unique index firing) before one succeeds.
+  existingUsernames?: string[];
+  usernameConflictInserts?: number;
   claimRows?: unknown[]; // consentGate CAS result
   claimError?: boolean; // consentGate CAS errors → gate 'outage'
   existingRows?: unknown[]; // consentGate classify result
@@ -125,6 +133,7 @@ function build(cfg: Cfg = {}) {
   // compensation lookup-by-child_id models the real "inserted but save-unseeded"
   // strand: the row exists even though ensurePlayerProfile returned no profileId.
   const seededProfiles = new Set<string>();
+  let childInsertAttempts = 0;
 
   const handle = (s: State): Result => {
     // ---- parent-token client ----
@@ -136,9 +145,15 @@ function build(cfg: Cfg = {}) {
             : { data: cfg.capRows ?? [], error: null };
         }
         if (s.op === "insert") {
-          return cfg.childInsertError
-            ? { data: null, error: { message: "child insert boom" } }
-            : { data: { id: "child1" }, error: null };
+          if (cfg.childInsertError) return { data: null, error: { message: "child insert boom" } };
+          childInsertAttempts += 1;
+          // Simulate the partial-unique fp_username index rejecting the first N
+          // attempts (a concurrent create grabbed the handle) → child-core
+          // re-picks the next suffix and retries.
+          if (childInsertAttempts <= (cfg.usernameConflictInserts ?? 0)) {
+            return { data: null, error: { code: "23505", message: "duplicate key value" } };
+          }
+          return { data: { id: "child1" }, error: null };
         }
       }
       return { data: null, error: null };
@@ -209,6 +224,13 @@ function build(cfg: Cfg = {}) {
       return { error: null }; // compensation delete
     }
     if (s.table === "children") {
+      // (U12) admin pre-seed read of existing fp_usernames for the taken-set.
+      if (s.op === "select") {
+        return {
+          data: (cfg.existingUsernames ?? []).map((u) => ({ fp_username: u })),
+          error: null,
+        };
+      }
       return { error: null }; // compensation delete (admin)
     }
     if (s.table === "funnel_student_provisioning") {
@@ -567,6 +589,58 @@ describe("createChild — attempt-advance is non-fatal", () => {
     expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
     expect(del(calls, "admin", "children")).toBe(false);
     expect(del(calls, "admin", "path_student_profiles")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------ U12: fp_username at creation */
+
+const childInserts = (calls: State[]) =>
+  calls.filter((c) => c.client === "parent" && c.table === "children" && c.op === "insert");
+
+describe("createChild — U12 fp_username claimed at child insert", () => {
+  it("the child insert carries a folded/slugged fp_username derived from the first name", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, input);
+    expect(res.ok).toBe(true);
+    const ins = childInserts(calls);
+    expect(ins).toHaveLength(1);
+    // "Dana" folds/slugs to "dana"; first child of the name gets the clean handle.
+    expect(ins[0]?.row?.fp_username).toBe("dana");
+  });
+
+  it("a pre-seeded existing username pushes the new child onto the next suffix (global uniqueness)", async () => {
+    const { deps, calls } = build({ existingUsernames: ["dana"] });
+    const res = await createChild(deps, input);
+    expect(res.ok).toBe(true);
+    expect(childInserts(calls)[0]?.row?.fp_username).toBe("dana2");
+  });
+
+  it("23505 on the first insert → re-pick the next suffix and retry; the child is created", async () => {
+    const { deps, calls } = build({ usernameConflictInserts: 1 });
+    const res = await createChild(deps, input);
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    const ins = childInserts(calls);
+    // Two insert attempts: the first (dana) conflicted, the second (dana2) won.
+    expect(ins).toHaveLength(2);
+    expect(ins[0]?.row?.fp_username).toBe("dana");
+    expect(ins[1]?.row?.fp_username).toBe("dana2");
+    // No compensation — a conflicting insert commits no row.
+    expect(del(calls, "admin", "children")).toBe(false);
+  });
+
+  it("persistent 23505 beyond the retry bound → outage, nothing stranded", async () => {
+    const { deps, calls } = build({ usernameConflictInserts: 99 });
+    expect(await createChild(deps, input)).toEqual({ ok: false, reason: "outage" });
+    // Every attempt conflicted (no row committed), so there is nothing to delete.
+    expect(del(calls, "admin", "children")).toBe(false);
+    expect(insert(calls, "admin", "path_student_profiles")).toBe(false);
+  });
+
+  it("an unfoldable first name falls back to a 'student'-base username (child never blocked)", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "🙂🙂" });
+    expect(res.ok).toBe(true);
+    expect(childInserts(calls)[0]?.row?.fp_username).toBe("student");
   });
 });
 

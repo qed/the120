@@ -85,15 +85,24 @@ export const DIRECT_RESERVE_MARKER = "direct reserve — no application";
 
 /**
  * Direct reserve (2026-08-02, nav-deposit-shortcut U5): the children whose
- * seat was paid for BEFORE any application — a live paid deposit on a child
- * still at `status='draft'`. This population is new (the checkout gate no
- * longer requires offered-or-later), and staff confirm each of them — spot
- * or refund — by the Sept 19 kickoff, so the pipeline must make them
- * distinguishable from offer-first payers. Derived from `children.status`
- * alone (no applicant_state in the CRM fetch, and direct-reserve children
- * stay `draft` by construction — the funnel's pre-submit rows never leave
- * draft without a submission).
+ * seat was paid for BEFORE a staff decision — a live paid deposit on a
+ * child whose `status` sits before `offered`. Staff confirm each of them —
+ * spot or refund — by the Sept 19 kickoff, so the pipeline must keep them
+ * distinguishable until that confirmation happens.
+ *
+ * PRE-OFFER, not just draft (whole-branch review): a pay-then-submit
+ * family moves draft → submitted while staff still owe them the
+ * confirmation — the trigger fixes (20260902120000) exist precisely so
+ * that progression works. Keying the marker on `draft` alone made the
+ * family vanish from the pipeline at the moment of highest ambiguity.
+ * The marker clears exactly when staff act: move_candidate to `offered`/
+ * `member` (spot) or a refund (paid row gone). `invited` stays marked —
+ * staff engagement is not a seat decision. Derived from `children.status`
+ * alone (no applicant_state in the CRM fetch); unknown statuses stay
+ * unmarked (fail quiet, never a false badge).
  */
+const PRE_OFFER_STATUSES = new Set(["draft", "submitted", "in_review", "invited"]);
+
 export function directReserveChildIds(
   children: readonly { id: string; status: string }[],
   deposits: readonly { child_id: string; status: string }[]
@@ -101,7 +110,9 @@ export function directReserveChildIds(
   const paid = new Set(
     deposits.filter((d) => d.status === "paid").map((d) => d.child_id)
   );
-  return children.filter((c) => c.status === "draft" && paid.has(c.id)).map((c) => c.id);
+  return children
+    .filter((c) => PRE_OFFER_STATUSES.has(c.status) && paid.has(c.id))
+    .map((c) => c.id);
 }
 
 /**

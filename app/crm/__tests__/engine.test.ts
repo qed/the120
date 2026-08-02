@@ -19,11 +19,20 @@ describe("directReserveChildIds — the paid-but-never-applied population (U5)",
   const kid = (id: string, status: string) => ({ id, status });
   const dep = (child_id: string, status: string) => ({ child_id, status });
 
-  it("marks a paid child still at draft; offer-first payers are NOT marked", () => {
+  it("marks every PRE-OFFER paid child; offer-first payers are NOT marked", () => {
     expect(directReserveChildIds([kid("a", "draft")], [dep("a", "paid")])).toEqual(["a"]);
-    // Offer-first: paid at offered/member — no marker (regression pin).
+    // The whole-branch review's cascade: a pay-then-submit family keeps the
+    // marker through submitted/in_review/invited — staff still owe them the
+    // Sept-19 confirmation, and the trigger fixes exist so this progression
+    // happens. Only a staff SEAT decision clears it.
+    expect(directReserveChildIds([kid("a", "submitted")], [dep("a", "paid")])).toEqual(["a"]);
+    expect(directReserveChildIds([kid("a", "in_review")], [dep("a", "paid")])).toEqual(["a"]);
+    expect(directReserveChildIds([kid("a", "invited")], [dep("a", "paid")])).toEqual(["a"]);
+    // Offer-first / staff-confirmed: no marker (regression pin).
     expect(directReserveChildIds([kid("a", "offered")], [dep("a", "paid")])).toEqual([]);
     expect(directReserveChildIds([kid("a", "member")], [dep("a", "paid")])).toEqual([]);
+    // Unknown status: fail quiet, never a false badge.
+    expect(directReserveChildIds([kid("a", "garbage")], [dep("a", "paid")])).toEqual([]);
   });
 
   it("pending/refunded deposits never mark; unpaid drafts never mark", () => {

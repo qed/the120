@@ -52,12 +52,11 @@ export {
 export const CHILD_AGE_BANDS = ["under_13", "13_to_15", "16_plus"] as const;
 export type ChildAgeBand = (typeof CHILD_AGE_BANDS)[number];
 
-// path (a) = the parent sets an existing email + password for the child;
-// path (b) = request a provisioned Google Workspace address. Unit 2 only
-// records the CHOICE; the credential specifics land in Unit 4 (a) / Unit 5 (b).
-export const CREDENTIAL_CHOICES = ["existing_credential", "provision_workspace"] as const;
-export type CredentialChoice = (typeof CREDENTIAL_CHOICES)[number];
-
+// (Slice B U15) The former `credentialChoice` path selector is GONE from START:
+// every child is created the one username+password way (U14), so START no longer
+// records a choice. The field is dropped from the schema entirely, and — under
+// `.strict()` — an in-flight FP client that still sends it is now REFUSED as an
+// unknown key (the FP client is reconciled in the same unit).
 const signupSchema = z
   .object({
     parentName: z.string().trim().min(1).max(120),
@@ -73,7 +72,6 @@ const signupSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
     jurisdiction: z.string().trim().min(2).max(100),
-    credentialChoice: z.enum(CREDENTIAL_CHOICES),
   })
   .strict();
 

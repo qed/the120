@@ -155,6 +155,15 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
     this.preds.push((r) => typeof r[col] === "string" && (r[col] as string).startsWith(prefix));
     return this;
   }
+  // Case-insensitive prefix match — the U12 child-core username pre-seed reads
+  // `.ilike("fp_username", "<base>%")` to build its taken-set.
+  ilike(col: string, pattern: string): this {
+    const prefix = (pattern.endsWith("%") ? pattern.slice(0, -1) : pattern).toLowerCase();
+    this.preds.push(
+      (r) => typeof r[col] === "string" && (r[col] as string).toLowerCase().startsWith(prefix)
+    );
+    return this;
+  }
   order(col: string, opts?: { ascending?: boolean }): this {
     this.orderKey = { col, asc: opts?.ascending ?? true };
     return this;

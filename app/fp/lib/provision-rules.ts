@@ -106,6 +106,30 @@ export function studentNameMatches(dbFirstName: string, typedName: string): bool
   return a.length > 0 && a === b;
 }
 
+/* --------------------------------------------------------- username matching */
+
+/**
+ * Whether a child's stored `fp_username` matches the (already-normalized,
+ * lowercase) identifier the child typed — the First Profit login resolution key
+ * from Slice B Unit 13 onward (the /fp Path student sign-in still resolves by
+ * NAME via studentNameMatches above; only the cross-origin FP child login moved
+ * to usernames). CASE-INSENSITIVE, matching the U12 `lower(fp_username)` unique
+ * index: the DB stores a lowercase `^[a-z0-9]+$` handle and the caller lowercases
+ * the typed identifier, so both fold the same way and the namespaces cannot drift.
+ *
+ * FAILS CLOSED on a null / empty stored username: a child with no fp_username has
+ * nothing to type, so they can NEVER be resolved by username — this is the
+ * no-match that keeps a not-yet-backfilled child (or one minted by another
+ * product before it got a username) from being reachable via the login lookup.
+ */
+export function childUsernameMatches(
+  dbUsername: string | null | undefined,
+  normalizedIdentifier: string
+): boolean {
+  if (!dbUsername || !normalizedIdentifier) return false;
+  return dbUsername.toLowerCase() === normalizedIdentifier;
+}
+
 /* -------------------------------------------------------- password strength */
 
 export const STUDENT_PASSWORD_MIN_LENGTH = 10;
@@ -213,13 +237,17 @@ export function isParentOfFamily(grants: readonly RoleGrant[], familyId: string)
 
 /* --------------------------------------------------------- sign-in lookup */
 
-/** A sign-in candidate: one provisioned student whose roster name matched. */
+/** A sign-in candidate: one provisioned student resolved from the profiles⋈children
+ *  join. `firstName` still drives the player-profile display seed; `username` is the
+ *  U13 First Profit login resolution key (`children.fp_username`), NULL for a child
+ *  not yet backfilled — the /fp name path ignores it, the FP login path matches on it. */
 export type SignInCandidate = {
   profileId: string;
   userId: string;
   childId: string;
   familyId: string;
   firstName: string;
+  username: string | null;
 };
 
 /**
@@ -260,12 +288,20 @@ export function parseCandidateRow(row: {
   if (child === null || typeof child !== "object") return null;
   const firstName = (child as { first_name?: unknown }).first_name;
   if (typeof firstName !== "string") return null;
+  // fp_username is OPTIONAL on the row: a child not yet backfilled (U12) has NULL,
+  // and the /fp name-path select does not request the column at all. A missing or
+  // non-string value narrows to null (an unmatchable username), NEVER a dropped
+  // row — a null username is a valid, provisioned student who simply cannot be
+  // resolved by the FP username login.
+  const rawUsername = (child as { fp_username?: unknown }).fp_username;
+  const username = typeof rawUsername === "string" ? rawUsername : null;
   return {
     profileId: row.id,
     userId: row.user_id,
     childId: row.child_id,
     familyId: row.family_id,
     firstName,
+    username,
   };
 }
 

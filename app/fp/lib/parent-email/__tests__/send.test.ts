@@ -44,7 +44,7 @@ afterEach(() => sendEmailMock.mockClear());
 describe("sendSignupRecap suppression", () => {
   const base = {
     parentId: "u1",
-    children: [{ firstName: "Kai", loginPath: "existing_credential" as const }],
+    children: [{ firstName: "Kai", username: "kai" }],
     signInUrl: "https://firstprofit.school",
     resetUrl: "https://firstprofit.school/reset",
   };

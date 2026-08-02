@@ -1,14 +1,19 @@
 /**
- * /api/fp/signup/child — First Profit CHILD CREATION, paths (a) AND (b) (Slice B
- * Units 4/5; R12, R9, R13). The AUTHENTICATED cross-origin POST the SPA makes
- * after the parent has verified their email AND recorded consent: it carries the
- * parent's Bearer access token (obtained from /api/fp/signup/verify, Rev 1), the
- * child input, `credentialChoice`, an optional child password (path a), and the
- * attemptId, and mints the child (roster row + auth account + path_student_profiles
- * mapping + FP player profile), consent-gated. `credentialChoice ===
- * 'provision_workspace'` mints no `.invalid` account — it enqueues + drives the
- * Google Workspace provisioning machinery (real users.insert gated off during the
- * build) and uses the provisioned Supabase identity.
+ * /api/fp/signup/child — First Profit CHILD CREATION, the SINGLE username+password
+ * path (Slice B Unit 14; R12, R9). The AUTHENTICATED cross-origin POST the SPA
+ * makes after the parent has verified their email AND recorded consent: it carries
+ * the parent's Bearer access token (obtained from /api/fp/signup/verify, Rev 1),
+ * the child's first name, the parent-set child password, and the attemptId, and
+ * mints the child (roster row + globally-unique fp_username + `.invalid` auth
+ * account + path_student_profiles mapping + FP player profile), consent-gated. The
+ * child then signs in with their username (U13).
+ *
+ * (Slice B U14) The former `credentialChoice` path selector and the path-b
+ * Google Workspace provisioning branch are GONE from child creation: every child
+ * takes the one path above. The provisioning machinery stays in the repo for the
+ * future firstprofit.school email piece but is no longer wired here. As of U15 the
+ * FP client no longer sends `credentialChoice`; the schema still `.strip()`s any
+ * stray unknown key defensively rather than 401-refusing an old in-flight caller.
  *
  * CORS MIRROR of /api/fp/login + ../route.ts + ../verify/route.ts: OPTIONS 204
  * with the echoed origin, 403 for a bad Origin, one generic 401 for EVERY
@@ -21,7 +26,6 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
-import { provisionFpChildInline } from "@/app/lib/funnel/provision-deps";
 import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
 import {
   checkAndRecordRateLimit,
@@ -53,14 +57,16 @@ const childSchema = z
     // Optional: FP captures an age band, not a grade. Accepted as a number or a
     // numeric string; the core coerces it through the funnel gradeVerdict guard.
     childGrade: z.union([z.number(), z.string().max(4)]).optional(),
-    // R12 path selector. Absent = path (a), preserving Unit 4's contract for any
-    // caller that predates this field.
-    credentialChoice: z.enum(["existing_credential", "provision_workspace"]).optional(),
-    // Required for path (a); optional for path (b), whose credential is the
-    // provisioned Workspace account (the core skips the password floor there).
-    childPassword: z.string().min(1).max(200).optional(),
+    // (Slice B U14) REQUIRED — the parent-set child password. The core validates
+    // it against the R29 student floor. The former path-b optionality is gone.
+    childPassword: z.string().min(1).max(200),
   })
-  .strict();
+  // .strip() (the zod default), NOT .strict(): the canonical body is now
+  // `{ attemptId, childFirstName, childPassword, childGrade? }`. As of U15 the FP
+  // client no longer sends `credentialChoice`; strip stays as a defensive default
+  // so a stray unknown key from an old in-flight caller is dropped, not 401'd. No
+  // path branches on it anymore.
+  .strip();
 
 function corsJsonHeaders(origin: string): Record<string, string> {
   return {
@@ -159,11 +165,6 @@ export async function POST(req: Request): Promise<Response> {
         }
         return { ok: true, userId: res.data.user.id };
       },
-      // Path (b): enqueue + drive the Workspace provisioning machinery inline.
-      // The real users.insert is gated OFF here (GOOGLE_WORKSPACE_SA_KEY absent →
-      // parks pending after the Supabase identity leg) for the whole Slice B
-      // build; the one live acceptance run is Unit 11.
-      provisionWorkspace: ({ childId }) => provisionFpChildInline(childId, `fp-child:${childId}`),
       deleteAuthUser: async (userId) => {
         const res = await admin.auth.admin.deleteUser(userId);
         if (res.error) {
@@ -177,7 +178,6 @@ export async function POST(req: Request): Promise<Response> {
     const result = await createChild(deps, {
       attemptId: data.attemptId,
       parentToken: token,
-      credentialChoice: data.credentialChoice,
       firstName: data.childFirstName,
       grade: data.childGrade,
       childPassword: data.childPassword,
@@ -202,12 +202,13 @@ export async function POST(req: Request): Promise<Response> {
       const who = await supabaseParentToken(token).auth.getUser();
       const parentId = who.data?.user?.id;
       if (parentId) {
-        const child: RecapChild =
-          data.credentialChoice === "provision_workspace"
-            ? // Path b: the mailbox is provisioned asynchronously (gated off in
-              // this build → pending); the recap says the address is on its way.
-              { firstName: data.childFirstName, loginPath: "provision_workspace", provisionPending: true }
-            : { firstName: data.childFirstName, loginPath: "existing_credential" };
+        // The recap tells the parent the child's USERNAME (U13 login key). The mint
+        // just claimed it and threads it back on the result (U15) — no extra read.
+        // Best-effort: an absent username (idempotent replay) falls back to an empty
+        // string, which the pure builder renders as a graceful "the username you were
+        // shown" line rather than blocking the (already-successful) mint's recap.
+        const username = result.username ?? "";
+        const child: RecapChild = { firstName: data.childFirstName, username };
         const recap = await sendSignupRecap(admin, {
           parentId,
           children: [child],
@@ -224,8 +225,15 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
+    // Surface the generated fp_username (U15) so the FP confirmation can show the
+    // parent the login key. Absent only on an idempotent replay (empty string).
     return new Response(
-      JSON.stringify({ ok: true, status: "child_created", childId: result.childId }),
+      JSON.stringify({
+        ok: true,
+        status: "child_created",
+        childId: result.childId,
+        username: result.username ?? "",
+      }),
       { status: 200, headers }
     );
   } catch (err) {

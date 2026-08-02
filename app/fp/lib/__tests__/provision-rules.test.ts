@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildStudentCreateUserPayload,
   buildStudentGrants,
+  childUsernameMatches,
   deriveStudentEmail,
   isParentOfFamily,
   normalizeStudentName,
@@ -233,23 +234,37 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
     user_id: "user-1",
     child_id: "child-1",
     family_id: "fam-1",
-    children: { first_name: "Maya" },
+    children: { first_name: "Maya", fp_username: "maya" },
   };
 
-  it("parses a well-formed row (object embed)", () => {
+  it("parses a well-formed row (object embed), carrying fp_username", () => {
     expect(parseCandidateRow(valid)).toEqual({
       profileId: "prof-1",
       userId: "user-1",
       childId: "child-1",
       familyId: "fam-1",
       firstName: "Maya",
+      username: "maya",
     });
   });
 
+  it("narrows a missing / non-string fp_username to null — a valid, unmatchable row", () => {
+    // The /fp name path never selects the column (absent → null); a not-yet-
+    // backfilled child has a NULL handle. Either way the row survives as a
+    // candidate that simply cannot be resolved by username.
+    expect(parseCandidateRow({ ...valid, children: { first_name: "Maya" } })?.username).toBeNull();
+    expect(
+      parseCandidateRow({ ...valid, children: { first_name: "Maya", fp_username: null } })?.username
+    ).toBeNull();
+    expect(
+      parseCandidateRow({ ...valid, children: { first_name: "Maya", fp_username: 42 } })?.username
+    ).toBeNull();
+  });
+
   it("tolerates PostgREST's single-element-array embed shape", () => {
-    expect(parseCandidateRow({ ...valid, children: [{ first_name: "Maya" }] })).toEqual(
-      parseCandidateRow(valid)
-    );
+    expect(
+      parseCandidateRow({ ...valid, children: [{ first_name: "Maya", fp_username: "maya" }] })
+    ).toEqual(parseCandidateRow(valid));
   });
 
   it("DROPS a row with a missing or ambiguous embed — never guesses", () => {
@@ -266,6 +281,37 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
     expect(parseCandidateRow({ ...valid, id: 7 })).toBeNull();
     expect(parseCandidateRow({ ...valid, family_id: undefined })).toBeNull();
     expect(parseCandidateRow({ ...valid, children: { first_name: 42 } })).toBeNull();
+  });
+});
+
+describe("childUsernameMatches — case-insensitive FP login resolution (U13)", () => {
+  it("matches a stored lowercase handle against the normalized identifier", () => {
+    expect(childUsernameMatches("alex", "alex")).toBe(true);
+    // The route lowercases the typed identifier before calling; a stored handle
+    // is always lowercase (the CHECK), so both fold to the same namespace.
+    expect(childUsernameMatches("alex", "alex")).toBe(true);
+  });
+
+  it("folds case on BOTH sides (defensive) so `Alex` and `alex` resolve alike", () => {
+    // Even if a stored value were mixed-case, lower() on both keeps resolution
+    // aligned with the `lower(fp_username)` unique index.
+    expect(childUsernameMatches("Alex", "alex")).toBe(true);
+    expect(childUsernameMatches("ALEX", "alex")).toBe(true);
+  });
+
+  it("does NOT match a different username", () => {
+    expect(childUsernameMatches("alex", "maya")).toBe(false);
+    expect(childUsernameMatches("alex2", "alex")).toBe(false);
+  });
+
+  it("FAILS CLOSED on a null / undefined / empty stored username (nothing to type)", () => {
+    expect(childUsernameMatches(null, "alex")).toBe(false);
+    expect(childUsernameMatches(undefined, "alex")).toBe(false);
+    expect(childUsernameMatches("", "alex")).toBe(false);
+  });
+
+  it("FAILS CLOSED on an empty identifier — never resolves a blank onto a real child", () => {
+    expect(childUsernameMatches("alex", "")).toBe(false);
   });
 });
 

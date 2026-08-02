@@ -17,29 +17,43 @@
  *     to the child's network, not Vercel's egress IP. Tokens ride the JSON
  *     body under Cache-Control: no-store; the SPA adopts them via setSession.
  *   - ONE 401 refusal, byte-identical for every reason (bad password, unknown
- *     name, email-shaped identifier, non-child account, rate-limited, outage)
- *     — no status or copy oracle. 403 only for a disallowed Origin.
+ *     username, email-shaped / malformed-shape identifier, non-child account,
+ *     rate-limited, outage) — no status or copy oracle. 403 only for a
+ *     disallowed Origin.
  *   - Child gate: a successful auth that does not resolve to a children row
  *     via path_student_profiles has its JUST-MINTED session revoked SCOPED
  *     (admin.signOut(access_token, 'local') — never a global sign-out, which
  *     would let anyone holding, say, a staff password weaponize this endpoint
  *     as a remote force-logout of every device).
  *
- * Timing honesty (accepted, same posture as /fp): the candidate scan performs
- * 0–5 /token round-trips depending on name matches — response TIMING can
- * differ between a name with zero candidates and one with several. Response
- * SHAPE and side effects do not.
+ * Non-enumerating in BOTH body AND timing for valid-shape usernames: a known
+ * username and an unknown one each pay exactly ONE /token round-trip. A real
+ * match signs in against the child's derived identity; a no-match performs one
+ * DUMMY signInWithPassword against a throwaway, non-resolvable `.invalid`
+ * address (which always fails and mutates nothing) before the same generic
+ * refusal — so "valid username, no match" ≈ "valid username, wrong password" in
+ * timing as well as shape/side effects. The username's global uniqueness caps a
+ * match at one auth call, so the dummy exactly equalizes the empty-candidate
+ * case. (The /fp Path name-login retains the lower-value name-existence timing
+ * oracle; out of scope here.)
+ *
+ * Scoped honesty for the PRE-DB refusals (malformed / email-shaped / invalid
+ * shape / rate-limited): those short-circuit before any auth call and reflect
+ * only the attacker's own input — never account existence — so they are not
+ * equalized and need not be.
  *
  * NEVER log the password or tokens.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
+  childUsernameMatches,
   deriveStudentEmail,
   MAX_SIGN_IN_CANDIDATES,
   parseCandidateRow,
-  studentNameMatches,
   type SignInCandidate,
 } from "@/app/fp/lib/provision-rules";
 import {
@@ -135,6 +149,11 @@ export async function POST(req: Request): Promise<Response> {
     const parsed = parseLoginRequest(body);
     if (!parsed.ok) return refuse("malformed_request");
 
+    // The identifier is the child's USERNAME (Slice B U13). classifyIdentifier
+    // normalizes it to the stored lowercase `^[a-z0-9]+$` convention and refuses
+    // an empty / email-shaped / malformed-shape value EARLY as the same generic
+    // refusal (no format oracle). `classified.normalized` is the username lookup
+    // key — the DB namespace it resolves against, and the rate-limit bucket key.
     const classified = classifyIdentifier(parsed.identifier);
     if (classified.kind === "refuse") return refuse(classified.reason);
 
@@ -162,12 +181,14 @@ export async function POST(req: Request): Promise<Response> {
 
     const admin = supabaseAdmin();
 
-    // Candidate scan — same posture as signInStudent (full scan, symmetric JS
-    // normalization, deterministic order, max 5). The normalized-name column +
-    // index is tracked pre-public-launch carry-forward work, not Slice A's.
+    // Candidate scan — full scan, deterministic order, then resolve by USERNAME
+    // in JS (symmetric lowercase folding via childUsernameMatches, matching the
+    // U12 case-insensitive `lower(fp_username)` unique index). fp_username is
+    // globally unique, so at most ONE row matches — the multi-candidate cap stays
+    // for structural parity with /fp sign-in but a username can never fan out.
     const res = await admin
       .from("path_student_profiles")
-      .select("id, user_id, child_id, family_id, children!inner(first_name)")
+      .select("id, user_id, child_id, family_id, children!inner(first_name, fp_username)")
       .order("created_at", { ascending: true });
     if (res.error) {
       console.error(`[fp/login] candidate load failed: ${res.error.message}`);
@@ -189,7 +210,19 @@ export async function POST(req: Request): Promise<Response> {
         );
         continue;
       }
-      if (studentNameMatches(candidate.firstName, parsed.identifier)) candidates.push(candidate);
+      // Resolve by username, not name. A child whose fp_username is null never
+      // matches — they have nothing to type — which is the intended no-match, not
+      // an error. LOGIN-TIME LAZY-FILL WAS DESCOPED (whole-branch review): this
+      // route deliberately does NOT mint a username on the fly. It is chicken-and-
+      // egg — the child logs in BY typing their username, so one who lacks a
+      // username has nothing to type that a lazy fill could hang off of. A
+      // null-fp_username child therefore stays unloginable until a handle is
+      // minted for them out-of-band: RE-RUN `fp:backfill-usernames --apply` (it is
+      // idempotent) to sweep children created by other products (funnel / FW /
+      // Path) after the initial backfill. The durable follow-up (not built here)
+      // is a children-INSERT auto-username trigger so every new child is born
+      // loginable — see app/fp/lib/fp-username-rules.ts mintUsername header.
+      if (childUsernameMatches(candidate.username, classified.normalized)) candidates.push(candidate);
       if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
     }
 
@@ -204,6 +237,40 @@ export async function POST(req: Request): Promise<Response> {
         global: { headers: { "x-forwarded-for": ip } },
       }
     );
+
+    // Constant-work path (U13 review): a valid-shape username that matched NO
+    // child would otherwise skip the loop below and refuse WITHOUT any auth call
+    // — a timing oracle separating "no such username" (zero round-trips) from
+    // "wrong password" (one round-trip), enumerating which fp_username handles
+    // exist. Close it by paying the SAME one auth round-trip here: a single dummy
+    // signInWithPassword against a throwaway `.invalid` identity derived from a
+    // fresh random UUID. That address can never resolve to a real user, so the
+    // call can never succeed and mutates nothing; the result is discarded. Outage
+    // handling mirrors the real candidate loop — a 5xx/429/network fault is not a
+    // guess, so it releases the provisional strikes and refuses generically.
+    if (candidates.length === 0) {
+      try {
+        const dummy = await authClient.auth.signInWithPassword({
+          email: deriveStudentEmail(randomUUID()),
+          password: parsed.password,
+        });
+        if (dummy.error && classifyAuthError(dummy.error) === "outage") {
+          console.error(`[fp/login] dummy auth outage: ${dummy.error.message}`);
+          releaseStrikes();
+          return refuse("outage");
+        }
+        // Expected result is invalid_credentials (no such user) — discard it and
+        // fall through to the one generic refusal below.
+      } catch (err) {
+        console.error(
+          `[fp/login] dummy auth call threw: ${err instanceof Error ? err.message : String(err)}`
+        );
+        if (classifyAuthError(err) === "outage") {
+          releaseStrikes();
+          return refuse("outage");
+        }
+      }
+    }
 
     for (const candidate of candidates) {
       // A wrong password and an AUTH OUTAGE must NOT be treated alike. Supabase
@@ -313,8 +380,11 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    // Unknown name (empty candidate set) and wrong password land here together:
-    // strike already recorded at the gate, one body, indistinguishable outside.
+    // Unknown username (empty candidate set, after its equalizing dummy auth
+    // call above) and wrong password land here together: strike already recorded
+    // at the gate, one body, and now one matched auth round-trip apiece —
+    // indistinguishable outside in shape AND timing. No oracle separates "no such
+    // username" from "wrong password".
     return refuse("bad_credentials");
   } catch (err) {
     // Any unexpected throw collapses into the one generic refusal — never a

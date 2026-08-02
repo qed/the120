@@ -10,44 +10,35 @@ import {
 /* ─────────────────────────────────────────────────── R26 recap builder */
 
 describe("buildSignupRecap", () => {
-  it("renders path-a login guidance (name + password) and the sign-in + reset links", () => {
+  it("renders the single username+password login guidance and the sign-in + reset links", () => {
     const out = buildSignupRecap({
       parentFirstName: "Dana",
-      children: [{ firstName: "Kai", loginPath: "existing_credential" }],
+      children: [{ firstName: "Kai", username: "kai" }],
       signInUrl: "https://firstprofit.school",
       resetUrl: "https://firstprofit.school/reset",
     });
     expect(out.subject).toBe("Your child's First Profit account is ready");
     expect(out.text).toContain("Hi Dana,");
-    expect(out.text).toContain("Kai signs in with the name and password you chose");
+    expect(out.text).toContain("Kai signs in with the username kai and the password you set.");
     expect(out.text).toContain("https://firstprofit.school");
     expect(out.text).toContain("https://firstprofit.school/reset");
     expect(out.html).toContain("Open First Profit");
   });
 
-  it("renders path-b ready address and path-b pending differently", () => {
-    const ready = buildSignupRecap({
-      children: [
-        { firstName: "Mira", loginPath: "provision_workspace", provisionedEmail: "mira@the120.school" },
-      ],
+  it("falls back gracefully when the username is blank (never on the happy path)", () => {
+    const out = buildSignupRecap({
+      children: [{ firstName: "Mira", username: "" }],
       signInUrl: "https://firstprofit.school",
     });
-    expect(ready.text).toContain("mira@the120.school");
-
-    const pending = buildSignupRecap({
-      children: [{ firstName: "Mira", loginPath: "provision_workspace", provisionPending: true }],
-      signInUrl: "https://firstprofit.school",
-    });
-    expect(pending.text).toContain("still being set up");
-    expect(pending.text).toContain("as soon as it is ready");
+    expect(out.text).toContain("Mira signs in with the username you were shown and the password you set.");
   });
 
   it("pluralizes for multiple children and falls back to a neutral greeting", () => {
     const out = buildSignupRecap({
       parentFirstName: "  ",
       children: [
-        { firstName: "A", loginPath: "existing_credential" },
-        { firstName: "B", loginPath: "existing_credential" },
+        { firstName: "A", username: "a" },
+        { firstName: "B", username: "b" },
       ],
       signInUrl: "https://firstprofit.school",
     });
@@ -59,7 +50,7 @@ describe("buildSignupRecap", () => {
   it("escapes HTML in the html part but leaves the text part literal", () => {
     const out = buildSignupRecap({
       parentFirstName: 'Bo<b>"',
-      children: [{ firstName: "A&B", loginPath: "existing_credential" }],
+      children: [{ firstName: "A&B", username: "ab" }],
       signInUrl: "https://firstprofit.school",
     });
     expect(out.html).toContain("Bo&lt;b&gt;");
@@ -71,7 +62,7 @@ describe("buildSignupRecap", () => {
 
   it("has no em dashes", () => {
     const out = buildSignupRecap({
-      children: [{ firstName: "Kai", loginPath: "existing_credential" }],
+      children: [{ firstName: "Kai", username: "kai" }],
       signInUrl: "https://firstprofit.school",
       resetUrl: "https://firstprofit.school/reset",
     });
@@ -81,7 +72,7 @@ describe("buildSignupRecap", () => {
 
   it("subject is header-safe (no CR/LF injection)", () => {
     const out = buildSignupRecap({
-      children: [{ firstName: "Kai", loginPath: "existing_credential" }],
+      children: [{ firstName: "Kai", username: "kai" }],
       signInUrl: "https://firstprofit.school",
     });
     expect(out.subject).not.toMatch(/[\r\n]/);

@@ -88,10 +88,14 @@ type Cfg = {
   capError?: boolean;
   childInsertError?: boolean;
   // (U12) fp_username: existing usernames the admin pre-seed read returns, and
-  // how many of the FIRST parent child-inserts should fail with a 23505 (the
-  // partial-unique index firing) before one succeeds.
+  // how many of the FIRST service-role fp_username CLAIMS (admin updates of the
+  // child row) should fail with a 23505 (the case-insensitive unique index
+  // firing) before one succeeds.
   existingUsernames?: string[];
   usernameConflictInserts?: number;
+  // (U12) the admin fp_username claim returns a hard, non-23505 error (e.g. the
+  // trigger's 42501, or a PostgREST outage) → child-core compensates the child.
+  usernameClaimHardError?: boolean;
   claimRows?: unknown[]; // consentGate CAS result
   claimError?: boolean; // consentGate CAS errors → gate 'outage'
   existingRows?: unknown[]; // consentGate classify result
@@ -133,7 +137,7 @@ function build(cfg: Cfg = {}) {
   // compensation lookup-by-child_id models the real "inserted but save-unseeded"
   // strand: the row exists even though ensurePlayerProfile returned no profileId.
   const seededProfiles = new Set<string>();
-  let childInsertAttempts = 0;
+  let usernameClaimAttempts = 0; // (U12) admin fp_username claim attempts (23505 sim)
 
   const handle = (s: State): Result => {
     // ---- parent-token client ----
@@ -146,13 +150,9 @@ function build(cfg: Cfg = {}) {
         }
         if (s.op === "insert") {
           if (cfg.childInsertError) return { data: null, error: { message: "child insert boom" } };
-          childInsertAttempts += 1;
-          // Simulate the partial-unique fp_username index rejecting the first N
-          // attempts (a concurrent create grabbed the handle) → child-core
-          // re-picks the next suffix and retries.
-          if (childInsertAttempts <= (cfg.usernameConflictInserts ?? 0)) {
-            return { data: null, error: { code: "23505", message: "duplicate key value" } };
-          }
+          // (U12 review fix) The parent-token insert NO LONGER carries fp_username
+          // — that write is service-role-only (blocked for parents by trigger), so
+          // this insert always succeeds and never simulates a username 23505.
           return { data: { id: "child1" }, error: null };
         }
       }
@@ -230,6 +230,20 @@ function build(cfg: Cfg = {}) {
           data: (cfg.existingUsernames ?? []).map((u) => ({ fp_username: u })),
           error: null,
         };
+      }
+      // (U12 review fix) The SERVICE-ROLE fp_username claim — an admin update of
+      // the just-created child row. Simulate the case-insensitive unique index
+      // rejecting the first N claims (a concurrent writer grabbed the handle) →
+      // child-core re-picks the next suffix and retries.
+      if (s.op === "update") {
+        usernameClaimAttempts += 1;
+        if (cfg.usernameClaimHardError) {
+          return { data: null, error: { code: "42501", message: "fp_username is server-managed" } };
+        }
+        if (usernameClaimAttempts <= (cfg.usernameConflictInserts ?? 0)) {
+          return { data: null, error: { code: "23505", message: "duplicate key value" } };
+        }
+        return { data: { id: "child1" }, error: null };
       }
       return { error: null }; // compensation delete (admin)
     }
@@ -596,43 +610,68 @@ describe("createChild — attempt-advance is non-fatal", () => {
 
 const childInserts = (calls: State[]) =>
   calls.filter((c) => c.client === "parent" && c.table === "children" && c.op === "insert");
+// (U12 review fix) fp_username is claimed by a SERVICE-ROLE admin UPDATE of the
+// child row, never on the parent insert — the parent RLS write is trigger-blocked.
+const usernameClaims = (calls: State[]) =>
+  calls.filter((c) => c.client === "admin" && c.table === "children" && c.op === "update");
 
-describe("createChild — U12 fp_username claimed at child insert", () => {
-  it("the child insert carries a folded/slugged fp_username derived from the first name", async () => {
+describe("createChild — U12 fp_username claimed via service-role admin write", () => {
+  it("the parent child insert carries NO fp_username; the username is claimed by a SERVICE-ROLE admin update", async () => {
     const { deps, calls } = build();
     const res = await createChild(deps, input);
     expect(res.ok).toBe(true);
     const ins = childInserts(calls);
     expect(ins).toHaveLength(1);
+    // The parent-token insert must never name fp_username (the RLS `with check`
+    // pins values not columns; the trigger blocks a parent write of it).
+    expect(ins[0]?.row).not.toHaveProperty("fp_username");
+    // The username is claimed on the child via the service-role admin client.
     // "Dana" folds/slugs to "dana"; first child of the name gets the clean handle.
-    expect(ins[0]?.row?.fp_username).toBe("dana");
+    const claims = usernameClaims(calls);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]?.row?.fp_username).toBe("dana");
+    expect(claims[0]?.filters?.id).toBe("child1");
   });
 
   it("a pre-seeded existing username pushes the new child onto the next suffix (global uniqueness)", async () => {
     const { deps, calls } = build({ existingUsernames: ["dana"] });
     const res = await createChild(deps, input);
     expect(res.ok).toBe(true);
-    expect(childInserts(calls)[0]?.row?.fp_username).toBe("dana2");
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("dana2");
   });
 
-  it("23505 on the first insert → re-pick the next suffix and retry; the child is created", async () => {
+  it("23505 on the first claim → re-pick the next suffix and retry; the child keeps its row", async () => {
     const { deps, calls } = build({ usernameConflictInserts: 1 });
     const res = await createChild(deps, input);
     expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
-    const ins = childInserts(calls);
-    // Two insert attempts: the first (dana) conflicted, the second (dana2) won.
-    expect(ins).toHaveLength(2);
-    expect(ins[0]?.row?.fp_username).toBe("dana");
-    expect(ins[1]?.row?.fp_username).toBe("dana2");
-    // No compensation — a conflicting insert commits no row.
+    // The parent inserts the child exactly once; the retry is on the admin claim.
+    expect(childInserts(calls)).toHaveLength(1);
+    const claims = usernameClaims(calls);
+    // Two claim attempts: the first (dana) conflicted, the second (dana2) won.
+    expect(claims).toHaveLength(2);
+    expect(claims[0]?.row?.fp_username).toBe("dana");
+    expect(claims[1]?.row?.fp_username).toBe("dana2");
+    // The child was claimed successfully — no compensation.
     expect(del(calls, "admin", "children")).toBe(false);
   });
 
-  it("persistent 23505 beyond the retry bound → outage, nothing stranded", async () => {
+  it("persistent 23505 beyond the retry bound → outage AND the username-less child is COMPENSATED (never stranded without a handle)", async () => {
     const { deps, calls } = build({ usernameConflictInserts: 99 });
     expect(await createChild(deps, input)).toEqual({ ok: false, reason: "outage" });
-    // Every attempt conflicted (no row committed), so there is nothing to delete.
-    expect(del(calls, "admin", "children")).toBe(false);
+    // The child row WAS inserted (before the claim), so it must be torn down.
+    expect(insert(calls, "parent", "children")).toBe(true);
+    expect(del(calls, "admin", "children")).toBe(true);
+    // Nothing downstream of the claim ran.
+    expect(insert(calls, "admin", "path_student_profiles")).toBe(false);
+  });
+
+  it("a hard (non-23505) claim error — e.g. the trigger's 42501 — also compensates the child and returns outage", async () => {
+    const { deps, calls } = build({ usernameClaimHardError: true });
+    expect(await createChild(deps, input)).toEqual({ ok: false, reason: "outage" });
+    // The child was inserted then torn down; no retry loop on a hard error.
+    expect(insert(calls, "parent", "children")).toBe(true);
+    expect(usernameClaims(calls)).toHaveLength(1);
+    expect(del(calls, "admin", "children")).toBe(true);
     expect(insert(calls, "admin", "path_student_profiles")).toBe(false);
   });
 
@@ -640,7 +679,7 @@ describe("createChild — U12 fp_username claimed at child insert", () => {
     const { deps, calls } = build();
     const res = await createChild(deps, { ...input, firstName: "🙂🙂" });
     expect(res.ok).toBe(true);
-    expect(childInserts(calls)[0]?.row?.fp_username).toBe("student");
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("student");
   });
 });
 

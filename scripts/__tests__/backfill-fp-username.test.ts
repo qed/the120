@@ -5,6 +5,12 @@ import {
   type BackfillDb,
   type MissingChild,
 } from "../backfill-fp-username-core";
+// Importing the ENTRYPOINT module (not just -core) is the loadability proof: if
+// its dep chain ever transitively pulled in `server-only`/next, this import would
+// crash the suite exactly as `tsx` would (docs/solutions/build-issues/
+// a-standalone-script-...-die-at-load-run-the-entrypoint). The entrypoint guards
+// its own main() so this import does NOT fire a real run.
+import { makeDb, runBackfill } from "../backfill-fp-username";
 
 /**
  * Backfill core (Slice B Unit 12) against an in-memory fake — no real DB. Proves
@@ -21,10 +27,12 @@ type Row = { id: string; first_name: string; fp_username: string | null };
 function fakeDb(rows: Row[]) {
   const store = rows.map((r) => ({ ...r }));
   const pageMissingCalls: Array<{ afterId: string | null; limit: number }> = [];
+  const pageUsernamesCalls: Array<{ after: string | null; limit: number }> = [];
   let assignConflictOnce: string | null = null; // username that 23505s exactly once
 
   const db: BackfillDb = {
     async pageUsernames(after, limit) {
+      pageUsernamesCalls.push({ after, limit });
       const all = store
         .map((r) => r.fp_username)
         .filter((u): u is string => u !== null)
@@ -56,6 +64,7 @@ function fakeDb(rows: Row[]) {
     db,
     store,
     pageMissingCalls,
+    pageUsernamesCalls,
     setConflictOnce: (u: string) => {
       assignConflictOnce = u;
     },
@@ -166,6 +175,104 @@ describe("backfillUsernames — batching / paging", () => {
   it("rejects an out-of-range page size (guards the PostgREST 1000 cap)", async () => {
     const { db } = fakeDb(rows([["c1", "Alex", null]]));
     await expect(backfillUsernames(db, { apply: true, pageSize: 2000 })).rejects.toThrow(/out of range/);
+  });
+
+  it("seeds the taken-set across ALL username pages: a new same-base child is pushed past EVERY existing page (no seed truncation)", async () => {
+    // Three existing 'alex*' handles span TWO pages at pageSize 2 (["alex","alex2"]
+    // then ["alex3"]). A new NULL 'Alex' child must land on alex4 — proving the
+    // seed paged through the SECOND page. The tell that seeding (not the 23505
+    // re-pick) did the work is conflictsResolved === 0: had the seed truncated at
+    // page 1, the mint would have proposed alex3, hit the index, and needed a
+    // conflict re-pick. (Guards the seed-truncation regression the design prevents.)
+    const f = fakeDb(rows([
+      ["c1", "Alex", "alex"],
+      ["c2", "Alex", "alex2"],
+      ["c3", "Alex", "alex3"],
+      ["c4", "Alex", null],
+    ]));
+    const s = await backfillUsernames(f.db, { apply: true, pageSize: 2 });
+    expect(s.scanned).toBe(1); // only the NULL row
+    expect(f.store.find((r) => r.id === "c4")?.fp_username).toBe("alex4");
+    expect(s.conflictsResolved).toBe(0); // the seed prevented any index conflict
+    expect(s.suffixed).toBe(1);
+    // The username seed actually PAGED (more than one bounded read, cursor-advanced).
+    expect(f.pageUsernamesCalls.length).toBeGreaterThan(1);
+    expect(f.pageUsernamesCalls.every((c) => c.limit === 2)).toBe(true);
+  });
+});
+
+describe("backfillUsernames — concurrent-fill (already_filled) is benign, not an error", () => {
+  it("a row scanned as missing but whose guarded assign matches 0 rows (filled by a concurrent run) is counted skipped, never thrown", async () => {
+    // pageMissing surfaces c1 as still-NULL, but between the scan and our write a
+    // concurrent run filled it, so assign's `where fp_username is null` matches 0
+    // rows → outcome 'already_filled'. That is idempotency working, not a failure.
+    let missingServed = false;
+    const db: BackfillDb = {
+      async pageUsernames() {
+        return [];
+      },
+      async pageMissing() {
+        if (missingServed) return [];
+        missingServed = true;
+        return [{ id: "c1", firstName: "Alex" }];
+      },
+      async assign(): Promise<AssignOutcome> {
+        return { outcome: "already_filled" };
+      },
+    };
+    const s = await backfillUsernames(db, { apply: true });
+    expect(s.scanned).toBe(1);
+    expect(s.skipped).toBe(1);
+    expect(s.filled).toBe(0);
+  });
+});
+
+/* ----------------------------------- entrypoint loadability + wiring smoke */
+
+/** A minimal thenable Supabase-lite that answers only the two SELECT chains
+ *  `makeDb` issues (username page vs missing page, disambiguated by columns). No
+ *  network, no writes — enough to drive a dry-run through the real makeDb wiring. */
+function fakeSupabase(missing: Array<{ id: string; first_name: string }>) {
+  const from = () => {
+    let cols = "";
+    const b = {
+      select(c: string) {
+        cols = c;
+        return b;
+      },
+      not: () => b,
+      is: () => b,
+      gt: () => b,
+      order: () => b,
+      limit: () => b,
+      then(resolve: (v: { data: unknown; error: null }) => unknown) {
+        const data = cols.includes("first_name")
+          ? missing.map((m) => ({ id: m.id, first_name: m.first_name }))
+          : []; // no existing usernames to seed
+        return Promise.resolve({ data, error: null }).then(resolve);
+      },
+    };
+    return b;
+  };
+  return { from } as unknown as Parameters<typeof runBackfill>[0];
+}
+
+describe("backfill-fp-username ENTRYPOINT — loads and runs (dry-run wiring smoke)", () => {
+  it("the entrypoint module imported clean and runBackfill drives makeDb + the core end-to-end (dry-run: no writes)", async () => {
+    expect(typeof makeDb).toBe("function");
+    const lines: string[] = [];
+    const summary = await runBackfill(fakeSupabase([{ id: "c1", first_name: "Alex" }]), {
+      apply: false,
+      log: (l) => lines.push(l),
+    });
+    // The wiring executed: it scanned the missing child and reported what it WOULD
+    // fill, writing nothing (dry-run) — proving the entrypoint's dep chain is
+    // bundler-free (it loaded) AND its makeDb→core→report path runs.
+    expect(summary.apply).toBe(false);
+    expect(summary.scanned).toBe(1);
+    expect(summary.filled).toBe(1);
+    expect(summary.samples).toEqual([{ childId: "c1", username: "alex" }]);
+    expect(lines.join("\n")).toContain("DRY-RUN");
   });
 });
 

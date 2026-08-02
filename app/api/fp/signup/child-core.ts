@@ -70,12 +70,15 @@ import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 
 /**
- * How many times the child-row insert is re-attempted with a freshly-suffixed
- * username after a unique-index (23505) conflict on `children.fp_username`. A
- * concurrent create that grabbed our candidate first is the only realistic
- * cause; a handful of retries is plenty, and the numeric suffixer walks forward
- * deterministically (`alex` → `alex2` → …) each time. Exhausting it is an
- * `outage`, not a stranded child — nothing was inserted on a conflicting try.
+ * How many times the SERVICE-ROLE fp_username claim (an `admin` update of the
+ * just-created child row) is re-attempted with a freshly-suffixed username after
+ * a unique-index (23505) conflict on `children (lower(fp_username))`. A concurrent
+ * create that grabbed our candidate first is the only realistic cause; a handful
+ * of retries is plenty, and the numeric suffixer walks forward deterministically
+ * (`alex` → `alex2` → …) each time. Because the child row is inserted BEFORE the
+ * username is claimed (the username write is service-role-only — see step 5),
+ * exhausting the retries leaves a username-LESS child, so it is COMPENSATED (the
+ * child is deleted), never stranded.
  */
 export const MAX_USERNAME_INSERT_RETRIES = 5;
 
@@ -307,15 +310,44 @@ export async function createChild(
     //    insertChild shape (draft + entry applicant_state) so an FP-signup child
     //    is a normal draft roster row.
     //
-    //    (Slice B U12) The child gets a GLOBALLY-UNIQUE `fp_username` AT CREATION,
-    //    included in the insert (generate-before-insert is cleanest: a failed
-    //    username claim leaves no child to strand). Uniqueness is checked against
-    //    the whole `children.fp_username` space via the SERVICE-ROLE `admin`
-    //    client — the parent-token client can only SEE its own children under
-    //    RLS, so it cannot judge GLOBAL uniqueness; the partial-unique index is
-    //    the real arbiter and we CAS-retry on its 23505. The pre-seed is a
-    //    best-effort fast path that trims conflicts; a read error just means we
-    //    lean on the index + retry.
+    //    (Slice B U12 — SECURITY review fix) fp_username is DELIBERATELY NOT part
+    //    of this parent-token insert. The `children` RLS `with check (auth.uid()
+    //    = parent_id)` pins row VALUES not COLUMNS, so a parent could otherwise
+    //    write/squat fp_username over the GLOBAL login namespace (an enumeration
+    //    oracle + a login-resolution break). A DB trigger (migration
+    //    20260831120000) BLOCKS any non-service-role write of fp_username, so the
+    //    child row is inserted WITHOUT one here (RLS still enforces parent_id =
+    //    auth.uid()), and the username is claimed via the SERVICE-ROLE admin
+    //    client in step 5b — the only principal the trigger admits.
+    const insChild = await pc
+      .from("children")
+      .insert({
+        parent_id: parentId,
+        first_name: firstName,
+        grade,
+        status: "draft",
+        applicant_state: APPLICANT_ENTRY_STATE,
+      })
+      .select("id")
+      .single();
+    if (insChild.error || !insChild.data) {
+      console.error(`[fp/signup/child] child insert failed: ${insChild.error?.message ?? "no row"}`);
+      return { ok: false, reason: "outage" };
+    }
+    const childId = String((insChild.data as { id: unknown }).id);
+    // Track the child for compensation NOW — it exists before the username claim,
+    // so a failed claim (below) must be able to tear it down. No window may leave
+    // a permanently username-less child.
+    created.childId = childId;
+
+    // 5b. Claim a GLOBALLY-UNIQUE fp_username on the just-created child via the
+    //     SERVICE-ROLE `admin` client (the ONLY principal the trigger lets write
+    //     fp_username; the parent-token client is blocked). Uniqueness is
+    //     arbitrated by the case-insensitive partial-unique index, and we CAS-retry
+    //     on its 23505, re-picking the next suffix each time. The pre-seed taken-set
+    //     — read on `admin` so it spans the WHOLE children space (a parent-token
+    //     read sees only its own children under RLS) — is a best-effort fast path
+    //     that trims conflicts; a read error just leans on the index + retry.
     const taken = new Set<string>();
     // Seed the taken-set from existing usernames sharing this child's base. The
     // base is `mintUsername`'s own (empty predicate → attempt 1 → the bare base),
@@ -338,48 +370,45 @@ export async function createChild(
       }
     }
 
-    let childId: string | null = null;
+    let usernameClaimed = false;
     for (let attempt = 0; attempt < MAX_USERNAME_INSERT_RETRIES; attempt += 1) {
       const pick = mintUsername({ firstName, isTaken: (c) => taken.has(c) });
       if (!pick.ok) {
         console.error(`[fp/signup/child] username exhausted for attempt ${input.attemptId}`);
-        return { ok: false, reason: "outage" };
-      }
-      const insChild = await pc
-        .from("children")
-        .insert({
-          parent_id: parentId,
-          first_name: firstName,
-          grade,
-          status: "draft",
-          applicant_state: APPLICANT_ENTRY_STATE,
-          fp_username: pick.username,
-        })
-        .select("id")
-        .single();
-      if (!insChild.error && insChild.data) {
-        childId = String((insChild.data as { id: unknown }).id);
         break;
       }
-      // 23505 = the partial-unique index on fp_username fired (a concurrent
-      // create grabbed this handle first). Mark it taken and re-pick the next
-      // suffix; the failed insert committed no row, so there is nothing to
-      // compensate. Any OTHER insert error is a genuine outage.
-      const code = (insChild.error as { code?: unknown } | null)?.code;
+      const claim = await admin
+        .from("children")
+        .update({ fp_username: pick.username })
+        .eq("id", childId)
+        .select("id")
+        .single();
+      if (!claim.error && claim.data) {
+        usernameClaimed = true;
+        break;
+      }
+      // 23505 = the case-insensitive partial-unique index fired (a concurrent
+      // writer grabbed this handle first). Mark it taken and re-pick the next
+      // suffix; the row keeps its NULL fp_username, so a retry is clean. Any OTHER
+      // error breaks out to the compensating unwind below.
+      const code = (claim.error as { code?: unknown } | null)?.code;
       if (code === "23505") {
         taken.add(pick.username.toLowerCase());
         continue;
       }
-      console.error(`[fp/signup/child] child insert failed: ${insChild.error?.message ?? "no row"}`);
-      return { ok: false, reason: "outage" };
+      console.error(`[fp/signup/child] fp_username claim failed: ${claim.error?.message ?? "no row"}`);
+      break;
     }
-    if (!childId) {
+    if (!usernameClaimed) {
+      // The child row is durably inserted but never got a username (retries
+      // exhausted, or a hard claim error). A username-less child must never
+      // survive — COMPENSATE it (delete) rather than strand it.
       console.error(
-        `[fp/signup/child] child insert exhausted ${MAX_USERNAME_INSERT_RETRIES} username retries for attempt ${input.attemptId}`
+        `[fp/signup/child] fp_username claim exhausted/failed for child ${childId} (attempt ${input.attemptId}) — compensating`
       );
+      await compensate("username-claim");
       return { ok: false, reason: "outage" };
     }
-    created.childId = childId;
 
     // 6. CONSENT GATE — atomically claim the active consent for THIS child. This
     //    is the mint gate: nothing below runs without a valid, matching consent.

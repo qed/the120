@@ -23,6 +23,8 @@
  *   AFTER the human applies that migration at the gate.
  */
 
+import { fileURLToPath } from "node:url";
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { loadSupabaseEnv } from "./load-env";
@@ -30,11 +32,12 @@ import {
   backfillUsernames,
   type AssignOutcome,
   type BackfillDb,
+  type BackfillSummary,
 } from "./backfill-fp-username-core";
 
 const PAGE_SIZE = 500; // ≤ the PostgREST 1000-row cap; keyset-paged.
 
-function makeDb(db: SupabaseClient): BackfillDb {
+export function makeDb(db: SupabaseClient): BackfillDb {
   return {
     async pageUsernames(after, limit) {
       let q = db
@@ -84,22 +87,31 @@ function makeDb(db: SupabaseClient): BackfillDb {
   };
 }
 
-async function main(): Promise<void> {
-  const apply = process.argv.includes("--apply");
-  const { url, serviceRoleKey } = loadSupabaseEnv();
-  const db = createClient(url, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  console.log(
-    apply
+/**
+ * Run the backfill over an INJECTED Supabase client and print the summary. Split
+ * out of `main` so the wiring (makeDb + the core + the report) is exercised by an
+ * in-process smoke test against a fake client — the entrypoint's LOADABILITY and
+ * its dep chain are otherwise unproven, because the suite imports only the pure
+ * -core (see docs/solutions/build-issues/a-standalone-script-...-run-the-entrypoint).
+ * A `log` sink is injectable so the smoke test can capture output silently.
+ */
+export async function runBackfill(
+  db: SupabaseClient,
+  opts: { apply: boolean; pageSize?: number; log?: (line: string) => void }
+): Promise<BackfillSummary> {
+  const log = opts.log ?? console.log;
+  log(
+    opts.apply
       ? "fp:backfill-usernames — APPLY mode: writing fp_username to every still-NULL child.\n"
       : "fp:backfill-usernames — DRY-RUN (default): no writes. Pass --apply to write.\n"
   );
 
-  const summary = await backfillUsernames(makeDb(db), { apply, pageSize: PAGE_SIZE });
+  const summary = await backfillUsernames(makeDb(db), {
+    apply: opts.apply,
+    pageSize: opts.pageSize ?? PAGE_SIZE,
+  });
 
-  console.log(
+  log(
     [
       "",
       `  mode:               ${summary.apply ? "APPLY" : "DRY-RUN"}`,
@@ -117,13 +129,30 @@ async function main(): Promise<void> {
   );
 
   if (!summary.apply) {
-    console.log("DRY-RUN complete — re-run with --apply to write these usernames.");
+    log("DRY-RUN complete — re-run with --apply to write these usernames.");
   } else {
-    console.log(`APPLY complete — ${summary.filled} usernames written, ${summary.skipped} already present.`);
+    log(`APPLY complete — ${summary.filled} usernames written, ${summary.skipped} already present.`);
   }
+  return summary;
 }
 
-main().catch((err) => {
-  console.error("[backfill-fp-username] FAILED:", err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  const apply = process.argv.includes("--apply");
+  const { url, serviceRoleKey } = loadSupabaseEnv();
+  const db = createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  await runBackfill(db, { apply });
+}
+
+// Run main ONLY when executed as the entrypoint (`tsx scripts/backfill-fp-username.ts`),
+// not when a test imports this module for the loadability smoke — otherwise the
+// import would fire main(), hit loadSupabaseEnv(), and process.exit on missing env.
+const invokedDirectly =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error("[backfill-fp-username] FAILED:", err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

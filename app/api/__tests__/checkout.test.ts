@@ -11,9 +11,11 @@ import {
   NEXT_STEPS,
   POLICY_CLAIMS_FOR_PETER,
   REFUND_POLICY,
+  fulfilVerdict,
   nextStepsReachable,
   policyVersionAtLeast,
   resolveOrigin,
+  webhookPlan,
 } from "@/app/lib/funnel/deposit-rules";
 import {
   buildCheckoutSessionParams,
@@ -302,6 +304,58 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
       message: REFUND_POLICY.text,
     });
     expect(degraded.params.custom_text?.submit).toEqual({ message: REFUND_POLICY.text });
+  });
+});
+
+describe("direct reserve end-to-end — a real-flow child through gate → webhook → gate (U2)", () => {
+  // The fixture-derivation lesson (docs/solutions 2026-08-01): the child is
+  // shaped exactly as the CREATION paths write it (FP signup and funnel
+  // add-child both insert status='draft', applicant_state='added'), and the
+  // deposit list is a stateful store later steps read from — never a
+  // hand-seeded "offered" row.
+  it("draft+added child: gate opens → fulfil writes → gate closes → replay is a noop", () => {
+    const child = { status: "draft", applicantState: "added" };
+    const deposits: { status: string; refunded_at: string | null }[] = [];
+
+    // 1. The gate the route consults is OPEN pre-decision (the shortcut's point).
+    expect(canReserveSeatForChild({ ...child, deposits })).toBe(true);
+
+    // 2. Stripe completes with payment_status paid → the webhook plans a fulfil.
+    expect(webhookPlan({ type: "checkout.session.completed", paymentStatus: "paid" })).toEqual({
+      kind: "fulfil",
+    });
+
+    // 3. No existing row → write; the store now holds the paid deposit.
+    expect(fulfilVerdict(deposits[0] ?? null)).toBe("write");
+    deposits.push({ status: "paid", refunded_at: null });
+
+    // 4. The SAME gate, reading the store the webhook wrote, is now closed.
+    expect(canReserveSeatForChild({ ...child, deposits })).toBe(false);
+
+    // 5. A redelivered completed event replays as a noop — never a second write.
+    expect(fulfilVerdict(deposits[0])).toBe("replay_noop");
+  });
+
+  it("the trigger fixes ride along: first pick lands while paid; first submission still seeds (migration scan)", () => {
+    // The U2 adversarial review's two cascades, pinned against the migration
+    // text: (1) the group lock guards only CHANGES of an already-set group
+    // (an early payer's FIRST pick must land); (2) the seeding trigger's
+    // live-paid skip exempts the first submission and first pick (a
+    // pay-then-submit family must not lose its child_reviews row forever).
+    const sql = read("supabase/migrations/20260902120000_direct_reserve_trigger_fixes.sql");
+    expect(sql).toContain("coalesce(OLD.group_slug, '') <> ''"); // lock: changes only
+    expect(sql).toContain("(OLD.status = 'draft' and NEW.status = 'submitted')");
+    expect(sql).toContain("coalesce(OLD.group_slug, '') = ''"); // seed: first pick exempt
+  });
+
+  it("the route no longer carries a draft-block — the gate is the only status arbiter (wiring scan)", () => {
+    const src = read("app/api/checkout/route.ts");
+    expect(src).not.toContain('child.status === "draft"');
+    expect(src).not.toContain("Submit the application before reserving a seat.");
+    // The checks that MUST survive the removal, still present:
+    expect(src).toContain("canReserveSeatForChild");
+    expect(src).toContain('d.status === "pending"');
+    expect(src).toContain("getSeatsRemainingStrict");
   });
 });
 

@@ -16,20 +16,22 @@ import {
  * Auth: the parent's Supabase session cookie (browser) or a Bearer token (API).
  * RLS guarantees the child lookup only succeeds for the parent's own children.
  *
- * Approval gate (R11): checkout opens only at `offered` or later — the same
- * predicate family the dashboard CTA uses, enforced here so a direct API call
- * can't pay early. `children.status` is safe to gate on: only the staff-side
- * move_candidate RPC can advance it (parents are limited to draft → submitted
- * by the DB status guard).
- *
- * Since funnel U1 the gate is `canReserveSeatForChild`, which also refuses a
- * funnel child whose `applicant_state` sits before `offered` (or at
- * `waitlisted` — F7 closes checkout at zero seats). For every pre-funnel
- * child `applicant_state` is NULL and the verdict is bit-identical to the old
- * `canReserveSeat` — pinned by a regression sweep in
- * app/lib/__tests__/funnel-applicant-rules.test.ts. This is the SERVER gate;
- * it must adopt funnel awareness first, because a UI-only check is a request
- * away from being bypassed.
+ * Direct reserve (2026-08-02, nav-deposit-shortcut U2): the offered-or-later
+ * approval gate is GONE — a parent may pay the refundable deposit for any of
+ * their children before a staff decision; the refund clause covers the
+ * decline case, and staff confirm every early deposit (spot or refund) by
+ * the Sept 19 kickoff. The gate is still `canReserveSeatForChild`, and it is
+ * still the SERVER gate (a UI-only check is a request away from being
+ * bypassed) — but its refusals are now exactly the money-integrity and
+ * standing-staff-decision set: a live paid deposit, a pending (clearing)
+ * debit, and `waitlisted` on EITHER column (F7: a waitlist decision closes
+ * checkout whichever column carries it; unknown applicant states still fail
+ * closed). The old "submit the application first" draft-block is removed
+ * with the gate — its rationale (application precedes payment) is exactly
+ * the sequencing this feature inverts. Sweeps in
+ * app/lib/__tests__/funnel-applicant-rules.test.ts pin the new verdicts;
+ * the STAFF offer-email gates keep the offered-or-later ladder
+ * (canReserveSeat, untouched — see app/dashboard/data.ts).
  */
 export async function POST(req: Request) {
   try {
@@ -84,11 +86,6 @@ export async function POST(req: Request) {
       .eq("id", childId)
       .maybeSingle();
     if (!child) return NextResponse.json({ error: "Child not found" }, { status: 404 });
-    if (child.status === "draft")
-      return NextResponse.json(
-        { error: "Submit the application before reserving a seat." },
-        { status: 400 }
-      );
 
     // F7: zero seats closes checkout and routes to the waitlist. STRICT
     // read: an unavailable count refuses rather than guessing (a stale

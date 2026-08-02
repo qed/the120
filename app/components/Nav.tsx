@@ -9,6 +9,12 @@ import Cta from "./Cta";
 import StartCta from "./StartCta";
 import { supabaseBrowser } from "@/app/lib/supabase/client";
 import { nav as defaultLinks, isActiveNav } from "@/app/lib/site";
+import {
+  NAV_RESERVE_CTA,
+  showReserveCta,
+  type NavChildRow,
+  type NavDepositRow,
+} from "@/app/lib/nav-reserve-rules";
 
 /**
  * Floating card nav (handoff): white, radius 14px, floats 18px from the top
@@ -23,6 +29,12 @@ import { nav as defaultLinks, isActiveNav } from "@/app/lib/site";
 export default function Nav() {
   const [open, setOpen] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  // Direct reserve (2026-08-02, U4): the rows behind the deposit CTA.
+  // null = not yet resolved → the CTA stays hidden (no-flash convention);
+  // the pure predicate decides everything else, and the label/href come
+  // only from NAV_RESERVE_CTA.
+  const [reserveChildren, setReserveChildren] = useState<NavChildRow[] | null>(null);
+  const [reserveDeposits, setReserveDeposits] = useState<NavDepositRow[] | null>(null);
   const items = [...defaultLinks];
   const pathname = usePathname();
 
@@ -38,6 +50,42 @@ export default function Nav() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // RLS-scoped browser-client reads (the dashboard store's pattern) — never
+  // a service-role query for nav convenience. Re-runs on auth change AND on
+  // navigation, so a just-paid parent loses the CTA on their next page move
+  // (accepted staleness window, pilot scale). Signed out → rows reset to
+  // null and the CTA hides.
+  useEffect(() => {
+    if (!signedIn) {
+      setReserveChildren(null);
+      setReserveDeposits(null);
+      return;
+    }
+    let cancelled = false;
+    const supabase = supabaseBrowser();
+    Promise.all([
+      supabase.from("children").select("id"),
+      supabase.from("deposits").select("child_id,status"),
+    ])
+      .then(([kids, deps]) => {
+        if (cancelled) return;
+        setReserveChildren((kids.data as NavChildRow[] | null) ?? null);
+        setReserveDeposits((deps.data as NavDepositRow[] | null) ?? null);
+      })
+      .catch(() => {
+        // Fail safe to hidden (null), never a stale carry-over from the
+        // previous route's rows — and no unhandled-rejection noise.
+        if (cancelled) return;
+        setReserveChildren(null);
+        setReserveDeposits(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, pathname]);
+
+  const showReserve = signedIn && showReserveCta(reserveChildren, reserveDeposits);
 
   useEffect(() => {
     if (!open) return;
@@ -87,7 +135,19 @@ export default function Nav() {
               );
             })}
             {signedIn ? (
-              <Cta href="/dashboard">My dashboard</Cta>
+              showReserve ? (
+                // Direct reserve (U4): the deposit CTA is the primary red
+                // action; My dashboard degrades to ghost beside it — never
+                // two adjacent solid-red buttons.
+                <>
+                  <Cta href="/dashboard" variant="ghost">
+                    My dashboard
+                  </Cta>
+                  <Cta href={NAV_RESERVE_CTA.href}>{NAV_RESERVE_CTA.label}</Cta>
+                </>
+              ) : (
+                <Cta href="/dashboard">My dashboard</Cta>
+              )
             ) : (
               <>
                 <Cta href="/dashboard" variant="ghost">
@@ -102,7 +162,13 @@ export default function Nav() {
           <span className="flex items-center gap-3 lg:hidden">
             <span className="hidden sm:inline-flex">
               {signedIn ? (
-                <Cta href="/dashboard">My dashboard</Cta>
+                // The single mobile-header slot goes to the deposit CTA when
+                // it applies; My dashboard stays reachable in the panel.
+                showReserve ? (
+                  <Cta href={NAV_RESERVE_CTA.href}>{NAV_RESERVE_CTA.label}</Cta>
+                ) : (
+                  <Cta href="/dashboard">My dashboard</Cta>
+                )
               ) : (
                 <StartCta source={"home"}/>
               )}
@@ -168,9 +234,20 @@ export default function Nav() {
                 })}
                 <div className="mt-5 flex flex-col gap-3">
                   {signedIn ? (
-                    <Cta href="/dashboard" className="w-full" onClick={close}>
-                      My dashboard
-                    </Cta>
+                    showReserve ? (
+                      <>
+                        <Cta href={NAV_RESERVE_CTA.href} className="w-full" onClick={close}>
+                          {NAV_RESERVE_CTA.label}
+                        </Cta>
+                        <Cta href="/dashboard" variant="ghost" className="w-full" onClick={close}>
+                          My dashboard
+                        </Cta>
+                      </>
+                    ) : (
+                      <Cta href="/dashboard" className="w-full" onClick={close}>
+                        My dashboard
+                      </Cta>
+                    )
                   ) : (
                     <>
                       <StartCta source={"home"} className="w-full" onClick={close}/>

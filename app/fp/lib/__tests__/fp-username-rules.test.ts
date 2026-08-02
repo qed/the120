@@ -25,12 +25,32 @@ describe("generateUsernameBase — fold + slug", () => {
     expect(generateUsernameBase("Weiß")).toEqual({ ok: true, base: "weiss" });
   });
 
-  it("levels internal separators to a single dash (Jean-Luc → jean-luc)", () => {
-    expect(generateUsernameBase("Jean Luc")).toEqual({ ok: true, base: "jean-luc" });
+  it("STRIPS internal separators for the username namespace (Jean Luc → jeanluc)", () => {
+    // The shared FW slugger levels separators to a DASH (jean-luc), valid for the
+    // .fw@ ADDRESS path; the username path strips them so the result stays inside
+    // `^[a-z0-9]+$` (the CHECK / index / login namespace). No dash survives.
+    expect(generateUsernameBase("Jean Luc")).toEqual({ ok: true, base: "jeanluc" });
+  });
+
+  it("STRIPS a hyphen too (Anna-Lee → annalee), not a dash", () => {
+    expect(generateUsernameBase("Anna-Lee")).toEqual({ ok: true, base: "annalee" });
+  });
+
+  it("collapses a multi-word name to alnum-only (Mary Jane → maryjane)", () => {
+    expect(generateUsernameBase("Mary Jane")).toEqual({ ok: true, base: "maryjane" });
   });
 
   it("drops elision marks (O'Brien → obrien)", () => {
     expect(generateUsernameBase("O'Brien")).toEqual({ ok: true, base: "obrien" });
+  });
+
+  it("fails closed (verdict, not throw) on a name that is ONLY separators/punctuation", () => {
+    // buildFwLocalBaseFromFirstName folds "- -" to nothing (throws → underivable);
+    // even a name that folds to a bare dash strips to "" here → underivable, so
+    // mintUsername applies the `student` fallback rather than minting an empty base.
+    const v = generateUsernameBase("- -");
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("underivable");
   });
 
   it("fails closed (verdict, not throw) on an empty first name", () => {
@@ -120,5 +140,72 @@ describe("mintUsername — generate-if-missing (fallback on unfoldable)", () => 
       username: "alex2",
       usedFallback: false,
     });
+  });
+});
+
+/* ------------------------------------------------------------- SEAM regression */
+
+describe("generator === CHECK === unique index === login namespace (^[a-z0-9]+$)", () => {
+  // The exact regexes the generator's output must satisfy, replicated from their
+  // sources so a drift in EITHER end trips this test (the per-unit generator tests
+  // above never checked output against the DB CHECK or the login regex — that gap
+  // let the dash-leveling P0 through):
+  //   - login  app/api/fp/login/login-rules.ts   `const USERNAME_FORMAT = /^[a-z0-9]+$/`
+  //   - storage supabase/migrations/20260831120000_fp_children_username.sql
+  //             CHECK (fp_username ~ '^[a-z0-9]+$') + unique index lower(fp_username)
+  const LOGIN_USERNAME_FORMAT = /^[a-z0-9]+$/;
+  const DB_CHECK_FORMAT = /^[a-z0-9]+$/;
+
+  // A spread that previously produced a dash (multi-word, hyphenated), an elision
+  // mark (apostrophe), a diacritic (accented), and leading/internal/trailing
+  // whitespace — every separator class the FW slugger levels to a dash.
+  const names = ["Mary Jane", "Anna-Lee", "O'Brien", "José", "Lily  Rose  ", "Jean-Luc van der Berg"];
+
+  it("generateUsernameBase output ALWAYS matches BOTH the login regex and the DB CHECK", () => {
+    for (const name of names) {
+      const v = generateUsernameBase(name);
+      expect(v.ok).toBe(true);
+      if (v.ok) {
+        expect(v.base).toMatch(LOGIN_USERNAME_FORMAT);
+        expect(v.base).toMatch(DB_CHECK_FORMAT);
+      }
+    }
+  });
+
+  it("mintUsername output (base AND final username, incl. suffix) ALWAYS matches both regexes", () => {
+    // Suffix the first pick so the collision path is exercised too — a numeric
+    // suffix must not break `^[a-z0-9]+$` either.
+    for (const name of names) {
+      const taken = new Set<string>();
+      for (let i = 0; i < 3; i += 1) {
+        const mint = mintUsername({ firstName: name, isTaken: (c) => taken.has(c) });
+        expect(mint.ok).toBe(true);
+        if (mint.ok) {
+          expect(mint.username).toMatch(LOGIN_USERNAME_FORMAT);
+          expect(mint.username).toMatch(DB_CHECK_FORMAT);
+          expect(mint.base).toMatch(LOGIN_USERNAME_FORMAT);
+          taken.add(mint.username.toLowerCase());
+        }
+      }
+    }
+  });
+
+  it("the specific P0 cases land on their alnum-only handles", () => {
+    expect(mintUsername({ firstName: "Mary Jane", isTaken: () => false })).toMatchObject({
+      ok: true,
+      username: "maryjane",
+      usedFallback: false,
+    });
+    expect(mintUsername({ firstName: "Anna-Lee", isTaken: () => false })).toMatchObject({
+      ok: true,
+      username: "annalee",
+      usedFallback: false,
+    });
+  });
+
+  it("a separators-only first name falls back to `student` (never an empty/invalid handle)", () => {
+    const mint = mintUsername({ firstName: "- -", isTaken: () => false });
+    expect(mint).toMatchObject({ ok: true, username: USERNAME_FALLBACK_BASE, usedFallback: true });
+    if (mint.ok) expect(mint.username).toMatch(LOGIN_USERNAME_FORMAT);
   });
 });

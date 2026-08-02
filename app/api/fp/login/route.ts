@@ -210,9 +210,18 @@ export async function POST(req: Request): Promise<Response> {
         );
         continue;
       }
-      // Resolve by username, not name. A child whose fp_username is null (not yet
-      // backfilled, or minted by another product before U12) never matches — they
-      // have nothing to type — which is the intended no-match, not an error.
+      // Resolve by username, not name. A child whose fp_username is null never
+      // matches — they have nothing to type — which is the intended no-match, not
+      // an error. LOGIN-TIME LAZY-FILL WAS DESCOPED (whole-branch review): this
+      // route deliberately does NOT mint a username on the fly. It is chicken-and-
+      // egg — the child logs in BY typing their username, so one who lacks a
+      // username has nothing to type that a lazy fill could hang off of. A
+      // null-fp_username child therefore stays unloginable until a handle is
+      // minted for them out-of-band: RE-RUN `fp:backfill-usernames --apply` (it is
+      // idempotent) to sweep children created by other products (funnel / FW /
+      // Path) after the initial backfill. The durable follow-up (not built here)
+      // is a children-INSERT auto-username trigger so every new child is born
+      // loginable — see app/fp/lib/fp-username-rules.ts mintUsername header.
       if (childUsernameMatches(candidate.username, classified.normalized)) candidates.push(candidate);
       if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
     }

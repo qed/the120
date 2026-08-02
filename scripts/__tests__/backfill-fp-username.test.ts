@@ -148,6 +148,25 @@ describe("backfillUsernames — apply", () => {
     expect(store[0]?.fp_username).toBe("student");
   });
 
+  it("multi-word / hyphenated existing names backfill to dash-FREE `^[a-z0-9]+$` handles (no fail-loud abort) — the P0 seam", async () => {
+    // Pre-fix these folded to mary-jane / anna-lee, which the CHECK rejects (23514);
+    // the backfill's fail-loud on the first non-benign error would abort the whole
+    // run on the first existing dashed name. They must now backfill cleanly to
+    // alnum-only handles.
+    const { db, store } = fakeDb(rows([
+      ["c1", "Mary Jane", null],
+      ["c2", "Anna-Lee", null],
+      ["c3", "Lily  Rose  ", null],
+    ]));
+    const s = await backfillUsernames(db, { apply: true });
+    expect(s.filled).toBe(3);
+    expect(s.fallbacks).toBe(0);
+    expect(store.find((r) => r.id === "c1")?.fp_username).toBe("maryjane");
+    expect(store.find((r) => r.id === "c2")?.fp_username).toBe("annalee");
+    expect(store.find((r) => r.id === "c3")?.fp_username).toBe("lilyrose");
+    for (const r of store) expect(r.fp_username).toMatch(/^[a-z0-9]+$/);
+  });
+
   it("resolves a 23505 conflict by re-picking the next suffix", async () => {
     const f = fakeDb(rows([["c1", "Alex", null]]));
     f.setConflictOnce("alex"); // the index rejects 'alex' once

@@ -55,10 +55,34 @@ export type UsernameBaseVerdict =
  * genuinely empty / unfoldable first name — they choose a fallback instead.
  * Mirrors `deriveStudentLocalBaseFromFirstName`, kept separate so the username
  * vocabulary is not coupled to the deposit/address module.
+ *
+ * SEPARATOR STRIP (whole-branch review P0): `buildFwLocalBaseFromFirstName`
+ * LEVELS internal separators/punctuation to a DASH (`Mary Jane` → `mary-jane`,
+ * `Anna-Lee` → `anna-lee`) — valid for the FW/funnel `.fw@` ADDRESS path, where
+ * `first.last` separators are legitimate. But a USERNAME lives in a strictly
+ * `^[a-z0-9]+$` namespace: the storage CHECK (`children_fp_username_format`),
+ * the case-insensitive unique index, and login's `USERNAME_FORMAT` +
+ * `childUsernameMatches` ALL forbid a dash. A generated `mary-jane` would fail
+ * the CHECK (Postgres 23514) on write and be unclassifiable at login. So the
+ * username path — and ONLY it — strips every non-`[a-z0-9]` character AFTER the
+ * shared fold: `Mary Jane` → `maryjane`, `Anna-Lee` → `annalee`. The FW address
+ * deriver is untouched (dashes remain valid there). If nothing survives the
+ * strip (a name that was purely separators/punctuation), the verdict is
+ * `underivable` so `mintUsername` applies the `student`-base fallback. The net
+ * invariant: generator output === CHECK === unique index === login regex, all
+ * `^[a-z0-9]+$`.
  */
 export function generateUsernameBase(firstName: string): UsernameBaseVerdict {
   try {
-    return { ok: true, base: buildFwLocalBaseFromFirstName(firstName) };
+    const base = buildFwLocalBaseFromFirstName(firstName).replace(/[^a-z0-9]/g, "");
+    if (base.length === 0) {
+      return {
+        ok: false,
+        reason: "underivable",
+        detail: "first name has no [a-z0-9] characters after separator strip",
+      };
+    }
+    return { ok: true, base };
   } catch (err) {
     return {
       ok: false,
@@ -109,18 +133,28 @@ export type UsernameMint =
 /**
  * The shared "give this child a unique username" primitive — derive the base
  * from the first name, fall back to `student` when the name is unfoldable, then
- * suffix until free. This is the ONE function three callers share:
+ * suffix until free. This is the function BOTH real callers share:
  *
  *   - child-creation (child-core): assigns `fp_username` at insert, retrying on
  *     the unique-index conflict;
- *   - the backfill script: fills every existing child that lacks one;
- *   - **U13 (login-time lazy fill, NOT wired this unit):** a child created by
- *     ANY product (funnel / FW / Path) before U12 has no `fp_username`. When
- *     such a child first logs into First Profit, U13 will call THIS function
- *     (with an `isTaken` backed by a `children.fp_username` probe) to mint one
- *     on the spot, then write it under the same 23505-retry the other two use.
- *     U12 deliberately does not touch app/api/fp/login — the primitive is here,
- *     tested, ready; the wiring is U13's.
+ *   - the backfill script: fills every existing child that lacks one.
+ *
+ * LOGIN-TIME LAZY-FILL WAS DESCOPED (whole-branch review P2). An earlier header
+ * claimed a THIRD caller — "U13 login-time lazy fill" — that NEVER shipped: the
+ * login route (app/api/fp/login/route.ts) does no lazy fill, and a child whose
+ * `fp_username` is null simply never matches a typed username. It is
+ * CHICKEN-AND-EGG by construction: the child logs in BY typing their username,
+ * so a child who has no username has nothing to type that could trigger a fill —
+ * lazy-fill-on-login cannot mint the very handle the login is keyed on.
+ *
+ * CONSEQUENCE, stated plainly so it is not rediscovered as a bug: children
+ * created by OTHER products (funnel / FW / Path) AFTER the one-time backfill runs
+ * receive NO `fp_username` and therefore cannot log into First Profit until a
+ * handle is minted for them. The stopgap is to RE-RUN `fp:backfill-usernames
+ * --apply` (it is idempotent — fills only still-NULL rows). The DURABLE
+ * follow-up (NOT built here) is a `children`-INSERT auto-username trigger /
+ * server hook so every new child is born loginable; recommended as the next
+ * unit of this workstream.
  *
  * `isTaken` MUST reflect both the persisted usernames and everything the current
  * run has already issued, or two same-named children collide. The caller adds

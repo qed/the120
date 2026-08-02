@@ -649,6 +649,31 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
     expect(res.ok).toBe(true);
     expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("student");
   });
+
+  it("a MULTI-WORD first name mints a dash-FREE `^[a-z0-9]+$` handle (Mary Jane → maryjane, no 23514) — the P0 seam", async () => {
+    // Before the whole-branch fix the generator leveled the space to a dash
+    // (mary-jane), which the children_fp_username_format CHECK rejects with a 23514
+    // check_violation — a code child-core's retry loop does NOT handle (only 23505),
+    // so the child would be compensated/deleted and the login would 401. The claim
+    // must now carry the stripped handle and succeed on the FIRST attempt.
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "Mary Jane" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "maryjane" });
+    const claims = usernameClaims(calls);
+    // ONE claim (no 23514 retry — the handle is CHECK-valid on the first write) ...
+    expect(claims).toHaveLength(1);
+    expect(claims[0]?.row?.fp_username).toBe("maryjane");
+    expect(String(claims[0]?.row?.fp_username)).toMatch(/^[a-z0-9]+$/);
+    // ... and the child is NOT compensated.
+    expect(del(calls, "admin", "children")).toBe(false);
+  });
+
+  it("a hyphenated first name likewise mints a dash-free handle (Anna-Lee → annalee)", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, firstName: "Anna-Lee" });
+    expect(res.ok).toBe(true);
+    expect(usernameClaims(calls)[0]?.row?.fp_username).toBe("annalee");
+  });
 });
 
 /* --------------------------------------- U14: single-path (no credentialChoice) */

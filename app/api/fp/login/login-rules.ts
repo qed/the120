@@ -8,11 +8,15 @@
  * means).
  *
  * The posture this encodes:
- *   - Slice A ships the STUDENT-NAME path only. Email-shaped identifiers are
- *     classified `refuse` and fall into the same generic refusal as an unknown
- *     name — no email auth branch exists, and probing a derived `.invalid`
- *     address learns nothing. Slice B adds an email branch by extending
- *     `classifyIdentifier`, without reshaping the wire contract.
+ *   - Slice B Unit 13: the child logs in with their USERNAME (children.fp_username),
+ *     not their name. `classifyIdentifier` normalizes the typed identifier to the
+ *     stored lowercase `^[a-z0-9]+$` convention and, if it is not a valid username
+ *     shape, refuses it EARLY as the same generic refusal as an unknown username —
+ *     no format oracle leaks (the caller cannot tell "malformed" from "no such
+ *     user"). Email-shaped identifiers stay classified `refuse` and fall into that
+ *     same generic refusal — no email auth branch exists, and probing a derived
+ *     `.invalid` address learns nothing. Resolution by username happens in the
+ *     route against `children.fp_username`; this module only classifies + shapes.
  *   - ONE refusal. `shapeRefusal` takes a reason (for the caller's logs and
  *     tests) and deliberately ignores it: every refusal is the same 401 with a
  *     byte-identical body. 403 exists only for a disallowed Origin — which the
@@ -31,7 +35,7 @@
  */
 
 import { z } from "zod";
-import { normalizeStudentName, SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
 
 /* ----------------------------------------------------------- request parse */
 
@@ -54,19 +58,34 @@ export function parseLoginRequest(body: unknown): ParsedLoginRequest {
 /* ------------------------------------------------ identifier classification */
 
 export type IdentifierClassification =
-  | { kind: "name"; normalized: string }
-  | { kind: "refuse"; reason: "empty_identifier" | "email_identifier" };
+  | { kind: "username"; normalized: string }
+  | { kind: "refuse"; reason: "empty_identifier" | "email_identifier" | "invalid_username" };
 
 /**
- * Slice A: student names only. The `@` test runs on the NORMALIZED string so a
- * padded / unicode-fullwidth `@` cannot smuggle an email shape into the name
- * scan (NFKC folds U+FF20 to `@`).
+ * The stored username shape (U12): lowercase alphanumerics only. Matches the
+ * `children_fp_username_format` CHECK and the generator's output, so a valid
+ * typed identifier normalizes into exactly the DB namespace.
+ */
+const USERNAME_FORMAT = /^[a-z0-9]+$/;
+
+/**
+ * Slice B Unit 13: child USERNAMES. Normalize to the stored convention — NFKC
+ * fold (so a fullwidth `＠`/`Ａ` cannot smuggle a different shape past the guard),
+ * trim, lowercase — then classify:
+ *   - empty after trim            → `empty_identifier`
+ *   - contains `@` (email-shaped) → `email_identifier`
+ *   - not `^[a-z0-9]+$`           → `invalid_username`
+ * All three collapse to the SAME generic refusal in the route; the distinct
+ * reasons exist only for the caller's logs. Refusing a malformed shape EARLY
+ * (before any DB I/O) is deliberate and non-enumerating: it reveals nothing a
+ * not-found would not, and a username the child does not have is unguessable.
  */
 export function classifyIdentifier(identifier: string): IdentifierClassification {
-  const normalized = normalizeStudentName(identifier);
+  const normalized = identifier.normalize("NFKC").trim().toLowerCase();
   if (!normalized) return { kind: "refuse", reason: "empty_identifier" };
   if (normalized.includes("@")) return { kind: "refuse", reason: "email_identifier" };
-  return { kind: "name", normalized };
+  if (!USERNAME_FORMAT.test(normalized)) return { kind: "refuse", reason: "invalid_username" };
+  return { kind: "username", normalized };
 }
 
 /* --------------------------------------------------------- refusal shaping */
@@ -75,6 +94,7 @@ export type LoginRefusalReason =
   | "malformed_request"
   | "empty_identifier"
   | "email_identifier"
+  | "invalid_username"
   | "bad_credentials"
   | "not_child"
   | "rate_limited"

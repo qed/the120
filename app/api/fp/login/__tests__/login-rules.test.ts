@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   buildAllowedOrigins,
   checkOrigin,
@@ -46,18 +46,29 @@ describe("parseLoginRequest", () => {
 /* ------------------------------------------------- identifier classification */
 
 describe("classifyIdentifier", () => {
-  it("classifies a plain student name as the name-scan path", () => {
-    expect(classifyIdentifier("Maya")).toEqual({ kind: "name", normalized: "maya" });
+  it("classifies a plain username as the username-lookup path", () => {
+    expect(classifyIdentifier("alex")).toEqual({ kind: "username", normalized: "alex" });
+    expect(classifyIdentifier("maya2")).toEqual({ kind: "username", normalized: "maya2" });
   });
 
-  it("normalizes whitespace and case exactly like normalizeStudentName", () => {
-    expect(classifyIdentifier("  Maya   Rose ")).toEqual({
-      kind: "name",
-      normalized: "maya rose",
-    });
-    expect(classifyIdentifier("MAYA")).toEqual({ kind: "name", normalized: "maya" });
-    // NFKC: composed and decomposed accents classify identically.
-    expect(classifyIdentifier("Zoë")).toEqual(classifyIdentifier("Zoë"));
+  it("normalizes case + surrounding whitespace to the stored lowercase convention", () => {
+    // `Alex` and `alex` both resolve to the one stored lowercase handle (the U12
+    // `lower(fp_username)` unique index folds case, so login must too).
+    expect(classifyIdentifier("Alex")).toEqual({ kind: "username", normalized: "alex" });
+    expect(classifyIdentifier("ALEX")).toEqual({ kind: "username", normalized: "alex" });
+    expect(classifyIdentifier("  alex  ")).toEqual({ kind: "username", normalized: "alex" });
+  });
+
+  it("refuses a non-username shape (spaces, punctuation, non-ASCII) as invalid_username", () => {
+    // A name-shaped identifier is now a MALFORMED username: refused early, yet
+    // indistinguishable from a not-found at the wire (same generic refusal).
+    expect(classifyIdentifier("Maya Rose")).toEqual({ kind: "refuse", reason: "invalid_username" });
+    expect(classifyIdentifier("maya-rose")).toMatchObject({ reason: "invalid_username" });
+    expect(classifyIdentifier("maya_rose")).toMatchObject({ reason: "invalid_username" });
+    expect(classifyIdentifier("maya!")).toMatchObject({ reason: "invalid_username" });
+    // A non-ASCII letter (no NFKC compatibility mapping to ASCII) is not
+    // `^[a-z0-9]+$`, so an accented identifier is invalid_username too.
+    expect(classifyIdentifier("Zo\u00eb")).toMatchObject({ reason: "invalid_username" });
   });
 
   it("refuses an empty / whitespace-only identifier", () => {
@@ -65,13 +76,13 @@ describe("classifyIdentifier", () => {
     expect(classifyIdentifier("   ")).toEqual({ kind: "refuse", reason: "empty_identifier" });
   });
 
-  it("refuses email-shaped identifiers — Slice A has no email auth branch", () => {
+  it("refuses email-shaped identifiers (no email auth branch exists)", () => {
     expect(classifyIdentifier("kid@example.com")).toEqual({
       kind: "refuse",
       reason: "email_identifier",
     });
     // Including the synthetic derived student addresses: probing one must look
-    // exactly like an unknown name, never reach a scheme-revealing branch.
+    // exactly like an unknown username, never reach a scheme-revealing branch.
     expect(
       classifyIdentifier("s-1c9f2a00-0000-0000-0000-000000000000@students.the120.invalid")
     ).toEqual({ kind: "refuse", reason: "email_identifier" });
@@ -85,6 +96,7 @@ describe("shapeRefusal", () => {
     "malformed_request",
     "empty_identifier",
     "email_identifier",
+    "invalid_username",
     "bad_credentials",
     "not_child",
     "rate_limited",

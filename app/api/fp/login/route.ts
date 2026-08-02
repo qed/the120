@@ -17,8 +17,9 @@
  *     to the child's network, not Vercel's egress IP. Tokens ride the JSON
  *     body under Cache-Control: no-store; the SPA adopts them via setSession.
  *   - ONE 401 refusal, byte-identical for every reason (bad password, unknown
- *     name, email-shaped identifier, non-child account, rate-limited, outage)
- *     — no status or copy oracle. 403 only for a disallowed Origin.
+ *     username, email-shaped / malformed-shape identifier, non-child account,
+ *     rate-limited, outage) — no status or copy oracle. 403 only for a
+ *     disallowed Origin.
  *   - Child gate: a successful auth that does not resolve to a children row
  *     via path_student_profiles has its JUST-MINTED session revoked SCOPED
  *     (admin.signOut(access_token, 'local') — never a global sign-out, which
@@ -26,9 +27,9 @@
  *     as a remote force-logout of every device).
  *
  * Timing honesty (accepted, same posture as /fp): the candidate scan performs
- * 0–5 /token round-trips depending on name matches — response TIMING can
- * differ between a name with zero candidates and one with several. Response
- * SHAPE and side effects do not.
+ * 0–1 /token round-trips — a username is globally unique, so a known username
+ * costs one auth call and an unknown one costs none. Response TIMING can differ
+ * between the two; response SHAPE and side effects do not.
  *
  * NEVER log the password or tokens.
  */
@@ -36,10 +37,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
+  childUsernameMatches,
   deriveStudentEmail,
   MAX_SIGN_IN_CANDIDATES,
   parseCandidateRow,
-  studentNameMatches,
   type SignInCandidate,
 } from "@/app/fp/lib/provision-rules";
 import {
@@ -135,6 +136,11 @@ export async function POST(req: Request): Promise<Response> {
     const parsed = parseLoginRequest(body);
     if (!parsed.ok) return refuse("malformed_request");
 
+    // The identifier is the child's USERNAME (Slice B U13). classifyIdentifier
+    // normalizes it to the stored lowercase `^[a-z0-9]+$` convention and refuses
+    // an empty / email-shaped / malformed-shape value EARLY as the same generic
+    // refusal (no format oracle). `classified.normalized` is the username lookup
+    // key — the DB namespace it resolves against, and the rate-limit bucket key.
     const classified = classifyIdentifier(parsed.identifier);
     if (classified.kind === "refuse") return refuse(classified.reason);
 
@@ -162,12 +168,14 @@ export async function POST(req: Request): Promise<Response> {
 
     const admin = supabaseAdmin();
 
-    // Candidate scan — same posture as signInStudent (full scan, symmetric JS
-    // normalization, deterministic order, max 5). The normalized-name column +
-    // index is tracked pre-public-launch carry-forward work, not Slice A's.
+    // Candidate scan — full scan, deterministic order, then resolve by USERNAME
+    // in JS (symmetric lowercase folding via childUsernameMatches, matching the
+    // U12 case-insensitive `lower(fp_username)` unique index). fp_username is
+    // globally unique, so at most ONE row matches — the multi-candidate cap stays
+    // for structural parity with /fp sign-in but a username can never fan out.
     const res = await admin
       .from("path_student_profiles")
-      .select("id, user_id, child_id, family_id, children!inner(first_name)")
+      .select("id, user_id, child_id, family_id, children!inner(first_name, fp_username)")
       .order("created_at", { ascending: true });
     if (res.error) {
       console.error(`[fp/login] candidate load failed: ${res.error.message}`);
@@ -189,7 +197,10 @@ export async function POST(req: Request): Promise<Response> {
         );
         continue;
       }
-      if (studentNameMatches(candidate.firstName, parsed.identifier)) candidates.push(candidate);
+      // Resolve by username, not name. A child whose fp_username is null (not yet
+      // backfilled, or minted by another product before U12) never matches — they
+      // have nothing to type — which is the intended no-match, not an error.
+      if (childUsernameMatches(candidate.username, classified.normalized)) candidates.push(candidate);
       if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
     }
 
@@ -313,8 +324,9 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    // Unknown name (empty candidate set) and wrong password land here together:
-    // strike already recorded at the gate, one body, indistinguishable outside.
+    // Unknown username (empty candidate set) and wrong password land here
+    // together: strike already recorded at the gate, one body, indistinguishable
+    // outside — no oracle separates "no such username" from "wrong password".
     return refuse("bad_credentials");
   } catch (err) {
     // Any unexpected throw collapses into the one generic refusal — never a

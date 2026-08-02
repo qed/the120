@@ -252,17 +252,38 @@ describe("the offer bridge (the U13 critical: applicant_state must advance)", ()
   });
 });
 
-describe("the deposit gate (R49a: refused server-side before an offer)", () => {
-  it("the checkout predicate refuses every pre-offer funnel state and admits offered", () => {
-    for (const state of ["added", "project_created", "submitted", "in_review", "waitlisted"]) {
+describe("the deposit gate (direct reserve 2026-08-02) vs the STAFF offer gate (unchanged)", () => {
+  it("the checkout predicate admits every pre-offer funnel state; only waitlisted refuses", () => {
+    for (const state of ["added", "project_created", "submitted", "in_review"]) {
       expect(
         canReserveSeatForChild({ status: "submitted", applicantState: state, deposits: [] }),
         state
-      ).toBe(false);
+      ).toBe(true);
     }
+    expect(
+      canReserveSeatForChild({ status: "submitted", applicantState: "waitlisted", deposits: [] })
+    ).toBe(false);
     expect(
       canReserveSeatForChild({ status: "offered", applicantState: "offered", deposits: [] })
     ).toBe(true);
+  });
+
+  it("the STAFF offer-email gate keeps offered-or-later — a draft child is never sendable", () => {
+    // The deliberate split (nav-deposit-shortcut plan): relaxing the parent
+    // deposit gate must NOT leak into the offer-email gates, which still mean
+    // "staff approved this child". offerButtonState delegates to bare
+    // canReserveSeat, whose ladder is untouched.
+    for (const reviewStatus of ["draft", "submitted", "in_review"]) {
+      expect(
+        offerButtonState({
+          reviewStatus,
+          deposits: [],
+          effectiveParentEmail: "p@x.com",
+          offerSentAt: null,
+        }),
+        reviewStatus
+      ).toBe("not_offered");
+    }
   });
 
   it("a staff offer makes the CTA reachable: the button predicate flips from not_offered to sendable", () => {

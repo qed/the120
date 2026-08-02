@@ -62,8 +62,12 @@ describe("hasPaidDeposit (paid-banner derivation — must match the gate's)", ()
 
 describe("RESERVE_GATE_MESSAGE", () => {
   it("is the distinct non-retry rejection copy (client branches on it verbatim)", () => {
+    // Direct reserve (2026-08-02): the gate refuses only waitlisted children,
+    // so this is waitlist copy — never an "approval" promise, which would
+    // claim a step that no longer precedes payment.
     expect(RESERVE_GATE_MESSAGE).toBe(
-      "Your application is still under review — checkout opens once it's approved."
+      "The 120's seats are spoken for right now — your child is on the waitlist, and we'll email you the moment a spot opens."
     );
+    expect(RESERVE_GATE_MESSAGE).not.toMatch(/approv|under review/i);
   });
 });

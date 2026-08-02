@@ -132,34 +132,34 @@ export function parseApplicantState(
 }
 
 /**
- * The applicant-state half of the seat-deposit gate.
- *
- * `children.status` remains the authoritative gate (`canReserveSeat` in
- * app/dashboard/data.ts is unchanged); this is the SECOND condition a funnel
- * child must also satisfy, consulted through `canReserveSeatForChild`.
+ * The applicant-state half of the seat-deposit gate, consulted through
+ * `canReserveSeatForChild` — which since direct reserve (2026-08-02) no
+ * longer composes `canReserveSeat`: the offered-or-later status ladder
+ * survives as the STAFF offer-email predicate only, and the status column's
+ * lone parent-facing refusal is `waitlisted` (checked in
+ * `canReserveSeatForChild` itself).
  *
  * Three behaviours, each with its own signature — none of them the fallback's:
  *
- *   - **NULL → true.** Every child in production today has no
- *     `applicant_state`. Returning true is what makes this unit a no-op for
- *     them, and it is pinned by a regression test. A NULL child is gated by
- *     `children.status` exactly as it was before this column existed.
+ *   - **NULL → true.** Pre-funnel children have no `applicant_state`;
+ *     returning true leaves them gated only by the paid/pending and
+ *     status-waitlisted refusals, like every other child.
  *   - **Unknown string → false.** Fail closed, consistent with
  *     `parseApplicantState`.
  *   - **Known state → membership of the allow-set below.**
  *
- * The allow-set is `offered` and everything past it, NOT `offered` alone. A
- * refunded child sits at `deposited`/`enrolled` with no *live* paid deposit,
- * and `canReserveSeat` deliberately lets them pay again ("a candidate advanced
- * straight to `member` before paying is never locked out"). An `offered`-only
- * set would silently withdraw that. `waitlisted` is excluded: F7 closes
- * checkout at zero seats, and that is the whole mechanism.
+ * Direct reserve (2026-08-02, nav-deposit-shortcut): the allow-set is every
+ * rung EXCEPT `waitlisted` — derived by exclusion, not enumerated, so a
+ * future rung is reservable for free (the previous-state-class rule). The
+ * old offered-or-later allow-list was the approval gate this feature
+ * removes: a parent may now pay the refundable deposit at any point before
+ * a decision, and the refund clause covers the decline case. `waitlisted`
+ * stays excluded on BOTH columns (see `canReserveSeatForChild`): it is a
+ * standing staff decision, and F7 closes checkout at zero seats besides. A
+ * refunded child still re-pays (`deposited`/`enrolled` remain members).
  */
-export const APPLICANT_STATES_ALLOWING_RESERVE: readonly ApplicantState[] = [
-  "offered",
-  "deposited",
-  "enrolled",
-];
+export const APPLICANT_STATES_ALLOWING_RESERVE: readonly ApplicantState[] =
+  APPLICANT_STATES.filter((s) => s !== "waitlisted");
 
 export function applicantStateAllowsReserve(value: unknown): boolean {
   if (value === null || value === undefined) return true;

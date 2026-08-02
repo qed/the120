@@ -95,16 +95,20 @@ const liveFacts = (over: Partial<MergedFlowFacts> = {}): MergedFlowFacts => ({
 });
 
 describe("assembly audit — the swapped composites, one pinned fact each", () => {
-  it("offered card: the reserve block assembles exactly TWO pills — filled Reserve (button) + outlined Review (anchor)", () => {
+  it("offered card: the reserve block assembles TWO pills; the secondary-reserve twin adds ONE more button", () => {
     const app = read("app/dashboard/DashboardApp.tsx");
     const block = app.slice(
       app.indexOf("const renderReserveCta"),
       app.indexOf("// Auth gate:")
     );
     expect(block.length).toBeGreaterThan(0);
-    expect(block.match(/<button\b/g)).toHaveLength(1);
+    // renderReserveCta: filled Reserve (button) + outlined Review (anchor);
+    // renderSecondaryReserve (direct reserve 2026-08-02): one more button,
+    // no anchor — both share the ONE reserveSeat path.
+    expect(block.match(/<button\b/g)).toHaveLength(2);
     expect(block.match(/<a\b/g)).toHaveLength(1);
     expect(block).toContain("reviewPillClass");
+    expect(block.match(/reserveSeat\(c\.id\)/g)).toHaveLength(2);
   });
 
   it("dashboard entry points: the offered walk lands on the FIRST form step (R3: review from the top)", () => {

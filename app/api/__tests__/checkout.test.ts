@@ -306,9 +306,14 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
 });
 
 describe("the server gates", () => {
-  it("ownership refusal equals non-existent child (RLS answers both with no rows) — and pre-offer states refuse", () => {
+  it("ownership refusal equals non-existent child (RLS answers both with no rows) — and only waitlisted refuses", () => {
+    // Direct reserve (2026-08-02): pre-offer states pass the gate now — the
+    // refusals left are paid/pending and waitlisted on either column.
     expect(
       canReserveSeatForChild({ status: "submitted", applicantState: "in_review", deposits: [] })
+    ).toBe(true);
+    expect(
+      canReserveSeatForChild({ status: "submitted", applicantState: "waitlisted", deposits: [] })
     ).toBe(false);
     expect(
       canReserveSeatForChild({ status: "offered", applicantState: "offered", deposits: [] })

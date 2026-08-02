@@ -218,24 +218,26 @@ describe("parseApplicantState — fail closed, never coerce", () => {
   });
 });
 
-describe("the reserve gate (R52a, F7)", () => {
-  it("allows offered and everything past it, and nothing before", () => {
+describe("the reserve gate (direct reserve 2026-08-02; F7 waitlist survives)", () => {
+  it("allows every rung except waitlisted — the offered-or-later approval gate is gone", () => {
     const allowed = new Set<string>(APPLICANT_STATES_ALLOWING_RESERVE);
-    expect([...allowed].sort()).toEqual(["deposited", "enrolled", "offered"]);
+    expect([...allowed].sort()).toEqual(
+      [...APPLICANT_STATES].filter((s) => s !== "waitlisted").sort()
+    );
 
     for (const s of APPLICANT_STATES) {
       expect(applicantStateAllowsReserve(s), s).toBe(allowed.has(s));
     }
   });
 
-  it("refuses every pre-offer state", () => {
+  it("allows every pre-offer state — a parent may pay before any decision", () => {
     for (const s of [
       "added",
       "project_created",
       "submitted",
       "in_review",
     ] as const) {
-      expect(applicantStateAllowsReserve(s), s).toBe(false);
+      expect(applicantStateAllowsReserve(s), s).toBe(true);
     }
   });
 
@@ -262,7 +264,7 @@ describe("the reserve gate (R52a, F7)", () => {
   });
 });
 
-describe("canReserveSeatForChild — both columns, no regression for the old one", () => {
+describe("canReserveSeatForChild — direct reserve (2026-08-02), both columns still checked", () => {
   const paid = [{ status: "paid" }];
   const refunded = [{ status: "refunded" }];
   const none: { status: string }[] = [];
@@ -270,18 +272,23 @@ describe("canReserveSeatForChild — both columns, no regression for the old one
   const gate = (status: string, applicantState: string | null, deposits: { status: string }[]) =>
     canReserveSeatForChild({ status, applicantState, deposits });
 
-  it("is identical to canReserveSeat for every child with no applicant_state", () => {
-    // THE regression guarantee of this unit: nine children exist in production
-    // and none of them has an applicant_state. Swept over the whole seat
-    // vocabulary and all three deposit shapes rather than a named fixture.
+  it("no longer composes canReserveSeat: every NULL-state child except waitlisted/paid may reserve", () => {
+    // The direct-reserve inversion, swept over the whole seat vocabulary and
+    // all three deposit shapes. The OLD guarantee (bit-identical to
+    // canReserveSeat) is deliberately retired: the offered-or-later ladder was
+    // the approval gate this feature removes for parents. canReserveSeat
+    // itself is untouched — the staff offer-email gates still consume it
+    // (pinned in app/crm/__tests__/funnel-offer-rules.test.ts).
     for (const { id } of STATUS_FLOW) {
       for (const deposits of [none, paid, refunded]) {
-        expect(
-          gate(id, null, deposits),
-          `${id} / ${JSON.stringify(deposits)}`
-        ).toBe(canReserveSeat(id, deposits));
+        const expected = id !== "waitlisted" && !deposits.some((d) => d.status === "paid");
+        expect(gate(id, null, deposits), `${id} / ${JSON.stringify(deposits)}`).toBe(expected);
       }
     }
+    // The staff predicate keeps its offered-or-later semantics untouched.
+    expect(canReserveSeat("draft", none)).toBe(false);
+    expect(canReserveSeat("submitted", none)).toBe(false);
+    expect(canReserveSeat("offered", none)).toBe(true);
   });
 
   it("still opens for offered/member with no live paid deposit", () => {
@@ -303,18 +310,30 @@ describe("canReserveSeatForChild — both columns, no regression for the old one
     expect(gate("member", "enrolled", refunded)).toBe(true);
   });
 
-  it("refuses when either column refuses", () => {
-    // status says yes, applicant_state says no
-    expect(gate("offered", "in_review", none)).toBe(false);
+  it("refuses waitlisted on EITHER column — the fails-open-on-the-wrong-column trap", () => {
+    // The overlap trap the two-column signature exists for: `waitlisted` is a
+    // member of BOTH vocabularies, and a staff waitlist decision must close
+    // checkout whichever column carries it.
     expect(gate("offered", "waitlisted", none)).toBe(false);
-    // applicant_state says yes, status says no
-    expect(gate("draft", "offered", none)).toBe(false);
-    expect(gate("submitted", "offered", none)).toBe(false);
+    expect(gate("waitlisted", "offered", none)).toBe(false);
+    expect(gate("waitlisted", null, none)).toBe(false); // legacy staff-waitlisted child
   });
 
-  it("refuses an unknown value in either column", () => {
-    expect(gate("nonsense", "offered", none)).toBe(false);
+  it("pre-decision children now pass — the shortcut's whole point", () => {
+    expect(gate("draft", "added", none)).toBe(true); // FP/funnel child as created
+    expect(gate("draft", null, none)).toBe(true); // legacy dashboard child
+    expect(gate("submitted", "submitted", none)).toBe(true);
+    expect(gate("in_review", "in_review", none)).toBe(true);
+  });
+
+  it("refuses an unknown applicant_state (fail closed); unknown STATUS passes by design", () => {
+    // applicant_state keeps the closed vocabulary — a typo'd write must not
+    // open checkout. The status ladder no longer gates parents, so an unknown
+    // status no longer refuses; the deposit/waitlist refusals carry the
+    // invariant.
     expect(gate("offered", "nonsense", none)).toBe(false);
+    expect(gate("nonsense", "offered", none)).toBe(true);
+    expect(gate("nonsense", "offered", paid)).toBe(false);
   });
 
   it("is wired into the checkout route — the server gate, not just a module", () => {

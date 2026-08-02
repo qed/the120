@@ -11,9 +11,9 @@
  * (Slice B U14) The former `credentialChoice` path selector and the path-b
  * Google Workspace provisioning branch are GONE from child creation: every child
  * takes the one path above. The provisioning machinery stays in the repo for the
- * future firstprofit.school email piece but is no longer wired here. An incidental
- * `credentialChoice` from an in-flight caller is accepted-and-IGNORED (the schema
- * strips unknown keys) until the FP client is reconciled in U15.
+ * future firstprofit.school email piece but is no longer wired here. As of U15 the
+ * FP client no longer sends `credentialChoice`; the schema still `.strip()`s any
+ * stray unknown key defensively rather than 401-refusing an old in-flight caller.
  *
  * CORS MIRROR of /api/fp/login + ../route.ts + ../verify/route.ts: OPTIONS 204
  * with the echoed origin, 403 for a bad Origin, one generic 401 for EVERY
@@ -62,10 +62,10 @@ const childSchema = z
     childPassword: z.string().min(1).max(200),
   })
   // .strip() (the zod default), NOT .strict(): the canonical body is now
-  // `{ attemptId, childFirstName, childPassword, childGrade? }`, but an in-flight
-  // FP client still sends a `credentialChoice` — accept-and-IGNORE it (strip the
-  // unknown key) rather than 401-refusing the whole request until U15 reconciles
-  // the client. No path branches on it anymore.
+  // `{ attemptId, childFirstName, childPassword, childGrade? }`. As of U15 the FP
+  // client no longer sends `credentialChoice`; strip stays as a defensive default
+  // so a stray unknown key from an old in-flight caller is dropped, not 401'd. No
+  // path branches on it anymore.
   .strip();
 
 function corsJsonHeaders(origin: string): Record<string, string> {
@@ -202,20 +202,12 @@ export async function POST(req: Request): Promise<Response> {
       const who = await supabaseParentToken(token).auth.getUser();
       const parentId = who.data?.user?.id;
       if (parentId) {
-        // The recap tells the parent the child's USERNAME (U13 login key). Read
-        // the fp_username the mint just claimed (service-role) off the child row.
-        // Best-effort: a read miss falls back to an empty username, which the pure
-        // builder renders as a graceful "the username you were shown" line rather
-        // than blocking the (already-successful) mint's recap.
-        const childRow = await admin
-          .from("children")
-          .select("fp_username")
-          .eq("id", result.childId)
-          .maybeSingle();
-        const username =
-          typeof (childRow.data as { fp_username?: unknown } | null)?.fp_username === "string"
-            ? String((childRow.data as { fp_username: unknown }).fp_username)
-            : "";
+        // The recap tells the parent the child's USERNAME (U13 login key). The mint
+        // just claimed it and threads it back on the result (U15) — no extra read.
+        // Best-effort: an absent username (idempotent replay) falls back to an empty
+        // string, which the pure builder renders as a graceful "the username you were
+        // shown" line rather than blocking the (already-successful) mint's recap.
+        const username = result.username ?? "";
         const child: RecapChild = { firstName: data.childFirstName, username };
         const recap = await sendSignupRecap(admin, {
           parentId,
@@ -233,8 +225,15 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
+    // Surface the generated fp_username (U15) so the FP confirmation can show the
+    // parent the login key. Absent only on an idempotent replay (empty string).
     return new Response(
-      JSON.stringify({ ok: true, status: "child_created", childId: result.childId }),
+      JSON.stringify({
+        ok: true,
+        status: "child_created",
+        childId: result.childId,
+        username: result.username ?? "",
+      }),
       { status: 200, headers }
     );
   } catch (err) {

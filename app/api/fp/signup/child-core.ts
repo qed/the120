@@ -144,9 +144,11 @@ export type CreateChildRefusal =
   | "outage";
 
 export type CreateChildResult =
-  // playerProfileId is present on a fresh mint; the idempotent-replay success
-  // (attempt already 'child_created') carries only the existing childId.
-  | { ok: true; childId: string; playerProfileId?: string }
+  // playerProfileId + username are present on a fresh mint; the idempotent-replay
+  // success (attempt already 'child_created') carries only the existing childId.
+  // `username` is the globally-unique fp_username the mint claimed (U12) — the
+  // login key the FP confirmation shows the parent (U15). Never present on replay.
+  | { ok: true; childId: string; playerProfileId?: string; username?: string }
   | {
       ok: false;
       reason: CreateChildRefusal;
@@ -330,6 +332,7 @@ export async function createChild(
     }
 
     let usernameClaimed = false;
+    let claimedUsername = "";
     for (let attempt = 0; attempt < MAX_USERNAME_INSERT_RETRIES; attempt += 1) {
       const pick = mintUsername({ firstName, isTaken: (c) => taken.has(c) });
       if (!pick.ok) {
@@ -344,6 +347,7 @@ export async function createChild(
         .single();
       if (!claim.error && claim.data) {
         usernameClaimed = true;
+        claimedUsername = pick.username;
         break;
       }
       // 23505 = the case-insensitive partial-unique index fired (a concurrent
@@ -469,7 +473,7 @@ export async function createChild(
       );
     }
 
-    return { ok: true, childId, playerProfileId: player.profileId };
+    return { ok: true, childId, playerProfileId: player.profileId, username: claimedUsername };
   } catch (err) {
     console.error(
       `[fp/signup/child] unexpected error: ${err instanceof Error ? err.message : String(err)}`

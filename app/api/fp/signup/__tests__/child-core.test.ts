@@ -289,7 +289,7 @@ describe("createChild — happy path", () => {
   it("creates child row + auth + path_student_profiles + player profile; claims consent; advances the attempt", async () => {
     const { deps, calls, authCreated } = build();
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
 
     // Every resource created.
     expect(insert(calls, "parent", "children")).toBe(true);
@@ -407,7 +407,7 @@ describe("createChild — refusals before any mint", () => {
   it("grade is optional: an omitted grade still mints (FP captures an age band, not a grade)", async () => {
     const { deps } = build();
     const res = await createChild(deps, { ...input, grade: undefined });
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
   });
 });
 
@@ -568,7 +568,7 @@ describe("createChild — attempt-advance is non-fatal", () => {
     const { deps, calls } = build({ advError: true });
     const res = await createChild(deps, input);
     // The child is real and playable; the failed advance is a durable marker only.
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
     expect(del(calls, "admin", "children")).toBe(false);
     expect(del(calls, "admin", "path_student_profiles")).toBe(false);
   });
@@ -611,7 +611,7 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
   it("23505 on the first claim → re-pick the next suffix and retry; the child keeps its row", async () => {
     const { deps, calls } = build({ usernameConflictInserts: 1 });
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana2" });
     // The parent inserts the child exactly once; the retry is on the admin claim.
     expect(childInserts(calls)).toHaveLength(1);
     const claims = usernameClaims(calls);
@@ -657,7 +657,7 @@ describe("createChild — U14 single username+password path", () => {
   it("always mints the `.invalid` account from the parent-set password (no path branch)", async () => {
     const { deps, calls, authCreated } = build();
     const res = await createChild(deps, input);
-    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
+    expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
     // The `.invalid` account is minted with the parent-set password ...
     expect(authCreated).toEqual([{ childId: "child1", password: "orangeledgerkite" }]);
     // ... and path_student_profiles.user_id is that minted account's id.

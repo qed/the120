@@ -83,4 +83,22 @@ describe("POST /api/fp/signup/child — FIX 4: attemptId must be a UUID", () => 
     // Both the (ip,attempt) and ip-aggregate strikes are refunded on a real outage.
     expect(rateRef.released.length).toBe(2);
   });
+
+  it("a successful mint returns the generated fp_username (U15) in the 200 body", async () => {
+    createChildRef.fn = vi
+      .fn()
+      .mockResolvedValue({ ok: true, childId: "child1", playerProfileId: "pp1", username: "dana" });
+    const res = await post(validBody(UUID));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; childId: string; username: string };
+    expect(body).toMatchObject({ ok: true, childId: "child1", username: "dana" });
+  });
+
+  it("an idempotent replay (no username on the result) returns an empty username, not undefined", async () => {
+    createChildRef.fn = vi.fn().mockResolvedValue({ ok: true, childId: "child1" });
+    const res = await post(validBody(UUID));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; childId: string; username: string };
+    expect(body).toEqual({ ok: true, status: "child_created", childId: "child1", username: "" });
+  });
 });

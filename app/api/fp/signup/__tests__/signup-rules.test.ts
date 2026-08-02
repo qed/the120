@@ -21,7 +21,6 @@ const goodBody = {
   childFirstName: "Mia",
   childAgeBand: "under_13",
   jurisdiction: "US-CA",
-  credentialChoice: "existing_credential",
 };
 
 describe("parseSignupRequest", () => {
@@ -31,7 +30,6 @@ describe("parseSignupRequest", () => {
     if (parsed.ok) {
       expect(parsed.data.parentEmail).toBe("dana@example.com");
       expect(parsed.data.childAgeBand).toBe("under_13");
-      expect(parsed.data.credentialChoice).toBe("existing_credential");
     }
   });
 
@@ -57,9 +55,8 @@ describe("parseSignupRequest", () => {
     expect(parseSignupRequest({ ...goodBody, parentPassword: "12345678" }).ok).toBe(true);
   });
 
-  it("refuses an unknown age band or credential choice", () => {
+  it("refuses an unknown age band", () => {
     expect(parseSignupRequest({ ...goodBody, childAgeBand: "toddler" }).ok).toBe(false);
-    expect(parseSignupRequest({ ...goodBody, credentialChoice: "carrier_pigeon" }).ok).toBe(false);
   });
 
   it("refuses a missing required field and unknown extra keys (strict)", () => {
@@ -67,6 +64,9 @@ describe("parseSignupRequest", () => {
     void jurisdiction;
     expect(parseSignupRequest(noJurisdiction).ok).toBe(false);
     expect(parseSignupRequest({ ...goodBody, isTest: true }).ok).toBe(false); // is_test is server-side only
+    // (Slice B U15) credentialChoice is dropped from START: an in-flight client
+    // that still sends it is refused as an unknown key under `.strict()`.
+    expect(parseSignupRequest({ ...goodBody, credentialChoice: "existing_credential" }).ok).toBe(false);
   });
 });
 

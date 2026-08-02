@@ -1,5 +1,5 @@
 /**
- * First Profit CHILD CREATION — path (a) (Slice B Unit 4; R12a, R9). House
+ * First Profit CHILD CREATION (Slice B Unit 4; single-path since U14; R9). House
  * core-module pattern: NO "use server", NO `server-only` — the route hands in a
  * service-role `admin` client, a PARENT-TOKEN-SCOPED client factory, and a
  * couple of injected auth-account effects; tests hand in fakes. All the
@@ -29,6 +29,8 @@
  *   3. insert the child row under the PARENT-TOKEN client, so RLS
  *      (`auth.uid() = parent_id`) authorizes it — NOT the service-role client
  *      (Plan Revision 1). This yields the childId consentGate needs;
+ *   3b. claim a globally-unique fp_username via the service-role admin client
+ *      (U12; fp_username is service-role-write-only), CAS-retrying on 23505;
  *   4. consentGate(admin, {attemptId, childId}) — ATOMICALLY CLAIMS the active
  *      consent for this child. Refuse => compensate (delete the child row) and
  *      return the refusal. Consent thus gates every step below it;

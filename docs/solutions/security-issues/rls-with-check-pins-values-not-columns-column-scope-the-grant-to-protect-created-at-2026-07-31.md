@@ -1,6 +1,7 @@
 ---
 title: "An RLS INSERT policy's WITH CHECK pins column VALUES, not which columns a client may set — column-scope the GRANT to protect server-managed columns like created_at on a client-written append-only table"
 date: 2026-07-31
+last_updated: 2026-08-01
 category: security-issues
 module: fp-game
 problem_type: security_issue
@@ -138,3 +139,54 @@ excluded from the GRANT; a WITH CHECK cannot substitute, because it never sees
   raise-trigger makes the ledger append-only for non-service-role writers, and a
   `before update` trigger enforces `revision = old + 1` on `fp_player_saves` —
   the column-scoped grant handles the insert side, the trigger handles the rest.
+
+## Follow-up 2026-08-01: a SHARED table — protect the one column with a TRIGGER, not a column-scoped grant
+
+Slice B added `children.fp_username` — the globally-unique **First Profit login
+identifier**, server-generated. `children` carries the same value-only
+`with check (auth.uid()=parent_id)` policy, so a parent could
+`update children set fp_username=<anything> where id=<own child>` via the anon
+key + their JWT: a cross-tenant "is this handle taken" **enumeration oracle**
+(via the unique-index `23505`), handle-squatting, and — since login later
+resolves by this column — a login-resolution break. Same root cause as above.
+
+But the column-scoped-grant fix does **not** transfer cleanly here: `children` is
+a **shared** table written by several products (funnel, FW, Path, First Profit).
+Revoking the table-wide grant and re-`grant`ing an explicit column list risks
+breaking every other product's child writes the moment you miss a column. So the
+right tool for a *single* server-managed column on a *shared* client-written
+table is a **targeted trigger**:
+
+```sql
+create or replace function public.children_fp_username_guard() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if auth.role() = 'service_role' then return new; end if;      -- server writes pass
+  if tg_op = 'INSERT' and new.fp_username is not null then
+    raise exception 'fp_username is server-managed' using errcode = '42501';
+  elsif tg_op = 'UPDATE' and new.fp_username is distinct from old.fp_username then
+    raise exception 'fp_username is server-managed' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+create trigger children_fp_username_guard
+  before insert or update of fp_username on public.children
+  for each row execute function public.children_fp_username_guard();
+```
+
+Consequence: the app write of that column must move onto the **service-role**
+client (the trigger blocks the parent-token write). In `child-core` the child row
+is still inserted via the parent-token client (RLS `parent_id=auth.uid()`) but
+**without** `fp_username`; a `service-role admin.update` then claims the username,
+and on claim-exhaustion the child is compensated — so no row is left without one.
+
+- **Choose the enforcement to the table's ownership:** a table only YOUR feature
+  writes → column-scoped grant (as above); a SHARED table where you must lock ONE
+  column → a `before insert or update of <col>` trigger gated on
+  `auth.role() = 'service_role'`, leaving the table-wide grant (and every other
+  product) untouched.
+- **A login/identity column also needs a case-insensitive uniqueness index**
+  (`unique (lower(fp_username))`) matching how the value is generated/compared,
+  plus a format `check (… ~ '^[a-z0-9]+$')` — otherwise `Alex` and `alex` are
+  distinct rows and login resolution is ambiguous. Bake this in before the column
+  is backfilled into a global namespace; retrofitting it afterward is expensive.

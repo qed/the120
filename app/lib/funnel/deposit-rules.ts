@@ -29,9 +29,16 @@ export function resolveOrigin(originHeader: string | null): string {
 /* ─────────────────── R51a: the refund policy, full text, versioned ─────────────────── */
 
 /**
- * Policy text CONFIRMED as written 2026-07-28 (Peter, decision batch);
- * the post-deadline-tuition wording remains flagged pending Ontario
- * counsel. Rendered IN FULL on the Stripe-hosted checkout page (P0
+ * Policy text CONFIRMED as written 2026-07-28 (Peter, decision batch),
+ * EXCEPT: the post-deadline-tuition wording remains flagged pending Ontario
+ * counsel, and since 2026-08-02.1 the consent clause is reworded
+ * application-NEUTRAL (direct reserve lets a parent pay before any
+ * application exists, so "the child named on this application" was false
+ * for that path — the child is now named by the deposit itself). The
+ * pinned phrases "parent or legal guardian" and "school account and email
+ * address" are preserved verbatim; the consent SEMANTICS are unchanged,
+ * which is why CONSENT_MIN_POLICY_VERSION does not move. The 2026-08-02.1
+ * wording joins the same pending counsel batch. Rendered IN FULL on the Stripe-hosted checkout page (P0
  * 2026-07-30) above a REQUIRED tick that gates payment
  * (consent_collection + custom_text.terms_of_service_acceptance) — the
  * full text, never a bare link, which card issuers reject as dispute
@@ -50,14 +57,14 @@ export function resolveOrigin(originHeader: string | null): string {
  * condensed.
  */
 export const REFUND_POLICY = {
-  version: "2026-07-28.2",
+  version: "2026-08-02.1",
   text:
     `The $250 seat deposit reserves your child's place in The 120's founding cohort. ` +
     `It is fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}: email admissions@the120.school ` +
     `from the address on this account and the deposit is returned to the original payment method. ` +
     `After ${DEPOSIT_REFUND_DEADLINE_LABEL}, the deposit is applied to tuition and is no longer refundable. ` +
     `If The 120 cannot offer your child a place in the program, the deposit is refunded in full regardless of date. ` +
-    `By paying the deposit you confirm you are the parent or legal guardian of the child named on this application, ` +
+    `By paying the deposit you confirm you are the parent or legal guardian of the child this deposit reserves a seat for, ` +
     `and you consent to The 120 creating a school account and email address for your child as part of enrolment.`,
 } as const;
 
@@ -82,7 +89,11 @@ export const CONSENT_MIN_POLICY_VERSION = "2026-07-28.2";
  * ⚠️ Append every new version here in the same PR that bumps
  * REFUND_POLICY.version — a test pins that the live version is a member.
  */
-export const PUBLISHED_POLICY_VERSIONS: readonly string[] = ["2026-07-28.1", "2026-07-28.2"];
+export const PUBLISHED_POLICY_VERSIONS: readonly string[] = [
+  "2026-07-28.1",
+  "2026-07-28.2",
+  "2026-08-02.1",
+];
 
 /**
  * Structural "at-or-after" for policy versions ("YYYY-MM-DD.N"). NEVER
@@ -125,7 +136,7 @@ export const POLICY_CLAIMS_FOR_PETER: { claim: string; phrase: string }[] = [
   },
   {
     claim:
-      "Payment confirms parent/guardian status and consents to the child's school account — UNVERIFIED wording, Peter/Ontario counsel to confirm (ordering decided: consent precedes minting)",
+      "Payment confirms parent/guardian status and consents to the child's school account — UNVERIFIED wording, Peter/Ontario counsel to confirm (ordering decided: consent precedes minting; 2026-08-02.1 application-neutral rewording joins the same counsel batch)",
     phrase: "school account and email address",
   },
 ];

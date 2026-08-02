@@ -89,14 +89,18 @@ describe("R51a — the policy record", () => {
     // With a child-scoped key and stable params, Stripe replays the same
     // session; expires_at shortens the window to the 30-minute minimum.
     const consent = buildCheckoutSessionParams(SESSION_INPUT, "consent_tick");
-    expect(consent.idempotencyKey).toBe("deposit:child-1");
+    // Since U3 the key carries the policy VERSION: the params embed the
+    // policy text, and a text bump under a version-blind key collides with
+    // Stripe's 24h-retained pre-bump entry (idempotency_error → generic 500
+    // lockout for that child). Stable within an era; rotates with the params.
+    expect(consent.idempotencyKey).toBe(`deposit:child-1:${REFUND_POLICY.version}`);
     expect(consent.params.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
     // The degraded mode uses a DIFFERENT (still child-scoped) key: Stripe
     // stores the first result under a key — including the missing-ToS
     // error — and refuses the same key with different params, so the
     // text-only retry must not reuse the consent-mode key.
     const degraded = buildCheckoutSessionParams(SESSION_INPUT, "text_only");
-    expect(degraded.idempotencyKey).toBe("deposit:child-1:notos");
+    expect(degraded.idempotencyKey).toBe(`deposit:child-1:${REFUND_POLICY.version}:notos`);
     const src = read("app/api/checkout/route.ts");
     // The attempt row remains the R51a presentation record, linked post-create.
     expect(src).toContain('.update({ stripe_session_id: session.id })');
@@ -238,10 +242,10 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
     expect(first.consentTick).toBe(false);
     expect(calls).toHaveLength(2);
     expect(calls[0].params.consent_collection).toEqual({ terms_of_service: "required" });
-    expect(calls[0].key).toBe("deposit:child-1");
+    expect(calls[0].key).toBe(`deposit:child-1:${REFUND_POLICY.version}`);
     expect(calls[1].params.consent_collection).toBeUndefined();
     expect(calls[1].params.custom_text).toEqual({ submit: { message: REFUND_POLICY.text } });
-    expect(calls[1].key).toBe("deposit:child-1:notos"); // never reuse a key with different params
+    expect(calls[1].key).toBe(`deposit:child-1:${REFUND_POLICY.version}:notos`); // never reuse a key with different params
     // ONCE per process: the next checkout goes straight to text_only.
     const second = await createCheckoutSessionWithConsent(deps, SESSION_INPUT);
     expect(second.consentTick).toBe(false);
@@ -304,6 +308,29 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
       message: REFUND_POLICY.text,
     });
     expect(degraded.params.custom_text?.submit).toEqual({ message: REFUND_POLICY.text });
+  });
+});
+
+describe("the policy version↔text bind (U3): a text edit MUST bump the version", () => {
+  it("pins the live version AND the live text's hash together", () => {
+    // "Change the TEXT → bump the VERSION, always" was a comment, not a
+    // mechanism (U3 review): the membership and phrase pins are blind to a
+    // text edit that keeps both phrases and forgets the bump — silently
+    // decoupling recorded acceptances from what a parent actually saw. This
+    // pin makes the rule executable: edit the text and this hash reddens;
+    // the fix is ALWAYS all three together — new text, bumped version,
+    // PUBLISHED_POLICY_VERSIONS append — then update this pin.
+    expect(REFUND_POLICY.version).toBe("2026-08-02.1");
+    expect(policyHash(REFUND_POLICY.text)).toBe(
+      "2430855d2621f2702f5a5e018ae80cebbc1a4dd477512938beae75377371c0ba"
+    );
+  });
+
+  it("the 2026-08-02.1 clause is application-neutral — the substantive change is pinned", () => {
+    // Direct reserve lets a parent pay before any application exists; the
+    // consent clause must never re-couple to one.
+    expect(REFUND_POLICY.text).toContain("the child this deposit reserves a seat for");
+    expect(REFUND_POLICY.text).not.toContain("named on this application");
   });
 });
 

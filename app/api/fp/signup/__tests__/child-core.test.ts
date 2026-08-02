@@ -108,21 +108,6 @@ type Cfg = {
   playerInsertError?: boolean;
   saveSeedError?: boolean; // profile INSERT ok, fp_player_saves upsert errors
   advError?: boolean;
-  // Path (b): what the injected provisionWorkspace returns. Default = a parked-
-  // pending success carrying the provisioned Supabase identity (the normal
-  // Workspace-unconfigured Slice-B state).
-  provisionResult?:
-    | { ok: true; supabaseUserId: string; state: string }
-    | {
-        ok: false;
-        reason: "no_identity" | "outage" | "exception" | "lease_pending";
-        state: string | null;
-        supabaseUserId?: string | null;
-      };
-  // The supabase_user_id the provisioning claim carries (read by runCompensation's
-  // delete-by-child_id backstop, FIX 1). Undefined = no claim row / no id.
-  claimSupabaseUserId?: string;
-  claimReadError?: boolean;
 };
 
 const verifiedAttempt = { id: "att1", parent_id: "u1", state: "verified" };
@@ -132,7 +117,6 @@ function build(cfg: Cfg = {}) {
   const calls: State[] = [];
   const authCreated: Array<{ childId: string; password: string }> = [];
   const authDeleted: string[] = [];
-  const provisioned: string[] = []; // child_ids handed to provisionWorkspace (path b)
   // child_ids that currently have a committed fp_player_profiles row, so the
   // compensation lookup-by-child_id models the real "inserted but save-unseeded"
   // strand: the row exists even though ensurePlayerProfile returned no profileId.
@@ -247,16 +231,6 @@ function build(cfg: Cfg = {}) {
       }
       return { error: null }; // compensation delete (admin)
     }
-    if (s.table === "funnel_student_provisioning") {
-      // runCompensation's defense-in-depth read of the claim's supabase_user_id
-      // by child_id (FIX 1). Errors when configured; otherwise returns the
-      // configured id (or none).
-      if (cfg.claimReadError) return { data: null, error: { message: "claim read boom" } };
-      return {
-        data: cfg.claimSupabaseUserId ? { supabase_user_id: cfg.claimSupabaseUserId } : null,
-        error: null,
-      };
-    }
     return { data: null, error: null };
   };
 
@@ -287,19 +261,13 @@ function build(cfg: Cfg = {}) {
       authCreated.push(i);
       return cfg.authFail ? { ok: false } : { ok: true, userId: "child-user-1" };
     },
-    provisionWorkspace: async ({ childId }) => {
-      provisioned.push(childId);
-      return (
-        cfg.provisionResult ?? { ok: true, supabaseUserId: "prov-user-1", state: "pending" }
-      );
-    },
     deleteAuthUser: async (id) => {
       authDeleted.push(id);
       return { ok: !cfg.deleteAuthFail };
     },
     now: () => 1000,
   };
-  return { deps, calls, authCreated, authDeleted, provisioned };
+  return { deps, calls, authCreated, authDeleted };
 }
 
 const input = {
@@ -683,130 +651,27 @@ describe("createChild — U12 fp_username claimed via service-role admin write",
   });
 });
 
-/* ----------------------------------------------------- path (b): provision */
+/* --------------------------------------- U14: single-path (no credentialChoice) */
 
-const inputB = {
-  attemptId: "att1",
-  parentToken: "parent-access-token",
-  credentialChoice: "provision_workspace" as const,
-  firstName: "Dana",
-  grade: 7,
-  // No childPassword — path (b) has no parent-set credential.
-};
-
-describe("createChild — path (b) provision_workspace", () => {
-  it("mints NO .invalid account; enqueues+drives provisioning; uses the provisioned identity for path_student_profiles + player profile", async () => {
-    const { deps, calls, authCreated, provisioned } = build();
-    const res = await createChild(deps, inputB);
+describe("createChild — U14 single username+password path", () => {
+  it("always mints the `.invalid` account from the parent-set password (no path branch)", async () => {
+    const { deps, calls, authCreated } = build();
+    const res = await createChild(deps, input);
     expect(res).toEqual({ ok: true, childId: "child1", playerProfileId: "pp1" });
-
-    // The path-a `.invalid` account is NEVER minted on path (b).
-    expect(authCreated).toEqual([]);
-    // Provisioning was driven for the freshly-inserted child.
-    expect(provisioned).toEqual(["child1"]);
-
-    // The child row + consent + downstream profiles are all created.
-    expect(insert(calls, "parent", "children")).toBe(true);
-    const cas = calls.find((c) => c.table === "fp_parental_consent" && c.op === "update");
-    expect(cas?.row).toEqual({ child_id: "child1" });
-
-    // path_student_profiles.user_id is the PROVISIONED Supabase identity.
+    // The `.invalid` account is minted with the parent-set password ...
+    expect(authCreated).toEqual([{ childId: "child1", password: "orangeledgerkite" }]);
+    // ... and path_student_profiles.user_id is that minted account's id.
     const psp = calls.find(
       (c) => c.client === "admin" && c.table === "path_student_profiles" && c.op === "insert"
     );
-    expect(psp?.row).toMatchObject({ user_id: "prov-user-1", child_id: "child1" });
-    expect(insert(calls, "admin", "fp_player_profiles")).toBe(true);
-
-    // Attempt advanced; nothing compensated.
-    const adv = calls.find((c) => c.table === "fp_signup_attempts" && c.op === "update");
-    expect(adv?.row).toMatchObject({ state: "child_created", child_id: "child1" });
-    expect(del(calls, "admin", "children")).toBe(false);
+    expect(psp?.row).toMatchObject({ user_id: "child-user-1", child_id: "child1" });
   });
 
-  it("a mailbox-pending park (identity present) is a SUCCESS — the child is playable while the mailbox lands later", async () => {
-    const { deps } = build({
-      provisionResult: { ok: true, supabaseUserId: "prov-user-1", state: "pending" },
-    });
-    const res = await createChild(deps, inputB);
-    expect(res.ok).toBe(true);
-  });
-
-  it("path (b) never validates a password floor (no childPassword required)", async () => {
-    // A path-a call with no password is weak_password; the SAME call on path (b)
-    // succeeds, proving the floor is path-a-only.
-    const { deps } = build();
-    const res = await createChild(deps, { ...inputB, childPassword: undefined });
-    expect(res.ok).toBe(true);
-  });
-
-  it("provisioning that never reached the identity (no_identity) compensates the child and returns outage — the claim survives as a released placeholder (SET NULL + trigger, NOT a cascade)", async () => {
-    const { deps, calls, authDeleted } = build({
-      provisionResult: { ok: false, reason: "no_identity", state: "pending" },
-    });
-    const res = await createChild(deps, inputB);
-    expect(res).toEqual({ ok: false, reason: "outage" });
-
-    // The child row is torn down. Its child_id FK on the claim is ON DELETE SET
-    // NULL (+ trigger → released/child_deleted), so the claim is NOT cascaded
-    // away and no LIVE claim is stranded.
-    expect(del(calls, "admin", "children")).toBe(true);
-    // No provisioned identity existed, so nothing to delete as an auth account.
-    expect(authDeleted).toEqual([]);
-    // path_student_profiles / player profile were never inserted.
-    expect(insert(calls, "admin", "path_student_profiles")).toBe(false);
-    expect(insert(calls, "admin", "fp_player_profiles")).toBe(false);
-  });
-
-  it("a later failure (player insert) tears down the PROVISIONED identity by child_id (compensation unwinds path b too)", async () => {
-    const { deps, calls, authDeleted } = build({ playerInsertError: true });
-    const res = await createChild(deps, inputB);
-    expect(res).toEqual({ ok: false, reason: "outage" });
-    // The provisioned Supabase identity is deleted in compensation ...
-    expect(authDeleted).toEqual(["prov-user-1"]);
-    // ... and the child row is deleted (the claim survives as a released
-    // placeholder via SET NULL + trigger — never cascaded away).
-    expect(del(calls, "admin", "children")).toBe(true);
-    expect(del(calls, "admin", "path_student_profiles")).toBe(true);
-  });
-
-  it("FIX 1 — provisioning minted an identity but returned ok:false (post-read outage) SURFACING it → compensation tears that identity down by the surfaced handle, so it is never orphaned", async () => {
-    const { deps, calls, authDeleted } = build({
-      provisionResult: { ok: false, reason: "outage", state: null, supabaseUserId: "surfaced-orphan" },
-    });
-    const res = await createChild(deps, inputB);
-    expect(res).toEqual({ ok: false, reason: "outage" });
-    // The surfaced identity is deleted (never left orphaned in auth.users) ...
-    expect(authDeleted).toEqual(["surfaced-orphan"]);
-    // ... and the child is torn down.
-    expect(del(calls, "admin", "children")).toBe(true);
-  });
-
-  it("FIX 1 defense-in-depth — provisioning did NOT surface an identity, but the claim carries one → runCompensation recovers it BY CHILD_ID and deletes it", async () => {
-    const { deps, calls, authDeleted } = build({
-      provisionResult: { ok: false, reason: "outage", state: null, supabaseUserId: null },
-      claimSupabaseUserId: "claim-orphan",
-    });
-    const res = await createChild(deps, inputB);
-    expect(res).toEqual({ ok: false, reason: "outage" });
-    // Recovered from the claim (child_id lookup) and deleted — no orphan remains.
-    const claimLookup = calls.find(
-      (c) => c.table === "funnel_student_provisioning" && c.op === "select"
-    );
-    expect(claimLookup?.filters.child_id).toBe("child1");
-    expect(authDeleted).toEqual(["claim-orphan"]);
-    expect(del(calls, "admin", "children")).toBe(true);
-  });
-
-  it("FIX 2 — a lease_pending result (a concurrent re-drive cron owns the claim) does NOT compensate: the child is left intact for the cron to finish", async () => {
-    const { deps, calls, authDeleted } = build({
-      provisionResult: { ok: false, reason: "lease_pending", state: "in_progress", supabaseUserId: null },
-    });
-    const res = await createChild(deps, inputB);
-    expect(res).toEqual({ ok: false, reason: "outage" });
-    // NO compensation — the child + claim survive for the cron's in-flight mint.
-    expect(del(calls, "admin", "children")).toBe(false);
-    expect(authDeleted).toEqual([]);
-    // And no claim read happened (we never entered the compensation path).
-    expect(calls.some((c) => c.table === "funnel_student_provisioning")).toBe(false);
+  it("a missing/weak password is refused BEFORE any write (password is now required)", async () => {
+    const { deps, calls } = build();
+    const res = await createChild(deps, { ...input, childPassword: "short" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("weak_password");
+    expect(insert(calls, "parent", "children")).toBe(false);
   });
 });

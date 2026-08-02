@@ -45,19 +45,14 @@ export type RenderedEmail = { subject: string; html: string; text: string };
 /* ───────────────────────────────────────────────── R26 signup recap email */
 
 /**
- * How ONE child logs in, for the recap. `existing_credential` (path a): the
- * parent set a name + password. `provision_workspace` (path b): a Google
- * Workspace address is being minted; `provisionedEmail` is present ONCE the
- * address is ready, else the child is still `provisionPending` (we tell the
- * parent we will email the address when it is live — R13's provisioning timing).
+ * How ONE child logs in, for the recap (Slice B U14). Every First Profit child
+ * signs in with their USERNAME (children.fp_username, U13) and the password the
+ * parent set at signup — a single path, no provisioning branch.
  */
 export type RecapChild = {
   firstName: string;
-  loginPath: "existing_credential" | "provision_workspace";
-  /** Path b: the provisioned @the120.school address, once minted. */
-  provisionedEmail?: string | null;
-  /** Path b: true while the mailbox is still being provisioned (no address yet). */
-  provisionPending?: boolean;
+  /** The child's login username (children.fp_username). */
+  username: string;
 };
 
 export type SignupRecapInput = {
@@ -72,26 +67,25 @@ export type SignupRecapInput = {
   unsubscribeUrl?: string | null;
 };
 
-/** One child's login line, rendered for both html (escaped) and text (literal). */
+/** One child's login line, rendered for both html (escaped) and text (literal).
+ *  Every child signs in with their USERNAME + the parent-set password (U14). */
 function childLoginLine(child: RecapChild, forHtml: boolean): string {
   const name = child.firstName.trim() || "your child";
   const nm = forHtml ? escapeHtml(name) : name;
-  if (child.loginPath === "provision_workspace") {
-    if (child.provisionedEmail && child.provisionedEmail.trim()) {
-      const addr = child.provisionedEmail.trim();
-      const a = forHtml ? escapeHtml(addr) : addr;
-      return `${nm} signs in with their new address ${a} and the password from the setup email.`;
-    }
-    return `${nm}'s login address is still being set up. We will email you the address and next steps as soon as it is ready.`;
+  const uname = child.username.trim();
+  if (uname) {
+    const u = forHtml ? escapeHtml(uname) : uname;
+    return `${nm} signs in with the username ${u} and the password you set.`;
   }
-  return `${nm} signs in with the name and password you chose during signup.`;
+  // Graceful fallback if the username could not be read (never on the happy path).
+  return `${nm} signs in with the username you were shown and the password you set.`;
 }
 
 /**
  * Build the R26 recap the verified parent receives after a successful signup
- * (child created / provisioning enqueued): what was created, how each child logs
- * in, the parent's own reset link (R7), and what happens next. Pure — subject +
- * html + text from typed inputs only.
+ * (child created): what was created, how each child logs in (username + the
+ * password the parent set), the parent's own reset link (R7), and what happens
+ * next. Pure — subject + html + text from typed inputs only.
  */
 export function buildSignupRecap(input: SignupRecapInput): RenderedEmail {
   const parent = (input.parentFirstName ?? "").trim() || "there";
@@ -105,10 +99,6 @@ export function buildSignupRecap(input: SignupRecapInput): RenderedEmail {
       : `Your ${count} First Profit accounts are ready`
   );
 
-  const anyPending = kids.some(
-    (k) => k.loginPath === "provision_workspace" && !(k.provisionedEmail && k.provisionedEmail.trim())
-  );
-
   const loginItemsHtml = kids
     .map((k) => `    <li style="margin: 0 0 8px;">${childLoginLine(k, true)}</li>`)
     .join("\n");
@@ -116,9 +106,6 @@ export function buildSignupRecap(input: SignupRecapInput): RenderedEmail {
     ? `  <p style="margin: 0 0 16px;">You manage the ${noun}. If you ever need to reset a password, use <a href="${escapeHtml(
         input.resetUrl
       )}">this link</a>.</p>`
-    : "";
-  const pendingHtml = anyPending
-    ? `  <p style="margin: 0 0 16px; color: #4a5468;">Some logins are still being set up. We will email you the moment each address is ready.</p>`
     : "";
 
   const html = shell(
@@ -132,7 +119,7 @@ ${loginItemsHtml}
   <p style="margin: 0 0 16px;"><a href="${escapeHtml(
     input.signInUrl
   )}" style="display: inline-block; background: #1a2233; color: #ffffff; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;">Open First Profit</a></p>
-${resetHtml}${pendingHtml}
+${resetHtml}
   <p style="margin: 0; font-size: 13px; color: #8a93a6;">Next: your child signs in and starts building. You will get a note when their work is ready for your review.</p>`,
     input.unsubscribeUrl
   );
@@ -148,9 +135,6 @@ ${resetHtml}${pendingHtml}
   ];
   if (input.resetUrl) {
     textLines.push(``, `Reset a password anytime: ${input.resetUrl}`);
-  }
-  if (anyPending) {
-    textLines.push(``, `Some logins are still being set up. We will email you the moment each address is ready.`);
   }
   textLines.push(``, `Next: your child signs in and starts building. You will get a note when their work is ready for your review.`);
   if (input.unsubscribeUrl) {

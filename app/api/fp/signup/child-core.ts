@@ -6,24 +6,21 @@
  * wire-shaping (CORS, Bearer parse, one refusal, rate limit) lives in the thin
  * ./child/route.ts wrapper; this file is the SEQUENCING + compensation.
  *
- * Path (a) = the parent supplies the child's own credential (a name + a
- * password), and First Profit mints everything the child needs to log in and
- * play: a `public.children` roster row, a child auth account on the derived
- * non-deliverable `.invalid` address, the `path_student_profiles` child->user
- * mapping (the ensurePlayerProfile PRECONDITION), and the FP player profile +
- * seeded save. The whole mint is GATED on verifiable parental consent.
+ * Every First Profit child is created ONE way: the parent supplies a display
+ * first name + a password, First Profit claims a globally-unique username
+ * (fp_username, U12), and mints everything the child needs to log in and play: a
+ * `public.children` roster row, a child auth account on the derived
+ * non-deliverable `.invalid` address (`deriveStudentEmail(childId)`) carrying
+ * the PARENT-SET password, the `path_student_profiles` child->user mapping (the
+ * ensurePlayerProfile PRECONDITION), and the FP player profile + seeded save.
+ * The whole mint is GATED on verifiable parental consent. The child then signs
+ * in with their username (U13).
  *
- * Path (b) (Slice B Unit 5; R12b, R13) = the parent requests a PROVISIONED
- * Google Workspace address instead. Everything is the same EXCEPT the identity
- * step (7): no `.invalid` account is minted; instead the funnel provisioning
- * machinery is enqueued (`ensureProvisionClaim`, idempotent by child_id) and
- * driven inline, and its Supabase identity leg — minting the child's auth
- * account on the derived @the120.school address — supplies the
- * path_student_profiles.user_id. The Workspace mailbox itself is gated on
- * GOOGLE_WORKSPACE_SA_KEY and lands `pending` during this build (the re-drive
- * cron completes it once the credential is configured; no mailbox is burned
- * here). Consent still gates the mint, now read from fp_parental_consent by the
- * provisioning consent adapter (Rev 2).
+ * (Slice B U14) The former path (b) — a parent requesting a PROVISIONED Google
+ * Workspace address instead of a `.invalid` account — is REMOVED from child
+ * creation: signup no longer branches on a `credentialChoice`, and the funnel
+ * provisioning machinery (`provisionFpChildInline` et al.) is left DEFINED but
+ * UNINVOKED by this flow, deferred to the future firstprofit.school email piece.
  *
  * ── the sequence (consent gates the MINT) ──
  *   1. resolve the caller's parent id from their Bearer token (getUser on the
@@ -100,39 +97,16 @@ export type CreateChildDeps = {
    *  and the family cap-listing run under THIS client so `auth.uid() =
    *  parent_id` authorizes them — never the service-role client. */
   parentClient: (accessToken: string) => SupabaseClient;
-  /** Path (a) only: mint the child auth account on the derived `.invalid`
-   *  address with email_confirm:true (the route wires
-   *  buildStudentCreateUserPayload). Unused on path (b). */
+  /** Mint the child auth account on the derived `.invalid` address with
+   *  email_confirm:true (the route wires buildStudentCreateUserPayload) carrying
+   *  the parent-set password. */
   createAuthUser: (input: {
     childId: string;
     password: string;
   }) => Promise<{ ok: true; userId: string } | { ok: false }>;
-  /**
-   * Path (b) only (Slice B Unit 5): enqueue the provisioning claim and drive it
-   * inline, returning the Supabase identity the provisioning machinery minted on
-   * the derived @the120.school address — used as this child's
-   * path_student_profiles.user_id in place of a path-a `.invalid` account. The
-   * mailbox itself lands later (gated on GOOGLE_WORKSPACE_SA_KEY); a park at
-   * `pending` with an identity is `ok:true`. Only a claim that never reached the
-   * identity (consent gap / transient read failure) returns ok:false, so the
-   * caller can compensate rather than leave a child with no login account.
-   */
-  provisionWorkspace: (input: { childId: string }) => Promise<
-    | { ok: true; supabaseUserId: string; state: string }
-    | {
-        // `lease_pending` = a concurrent owner (the re-drive cron) is finishing
-        // this claim; the caller must NOT compensate. Every other reason is a
-        // genuine no-mint/failure. `supabaseUserId` surfaces an identity the drive
-        // DID mint so compensation tears it down instead of orphaning it (FIX 1).
-        ok: false;
-        reason: "no_identity" | "outage" | "exception" | "lease_pending";
-        state: string | null;
-        supabaseUserId?: string | null;
-      }
-  >;
-  /** Compensation: delete the child auth account THIS call minted (path a's
-   *  `.invalid` account OR path b's provisioned Supabase identity). Returns
-   *  ok:false when the delete itself failed so the caller can mark it stranded. */
+  /** Compensation: delete the child auth account (the `.invalid` account) THIS
+   *  call minted. Returns ok:false when the delete itself failed so the caller
+   *  can mark it stranded. */
   deleteAuthUser: (userId: string) => Promise<{ ok: boolean }>;
   now: () => number;
 };
@@ -143,18 +117,7 @@ export type CreateChildInput = {
   attemptId: string;
   /** The parent's access token (Bearer), scoping the RLS child-row insert. */
   parentToken: string;
-  /**
-   * Which child-credential path the parent chose (R12). `existing_credential`
-   * (path a, the default and Unit 4's behavior) mints the `.invalid` account
-   * from `childPassword`. `provision_workspace` (path b, Unit 5) mints NO
-   * `.invalid` account — it enqueues Google Workspace provisioning and uses the
-   * provisioned Supabase identity. The choice is threaded through the request,
-   * not persisted as its own column: the durable artifacts (a `.invalid` account
-   * vs. a provisioning claim + @the120.school identity) already record which
-   * path a child took, so no fp_signup_attempts migration is warranted.
-   */
-  credentialChoice?: "existing_credential" | "provision_workspace";
-  /** The child's display first name (also the derived-handle seed). */
+  /** The child's display first name (also the derived-handle + username seed). */
   firstName: string;
   /**
    * Optional grade. First Profit's signup captures an age band, not a grade
@@ -163,10 +126,9 @@ export type CreateChildInput = {
    * gradeVerdict guard (3-12 or refuse — never clamp).
    */
   grade?: number | string | null;
-  /** The child's chosen password — validated against the R29 student floor.
-   *  Required for path (a); ignored (and may be omitted) for path (b), whose
-   *  credential is the provisioned Workspace account, not a parent-set password. */
-  childPassword?: string;
+  /** The parent-set child password — REQUIRED, validated against the R29 student
+   *  floor before any side effect. */
+  childPassword: string;
 };
 
 export type CreateChildRefusal =
@@ -263,15 +225,10 @@ export async function createChild(
     if (!verdict.ok) return { ok: false, reason: "invalid_child" };
     grade = verdict.grade;
   }
-  const credentialChoice = input.credentialChoice ?? "existing_credential";
-  // Path (a) validates the parent-set password up front (a weak password should
-  // never leave a child row to compensate). Path (b) has no parent-set password
-  // — its credential is the provisioned Workspace account — so the floor check is
-  // skipped entirely.
-  if (credentialChoice === "existing_credential") {
-    const pw = validateStudentPassword(input.childPassword ?? "", { studentName: firstName });
-    if (!pw.ok) return { ok: false, reason: "weak_password", detail: pw.error };
-  }
+  // Validate the parent-set password up front — a weak password should never
+  // leave a child row to compensate.
+  const pw = validateStudentPassword(input.childPassword, { studentName: firstName });
+  if (!pw.ok) return { ok: false, reason: "weak_password", detail: pw.error };
 
   // Track exactly what THIS call creates, for reverse-order compensation.
   const created: {
@@ -426,55 +383,15 @@ export async function createChild(
       return { ok: false, reason: "consent_required", detail: gate.reason };
     }
 
-    // 7. Establish the child's login identity — the ONE step that differs by
-    //    credential path (both yield an auth.users id used below).
-    let authUserId: string;
-    if (credentialChoice === "provision_workspace") {
-      // Path (b): DO NOT mint a `.invalid` password account. Enqueue + drive the
-      // Workspace provisioning machinery (idempotent claim by child_id, then a
-      // lease-arbitrated drive); its Supabase identity leg mints the child's auth
-      // account on the derived @the120.school address. The mailbox itself lands
-      // later, gated on GOOGLE_WORKSPACE_SA_KEY (this build burns none). The claim
-      // is enqueued AFTER the child row is durably inserted. On a compensating
-      // delete the claim does NOT cascade away: its child_id FK is ON DELETE SET
-      // NULL (migration 20260818120000), and a trigger flips the orphaned row to
-      // state=released / released_reason=child_deleted — the local_part is retired
-      // (never re-issued) and no LIVE claim is stranded. The provisioned identity,
-      // however, is torn down explicitly below (surfaced + delete-by-child_id).
-      const prov = await deps.provisionWorkspace({ childId });
-      if (!prov.ok) {
-        // FIX 2 — `lease_pending`: a concurrent owner (the hourly re-drive cron)
-        // holds the lease and is finishing THIS claim. Deleting the child now
-        // would orphan the cron's in-flight mint, so do NOT compensate — leave
-        // the child + claim for the cron to complete. Retryable outage.
-        if (prov.reason === "lease_pending") {
-          console.error(
-            `[fp/signup/child] provisioning lease held by a concurrent owner for child ${childId} — leaving the child intact for the re-drive cron`
-          );
-          return { ok: false, reason: "outage" };
-        }
-        // Parked BEFORE a usable identity (consent gap / read failure / an
-        // exception after minting): the child would have no usable login, so
-        // unwind cleanly. A NORMAL mailbox-pending park is NOT this branch — it
-        // carries a supabaseUserId and returns ok:true. FIX 1 — surface any
-        // identity the drive DID mint so compensation tears it down by the stable
-        // handle instead of orphaning it in auth.users.
-        if (prov.supabaseUserId) created.authUserId = prov.supabaseUserId;
-        await compensate("provision-identity");
-        return { ok: false, reason: "outage" };
-      }
-      authUserId = prov.supabaseUserId;
-    } else {
-      // Path (a): the parent set the credential — mint the `.invalid` account
-      // (email_confirm:true is inside the payload the route builds — mandatory on
-      // the non-deliverable address).
-      const auth = await deps.createAuthUser({ childId, password: input.childPassword ?? "" });
-      if (!auth.ok) {
-        await compensate("auth-create");
-        return { ok: false, reason: "outage" };
-      }
-      authUserId = auth.userId;
+    // 7. Establish the child's login identity: mint the `.invalid` account with
+    //    the parent-set credential (email_confirm:true is inside the payload the
+    //    route builds — mandatory on the non-deliverable address).
+    const auth = await deps.createAuthUser({ childId, password: input.childPassword });
+    if (!auth.ok) {
+      await compensate("auth-create");
+      return { ok: false, reason: "outage" };
     }
+    const authUserId = auth.userId;
     created.authUserId = authUserId;
 
     // 8. Create the path_student_profiles child->user row — the precondition
@@ -625,44 +542,22 @@ async function runCompensation(
     }
   }
 
-  // Tear down the child's auth identity. Prefer the handle THIS call surfaced
-  // (created.authUserId — path a's `.invalid` account, or a path-b identity the
-  // drive surfaced on its failure return). DEFENSE-IN-DEPTH (FIX 1): if we never
-  // captured one — e.g. path-b provisioning minted an identity, recorded it on
-  // the claim, but a post-drive read hid it — recover it by reading the claim's
-  // supabase_user_id BY CHILD_ID (the Unit-4 delete-by-stable-identity pattern),
-  // so a provisioned identity is never orphaned in auth.users. This must run
-  // BEFORE the child delete below, which SET-NULLs child_id and breaks the lookup.
-  let authUserId = created.authUserId;
-  if (!authUserId && created.childId) {
-    const claim = await admin
-      .from("funnel_student_provisioning")
-      .select("supabase_user_id")
-      .eq("child_id", created.childId)
-      .maybeSingle();
-    if (claim.error) {
-      console.error(
-        `[fp/signup/child] STRANDED: provisioning claim read by child ${created.childId} failed during compensation: ${claim.error.message}`
-      );
-    } else {
-      const recovered = (claim.data as { supabase_user_id?: unknown } | null)?.supabase_user_id;
-      if (typeof recovered === "string" && recovered.length > 0) authUserId = recovered;
-    }
-  }
-  if (authUserId) {
-    const del = await deps.deleteAuthUser(authUserId);
+  // Tear down the child's auth identity — the `.invalid` account THIS call
+  // minted (created.authUserId). This runs BEFORE the child delete below, whose
+  // RESTRICT referrers (both profiles) are already gone above.
+  if (created.authUserId) {
+    const del = await deps.deleteAuthUser(created.authUserId);
     if (!del.ok) {
       console.error(
-        `[fp/signup/child] STRANDED ACCOUNT ${authUserId}: deleteUser failed during compensation — needs manual cleanup`
+        `[fp/signup/child] STRANDED ACCOUNT ${created.authUserId}: deleteUser failed during compensation — needs manual cleanup`
       );
     }
   }
 
   if (created.childId) {
     // Service-role delete: the roster row's RESTRICT referrers (both profiles)
-    // are gone above, and the consent FK is ON DELETE SET NULL (unbinds). The
-    // provisioning claim's child_id FK is ALSO SET NULL (+ trigger → released/
-    // child_deleted): the claim survives as a placeholder, never cascaded away.
+    // are gone above, and the consent FK is ON DELETE SET NULL (unbinds), so a
+    // later retry can re-claim the consent.
     const child = await admin.from("children").delete().eq("id", created.childId);
     if (child.error) {
       console.error(

@@ -13,6 +13,7 @@ import {
   type Source,
   type Stage,
 } from "@/app/crm/lib/constants";
+import { DIRECT_RESERVE_MARKER } from "@/app/crm/lib/engine";
 import {
   daysSince,
   lastTouchTone,
@@ -63,13 +64,28 @@ export function Chip({
 
 export function StagePill({ stage, title }: { stage: Stage; title?: string }) {
   const colors = STAGE_COLORS[stage];
+  // Direct reserve (U5): the marker must be VISIBLE, not a hover tooltip —
+  // this pipeline view is the confirm-by-Sept-19 mechanism (no system
+  // backstop by decision), and staff scanning the table can't hover every
+  // pill. The detail string stays the source of truth; the pill only reads.
+  const directReserve = title?.includes(DIRECT_RESERVE_MARKER) ?? false;
   return (
-    <span
-      title={title}
-      className="inline-block whitespace-nowrap rounded-full px-2 py-[3px] font-mono text-[9px] tracking-[0.08em]"
-      style={{ backgroundColor: colors.bg, color: colors.text }}
-    >
-      {STAGE_LABELS[stage]}
+    <span className="inline-flex items-center gap-1">
+      <span
+        title={title}
+        className="inline-block whitespace-nowrap rounded-full px-2 py-[3px] font-mono text-[9px] tracking-[0.08em]"
+        style={{ backgroundColor: colors.bg, color: colors.text }}
+      >
+        {STAGE_LABELS[stage]}
+      </span>
+      {directReserve && (
+        <span
+          title={DIRECT_RESERVE_MARKER}
+          className="inline-block whitespace-nowrap rounded-full border border-crm-red px-2 py-[3px] font-mono text-[9px] uppercase tracking-[0.08em] text-crm-red"
+        >
+          direct reserve
+        </span>
+      )}
     </span>
   );
 }

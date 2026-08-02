@@ -78,6 +78,50 @@ export function shouldClearOverride(truth: FamilyTruth): boolean {
   return hasPaidDeposit(truth) || hasMemberReview(truth);
 }
 
+/* ------------------------------------------------------- direct reserve */
+
+/** The staff-facing marker label — one spelling, consumed by stageDetail. */
+export const DIRECT_RESERVE_MARKER = "direct reserve — no application";
+
+/**
+ * Direct reserve (2026-08-02, nav-deposit-shortcut U5): the children whose
+ * seat was paid for BEFORE any application — a live paid deposit on a child
+ * still at `status='draft'`. This population is new (the checkout gate no
+ * longer requires offered-or-later), and staff confirm each of them — spot
+ * or refund — by the Sept 19 kickoff, so the pipeline must make them
+ * distinguishable from offer-first payers. Derived from `children.status`
+ * alone (no applicant_state in the CRM fetch, and direct-reserve children
+ * stay `draft` by construction — the funnel's pre-submit rows never leave
+ * draft without a submission).
+ */
+export function directReserveChildIds(
+  children: readonly { id: string; status: string }[],
+  deposits: readonly { child_id: string; status: string }[]
+): string[] {
+  const paid = new Set(
+    deposits.filter((d) => d.status === "paid").map((d) => d.child_id)
+  );
+  return children.filter((c) => c.status === "draft" && paid.has(c.id)).map((c) => c.id);
+}
+
+/**
+ * Append the marker to a family's stage-detail string whenever a
+ * direct-reserve child exists — on EVERY stage, not just `deposit_paid`:
+ * a sibling's `member` review outranks the family stage (deriveStage), and
+ * hiding the marker behind the stage switch made exactly the child staff
+ * must confirm invisible in mixed families (U5 review). Pure, so the
+ * composition is testable without the server-only queries module.
+ */
+export function withDirectReserveMarker(
+  detail: string,
+  children: readonly { id: string; status: string }[],
+  deposits: readonly { child_id: string; status: string }[]
+): string {
+  return directReserveChildIds(children, deposits).length > 0
+    ? `${detail} · ${DIRECT_RESERVE_MARKER}`
+    : detail;
+}
+
 /* ----------------------------------------------------------- suggestHeat */
 
 /**

@@ -18,6 +18,7 @@ import {
   shouldClearOverride,
   suggestedLibraryItems,
   suggestHeat,
+  withDirectReserveMarker,
   type FamilyTruth,
 } from "./engine";
 import {
@@ -391,7 +392,14 @@ function composeFamily(
     referralCode: family.referral_code,
     parentLinked: Boolean(family.parent_id),
     stage,
-    stageDetail: stageDetail(stage, family, children, deposits, reviews),
+    // Direct reserve (U5): the marker rides EVERY stage's detail — a
+    // sibling's member review outranks deposit_paid at the family level,
+    // and the paid-but-never-applied child must stay visible regardless.
+    stageDetail: withDirectReserveMarker(
+      stageDetail(stage, family, children, deposits, reviews),
+      children,
+      deposits
+    ),
     overrideSet: (family.stage_override as OverrideStage | null) ?? null,
     overrideSuperseded: shouldClearOverride(truth),
     heat: family.heat_score,

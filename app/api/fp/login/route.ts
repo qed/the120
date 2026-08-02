@@ -26,13 +26,26 @@
  *     would let anyone holding, say, a staff password weaponize this endpoint
  *     as a remote force-logout of every device).
  *
- * Timing honesty (accepted, same posture as /fp): the candidate scan performs
- * 0–1 /token round-trips — a username is globally unique, so a known username
- * costs one auth call and an unknown one costs none. Response TIMING can differ
- * between the two; response SHAPE and side effects do not.
+ * Non-enumerating in BOTH body AND timing for valid-shape usernames: a known
+ * username and an unknown one each pay exactly ONE /token round-trip. A real
+ * match signs in against the child's derived identity; a no-match performs one
+ * DUMMY signInWithPassword against a throwaway, non-resolvable `.invalid`
+ * address (which always fails and mutates nothing) before the same generic
+ * refusal — so "valid username, no match" ≈ "valid username, wrong password" in
+ * timing as well as shape/side effects. The username's global uniqueness caps a
+ * match at one auth call, so the dummy exactly equalizes the empty-candidate
+ * case. (The /fp Path name-login retains the lower-value name-existence timing
+ * oracle; out of scope here.)
+ *
+ * Scoped honesty for the PRE-DB refusals (malformed / email-shaped / invalid
+ * shape / rate-limited): those short-circuit before any auth call and reflect
+ * only the attacker's own input — never account existence — so they are not
+ * equalized and need not be.
  *
  * NEVER log the password or tokens.
  */
+
+import { randomUUID } from "node:crypto";
 
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
@@ -216,6 +229,40 @@ export async function POST(req: Request): Promise<Response> {
       }
     );
 
+    // Constant-work path (U13 review): a valid-shape username that matched NO
+    // child would otherwise skip the loop below and refuse WITHOUT any auth call
+    // — a timing oracle separating "no such username" (zero round-trips) from
+    // "wrong password" (one round-trip), enumerating which fp_username handles
+    // exist. Close it by paying the SAME one auth round-trip here: a single dummy
+    // signInWithPassword against a throwaway `.invalid` identity derived from a
+    // fresh random UUID. That address can never resolve to a real user, so the
+    // call can never succeed and mutates nothing; the result is discarded. Outage
+    // handling mirrors the real candidate loop — a 5xx/429/network fault is not a
+    // guess, so it releases the provisional strikes and refuses generically.
+    if (candidates.length === 0) {
+      try {
+        const dummy = await authClient.auth.signInWithPassword({
+          email: deriveStudentEmail(randomUUID()),
+          password: parsed.password,
+        });
+        if (dummy.error && classifyAuthError(dummy.error) === "outage") {
+          console.error(`[fp/login] dummy auth outage: ${dummy.error.message}`);
+          releaseStrikes();
+          return refuse("outage");
+        }
+        // Expected result is invalid_credentials (no such user) — discard it and
+        // fall through to the one generic refusal below.
+      } catch (err) {
+        console.error(
+          `[fp/login] dummy auth call threw: ${err instanceof Error ? err.message : String(err)}`
+        );
+        if (classifyAuthError(err) === "outage") {
+          releaseStrikes();
+          return refuse("outage");
+        }
+      }
+    }
+
     for (const candidate of candidates) {
       // A wrong password and an AUTH OUTAGE must NOT be treated alike. Supabase
       // signs a bad guess back as a returned {error}; a network failure REJECTS
@@ -324,9 +371,11 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    // Unknown username (empty candidate set) and wrong password land here
-    // together: strike already recorded at the gate, one body, indistinguishable
-    // outside — no oracle separates "no such username" from "wrong password".
+    // Unknown username (empty candidate set, after its equalizing dummy auth
+    // call above) and wrong password land here together: strike already recorded
+    // at the gate, one body, and now one matched auth round-trip apiece —
+    // indistinguishable outside in shape AND timing. No oracle separates "no such
+    // username" from "wrong password".
     return refuse("bad_credentials");
   } catch (err) {
     // Any unexpected throw collapses into the one generic refusal — never a

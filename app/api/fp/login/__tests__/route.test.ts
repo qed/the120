@@ -134,10 +134,21 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect(authRef.calls[0]).toMatchObject({ email: INTERNAL_EMAIL });
   });
 
-  it("an unknown username collapses to the generic 401 — never a password call", async () => {
+  it("an unknown username collapses to the generic 401 — still one (dummy) password call", async () => {
+    authRef.signIn = signInInvalid();
     const res = await post({ identifier: "nobody", password: "correct horse tulip" });
     expect(res.status).toBe(401);
-    expect(authRef.signIn).not.toHaveBeenCalled();
+    // Constant-work path (U13 review): a valid-shape username that matched no
+    // child still pays exactly ONE signInWithPassword — a dummy against a
+    // throwaway `.invalid` identity — so its timing matches the wrong-password
+    // path and cannot be used to enumerate which usernames exist.
+    expect(authRef.signIn).toHaveBeenCalledTimes(1);
+    expect(authRef.calls).toHaveLength(1);
+    const dummyArgs = authRef.calls[0] as { email: string; password: string };
+    // Non-resolvable derived identity, and NOT the real seeded child's identity.
+    expect(dummyArgs.email).toMatch(/@students\.the120\.invalid$/);
+    expect(dummyArgs.email).not.toBe(INTERNAL_EMAIL);
+    expect(dummyArgs.password).toBe("correct horse tulip");
     // The strike stands (not released): an unknown username is a real failed guess.
     expect(rateRef.released).toEqual([]);
   });
@@ -158,13 +169,65 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect(unknownBody).toBe(wrongPwBody);
   });
 
+  it("constant-work: no-match, wrong-password, and null-username refusals are byte-identical AND each cost one signInWithPassword", async () => {
+    // Wrong password (username resolves, one real auth call).
+    authRef.signIn = signInInvalid();
+    authRef.calls = [];
+    const wrongPw = await post({ identifier: "alex", password: "wrong-guess-here" });
+    const wrongPwBody = await wrongPw.text();
+    const wrongPwCalls = authRef.calls.length;
+
+    // Unknown username (no candidate, one DUMMY auth call).
+    authRef.signIn = signInInvalid();
+    authRef.calls = [];
+    const unknown = await post({ identifier: "nobody", password: "wrong-guess-here" });
+    const unknownBody = await unknown.text();
+    const unknownCalls = authRef.calls.length;
+
+    // Null fp_username (candidate exists but is unreachable → no candidate, one DUMMY call).
+    seedChild(null);
+    authRef.signIn = signInInvalid();
+    authRef.calls = [];
+    const nullUser = await post({ identifier: "alex", password: "wrong-guess-here" });
+    const nullUserBody = await nullUser.text();
+    const nullUserCalls = authRef.calls.length;
+
+    // Each path pays EXACTLY one auth round-trip — no timing oracle.
+    expect(wrongPwCalls).toBe(1);
+    expect(unknownCalls).toBe(1);
+    expect(nullUserCalls).toBe(1);
+
+    // ... and the refusal is byte-identical across all three (status + body).
+    expect(unknown.status).toBe(wrongPw.status);
+    expect(nullUser.status).toBe(wrongPw.status);
+    expect(unknownBody).toBe(wrongPwBody);
+    expect(nullUserBody).toBe(wrongPwBody);
+  });
+
+  it("a dummy-auth OUTAGE on the no-match path releases the provisional strikes", async () => {
+    // The dummy sign-in classifies a 5xx/429/network fault as an outage, not a
+    // guess — it must release strikes, exactly like the real candidate loop.
+    authRef.signIn = vi.fn().mockResolvedValue({
+      data: { session: null, user: null },
+      error: { status: 503 },
+    }) as unknown as SignInFn;
+    const res = await post({ identifier: "nobody", password: "correct horse tulip" });
+    expect(res.status).toBe(401);
+    expect(authRef.signIn).toHaveBeenCalledTimes(1);
+    expect(rateRef.released.length).toBeGreaterThan(0);
+  });
+
   it("a child with a NULL fp_username is unreachable by username (generic 401)", async () => {
     seedChild(null);
+    authRef.signIn = signInInvalid();
     const res = await post({ identifier: "alex", password: "correct horse tulip" });
     expect(res.status).toBe(401);
-    // Never even attempted a password: nothing resolved, so no oracle and no
-    // lazy generate-at-login (the child has nothing to type).
-    expect(authRef.signIn).not.toHaveBeenCalled();
+    // Nothing resolved (the child has no username to type, so no lazy
+    // generate-at-login), yet the constant-work path still pays one dummy auth
+    // round-trip so the empty-candidate case is timing-indistinguishable from a
+    // wrong password. The dummy never targets the real child identity.
+    expect(authRef.signIn).toHaveBeenCalledTimes(1);
+    expect((authRef.calls[0] as { email: string }).email).not.toBe(INTERNAL_EMAIL);
   });
 
   it("refuses an email-shaped identifier pre-DB with the generic 401", async () => {

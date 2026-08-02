@@ -54,12 +54,12 @@ Toronto's most motivated and engaged kids — athletes, founders, makers, schola
 2. **Book a call** — we review the dossier together and qualify the fit, group by group.
 3. **Join the group** — a seat, a Tin Can, a mentor, and a real business to build across the year.
 
-**Admission first.** Tuition applies only after your child qualifies: dossier review, then the qualifying assessment. No payment until a seat is offered.
+**Admission first.** Tuition applies only after your child qualifies: dossier review, then the qualifying assessment. The only earlier payment is optional — the refundable seat deposit below.
 
 ---
 
 ### Reserve the seat — $250, fully refundable
-Once a seat is offered, hold it with a **$250 deposit, per child, fully refundable until September 30, 2026.**
+Hold a seat any time — before or after an offer — with a **$250 deposit, per child, fully refundable until September 30, 2026,** and returned in full if a seat can't be offered.
 
 > The only thing you can lose is the seat.
 

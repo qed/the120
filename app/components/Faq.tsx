@@ -5,7 +5,7 @@ const faqs = [
   },
   {
     q: "What happens after I create an account?",
-    a: "You build an application for each child in your dashboard and submit it for review. If it's a fit, you're invited to a qualifying assessment and a call — then, if a seat is offered, your child becomes a member of the 120.",
+    a: "You build an application for each child in your dashboard and submit it for review. If it's a fit, you're invited to a qualifying assessment and a call — then, if a seat is offered, your child becomes a member of the 120. Ready sooner? You can reserve a seat any time with the fully refundable $250 deposit — returned in full if we can't offer a place.",
   },
   {
     q: "What is the Tin Can?",

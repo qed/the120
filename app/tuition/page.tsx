@@ -37,7 +37,7 @@ const finePrint = [
   },
   {
     title: "Admission first",
-    body: "Tuition applies only after your child qualifies: application review, then the qualifying assessment. No payment until a seat is offered.",
+    body: "Tuition applies only after your child qualifies: application review, then the qualifying assessment. The only earlier payment is optional — the $250 seat deposit reserves a spot any time, fully refundable, and returned in full if a seat can't be offered.",
   },
   {
     title: "The network stays 120",

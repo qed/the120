@@ -1735,14 +1735,10 @@ function Menu({
   const pathwayHref = `${basePath}/pathway`;
   const firstCheckpoint = track.activeGrade === TRACK_GRADES[0] && track.passedGrades.length === 0;
   const journeyGoalGrade = Math.max(goalGrade, track.activeGrade);
-  const journeyPercent = Math.max(
-    0,
-    Math.min(
-      100,
-      ((track.activeGrade - TRACK_GRADES[0]) /
-        (journeyGoalGrade - TRACK_GRADES[0] || 1)) * 100
-    )
-  );
+  const journeyStarted =
+    track.activeGrade > TRACK_GRADES[0] ||
+    track.passedGrades.includes(TRACK_GRADES[0]);
+  const journeyComplete = track.passedGrades.includes(journeyGoalGrade);
 
   const primary = status === "remediation" && mission
     ? {
@@ -1945,10 +1941,20 @@ function Menu({
             className="relative mx-auto mt-5 w-full max-w-lg"
             aria-label={`Pathway: Grade ${TRACK_GRADES[0]} start, Grade ${track.activeGrade} now, Grade ${journeyGoalGrade} goal`}
           >
-            <div className="absolute left-[16.66%] right-[16.66%] top-3.5 h-0.5 rounded-full bg-white/10" aria-hidden>
+            <div className="absolute left-[16.66%] right-[16.66%] top-3.5 grid grid-cols-2" aria-hidden>
               <span
-                className="block h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-300"
-                style={{ width: `${journeyPercent}%` }}
+                className={`h-0.5 rounded-l-full ${
+                  journeyStarted
+                    ? "bg-gradient-to-r from-emerald-400 to-cyan-300"
+                    : "bg-white/25"
+                }`}
+              />
+              <span
+                className={`h-0.5 rounded-r-full ${
+                  journeyComplete
+                    ? "bg-gradient-to-r from-cyan-300 to-amber-300"
+                    : "bg-white/25"
+                }`}
               />
             </div>
             <div className="relative grid grid-cols-3">

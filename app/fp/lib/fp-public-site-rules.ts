@@ -141,6 +141,183 @@ export function isReservedHandle(value: string): boolean {
   return RESERVED.has(value);
 }
 
+/* ------------------------------------------------------------ site status */
+
+export type SiteStatus = "none" | "claimed" | "published" | "offline";
+
+export type SiteRowFlags = {
+  published: boolean;
+  operator_locked: boolean;
+  first_published_at: string | null;
+};
+
+/**
+ * The ONE status ladder every surface derives from (child self-read, parent
+ * dashboard — the review's no-second-copy rule):
+ *   no row                                → none
+ *   visible (published AND NOT locked)    → published
+ *   locked, or unpublished-after-publish  → offline (parent-unpublished and
+ *     operator-locked are DELIBERATELY indistinguishable to the child)
+ *   claimed, never published, not locked  → claimed
+ */
+export function deriveSiteStatus(row: SiteRowFlags | null): SiteStatus {
+  if (!row) return "none";
+  if (row.published && !row.operator_locked) return "published";
+  if (row.operator_locked || row.first_published_at !== null) return "offline";
+  return "claimed";
+}
+
+/* ---------------------------------------------------------------- blocklist */
+
+/**
+ * Kid-safety blocklist for PUBLIC strings (handle, headline, one-liner). The120
+ * is the SOURCE OF TRUTH (the echo-the-server learning: the client screens for
+ * UX only and never re-authors these rules), and since the Unit 2 review the
+ * SQL extraction enforces the SAME list (fp_blocked_terms seed +
+ * fp_public_text_blocked in 20260907120000_fp_public_sites.sql — parity test
+ * pins seed ⟷ these arrays), so the projection trigger can never put a
+ * blocked in-game edit on a live page.
+ *
+ * TWO MATCH CLASSES (both directions of the matcher problem):
+ *   - SUBSTRING terms: long/unambiguous — matched as substrings of the FOLDED
+ *     text (separator/symbol stripping defeats "f-u-c-k" / "f*u*c*k" dodges).
+ *     Every term here must be one no innocent kid string contains (the
+ *     scunthorpe class). Includes common masked spellings (fck, fuk) so
+ *     "f*ck" (symbol swallowed by folding → "fck") is caught.
+ *   - WORD terms: short/collision-prone (meth ⊂ method, retard ⊂ retardant,
+ *     heroin ⊂ heroine) — matched only as WHOLE TOKENS of the lightly-folded
+ *     text (NFKC + lowercase + format-char strip, tokenized on
+ *     non-alphanumerics). "Our proven method for selling lemonade" passes;
+ *     "meth" alone does not.
+ *
+ * SPACES ARE BOUNDARIES in the substring fold (round-2 review P1): symbols,
+ * punctuation, and format chars are folded away WITHIN tokens, but whitespace
+ * survives (collapsed to single spaces), so a blocked term can never match
+ * ACROSS a word join — "Sushi Tempura" does not contain "shit", "Bass Hole
+ * Lures" does not contain "asshole", "Scunthorpe Sweets" does not contain
+ * "cunt". Multi-word terms match via their spaced phrase form ("kill
+ * yourself") OR their joined form within one token ("killyourself",
+ * "kill-your-self" → "killyourself").
+ *
+ * ACCEPTED RESIDUALS (documented, not defended): (a) a WORD term spelled with
+ * separators ("m-e-t-h") tokenizes into single letters and is missed —
+ * boundary information and separator-dodge resistance are mutually exclusive
+ * per term, and the aggressive class covers the high-severity terms; (b)
+ * homoglyph substitution outside NFKC's reach (e.g. Cyrillic а U+0430 for
+ * Latin a) is NOT caught — NFKC does not confusable-fold; that class is
+ * operator-takedown territory (fp-site-lock), not filter territory; (c) a
+ * SUBSTRING term spelled with real SPACES ("f u c k") is missed — the price
+ * of the space-boundary rule above, consistent with residual (a): spaces are
+ * the one separator the fold must respect to avoid blanking innocent
+ * cross-word joins.
+ */
+export const BLOCKED_SUBSTRING_TERMS = [
+  "fuck",
+  "fck",
+  "fuk",
+  "shit",
+  "bitch",
+  "asshole",
+  "bastard",
+  "dickhead",
+  "nigger",
+  "nigga",
+  "faggot",
+  "whore",
+  "slut",
+  "porn",
+  "kill yourself",
+  "hitler",
+  "nazi",
+  "cocaine",
+] as const;
+
+export const BLOCKED_WORD_TERMS = [
+  // cunt ⊂ scunthorpe — the namesake collision; boundary-aware like meth.
+  "cunt",
+  "kys",
+  "meth",
+  "retard",
+  "heroin",
+  "sexy",
+  "nude",
+  "naked",
+] as const;
+
+/** The full curated list (SQL-seed parity + the client mirror). */
+export const PUBLIC_CONTENT_BLOCKLIST = [
+  ...BLOCKED_SUBSTRING_TERMS,
+  ...BLOCKED_WORD_TERMS,
+] as const;
+
+/**
+ * Fold for SUBSTRING matching: NFKC (fullwidth/compatibility forms collapse
+ * to ASCII shapes), lowercase, strip format/zero-width characters (\p{Cf}:
+ * ZWSP, ZWJ, ...), strip symbols/punctuation WITHIN tokens ("f*u_c-k" →
+ * "fuck") — but PRESERVE whitespace as token boundaries (runs collapse to a
+ * single space), so a term can never match across a word join ("Sushi
+ * Tempura" → "sushi tempura", which does NOT contain "shit"). SQL mirror:
+ * fp_blocklist_fold (normalize(...,NFKC) + lower + non-alnum-non-space strip
+ * + space collapse — see the divergence note there).
+ */
+export function foldForBlocklist(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\p{Cf}/gu, "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/** A term's JOINED form (spaces removed after folding): the shape that may
+ *  match only WITHIN one token of the folded text (it contains no space, so
+ *  it structurally cannot span one). */
+function joinedFold(value: string): string {
+  return foldForBlocklist(value).replace(/ /g, "");
+}
+
+/** Light fold + tokenize for WORD matching: NFKC + lowercase + format-char
+ *  strip, then split on runs of non-alphanumerics. Boundary info survives. */
+function tokensForBlocklist(value: string): string[] {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\p{Cf}/gu, "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/** True when the value trips either match class — see the module comment.
+ *  Substring terms match as their spaced phrase ("kill yourself") or their
+ *  joined form ("killyourself" — spaceless, so it can only land inside one
+ *  token of the space-preserving fold, never across a word join). */
+export function containsBlockedTerm(value: string): boolean {
+  const folded = foldForBlocklist(value);
+  if (
+    BLOCKED_SUBSTRING_TERMS.some((term) => {
+      const spaced = foldForBlocklist(term);
+      const joined = joinedFold(term);
+      return folded.includes(spaced) || folded.includes(joined);
+    })
+  ) {
+    return true;
+  }
+  const tokens = new Set(tokensForBlocklist(value));
+  return BLOCKED_WORD_TERMS.some((term) => tokens.has(term));
+}
+
+/**
+ * Server-side ENFORCEMENT for public content strings (headline / one-liner) at
+ * the claim backfill and every publish-time refresh: an offending string is
+ * stored as EMPTY (the public renderer's default copy shows) — never stored
+ * raw, never an error (a save-doc write can bypass the client entirely, R20
+ * threat model). Client screening is UX; this is the gate.
+ */
+export function sanitizePublicText(value: string): string {
+  return containsBlockedTerm(value) ? "" : value;
+}
+
 /* --------------------------------------------- executable extraction spec */
 
 /** Result of extracting public-site content from a save doc.
@@ -175,10 +352,13 @@ const ACTIVE_IDEA_RE = /^[0-9]{1,9}$/;
  *
  * Faithful to the SQL including: object-doc gate; per-step type guards
  * (ideas array, idea object, fields object, oneLiner string); the activeIdea
- * acceptor above with the < ideas.length bounds check; truncation to
- * SITE_HEADLINE_MAX_CHARS / SITE_ONE_LINER_MAX_CHARS. (Truncation counts
- * UTF-16 units here vs Postgres characters — divergent only beyond the BMP,
- * and only in where the clamp cuts, never whether it clamps.)
+ * acceptor above with the < ideas.length bounds check; the BLOCKLIST step
+ * (sanitizePublicText on the RAW value — blocked → '', mirroring
+ * fp_clamp_public_text, so a term straddling the cap cannot slip through as
+ * its clamped prefix); then truncation to SITE_HEADLINE_MAX_CHARS /
+ * SITE_ONE_LINER_MAX_CHARS. (Truncation counts UTF-16 units here vs Postgres
+ * characters — divergent only beyond the BMP, and only in where the clamp
+ * cuts, never whether it clamps.)
  *
  * The docVersion GATE is deliberately NOT here: it belongs to the projection
  * trigger (and to Unit 2's callers), exactly as in the SQL where the gate
@@ -189,7 +369,7 @@ export function extractSiteContent(doc: unknown): SiteContent {
   let oneLiner: string | null = null;
   if (isJsonObject(doc)) {
     if (typeof doc.siteHeadline === "string") {
-      headline = doc.siteHeadline.slice(0, SITE_HEADLINE_MAX_CHARS);
+      headline = sanitizePublicText(doc.siteHeadline).slice(0, SITE_HEADLINE_MAX_CHARS);
     }
     const ideas = doc.ideas;
     const active = doc.activeIdea;
@@ -201,7 +381,7 @@ export function extractSiteContent(doc: unknown): SiteContent {
     ) {
       const idea: unknown = ideas[active];
       if (isJsonObject(idea) && isJsonObject(idea.fields) && typeof idea.fields.oneLiner === "string") {
-        oneLiner = idea.fields.oneLiner.slice(0, SITE_ONE_LINER_MAX_CHARS);
+        oneLiner = sanitizePublicText(idea.fields.oneLiner).slice(0, SITE_ONE_LINER_MAX_CHARS);
       }
     }
   }

@@ -274,3 +274,75 @@ export function parentEmailSuppression(family: ParentEmailFamily): ParentEmailSu
 export function mayEmailParent(family: ParentEmailFamily): boolean {
   return parentEmailSuppression(family) === "ok";
 }
+
+/* ───────────────────────────── real-public-site: page-is-live notification */
+
+export type SiteLiveNoticeInput = {
+  parentFirstName?: string | null;
+  childFirstName: string;
+  /** The claimed handle, ALREADY validated by the claim pipeline (charset
+   *  `^[a-z0-9-]{3,20}$`) — the page URL is constructed from it, never echoed
+   *  from any request. */
+  handle: string;
+  /** The child's public headline at publish time; may be "" (default copy
+   *  shows on the page). LEARNER-CONTROLLED: escaped in html, headerSafe'd
+   *  never (it does not ride the subject). */
+  headline: string;
+  /** Where the parent manages the page (plain navigation, no token). */
+  manageUrl: string;
+};
+
+/**
+ * The R21 parent safety-net notification, sent by the publish endpoint on
+ * every hidden-to-visible transition (first publish AND a republish after a
+ * parent takedown; an already-visible republish sends nothing). This is a
+ * TRANSACTIONAL SAFETY notice, not marketing: it is the parent's discovery
+ * path that their child's page is publicly visible, so it carries no
+ * unsubscribe footer (suppressing it would defeat R21). Pure builder; the
+ * publish endpoint owns the send + the loud operator-attention flag when no
+ * parent email exists.
+ *
+ * Escaping: child name, headline (learner-controlled strings) and the handle
+ * are escaped in the html part per the module posture; the text part stays
+ * literal. The subject carries only the child's first name, through
+ * headerSafe. The page link is `https://firstprofit.school/<handle>` with the
+ * charset-validated handle — no request-echoed URL shapes.
+ */
+export function buildFpSiteLiveNotice(input: SiteLiveNoticeInput): RenderedEmail {
+  const parent = (input.parentFirstName ?? "").trim() || "there";
+  const child = input.childFirstName.trim() || "Your child";
+  const pageUrl = `https://firstprofit.school/${input.handle}`;
+  const headline = input.headline.trim();
+
+  const subject = headerSafe(`${child}'s First Profit page is now live`);
+
+  const headlineHtml = headline
+    ? `  <p style="margin: 0 0 16px;">Their headline: "${escapeHtml(headline)}"</p>`
+    : "";
+  const html = shell(
+    `  <p style="margin: 0 0 16px;">Hi ${escapeHtml(parent)},</p>
+  <p style="margin: 0 0 16px;">${escapeHtml(child)} just published their First Profit page. It is now visible to anyone with the link:</p>
+  <p style="margin: 0 0 16px;"><a href="${escapeHtml(pageUrl)}">${escapeHtml(pageUrl)}</a></p>
+${headlineHtml}
+  <p style="margin: 0 0 16px;">The page is designed to show only their first name, a short headline they wrote, and a one-line description of their business idea. Please take a look at it via the link above so you know what it says.</p>
+  <p style="margin: 0; font-size: 13px; color: #8a93a6;">You can take the page offline any time from your family dashboard: <a href="${escapeHtml(
+    input.manageUrl
+  )}" style="color: #8a93a6;">${escapeHtml(input.manageUrl)}</a></p>`,
+    null
+  );
+
+  const text = [
+    `Hi ${parent},`,
+    ``,
+    `${child} just published their First Profit page. It is now visible to anyone with the link:`,
+    ``,
+    pageUrl,
+    ...(headline ? [``, `Their headline: "${headline}"`] : []),
+    ``,
+    `The page is designed to show only their first name, a short headline they wrote, and a one-line description of their business idea. Please take a look at it via the link above so you know what it says.`,
+    ``,
+    `You can take the page offline any time from your family dashboard: ${input.manageUrl}`,
+  ].join("\n");
+
+  return { subject, html, text };
+}

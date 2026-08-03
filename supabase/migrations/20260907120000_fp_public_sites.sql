@@ -106,6 +106,16 @@
 --      clamped value; then with docVersion 2 → row unchanged, save succeeds.
 --   7. Teardown: delete probe rows (sites FIRST — the amended ordering).
 --
+--   OPS NOTE (accepted crash window, round-2 review): a process kill between
+--   the publish CAS and the parent notification loses the R21 email with no
+--   OPERATOR ATTENTION flag (site-core.ts publishSite documents why this is
+--   accepted; no outbox). Recovery/reconciliation when suspected:
+--     select s.handle, s.first_published_at
+--       from public.fp_public_sites s
+--      where s.first_published_at > now() - interval '<window>'
+--   ...and cross-check those handles/times against the Resend send log; any
+--   row with no matching "page is now live" send needs a manual parent note.
+--
 -- ⚠ DELETE POSTURE — RESTRICT, matching the FP graph (fp_player_tables
 --   header): deleting a profile out from under a live public page must FAIL
 --   LOUDLY. This table AMENDS the documented FP-aware service-role deletion
@@ -113,13 +123,14 @@
 --
 --       sites → ledger → saves → profile → child
 --
---   The explicit procedure (app/lib/funnel/erase-family-core.ts — which must
---   gain the fp_public_sites step in Unit 2; until then a claimed site strands
---   that erase loudly, which is the designed RESTRICT behavior, not a bug)
---   decides handle disposition EXPLICITLY at deletion time — reclaimable vs
---   retired is a recorded policy call, never an implicit CASCADE side effect —
---   and an OPERATOR-LOCKED handle is NEVER silently freed: the procedure must
---   refuse (or explicitly retire) a locked row, not release it to the pool.
+--   The explicit procedure (app/lib/funnel/erase-family-core.ts — which gained
+--   the fp_public_sites step in Unit 2: the site row is deleted first, keyed on
+--   the profile ids) decides handle disposition EXPLICITLY at deletion time —
+--   reclaimable vs retired is a recorded policy call, never an implicit
+--   CASCADE side effect — and an OPERATOR-LOCKED handle is NEVER silently freed:
+--   a data-rights erasure outranks a takedown lock and does delete the
+--   row, but the executor logs the locked-handle release loudly and records
+--   `site-locked-released` in its order log, so the release is always seen.
 --
 -- ENUMERATION RESISTANCE (R20 posture): fp_public_site() returns the IDENTICAL
 --   empty result for an unknown handle and a claimed-but-never-published
@@ -276,6 +287,166 @@ insert into public.fp_reserved_handles (handle, reason) values
   ('store',       'brand: likely future surface')
 on conflict (handle) do nothing;
 
+-- ------------------------------------------------------- content blocklist
+-- AMENDED IN PLACE during the Unit 2 review (this migration has never been
+-- applied to any database — it exists only on this branch, so amending beats
+-- stacking a second migration that would briefly leave the trigger filterless
+-- between applies; the VERSION ritual above still governs the real apply).
+-- WHY HERE: after first publish the ONLY writer of live-page content is the
+-- projection trigger below. A blocklist enforced only in the Unit 2 endpoints
+-- (claim backfill / publish re-sync) would let an in-game edit — or an R20
+-- direct save-doc write — put blocked content on a LIVE page via the next
+-- ~3s save. The blocklist therefore lives at the SHARED extraction, so
+-- trigger, backfill, and re-sync all inherit it.
+--
+-- TS mirror (the source of truth for the term list):
+-- app/fp/lib/fp-public-site-rules.ts BLOCKED_SUBSTRING_TERMS /
+-- BLOCKED_WORD_TERMS + containsBlockedTerm. Parity test pins seed ⟷ arrays.
+-- Two match classes (both directions of the matcher problem):
+--   substring — long/unambiguous terms matched inside the FOLDED text
+--     (defeats separator/symbol dodges like "f-u-c-k"). SPACES ARE
+--     BOUNDARIES (round-2 review P1): the fold strips symbols/punctuation
+--     WITHIN tokens but PRESERVES whitespace (collapsed to single spaces), so
+--     a term can never match ACROSS a word join — "Sushi Tempura" does not
+--     contain "shit", "Bass Hole Lures" does not contain "asshole",
+--     "Scunthorpe Sweets" does not contain "cunt". Multi-word terms match via
+--     their spaced `phrase` column OR their joined `term` form (spaceless, so
+--     it can only land inside one token).
+--   word      — short collision-prone terms (meth ⊂ method, retard ⊂
+--     retardant, heroin ⊂ heroine) matched only as WHOLE TOKENS.
+-- DIVERGENCE NOTE (documented in both files): the TS fold strips \p{Cf}
+-- explicitly and keeps \p{L}\p{N}\s; SQL folds via [^[:alnum:][:space:]]
+-- removal + space collapse after normalize(...,NFKC) — format/zero-width
+-- chars are not alnum or space, so both folds drop them; [[:alnum:]]'s exact
+-- Unicode letter coverage is locale-dependent (best effort, fails toward NOT
+-- matching). Accepted residuals (same as TS): separator-spelled WORD-class
+-- terms ("m-e-t-h"), SPACE-spelled SUBSTRING terms ("f u c k" — the price of
+-- the space-boundary rule), and non-NFKC homoglyphs are not caught —
+-- operator-takedown territory (fp-site-lock), not filter territory.
+create table if not exists public.fp_blocked_terms (
+  -- stored FOLDED+JOINED (lowercase alphanumeric; "kill yourself" →
+  -- 'killyourself'); multi-word terms ALSO carry their spaced phrase form.
+  term text primary key check (term ~ '^[a-z0-9]{2,40}$'),
+  match_kind text not null check (match_kind in ('substring', 'word')),
+  -- the spaced phrase form for multi-word substring terms (null otherwise);
+  -- matched against the space-preserving fold.
+  phrase text check (phrase ~ '^[a-z0-9 ]{3,60}$')
+);
+
+alter table public.fp_blocked_terms enable row level security;
+revoke all on public.fp_blocked_terms from anon, authenticated;
+
+insert into public.fp_blocked_terms (term, match_kind) values
+  ('fuck', 'substring'),
+  ('fck', 'substring'),
+  ('fuk', 'substring'),
+  ('shit', 'substring'),
+  ('bitch', 'substring'),
+  ('asshole', 'substring'),
+  ('bastard', 'substring'),
+  ('dickhead', 'substring'),
+  ('nigger', 'substring'),
+  ('nigga', 'substring'),
+  ('faggot', 'substring'),
+  ('whore', 'substring'),
+  ('slut', 'substring'),
+  ('porn', 'substring'),
+  ('killyourself', 'substring'),
+  ('hitler', 'substring'),
+  ('nazi', 'substring'),
+  ('cocaine', 'substring'),
+  ('cunt', 'word'),
+  ('kys', 'word'),
+  ('meth', 'word'),
+  ('retard', 'word'),
+  ('heroin', 'word'),
+  ('sexy', 'word'),
+  ('nude', 'word'),
+  ('naked', 'word')
+on conflict (term) do nothing;
+
+-- Spaced phrase forms for the multi-word substring terms (idempotent).
+update public.fp_blocked_terms set phrase = 'kill yourself' where term = 'killyourself';
+
+-- Fold for SUBSTRING matching (TS mirror: foldForBlocklist). Space-preserving:
+-- symbols/punctuation/format chars fold away WITHIN tokens; whitespace runs
+-- collapse to a single space and survive as token boundaries.
+create or replace function public.fp_blocklist_fold(p_value text)
+returns text
+language sql
+immutable
+as $$
+  select btrim(
+    regexp_replace(
+      regexp_replace(lower(normalize(coalesce(p_value, ''), NFKC)), '[^[:alnum:][:space:]]+', '', 'g'),
+      '[[:space:]]+', ' ', 'g'
+    )
+  );
+$$;
+
+-- True when the value trips either match class. STABLE (reads the seed
+-- table). Word tokens: format/zero-width chars stripped FIRST (so an
+-- interleaved ZWSP cannot split a token), then split on non-alphanumerics.
+create or replace function public.fp_public_text_blocked(p_value text)
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1 from public.fp_blocked_terms t
+    where t.match_kind = 'substring'
+      and (
+        -- joined form: spaceless, so it structurally cannot span a word join
+        -- in the space-preserving fold
+        position(t.term in public.fp_blocklist_fold(p_value)) > 0
+        -- spaced phrase form for multi-word terms ("kill yourself")
+        or (t.phrase is not null and position(t.phrase in public.fp_blocklist_fold(p_value)) > 0)
+      )
+  )
+  or exists (
+    select 1 from public.fp_blocked_terms t
+    where t.match_kind = 'word'
+      and t.term in (
+        select tok from regexp_split_to_table(
+          regexp_replace(
+            lower(normalize(coalesce(p_value, ''), NFKC)),
+            -- the common format/zero-width set (soft hyphen, ZWSP..RLM,
+            -- LRE..RLO, word-joiner..invisible-plus, BOM), via ARE \u escapes
+            -- so no invisible literals ride in this file
+            '[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]',
+            '', 'g'
+          ),
+          '[^[:alnum:]]+'
+        ) tok
+      )
+  );
+$$;
+
+-- The one enforcement point: blocked → EMPTY (renderer default copy shows;
+-- never an error — the trigger must never fail a save), else truncate. The
+-- blocked check runs on the RAW value BEFORE truncation, so a term straddling
+-- the cut cannot slip through as its clamped prefix.
+create or replace function public.fp_clamp_public_text(p_value text, p_cap integer)
+returns text
+language sql
+stable
+as $$
+  select case
+    when public.fp_public_text_blocked(p_value) then ''
+    else left(p_value, p_cap)
+  end;
+$$;
+
+-- Not public surfaces. service_role needs EXECUTE (the Unit 2 endpoints call
+-- fp_public_site_content via RPC AS service_role, which invokes these); the
+-- trigger path runs as the SECURITY DEFINER owner and is unaffected.
+revoke execute on function public.fp_blocklist_fold(text) from public, anon, authenticated;
+revoke execute on function public.fp_public_text_blocked(text) from public, anon, authenticated;
+revoke execute on function public.fp_clamp_public_text(text, integer) from public, anon, authenticated;
+grant execute on function public.fp_blocklist_fold(text) to service_role;
+grant execute on function public.fp_public_text_blocked(text) to service_role;
+grant execute on function public.fp_clamp_public_text(text, integer) to service_role;
+
 -- ------------------------------------------- shared clamped extraction (doc→)
 -- THE single source of truth for the SaveDoc → projection mapping (see the
 -- JSON contract in the header). Used by BOTH the projection trigger below and
@@ -297,12 +468,14 @@ on conflict (handle) do nothing;
 --     so do we), and unboundedly long digit strings that would overflow ::int
 --     (the 9-digit bound keeps the cast safe). Then it must still fall inside
 --     jsonb_array_length. 999 with 2 ideas → out of range → skip.
---   * truncation caps: headline left(·,120), one_liner left(·,140) — matching
---     the table CHECKs so the trigger's UPDATE can never violate them.
+--   * clamping via fp_clamp_public_text: blocklist check on the RAW value
+--     (blocked → '' — the Unit 2 amendment, see the content-blocklist section
+--     above), then truncation to 120/140 — matching the table CHECKs so the
+--     trigger's UPDATE can never violate them.
 create or replace function public.fp_public_site_content(p_doc jsonb)
 returns table (headline text, one_liner text)
 language plpgsql
-immutable
+stable
 as $$
 declare
   v_headline  text := null;
@@ -313,7 +486,7 @@ declare
 begin
   if p_doc is not null and jsonb_typeof(p_doc) = 'object' then
     if jsonb_typeof(p_doc->'siteHeadline') = 'string' then
-      v_headline := left(p_doc->>'siteHeadline', 120);
+      v_headline := public.fp_clamp_public_text(p_doc->>'siteHeadline', 120);
     end if;
     v_ideas := p_doc->'ideas';
     if jsonb_typeof(v_ideas) = 'array'
@@ -325,7 +498,7 @@ begin
         if jsonb_typeof(v_idea) = 'object'
            and jsonb_typeof(v_idea->'fields') = 'object'
            and jsonb_typeof(v_idea->'fields'->'oneLiner') = 'string' then
-          v_one_liner := left(v_idea->'fields'->>'oneLiner', 140);
+          v_one_liner := public.fp_clamp_public_text(v_idea->'fields'->>'oneLiner', 140);
         end if;
       end if;
     end if;

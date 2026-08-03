@@ -2,16 +2,21 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BLOCKED_SUBSTRING_TERMS,
+  BLOCKED_WORD_TERMS,
   HANDLE_PATTERN,
   RESERVED_HANDLES,
   SITE_DOC_VERSION_GATE,
   SITE_FIRST_NAME_MAX_CHARS,
   SITE_HEADLINE_MAX_CHARS,
   SITE_ONE_LINER_MAX_CHARS,
+  containsBlockedTerm,
   extractSiteContent,
+  foldForBlocklist,
   isReservedHandle,
   isValidHandle,
   normalizeHandle,
+  sanitizePublicText,
 } from "../fp-public-site-rules";
 
 // ── Migration ↔ TS parity (the SQL is a copy the node suite can't run) ──
@@ -91,13 +96,77 @@ describe("migration parity: fp_public_sites.sql", () => {
     expect(cap("one_liner")).toBe(SITE_ONE_LINER_MAX_CHARS);
   });
 
-  it("the extraction TRUNCATES (left()) to exactly the column caps — clamp, never raise", () => {
-    const m1 = extractBody.match(/left\s*\(\s*p_doc\s*->>\s*'siteHeadline'\s*,\s*(\d+)\s*\)/i);
-    expect(m1, "left(p_doc->>'siteHeadline', N)").not.toBeNull();
+  it("the extraction clamps via the SHARED fp_clamp_public_text at exactly the column caps", () => {
+    const m1 = extractBody.match(
+      /fp_clamp_public_text\s*\(\s*p_doc\s*->>\s*'siteHeadline'\s*,\s*(\d+)\s*\)/i
+    );
+    expect(m1, "fp_clamp_public_text(p_doc->>'siteHeadline', N)").not.toBeNull();
     expect(Number(m1![1])).toBe(SITE_HEADLINE_MAX_CHARS);
-    const m2 = extractBody.match(/left\s*\(\s*v_idea\s*->\s*'fields'\s*->>\s*'oneLiner'\s*,\s*(\d+)\s*\)/i);
-    expect(m2, "left(v_idea->'fields'->>'oneLiner', N)").not.toBeNull();
+    const m2 = extractBody.match(
+      /fp_clamp_public_text\s*\(\s*v_idea\s*->\s*'fields'\s*->>\s*'oneLiner'\s*,\s*(\d+)\s*\)/i
+    );
+    expect(m2, "fp_clamp_public_text(v_idea->'fields'->>'oneLiner', N)").not.toBeNull();
     expect(Number(m2![1])).toBe(SITE_ONE_LINER_MAX_CHARS);
+  });
+
+  it("fp_clamp_public_text: blocklist check on the RAW value first (blocked → ''), THEN left() truncation; no raise", () => {
+    const clampBody = fnBody("fp_clamp_public_text");
+    const blockedAt = clampBody.search(/fp_public_text_blocked\s*\(\s*p_value\s*\)\s*then\s*''/i);
+    const leftAt = clampBody.search(/left\s*\(\s*p_value\s*,\s*p_cap\s*\)/i);
+    expect(blockedAt).toBeGreaterThanOrEqual(0);
+    expect(leftAt).toBeGreaterThanOrEqual(0);
+    expect(blockedAt).toBeLessThan(leftAt);
+    expect(/\braise\b/i.test(clampBody)).toBe(false);
+  });
+
+  // ---------------------------------------------------- blocklist (SQL side)
+  it("the fp_blocked_terms seed is EXACTLY the folded-and-JOINED TS term lists, kind for kind", () => {
+    const block = raw.match(/insert into public\.fp_blocked_terms[\s\S]*?on conflict \(term\) do nothing;/i);
+    expect(block, "blocked-terms seed insert").not.toBeNull();
+    const seeded = [...block![0].matchAll(/\(\s*'([a-z0-9]+)'\s*,\s*'(substring|word)'\s*\)/g)].map(
+      (m) => ({ term: m[1]!, kind: m[2]! })
+    );
+    const joined = (t: string) => foldForBlocklist(t).replace(/ /g, "");
+    const seededSub = seeded.filter((s) => s.kind === "substring").map((s) => s.term).sort();
+    const seededWord = seeded.filter((s) => s.kind === "word").map((s) => s.term).sort();
+    expect(seededSub).toEqual([...BLOCKED_SUBSTRING_TERMS].map(joined).sort());
+    expect(seededWord).toEqual([...BLOCKED_WORD_TERMS].map(joined).sort());
+  });
+
+  it("every MULTI-WORD substring term also seeds its spaced phrase form (the space-boundary rule needs it)", () => {
+    const multiWord = [...BLOCKED_SUBSTRING_TERMS]
+      .map((t) => foldForBlocklist(t))
+      .filter((t) => t.includes(" "));
+    expect(multiWord.length).toBeGreaterThan(0); // 'kill yourself' at minimum
+    for (const phrase of multiWord) {
+      const joined = phrase.replace(/ /g, "");
+      expect(raw).toContain(
+        `update public.fp_blocked_terms set phrase = '${phrase}' where term = '${joined}';`
+      );
+    }
+    // And the blocked predicate consults the phrase column.
+    const blockedBody = fnBody("fp_public_text_blocked");
+    expect(/t\.phrase\s+is\s+not\s+null\s+and\s+position\s*\(\s*t\.phrase\s+in/i.test(blockedBody)).toBe(true);
+  });
+
+  it("the SQL fold mirrors the TS fold: NFKC + lower + intra-token strip with SPACES PRESERVED as boundaries (collapsed + trimmed)", () => {
+    const foldBody = fnBody("fp_blocklist_fold");
+    expect(/normalize\s*\(\s*coalesce\s*\(\s*p_value\s*,\s*''\s*\)\s*,\s*NFKC\s*\)/i.test(foldBody)).toBe(true);
+    expect(/lower\s*\(/i.test(foldBody)).toBe(true);
+    // Strip class keeps [:space:] (the round-2 P1: no cross-word joins) …
+    expect(foldBody).toContain("[^[:alnum:][:space:]]");
+    // …whitespace runs collapse to ONE space and the result is trimmed.
+    expect(/'\[\[:space:\]\]\+'\s*,\s*' '/.test(foldBody)).toBe(true);
+    expect(/btrim\s*\(/i.test(foldBody)).toBe(true);
+    const blockedBody = fnBody("fp_public_text_blocked");
+    expect(/match_kind\s*=\s*'substring'/i.test(blockedBody)).toBe(true);
+    expect(/match_kind\s*=\s*'word'/i.test(blockedBody)).toBe(true);
+    expect(/regexp_split_to_table/i.test(blockedBody)).toBe(true);
+    // zero-width/format strip precedes tokenization (ARE \u escapes, no
+    // invisible literals in the file).
+    expect(blockedBody).toContain("\\u200B");
+    expect(/\braise\b/i.test(blockedBody)).toBe(false);
+    expect(/\braise\b/i.test(foldBody)).toBe(false);
   });
 
   it("the reserved-handle seed is exactly RESERVED_HANDLES (set equality, no drift)", () => {
@@ -318,7 +387,7 @@ describe("migration parity: fp_public_sites.sql", () => {
   });
 
   it("RLS is enabled on BOTH tables with ZERO policies and default-deny revokes (service-role writes only)", () => {
-    for (const t of ["fp_public_sites", "fp_reserved_handles"]) {
+    for (const t of ["fp_public_sites", "fp_reserved_handles", "fp_blocked_terms"]) {
       expect(new RegExp(`alter\\s+table\\s+public\\.${t}\\s+enable\\s+row\\s+level\\s+security`, "i").test(sql)).toBe(true);
       expect(new RegExp(`revoke\\s+all\\s+on\\s+public\\.${t}\\s+from\\s+anon\\s*,\\s*authenticated`, "i").test(sql)).toBe(true);
       expect(new RegExp(`create\\s+policy\\s+"[^"]*"\\s+on\\s+public\\.${t}`, "i").test(sql)).toBe(false);
@@ -406,6 +475,79 @@ describe("fp-public-site-rules predicates", () => {
   });
 });
 
+// ── Blocklist matcher — both directions (Unit 2 review items 1 + 9) ──
+describe("containsBlockedTerm", () => {
+  it("catches separator/symbol dodges via the aggressive fold: f-u-c-k, f*u*c*k, f_u.c-k", () => {
+    expect(containsBlockedTerm("f-u-c-k")).toBe(true);
+    expect(containsBlockedTerm("f*u*c*k this")).toBe(true);
+    expect(containsBlockedTerm("F_U.C-K")).toBe(true);
+  });
+
+  it("catches the masked spelling f*ck (symbol swallowed by folding → the fck term)", () => {
+    expect(containsBlockedTerm("f*ck")).toBe(true);
+    expect(containsBlockedTerm("what the f@ck")).toBe(true);
+  });
+
+  it("catches zero-width interleave and fullwidth (NFKC) forms", () => {
+    expect(containsBlockedTerm("f​uck")).toBe(true); // ZWSP inside
+    expect(containsBlockedTerm("s‍hit")).toBe(true); // ZWJ inside
+    expect(containsBlockedTerm("ｆｕｃｋ")).toBe(true); // fullwidth fuck
+    // WORD-class terms survive zero-width interleave too (stripped pre-token).
+    expect(containsBlockedTerm("me​th")).toBe(true);
+  });
+
+  it("multi-word substring terms match their run-together and separated forms", () => {
+    expect(containsBlockedTerm("kill yourself")).toBe(true);
+    expect(containsBlockedTerm("killyourself")).toBe(true);
+    expect(containsBlockedTerm("kill-your-self")).toBe(true);
+  });
+
+  it("WORD-class terms are boundary-aware: method/retardant/heroine pass; meth/retard/heroin alone do not", () => {
+    expect(containsBlockedTerm("Our proven method for selling lemonade")).toBe(false);
+    expect(containsBlockedTerm("fire retardant coating")).toBe(false);
+    expect(containsBlockedTerm("the heroine of the story")).toBe(false);
+    expect(containsBlockedTerm("nudest")).toBe(false); // not the token 'nude'
+    expect(containsBlockedTerm("meth")).toBe(true);
+    expect(containsBlockedTerm("you retard")).toBe(true);
+    expect(containsBlockedTerm("kys")).toBe(true);
+    expect(containsBlockedTerm("KYS!!!")).toBe(true);
+  });
+
+  it("SPACES ARE BOUNDARIES (round-2 P1): innocent cross-word joins pass through UNTOUCHED", () => {
+    expect(containsBlockedTerm("Sushi Tempura")).toBe(false); // NOT 'shit'
+    expect(containsBlockedTerm("Bass Hole Lures")).toBe(false); // NOT 'asshole'
+    expect(containsBlockedTerm("Pass Hole Repair")).toBe(false); // NOT 'asshole'
+    expect(containsBlockedTerm("Scunthorpe Sweets")).toBe(false); // NOT 'cunt'
+    expect(sanitizePublicText("Sushi Tempura delivery for the block")).toBe(
+      "Sushi Tempura delivery for the block"
+    );
+    expect(sanitizePublicText("Bass Hole Lures by Cedric")).toBe("Bass Hole Lures by Cedric");
+  });
+
+  it("ACCEPTED RESIDUALS, pinned so a future 'fix' is a conscious decision: separator-spelled WORD terms, SPACE-spelled SUBSTRING terms, and Cyrillic homoglyphs are NOT caught", () => {
+    // Boundary info and separator-dodge resistance are mutually exclusive per
+    // term (module doc): "m-e-t-h" tokenizes to single letters.
+    expect(containsBlockedTerm("m-e-t-h")).toBe(false);
+    // Round-2 P1 price: real spaces are the ONE separator the fold respects
+    // (else Sushi Tempura is blanked), so a space-spelled substring term is
+    // missed — consistent with the word-class residual above.
+    expect(containsBlockedTerm("f u c k")).toBe(false);
+    // NFKC does not confusable-fold: Cyrillic і (U+0456) ≠ Latin i. Operator
+    // takedown (fp-site-lock) is the answer for this class, not the filter.
+    expect(containsBlockedTerm("shіt")).toBe(false); // Cyrillic і
+  });
+
+  it("sanitizePublicText: blocked → '' (stored empty, renderer default shows); clean strings pass through UNTOUCHED", () => {
+    expect(sanitizePublicText("f-u-c-k yeah")).toBe("");
+    expect(sanitizePublicText("Our proven method for selling lemonade")).toBe(
+      "Our proven method for selling lemonade"
+    );
+    expect(sanitizePublicText("Dog walking for busy neighbors!")).toBe(
+      "Dog walking for busy neighbors!"
+    );
+  });
+});
+
 // ── Executable extraction spec (THE SPEC LIVES HERE — guardSaveDocUpdate
 // precedent): extractSiteContent is the behavioral mirror of the SQL's
 // fp_public_site_content; the parity suite above pins that the plpgsql
@@ -472,6 +614,22 @@ describe("extractSiteContent (executable spec)", () => {
     for (const bad of [null, undefined, [], "doc", 7, true]) {
       expect(extractSiteContent(bad)).toEqual({ headline: null, oneLiner: null });
     }
+  });
+
+  it("BLOCKLIST inside the spec (mirrors fp_clamp_public_text): blocked headline/one-liner extract as '' — an OVERWRITE, never a skip", () => {
+    const r = extractSiteContent(
+      doc({ siteHeadline: "f-u-c-k the rules", ideas: [idea("selling meth to neighbors")] })
+    );
+    expect(r.headline).toBe(""); // '' = overwrite (clears the live column)
+    expect(r.oneLiner).toBe("");
+    // The check runs on the RAW value BEFORE truncation: a blocked term
+    // straddling the cap cannot survive as its clamped prefix.
+    const straddle = "x".repeat(118) + "f-u-c-k";
+    expect(extractSiteContent(doc({ siteHeadline: straddle })).headline).toBe("");
+    // Boundary-aware WORD terms stay honest inside the spec too.
+    expect(
+      extractSiteContent(doc({ siteHeadline: "Our proven method for selling lemonade" })).headline
+    ).toBe("Our proven method for selling lemonade");
   });
 
   it("exponent notation behaves like the DB: the PARSED number (1e3 → 1000) is in-shape and bounds-checked, not string-rejected", () => {

@@ -256,6 +256,10 @@ export const AUDIT_ACTIONS = [
   // the DB CHECK in the same change (20260722180000_crm_audit_path_recovery.sql);
   // parity pinned by app/crm/__tests__/audit-actions-parity.test.ts.
   "path-recovery",
+  // Real-public-site Unit 2: operator lock/unlock of a child's First Profit
+  // public page (abuse takedown; always wins over `published`). Added to the DB
+  // CHECK in the same change (20260908120000_fp_public_sites_ops.sql).
+  "fp-site-lock",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

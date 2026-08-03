@@ -61,8 +61,12 @@ const USER_ID = "user-alex-1";
 const CHILD_ID = "aaaaaaaa-1111-4111-8111-000000000001";
 const INTERNAL_EMAIL = `s-${CHILD_ID.toLowerCase()}@students.the120.invalid`;
 
-/** Seed one provisioned FP student whose child row carries a lowercase username. */
-function seedChild(fpUsername: string | null): void {
+/** Seed one provisioned FP student whose child row carries a lowercase username
+ *  (and, for the Unit 3 grade tests, an optional roster birth_year/grade). */
+function seedChild(
+  fpUsername: string | null,
+  roster?: { birthYear?: string; grade?: number | null }
+): void {
   store.value = {
     path_student_profiles: [
       {
@@ -71,7 +75,12 @@ function seedChild(fpUsername: string | null): void {
         child_id: CHILD_ID,
         family_id: "fam-1",
         created_at: "2026-01-01T00:00:00Z",
-        children: { first_name: "Alex", fp_username: fpUsername },
+        children: {
+          first_name: "Alex",
+          fp_username: fpUsername,
+          birth_year: roster?.birthYear ?? "",
+          grade: roster?.grade ?? null,
+        },
       },
     ],
   } as Store;
@@ -111,7 +120,10 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     rateRef.cleared = [];
     ensureRef.fn = vi.fn().mockResolvedValue({ ok: true, handle: "alex" }) as unknown as EnsureFn;
   });
-  afterEach(() => vi.resetModules());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
 
   it("resolves a child by fp_username and mints a session (200 + tokens)", async () => {
     const res = await post({ identifier: "alex", password: "correct horse tulip" });
@@ -240,6 +252,36 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect(res.status).toBe(401);
     expect(authRef.signIn).toHaveBeenCalledTimes(1);
     expect((authRef.calls[0] as { email: string }).email).not.toBe(INTERNAL_EMAIL);
+  });
+
+  it("the 200 body carries grade derived AT READ TIME from birth_year (Unit 3)", async () => {
+    // Pin the clock inside school year 2026-27: born 2018 → grade 3. The
+    // derivation runs at READ time, so the stored (stale) grade loses.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.UTC(2026, 9, 1, 12, 0, 0)));
+    seedChild("alex", { birthYear: "2018", grade: 2 });
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).grade).toBe(3);
+  });
+
+  it("grade falls back to the stored children.grade when birth_year is the '' sentinel", async () => {
+    seedChild("alex", { grade: 7 });
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect((await res.json()).grade).toBe(7);
+  });
+
+  it("grade is null when neither birth_year nor a stored grade is set", async () => {
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect((await res.json()).grade).toBeNull();
+  });
+
+  it("grade is returned UNCLAMPED outside 3-12 — display code decides banding", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.UTC(2026, 9, 1, 12, 0, 0)));
+    seedChild("alex", { birthYear: "2005" }); // grade 16 in 2026-27
+    const res = await post({ identifier: "alex", password: "correct horse tulip" });
+    expect((await res.json()).grade).toBe(16);
   });
 
   it("preserves the origin gate — a disallowed Origin is 403, not the generic 401", async () => {

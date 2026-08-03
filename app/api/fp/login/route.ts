@@ -42,7 +42,14 @@
  * only the attacker's own input — never account existence — so they are not
  * equalized and need not be.
  *
- * NEVER log the password or tokens.
+ * The 200 body also carries `grade: number|null` (Unit 3; R9): derived AT
+ * READ TIME from `children.birth_year` (empty-string sentinel = unset) via the
+ * pure school-year arithmetic in ../grade/grade-rules, falling back to the
+ * stored `children.grade`, null when neither — surfaced through the EXISTING
+ * candidate-scan join, unclamped (display code decides banding).
+ *
+ * NEVER log the password or tokens — nor the child's birth_year or grade
+ * (child data rides the same never-log rule).
  */
 
 import { randomUUID } from "node:crypto";
@@ -76,6 +83,7 @@ import {
   shapeRefusal,
   type LoginRefusalReason,
 } from "./login-rules";
+import { resolveChildGrade } from "../grade/grade-rules";
 import { ensurePlayerProfile } from "./profile-core";
 
 export const dynamic = "force-dynamic";
@@ -186,9 +194,13 @@ export async function POST(req: Request): Promise<Response> {
     // U12 case-insensitive `lower(fp_username)` unique index). fp_username is
     // globally unique, so at most ONE row matches — the multi-candidate cap stays
     // for structural parity with /fp sign-in but a username can never fan out.
+    // birth_year/grade ride the SAME join (Unit 3) — the grade in the 200 body
+    // is derived from them at read time; no second query. NEVER logged.
     const res = await admin
       .from("path_student_profiles")
-      .select("id, user_id, child_id, family_id, children!inner(first_name, fp_username)")
+      .select(
+        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade)"
+      )
       .order("created_at", { ascending: true });
     if (res.error) {
       console.error(`[fp/login] candidate load failed: ${res.error.message}`);
@@ -375,6 +387,15 @@ export async function POST(req: Request): Promise<Response> {
           access_token: session.access_token,
           refresh_token: session.refresh_token,
           profile: { handle: profile.handle, firstName: candidate.firstName },
+          // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
+          // across school years), stored children.grade as the fallback, null
+          // when neither. UNCLAMPED even outside 3-12 — display code decides
+          // banding (bandForGrade answers null outside the bands). NEVER
+          // logged, same rule as the credentials above.
+          grade: resolveChildGrade(
+            { birthYear: candidate.birthYear, storedGrade: candidate.grade },
+            new Date()
+          ),
         }),
         { status: 200, headers }
       );

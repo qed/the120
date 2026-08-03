@@ -248,6 +248,13 @@ export type SignInCandidate = {
   familyId: string;
   firstName: string;
   username: string | null;
+  /** `children.birth_year` (text; '' = unset sentinel). Only the FP login path
+   *  selects it — absent narrows to '' (unset), never a dropped row. Feeds the
+   *  read-time grade derivation (Unit 3); NEVER logged. */
+  birthYear: string;
+  /** `children.grade` (int, nullable) — the stored-roster fallback when
+   *  birth_year is unset. Absent/non-int narrows to null. NEVER logged. */
+  grade: number | null;
 };
 
 /**
@@ -295,6 +302,15 @@ export function parseCandidateRow(row: {
   // resolved by the FP username login.
   const rawUsername = (child as { fp_username?: unknown }).fp_username;
   const username = typeof rawUsername === "string" ? rawUsername : null;
+  // birth_year / grade (Unit 3): OPTIONAL on the row — only the FP login path
+  // selects them (the /fp name path does not). Malformed values narrow to the
+  // unset sentinel ('' / null), NEVER a dropped row: grade is display
+  // plumbing, and a bad roster value must not make a student vanish from the
+  // candidate set.
+  const rawBirthYear = (child as { birth_year?: unknown }).birth_year;
+  const birthYear = typeof rawBirthYear === "string" ? rawBirthYear : "";
+  const rawGrade = (child as { grade?: unknown }).grade;
+  const grade = typeof rawGrade === "number" && Number.isInteger(rawGrade) ? rawGrade : null;
   return {
     profileId: row.id,
     userId: row.user_id,
@@ -302,6 +318,8 @@ export function parseCandidateRow(row: {
     familyId: row.family_id,
     firstName,
     username,
+    birthYear,
+    grade,
   };
 }
 

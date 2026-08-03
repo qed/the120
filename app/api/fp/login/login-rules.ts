@@ -59,31 +59,40 @@ export function parseLoginRequest(body: unknown): ParsedLoginRequest {
 
 export type IdentifierClassification =
   | { kind: "username"; normalized: string }
-  | { kind: "refuse"; reason: "empty_identifier" | "email_identifier" | "invalid_username" };
+  | { kind: "refuse"; reason: "empty_identifier" | "invalid_username" };
 
 /**
- * The stored username shape (U12): lowercase alphanumerics only. Matches the
- * `children_fp_username_format` CHECK and the generator's output, so a valid
- * typed identifier normalizes into exactly the DB namespace.
+ * The stored username shape. Lowercase alphanumerics PLUS the email-safe
+ * punctuation `@ . _ + -`, so a username MAY be email-shaped
+ * (e.g. `cedric@firstprofit.school`). Usernames are treated as OPAQUE lowercase
+ * strings — NOT validated as deliverable email addresses (a `@` here is just a
+ * character, there is no email auth branch). Must START and END with an
+ * alphanumeric (no leading/trailing punctuation), bounded ≤ 80 by the request
+ * schema. This is a SUPERSET of the auto-generator's `^[a-z0-9]+$` output, so a
+ * generated handle still classifies; it must stay in lock-step with the
+ * `children_fp_username_format` DB CHECK and the case-insensitive unique index
+ * (the generator/CHECK/regex charset-agreement invariant).
  */
-const USERNAME_FORMAT = /^[a-z0-9]+$/;
+const USERNAME_FORMAT = /^[a-z0-9]([a-z0-9._+@-]*[a-z0-9])?$/;
 
 /**
- * Slice B Unit 13: child USERNAMES. Normalize to the stored convention — NFKC
- * fold (so a fullwidth `＠`/`Ａ` cannot smuggle a different shape past the guard),
- * trim, lowercase — then classify:
- *   - empty after trim            → `empty_identifier`
- *   - contains `@` (email-shaped) → `email_identifier`
- *   - not `^[a-z0-9]+$`           → `invalid_username`
- * All three collapse to the SAME generic refusal in the route; the distinct
- * reasons exist only for the caller's logs. Refusing a malformed shape EARLY
- * (before any DB I/O) is deliberate and non-enumerating: it reveals nothing a
- * not-found would not, and a username the child does not have is unguessable.
+ * Slice B Unit 13 (+ email-shaped usernames): child USERNAMES. Normalize to the
+ * stored convention — NFKC fold (so a fullwidth `＠`/`Ａ` folds to its ASCII shape
+ * rather than smuggling a different one past the guard), trim, lowercase — then
+ * classify:
+ *   - empty after trim              → `empty_identifier`
+ *   - not the USERNAME_FORMAT shape  → `invalid_username`
+ * Both collapse to the SAME generic refusal in the route; the distinct reasons
+ * exist only for the caller's logs. Refusing a malformed shape EARLY (before any
+ * DB I/O) is deliberate and non-enumerating: it reveals nothing a not-found would
+ * not, and a username the child does not have is unguessable. An email-shaped
+ * identifier is now a VALID username shape (no early `@` refusal): it takes the
+ * same single lookup + byte-identical 401 as any other username, so no new
+ * timing/shape oracle is introduced.
  */
 export function classifyIdentifier(identifier: string): IdentifierClassification {
   const normalized = identifier.normalize("NFKC").trim().toLowerCase();
   if (!normalized) return { kind: "refuse", reason: "empty_identifier" };
-  if (normalized.includes("@")) return { kind: "refuse", reason: "email_identifier" };
   if (!USERNAME_FORMAT.test(normalized)) return { kind: "refuse", reason: "invalid_username" };
   return { kind: "username", normalized };
 }
@@ -93,7 +102,6 @@ export function classifyIdentifier(identifier: string): IdentifierClassification
 export type LoginRefusalReason =
   | "malformed_request"
   | "empty_identifier"
-  | "email_identifier"
   | "invalid_username"
   | "bad_credentials"
   | "not_child"

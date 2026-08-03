@@ -20,6 +20,20 @@
 --   supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md).
 --   Do NOT write schema_migrations by hand.
 --
+-- AMENDMENT LOG (this migration is still branch-only / never applied, so
+--   amendments land IN PLACE — the established pattern from the Unit 2
+--   content-blocklist amendment below; the VERSION ritual above still governs
+--   the one real apply):
+--   * 2026-08-03 (Unit 2 review): content blocklist added at the shared
+--     extraction — see the content-blocklist section.
+--   * 2026-08-03 (Unit 7): reserved seed 46 → 48 — added 'your-name' and
+--     'their-name', the marketing placeholder URLs the first-profit Landing
+--     renders (hero mockup firstprofit.school/your-name; steps copy
+--     firstprofit.school/their-name). Reserved BEFORE claiming is enabled
+--     anywhere so neither can become a real child's page. Mirrored the same
+--     change in app/fp/lib/fp-public-site-rules.ts RESERVED_HANDLES and
+--     first-profit api/_lib/reservedHandles.ts + vercel.json exclusions.
+--
 -- ⚠ DEPLOY ORDERING: this migration + a PostgREST schema-cache reload MUST be
 --   live BEFORE the Unit 2 the120 endpoints and BEFORE the first-profit
 --   serving function (Unit 3) that calls fp_public_site(). Ordering per the
@@ -284,7 +298,9 @@ insert into public.fp_reserved_handles (handle, reason) values
   ('docs',        'brand: likely future surface'),
   ('news',        'brand: likely future surface'),
   ('shop',        'brand: likely future surface'),
-  ('store',       'brand: likely future surface')
+  ('store',       'brand: likely future surface'),
+  ('your-name',   'brand: marketing placeholder URL (the Landing hero mockup shows firstprofit.school/your-name; must never become a real child page)'),
+  ('their-name',  'brand: marketing placeholder URL (the Landing steps copy shows firstprofit.school/their-name; must never become a real child page)')
 on conflict (handle) do nothing;
 
 -- ------------------------------------------------------- content blocklist

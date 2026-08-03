@@ -176,7 +176,7 @@ describe("migration parity: fp_public_sites.sql", () => {
     expect(new Set(seeded).size, "no duplicate seed rows").toBe(seeded.length);
     // Exact count pinned (a review found conflicting reports; the number is
     // load-bearing for the Unit 3 vercel.json exclusion cross-check).
-    expect(seeded).toHaveLength(46);
+    expect(seeded).toHaveLength(48);
     expect([...seeded].sort()).toEqual([...RESERVED_HANDLES].sort());
     // And every seeded reason is non-empty (the rationale lives WITH the row).
     const reasons = [...block![0].matchAll(/,\s*'([^']*)'\s*\)/g)].map((m) => m[1]!);

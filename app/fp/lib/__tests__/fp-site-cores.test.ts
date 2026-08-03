@@ -2,6 +2,8 @@
  * Parent unpublish/republish core + operator lock core (real-public-site
  * plan, Unit 2; R21, R22) over the shared fake-supabase store.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -83,6 +85,37 @@ describe("setSitePublishedForParent", () => {
       site: { handle: "cedric", status: "offline", operatorLocked: true },
     });
     expect(store.fp_public_sites[0]).toMatchObject({ operator_locked: true });
+  });
+
+  it("parent republish is a FLAG FLIP ONLY: no email, headline/one_liner/first_name untouched (content resync + R21 notification belong to the CHILD publish endpoint)", async () => {
+    const store = seeded({
+      published: false,
+      headline: "Dog walking for busy neighbors",
+      one_liner: "I walk dogs after school",
+    });
+    const res = await setSitePublishedForParent(db(store), {
+      parentUserId: PARENT,
+      childId: CHILD,
+      published: true,
+    });
+    expect(res.ok).toBe(true);
+    // Content columns are exactly as seeded — no doc/profile resync rode the
+    // toggle (the child publish endpoint is the authoritative refresh point).
+    expect(store.fp_public_sites[0]).toMatchObject({
+      published: true,
+      headline: "Dog walking for busy neighbors",
+      one_liner: "I walk dogs after school",
+      first_name: "Cedric",
+    });
+    // And the module has no mail path at all — structurally pinned, so a
+    // future edit that wires notification into the parent toggle fails a
+    // named test, not a review (the actor asymmetry: the parent is the actor,
+    // so R21 "notify the parent" would be a self-notification here).
+    const src = readFileSync(
+      path.resolve(process.cwd(), "app/fp/lib/fp-site-parent-core.ts"),
+      "utf8"
+    );
+    expect(src).not.toMatch(/sendMail|sendEmail|Resend/i);
   });
 
   it("a child the caller does NOT own answers the same forbidden as a nonexistent child (no oracle)", async () => {

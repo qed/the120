@@ -111,6 +111,12 @@ export const RESERVED_HANDLES = [
   "news",
   "shop",
   "store",
+  // marketing placeholder URLs: the first-profit Landing renders the literal
+  // URLs firstprofit.school/your-name (hero mockup) and
+  // firstprofit.school/their-name (steps copy) — neither may ever become a
+  // real child's page (Unit 7; reserved before claiming is enabled anywhere).
+  "your-name",
+  "their-name",
 ] as const;
 
 const RESERVED = new Set<string>(RESERVED_HANDLES);

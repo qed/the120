@@ -35,24 +35,20 @@ export type Skill = {
 
 /** Ordered easiest → hardest. Appending is safe; renaming ids loses progress. */
 export const PATHWAY: Skill[] = [
-  // Arithmetic
+  // Grade 3 foundations
   { id: "add-facts", label: "Addition facts", area: "arith", topic: "add", band: "g34" },
   { id: "sub-facts", label: "Subtraction facts", area: "arith", topic: "sub", band: "g34" },
   { id: "times-1", label: "Times tables I", area: "arith", topic: "mul", band: "g34" },
   { id: "div-facts", label: "Division facts", area: "arith", topic: "div", band: "g34" },
   { id: "dbl-halve", label: "Double & halve", area: "arith", topic: "dbl", band: "g34" },
+  // Grade 4 foundations
   { id: "place-value", label: "Place value", area: "arith", topic: "place", band: "g34" },
   { id: "times-2", label: "Times tables II", area: "arith", topic: "mul", band: "g56" },
   { id: "mul-2x1", label: "2-digit × 1-digit", area: "arith", topic: "mul2x1", band: "g56" },
+  // Grade 5 foundations
   { id: "pow-ten", label: "Powers of ten", area: "arith", topic: "pow10", band: "g56" },
   { id: "frac-of", label: "Fraction of a number", area: "arith", topic: "fracof", band: "g56" },
-  { id: "signed-add", label: "Signed add & subtract", area: "arith", topic: "intadd", band: "g78" },
-  { id: "sign-rules", label: "Sign rules ×/÷", area: "arith", topic: "intmul", band: "g78" },
-  // Pre-Algebra
-  { id: "squares", label: "Perfect squares", area: "prealg", topic: "sq", band: "g56" },
-  { id: "sq-roots", label: "Square roots", area: "prealg", topic: "sqrt", band: "g56" },
-  { id: "cubes", label: "Perfect cubes", area: "prealg", topic: "cube", band: "g78" },
-  { id: "exponents", label: "Exponents", area: "prealg", topic: "pow", band: "g78" },
+  // Grade 6 number relationships
   { id: "gcd", label: "Greatest common divisor", area: "prealg", topic: "gcd", band: "g56" },
   { id: "simp-fractions", label: "Simplify fractions", area: "prealg", topic: "simpfrac", band: "g56" },
   // g34 parameter spaces (tester feedback 2026-07-18: g56's LCM/LCD pairs —
@@ -60,21 +56,31 @@ export const PATHWAY: Skill[] = [
   { id: "lcm", label: "Least common multiple", area: "prealg", topic: "lcm", band: "g34" },
   { id: "denoms", label: "Common denominators", area: "prealg", topic: "denom", band: "g34" },
   { id: "mul-fractions", label: "Multiply fractions", area: "prealg", topic: "fracmul", band: "g56" },
-  { id: "add-fractions", label: "Add fractions", area: "prealg", topic: "fracadd", band: "g56" },
   { id: "compare-fractions", label: "Compare fractions", area: "prealg", topic: "fraccomp", band: "g56" },
-  { id: "exp-rules", label: "Exponent product rule", area: "prealg", topic: "exprule", band: "g78" },
-  { id: "proportions", label: "Proportions", area: "prealg", topic: "prop", band: "g78" },
+  // Grade 7 operations and early algebra
+  { id: "signed-add", label: "Signed add & subtract", area: "arith", topic: "intadd", band: "g78" },
+  { id: "add-fractions", label: "Add fractions", area: "prealg", topic: "fracadd", band: "g56" },
   { id: "pct-to-dec", label: "Percent → decimal", area: "prealg", topic: "pct2dec", band: "g78" },
   { id: "dec-to-pct", label: "Decimal → percent", area: "prealg", topic: "dec2pct", band: "g78" },
   { id: "pct-to-frac", label: "Percent → fraction", area: "prealg", topic: "pct2frac", band: "g78" },
   { id: "arith-patterns", label: "Arithmetic patterns", area: "prealg", topic: "nextarith", band: "g78" },
   { id: "eval-expressions", label: "Evaluate expressions", area: "prealg", topic: "evalexpr", band: "g78" },
   { id: "one-step-eq", label: "One-step equations", area: "prealg", topic: "solve1", band: "g78" },
+  // Grade 8 number, algebra, and spatial relationships
+  { id: "sign-rules", label: "Sign rules ×/÷", area: "arith", topic: "intmul", band: "g78" },
+  { id: "squares", label: "Perfect squares", area: "prealg", topic: "sq", band: "g56" },
+  { id: "sq-roots", label: "Square roots", area: "prealg", topic: "sqrt", band: "g56" },
+  { id: "cubes", label: "Perfect cubes", area: "prealg", topic: "cube", band: "g78" },
+  { id: "exponents", label: "Exponents", area: "prealg", topic: "pow", band: "g78" },
+  { id: "exp-rules", label: "Exponent product rule", area: "prealg", topic: "exprule", band: "g78" },
+  { id: "proportions", label: "Proportions", area: "prealg", topic: "prop", band: "g78" },
   { id: "two-step-eq", label: "Two-step equations", area: "prealg", topic: "solve2", band: "g78" },
   { id: "like-terms", label: "Combine like terms", area: "prealg", topic: "likterms", band: "g78" },
   { id: "distribute", label: "Distribute", area: "prealg", topic: "distlin", band: "g78" },
-  // Algebra
   { id: "linear-fn", label: "Evaluate linear functions", area: "alg", topic: "linfn", band: "g912" },
+  { id: "supp-comp", label: "Supplements & complements", area: "geo", topic: "suppcomp", band: "g78" },
+  { id: "pythagoras", label: "Pythagorean triples", area: "geo", topic: "pyth", band: "g78" },
+  // Grade 9 algebra
   { id: "slope", label: "Slope from two points", area: "alg", topic: "slope", band: "g912" },
   { id: "slope-fractions", label: "Slope (fractions)", area: "alg", topic: "slope2", band: "g912" },
   { id: "quadratics", label: "Evaluate quadratics", area: "alg", topic: "evalquad", band: "g912" },
@@ -86,9 +92,7 @@ export const PATHWAY: Skill[] = [
   { id: "exp-quotient", label: "Exponent quotient rule", area: "alg", topic: "expquot", band: "g912" },
   { id: "simplify-roots", label: "Larger square roots", area: "alg", topic: "sqrtbig", band: "g912" },
   { id: "discriminant", label: "Discriminant & real roots", area: "alg", topic: "disc", band: "g912" },
-  // Geometry
-  { id: "supp-comp", label: "Supplements & complements", area: "geo", topic: "suppcomp", band: "g78" },
-  { id: "pythagoras", label: "Pythagorean triples", area: "geo", topic: "pyth", band: "g78" },
+  // Grade 10 geometry and trigonometry
   { id: "congruence", label: "Triangle congruence", area: "geo", topic: "congruence", band: "g78" },
   { id: "distance", label: "Coordinate distance triples", area: "geo", topic: "dist", band: "g912" },
   { id: "midpoints", label: "Midpoints", area: "geo", topic: "midpoint", band: "g912" },
@@ -137,19 +141,19 @@ export const SKILL_GRADE: Record<string, number> = {
   // Arithmetic — grades 3–6
   "add-facts": 3, "sub-facts": 3, "times-1": 3, "div-facts": 3, "dbl-halve": 3,
   "place-value": 4, "times-2": 4, "mul-2x1": 4, "pow-ten": 5, "frac-of": 5,
-  "signed-add": 6, "sign-rules": 6,
+  "signed-add": 7, "sign-rules": 8,
   // Pre-Algebra — grades 6–8
-  "squares": 6, "sq-roots": 6, "cubes": 6, "exponents": 6, "exp-rules": 7,
+  "squares": 8, "sq-roots": 8, "cubes": 8, "exponents": 8, "exp-rules": 8,
   "gcd": 6, "simp-fractions": 6, "lcm": 6, "denoms": 6, "mul-fractions": 6,
-  "add-fractions": 6, "compare-fractions": 6, "proportions": 7, "pct-to-dec": 7,
+  "add-fractions": 7, "compare-fractions": 6, "proportions": 8, "pct-to-dec": 7,
   "dec-to-pct": 7, "pct-to-frac": 7, "arith-patterns": 7, "eval-expressions": 7,
   "one-step-eq": 7, "two-step-eq": 8, "like-terms": 8, "distribute": 8,
   // Algebra — grades 8–9
-  "linear-fn": 8, "slope": 8, "slope-fractions": 8, "quadratics": 9,
+  "linear-fn": 8, "slope": 9, "slope-fractions": 9, "quadratics": 9,
   "factor-pairs": 9, "binomials": 9, "factor-quads": 9, "factor-gcf": 9,
   "geo-patterns": 9, "exp-quotient": 9, "simplify-roots": 9, "discriminant": 9,
-  // Geometry — grades 9–10
-  "supp-comp": 9, "pythagoras": 9, "congruence": 10, "distance": 10,
+  // Geometry — grades 8–10
+  "supp-comp": 8, "pythagoras": 8, "congruence": 10, "distance": 10,
   "midpoints": 10, "special-rt": 10,
   // Trigonometry — grades 10–11
   "ref-angles": 10, "coterminal": 10, "trig-values": 10, "trig-beyond-q1": 11,

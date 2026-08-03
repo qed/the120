@@ -7,6 +7,7 @@ import {
   personalBestCopy,
   rankMovementCopy,
   sprintBracketForGrade,
+  sprintGradeForProgress,
   sprintScore,
   standingGapCopy,
   type SprintBoardRow,
@@ -33,6 +34,12 @@ describe("daily sprint", () => {
     expect(sprintBracketForGrade(10)).toBe("g910");
     expect(sprintBracketForGrade(11)).toBe("g11");
     expect(sprintBracketForGrade(12)).toBe("g12");
+  });
+
+  it("never lowers a Sprint division below reached pathway play", () => {
+    expect(sprintGradeForProgress(5, 8)).toBe(8);
+    expect(sprintGradeForProgress(10, 8)).toBe(10);
+    expect(sprintGradeForProgress(null, 7)).toBe(7);
   });
 
   it("keeps calculus out of the Grades 9–10 Sprint", () => {

@@ -19,6 +19,7 @@ import {
   type SprintRun,
 } from "../game/dailySprint";
 import {
+  answerInstruction,
   entryOf,
   judgeAnswer,
   type Problem,
@@ -274,8 +275,11 @@ export default function DailySprint({
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300">Daily Sprint</p>
         <h2 className="mt-2 text-4xl font-bold sm:text-5xl">Same 20. Same order. One minute.</h2>
         <p className="mt-3 max-w-xl text-white/65">
-          Official runners in {bandLabel}{" "}get today&apos;s exact quickfire deck. Accuracy ranks first;
+          Everyone in the {bandLabel}{" "}content division gets today&apos;s exact quickfire deck. Accuracy ranks first;
           time breaks close scores. Formula and visual challenges stay in learning raids.
+        </p>
+        <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
+          Content division follows the highest grade selected or reached · age is not verified
         </p>
         <p
           className={`mt-4 rounded-2xl border px-4 py-3 font-mono text-xs ${
@@ -437,6 +441,7 @@ export default function DailySprint({
   }
 
   const entry = entryOf(problem);
+  const instruction = answerInstruction(problem);
   const auto = isAutoSubmit(entry);
   const minutes = Math.floor(timeLeft / 60);
   const seconds = String(timeLeft % 60).padStart(2, "0");
@@ -492,6 +497,11 @@ export default function DailySprint({
             {problem.prompt}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && " = ?"}
           </p>
+          {instruction && (
+            <p className="mt-1 text-[10px] text-white/30">
+              {instruction}
+            </p>
+          )}
           {problem.kind === "numeric" ? (
             coarse ? (
               <>

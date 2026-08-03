@@ -56,7 +56,7 @@ describe("authored samples", () => {
   it("2/3 × 3/4 → 1/2 (fraction-multiply)", () => {
     const p = problemFromKey("fracmul:2/3×3/4")!;
     expect(p.answer).toBe("1/2");
-    expect(judgeAnswer(p, "6/12")).toBe(false); // lowest terms enforced
+    expect(judgeAnswer(p, "6/12")).toBe(true); // multiplication accepts equivalents
   });
   it("3/5 > 2/3 → False (compare-fractions)", () => {
     expect(problemFromKey("fraccomp:3/5>2/3")!.answer).toBe("False");
@@ -101,6 +101,14 @@ describe("sets + generators", () => {
       expect(d, p.key).toBeGreaterThan(1);
       const g = (a: number, b: number): number => (b ? g(b, a % b) : a);
       expect(g(n, d), p.key).toBe(1);
+    }
+  });
+  it("fraction multiplication accepts an equivalent unsimplified result", () => {
+    for (let i = 0; i < 30; i++) {
+      const p = GENERATORS.fracmul("g78");
+      const [n, d] = p.answer.split("/").map(Number);
+      expect(p.rule, p.key).toBe("frac-any-equivalent");
+      expect(judgeAnswer(p, `${n * 2}/${d * 2}`), p.key).toBe(true);
     }
   });
   it("the pathway wires every new topic", () => {

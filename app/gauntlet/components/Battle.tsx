@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Boss } from "../game/bosses";
-import { canonicalProblemFromKey, entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
+import { answerInstruction, canonicalProblemFromKey, entryOf, judgeAnswer, masteryMsFor, nextProblem, type Band, type Problem, type TopicId } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import type { FactStat } from "../game/mastery";
 import { ensureAudio, sfxCrit, sfxEnter, sfxHit, sfxTick, sfxWrong } from "../game/audio";
@@ -27,13 +27,9 @@ const PAR_MS = 4000; // time beyond this counts as "waste"
 const REVEAL_MS = 1500;
 const PUZZLE_SECONDS = 15;
 export const streakMult = (s: number) => (s >= 15 ? 3 : s >= 10 ? 2.5 : s >= 5 ? 2 : s >= 3 ? 1.5 : 1);
-export const strikePowerDamage = (bossMaxHp: number) =>
-  Math.max(120, Math.round(bossMaxHp * 0.14));
-export const strikePowerMode = (
-  bossHp: number,
-  bossMaxHp: number
-): "charged" | "finisher" =>
-  bossHp <= strikePowerDamage(bossMaxHp) ? "finisher" : "charged";
+export const isComboBurst = (streak: number) => streak > 0 && streak % 5 === 0;
+export const comboBurstDamage = (bossMaxHp: number) =>
+  Math.max(60, Math.round(bossMaxHp * 0.08));
 
 export type ProblemResult = {
   key: string;
@@ -52,7 +48,7 @@ export type BattleStats = {
   activeMs: number;
   timeLeft: number;
   puzzlesSolved: number;
-  powersUsed: number;
+  comboBursts: number;
 };
 
 export default function Battle({
@@ -64,6 +60,7 @@ export default function Battle({
   puzzleSource,
   challengeDeck,
   raidLevel = 1,
+  raidLabel,
   instantSubmit = false,
   onFinish,
 }: {
@@ -73,12 +70,14 @@ export default function Battle({
   facts: Record<string, FactStat>;
   /** Earlier recall skills used to create a readable warmup/recovery rhythm. */
   quickfireSources?: RaidSource[];
-  /** The selected slower/visual skill, served as a fixed-effect Armor Break. */
+  /** The selected slower/visual skill, served as a fixed-effect Power Question. */
   puzzleSource?: RaidSource;
   /** Exact question/encounter order from a v2 friend challenge. */
   challengeDeck?: ChallengeQuestion[];
   /** Boss ladder level, used for skill-specific scaffolding. */
   raidLevel?: number;
+  /** Child-facing reason/skill for this raid. */
+  raidLabel?: string;
   /** opt-in speedrun mode: number answers auto-fire at full length */
   instantSubmit?: boolean;
   onFinish: (won: boolean, stats: BattleStats, results: ProblemResult[]) => void;
@@ -140,8 +139,6 @@ export default function Battle({
   const [wrongFlash, setWrongFlash] = useState(false);
   const [reveal, setReveal] = useState<null | { answer: string }>(null);
   const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_SECONDS);
-  const [powerReady, setPowerReady] = useState(false);
-  const [chargedStrike, setChargedStrike] = useState(false);
   const [effectCallout, setEffectCallout] = useState<string | null>(null);
   const [dying, setDying] = useState(false);
   const [entering, setEntering] = useState(true);
@@ -162,7 +159,7 @@ export default function Battle({
     activeMs: 0,
     timeLeft: 0,
     puzzlesSolved: 0,
-    powersUsed: 0,
+    comboBursts: 0,
   });
   const resultsRef = useRef<ProblemResult[]>([]);
   const wrongStreakRef = useRef(0);
@@ -171,14 +168,7 @@ export default function Battle({
   const doneRef = useRef(false);
   const endAtRef = useRef(0);
   const lastTickRef = useRef(RAID_SECONDS);
-  const powerPauseAtRef = useRef(0);
-  const powerReadyRef = useRef(false);
-
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    powerReadyRef.current = powerReady;
-  }, [powerReady]);
 
   useEffect(() => {
     const now = Date.now();
@@ -204,7 +194,7 @@ export default function Battle({
     };
     document.addEventListener("visibilitychange", onVis);
     const t = setInterval(() => {
-      if (document.hidden || powerReadyRef.current) return;
+      if (document.hidden) return;
       const s = Math.max(0, Math.ceil((endAtRef.current - Date.now()) / 1000));
       setTimeLeft(s);
       if (s <= 10 && s > 0 && s !== lastTickRef.current) sfxTick();
@@ -319,20 +309,21 @@ export default function Battle({
     const elapsed = Date.now() - askedAt.current;
     record(true, elapsed);
     const isPuzzle = beat === "puzzle";
+    const nextStreak = streak + 1;
+    const comboBurst = isComboBurst(nextStreak);
     // Later-grade skills take longer per answer, so both the speed-bonus
     // window and the damage scale with the topic's mastery window — a slow
     // topic's raid is still winnable in the same 2-minute clock.
     const topicMs = masteryMsFor(problem.topic);
     const speedWindow = Math.max(SPEED_WINDOW_MS, 2 * topicMs);
     const speed = Math.max(0, 1 - elapsed / speedWindow);
-    const mult = streakMult(streak + 1);
+    const mult = streakMult(nextStreak);
     const baseDamage = isPuzzle
       ? Math.max(90, Math.round(boss.hp * 0.12))
       : Math.round((BASE_DAMAGE + SPEED_BONUS_MAX * speed) * mult * (topicMs / 3000));
-    const chargedDamage = chargedStrike ? strikePowerDamage(boss.hp) : 0;
-    const dmg = baseDamage + chargedDamage;
-    const crit = chargedStrike || isPuzzle || mult >= 2;
-    const nextStreak = streak + 1;
+    const burstDamage = comboBurst ? comboBurstDamage(boss.hp) : 0;
+    const dmg = baseDamage + burstDamage;
+    const crit = comboBurst || isPuzzle || mult >= 2;
     const nextBossHp = Math.max(0, bossHp - dmg);
     statsRef.current.correct++;
     setAnswerCounts({
@@ -343,22 +334,18 @@ export default function Battle({
     if (isPuzzle) statsRef.current.puzzlesSolved++;
     statsRef.current.bestStreak = Math.max(statsRef.current.bestStreak, nextStreak);
     wrongStreakRef.current = 0;
-    setStreak((s) => s + 1);
+    setStreak(nextStreak);
     setBossHp(nextBossHp);
-    if (chargedStrike) {
-      setChargedStrike(false);
-      setEffectCallout(
-        isPuzzle
-          ? `CHARGED ARMOR BREAK -${dmg} · +8 HP`
-          : `CHARGED STRIKE -${dmg}`
-      );
+    if (comboBurst) {
+      statsRef.current.comboBursts++;
+      setEffectCallout(`${nextStreak} STREAK · COMBO +${burstDamage} DAMAGE`);
       setTimeout(() => setEffectCallout(null), 1300);
     } else if (isPuzzle) {
       setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 8));
-      setEffectCallout(`ARMOR BREAK -${dmg} · +8 HP`);
+      setEffectCallout(`POWER HIT -${dmg} · +8 HP`);
       setTimeout(() => setEffectCallout(null), 1300);
     }
-    if (chargedStrike && isPuzzle) {
+    if (comboBurst && isPuzzle) {
       setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 8));
     }
     setFx({ dmg, crit, angle: (Math.random() < 0.5 ? -1 : 1) * (28 + Math.random() * 24), n: statsRef.current.correct });
@@ -371,13 +358,10 @@ export default function Battle({
     setTimeout(() => setFx(null), 700);
     if (nextBossHp <= 0) {
       beginVictory();
-    } else if (nextStreak % 5 === 0) {
-      powerPauseAtRef.current = Date.now();
-      setPowerReady(true);
     } else {
       advance();
     }
-  }, [advance, beat, beginVictory, boss.hp, bossHp, chargedStrike, problem.topic, record, streak]);
+  }, [advance, beat, beginVictory, boss.hp, bossHp, problem.topic, record, streak]);
 
   const handleWrong = useCallback(() => {
     const elapsed = Date.now() - askedAt.current;
@@ -392,7 +376,7 @@ export default function Battle({
     if (beat !== "puzzle") {
       setPlayerHp((h) => Math.max(0, h - WRONG_PENALTY));
     } else {
-      setEffectCallout("ARMOR HELD · NO HP LOST");
+      setEffectCallout("POWER QUESTION MISSED · NO HP LOST");
       setTimeout(() => setEffectCallout(null), 1300);
     }
     setWrongFlash(true);
@@ -406,7 +390,7 @@ export default function Battle({
   }, [advance, beat, problem.answer, record]);
 
   useEffect(() => {
-    if (beat !== "puzzle" || reveal || powerReady || doneRef.current) return;
+    if (beat !== "puzzle" || reveal || doneRef.current) return;
     const timer = setInterval(() => {
       const remaining = Math.max(
         0,
@@ -419,47 +403,7 @@ export default function Battle({
       }
     }, 100);
     return () => clearInterval(timer);
-  }, [beat, handleWrong, powerReady, reveal]);
-
-  const choosePower = (power: "smash" | "heal" | "freeze") => {
-    if (!powerReady) return;
-    endAtRef.current += Math.max(0, Date.now() - powerPauseAtRef.current);
-    statsRef.current.powersUsed++;
-    let shouldAdvance = true;
-    if (power === "smash") {
-      const damage = strikePowerDamage(boss.hp);
-      if (strikePowerMode(bossHp, boss.hp) === "finisher") {
-        statsRef.current.damage += damage;
-        setBossHp(0);
-        setFx({
-          dmg: damage,
-          crit: true,
-          angle: -38,
-          n: statsRef.current.correct + statsRef.current.powersUsed,
-        });
-        setEffectCallout(`FINISHING BLOW -${damage}`);
-        sfxCrit();
-        shouldAdvance = false;
-        beginVictory();
-      } else {
-        setChargedStrike(true);
-        setEffectCallout("STRIKE CHARGED · NEXT CORRECT ANSWER");
-      }
-    } else if (power === "heal") {
-      setPlayerHp((hp) => Math.min(PLAYER_MAX_HP, hp + 25));
-      setEffectCallout("SECOND WIND +25 HP");
-    } else {
-      endAtRef.current += 10_000;
-      setTimeLeft((seconds) => seconds + 10);
-      setEffectCallout("TIME FREEZE +10s");
-    }
-    setPowerReady(false);
-    setTimeout(() => {
-      setEffectCallout(null);
-      setFx(null);
-    }, 1100);
-    if (shouldAdvance) advance();
-  };
+  }, [beat, handleWrong, reveal]);
 
   // ⚡ instant (default): number facts fire at full length, right OR wrong —
   // instant AND committal. Built answers (fractions/expressions/pairs) always
@@ -467,10 +411,11 @@ export default function Battle({
   // on correct would make them guess-and-check-able for free (mastery and
   // tournament integrity). Recall fires; construction commits.
   const entry = entryOf(problem);
+  const instruction = answerInstruction(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
 
   const onType = (v: string) => {
-    if (reveal || powerReady) return;
+    if (reveal) return;
     ensureAudio();
     const clean = v.replace(allowedCharsRe(entry), "");
     setInput(clean);
@@ -481,14 +426,14 @@ export default function Battle({
   };
 
   const submit = () => {
-    if (reveal || powerReady || !input.trim()) return;
+    if (reveal || !input.trim()) return;
     ensureAudio();
     if (judgeAnswer(problem, input)) handleCorrect();
     else handleWrong();
   };
 
   const choose = (c: string) => {
-    if (reveal || powerReady) return;
+    if (reveal) return;
     ensureAudio();
     if (c === problem.answer) handleCorrect();
     else handleWrong();
@@ -541,14 +486,14 @@ export default function Battle({
           <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-white/45">
             Accuracy {accuracy}%
           </p>
-          {chargedStrike && (
-            <p className="mt-1 rounded-full border border-amber-300/35 bg-amber-300/10 px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200">
-              ⚡ Charged · next correct answer
-            </p>
-          )}
         </div>
 
         <div className="w-full max-w-md">
+          {raidLabel && (
+            <p className="mb-1 truncate text-center font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-200/75">
+              {raidLabel}
+            </p>
+          )}
           <div className="flex items-baseline justify-between">
             <p className="truncate text-base font-bold sm:text-lg">
               {boss.name} <span className="hidden font-mono text-xs text-white/50 sm:inline">{boss.title}</span>
@@ -693,6 +638,11 @@ export default function Battle({
               </span>
             )}
           </p>
+          {instruction && !reveal && (
+            <p className="mt-1 text-center text-[10px] text-white/30">
+              {instruction}
+            </p>
+          )}
 
           {reveal && (problem.kind === "choice" || problem.prompt.includes("?")) && (
             <p className="mt-2 text-center font-mono text-sm text-emerald-400">
@@ -761,7 +711,7 @@ export default function Battle({
                 <button
                   key={c}
                   onClick={() => choose(c)}
-                  disabled={!!reveal || powerReady}
+                  disabled={!!reveal}
                   className={`rounded-xl border font-mono font-medium text-white transition-colors disabled:opacity-60 ${
                     problem.choices!.length <= 2
                       ? "min-w-0 whitespace-normal break-words px-6 py-4 text-lg leading-tight [overflow-wrap:anywhere]"
@@ -779,52 +729,6 @@ export default function Battle({
           )}
         </div>
       </div>
-
-      {powerReady && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl border border-amber-300/45 bg-[#101525] p-5 text-center shadow-2xl">
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">
-              5-answer streak · choose your power
-            </p>
-            <h3 className="mt-2 text-3xl font-bold">Make the streak matter.</h3>
-            <p className="mt-1 text-sm text-white/55">The raid clock is paused while you choose.</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <button
-                onClick={() => choosePower("smash")}
-                className="rounded-2xl border border-red-400/35 bg-red-400/10 p-4 hover:bg-red-400/20"
-              >
-                <span className="block text-3xl">⚔</span>
-                <span className="mt-2 block font-mono text-sm font-bold text-red-200">
-                  {strikePowerMode(bossHp, boss.hp) === "finisher"
-                    ? "FINISHING BLOW"
-                    : "CHARGE STRIKE"}
-                </span>
-                <span className="mt-1 block text-xs text-white/50">
-                  {strikePowerMode(bossHp, boss.hp) === "finisher"
-                    ? "Defeat the boss now"
-                    : "Next correct answer hits harder"}
-                </span>
-              </button>
-              <button
-                onClick={() => choosePower("heal")}
-                className="rounded-2xl border border-emerald-400/35 bg-emerald-400/10 p-4 hover:bg-emerald-400/20"
-              >
-                <span className="block text-3xl">+</span>
-                <span className="mt-2 block font-mono text-sm font-bold text-emerald-200">SECOND WIND</span>
-                <span className="mt-1 block text-xs text-white/50">Restore 25 HP</span>
-              </button>
-              <button
-                onClick={() => choosePower("freeze")}
-                className="rounded-2xl border border-cyan-400/35 bg-cyan-400/10 p-4 hover:bg-cyan-400/20"
-              >
-                <span className="block text-3xl">❄</span>
-                <span className="mt-2 block font-mono text-sm font-bold text-cyan-200">TIME FREEZE</span>
-                <span className="mt-1 block text-xs text-white/50">Add 10 seconds</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Leave confirm (D3) */}
       {confirmLeave && (

@@ -8,13 +8,18 @@ import {
 } from "../pathway";
 import {
   GRADE_ASSIGNMENTS,
+  GRADE_TRACK_VERSION,
   TRACK_GRADES,
   WORKING_GRADE_BOSS_CAP,
   applyGradeCheckpoint,
+  applyGradeRecheck,
   assignmentFor,
+  checkpointAssignmentsOfGrade,
   currentGradeSkillIdx,
   gradeTrackStatus,
   normalizeGradeTrack,
+  pendingGradeMissions,
+  pendingGradeRechecks,
   preferredGradeMissionLevel,
   seedGradeAssignmentProgress,
 } from "../gradeTrack";
@@ -30,9 +35,9 @@ describe("sequential grade track", () => {
 
   it("credits only demonstrated assignments after a failed checkpoint", () => {
     const track = normalizeGradeTrack(null, {});
-    const gradeSkills = skillsOfGrade(3);
-    const passed = gradeSkills.slice(0, 2);
-    const failed = gradeSkills.slice(2);
+    const checkpointSkills = checkpointAssignmentsOfGrade(3).map((assignment) => assignment.skillIdx);
+    const passed = checkpointSkills.slice(0, 1);
+    const failed = checkpointSkills.slice(1);
 
     const applied = applyGradeCheckpoint(track, {}, { grade: 3, passed, failed });
 
@@ -46,21 +51,51 @@ describe("sequential grade track", () => {
     expect(currentGradeSkillIdx(applied.track, applied.progress)).toBe(failed[0]);
   });
 
-  it("offers the same checkpoint again after every missed skill is secure", () => {
+  it("offers a short recheck after the boss, then advances without replaying the grade", () => {
     const track = normalizeGradeTrack(null, {});
-    const gradeSkills = skillsOfGrade(3);
+    const gradeSkills = checkpointAssignmentsOfGrade(3).map((assignment) => assignment.skillIdx);
     const applied = applyGradeCheckpoint(track, {}, {
       grade: 3,
-      passed: gradeSkills.slice(0, 1),
-      failed: gradeSkills.slice(1),
+      passed: gradeSkills.slice(0, 2),
+      failed: gradeSkills.slice(2),
     });
     const remediated = { ...applied.progress };
-    for (const index of gradeSkills.slice(1)) {
+    for (const index of gradeSkills.slice(2)) {
       const assignment = assignmentFor(3, PATHWAY[index].id)!;
       remediated[assignment.id] = PASS_LEVEL;
     }
 
-    expect(gradeTrackStatus(applied.track, remediated)).toBe("checkpoint");
+    expect(gradeTrackStatus(applied.track, remediated)).toBe("recheck");
+    const proof = pendingGradeRechecks(applied.track, remediated)[0];
+    const proved = applyGradeRecheck(applied.track, remediated, proof.id, true);
+    expect(proved.passedGrade).toBe(true);
+    expect(proved.track.passedGrades).toEqual([3]);
+    expect(proved.track.activeGrade).toBe(4);
+  });
+
+  it("collects every authored anchor gap while leaving non-anchor skills untested", () => {
+    const track = normalizeGradeTrack(null, {});
+    const gradeSkills = skillsOfGrade(3);
+    const anchors = checkpointAssignmentsOfGrade(3).map((assignment) => assignment.skillIdx);
+    const passed = anchors.slice(0, 1);
+    const failed = anchors.slice(1);
+    const nonAnchor = gradeSkills.find((index) => !anchors.includes(index))!;
+
+    const applied = applyGradeCheckpoint(track, {}, {
+      grade: 3,
+      passed,
+      failed,
+    });
+
+    expect(pendingGradeMissions(applied.track, applied.progress).map((mission) => mission.skillIdx))
+      .toEqual(failed);
+    expect(applied.progress[assignmentFor(3, PATHWAY[nonAnchor].id)!.id]).toBeUndefined();
+
+    const remediated = { ...applied.progress };
+    for (const index of failed) {
+      remediated[assignmentFor(3, PATHWAY[index].id)!.id] = PASS_LEVEL;
+    }
+    expect(gradeTrackStatus(applied.track, remediated)).toBe("recheck");
   });
 
   it("turns an untouched checkpoint miss into one direct proof mission", () => {
@@ -70,13 +105,28 @@ describe("sequential grade track", () => {
     expect(preferredGradeMissionLevel({ [assignment.id]: 1 }, assignment)).toBe(2);
   });
 
+  it("turns a confirmed miss on a previously secure skill into one new proof mission", () => {
+    const track = normalizeGradeTrack(null, {});
+    const skillIdx = skillsOfGrade(3)[0];
+    const assignment = assignmentFor(3, PATHWAY[skillIdx].id)!;
+    const applied = applyGradeCheckpoint(
+      track,
+      { [assignment.id]: PASS_LEVEL },
+      { grade: 3, passed: [], failed: [skillIdx] }
+    );
+
+    expect(applied.progress[assignment.id]).toBe(PASS_LEVEL - 1);
+    expect(preferredGradeMissionLevel(applied.progress, assignment)).toBe(PASS_LEVEL);
+    expect(gradeTrackStatus(applied.track, applied.progress)).toBe("remediation");
+  });
+
   it("a clean checkpoint grants crown proof and immediately offers the next grade", () => {
     const track = normalizeGradeTrack(null, {});
-    const gradeSkills = skillsOfGrade(3);
+    const checkpointSkills = checkpointAssignmentsOfGrade(3).map((assignment) => assignment.skillIdx);
 
     const applied = applyGradeCheckpoint(track, {}, {
       grade: 3,
-      passed: gradeSkills,
+      passed: checkpointSkills,
       failed: [],
     });
 
@@ -84,7 +134,7 @@ describe("sequential grade track", () => {
     expect(applied.track.passedGrades).toEqual([3]);
     expect(applied.track.activeGrade).toBe(4);
     expect(gradeTrackStatus(applied.track, applied.progress)).toBe("checkpoint");
-    for (const index of gradeSkills) {
+    for (const index of skillsOfGrade(3)) {
       const assignment = assignmentFor(3, PATHWAY[index].id)!;
       expect(applied.progress[assignment.id]).toBe(SKILL_LEVELS);
     }
@@ -94,12 +144,12 @@ describe("sequential grade track", () => {
     const start = normalizeGradeTrack(null, {});
     const grade3 = applyGradeCheckpoint(start, {}, {
       grade: 3,
-      passed: skillsOfGrade(3),
+      passed: checkpointAssignmentsOfGrade(3).map((assignment) => assignment.skillIdx),
       failed: [],
     });
     const grade4 = applyGradeCheckpoint(grade3.track, grade3.progress, {
       grade: 4,
-      passed: skillsOfGrade(4),
+      passed: checkpointAssignmentsOfGrade(4).map((assignment) => assignment.skillIdx),
       failed: [],
     });
 
@@ -134,6 +184,15 @@ describe("sequential grade track", () => {
     expect(WORKING_GRADE_BOSS_CAP).toBe(SKILL_LEVELS - 1);
   });
 
+  it("uses explicit 3–5 question blueprints for every grade", () => {
+    for (const grade of TRACK_GRADES) {
+      const checkpoint = checkpointAssignmentsOfGrade(grade);
+      expect(checkpoint.length).toBeGreaterThanOrEqual(3);
+      expect(checkpoint.length).toBeLessThanOrEqual(5);
+      expect(checkpoint.every((assignment) => assignment.grade === grade)).toBe(true);
+    }
+  });
+
   it("prefers grade-scoped progress over a legacy concept value", () => {
     const assignment = GRADE_ASSIGNMENTS[0];
     const seeded = seedGradeAssignmentProgress(
@@ -142,6 +201,17 @@ describe("sequential grade track", () => {
     );
 
     expect(seeded[assignment.id]).toBe(1);
+  });
+
+  it("carries grade-scoped evidence forward when curriculum review moves a skill", () => {
+    const assignment = assignmentFor(7, "signed-add")!;
+    const seeded = seedGradeAssignmentProgress(
+      { "g6:signed-add": PASS_LEVEL },
+      {}
+    );
+
+    expect(seeded[assignment.id]).toBe(PASS_LEVEL);
+    expect(seeded["g6:signed-add"]).toBeUndefined();
   });
 
   it("ignores a stale checkpoint result from a different active grade", () => {
@@ -163,10 +233,28 @@ describe("sequential grade track", () => {
       {}
     );
 
-    expect(track.version).toBe(2);
+    expect(track.version).toBe(GRADE_TRACK_VERSION);
     expect(track.activeGrade).toBe(6);
     expect(track.passedGrades).toEqual([3, 4, 5]);
     expect(track.attemptedGrades).toEqual([]);
+    expect(track.missionIds).toEqual([]);
     expect(gradeTrackStatus(track, {})).toBe("checkpoint");
+  });
+
+  it("upgrades v2 attempts into a fresh checkpoint without deleting skill evidence", () => {
+    const gradeSkills = skillsOfGrade(3);
+    const secured = assignmentFor(3, PATHWAY[gradeSkills[0]].id)!;
+    const progress = { [secured.id]: PASS_LEVEL };
+    const track = normalizeGradeTrack(
+      { version: 2, passedGrades: [], attemptedGrades: [3] },
+      progress
+    );
+
+    expect(track.version).toBe(GRADE_TRACK_VERSION);
+    expect(track.attemptedGrades).toEqual([]);
+    expect(track.missionIds).toEqual([]);
+    expect(track.activeGrade).toBe(3);
+    expect(progress[secured.id]).toBe(PASS_LEVEL);
+    expect(gradeTrackStatus(track, progress)).toBe("checkpoint");
   });
 });

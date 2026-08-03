@@ -232,6 +232,14 @@ export type Problem = {
 export const entryOf = (p: Problem): EntryFormat =>
   p.entry ?? (p.kind === "choice" ? "multiple-choice" : "single-number");
 
+/** Short, visible guidance for answer rules that are otherwise easy to miss. */
+export const answerInstruction = (p: Problem): string | null =>
+  p.rule === "frac-lowest-terms"
+    ? "Answer in simplest form."
+    : p.rule === "frac-any-equivalent"
+      ? "Equivalent fraction answers work too."
+      : null;
+
 /** Topic id off a fact key ("mul:7×8" → "mul"). */
 export const topicOfKey = (key: string): TopicId => key.split(":")[0] as TopicId;
 
@@ -1473,7 +1481,10 @@ function makeFracmul(n1: number, d1: number, n2: number, d2: number): Problem {
     answer: `${num / g}/${den / g}`,
     kind: "numeric",
     entry: "fraction",
-    rule: "frac-lowest-terms",
+    // This skill measures multiplication, not a second hidden simplification
+    // requirement. The separate "Simplify fractions" skill still requires
+    // lowest terms.
+    rule: "frac-any-equivalent",
   };
 }
 function genFracmul(): Problem {

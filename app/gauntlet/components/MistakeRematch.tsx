@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
 import {
+  answerInstruction,
   canonicalProblemFromKey,
   entryOf,
   judgeAnswer,
@@ -19,11 +20,13 @@ const MAX_TRIES_PER_ROUND = 3;
 export default function MistakeRematch({
   keys,
   instantSubmit = false,
+  exitLabel = "RETURN TO MENU",
   onRoundComplete,
   onExit,
 }: {
   keys: string[];
   instantSubmit?: boolean;
+  exitLabel?: string;
   onRoundComplete: (results: ProblemResult[]) => void;
   onExit: () => void;
 }) {
@@ -149,7 +152,7 @@ export default function MistakeRematch({
         <div>
           <p className="text-white/60">No review cards are available.</p>
           <button onClick={onExit} className="mt-4 rounded-xl bg-white/15 px-5 py-3 font-mono text-sm">
-            RETURN TO MENU
+            {exitLabel}
           </button>
         </div>
       </div>
@@ -185,7 +188,7 @@ export default function MistakeRematch({
             onClick={onExit}
             className="rounded-xl border border-white/25 px-6 py-3 font-mono text-sm text-white/80 hover:border-white/60"
           >
-            RETURN TO MENU
+            {exitLabel}
           </button>
         </div>
       </div>
@@ -193,6 +196,7 @@ export default function MistakeRematch({
   }
 
   const entry = entryOf(problem);
+  const instruction = answerInstruction(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
   const onType = (value: string) => {
     const clean = value.replace(allowedCharsRe(entry), "");
@@ -255,6 +259,11 @@ export default function MistakeRematch({
             {problem.prompt}
             {problem.kind === "numeric" && !problem.prompt.includes("?") && " = ?"}
           </p>
+          {instruction && !reveal && (
+            <p className="mt-1 text-[10px] text-white/30">
+              {instruction}
+            </p>
+          )}
           {reveal && (
             <p className="mt-4 rounded-xl bg-red-400/10 px-4 py-3 font-mono text-sm text-red-200">
               Answer: <strong>{reveal}</strong> · this card will return

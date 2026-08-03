@@ -58,7 +58,7 @@ describe("fastMathGrade", () => {
       if (PATHWAY[i].id !== gapId) progress[PATHWAY[i].id] = PASS_LEVEL;
     }
     const fm = fastMathGrade(progress);
-    expect(fm.grade).toBe(6); // the gap's grade
+    expect(fm.grade).toBe(7); // the gap's grade
     expect(fm.frontierGrade).toBe(9); // discriminant's grade
   });
   it("everything passed → grade 12 complete", () => {
@@ -67,6 +67,22 @@ describe("fastMathGrade", () => {
     const fm = fastMathGrade(progress);
     expect(fm.complete).toBe(true);
     expect(fm.grade).toBe(12);
+  });
+});
+
+describe("Ontario curriculum corrections", () => {
+  it("keeps the highest-confidence elementary expectations in their taught grade", () => {
+    expect(skillGrade("signed-add")).toBe(7);
+    expect(skillGrade("squares")).toBe(8);
+    expect(skillGrade("sq-roots")).toBe(8);
+    expect(skillGrade("proportions")).toBe(8);
+    expect(skillGrade("supp-comp")).toBe(8);
+    expect(skillGrade("pythagoras")).toBe(8);
+  });
+
+  it("does not introduce formal slope before the secondary track", () => {
+    expect(skillGrade("slope")).toBe(9);
+    expect(skillGrade("slope-fractions")).toBe(9);
   });
 });
 

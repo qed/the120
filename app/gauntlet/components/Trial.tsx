@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BOSSES } from "../game/bosses";
 import {
+  answerInstruction,
   entryOf,
   factSetFor,
   judgeAnswer,
@@ -184,6 +185,7 @@ export default function Trial({
   }, [advance, problem.answer, problem.key, problem.prompt, problem.topic]);
 
   const entry = entryOf(problem);
+  const instruction = answerInstruction(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
 
   const onType = (v: string) => {
@@ -257,6 +259,11 @@ export default function Trial({
               <span className="text-amber-300"> = ?</span>
             )}
           </p>
+          {instruction && (
+            <p className="mt-1 text-center text-[10px] text-white/30">
+              {instruction}
+            </p>
+          )}
           {problem.kind === "numeric" ? (
             coarse ? (
               <>

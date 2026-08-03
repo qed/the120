@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  answerInstruction,
   entryOf,
   factSetFor,
   judgeAnswer,
@@ -11,21 +12,81 @@ import {
   type Problem,
 } from "../game/problems";
 import { allowedCharsRe, isAutoSubmit, padExtras } from "../game/answerRules";
-import { AREAS, PATHWAY, skillsOfGrade } from "../game/pathway";
-import { TRACK_GRADES, type GradeCheckpointResult } from "../game/gradeTrack";
+import { AREAS, PATHWAY } from "../game/pathway";
+import {
+  TRACK_GRADES,
+  checkpointAssignmentsOfGrade,
+  type GradeCheckpointResult,
+} from "../game/gradeTrack";
+import { BOSSES } from "../game/bosses";
 import { ensureAudio, sfxHit, sfxWrong } from "../game/audio";
+import BossSprite from "./BossSprite";
 import NumberPad, { useCoarsePointer } from "./NumberPad";
 import TriangleFigure from "./TriangleFigure";
 
 /**
- * A short, single-grade checkpoint. Every authored assignment in the grade
- * receives one probe, so a miss can create an exact remediation list instead
- * of an inferred placement gap. The curriculum blueprint can later add
- * authored multi-probe evidence without changing the grade-track contract.
+ * A short, resumable Grade Check. Each grade uses a small authored anchor
+ * blueprint; a miss creates confirmation questions before it can become an
+ * exact training mission. Recheck mode proves one repaired skill twice.
  */
 
 const PASS_SLACK_MS = 3000;
-const HARD_CAP_EXTRA_MS = 1200;
+const MIN_PLACEMENT_MS = 10_000;
+const MIDPOINT_PLACEMENT_MS = 20_000;
+export type GradeCheckSession = {
+  version: 1;
+  mode: "checkpoint" | "recheck";
+  grade: number;
+  skillIds: string[];
+  questionIndex: number;
+  recoveryMode: boolean;
+  recoveryCorrect: number;
+  passedSkillIds: string[];
+  failedSkillIds: string[];
+};
+
+type CheckpointNotice = {
+  tone: "confirm" | "success" | "mission";
+  title: string;
+  detail: string;
+};
+
+export function placementDeadlineMs(problem: Problem): number {
+  return problem.topic === "midpoint"
+    ? MIDPOINT_PLACEMENT_MS
+    : Math.max(MIN_PLACEMENT_MS, masteryMsFor(problem.topic) + PASS_SLACK_MS);
+}
+
+function CheckpointSummary({
+  title,
+  skills,
+  empty,
+  tone,
+}: {
+  title: string;
+  skills: string[];
+  empty: string;
+  tone: "proved" | "mission" | "waiting";
+}) {
+  const toneClass = tone === "proved"
+    ? "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-100"
+    : tone === "mission"
+      ? "border-amber-400/30 bg-amber-400/[0.08] text-amber-100"
+      : "border-white/12 bg-white/[0.04] text-white/55";
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.12em]">{title}</p>
+      {skills.length > 0 ? (
+        <ul className="mt-2 space-y-1.5 text-xs leading-snug">
+          {skills.map((label) => <li key={label}>• {label}</li>)}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs opacity-55">{empty}</p>
+      )}
+    </div>
+  );
+}
 
 function probeFor(skillIdx: number): Problem {
   const skill = PATHWAY[skillIdx];
@@ -36,50 +97,128 @@ function probeFor(skillIdx: number): Problem {
   return problem ?? nextProblem([skill.topic], skill.band);
 }
 
-function shuffledGradeSkills(grade: number): number[] {
-  const indexes = [...skillsOfGrade(grade)];
-  for (let i = indexes.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [indexes[i], indexes[j]] = [indexes[j], indexes[i]];
-  }
-  return indexes;
-}
-
 export default function PlacementTrial({
   grade,
+  mode = "checkpoint",
+  skillId,
+  targetGrade,
+  initialSession,
+  autoAdvance = false,
   instantSubmit = false,
+  onProgress,
   onDone,
   onExit,
 }: {
   grade: number;
+  mode?: "checkpoint" | "recheck";
+  skillId?: string;
+  targetGrade?: number;
+  initialSession?: GradeCheckSession | null;
+  autoAdvance?: boolean;
   instantSubmit?: boolean;
+  onProgress?: (session: GradeCheckSession) => void;
   onDone: (result: GradeCheckpointResult) => void;
   onExit: () => void;
 }) {
   const coarse = useCoarsePointer();
-  const [skillIndexes] = useState(() => shuffledGradeSkills(grade));
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [recoveryMode, setRecoveryMode] = useState(false);
-  const [recoveryCorrect, setRecoveryCorrect] = useState(0);
+  const isRecheck = mode === "recheck";
+  const [skillIds] = useState(() => {
+    const defaults = isRecheck
+      ? skillId ? [skillId, skillId] : []
+      : checkpointAssignmentsOfGrade(grade).map((assignment) => assignment.skillId);
+    const resume = initialSession &&
+      initialSession.version === 1 &&
+      initialSession.mode === mode &&
+      initialSession.grade === grade &&
+      initialSession.skillIds.length > 0
+        ? initialSession.skillIds
+        : null;
+    return resume ?? defaults;
+  });
+  const [skillIndexes] = useState(() => skillIds
+    .map((id) => PATHWAY.findIndex((candidate) => candidate.id === id))
+    .filter((index) => index >= 0));
+  const resumable = initialSession &&
+    initialSession.version === 1 &&
+    initialSession.mode === mode &&
+    initialSession.grade === grade;
+  const [questionIndex, setQuestionIndex] = useState(
+    resumable ? Math.min(initialSession.questionIndex, Math.max(0, skillIndexes.length - 1)) : 0
+  );
+  const [recoveryMode, setRecoveryMode] = useState(
+    isRecheck ? false : resumable ? initialSession.recoveryMode : false
+  );
+  const [recoveryCorrect, setRecoveryCorrect] = useState(
+    isRecheck ? 0 : resumable ? initialSession.recoveryCorrect : 0
+  );
   const [problem, setProblem] = useState<Problem>(() =>
-    probeFor(skillIndexes[0] ?? 0)
+    probeFor(skillIndexes[questionIndex] ?? skillIndexes[0] ?? 0)
   );
   const [input, setInput] = useState("");
   const [speedPct, setSpeedPct] = useState(100);
+  const [clearedSkills, setClearedSkills] = useState(
+    resumable ? initialSession.passedSkillIds.length : 0
+  );
   const [missFlash, setMissFlash] = useState(false);
+  const [guardianHit, setGuardianHit] = useState(false);
+  const [notice, setNotice] = useState<CheckpointNotice | null>(null);
   const [result, setResult] = useState<GradeCheckpointResult | null>(null);
-  const passedRef = useRef<number[]>([]);
-  const failedRef = useRef<number[]>([]);
+  const passedRef = useRef<number[]>(
+    resumable
+      ? initialSession.passedSkillIds
+        .map((id) => PATHWAY.findIndex((candidate) => candidate.id === id))
+        .filter((index) => index >= 0)
+      : []
+  );
+  const failedRef = useRef<number[]>(
+    resumable
+      ? initialSession.failedSkillIds
+        .map((id) => PATHWAY.findIndex((candidate) => candidate.id === id))
+        .filter((index) => index >= 0)
+      : []
+  );
   const askedAt = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const answeredRef = useRef(false);
+  const autoAdvancedRef = useRef(false);
+  const onDoneRef = useRef(onDone);
+
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   const skillPos = skillIndexes[questionIndex] ?? skillIndexes[0] ?? 0;
   const skill = PATHWAY[skillPos];
   const area = AREAS.find((candidate) => candidate.id === skill.area)!;
+  const guardian = BOSSES[TRACK_GRADES.indexOf(grade) % BOSSES.length] ?? BOSSES[0];
   const entry = entryOf(problem);
+  const instruction = answerInstruction(problem);
   const auto = isAutoSubmit(entry) && instantSubmit;
-  const passMs = masteryMsFor(problem.topic) + PASS_SLACK_MS;
+  const passMs = placementDeadlineMs(problem);
+  const secondsLeft = Math.max(0, Math.ceil((passMs * speedPct) / 100 / 1000));
+  const shieldLeft = Math.max(0, skillIndexes.length - clearedSkills);
+
+  const persist = useCallback((
+    nextQuestionIndex: number,
+    nextRecoveryMode: boolean,
+    nextRecoveryCorrect: number
+  ) => {
+    onProgress?.({
+      version: 1,
+      mode,
+      grade,
+      skillIds,
+      questionIndex: nextQuestionIndex,
+      recoveryMode: nextRecoveryMode,
+      recoveryCorrect: nextRecoveryCorrect,
+      passedSkillIds: passedRef.current
+        .map((index) => PATHWAY[index]?.id)
+        .filter((id): id is string => typeof id === "string"),
+      failedSkillIds: failedRef.current
+        .map((index) => PATHWAY[index]?.id)
+        .filter((id): id is string => typeof id === "string"),
+    });
+  }, [grade, mode, onProgress, skillIds]);
 
   useEffect(() => {
     askedAt.current = Date.now();
@@ -89,7 +228,8 @@ export default function PlacementTrial({
   const serve = useCallback((
     nextQuestionIndex: number,
     nextRecoveryMode = false,
-    nextRecoveryCorrect = 0
+    nextRecoveryCorrect = 0,
+    nextNotice: CheckpointNotice | null = null
   ) => {
     const nextSkill = skillIndexes[nextQuestionIndex];
     setQuestionIndex(nextQuestionIndex);
@@ -98,10 +238,12 @@ export default function PlacementTrial({
     setProblem(probeFor(nextSkill));
     setInput("");
     setSpeedPct(100);
+    setNotice(nextNotice);
     answeredRef.current = false;
     askedAt.current = Date.now();
+    persist(nextQuestionIndex, nextRecoveryMode, nextRecoveryCorrect);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [skillIndexes]);
+  }, [persist, skillIndexes]);
 
   const advance = useCallback((passed: boolean) => {
     if (answeredRef.current || result) return;
@@ -110,36 +252,98 @@ export default function PlacementTrial({
     // A single slip never creates a grade gap. After the first miss, the
     // student receives two fresh probes for the same assignment and must get
     // both right. A second miss is enough evidence to create remediation.
-    if (!passed && !recoveryMode) {
-      window.setTimeout(() => serve(questionIndex, true, 0), 450);
+    if (isRecheck && !passed) {
+      failedRef.current = [...failedRef.current, skillPos];
+      setNotice({
+        tone: "mission",
+        title: `${skill.label} needs one more training round`,
+        detail: `Correct answer: ${problem.answer}. Your Grade Climb is saved; face the same boss again.`,
+      });
+      persist(questionIndex, false, 0);
+      window.setTimeout(() => {
+        setResult({ grade, passed: passedRef.current, failed: failedRef.current });
+      }, 950);
       return;
     }
-    if (passed && recoveryMode && recoveryCorrect < 1) {
-      window.setTimeout(() => serve(questionIndex, true, recoveryCorrect + 1), 180);
+    if (!isRecheck && !passed && !recoveryMode) {
+      const confirmationNotice: CheckpointNotice = {
+        tone: "confirm",
+        title: `Let’s confirm ${skill.label}`,
+        detail: "One slip does not create a gap. Get the next two questions right to prove this skill.",
+      };
+      setNotice(confirmationNotice);
+      persist(questionIndex, true, 0);
+      window.setTimeout(() => serve(questionIndex, true, 0, confirmationNotice), 450);
+      return;
+    }
+    if (!isRecheck && passed && recoveryMode && recoveryCorrect < 1) {
+      const confirmationNotice: CheckpointNotice = {
+        tone: "confirm",
+        title: `One more ${skill.label} question`,
+        detail: "Confirmation 2 of 2. Get this one right and the skill is proven.",
+      };
+      setNotice(confirmationNotice);
+      persist(questionIndex, true, recoveryCorrect + 1);
+      window.setTimeout(
+        () => serve(questionIndex, true, recoveryCorrect + 1, confirmationNotice),
+        280
+      );
       return;
     }
 
-    if (passed) passedRef.current = [...passedRef.current, skillPos];
-    else failedRef.current = [...failedRef.current, skillPos];
+    if (passed) {
+      passedRef.current = [...passedRef.current, skillPos];
+      setClearedSkills((count) => count + 1);
+      setGuardianHit(true);
+      window.setTimeout(() => setGuardianHit(false), 420);
+      setNotice({
+        tone: "success",
+        title: `${skill.label} proven`,
+        detail: "Shield broken. Moving to the next checkpoint skill.",
+      });
+    } else {
+      failedRef.current = [...failedRef.current, skillPos];
+      setNotice({
+        tone: "mission",
+        title: `Mission unlocked: ${skill.label}`,
+        detail: "This confirmed gap becomes one focused boss mission—not a lower grade placement.",
+      });
+    }
 
     const nextQuestionIndex = questionIndex + 1;
+    persist(nextQuestionIndex, false, 0);
     if (nextQuestionIndex >= skillIndexes.length) {
-      setResult({
-        grade,
-        passed: passedRef.current,
-        failed: failedRef.current,
-      });
+      window.setTimeout(() => {
+        setResult({
+          grade,
+          passed: passedRef.current,
+          failed: failedRef.current,
+        });
+      }, passed ? 520 : 950);
       return;
     }
-    window.setTimeout(() => serve(nextQuestionIndex), passed ? 180 : 450);
-  }, [grade, questionIndex, recoveryCorrect, recoveryMode, result, serve, skillIndexes.length, skillPos]);
+    window.setTimeout(() => serve(nextQuestionIndex), passed ? 520 : 950);
+  }, [grade, isRecheck, persist, problem.answer, questionIndex, recoveryCorrect, recoveryMode, result, serve, skill.label, skillIndexes.length, skillPos]);
+
+  useEffect(() => {
+    if (
+      !result ||
+      isRecheck ||
+      !autoAdvance ||
+      result.failed.length > 0 ||
+      autoAdvancedRef.current
+    ) return;
+    autoAdvancedRef.current = true;
+    const timer = window.setTimeout(() => onDoneRef.current(result), 1_050);
+    return () => window.clearTimeout(timer);
+  }, [autoAdvance, isRecheck, result]);
 
   useEffect(() => {
     if (result) return;
     const timer = window.setInterval(() => {
       const elapsed = Date.now() - askedAt.current;
       setSpeedPct(Math.max(0, 100 - (elapsed / passMs) * 100));
-      if (elapsed > passMs + HARD_CAP_EXTRA_MS && !answeredRef.current) {
+      if (elapsed > passMs && !answeredRef.current) {
         sfxWrong();
         setMissFlash(true);
         window.setTimeout(() => setMissFlash(false), 450);
@@ -187,56 +391,142 @@ export default function PlacementTrial({
 
   if (result) {
     const passedGrade = result.failed.length === 0;
-    const missedSkills = result.failed.map((index) => PATHWAY[index]);
+    const uniqueSkills = (indexes: number[]) => [...new Set(indexes)]
+      .map((index) => PATHWAY[index])
+      .filter((candidate): candidate is (typeof PATHWAY)[number] => !!candidate);
+    const provedSkills = uniqueSkills(result.passed);
+    const missedSkills = uniqueSkills(result.failed);
+
+    if (isRecheck) {
+      return (
+        <div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-8 text-center sm:px-6">
+          <div className={`w-full max-w-lg rounded-3xl border p-7 ${
+            passedGrade
+              ? "border-emerald-300/45 bg-emerald-400/10"
+              : "border-amber-400/45 bg-amber-400/10"
+          }`}>
+            <div className="mx-auto w-fit">
+              <BossSprite id={guardian.id} size={112} useImage />
+            </div>
+            <p className="mt-3 font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">
+              Skill proof
+            </p>
+            <h2 className="mt-2 text-3xl font-bold sm:text-4xl">
+              {passedGrade ? `${skill.label} proved` : "One more training round"}
+            </h2>
+            <p className="mx-auto mt-3 max-w-md text-sm text-white/65">
+              {passedGrade
+                ? "Two clean answers sealed the skill. Your Grade Climb can keep moving."
+                : `Your climb is saved at Grade ${grade}. Review the miss, then face the same boss again.`}
+            </p>
+            <button
+              onClick={() => onDone(result)}
+              className="mt-7 w-full rounded-2xl bg-cyan-400 px-6 py-4 font-mono text-sm font-bold text-black shadow-lg shadow-cyan-500/20 hover:bg-cyan-300"
+            >
+              {passedGrade ? "CONTINUE MY CLIMB" : "RETURN TO TRAINING"}
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
-        <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Placement climb</p>
-        <div className={`mt-4 rounded-3xl border px-7 py-6 ${
+      <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-8 text-center sm:px-6">
+        {passedGrade && (
+          <div className="pointer-events-none absolute inset-0" aria-hidden>
+            <span className="absolute left-[12%] top-[18%] text-2xl text-amber-200/70">✦</span>
+            <span className="absolute right-[14%] top-[25%] text-4xl text-cyan-200/55">✦</span>
+            <span className="absolute bottom-[18%] left-[22%] text-3xl text-cyan-200/45">✦</span>
+            <span className="absolute bottom-[25%] right-[20%] text-xl text-amber-200/65">✦</span>
+          </div>
+        )}
+        <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">Grade Climb</p>
+        <div className={`relative mt-4 w-full max-w-xl rounded-3xl border px-5 py-6 sm:px-7 ${
           passedGrade
-            ? "border-emerald-400/45 bg-emerald-400/10"
+            ? "border-amber-300/50 bg-gradient-to-b from-amber-300/15 to-emerald-400/10 shadow-2xl shadow-amber-500/10"
             : "border-amber-400/45 bg-amber-400/10"
         }`}>
-          <div className="text-5xl" aria-hidden>{passedGrade ? "✓" : "↗"}</div>
+          {passedGrade ? (
+            <div className="mx-auto flex w-fit items-end">
+              <div className="mr-float">
+                <BossSprite id={guardian.id} size={112} useImage />
+              </div>
+              <span className="-ml-5 mb-1 flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-amber-200 bg-amber-400 font-mono text-xl font-black text-[#241600] shadow-lg shadow-amber-500/30">
+                G{grade}
+              </span>
+            </div>
+          ) : (
+            <div className="text-5xl" aria-hidden>↗</div>
+          )}
           <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
-            {passedGrade ? `Grade ${grade} cleared` : `Your Grade ${grade} path is ready`}
+            {passedGrade
+              ? autoAdvance ? `Grade ${grade} clear` : `Grade ${grade} Fast Math earned`
+              : "Training missions found"}
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm text-white/65">
             {passedGrade
-              ? grade < 12
-                ? `Grade ${grade + 1} is unlocked. Its checkpoint is ready now.`
+              ? autoAdvance
+                ? `Saved. Moving straight to the Grade ${grade + 1} check.`
+                : grade < 12
+                  ? `You broke ${guardian.name}’s shield and earned Grade ${grade} Fast Math.`
                 : "You cleared the complete Fast Math pathway."
-              : `You proved ${result.passed.length} of ${skillIndexes.length} skills. Continue will focus only on what remains.`}
+              : `You finished the Grade ${grade} check. Train ${result.failed.length} confirmed ${result.failed.length === 1 ? "skill" : "skills"}, prove them, and continue at Grade ${grade + 1}.`}
           </p>
+          {passedGrade && (
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {provedSkills.slice(0, 3).map((proved) => (
+                <span key={proved.id} className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1.5 text-xs text-emerald-100">
+                  ✓ {proved.label}
+                </span>
+              ))}
+              {provedSkills.length > 3 && (
+                <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs text-white/55">
+                  +{provedSkills.length - 3} more
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {!passedGrade && (
-          <div className="mt-5 w-full max-w-lg rounded-2xl border border-white/12 bg-black/30 p-4 text-left">
-            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/45">
-              Skills to strengthen
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {missedSkills.map((missed) => (
-                <span
-                  key={missed.id}
-                  className="rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100"
-                >
-                  {missed.label}
-                </span>
-              ))}
-            </div>
+          <div className="mt-5 grid w-full max-w-2xl gap-3 text-left sm:grid-cols-2">
+            <CheckpointSummary
+              title="Proved today"
+              skills={provedSkills.map((proved) => proved.label)}
+              empty="None yet"
+              tone="proved"
+            />
+            <CheckpointSummary
+              title="Boss missions"
+              skills={missedSkills.map((missed) => missed.label)}
+              empty="No gaps"
+              tone="mission"
+            />
           </div>
         )}
 
-        <button
-          onClick={() => onDone(result)}
-          className="mt-8 rounded-2xl bg-cyan-400 px-9 py-4 font-mono text-sm font-bold text-black shadow-lg shadow-cyan-500/20 hover:bg-cyan-300"
-        >
-          {passedGrade
-            ? grade < 12
-              ? `NEXT: GRADE ${grade + 1} CHECKPOINT`
-              : "RETURN TO THE GAUNTLET"
-            : `START GRADE ${grade} FAST MATH`}
-        </button>
+        <div className="mt-8 flex w-full max-w-lg flex-col items-center">
+          {passedGrade && autoAdvance ? (
+            <p role="status" className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-5 py-2.5 font-mono text-xs text-cyan-100">
+              NEXT GRADE LOADING…
+            </p>
+          ) : (
+            <button
+              onClick={() => onDone(result)}
+              className="w-full rounded-2xl bg-cyan-400 px-6 py-4 font-mono text-sm font-bold text-black shadow-lg shadow-cyan-500/20 hover:bg-cyan-300"
+            >
+              {passedGrade
+                ? "RETURN TO THE GAUNTLET"
+                : `TRAIN FIRST SKILL · ${missedSkills[0]?.label ?? `GRADE ${grade}`}`}
+            </button>
+          )}
+          <p className="mt-2 text-xs text-white/35">
+            {passedGrade
+              ? autoAdvance
+                ? "Every cleared grade is saved permanently."
+                : "Today’s Raid, Daily Sprint, and the next-grade challenge are ready on home."
+              : "One focused boss per confirmed gap. No cleared grade will be repeated."}
+          </p>
+        </div>
       </div>
     );
   }
@@ -247,11 +537,15 @@ export default function PlacementTrial({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.14em] text-cyan-300">
-              Placement climb
+              {isRecheck ? "Skill proof" : `Grade Climb · Goal G${targetGrade ?? grade}`}
             </p>
-            <p className="mt-1 text-lg font-bold text-white">Grade {grade} checkpoint</p>
+            <p className="mt-1 text-lg font-bold text-white">
+              {isRecheck ? `Prove ${skill.label}` : `Grade ${grade} check`}
+            </p>
             <p className="mt-0.5 text-xs text-white/45">
-              {grade < TRACK_GRADES[TRACK_GRADES.length - 1]
+              {isRecheck
+                ? "Get two fresh questions right to seal this skill."
+                : grade < TRACK_GRADES[TRACK_GRADES.length - 1]
                 ? `Clear it to move straight to Grade ${grade + 1}. Each cleared grade saves.`
                 : "Clear this final checkpoint to complete the Fast Math pathway."}
             </p>
@@ -264,7 +558,7 @@ export default function PlacementTrial({
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+        {!isRecheck && <div className="mt-4 grid grid-cols-5 gap-1.5 sm:grid-cols-10">
           {TRACK_GRADES.map((trackGrade) => (
             <span
               key={trackGrade}
@@ -279,6 +573,35 @@ export default function PlacementTrial({
               G{trackGrade}{trackGrade < grade ? " ✓" : ""}
             </span>
           ))}
+        </div>}
+
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.07] px-3 py-2.5">
+          <div className={`shrink-0 ${guardianHit ? "mr-hit" : "mr-float"}`}>
+            <BossSprite id={guardian.id} size={88} useImage />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="truncate text-sm font-bold text-white">
+                {guardian.name} <span className="font-mono text-[10px] text-cyan-200/70">
+                  {isRecheck ? "SKILL BOSS" : "GRADE GATEKEEPER"}
+                </span>
+              </p>
+              <span className="shrink-0 font-mono text-[10px] text-white/55">
+                {shieldLeft}/{skillIndexes.length} SHIELD
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-blue-500 transition-[width] duration-300"
+                style={{ width: `${skillIndexes.length ? (shieldLeft / skillIndexes.length) * 100 : 0}%` }}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] text-white/45">
+              {isRecheck
+                ? "Two clean answers prove the training worked."
+                : "Correct answers break the shield. Confirmed gaps become focused training missions."}
+            </p>
+          </div>
         </div>
 
         <div className="mt-4 flex items-center gap-3">
@@ -301,13 +624,36 @@ export default function PlacementTrial({
             </span>
           )}
         </p>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        {notice && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mt-3 rounded-xl border px-3 py-2.5 text-left ${
+              notice.tone === "success"
+                ? "border-emerald-400/35 bg-emerald-400/10"
+                : notice.tone === "mission"
+                  ? "border-amber-400/40 bg-amber-400/10"
+                  : "border-cyan-300/35 bg-cyan-300/[0.08]"
+            }`}
+          >
+            <p className="text-sm font-bold text-white">{notice.title}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-white/55">{notice.detail}</p>
+          </div>
+        )}
+        <div className="mt-2 flex items-center gap-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
           <div
             className={`h-full rounded-full transition-[width] duration-150 ${
               speedPct > 30 ? "bg-cyan-400" : "bg-red-400"
             }`}
             style={{ width: `${speedPct}%` }}
           />
+          </div>
+          <span className={`w-8 text-right font-mono text-[11px] tabular-nums ${
+            secondsLeft <= 3 ? "text-red-300" : "text-white/45"
+          }`}>
+            {secondsLeft}s
+          </span>
         </div>
       </div>
 
@@ -330,6 +676,11 @@ export default function PlacementTrial({
               <span className="text-cyan-300"> = ?</span>
             )}
           </p>
+          {instruction && (
+            <p className="mt-1 text-center text-[10px] text-white/30">
+              {instruction}
+            </p>
+          )}
 
           {problem.kind === "numeric" ? (
             coarse ? (
@@ -400,7 +751,9 @@ export default function PlacementTrial({
           )}
         </div>
         <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-[0.1em] text-white/35">
-          One miss opens two confirmation questions · only a second miss creates a mission
+          {isRecheck
+            ? "Boss cleared → prove the skill → continue the climb"
+            : "Grade check → train exact gaps → continue from here"}
         </p>
       </div>
     </div>

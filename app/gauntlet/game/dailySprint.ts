@@ -16,12 +16,12 @@ export const SPRINT_BRACKETS: {
   label: string;
   contentBand: Band;
 }[] = [
-  { id: "g34", label: "Grades 3–4", contentBand: "g34" },
-  { id: "g56", label: "Grades 5–6", contentBand: "g56" },
-  { id: "g78", label: "Grades 7–8", contentBand: "g78" },
-  { id: "g910", label: "Grades 9–10", contentBand: "g912" },
-  { id: "g11", label: "Grade 11", contentBand: "g912" },
-  { id: "g12", label: "Grade 12", contentBand: "g912" },
+  { id: "g34", label: "Grade 3–4 skills", contentBand: "g34" },
+  { id: "g56", label: "Grade 5–6 skills", contentBand: "g56" },
+  { id: "g78", label: "Grade 7–8 skills", contentBand: "g78" },
+  { id: "g910", label: "Grade 9–10 skills", contentBand: "g912" },
+  { id: "g11", label: "Grade 11 skills", contentBand: "g912" },
+  { id: "g12", label: "Grade 12 skills", contentBand: "g912" },
 ];
 
 export type SprintAnswer = { key: string; response: string; ms: number };
@@ -150,6 +150,14 @@ export function sprintBracketForGrade(grade: number): SprintBracket {
   if (grade <= 10) return "g910";
   if (grade === 11) return "g11";
   return "g12";
+}
+
+/** Settings can raise a content division, but never lower it below reached play. */
+export function sprintGradeForProgress(
+  selectedSchoolGrade: number | null,
+  reachedGrade: number
+): number {
+  return Math.max(selectedSchoolGrade ?? reachedGrade, reachedGrade);
 }
 
 export const sprintBestKey = (date: string, band: SprintBracket) => `${date}:${band}`;

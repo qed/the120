@@ -6,7 +6,7 @@ import { useAccountModal } from "@/app/components/account/AccountModalProvider";
 import { type Boss } from "./game/bosses";
 import { factSetFor, masteryMsFor, topicOfKey, type Band, type TopicId } from "./game/problems";
 import BossSprite from "./components/BossSprite";
-import { type FactStat } from "./game/mastery";
+import { isMastered, type FactStat } from "./game/mastery";
 import {
   bossForLevel,
   PASS_LEVEL,
@@ -14,20 +14,23 @@ import {
   seedProgressFromFacts,
   SKILL_LEVELS,
   skillGrade,
+  skillLevel,
   unlockedTopics,
   type SkillProgress,
 } from "./game/pathway";
 import {
   applyGradeCheckpoint,
+  applyGradeRecheck,
   assignmentFor,
   assignmentLevel,
   assignmentsOfGrade,
   currentGradeSkillIdx,
-  gradeProgress,
   gradeTrackStatus,
   mergeGradeAssignmentProgress,
   mergeGradeTracks,
   normalizeGradeTrack,
+  pendingGradeMissions,
+  pendingGradeRechecks,
   preferredGradeMissionLevel,
   seedGradeAssignmentProgress,
   TRACK_GRADES,
@@ -39,7 +42,7 @@ import { buildCanonicalMasteryBatch, newlyMasteredKeys } from "./game/masteryBat
 import { ensureAudio, setMuted, sfxDefeat, sfxVictory } from "./game/audio";
 import Battle, { RAID_SECONDS, type BattleStats, type ProblemResult } from "./components/Battle";
 import Trial from "./components/Trial";
-import PlacementTrial from "./components/PlacementTrial";
+import PlacementTrial, { type GradeCheckSession } from "./components/PlacementTrial";
 import DailySprint from "./components/DailySprint";
 import MistakeRematch from "./components/MistakeRematch";
 import FoundingBoard from "./components/FoundingBoard";
@@ -66,6 +69,7 @@ import {
   rankMovementCopy,
   SPRINT_BRACKETS,
   sprintBracketForGrade,
+  sprintGradeForProgress,
   sprintBestKey,
   standingGapCopy,
   type SprintBest,
@@ -191,6 +195,14 @@ type Save = {
   lastPlacement: string;
   /** Sequential grade checkpoint and remediation state. */
   gradeTrack: GradeTrackState;
+  /** Self-selected school grade sets the first goal; reached play floors the Sprint division. */
+  schoolGrade: number | null;
+  /** The highest grade this continuous climb is currently trying to earn. */
+  climbGoalGrade: number | null;
+  /** Optional modes appear once the first climb has begun. */
+  climbStarted: boolean;
+  /** Exact resumable question/confirmation position inside a grade check. */
+  gradeCheckSession: GradeCheckSession | null;
   /** Official first Daily Sprint run per UTC date and grade bracket. */
   sprintBests: Record<string, SprintBest>;
 };
@@ -218,8 +230,50 @@ const EMPTY_SAVE: Save = {
   records: {},
   lastPlacement: "",
   gradeTrack: normalizeGradeTrack(null, {}),
+  schoolGrade: null,
+  climbGoalGrade: null,
+  climbStarted: false,
+  gradeCheckSession: null,
   sprintBests: {},
 };
+
+const validSchoolGrade = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && TRACK_GRADES.includes(value);
+
+function normalizeGradeCheckSession(
+  value: unknown,
+  track: GradeTrackState
+): GradeCheckSession | null {
+  if (!value || typeof value !== "object") return null;
+  const session = value as Partial<GradeCheckSession>;
+  if (
+    session.version !== 1 ||
+    (session.mode !== "checkpoint" && session.mode !== "recheck") ||
+    session.grade !== track.activeGrade ||
+    !Array.isArray(session.skillIds) ||
+    session.skillIds.length === 0 ||
+    !session.skillIds.every((id) => typeof id === "string" && PATHWAY.some((skill) => skill.id === id))
+  ) return null;
+  return {
+    version: 1,
+    mode: session.mode,
+    grade: session.grade,
+    skillIds: [...session.skillIds],
+    questionIndex: typeof session.questionIndex === "number"
+      ? Math.max(0, Math.floor(session.questionIndex))
+      : 0,
+    recoveryMode: session.recoveryMode === true,
+    recoveryCorrect: typeof session.recoveryCorrect === "number"
+      ? Math.max(0, Math.min(1, Math.floor(session.recoveryCorrect)))
+      : 0,
+    passedSkillIds: Array.isArray(session.passedSkillIds)
+      ? session.passedSkillIds.filter((id): id is string => typeof id === "string")
+      : [],
+    failedSkillIds: Array.isArray(session.failedSkillIds)
+      ? session.failedSkillIds.filter((id): id is string => typeof id === "string")
+      : [],
+  };
+}
 
 /** Union-merge two saves: keep the best of both (cloud vs local device). */
 function mergeSaves(a: Save, b: Save): Save {
@@ -264,6 +318,20 @@ function mergeSaves(a: Save, b: Save): Save {
     b.gradeTrack,
     assignmentProgress
   );
+  const sessionCandidates = [a.gradeCheckSession, b.gradeCheckSession]
+    .map((session) => normalizeGradeCheckSession(session, gradeTrack))
+    .filter((session): session is GradeCheckSession => !!session)
+    .sort((left, right) => right.questionIndex - left.questionIndex);
+  const schoolGrade = validSchoolGrade(a.schoolGrade)
+    ? a.schoolGrade
+    : validSchoolGrade(b.schoolGrade)
+      ? b.schoolGrade
+      : null;
+  const climbGoalGrade = validSchoolGrade(a.climbGoalGrade)
+    ? a.climbGoalGrade
+    : validSchoolGrade(b.climbGoalGrade)
+      ? b.climbGoalGrade
+      : schoolGrade;
   return {
     xp: Math.max(a.xp, b.xp),
     bossesBeaten: [...new Set([...a.bossesBeaten, ...b.bossesBeaten])],
@@ -286,6 +354,10 @@ function mergeSaves(a: Save, b: Save): Save {
     records,
     lastPlacement: (a.lastPlacement ?? "") >= (b.lastPlacement ?? "") ? (a.lastPlacement ?? "") : (b.lastPlacement ?? ""),
     gradeTrack,
+    schoolGrade,
+    climbGoalGrade,
+    climbStarted: (a.climbStarted ?? false) || (b.climbStarted ?? false),
+    gradeCheckSession: sessionCandidates[0] ?? null,
     sprintBests,
   };
 }
@@ -308,6 +380,15 @@ const loadSave = (): Save => {
     loaded.gradeTrack = normalizeGradeTrack(
       raw.gradeTrack,
       loaded.assignmentProgress
+    );
+    loaded.schoolGrade = validSchoolGrade(raw.schoolGrade) ? raw.schoolGrade : null;
+    loaded.climbGoalGrade = validSchoolGrade(raw.climbGoalGrade)
+      ? raw.climbGoalGrade
+      : loaded.schoolGrade;
+    loaded.climbStarted = raw.climbStarted ?? loaded.placed;
+    loaded.gradeCheckSession = normalizeGradeCheckSession(
+      raw.gradeCheckSession,
+      loaded.gradeTrack
     );
     return loaded;
   } catch {
@@ -360,6 +441,9 @@ function buildDemoSave(): Save {
     skillProgress,
     assignmentProgress: seedGradeAssignmentProgress(null, skillProgress),
     placed: true,
+    schoolGrade: 8,
+    climbGoalGrade: 8,
+    climbStarted: true,
     gradeTrack: normalizeGradeTrack(
       null,
       seedGradeAssignmentProgress(null, skillProgress)
@@ -381,9 +465,46 @@ const titleOf = (level: number) => TITLES.find(([l]) => level >= l)![1];
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const yesterdayStr = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
+export function todayRaidSkillIndex(
+  passedGrades: readonly number[],
+  date: string,
+  facts: Record<string, FactStat> = {}
+): number {
+  const highest = passedGrades.at(-1) ?? TRACK_GRADES[0] ?? 3;
+  let candidates = PATHWAY
+    .map((skill, index) => ({ skill, index }))
+    .filter(({ skill }) => skillGrade(skill.id) === highest);
+  if (candidates.length === 0) {
+    candidates = PATHWAY
+      .map((skill, index) => ({ skill, index }))
+      .filter(({ skill }) => skillGrade(skill.id) <= highest);
+  }
+  const hash = [...date].reduce((total, char) => total + char.charCodeAt(0), 0);
+  const rotated = candidates.map((candidate, index) => ({
+    ...candidate,
+    tieBreak: (index - hash + candidates.length) % Math.max(1, candidates.length),
+    weakness: (() => {
+      const keys = factSetFor(candidate.skill.topic, candidate.skill.band);
+      if (!keys?.length) return 0;
+      const unmastered = keys.filter((key) => !isMastered(facts[key])).length / keys.length;
+      const missRate = keys.reduce((total, key) => {
+        const stat = facts[key];
+        return total + (stat?.n ? stat.miss / stat.n : 0);
+      }, 0) / keys.length;
+      return unmastered + Math.min(0.5, missRate);
+    })(),
+  }));
+  rotated.sort((left, right) =>
+    right.weakness - left.weakness || left.tieBreak - right.tieBreak
+  );
+  return rotated[0]?.index ?? 0;
+}
+
 type Phase =
+  | "onboarding"
   | "menu"
   | "placement"
+  | "recheck"
   | "battle"
   | "trial"
   | "rematch"
@@ -391,6 +512,11 @@ type Phase =
   | "victory"
   | "defeat"
   | "trialEnd";
+
+type PathwayLaunch = {
+  mode: "checkpoint" | "mission" | "practice";
+  skillId?: string;
+};
 
 export default function GauntletGame({
   tournament,
@@ -418,6 +544,12 @@ export default function GauntletGame({
   const [challenge, setChallenge] = useState<GauntletChallenge | null>(null);
   const [challengeRun, setChallengeRun] = useState(false);
   const [battleDeck, setBattleDeck] = useState<ChallengeQuestion[] | undefined>(undefined);
+  const [pathwayLaunch, setPathwayLaunch] = useState<PathwayLaunch | null>(null);
+  const [recheckAssignmentId, setRecheckAssignmentId] = useState<string | null>(null);
+  const [rematchReturnBattle, setRematchReturnBattle] = useState<{
+    skillIdx: number;
+    level: number;
+  } | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -468,10 +600,18 @@ export default function GauntletGame({
       setSave(s);
       setMuted(s.muted);
       setLoaded(true);
-      if (!s.seenHelp) setShowHelp(true);
+      setPhase(s.schoolGrade ? "menu" : "onboarding");
+      const routeParams = new URLSearchParams(window.location.search);
+      const playMode = routeParams.get("play");
+      if (playMode === "checkpoint") {
+        setPathwayLaunch({ mode: "checkpoint" });
+      } else if (playMode === "mission" || playMode === "practice") {
+        const skillId = routeParams.get("skill") ?? undefined;
+        if (skillId) setPathwayLaunch({ mode: playMode, skillId });
+      }
       // Challenge link payload: validate skill, level, time, and kid-safe handle.
       try {
-        const encodedChallenge = new URLSearchParams(window.location.search).get("c");
+        const encodedChallenge = routeParams.get("c");
         if (encodedChallenge) {
           setChallenge(
             parseChallenge(
@@ -559,8 +699,27 @@ export default function GauntletGame({
 
   const skill = PATHWAY[skillIdx];
   const boss: Boss = bossForLevel(battleLevel);
+  const battleAssignment = assignmentFor(save.gradeTrack.activeGrade, skill.id);
+  const battleIsGradeMission = !!battleAssignment &&
+    save.gradeTrack.missionIds.includes(battleAssignment.id);
+  const remainingGradeRechecks = pendingGradeRechecks(
+    save.gradeTrack,
+    save.assignmentProgress
+  );
+  const recheckAssignment = recheckAssignmentId
+    ? assignmentsOfGrade(save.gradeTrack.activeGrade).find(
+        (assignment) => assignment.id === recheckAssignmentId
+      )
+    : remainingGradeRechecks[0];
   const curIdx = currentGradeSkillIdx(save.gradeTrack, save.assignmentProgress);
   const fmGrade = save.gradeTrack.activeGrade;
+  const climbGoalGrade = save.climbGoalGrade ?? save.schoolGrade ?? fmGrade;
+  const climbGoalReached = save.gradeTrack.passedGrades.includes(climbGoalGrade);
+  const todayRaidIdx = todayRaidSkillIndex(
+    save.gradeTrack.passedGrades,
+    todayStr(),
+    save.facts
+  );
   const trialSources = useMemo(
     () => {
       const reached = PATHWAY.filter(
@@ -580,7 +739,9 @@ export default function GauntletGame({
     [fmGrade, save.assignmentProgress]
   );
   const sprintDate = todayStr();
-  const sprintBand = sprintBracketForGrade(fmGrade);
+  const sprintBand = sprintBracketForGrade(
+    sprintGradeForProgress(save.schoolGrade, fmGrade)
+  );
   const sprintBest = save.sprintBests[sprintBestKey(sprintDate, sprintBand)];
   const previousSprintBest = useMemo(
     () =>
@@ -645,7 +806,7 @@ export default function GauntletGame({
     return { date: t, count: prev.daily.date === yesterdayStr() ? prev.daily.count + 1 : 1 };
   };
 
-  const startSkillBattle = (
+  const startSkillBattle = useCallback((
     idx: number,
     level: number,
     isChallenge = false,
@@ -660,7 +821,64 @@ export default function GauntletGame({
     // topics mirrors unlocked skills for cloud-merge back-compat
     setSave((p) => ({ ...p, band: PATHWAY[idx].band, topics: unlockedTopics(p.skillProgress) }));
     setPhase("battle");
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !pathwayLaunch) return;
+
+    const timer = window.setTimeout(() => {
+      const consumeLaunch = () => {
+        setPathwayLaunch(null);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("play");
+        url.searchParams.delete("skill");
+        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      };
+
+      if (pathwayLaunch.mode === "checkpoint") {
+        const status = gradeTrackStatus(save.gradeTrack, save.assignmentProgress);
+        if (status === "checkpoint") {
+          ensureAudio();
+          setPhase("placement");
+        } else if (status === "recheck") {
+          const recheck = pendingGradeRechecks(save.gradeTrack, save.assignmentProgress)[0];
+          if (recheck) {
+            setRecheckAssignmentId(recheck.id);
+            ensureAudio();
+            setPhase("recheck");
+          }
+        }
+        consumeLaunch();
+        return;
+      }
+
+      const idx = PATHWAY.findIndex((candidate) => candidate.id === pathwayLaunch.skillId);
+      if (idx < 0) {
+        consumeLaunch();
+        return;
+      }
+
+      if (pathwayLaunch.mode === "mission") {
+        const assignment = assignmentFor(save.gradeTrack.activeGrade, PATHWAY[idx].id);
+        const pending = new Set(
+          pendingGradeMissions(save.gradeTrack, save.assignmentProgress).map((item) => item.id)
+        );
+        if (assignment && pending.has(assignment.id)) {
+          const level = preferredGradeMissionLevel(save.assignmentProgress, assignment);
+          if (level) startSkillBattle(idx, level);
+        }
+      } else {
+        const practiceLevel = Math.min(
+          WORKING_GRADE_BOSS_CAP,
+          Math.max(1, skillLevel(save.skillProgress, PATHWAY[idx].id) || 1)
+        );
+        startSkillBattle(idx, practiceLevel);
+      }
+      consumeLaunch();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loaded, pathwayLaunch, save.assignmentProgress, save.gradeTrack, save.skillProgress, startSkillBattle]);
 
   // Challenge a friend: encode this win as a link (skill + level + time to
   // beat + kid-safe handle only — no PII). navigator.share on phones,
@@ -717,6 +935,7 @@ export default function GauntletGame({
       phase === "battle" ||
       phase === "trial" ||
       phase === "placement" ||
+      phase === "recheck" ||
       phase === "sprint" ||
       phase === "rematch";
     document.body.classList.toggle("gauntlet-playing", playing);
@@ -967,7 +1186,7 @@ export default function GauntletGame({
     <div
       className="gauntlet-root flex min-h-screen flex-col bg-[#0a0f1a] font-display text-white"
       style={
-        phase === "menu" || phase === "placement" || phase === "victory" || phase === "defeat" || phase === "trialEnd"
+        phase === "onboarding" || phase === "menu" || phase === "placement" || phase === "recheck" || phase === "victory" || phase === "defeat" || phase === "trialEnd"
           ? {
               background:
                 "linear-gradient(rgba(6,9,16,0.84), rgba(6,9,16,0.95)), url(/raiders/keyart.jpg) center / cover no-repeat, #0a0f1a",
@@ -975,7 +1194,7 @@ export default function GauntletGame({
           : undefined
       }
     >
-      {phase !== "menu" && phase !== "placement" && (
+      {phase !== "onboarding" && phase !== "menu" && phase !== "placement" && (
         <button
           onClick={toggleMute}
           aria-label={save.muted ? "Unmute" : "Mute"}
@@ -985,6 +1204,23 @@ export default function GauntletGame({
         >
           {save.muted ? "🔇" : "🔊"}
         </button>
+      )}
+
+      {phase === "onboarding" && (
+        <GradeWelcome
+          hasSavedProgress={save.gradeTrack.passedGrades.length > 0 || Object.keys(save.skillProgress).length > 0}
+          onSelect={(grade) => {
+            setSave((previous) => ({
+              ...previous,
+              schoolGrade: grade,
+              climbGoalGrade: grade,
+              climbStarted: true,
+            }));
+            const status = gradeTrackStatus(save.gradeTrack, save.assignmentProgress);
+            const alreadyReached = save.gradeTrack.passedGrades.includes(grade);
+            setPhase(status === "checkpoint" && !alreadyReached ? "placement" : "menu");
+          }}
+        />
       )}
 
       {phase === "menu" && (
@@ -1011,16 +1247,33 @@ export default function GauntletGame({
           }}
           onDismissChallenge={() => setChallenge(null)}
           setHandle={(h) => setSave((p) => ({ ...p, handle: h }))}
+          onSchoolGradeChange={(grade) => setSave((previous) => ({
+            ...previous,
+            schoolGrade: grade,
+            climbGoalGrade: grade,
+            gradeCheckSession: null,
+          }))}
           onContinue={() => {
             const status = gradeTrackStatus(save.gradeTrack, save.assignmentProgress);
             if (status === "checkpoint") {
+              if (climbGoalReached) {
+                startSkillBattle(todayRaidIdx, WORKING_GRADE_BOSS_CAP);
+                return;
+              }
               ensureAudio();
               setPhase("placement");
               return;
             }
             if (status === "complete") {
-              ensureAudio();
-              setPhase("trial");
+              startSkillBattle(todayRaidIdx, WORKING_GRADE_BOSS_CAP);
+              return;
+            }
+            if (status === "recheck") {
+              const recheck = remainingGradeRechecks[0];
+              if (recheck) {
+                setRecheckAssignmentId(recheck.id);
+                setPhase("recheck");
+              }
               return;
             }
             const target = PATHWAY[curIdx];
@@ -1029,6 +1282,15 @@ export default function GauntletGame({
               ? preferredGradeMissionLevel(save.assignmentProgress, assignment)
               : undefined;
             if (lvl) startSkillBattle(curIdx, lvl);
+          }}
+          onNextGradeChallenge={() => {
+            setSave((previous) => ({
+              ...previous,
+              climbGoalGrade: previous.gradeTrack.activeGrade,
+              gradeCheckSession: null,
+            }));
+            ensureAudio();
+            setPhase("placement");
           }}
           onToggleInstant={() => setSave((p) => ({ ...p, instantSubmit: !p.instantSubmit }))}
           onToggleMute={toggleMute}
@@ -1051,12 +1313,28 @@ export default function GauntletGame({
         <PlacementTrial
           key={save.gradeTrack.activeGrade}
           grade={save.gradeTrack.activeGrade}
+          targetGrade={climbGoalGrade}
+          initialSession={save.gradeCheckSession?.mode === "checkpoint"
+            ? save.gradeCheckSession
+            : null}
+          autoAdvance={save.gradeTrack.activeGrade < climbGoalGrade}
           instantSubmit={save.instantSubmit}
+          onProgress={(session) => setSave((previous) => ({
+            ...previous,
+            climbStarted: true,
+            gradeCheckSession:
+              previous.gradeTrack.activeGrade === session.grade ? session : previous.gradeCheckSession,
+          }))}
           onDone={(result) => {
-            const expectedAssignments = assignmentsOfGrade(result.grade).length;
-            const passedGrade =
-              result.failed.length === 0 &&
-              new Set(result.passed).size === expectedAssignments;
+            const preview = applyGradeCheckpoint(
+              save.gradeTrack,
+              save.assignmentProgress,
+              result
+            );
+            const firstMission = pendingGradeMissions(
+              preview.track,
+              preview.progress
+            )[0];
             setSave((p) => {
               if (p.gradeTrack.activeGrade !== result.grade) return p;
               const applied = applyGradeCheckpoint(
@@ -1065,7 +1343,10 @@ export default function GauntletGame({
                 result
               );
               const legacyProgress = { ...p.skillProgress };
-              for (const index of result.passed) {
+              const creditedIndexes = applied.passedGrade
+                ? assignmentsOfGrade(result.grade).map((assignment) => assignment.skillIdx)
+                : result.passed;
+              for (const index of creditedIndexes) {
                 const candidate = PATHWAY[index];
                 if (!candidate) continue;
                 legacyProgress[candidate.id] = Math.max(
@@ -1076,15 +1357,107 @@ export default function GauntletGame({
               return {
                 ...p,
                 placed: true,
+                climbStarted: true,
                 lastPlacement: todayStr(),
                 gradeTrack: applied.track,
+                gradeCheckSession: null,
                 skillProgress: legacyProgress,
                 assignmentProgress: applied.progress,
                 topics: unlockedTopics(legacyProgress),
               };
             });
-            const lastGrade = TRACK_GRADES[TRACK_GRADES.length - 1];
-            if (!passedGrade || result.grade >= lastGrade) setPhase("menu");
+            if (!preview.passedGrade && firstMission) {
+              const missionLevel = preferredGradeMissionLevel(
+                preview.progress,
+                firstMission
+              );
+              if (missionLevel) {
+                startSkillBattle(firstMission.skillIdx, missionLevel);
+                return;
+              }
+            }
+            setPhase(
+              preview.passedGrade &&
+              !preview.track.passedGrades.includes(climbGoalGrade)
+                ? "placement"
+                : "menu"
+            );
+          }}
+          onExit={() => setPhase("menu")}
+        />
+      )}
+      {phase === "recheck" && recheckAssignment && (
+        <PlacementTrial
+          key={`recheck:${recheckAssignment.id}`}
+          mode="recheck"
+          grade={save.gradeTrack.activeGrade}
+          targetGrade={climbGoalGrade}
+          skillId={recheckAssignment.skillId}
+          initialSession={save.gradeCheckSession?.mode === "recheck"
+            ? save.gradeCheckSession
+            : null}
+          instantSubmit={save.instantSubmit}
+          onProgress={(session) => setSave((previous) => ({
+            ...previous,
+            gradeCheckSession: session,
+          }))}
+          onDone={(result) => {
+            const passed = result.failed.length === 0;
+            const preview = applyGradeRecheck(
+              save.gradeTrack,
+              save.assignmentProgress,
+              recheckAssignment.id,
+              passed
+            );
+            setSave((previous) => {
+              const applied = applyGradeRecheck(
+                previous.gradeTrack,
+                previous.assignmentProgress,
+                recheckAssignment.id,
+                passed
+              );
+              const legacyProgress = { ...previous.skillProgress };
+              if (passed) {
+                const credited = applied.passedGrade
+                  ? assignmentsOfGrade(result.grade)
+                  : [recheckAssignment];
+                for (const assignment of credited) {
+                  const candidate = PATHWAY[assignment.skillIdx];
+                  if (candidate) legacyProgress[candidate.id] = SKILL_LEVELS;
+                }
+              }
+              return {
+                ...previous,
+                gradeTrack: applied.track,
+                assignmentProgress: applied.progress,
+                skillProgress: legacyProgress,
+                gradeCheckSession: null,
+                placed: true,
+                lastPlacement: todayStr(),
+                topics: unlockedTopics(legacyProgress),
+              };
+            });
+            setRecheckAssignmentId(null);
+
+            if (!passed) {
+              const level = preferredGradeMissionLevel(preview.progress, recheckAssignment);
+              if (level) startSkillBattle(recheckAssignment.skillIdx, level);
+              else setPhase("menu");
+              return;
+            }
+            const nextMission = pendingGradeMissions(preview.track, preview.progress)[0];
+            if (nextMission) {
+              const level = preferredGradeMissionLevel(preview.progress, nextMission);
+              if (level) startSkillBattle(nextMission.skillIdx, level);
+              else setPhase("menu");
+              return;
+            }
+            setPhase(
+              preview.passedGrade &&
+              !preview.track.passedGrades.includes(climbGoalGrade)
+                ? "placement"
+                : "menu"
+            );
           }}
           onExit={() => setPhase("menu")}
         />
@@ -1119,6 +1492,7 @@ export default function GauntletGame({
           puzzleSource={raidSetup.puzzleSource}
           challengeDeck={battleDeck}
           raidLevel={battleLevel}
+          raidLabel={battleIsGradeMission ? `Grade ${fmGrade} journey · ${skill.label}` : skill.label}
           instantSubmit={save.instantSubmit}
           onFinish={finishBattle}
         />
@@ -1143,7 +1517,16 @@ export default function GauntletGame({
           keys={rematchKeys}
           instantSubmit={save.instantSubmit}
           onRoundComplete={finishRematch}
-          onExit={() => setPhase("menu")}
+          exitLabel={rematchReturnBattle ? "RETRY BOSS" : "RETURN TO MENU"}
+          onExit={() => {
+            if (rematchReturnBattle) {
+              const target = rematchReturnBattle;
+              setRematchReturnBattle(null);
+              startSkillBattle(target.skillIdx, target.level);
+              return;
+            }
+            setPhase("menu");
+          }}
         />
       )}
       {phase === "trial" && (
@@ -1162,14 +1545,35 @@ export default function GauntletGame({
           grade={fmGrade}
           challengeNote={challengeNote}
           onChallenge={phase === "victory" ? shareChallenge : undefined}
-          onRematch={rematchKeys.length ? () => setPhase("rematch") : undefined}
+          onRematch={rematchKeys.length && !(phase === "victory" && battleIsGradeMission) ? () => {
+            setRematchReturnBattle(
+              phase === "defeat" && battleIsGradeMission
+                ? { skillIdx, level: battleLevel }
+                : null
+            );
+            setPhase("rematch");
+          } : undefined}
           onMenu={() => setPhase("menu")}
           onRetry={() => startSkillBattle(skillIdx, battleLevel, challengeRun, battleDeck)}
           onNext={
-            phase === "victory" && !challengeRun && battleLevel < WORKING_GRADE_BOSS_CAP
-              ? () => startSkillBattle(skillIdx, battleLevel + 1)
-              : undefined
+            phase !== "victory" || challengeRun
+              ? undefined
+              : battleIsGradeMission
+                ? battleAssignment
+                  ? () => {
+                      setRecheckAssignmentId(battleAssignment.id);
+                      setSave((previous) => ({ ...previous, gradeCheckSession: null }));
+                      ensureAudio();
+                      setPhase("recheck");
+                    }
+                  : undefined
+                : battleLevel < WORKING_GRADE_BOSS_CAP
+                  ? () => startSkillBattle(skillIdx, battleLevel + 1)
+                  : undefined
           }
+          nextLabel={battleIsGradeMission
+            ? "PROVE TO CONTINUE"
+            : undefined}
         />
       )}
       {phase === "trialEnd" && (
@@ -1180,7 +1584,10 @@ export default function GauntletGame({
           results={lastResults}
           recap={lastRecap}
           grade={fmGrade}
-          onRematch={rematchKeys.length ? () => setPhase("rematch") : undefined}
+          onRematch={rematchKeys.length ? () => {
+            setRematchReturnBattle(null);
+            setPhase("rematch");
+          } : undefined}
           onMenu={() => setPhase("menu")}
           onRetry={() => {
             ensureAudio();
@@ -1205,6 +1612,65 @@ export default function GauntletGame({
 /*  Menu                                                              */
 /* ------------------------------------------------------------------ */
 
+function GradeWelcome({
+  hasSavedProgress,
+  onSelect,
+}: {
+  hasSavedProgress: boolean;
+  onSelect: (grade: number) => void;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-3xl items-center px-4 py-8 sm:px-6">
+      <section className="w-full rounded-[2rem] border border-cyan-300/35 bg-black/45 p-5 text-center shadow-2xl backdrop-blur-md sm:p-9">
+        <p className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-200">
+          Welcome to The Gauntlet
+        </p>
+        <h1 className="mt-3 text-4xl font-bold tracking-tight sm:text-5xl">
+          What grade are you in?
+        </h1>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-white/60 sm:text-base">
+          We’ll start with a few quick Grade 3 questions and fast-forward toward your grade.
+          If we find something to train, you’ll fight one boss and continue from the same spot.
+        </p>
+        {hasSavedProgress && (
+          <p className="mx-auto mt-3 max-w-md rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
+            Your existing Gauntlet progress is safe. This sets your climb goal; Sprint follows the highest grade you select or reach.
+          </p>
+        )}
+
+        <div className="mx-auto mt-7 grid max-w-xl grid-cols-4 gap-2 sm:grid-cols-5">
+          {TRACK_GRADES.map((grade) => (
+            <button
+              key={grade}
+              type="button"
+              onClick={() => setSelected(grade)}
+              aria-pressed={selected === grade}
+              className={`rounded-xl border px-2 py-3 font-mono text-sm font-bold transition-all ${
+                selected === grade
+                  ? "border-cyan-200 bg-cyan-300 text-[#06101a] shadow-lg shadow-cyan-500/20"
+                  : "border-white/15 bg-white/5 text-white/75 hover:border-cyan-300/45 hover:bg-cyan-300/10"
+              }`}
+            >
+              GRADE {grade}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          disabled={selected === null}
+          onClick={() => selected !== null && onSelect(selected)}
+          className="mt-7 w-full max-w-xl rounded-2xl bg-gradient-to-r from-cyan-300 via-cyan-400 to-blue-500 px-6 py-5 font-mono text-sm font-black tracking-[0.04em] text-[#06101a] shadow-lg shadow-cyan-500/25 transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          {selected === null ? "CHOOSE MY GRADE" : `START MY GRADE ${selected} CLIMB`}
+        </button>
+        <p className="mt-3 text-xs text-white/35">No account needed. Every cleared grade saves.</p>
+      </section>
+    </main>
+  );
+}
+
 function Menu({
   save,
   userId,
@@ -1214,7 +1680,9 @@ function Menu({
   onAcceptChallenge,
   onDismissChallenge,
   setHandle,
+  onSchoolGradeChange,
   onContinue,
+  onNextGradeChallenge,
   onToggleInstant,
   onToggleMute,
   onTrial,
@@ -1239,7 +1707,9 @@ function Menu({
   onAcceptChallenge: () => void;
   onDismissChallenge: () => void;
   setHandle: (handle: string) => void;
+  onSchoolGradeChange: (grade: number) => void;
   onContinue: () => void;
+  onNextGradeChallenge: () => void;
   onToggleInstant: () => void;
   onToggleMute: () => void;
   onTrial: () => void;
@@ -1253,51 +1723,54 @@ function Menu({
   const progress = save.assignmentProgress;
   const track = save.gradeTrack;
   const status = gradeTrackStatus(track, progress);
-  const gradeState = gradeProgress(progress, track.activeGrade);
-  const currentIndex = currentGradeSkillIdx(track, progress);
-  const currentSkill = PATHWAY[currentIndex];
-  const currentAssignment = assignmentFor(track.activeGrade, currentSkill.id);
-  const nextLevel = currentAssignment
-    ? preferredGradeMissionLevel(progress, currentAssignment) ?? PASS_LEVEL
-    : PASS_LEVEL;
+  const pendingMissions = pendingGradeMissions(track, progress);
+  const pendingRechecks = pendingGradeRechecks(track, progress);
+  const mission = pendingMissions[0];
+  const recheck = pendingRechecks[0];
+  const goalGrade = save.climbGoalGrade ?? save.schoolGrade ?? track.activeGrade;
+  const goalReached = track.passedGrades.includes(goalGrade);
+  const dailySkill = PATHWAY[todayRaidSkillIndex(track.passedGrades, todayStr(), save.facts)];
   const level = levelOf(save.xp);
   const identity = save.handle || (userId ? "RAIDER" : "GUEST");
   const pathwayHref = `${basePath}/pathway`;
-  const checkpointRetry = track.attemptedGrades.includes(track.activeGrade);
   const firstCheckpoint = track.activeGrade === TRACK_GRADES[0] && track.passedGrades.length === 0;
+  const journeyGoalGrade = Math.max(goalGrade, track.activeGrade);
+  const journeyPercent = Math.max(
+    0,
+    Math.min(
+      100,
+      ((track.activeGrade - TRACK_GRADES[0]) /
+        (journeyGoalGrade - TRACK_GRADES[0] || 1)) * 100
+    )
+  );
 
-  const primary = status === "checkpoint"
+  const primary = status === "remediation" && mission
     ? {
-        eyebrow: checkpointRetry
-          ? `Grade ${track.activeGrade} checkpoint ready`
-          : "Placement climb",
-        title: checkpointRetry
-          ? `Prove Grade ${track.activeGrade}`
-          : firstCheckpoint
-            ? "Find your starting grade"
-            : "Keep climbing",
-        detail: track.activeGrade < 12
-          ? `Clear Grade ${track.activeGrade} to move straight into the next checkpoint`
-          : "Pass to complete the Fast Math pathway",
-        button: checkpointRetry
-          ? `RETAKE THE GRADE ${track.activeGrade} CHECKPOINT`
-          : firstCheckpoint
-            ? "START PLACEMENT CLIMB"
-            : `CONTINUE PLACEMENT · GRADE ${track.activeGrade}`,
+        eyebrow: `Grade ${track.activeGrade} journey`,
+        title: `Beat ${PATHWAY[mission.skillIdx].label}`,
+        detail: `${pendingMissions.length} ${pendingMissions.length === 1 ? "boss" : "bosses"} left before the route continues`,
+        button: `CONTINUE · ${PATHWAY[mission.skillIdx].label.toUpperCase()} BOSS`,
       }
-    : status === "complete"
+    : status === "recheck" && recheck
       ? {
-          eyebrow: "Fast Math pathway complete",
-          title: "Keep your edge",
-          detail: "Review everything you have proved across Grades 3–12",
-          button: "START MIXED REVIEW",
+          eyebrow: `Grade ${track.activeGrade} skill proof`,
+          title: `Prove ${PATHWAY[recheck.skillIdx].label}`,
+          detail: "Two clean answers, then your Grade Climb continues",
+          button: `PROVE ${PATHWAY[recheck.skillIdx].label.toUpperCase()}`,
         }
-      : {
-          eyebrow: `Grade ${track.activeGrade} Fast Math`,
-          title: "Your next mission",
-          detail: `${currentSkill.label} · Boss ${nextLevel}`,
-          button: `CONTINUE GRADE ${track.activeGrade}`,
-        };
+      : status === "checkpoint" && !goalReached
+        ? {
+            eyebrow: `Grade Climb · Goal Grade ${goalGrade}`,
+            title: firstCheckpoint ? "Start your Grade Climb" : `Continue to Grade ${track.activeGrade}`,
+            detail: `A short Grade ${track.activeGrade} check; every cleared grade saves`,
+            button: firstCheckpoint ? "START MY GRADE CLIMB" : `CONTINUE TO GRADE ${track.activeGrade}`,
+          }
+        : {
+            eyebrow: goalReached ? `Grade ${goalGrade} Fast Math earned` : "Fast Math pathway complete",
+            title: "Today’s Raid",
+            detail: `${dailySkill.label} · a fresh two-minute boss battle`,
+            button: "START TODAY’S RAID",
+          };
 
   return (
     <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-1 flex-col px-4 pb-8 sm:px-6">
@@ -1309,7 +1782,9 @@ function Menu({
           The Gauntlet
         </Link>
         <p className="hidden font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-200 sm:block">
-          Grade {track.activeGrade} Fast Math
+          {goalReached
+            ? `Grade ${goalGrade} earned`
+            : `Climbing Grade ${track.activeGrade} · Goal ${goalGrade}`}
         </p>
 
         <details className="group relative z-40">
@@ -1382,6 +1857,19 @@ function Menu({
 
             <div className="mt-3 border-t border-white/10 pt-3">
               <p className="px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-white/35">Settings</p>
+              <label className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-white/80 hover:bg-white/8">
+                <span>
+                  <span className="block">School grade</span>
+                  <span className="block text-[10px] text-white/40">Sets your climb goal; Sprint never drops below reached play</span>
+                </span>
+                <select
+                  value={save.schoolGrade ?? TRACK_GRADES[0]}
+                  onChange={(event) => onSchoolGradeChange(Number(event.target.value))}
+                  className="rounded-lg border border-white/15 bg-[#111a2a] px-2 py-1 font-mono text-[11px] text-white outline-none"
+                >
+                  {TRACK_GRADES.map((grade) => <option key={grade} value={grade}>G{grade}</option>)}
+                </select>
+              </label>
               <button
                 onClick={onToggleInstant}
                 className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-white/8"
@@ -1453,24 +1941,37 @@ function Menu({
           </h1>
           <p className="mt-3 text-sm text-white/60 sm:text-base">{primary.detail}</p>
 
-          {status !== "complete" && (
-            <div className="mx-auto mt-6 max-w-md">
-              <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.1em] text-white/40">
-                <span>Grade {track.activeGrade} skills secure</span>
-                <span>{gradeState.secure}/{gradeState.total}</span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-[width]"
-                  style={{ width: `${gradeState.total ? (gradeState.secure / gradeState.total) * 100 : 0}%` }}
-                />
-              </div>
+          <div
+            className="relative mx-auto mt-5 w-full max-w-lg"
+            aria-label={`Pathway: Grade ${TRACK_GRADES[0]} start, Grade ${track.activeGrade} now, Grade ${journeyGoalGrade} goal`}
+          >
+            <div className="absolute left-[16.66%] right-[16.66%] top-3.5 h-0.5 rounded-full bg-white/10" aria-hidden>
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-300"
+                style={{ width: `${journeyPercent}%` }}
+              />
             </div>
-          )}
+            <div className="relative grid grid-cols-3">
+              {[
+                { label: "START", grade: TRACK_GRADES[0], className: "bg-emerald-400 text-black" },
+                { label: "NOW", grade: track.activeGrade, className: "bg-cyan-300 text-black ring-4 ring-cyan-300/10" },
+                { label: "GOAL", grade: journeyGoalGrade, className: "bg-amber-300 text-black" },
+              ].map((stop) => (
+                <div key={stop.label} className="flex flex-col items-center">
+                  <span className={`flex h-7 w-7 items-center justify-center rounded-full font-mono text-[10px] font-black ${stop.className}`}>
+                    {stop.grade}
+                  </span>
+                  <span className="mt-1 font-mono text-[8px] font-bold tracking-[0.1em] text-white/35">
+                    {stop.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <button
             onClick={onContinue}
-            className="mt-7 w-full rounded-2xl bg-gradient-to-r from-cyan-300 via-cyan-400 to-blue-500 px-6 py-5 font-mono text-sm font-black tracking-[0.04em] text-[#06101a] shadow-lg shadow-cyan-500/25 transition-transform hover:scale-[1.015] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:text-base"
+            className="mt-5 w-full rounded-2xl bg-gradient-to-r from-cyan-300 via-cyan-400 to-blue-500 px-6 py-5 font-mono text-sm font-black tracking-[0.04em] text-[#06101a] shadow-lg shadow-cyan-500/25 transition-transform hover:scale-[1.015] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:text-base"
           >
             {primary.button}
             <span className="mt-1 block text-[10px] font-medium tracking-normal text-black/60 sm:text-xs">
@@ -1478,14 +1979,18 @@ function Menu({
             </span>
           </button>
 
-          {status === "checkpoint" && (
-            <p className="mt-3 text-xs text-white/40">
-              One short grade-only check. Any missed skills become your next missions.
-            </p>
-          )}
+          <p className="mt-3 text-xs text-white/40">
+            {status === "remediation"
+              ? "Beat the boss, prove the skill, and the next route step opens automatically."
+              : status === "recheck"
+                ? "Your earlier grades and completed questions are already saved."
+                : status === "checkpoint" && !goalReached
+                  ? "3–5 questions per grade. Confirmed gaps become focused training."
+                  : "A fresh raid keeps your earned skills sharp."}
+          </p>
         </section>
 
-        <section className="mt-8">
+        {save.climbStarted && <section className="mt-8">
           <div className="flex items-end justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-white">Play another way</h2>
@@ -1495,6 +2000,19 @@ function Menu({
               View pathway →
             </Link>
           </div>
+
+          {goalReached && status === "checkpoint" && track.activeGrade > goalGrade && (
+            <button
+              onClick={onNextGradeChallenge}
+              className="mt-4 flex w-full items-center justify-between rounded-2xl border border-white/12 bg-black/25 px-4 py-3 text-left transition-colors hover:border-cyan-300/35 hover:bg-cyan-300/[0.06]"
+            >
+              <span>
+                <span className="block text-sm font-semibold text-white">Ready for more?</span>
+                <span className="mt-0.5 block text-xs text-white/45">Try Grade {track.activeGrade} as an optional challenge.</span>
+              </span>
+              <span className="font-mono text-xs text-cyan-200">TRY G{track.activeGrade} →</span>
+            </button>
+          )}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <button
@@ -1534,7 +2052,7 @@ function Menu({
               </span>
             </button>
           </div>
-        </section>
+        </section>}
       </main>
 
       <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-white/8 pt-4 text-center font-mono text-[9px] uppercase tracking-[0.12em] text-white/30">
@@ -1559,7 +2077,9 @@ function trainList(results: ProblemResult[]): { prompt: string; answer: string; 
       [...matching].sort((a, b) => b.ms - a.ms)[0];
     if (!result) return [];
     return [{
-      prompt: result.prompt.length > 30 ? "Triangle congruence" : result.prompt,
+      prompt: result.prompt.length > 48
+        ? `${result.prompt.slice(0, 45).trimEnd()}…`
+        : result.prompt,
       answer: result.answer,
       note: result.correct ? `${(result.ms / 1000).toFixed(1)}s` : "missed",
     }];
@@ -1582,6 +2102,7 @@ function Result({
   onMenu,
   onRetry,
   onNext,
+  nextLabel = "NEXT BOSS",
 }: {
   won: boolean;
   boss: Boss;
@@ -1598,6 +2119,7 @@ function Result({
   onMenu: () => void;
   onRetry: () => void;
   onNext?: () => void;
+  nextLabel?: string;
 }) {
   const total = stats.correct + stats.wrong;
   const acc = total ? Math.round((stats.correct / total) * 100) : 0;
@@ -1628,10 +2150,10 @@ function Result({
         <Stat label="Best streak" value={`×${stats.bestStreak}`} />
         <Stat label="Waste" value={`${waste}%`} />
       </div>
-      {(stats.puzzlesSolved > 0 || stats.powersUsed > 0) && (
+      {(stats.puzzlesSolved > 0 || stats.comboBursts > 0) && (
         <p className="mt-3 font-mono text-xs text-cyan-200/70">
-          {stats.puzzlesSolved} armor break{stats.puzzlesSolved === 1 ? "" : "s"} ·{" "}
-          {stats.powersUsed} streak power{stats.powersUsed === 1 ? "" : "s"} used
+          {stats.puzzlesSolved} power question{stats.puzzlesSolved === 1 ? "" : "s"} ·{" "}
+          {stats.comboBursts} combo burst{stats.comboBursts === 1 ? "" : "s"}
         </p>
       )}
 
@@ -1671,6 +2193,11 @@ function Result({
       )}
 
       <div className="mt-8 flex flex-wrap justify-center gap-3">
+        {won && onNext && (
+          <button onClick={onNext} className="rounded-xl bg-emerald-500 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-400">
+            {nextLabel} →
+          </button>
+        )}
         {won && (
           <ShareButton
             data={{
@@ -1705,11 +2232,6 @@ function Result({
             className="rounded-xl bg-emerald-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-300"
           >
             FIX MY MISSES · {train.length}
-          </button>
-        )}
-        {won && onNext && (
-          <button onClick={onNext} className="rounded-xl bg-emerald-500 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-emerald-400">
-            NEXT BOSS →
           </button>
         )}
         <button onClick={onRetry} className="rounded-xl bg-white/15 px-6 py-3 font-mono text-sm font-bold text-white hover:bg-white/25">
@@ -2042,7 +2564,7 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
       >
         <header className="shrink-0 border-b border-white/10 px-5 py-4 sm:px-6 sm:py-5">
           <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-300">The basics</p>
-          <h3 id="gauntlet-help-title" className="mt-1 text-2xl font-bold">Ready to raid?</h3>
+          <h3 id="gauntlet-help-title" className="mt-1 text-2xl font-bold">Here&apos;s your next move</h3>
           <p className="mt-1 text-xs text-white/45">Four things to know. You&apos;ll learn the rest by playing.</p>
         </header>
 
@@ -2065,15 +2587,15 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
               <span className="text-xl" aria-hidden>🔥</span>
               <p className="text-sm leading-relaxed text-white/70">
-                <strong className="text-white">Reach a 5-answer streak.</strong> Then choose a power:
-                more damage, healing, or extra time.
+                <strong className="text-white">Reach a 5-answer streak.</strong> Choose a power, then
+                land one more correct answer to activate it.
               </p>
             </li>
             <li className="flex gap-3 rounded-xl bg-white/[0.04] p-3">
               <span className="text-xl" aria-hidden>↗</span>
               <p className="text-sm leading-relaxed text-white/70">
-                <strong className="text-white">Follow Continue.</strong> Pass a grade checkpoint to move up;
-                missed skills become your next missions.
+                <strong className="text-white">Follow the big button.</strong> Climb through short grade checks;
+                confirmed gaps become focused boss training.
               </p>
             </li>
           </ol>
@@ -2084,7 +2606,7 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             </summary>
             <ul className="mt-3 space-y-2 border-t border-white/10 pt-3 text-xs leading-relaxed text-white/50">
               <li>• A raid lasts two minutes. Bring the boss to zero before time runs out.</li>
-              <li>• Armor Break problems give you 15 seconds and reward the solve, not raw speed.</li>
+              <li>• Power Questions give you extra thinking time and reward the solve, not raw speed.</li>
               <li>• Answer a fact quickly twice in a row to mark it mastered.</li>
             </ul>
           </details>
@@ -2098,7 +2620,7 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             }}
             className="w-full rounded-xl bg-cyan-400 px-6 py-3 font-mono text-sm font-bold text-black hover:bg-cyan-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
           >
-            LET&apos;S RAID
+            SHOW MY NEXT STEP
           </button>
         </footer>
       </div>

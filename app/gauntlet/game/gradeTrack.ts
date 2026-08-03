@@ -8,7 +8,7 @@ import {
   type SkillProgress,
 } from "./pathway";
 
-export const GRADE_TRACK_VERSION = 2 as const;
+export const GRADE_TRACK_VERSION = 4 as const;
 
 export type GradeTrackState = {
   version: typeof GRADE_TRACK_VERSION;
@@ -18,17 +18,21 @@ export type GradeTrackState = {
   passedGrades: number[];
   /** Grades with a checkpoint attempt. Missing skills must be remediated first. */
   attemptedGrades: number[];
+  /** Exact confirmed gaps from the latest checkpoint; unasked skills stay untested. */
+  missionIds: string[];
 };
 
 export type GradeCheckpointResult = {
   grade: number;
   passed: number[];
   failed: number[];
+  /** The check stopped after enough confirmed gaps; remaining skills are untested. */
+  stoppedEarly?: boolean;
 };
 
 export type GradeAssignmentProgress = Record<string, number>;
 
-export type GradeTrackStatus = "checkpoint" | "remediation" | "complete";
+export type GradeTrackStatus = "checkpoint" | "remediation" | "recheck" | "complete";
 
 export type GradeAssignment = {
   /** Ready for repeated concepts: a future skill can have g4:* and g5:* assignments. */
@@ -65,6 +69,35 @@ export function assignmentsOfGrade(grade: number): GradeAssignment[] {
   return GRADE_ASSIGNMENTS.filter((assignment) => assignment.grade === grade);
 }
 
+/**
+ * Provisional, explicitly-authored grade-check blueprints. Repeated ids mean
+ * the clean climb asks a second question from that skill; using ids instead
+ * of array positions keeps an in-progress climb stable across curriculum
+ * reorderings. These anchors are intentionally isolated for human curriculum
+ * sign-off before the beta label is removed.
+ */
+export const GRADE_CHECKPOINT_SKILL_IDS: Readonly<Record<number, readonly string[]>> = {
+  3: ["add-facts", "times-1", "div-facts"],
+  4: ["place-value", "times-2", "mul-2x1"],
+  5: ["pow-ten", "frac-of", "frac-of"],
+  6: ["gcd", "simp-fractions", "mul-fractions"],
+  7: ["signed-add", "add-fractions", "one-step-eq"],
+  8: ["sign-rules", "sq-roots", "proportions", "two-step-eq", "pythagoras"],
+  9: ["slope", "binomials", "factor-quads", "discriminant"],
+  10: ["congruence", "distance", "midpoints", "trig-values"],
+  11: ["trig-beyond-q1", "amplitude", "exp-solve", "logs", "limits"],
+  12: ["power-rule", "diff-polys", "chain-rule", "deriv-at-point", "crit-points"],
+};
+
+export function checkpointAssignmentsOfGrade(grade: number): GradeAssignment[] {
+  const assignments = assignmentsOfGrade(grade);
+  const bySkill = new Map(assignments.map((assignment) => [assignment.skillId, assignment]));
+  const authored = GRADE_CHECKPOINT_SKILL_IDS[grade]
+    ?.map((skillId) => bySkill.get(skillId))
+    .filter((assignment): assignment is GradeAssignment => !!assignment);
+  return authored?.length ? authored : assignments.slice(0, 5);
+}
+
 export function assignmentFor(
   grade: number,
   skillId: string
@@ -79,6 +112,40 @@ export function assignmentLevel(
   assignment: GradeAssignment
 ): number {
   return progress[assignment.id] ?? 0;
+}
+
+function cleanMissionIds(value: unknown, grade: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const valid = new Set(assignmentsOfGrade(grade).map((assignment) => assignment.id));
+  return [...new Set(value.filter(
+    (id): id is string => typeof id === "string" && valid.has(id)
+  ))];
+}
+
+/** Confirmed checkpoint gaps that still need one proof mission. */
+export function pendingGradeMissions(
+  track: GradeTrackState,
+  progress: GradeAssignmentProgress
+): GradeAssignment[] {
+  const missionSet = new Set(track.missionIds);
+  return assignmentsOfGrade(track.activeGrade).filter(
+    (assignment) =>
+      missionSet.has(assignment.id) &&
+      assignmentLevel(progress, assignment) < PASS_LEVEL
+  );
+}
+
+/** Bosses already beaten for a gap, waiting on the two-question proof. */
+export function pendingGradeRechecks(
+  track: GradeTrackState,
+  progress: GradeAssignmentProgress
+): GradeAssignment[] {
+  const missionSet = new Set(track.missionIds);
+  return assignmentsOfGrade(track.activeGrade).filter(
+    (assignment) =>
+      missionSet.has(assignment.id) &&
+      assignmentLevel(progress, assignment) >= PASS_LEVEL
+  );
 }
 
 /**
@@ -106,9 +173,22 @@ export function seedGradeAssignmentProgress(
   const progress: GradeAssignmentProgress = {};
   for (const assignment of GRADE_ASSIGNMENTS) {
     const scoped = source[assignment.id];
+    // Curriculum corrections can move a concept to a different grade, which
+    // changes its gN:* assignment id. Carry the strongest prior scoped value
+    // forward by stable skill id so beta players do not lose earned evidence.
+    const movedScoped = Object.entries(source).reduce<number | undefined>(
+      (best, [id, value]) => {
+        if (!id.endsWith(`:${assignment.skillId}`)) return best;
+        if (typeof value !== "number" || !Number.isFinite(value)) return best;
+        return best === undefined ? value : Math.max(best, value);
+      },
+      undefined
+    );
     const legacy = legacyProgress[assignment.skillId];
     const level = typeof scoped === "number" && Number.isFinite(scoped)
       ? scoped
+      : movedScoped !== undefined
+        ? movedScoped
       : typeof legacy === "number" && Number.isFinite(legacy)
         ? legacy
         : 0;
@@ -188,6 +268,7 @@ export function normalizeGradeTrack(
       version?: unknown;
       passedGrades?: unknown;
       attemptedGrades?: unknown;
+      missionIds?: unknown;
     };
     if (candidate.version === GRADE_TRACK_VERSION) {
       const passedGrades = contiguousPassed(candidate.passedGrades);
@@ -198,6 +279,34 @@ export function normalizeGradeTrack(
         activeGrade,
         passedGrades,
         attemptedGrades: cleanGrades(candidate.attemptedGrades),
+        missionIds: complete ? [] : cleanMissionIds(candidate.missionIds, activeGrade),
+      };
+    }
+    if (candidate.version === 3) {
+      const passedGrades = contiguousPassed(candidate.passedGrades);
+      const complete = passedGrades.length === TRACK_GRADES.length;
+      const activeGrade = complete ? LAST_TRACK_GRADE : firstUnpassedGrade(passedGrades);
+      return {
+        version: GRADE_TRACK_VERSION,
+        activeGrade,
+        passedGrades,
+        attemptedGrades: cleanGrades(candidate.attemptedGrades),
+        missionIds: complete ? [] : cleanMissionIds(candidate.missionIds, activeGrade),
+      };
+    }
+    // v2 treated every unasked skill as a mission after an attempt. v3 cannot
+    // know which were confirmed gaps, so offer one fresh checkpoint instead
+    // of preserving accidental grind. Existing skill evidence stays intact.
+    if (candidate.version === 2) {
+      const passedGrades = contiguousPassed(candidate.passedGrades);
+      const complete = passedGrades.length === TRACK_GRADES.length;
+      const activeGrade = complete ? LAST_TRACK_GRADE : firstUnpassedGrade(passedGrades);
+      return {
+        version: GRADE_TRACK_VERSION,
+        activeGrade,
+        passedGrades,
+        attemptedGrades: [],
+        missionIds: [],
       };
     }
     // v1 conservatively treated the first incomplete legacy grade as already
@@ -211,6 +320,7 @@ export function normalizeGradeTrack(
         activeGrade: complete ? LAST_TRACK_GRADE : firstUnpassedGrade(passedGrades),
         passedGrades,
         attemptedGrades: [],
+        missionIds: [],
       };
     }
   }
@@ -222,6 +332,7 @@ export function normalizeGradeTrack(
       activeGrade: FIRST_TRACK_GRADE,
       passedGrades: [],
       attemptedGrades: [],
+      missionIds: [],
     };
   }
 
@@ -237,8 +348,9 @@ export function normalizeGradeTrack(
     activeGrade,
     passedGrades,
     // Existing players keep their evidence and receive one checkpoint at the
-    // first incomplete grade. Only an actual v2 miss starts remediation.
+    // first incomplete grade. Only an actual v3 confirmed gap starts remediation.
     attemptedGrades: [],
+    missionIds: [],
   };
 }
 
@@ -247,8 +359,9 @@ export function gradeTrackStatus(
   progress: GradeAssignmentProgress
 ): GradeTrackStatus {
   if (track.passedGrades.length === TRACK_GRADES.length) return "complete";
-  if (!track.attemptedGrades.includes(track.activeGrade)) return "checkpoint";
-  return gradeIsSecure(progress, track.activeGrade) ? "checkpoint" : "remediation";
+  if (pendingGradeRechecks(track, progress).length > 0) return "recheck";
+  if (pendingGradeMissions(track, progress).length > 0) return "remediation";
+  return "checkpoint";
 }
 
 /** The exact next unmet assignment inside the active grade. */
@@ -257,6 +370,8 @@ export function currentGradeSkillIdx(
   progress: GradeAssignmentProgress
 ): number {
   const assignments = assignmentsOfGrade(track.activeGrade);
+  const pendingMission = pendingGradeMissions(track, progress)[0];
+  if (pendingMission) return pendingMission.skillIdx;
   const unmet = assignments.find(
     (assignment) => assignmentLevel(progress, assignment) < PASS_LEVEL
   );
@@ -278,7 +393,9 @@ export function applyGradeCheckpoint(
     return { track, progress, passedGrade: false };
   }
   const assignments = assignmentsOfGrade(grade);
-  const required = new Set(assignments.map((assignment) => assignment.skillIdx));
+  const required = new Set(
+    checkpointAssignmentsOfGrade(grade).map((assignment) => assignment.skillIdx)
+  );
   const passed = new Set(
     result.passed.filter((index) => required.has(index))
   );
@@ -300,6 +417,29 @@ export function applyGradeCheckpoint(
     );
   }
 
+  if (passedGrade) {
+    // A grade check is a placement-out assessment. Once its authored anchors
+    // are clean, every assignment in that grade is credited so the student is
+    // not sent back to grind material the grade check just placed them past.
+    for (const assignment of assignments) {
+      nextProgress[assignment.id] = Math.max(
+        nextProgress[assignment.id] ?? 0,
+        SKILL_LEVELS
+      );
+    }
+  }
+
+  const failedAssignments = [...failed]
+    .map((index) => assignments.find((candidate) => candidate.skillIdx === index))
+    .filter((assignment): assignment is GradeAssignment => !!assignment);
+
+  // A confirmed checkpoint miss creates exactly one proof raid even when the
+  // skill was secure before this retry. Untested skills are left untouched.
+  for (const assignment of failedAssignments) {
+    const current = nextProgress[assignment.id] ?? 0;
+    if (current >= PASS_LEVEL) nextProgress[assignment.id] = PASS_LEVEL - 1;
+  }
+
   if (!passedGrade) {
     return {
       progress: nextProgress,
@@ -307,6 +447,7 @@ export function applyGradeCheckpoint(
       track: {
         ...track,
         attemptedGrades: cleanGrades([...track.attemptedGrades, grade]),
+        missionIds: failedAssignments.map((assignment) => assignment.id),
       },
     };
   }
@@ -321,6 +462,68 @@ export function applyGradeCheckpoint(
       activeGrade: complete ? LAST_TRACK_GRADE : firstUnpassedGrade(passedGrades),
       passedGrades,
       attemptedGrades: track.attemptedGrades,
+      missionIds: [],
+    },
+  };
+}
+
+/**
+ * Resolve one post-boss proof. A miss re-arms that exact mission; a clean
+ * proof removes it. Clearing the last confirmed gap earns the grade without
+ * replaying the already-finished grade check.
+ */
+export function applyGradeRecheck(
+  track: GradeTrackState,
+  progress: GradeAssignmentProgress,
+  assignmentId: string,
+  passed: boolean
+): { track: GradeTrackState; progress: GradeAssignmentProgress; passedGrade: boolean } {
+  const assignment = assignmentsOfGrade(track.activeGrade).find(
+    (candidate) => candidate.id === assignmentId
+  );
+  if (!assignment || !track.missionIds.includes(assignmentId)) {
+    return { track, progress, passedGrade: false };
+  }
+
+  const nextProgress = { ...progress };
+  if (!passed) {
+    nextProgress[assignment.id] = Math.min(
+      nextProgress[assignment.id] ?? PASS_LEVEL,
+      PASS_LEVEL - 1
+    );
+    return { track, progress: nextProgress, passedGrade: false };
+  }
+
+  nextProgress[assignment.id] = Math.max(
+    nextProgress[assignment.id] ?? 0,
+    SKILL_LEVELS
+  );
+  const missionIds = track.missionIds.filter((id) => id !== assignmentId);
+  if (missionIds.length > 0) {
+    return {
+      progress: nextProgress,
+      passedGrade: false,
+      track: { ...track, missionIds },
+    };
+  }
+
+  for (const gradeAssignment of assignmentsOfGrade(track.activeGrade)) {
+    nextProgress[gradeAssignment.id] = Math.max(
+      nextProgress[gradeAssignment.id] ?? 0,
+      SKILL_LEVELS
+    );
+  }
+  const passedGrades = contiguousPassed([...track.passedGrades, track.activeGrade]);
+  const complete = passedGrades.length === TRACK_GRADES.length;
+  return {
+    progress: nextProgress,
+    passedGrade: true,
+    track: {
+      version: GRADE_TRACK_VERSION,
+      activeGrade: complete ? LAST_TRACK_GRADE : firstUnpassedGrade(passedGrades),
+      passedGrades,
+      attemptedGrades: track.attemptedGrades,
+      missionIds: [],
     },
   };
 }
@@ -337,6 +540,7 @@ export function mergeGradeTracks(
       version: GRADE_TRACK_VERSION,
       passedGrades: [...left.passedGrades, ...right.passedGrades],
       attemptedGrades: [...left.attemptedGrades, ...right.attemptedGrades],
+      missionIds: [...left.missionIds, ...right.missionIds],
     },
     progress
   );

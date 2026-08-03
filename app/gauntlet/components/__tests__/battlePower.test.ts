@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { strikePowerDamage, strikePowerMode } from "../Battle";
+import { comboBurstDamage, isComboBurst } from "../Battle";
 
-describe("raid strike power", () => {
-  it("charges the next correct answer while the boss can survive the bonus", () => {
-    expect(strikePowerDamage(1_000)).toBe(140);
-    expect(strikePowerMode(500, 1_000)).toBe("charged");
+describe("raid combo burst", () => {
+  it("fires automatically on every fifth correct answer", () => {
+    expect(isComboBurst(0)).toBe(false);
+    expect(isComboBurst(4)).toBe(false);
+    expect(isComboBurst(5)).toBe(true);
+    expect(isComboBurst(10)).toBe(true);
   });
 
-  it("becomes an explicit finishing blow only inside lethal range", () => {
-    expect(strikePowerMode(140, 1_000)).toBe("finisher");
-    expect(strikePowerMode(141, 1_000)).toBe("charged");
+  it("adds a noticeable but bounded hit without pausing play", () => {
+    expect(comboBurstDamage(1_000)).toBe(80);
+    expect(comboBurstDamage(400)).toBe(60);
   });
 });

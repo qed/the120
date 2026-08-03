@@ -59,8 +59,8 @@ export const encounterKind = (topic: TopicId): EncounterKind =>
 export const encounterCopy = (topic: TopicId) =>
   encounterKind(topic) === "puzzle"
     ? {
-        label: "ARMOR BREAK",
-        detail: "Solve this to break armor and heal. Take your time — speed does not matter.",
+        label: "POWER QUESTION",
+        detail: "Solve this for a heavy hit and healing. Take your time — speed does not matter.",
       }
     : {
         label: "QUICKFIRE",
@@ -93,7 +93,7 @@ export function nextRaidBeat({
 export const raidBeatCopy: Record<RaidBeat, { label: string; hint: string }> = {
   warmup: { label: "WARMUP", hint: "Build your streak." },
   pressure: { label: "QUICKFIRE", hint: "Keep the pressure on." },
-  puzzle: { label: "ARMOR BREAK", hint: "Break armor + heal · speed does not matter." },
+  puzzle: { label: "POWER QUESTION", hint: "Heavy hit + heal · speed does not matter." },
   recovery: { label: "RECOVERY", hint: "A clean answer gets your rhythm back." },
   finisher: { label: "FINISHER", hint: "The boss is exposed." },
 };

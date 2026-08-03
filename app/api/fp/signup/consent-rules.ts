@@ -47,7 +47,7 @@ import { CHILD_AGE_BANDS } from "./signup-rules";
  * a bump) back-dates new wording onto old records. Independent of the Stripe
  * refund-policy registry by construction (different constant, different module).
  */
-export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = ["2026-08-01.1"];
+export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = ["2026-08-01.1", "2026-08-03.1"];
 
 /**
  * The current rendered policy text + its version. The parent sees exactly this
@@ -59,13 +59,20 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = ["2026-08-01.1"];
  * the final copy. No em dashes (repo style).
  */
 export const FP_CONSENT_POLICY = {
-  version: "2026-08-01.1",
+  // 2026-08-03.1 (owner-approved wording, Phase A cohort instrument): adds the
+  // birth-year and stuck-notes disclosures. Additive disclosure only - the
+  // FP_CONSENT_MIN_VERSION anchor below deliberately stays at 2026-08-01.1
+  // (see its doc comment); existing cohort parents are notified out of band.
+  version: "2026-08-03.1",
   text:
     "I confirm I am the parent or legal guardian of the child named in this " +
     "signup, and I am at least 18 years old. I consent to First Profit creating " +
     "an account for my child so they can play and learn, and to First Profit " +
     "collecting and storing the limited information needed to run that account " +
-    "(my child's first name, age band, and their saved game progress). I " +
+    "(my child's first name, age band, birth year - used only to show " +
+    "age-appropriate wording - their saved game progress, and short notes my " +
+    "child may choose to send about where they get stuck, which are used only " +
+    "to improve First Profit and kept for up to twelve months). I " +
     "understand this is a game-like business simulator for learners, that I can " +
     "review or delete my child's account by contacting First Profit, and that my " +
     "consent is recorded with the version of this notice shown above.",

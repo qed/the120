@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
   guardSaveDocUpdate,
 } from "../fp-save-doc-guard-rules";
@@ -170,19 +171,150 @@ describe("guardSaveDocUpdate — matching rules", () => {
   });
 
   it("preserves ALL OLD ideas against an empty NEW ideas list (fresh-start writer over a real save)", () => {
+    // Kept deliberately: an old tab that loaded an empty list while a
+    // new-build session created ideas is a legitimate save; the intentional
+    // discard/fresh-start cascade is handled by the docVersion gate.
     const oldDoc = newBuildDoc();
     const incoming = { docVersion: 1, ideas: [], activeIdea: 0 };
     const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: unknown[] };
     expect(out.ideas).toEqual(oldDoc.ideas);
   });
+
+  it("ACCEPTED LOSS MODE: an id-less old-build NEW idea index-fuses with an id-bearing OLD idea a concurrent new-build session created", () => {
+    // The migration header's documented accepted outcome, pinned exactly:
+    // OLD = [A(id a), B(id b)] where B was created by a new-build session;
+    // NEW = two id-less ideas (an old-build session that created its OWN
+    // distinct second idea). NEW[1] index-matches B: b's id (and monotonic
+    // maps) graft onto the old-build idea's content, and B is NOT appended
+    // at the tail — the two ideas fuse. Exposure is proportional to the
+    // mixed-build window length; deliberately not heuristically defended.
+    const oldDoc = {
+      ideas: [
+        { id: "a", fields: { oneLiner: "walk dogs" }, done: {} },
+        { id: "b", fields: { oneLiner: "new-build idea" }, done: {}, doneByTask: { "1.1.1": true } },
+      ],
+    };
+    const incoming = {
+      ideas: [
+        { fields: { oneLiner: "walk dogs" }, done: {} },
+        { fields: { oneLiner: "old-build fresh idea" }, done: {} },
+      ],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas).toHaveLength(2); // B is NOT appended at the tail
+    expect(out.ideas[1].id).toBe("b"); // fused: b's id grafted onto the old-build idea
+    expect(out.ideas[1].fields).toEqual({ oneLiner: "old-build fresh idea" }); // NEW's content wins — B's fields are lost
+    expect(out.ideas[1].doneByTask).toEqual({ "1.1.1": true });
+  });
+
+  it("resolves DUPLICATE ids within one array with first-unused semantics", () => {
+    const oldDoc = {
+      ideas: [
+        { id: "dup", fields: {}, done: {}, doneByTask: { first: true } },
+        { id: "dup", fields: {}, done: {}, doneByTask: { second: true } },
+      ],
+    };
+    const incoming = { ideas: [{ id: "dup", fields: {}, done: {} }, { id: "dup", fields: {}, done: {} }] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas).toHaveLength(2); // both matched — neither OLD entry re-appended
+    expect(out.ideas[0].doneByTask).toEqual({ first: true });
+    expect(out.ideas[1].doneByTask).toEqual({ second: true });
+  });
+
+  it("treats a non-string (numeric) id on NEW as id-less and falls to the index branch", () => {
+    const oldDoc = { ideas: [{ id: "a", fields: {}, done: {}, doneByTask: { t: true } }] };
+    const incoming = { ideas: [{ id: 7, fields: {}, done: {} }] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas).toHaveLength(1); // index-matched, not duplicated at the tail
+    expect(out.ideas[0].id).toBe(7); // present key (even non-string) is never overwritten
+    expect(out.ideas[0].doneByTask).toEqual({ t: true });
+  });
+
+  it("passes a NEW doc that omits the `ideas` KEY entirely through without resurrecting OLD's ideas", () => {
+    // Intended boundary: the guard covers per-idea keys and `businesses`,
+    // not the ideas list itself — no known writer omits the `ideas` key.
+    const oldDoc = { docVersion: 1, ideas: [{ id: "a", fields: {}, done: {} }] };
+    const incoming = { docVersion: 1, activeIdea: 0 };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "ideas")).toBe(false);
+  });
+});
+
+describe("guardSaveDocUpdate — docVersion gate", () => {
+  it("passes through untouched when docVersion differs (deliberate schema transition)", () => {
+    const oldDoc = newBuildDoc();
+    const incoming = { ...oldBuildRewriteOf(oldDoc), docVersion: 2 };
+    expect(guardSaveDocUpdate(oldDoc, incoming)).toBe(incoming);
+  });
+
+  it("passes through when OLD lacks docVersion and NEW says 1 (discarded malformed/unknown-version doc)", () => {
+    const oldDoc = { ideas: [{ id: "a", fields: {}, done: {}, doneByTask: { t: true } }], businesses: [{ id: "biz" }] };
+    const incoming = { docVersion: 1, ideas: [{ fields: {}, done: {} }] };
+    expect(guardSaveDocUpdate(oldDoc, incoming)).toBe(incoming);
+  });
+
+  it("still repairs when both sides agree on the version", () => {
+    const oldDoc = newBuildDoc();
+    const incoming = oldBuildRewriteOf(oldDoc); // same docVersion
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.businesses).toEqual(oldDoc.businesses);
+  });
+});
+
+describe("guardSaveDocUpdate — element-count fuse", () => {
+  const manyIdeas = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `idea-${i}`, fields: {}, done: {} }));
+  const manyIdealess = (n: number) => Array.from({ length: n }, () => ({ fields: {}, done: {} }));
+
+  it("passes through untouched when OLD's ideas exceed the fuse (not the mixed-build case)", () => {
+    const oldDoc = { ideas: manyIdeas(SAVE_DOC_IDEAS_FUSE_LIMIT + 1), businesses: [{ id: "biz" }] };
+    const incoming = { ideas: manyIdealess(2) };
+    expect(guardSaveDocUpdate(oldDoc, incoming)).toBe(incoming);
+  });
+
+  it("passes through untouched when NEW's ideas exceed the fuse", () => {
+    const oldDoc = { ideas: manyIdeas(1), businesses: [{ id: "biz" }] };
+    const incoming = { ideas: manyIdealess(SAVE_DOC_IDEAS_FUSE_LIMIT + 1) };
+    expect(guardSaveDocUpdate(oldDoc, incoming)).toBe(incoming);
+  });
+
+  it("still repairs at EXACTLY the fuse limit (the fuse is strictly greater-than)", () => {
+    const oldDoc = { ideas: manyIdeas(SAVE_DOC_IDEAS_FUSE_LIMIT) };
+    const incoming = { ideas: manyIdealess(SAVE_DOC_IDEAS_FUSE_LIMIT) };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas[0].id).toBe("idea-0");
+    expect(out.ideas[SAVE_DOC_IDEAS_FUSE_LIMIT - 1].id).toBe(`idea-${SAVE_DOC_IDEAS_FUSE_LIMIT - 1}`);
+  });
 });
 
 describe("guardSaveDocUpdate — present-but-empty is intentional", () => {
-  it("leaves a present-but-empty businesses [] alone", () => {
+  // ONE exception to the present-but-empty rule (reviewed decision): a NEW
+  // `businesses` present as the EMPTY array while OLD's is a non-empty array
+  // is carried, because the client's coerceBusinesses emits [] when every
+  // entry fails validation, and no legitimate writer shrinks businesses to
+  // empty (archival keeps records; owner erasure runs service_role-exempt).
+  it("carries OLD's non-empty businesses over a present-but-EMPTY [] (the coerceBusinesses wipe)", () => {
     const oldDoc = newBuildDoc();
     const incoming = { ...oldBuildRewriteOf(oldDoc), businesses: [] };
     const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.businesses).toEqual(oldDoc.businesses);
+  });
+
+  it("leaves a present-but-empty businesses [] alone when OLD's is also empty", () => {
+    const oldDoc = { ...newBuildDoc(), businesses: [] };
+    const incoming = { ...oldBuildRewriteOf(newBuildDoc()), businesses: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
     expect(out.businesses).toEqual([]);
+  });
+
+  it("leaves a NON-empty NEW businesses strictly untouched", () => {
+    const oldDoc = newBuildDoc();
+    const incoming = {
+      ...oldBuildRewriteOf(oldDoc),
+      businesses: [{ id: "biz-2", ideaId: "idea-a", archived: false }],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.businesses).toEqual(incoming.businesses);
   });
 
   it("leaves present-but-empty per-idea maps {} alone", () => {
@@ -251,13 +383,13 @@ describe("guardSaveDocUpdate — defensive posture (repairs, never rejects)", ()
   });
 
   it("skips idea handling (but still carries businesses) when either ideas is not an array", () => {
-    const oldDoc = { ideas: "not-an-array", businesses: [{ id: "biz-1" }] };
+    const oldDoc = { docVersion: 1, ideas: "not-an-array", businesses: [{ id: "biz-1" }] };
     const incoming = { docVersion: 1, ideas: [{ fields: {}, done: {} }] };
     const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
     expect(out.businesses).toEqual([{ id: "biz-1" }]);
     expect(out.ideas).toEqual(incoming.ideas); // untouched
     const out2 = guardSaveDocUpdate(
-      { ideas: [{ fields: {}, done: {} }] },
+      { docVersion: 1, ideas: [{ fields: {}, done: {} }] },
       { docVersion: 1, ideas: { not: "array" } },
     ) as Record<string, unknown>;
     expect(out2.ideas).toEqual({ not: "array" });

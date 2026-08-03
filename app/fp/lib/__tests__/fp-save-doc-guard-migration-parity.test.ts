@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   SAVE_DOC_CARRIED_TOP_KEYS,
   SAVE_DOC_IDEA_IDENTITY_KEY,
+  SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
 } from "../fp-save-doc-guard-rules";
 
@@ -15,8 +16,9 @@ import {
 // semantics is the TS mirror (fp-save-doc-guard-rules.ts guardSaveDocUpdate,
 // exercised by fp-save-doc-guard-rules.test.ts); this file pins that the
 // plpgsql implements the same STRUCTURE: the key lists, the key-PRESENCE (`?`)
-// operators that make omission key-level, the never-raise posture, and the
-// service-role/JWT-less exemption.
+// operators that make omission key-level, the docVersion gate, the
+// element-count fuse, the never-reject posture (warn + return NEW, no `raise
+// exception`), and the service-role/JWT-less exemption.
 describe("migration parity: fp_save_doc_guard.sql", () => {
   const raw = readFileSync(
     path.resolve(process.cwd(), "supabase/migrations/20260906120000_fp_save_doc_guard.sql"),
@@ -53,9 +55,23 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
 
   // ------------------------------------------------- never-raise posture
 
-  it("NEVER raises: a catch-all handler returns NEW, and no raise exists anywhere in the body", () => {
-    expect(/exception\s+when\s+others\s+then\s+return\s+NEW\s*;/i.test(body)).toBe(true);
-    expect(/\braise\b/i.test(body)).toBe(false);
+  it("NEVER rejects: the catch-all handler WARNS (visible failure) then returns NEW; no `raise exception` anywhere", () => {
+    // Observability decision: failures must be visible in the logs, but the
+    // guard still repairs-or-passes — it never turns a save into a refusal.
+    expect(
+      /exception\s+when\s+others\s+then\s+raise\s+warning\s+'fp_save_doc_guard failed: % %'\s*,\s*SQLSTATE\s*,\s*SQLERRM\s*;\s*return\s+NEW\s*;/i.test(body)
+    ).toBe(true);
+    expect(/raise\s+exception/i.test(body)).toBe(false);
+  });
+
+  it("assigns NEW.doc exactly ONCE, from the locally built doc, at the end of a successful repair", () => {
+    // The honest-protected-region decision: pre-checks never mutate NEW.doc,
+    // the repair builds v_doc, and the single assignment below is the only
+    // way a repaired doc can escape — so the exception path's `return NEW`
+    // truly returns the doc as the writer sent it (no partial repair).
+    const assignments = [...body.matchAll(/NEW\.doc\s*:=/gi)];
+    expect(assignments).toHaveLength(1);
+    expect(/NEW\.doc\s*:=\s*v_doc\s*;/i.test(body)).toBe(true);
   });
 
   it("every non-repair path returns NEW (the guard repairs, it does not reject)", () => {
@@ -74,12 +90,35 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(/current_setting\s*\(\s*'request\.jwt\.claims'\s*,\s*true\s*\)\s*=\s*''/i.test(body)).toBe(true);
   });
 
+  // ------------------------------------------------------------- pre-gates
+
+  it("gates the ENTIRE repair on docVersion agreement (is distinct from → pass through)", () => {
+    expect(
+      /if\s*\(\s*OLD\.doc\s*->>\s*'docVersion'\s*\)\s+is\s+distinct\s+from\s*\(\s*NEW\.doc\s*->>\s*'docVersion'\s*\)\s+then\s+return\s+NEW\s*;/i.test(body)
+    ).toBe(true);
+  });
+
+  it(`fuses on ideas element count (> ${SAVE_DOC_IDEAS_FUSE_LIMIT}) BEFORE any matching loop`, () => {
+    const oldFuse = new RegExp(
+      String.raw`jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_array_length\s*\(\s*v_old_ideas\s*\)\s*>\s*${SAVE_DOC_IDEAS_FUSE_LIMIT}\b`,
+      "i"
+    );
+    const newFuse = new RegExp(
+      String.raw`jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_array_length\s*\(\s*v_new_ideas\s*\)\s*>\s*${SAVE_DOC_IDEAS_FUSE_LIMIT}\b`,
+      "i"
+    );
+    expect(oldFuse.test(body), "OLD-side fuse").toBe(true);
+    expect(newFuse.test(body), "NEW-side fuse").toBe(true);
+    // The fuse must precede the first matching loop.
+    expect(body.search(oldFuse)).toBeLessThan(body.search(/for\s+i\s+in\s+0/i));
+  });
+
   // --------------------------------------------------- key-level semantics
 
-  it("carries each top-level key OLD has and NEW omits — via key-PRESENCE (`?`), not value tests", () => {
+  it("carries each top-level key OLD has when NEW omits it (key-PRESENCE `?`) OR sends the empty array over a non-empty OLD array", () => {
     for (const key of SAVE_DOC_CARRIED_TOP_KEYS) {
       const carry = new RegExp(
-        String.raw`if\s+OLD\.doc\s+\?\s+'${key}'\s+and\s+not\s+NEW\.doc\s+\?\s+'${key}'\s+then\s+NEW\.doc\s*:=\s*jsonb_set\s*\(\s*NEW\.doc\s*,\s*'\{${key}\}'\s*,\s*OLD\.doc\s*->\s*'${key}'\s*\)`,
+        String.raw`if\s+OLD\.doc\s+\?\s+'${key}'\s+and\s*\(\s*not\s+NEW\.doc\s+\?\s+'${key}'\s+or\s*\(\s*\(\s*NEW\.doc\s*->\s*'${key}'\s*\)\s*=\s*'\[\]'::jsonb\s+and\s+jsonb_typeof\s*\(\s*OLD\.doc\s*->\s*'${key}'\s*\)\s*=\s*'array'\s+and\s+jsonb_array_length\s*\(\s*OLD\.doc\s*->\s*'${key}'\s*\)\s*>\s*0\s*\)\s*\)\s*then\s+v_doc\s*:=\s*jsonb_set\s*\(\s*v_doc\s*,\s*'\{${key}\}'\s*,\s*OLD\.doc\s*->\s*'${key}'\s*\)`,
         "i"
       );
       expect(carry.test(body), `whole-key carry for '${key}'`).toBe(true);
@@ -120,6 +159,19 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(/v_used\s*:=\s*v_used\s*\|\|\s*v_match/i.test(body)).toBe(true);
   });
 
+  it("pins the matcher's fallback branches (the previously unpinned blind spot)", () => {
+    // The id-bearing-NEW index fallback only fires when the same-index OLD
+    // entry does NOT carry a string id (a different string id = two distinct
+    // ideas, no fuse):
+    expect(
+      /jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*i\s*->\s*'id'\s*\)\s+is\s+distinct\s+from\s+'string'/i.test(body)
+    ).toBe(true);
+    // Both index fallbacks honor the used-index guard at index i…
+    expect(/not\s*\(\s*v_used\s+@>\s+array\[i\]\s*\)/i.test(body)).toBe(true);
+    // …and require the same-index OLD entry to be an object.
+    expect(/jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*i\s*\)\s*=\s*'object'/i.test(body)).toBe(true);
+  });
+
   it("appends unmatched OLD ideas at the tail (object entries only — no resurrection of junk)", () => {
     const tail = /for\s+j\s+in\s+0\s*\.\.\s*jsonb_array_length\s*\(\s*v_old_ideas\s*\)\s*-\s*1\s+loop\s+if\s+not\s*\(\s*v_used\s+@>\s+array\[j\]\s*\)\s+and\s+jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*j\s*\)\s*=\s*'object'\s+then\s+v_out_ideas\s*:=\s*v_out_ideas\s*\|\|\s*jsonb_build_array\s*\(\s*v_old_ideas\s*->\s*j\s*\)/i;
     expect(tail.test(body)).toBe(true);
@@ -133,9 +185,10 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(/jsonb_typeof\s*\(\s*NEW\.doc\s*\)\s*<>\s*'object'/i.test(body)).toBe(true);
   });
 
-  it("skips idea handling unless BOTH ideas values are arrays", () => {
-    expect(/jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*<>\s*'array'/i.test(body)).toBe(true);
-    expect(/jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*<>\s*'array'/i.test(body)).toBe(true);
+  it("runs idea handling only when BOTH ideas values are arrays (positive gate)", () => {
+    expect(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i.test(body)
+    ).toBe(true);
   });
 
   it("passes non-object NEW idea entries through untouched", () => {
@@ -152,5 +205,18 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(raw).toMatch(/fp-save-doc-guard-rules\.ts/);
     // The accepted size-cap edge must stay documented.
     expect(raw).toMatch(/pg_column_size/);
+  });
+
+  it("the header documents the reviewed tradeoffs: accepted loss mode, JWT-less fail-open, and the post-apply probe", () => {
+    // Old-build idea fusion is an ACCEPTED loss, stated honestly (no
+    // "never fused" overclaim for the id-less-NEW case).
+    expect(raw).toMatch(/ACCEPTED LOSS MODE/);
+    // The JWT-less exemption arm is a documented fail-open tradeoff (owner
+    // maintenance runs via the JWT-less Management API SQL endpoint).
+    expect(raw).toMatch(/ACCEPTED FAIL-OPEN/);
+    expect(raw).toMatch(/Management\s+API/i);
+    // The apply ritual is not complete until the synthetic probe passes.
+    expect(raw).toMatch(/POST-APPLY VERIFICATION/i);
+    expect(raw).toMatch(/probe/i);
   });
 });

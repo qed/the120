@@ -27,6 +27,17 @@
 --   supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md).
 --   Do NOT write schema_migrations by hand.
 --
+-- ⚠ POST-APPLY VERIFICATION (the apply is NOT complete until this passes):
+--   after applying via the Management API, run a synthetic probe — seed a
+--   scratch row (or use the designated test child) with a new-shape doc, then
+--   issue an old-shape UPDATE (omitting `businesses` and the per-idea
+--   `id`/`doneByTask`/`doneAtByTask` maps, SAME docVersion) under a REAL child
+--   JWT via PostgREST, and assert the response row retains the grafted keys.
+--   Then restore the row to its pre-probe state. A probe that passes proves
+--   the trigger fires under real client claims (the exemption arm below makes
+--   a claims-propagation regression silently disable the guard — the probe is
+--   the only end-to-end check of that path).
+--
 -- ⚠ DEPLOY ORDERING (MIXED-BUILD window): this guard must be LIVE in prod
 --   BEFORE the first-profit build that writes `businesses` /
 --   `doneByTask` / `doneAtByTask` deploys — the erasure it prevents happens
@@ -37,11 +48,26 @@
 --   app/fp/lib/fp-save-doc-guard-rules.ts `guardSaveDocUpdate`; parity test:
 --   app/fp/lib/__tests__/fp-save-doc-guard-migration-parity.test.ts):
 --
+--   * docVersion GATE. The entire repair runs only when OLD and NEW agree on
+--     (doc->>'docVersion'). The mixed-build window this guard targets is
+--     explicitly a no-DOC_VERSION-bump window (both builds write the same
+--     version), so a version change is a deliberate schema transition — and
+--     gating on it prevents the guard from resurrecting a doc a client
+--     deliberately discarded as malformed / unknown-version.
+--   * ELEMENT-COUNT FUSE. If either side's `ideas` array exceeds 200 entries
+--     the guard passes NEW through untouched: a legitimate save has a handful
+--     of ideas, so past the fuse this is not the mixed-build case — and the
+--     fuse bounds the quadratic id-matching loop's CPU on adversarial docs.
 --   * KEY-LEVEL omission only. A key entirely ABSENT from the incoming doc
 --     means "this writer does not know the field" → repair by grafting OLD's
 --     value. A key PRESENT but empty ({} / []) is an intentional state →
---     left strictly alone.
---   * Top-level: OLD.doc has 'businesses' and NEW.doc does not → carry OLD's
+--     left strictly alone — with ONE exception: top-level `businesses`
+--     present as an EMPTY array while OLD's is a non-empty array is carried,
+--     because the client's coerceBusinesses emits [] when every entry fails
+--     validation, and no legitimate writer shrinks businesses to empty
+--     (archival keeps records; owner erasure runs service_role-exempt).
+--   * Top-level: OLD.doc has 'businesses' and NEW.doc does not (or has it as
+--     the empty array against a non-empty OLD, per above) → carry OLD's
 --     `businesses` into NEW.doc unchanged.
 --   * Per idea (NEW.doc->'ideas', matched to OLD.doc->'ideas' by `id` when
 --     both sides carry string ids, else by array index — ids are stable
@@ -64,14 +90,45 @@
 --   * NO-OP for new-build writes: the new build always re-emits every key it
 --     loaded (absent-stays-absent discipline), so every graft condition is
 --     false and the doc passes through semantically unchanged.
---   * NEVER raises — it repairs, it does not reject. Malformed shapes (either
---     doc not a JSON object, `ideas` not an array, non-object idea entries)
---     degrade to passing NEW through unchanged, and the whole body is wrapped
---     in a catch-all that returns NEW. Rejection stays the CHECK/RLS/revision
---     guard's job.
+--   * NEVER raises an EXCEPTION — it repairs, it does not reject. Malformed
+--     shapes (either doc not a JSON object, `ideas` not an array, non-object
+--     idea entries) degrade to passing NEW through unchanged, and the repair
+--     itself is wrapped in a catch-all handler that emits a `raise warning`
+--     (so failures are visible in the logs) and then returns NEW exactly as
+--     the writer sent it — the pre-checks and shape gates run BEFORE the
+--     protected region and never mutate NEW.doc, and NEW.doc is assigned
+--     exactly once at the end of a fully successful repair, so a mid-repair
+--     failure can never persist a half-repaired doc. Rejection stays the
+--     CHECK/RLS/revision guard's job.
 --   * EXEMPT: service_role and JWT-less (non-PostgREST) sessions — the owner
 --     must stay able to intentionally reset or repair a save (r28 erase,
 --     dashboard maintenance) without the guard resurrecting state.
+--
+-- ACCEPTED FAIL-OPEN (JWT-less exemption arm): this project's owner
+--   maintenance (the r28 erase, doc repairs) runs through the Supabase
+--   Management API SQL endpoint, which is a JWT-less session that is NOT
+--   service_role — dropping the JWT-less arm would make the guard re-graft
+--   state during intentional owner repairs, so the arm stays. The accepted
+--   tradeoff: a claims-propagation regression in PostgREST/GoTrue (client
+--   requests arriving with empty request.jwt.claims) would silently disable
+--   the guard for client traffic — fail-open, not fail-closed. Accepted
+--   because such a regression would simultaneously break RLS-scoped reads
+--   loudly (nothing would load), and the post-apply probe above verifies the
+--   claims path end-to-end at apply time.
+--
+-- ACCEPTED LOSS MODE (old-build idea fusion): the index fallback can FUSE two
+--   distinct ideas. If a new-build session creates an idea (id-bearing, at
+--   OLD index k) while an old-build session concurrently creates its OWN
+--   distinct idea at the same index (id-less, since the old build never emits
+--   ids), the old-build write's idea k index-matches the new-build idea: the
+--   new idea's id and monotonic maps are grafted onto the old-build idea's
+--   content, and the new-build idea is NOT appended at the tail (it was
+--   "matched"). The two ideas fuse; the new-build idea's fields are lost.
+--   Deliberately NOT heuristically defended: any content-similarity heuristic
+--   would misfire worse, exposure is proportional to the length of the
+--   mixed-build window (short by the deploy-ordering rule above), and it
+--   requires the same child racing two builds while creating ideas in both.
+--   Pinned as the accepted outcome by the behavioral suite.
 --
 -- ACCEPTED EDGE (size cap): grafting can only grow NEW.doc; a doc already
 --   near the 256KiB pg_column_size CHECK could be pushed over it, failing the
@@ -97,6 +154,7 @@ as $$
 declare
   v_old_ideas jsonb;
   v_new_ideas jsonb;
+  v_doc       jsonb;
   v_out_ideas jsonb;
   v_new_idea  jsonb;
   v_old_idea  jsonb;
@@ -107,10 +165,22 @@ declare
 begin
   -- Owner/maintenance sessions may rewrite the doc freely (intentional reset,
   -- PII scrub, repair). Every PostgREST child request carries jwt claims, so
-  -- this opens nothing to clients (the fp_task_feedback guard precedent).
+  -- this opens nothing to clients (the fp_task_feedback guard precedent). The
+  -- JWT-less arm is load-bearing: owner maintenance runs via the Management
+  -- API SQL endpoint (JWT-less, NOT service_role) — see the header's ACCEPTED
+  -- FAIL-OPEN paragraph for the tradeoff.
   if auth.role() = 'service_role'
      or current_setting('request.jwt.claims', true) is null
      or current_setting('request.jwt.claims', true) = '' then
+    return NEW;
+  end if;
+
+  -- ── docVersion gate ────────────────────────────────────────────────────
+  -- The whole repair requires schema agreement. The mixed-build window this
+  -- guard targets is explicitly a no-DOC_VERSION-bump window; a differing
+  -- version is a deliberate transition or a client that discarded a
+  -- malformed/unknown-version doc — never resurrect into it.
+  if (OLD.doc ->> 'docVersion') is distinct from (NEW.doc ->> 'docVersion') then
     return NEW;
   end if;
 
@@ -122,107 +192,147 @@ begin
     return NEW;
   end if;
 
-  -- ── Top-level carry: businesses ────────────────────────────────────────
-  -- Key entirely absent = the writer does not know the field (old build).
-  -- Present-but-empty ([]) is intentional and untouched.
-  if OLD.doc ? 'businesses' and not NEW.doc ? 'businesses' then
-    NEW.doc := jsonb_set(NEW.doc, '{businesses}', OLD.doc -> 'businesses');
-  end if;
-
-  -- ── Per-idea grafts ────────────────────────────────────────────────────
   v_old_ideas := OLD.doc -> 'ideas';
   v_new_ideas := NEW.doc -> 'ideas';
-  if v_old_ideas is null or v_new_ideas is null
-     or jsonb_typeof(v_old_ideas) <> 'array'
-     or jsonb_typeof(v_new_ideas) <> 'array' then
+
+  -- ── Element-count fuse (before any matching loop) ──────────────────────
+  -- A legitimate save has a handful of ideas; past the fuse this is not the
+  -- mixed-build case, and bailing here bounds the quadratic id-matcher's CPU.
+  -- Mirrored by SAVE_DOC_IDEAS_FUSE_LIMIT in fp-save-doc-guard-rules.ts.
+  if (jsonb_typeof(v_old_ideas) = 'array' and jsonb_array_length(v_old_ideas) > 200)
+     or (jsonb_typeof(v_new_ideas) = 'array' and jsonb_array_length(v_new_ideas) > 200) then
     return NEW;
   end if;
 
-  v_out_ideas := '[]'::jsonb;
-  v_used := '{}';
+  -- ── Protected repair region ────────────────────────────────────────────
+  -- The repaired doc is built in v_doc and NEW.doc is assigned EXACTLY ONCE
+  -- at the end, so the exception handler's `return NEW` really does return
+  -- the doc as the writer sent it (no half-repaired state can escape).
+  begin
+    v_doc := NEW.doc;
 
-  for i in 0 .. jsonb_array_length(v_new_ideas) - 1 loop
-    v_new_idea := v_new_ideas -> i;
-    -- A non-object entry is unexpected shape: pass it through untouched.
-    if jsonb_typeof(v_new_idea) <> 'object' then
-      v_out_ideas := v_out_ideas || jsonb_build_array(v_new_idea);
-      continue;
+    -- ── Top-level carry: businesses ────────────────────────────────────
+    -- Key entirely absent = the writer does not know the field (old build).
+    -- Present-but-empty [] is ALSO carried when OLD's is a non-empty array:
+    -- the client's coerceBusinesses emits [] when every entry fails
+    -- validation, and no legitimate writer shrinks businesses to empty
+    -- (archival keeps records; owner erasure runs service_role-exempt).
+    -- A present NON-empty NEW businesses stays strictly untouched.
+    if OLD.doc ? 'businesses'
+       and (
+         not NEW.doc ? 'businesses'
+         or (
+           (NEW.doc -> 'businesses') = '[]'::jsonb
+           and jsonb_typeof(OLD.doc -> 'businesses') = 'array'
+           and jsonb_array_length(OLD.doc -> 'businesses') > 0
+         )
+       ) then
+      v_doc := jsonb_set(v_doc, '{businesses}', OLD.doc -> 'businesses');
     end if;
 
-    -- Find the matching OLD idea: by id when both sides carry string ids,
-    -- else by array index (ideas are append-only, so indexes are stable for
-    -- id-less pairs). A same-index pair with two DIFFERENT ids is two
-    -- distinct ideas and is never fused (the unionCompletionMaps contract).
-    v_match := null;
-    v_new_id := case
-      when jsonb_typeof(v_new_idea -> 'id') = 'string' then v_new_idea ->> 'id'
-      else null
-    end;
+    -- ── Per-idea grafts (only when BOTH sides have an ideas ARRAY) ─────
+    if jsonb_typeof(v_old_ideas) = 'array' and jsonb_typeof(v_new_ideas) = 'array' then
+      v_out_ideas := '[]'::jsonb;
+      v_used := '{}';
 
-    if v_new_id is not null then
+      for i in 0 .. jsonb_array_length(v_new_ideas) - 1 loop
+        v_new_idea := v_new_ideas -> i;
+        -- A non-object entry is unexpected shape: pass it through untouched.
+        if jsonb_typeof(v_new_idea) <> 'object' then
+          v_out_ideas := v_out_ideas || jsonb_build_array(v_new_idea);
+          continue;
+        end if;
+
+        -- Find the matching OLD idea: by id when both sides carry string ids,
+        -- else by array index (ideas are append-only, so indexes are stable
+        -- for id-less pairs; duplicate ids resolve first-unused). A same-index
+        -- pair with two DIFFERENT ids is two distinct ideas and is never
+        -- fused (the unionCompletionMaps contract) — but see the header's
+        -- ACCEPTED LOSS MODE for the id-less-NEW vs id-bearing-OLD fusion.
+        v_match := null;
+        v_new_id := case
+          when jsonb_typeof(v_new_idea -> 'id') = 'string' then v_new_idea ->> 'id'
+          else null
+        end;
+
+        if v_new_id is not null then
+          for j in 0 .. jsonb_array_length(v_old_ideas) - 1 loop
+            if not (v_used @> array[j])
+               and jsonb_typeof(v_old_ideas -> j) = 'object'
+               and jsonb_typeof(v_old_ideas -> j -> 'id') = 'string'
+               and (v_old_ideas -> j ->> 'id') = v_new_id then
+              v_match := j;
+              exit;
+            end if;
+          end loop;
+          -- NEW carries an id but the same-index OLD idea predates ids (an
+          -- old doc the new build just re-loaded and id-minted): index
+          -- fallback, gated on the OLD entry NOT carrying a string id (a
+          -- different string id there means two distinct ideas — no fuse).
+          if v_match is null
+             and i < jsonb_array_length(v_old_ideas)
+             and not (v_used @> array[i])
+             and jsonb_typeof(v_old_ideas -> i) = 'object'
+             and jsonb_typeof(v_old_ideas -> i -> 'id') is distinct from 'string' then
+            v_match := i;
+          end if;
+        else
+          if i < jsonb_array_length(v_old_ideas)
+             and not (v_used @> array[i])
+             and jsonb_typeof(v_old_ideas -> i) = 'object' then
+            v_match := i;
+          end if;
+        end if;
+
+        if v_match is not null then
+          v_used := v_used || v_match;
+          v_old_idea := v_old_ideas -> v_match;
+          -- Stable identity: an old-build write strips `id`; graft it back so
+          -- Business.ideaId links and future id-matching survive.
+          if jsonb_typeof(v_old_idea -> 'id') = 'string' and not (v_new_idea ? 'id') then
+            v_new_idea := jsonb_set(v_new_idea, '{id}', v_old_idea -> 'id');
+          end if;
+          -- The monotonic per-idea maps (the unionCompletionMaps set). Grafted
+          -- only when the key is ENTIRELY ABSENT on NEW and a well-shaped
+          -- object on OLD; a present-but-empty {} on NEW is intentional and
+          -- untouched.
+          foreach v_key in array array['done', 'doneAt', 'doneByTask', 'doneAtByTask'] loop
+            if jsonb_typeof(v_old_idea -> v_key) = 'object' and not (v_new_idea ? v_key) then
+              v_new_idea := jsonb_set(v_new_idea, array[v_key], v_old_idea -> v_key);
+            end if;
+          end loop;
+        end if;
+
+        v_out_ideas := v_out_ideas || jsonb_build_array(v_new_idea);
+      end loop;
+
+      -- OLD ideas no NEW idea matched: appended at the tail in OLD order (no
+      -- build can legitimately delete an idea — see the header). Non-object
+      -- entries are unexpected shape and are not resurrected. This includes
+      -- the EMPTY NEW ideas list on purpose: an old tab that loaded an empty
+      -- list while a new-build session created ideas is a legitimate save;
+      -- the discard/fresh-start cascade is handled by the docVersion gate
+      -- above, so preservation here is safe and kept as is.
       for j in 0 .. jsonb_array_length(v_old_ideas) - 1 loop
-        if not (v_used @> array[j])
-           and jsonb_typeof(v_old_ideas -> j) = 'object'
-           and jsonb_typeof(v_old_ideas -> j -> 'id') = 'string'
-           and (v_old_ideas -> j ->> 'id') = v_new_id then
-          v_match := j;
-          exit;
+        if not (v_used @> array[j]) and jsonb_typeof(v_old_ideas -> j) = 'object' then
+          v_out_ideas := v_out_ideas || jsonb_build_array(v_old_ideas -> j);
         end if;
       end loop;
-      -- NEW carries an id but the same-index OLD idea predates ids (an old
-      -- doc the new build just re-loaded and id-minted): index fallback.
-      if v_match is null
-         and i < jsonb_array_length(v_old_ideas)
-         and not (v_used @> array[i])
-         and jsonb_typeof(v_old_ideas -> i) = 'object'
-         and jsonb_typeof(v_old_ideas -> i -> 'id') is distinct from 'string' then
-        v_match := i;
-      end if;
-    else
-      if i < jsonb_array_length(v_old_ideas)
-         and not (v_used @> array[i])
-         and jsonb_typeof(v_old_ideas -> i) = 'object' then
-        v_match := i;
-      end if;
+
+      v_doc := jsonb_set(v_doc, '{ideas}', v_out_ideas);
     end if;
 
-    if v_match is not null then
-      v_used := v_used || v_match;
-      v_old_idea := v_old_ideas -> v_match;
-      -- Stable identity: an old-build write strips `id`; graft it back so
-      -- Business.ideaId links and future id-matching survive.
-      if jsonb_typeof(v_old_idea -> 'id') = 'string' and not (v_new_idea ? 'id') then
-        v_new_idea := jsonb_set(v_new_idea, '{id}', v_old_idea -> 'id');
-      end if;
-      -- The monotonic per-idea maps (the unionCompletionMaps set). Grafted
-      -- only when the key is ENTIRELY ABSENT on NEW and a well-shaped object
-      -- on OLD; a present-but-empty {} on NEW is intentional and untouched.
-      foreach v_key in array array['done', 'doneAt', 'doneByTask', 'doneAtByTask'] loop
-        if jsonb_typeof(v_old_idea -> v_key) = 'object' and not (v_new_idea ? v_key) then
-          v_new_idea := jsonb_set(v_new_idea, array[v_key], v_old_idea -> v_key);
-        end if;
-      end loop;
-    end if;
-
-    v_out_ideas := v_out_ideas || jsonb_build_array(v_new_idea);
-  end loop;
-
-  -- OLD ideas no NEW idea matched: appended at the tail in OLD order (no
-  -- build can legitimately delete an idea — see the header). Non-object
-  -- entries are unexpected shape and are not resurrected.
-  for j in 0 .. jsonb_array_length(v_old_ideas) - 1 loop
-    if not (v_used @> array[j]) and jsonb_typeof(v_old_ideas -> j) = 'object' then
-      v_out_ideas := v_out_ideas || jsonb_build_array(v_old_ideas -> j);
-    end if;
-  end loop;
-
-  NEW.doc := jsonb_set(NEW.doc, '{ideas}', v_out_ideas);
-  return NEW;
-exception
-  when others then
-    -- This guard REPAIRS; it must never turn a save into a refusal. Any
-    -- unexpected failure degrades to the pre-guard behavior (NEW as sent).
+    NEW.doc := v_doc;
     return NEW;
+  exception
+    when others then
+      -- This guard REPAIRS; it must never turn a save into a refusal. Any
+      -- unexpected failure is made VISIBLE in the logs, then degrades to the
+      -- pre-guard behavior: NEW exactly as the writer sent it (NEW.doc was
+      -- never touched before the single assignment above).
+      raise warning 'fp_save_doc_guard failed: % %', SQLSTATE, SQLERRM;
+      return NEW;
+  end;
 end;
 $$;
 

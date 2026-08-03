@@ -116,7 +116,12 @@ describe("readSiteStatus — the split-storage read-back", () => {
   it("none / claimed / published / offline(parent) / offline(locked) — round-trip across 'sessions'", async () => {
     const store = seededStore();
     const db = fakeClient(store) as unknown as SupabaseClient;
-    expect(await readSiteStatus(db, PROFILE)).toEqual({ ok: true, handle: null, status: "none" });
+    expect(await readSiteStatus(db, PROFILE)).toEqual({
+      ok: true,
+      handle: null,
+      status: "none",
+      projected: null,
+    });
 
     store.fp_public_sites.push({
       profile_id: PROFILE,
@@ -130,7 +135,12 @@ describe("readSiteStatus — the split-storage read-back", () => {
     });
     // A SECOND client over the same store = a later session reading back.
     const db2 = fakeClient(store) as unknown as SupabaseClient;
-    expect(await readSiteStatus(db2, PROFILE)).toEqual({ ok: true, handle: "cedric", status: "claimed" });
+    expect(await readSiteStatus(db2, PROFILE)).toEqual({
+      ok: true,
+      handle: "cedric",
+      status: "claimed",
+      projected: { headline: "", oneLiner: "" },
+    });
 
     Object.assign(store.fp_public_sites[0], { published: true, first_published_at: "2026-08-03" });
     expect((await readSiteStatus(db2, PROFILE)) as object).toMatchObject({ status: "published" });
@@ -140,6 +150,70 @@ describe("readSiteStatus — the split-storage read-back", () => {
 
     Object.assign(store.fp_public_sites[0], { published: true, operator_locked: true });
     expect((await readSiteStatus(db2, PROFILE)) as object).toMatchObject({ status: "offline" });
+  });
+
+  it("projected surfaces the server-sanitized content, including the blocked→empty divergence the FP room renders honestly", async () => {
+    const store = seededStore();
+    store.fp_player_saves[0].doc = {
+      docVersion: 1,
+      siteHeadline: "f-u-c-k the rules",
+      ideas: [{ fields: { oneLiner: "I walk dogs after school" }, done: {} }],
+      activeIdea: 0,
+    };
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    const read = await readSiteStatus(deps.db, PROFILE);
+    // The doc still carries the raw typed text; the projection stored EMPTY —
+    // the self-read exposes exactly what the public page renders, so the FP
+    // room can say so instead of previewing raw text forever (Unit 7 review).
+    expect(read).toEqual({
+      ok: true,
+      handle: "cedric",
+      status: "claimed",
+      projected: { headline: "", oneLiner: "I walk dogs after school" },
+    });
+  });
+});
+
+/* --------------------------------------- truncation-boundary (Unit 7 P2) */
+
+describe("no blocklist re-check on truncated output (truncation-boundary blanking regression)", () => {
+  // The SQL/spec checks the RAW value BEFORE truncation; a redundant TS
+  // re-check on the ALREADY-TRUNCATED output would token-match a legitimate
+  // word's clamped fragment. 115 x's + " methodology..." cuts at exactly
+  // char 120 = "...x meth" — "methodology" is innocent, but the fragment
+  // "meth" is a WORD-class term. The stored headline must survive intact.
+  const straddleHeadline = "x".repeat(115) + " methodology for selling lemonade";
+  const expectedStored = ("x".repeat(115) + " meth"); // the honest 120-char clamp
+
+  it("claim backfill stores the clamped headline intact (never blanked by the fragment)", async () => {
+    const store = seededStore();
+    store.fp_player_saves[0].doc = {
+      docVersion: 1,
+      siteHeadline: straddleHeadline,
+      ideas: [{ fields: { oneLiner: "One-liner stays" }, done: {} }],
+      activeIdea: 0,
+    };
+    const { deps } = makeDeps(store);
+    const res = await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    expect(res.ok).toBe(true);
+    expect(expectedStored).toHaveLength(120);
+    expect(siteRow(store)).toMatchObject({ headline: expectedStored });
+  });
+
+  it("publish re-sync keeps it intact too (same single enforcement point)", async () => {
+    const store = seededStore();
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    store.fp_player_saves[0].doc = {
+      docVersion: 1,
+      siteHeadline: straddleHeadline,
+      ideas: [{ fields: { oneLiner: "One-liner stays" }, done: {} }],
+      activeIdea: 0,
+    };
+    const res = await publishSite(deps, { profileId: PROFILE, childId: CHILD });
+    expect(res.ok).toBe(true);
+    expect(siteRow(store)).toMatchObject({ headline: expectedStored });
   });
 });
 
@@ -538,7 +612,12 @@ describe("deletion ordering — fp_public_sites dies FIRST", () => {
     expect(siteAt).toBeLessThan(profileAt);
     // The read-back a public request would take now answers none.
     const db = fakeClient(store) as unknown as SupabaseClient;
-    expect(await readSiteStatus(db, PROFILE)).toEqual({ ok: true, handle: null, status: "none" });
+    expect(await readSiteStatus(db, PROFILE)).toEqual({
+      ok: true,
+      handle: null,
+      status: "none",
+      projected: null,
+    });
   });
 
   it("an OPERATOR-LOCKED site is still erased (data rights outrank the lock) but NEVER silently: the release is recorded", async () => {

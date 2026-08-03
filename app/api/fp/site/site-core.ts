@@ -26,15 +26,19 @@
  * (post-write verify + compensation, per the multi-step-write learning).
  *
  * ── Content enforcement ──
- * headline/one_liner pass sanitizePublicText (the120 blocklist) at claim
- * backfill AND publish re-sync — offending strings are stored EMPTY (the
- * renderer's default copy shows). Client screening is UX; this is the gate
- * (a save-doc write can bypass the client entirely, R20 threat model).
+ * headline/one_liner are blocklist-enforced INSIDE the shared extraction
+ * (fp_public_site_content → fp_clamp_public_text: blocked strings extract as
+ * EMPTY, so the renderer's default copy shows) — ONE enforcement point shared
+ * with the projection trigger, at the lowest shared writer (the content-safety
+ * solution doc). This module deliberately does NOT re-screen the extraction's
+ * output: the SQL checks the RAW value before truncation, and re-checking the
+ * truncated text is not idempotent (see currentContent). Client screening is
+ * UX; the extraction is the gate (a save-doc write can bypass the client
+ * entirely, R20 threat model).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  sanitizePublicText,
   SITE_DOC_VERSION_GATE,
   type SiteContent,
 } from "@/app/fp/lib/fp-public-site-rules";
@@ -112,11 +116,15 @@ export async function resolveFpChild(
 
 /* --------------------------------------------------------------- self-read */
 
+/** The OWN row's projected (server-sanitized) public content — what the
+ *  public page would render. Null when no row exists. */
+export type SiteProjectedContent = { headline: string; oneLiner: string };
+
 export type SiteReadResult =
-  | { ok: true; handle: string | null; status: SiteStatus }
+  | { ok: true; handle: string | null; status: SiteStatus; projected: SiteProjectedContent | null }
   | { ok: false; reason: "outage" };
 
-type SiteRow = SiteRowFlags & { handle: string };
+type SiteRow = SiteRowFlags & { handle: string; headline: string; one_liner: string };
 
 async function readOwnSiteRow(
   db: SupabaseClient,
@@ -124,7 +132,7 @@ async function readOwnSiteRow(
 ): Promise<{ ok: true; row: SiteRow | null } | { ok: false }> {
   const res = await db
     .from("fp_public_sites")
-    .select("handle, published, operator_locked, first_published_at")
+    .select("handle, headline, one_liner, published, operator_locked, first_published_at")
     .eq("profile_id", profileId)
     .maybeSingle();
   if (res.error) {
@@ -132,7 +140,14 @@ async function readOwnSiteRow(
     return { ok: false };
   }
   const row = res.data as
-    | { handle?: unknown; published?: unknown; operator_locked?: unknown; first_published_at?: unknown }
+    | {
+        handle?: unknown;
+        headline?: unknown;
+        one_liner?: unknown;
+        published?: unknown;
+        operator_locked?: unknown;
+        first_published_at?: unknown;
+      }
     | null;
   if (!row) return { ok: true, row: null };
   if (typeof row.handle !== "string") return { ok: false };
@@ -140,6 +155,8 @@ async function readOwnSiteRow(
     ok: true,
     row: {
       handle: row.handle,
+      headline: typeof row.headline === "string" ? row.headline : "",
+      one_liner: typeof row.one_liner === "string" ? row.one_liner : "",
       published: row.published === true,
       operator_locked: row.operator_locked === true,
       first_published_at: typeof row.first_published_at === "string" ? row.first_published_at : null,
@@ -151,6 +168,13 @@ async function readOwnSiteRow(
  * The split-storage READ-BACK (designed with the write, per the lesson): what
  * FP hydrate and room-open consume. `offline` deliberately covers BOTH
  * parent-unpublished and operator-locked without distinguishing them.
+ *
+ * `projected` (Unit 7 review, cross-repo divergence fix) is the OWN row's
+ * server-sanitized content — the exact strings the public page renders. It
+ * lets the FP room tell the learner when a typed headline/one-liner was
+ * stored empty by the blocklist (the public page shows default copy) instead
+ * of silently previewing raw text forever. Own-row data only — no new
+ * exposure beyond what the child already wrote and the anon RPC would serve.
  */
 export async function readSiteStatus(
   db: SupabaseClient,
@@ -162,6 +186,9 @@ export async function readSiteStatus(
     ok: true,
     handle: read.row?.handle ?? null,
     status: deriveSiteStatus(read.row),
+    projected: read.row
+      ? { headline: read.row.headline, oneLiner: read.row.one_liner }
+      : null,
   };
 }
 
@@ -231,9 +258,16 @@ export type ClaimResult =
   | { ok: false; reason: "outage" };
 
 /** Content snapshot for the claim backfill / publish re-sync: current doc →
- *  docVersion gate → shared extraction → blocklist enforcement (also inside
- *  the extraction since the Unit 2 review; kept here too as belt-and-
- *  suspenders — idempotent). NULL sentinel = key absent/unextractable. */
+ *  docVersion gate → shared extraction. NULL sentinel = key absent/
+ *  unextractable. Blocklist enforcement lives INSIDE the shared extraction
+ *  (fp_clamp_public_text: raw-value check, then truncate — the lowest shared
+ *  writer, per docs/solutions/security-issues/content-safety-must-live-at-the-
+ *  lowest-shared-writer-not-the-api-endpoints-2026-08-03.md) and is
+ *  deliberately NOT re-run here: the SQL checks the RAW value BEFORE
+ *  truncation, so re-screening the TRUNCATED output is not idempotent — a
+ *  legitimate headline whose 120-char cut lands right after a word-class
+ *  fragment ("...a proven meth|odology") would token-match the fragment and
+ *  be blanked here while the SQL correctly kept it (Unit 7 review P2). */
 async function currentContent(
   deps: SiteCoreDeps,
   profileId: string
@@ -255,10 +289,7 @@ async function currentContent(
   }
   const extracted = await deps.extractContent(doc);
   if (!extracted) return { headline: null, oneLiner: null };
-  return {
-    headline: extracted.headline === null ? null : sanitizePublicText(extracted.headline),
-    oneLiner: extracted.oneLiner === null ? null : sanitizePublicText(extracted.oneLiner),
-  };
+  return { headline: extracted.headline, oneLiner: extracted.oneLiner };
 }
 
 /** The child's roster first name (the120 profile is authoritative). */

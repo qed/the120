@@ -1,7 +1,7 @@
 /**
  * GET /api/fp/site — the First Profit SPA's public-site SELF-READ
  * (real-public-site plan, Unit 2): the account's own registry-row status,
- * `{ok, handle, status: none|claimed|published|offline}`. This is the
+ * `{ok, handle, status: none|claimed|published|offline, projected}`. This is the
  * split-storage READ-BACK the FP hydrate and Your-Site-room-open consume; the
  * anon RPC cannot serve it (the client does not know its handle at hydrate,
  * and never-published rows are deliberately invisible there). `offline`
@@ -14,10 +14,14 @@
  *
  * Thin wrapper over ./site-gateway (CORS mirror + child gate + rate limit)
  * and ./site-core readSiteStatus. Contract for the FP client (first-profit
- * Unit 4): 200 {ok:true, handle: string|null, status} on success; a DB outage
- * is the structured 200 {ok:false, reason:"outage"} (server-wide state — no
- * per-account oracle; the strikes are released). Every AUTH refusal is the
- * one generic 401.
+ * Unit 4): 200 {ok:true, handle: string|null, status, projected:
+ * {headline: string, oneLiner: string} | null} on success — `projected` is
+ * the OWN row's server-sanitized public content (null when no row), so the
+ * FP room can show honestly what the public page renders (a blocklisted
+ * string is stored empty; Unit 7 review, cross-repo divergence fix); a DB
+ * outage is the structured 200 {ok:false, reason:"outage"} (server-wide
+ * state — no per-account oracle; the strikes are released). Every AUTH
+ * refusal is the one generic 401.
  */
 
 import { withFpChild, siteOptions } from "./site-gateway";
@@ -44,7 +48,12 @@ export async function GET(req: Request): Promise<Response> {
         });
       }
       return new Response(
-        JSON.stringify({ ok: true, handle: status.handle, status: status.status }),
+        JSON.stringify({
+          ok: true,
+          handle: status.handle,
+          status: status.status,
+          projected: status.projected,
+        }),
         { status: 200, headers }
       );
     }

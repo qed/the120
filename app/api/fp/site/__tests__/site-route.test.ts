@@ -175,7 +175,7 @@ describe("self-read route — ungated read-back", () => {
       })
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, handle: null, status: "none" });
+    expect(await res.json()).toEqual({ ok: true, handle: null, status: "none", projected: null });
   });
 
   it("OPTIONS preflight: 204 with echoed origin and authorization allowed", async () => {

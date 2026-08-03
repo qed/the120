@@ -27,12 +27,22 @@ refusal is the same generic 401 as every other refusal (no oracle).
   first-profit's `VITE_ENABLE_PUBLIC_SITE=true`.
 - **`FP_SITE_TEST_ALLOWLIST`** — comma-separated `children.fp_username` values
   (trimmed, lowercased, exact match). While `FP_SITE_TEST_ONLY` is on (the
-  default), ONLY these accounts pass the gate — this is the production test
-  window mechanism (e.g. the Cedric test family) with everything else still
-  dark. Ignored once `FP_SITE_TEST_ONLY=off`.
+  default), ONLY these accounts pass the gate — the server side of the test
+  window (e.g. the Cedric test family) with everything else still dark.
+  Ignored once `FP_SITE_TEST_ONLY=off`.
 
 So: endpoints deployed with BOTH unset are live-but-closed (safe default);
-allowlist set + test-only on = scoped production test; test-only off = open.
+allowlist set + test-only on = server scoped for the test window; test-only
+off = open.
+
+NOTE (Unit 7 review — the client cannot scope per-account): the allowlist
+gates the SERVER only. First-profit's `VITE_ENABLE_PUBLIC_SITE` is baked into
+its one production bundle, so it must stay OFF in production during any test
+window — otherwise every child sees the live claim UI while non-allowlisted
+claims die on the generic 401 (rendered as retry-inviting outage copy). The
+required test mechanism is a PREVIEW first-profit deployment (flag on in the
+preview env only) driving these allowlist-scoped production endpoints — see
+the first-profit launch checklist §6.
 
 ## 2. Operator lock / unlock (abuse takedown)
 

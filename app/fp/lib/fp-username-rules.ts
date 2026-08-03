@@ -69,8 +69,12 @@ export type UsernameBaseVerdict =
  * deriver is untouched (dashes remain valid there). If nothing survives the
  * strip (a name that was purely separators/punctuation), the verdict is
  * `underivable` so `mintUsername` applies the `student`-base fallback. The net
- * invariant: generator output === CHECK === unique index === login regex, all
- * `^[a-z0-9]+$`.
+ * invariant: generator output stays `^[a-z0-9]+$`, which is a strict SUBSET of the
+ * (now broadened) storage CHECK / login regex that ALSO accept email-shaped
+ * usernames (`@ . _ + -`, e.g. `cedric@firstprofit.school`; see migration
+ * 20260904120000 + login-rules `USERNAME_FORMAT`). Generated handles therefore
+ * always pass the CHECK and classify at login; the charset-agreement invariant
+ * holds as generator ⊆ CHECK === login regex (they need not be equal, only nested).
  */
 export function generateUsernameBase(firstName: string): UsernameBaseVerdict {
   try {

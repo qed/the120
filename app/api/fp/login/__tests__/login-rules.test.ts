@@ -59,15 +59,20 @@ describe("classifyIdentifier", () => {
     expect(classifyIdentifier("  alex  ")).toEqual({ kind: "username", normalized: "alex" });
   });
 
-  it("refuses a non-username shape (spaces, punctuation, non-ASCII) as invalid_username", () => {
-    // A name-shaped identifier is now a MALFORMED username: refused early, yet
+  it("refuses a truly non-username shape (spaces, disallowed punctuation, non-ASCII) as invalid_username", () => {
+    // A name-shaped identifier is a MALFORMED username: refused early, yet
     // indistinguishable from a not-found at the wire (same generic refusal).
     expect(classifyIdentifier("Maya Rose")).toEqual({ kind: "refuse", reason: "invalid_username" });
-    expect(classifyIdentifier("maya-rose")).toMatchObject({ reason: "invalid_username" });
-    expect(classifyIdentifier("maya_rose")).toMatchObject({ reason: "invalid_username" });
     expect(classifyIdentifier("maya!")).toMatchObject({ reason: "invalid_username" });
-    // A non-ASCII letter (no NFKC compatibility mapping to ASCII) is not
-    // `^[a-z0-9]+$`, so an accented identifier is invalid_username too.
+    expect(classifyIdentifier("maya/rose")).toMatchObject({ reason: "invalid_username" });
+    expect(classifyIdentifier("<script>")).toMatchObject({ reason: "invalid_username" });
+    // Leading/trailing punctuation is refused (must start AND end alphanumeric),
+    // even though `.`/`@`/`-` are allowed in the interior.
+    expect(classifyIdentifier(".maya")).toMatchObject({ reason: "invalid_username" });
+    expect(classifyIdentifier("maya@")).toMatchObject({ reason: "invalid_username" });
+    expect(classifyIdentifier("@maya")).toMatchObject({ reason: "invalid_username" });
+    // A non-ASCII letter with no NFKC compatibility mapping to ASCII is still
+    // outside the charset, so an accented identifier is invalid_username too.
     expect(classifyIdentifier("Zo\u00eb")).toMatchObject({ reason: "invalid_username" });
   });
 
@@ -76,16 +81,30 @@ describe("classifyIdentifier", () => {
     expect(classifyIdentifier("   ")).toEqual({ kind: "refuse", reason: "empty_identifier" });
   });
 
-  it("refuses email-shaped identifiers (no email auth branch exists)", () => {
-    expect(classifyIdentifier("kid@example.com")).toEqual({
-      kind: "refuse",
-      reason: "email_identifier",
+  it("accepts plain alphanumeric usernames (the generator's shape), lowercased", () => {
+    expect(classifyIdentifier("Alex")).toEqual({ kind: "username", normalized: "alex" });
+    expect(classifyIdentifier("cedric")).toEqual({ kind: "username", normalized: "cedric" });
+    expect(classifyIdentifier("alex2")).toEqual({ kind: "username", normalized: "alex2" });
+  });
+
+  it("accepts email-shaped usernames as OPAQUE lowercase strings (no email auth branch)", () => {
+    // Usernames MAY be email-shaped; they are treated as opaque strings, NOT
+    // validated as deliverable email addresses. Classifying as a valid username
+    // means the route does the SAME single fp_username lookup + byte-identical
+    // 401 as any username \u2014 a `.invalid` probe still just misses, no email branch.
+    expect(classifyIdentifier("cedric@firstprofit.school")).toEqual({
+      kind: "username",
+      normalized: "cedric@firstprofit.school",
     });
-    // Including the synthetic derived student addresses: probing one must look
-    // exactly like an unknown username, never reach a scheme-revealing branch.
-    expect(
-      classifyIdentifier("s-1c9f2a00-0000-0000-0000-000000000000@students.the120.invalid")
-    ).toEqual({ kind: "refuse", reason: "email_identifier" });
+    // NFKC folds a fullwidth \uff20/uppercase into the canonical lowercase shape.
+    expect(classifyIdentifier("Cedric@FirstProfit.School")).toEqual({
+      kind: "username",
+      normalized: "cedric@firstprofit.school",
+    });
+    // Email local-part punctuation (. _ + -) is allowed in the interior.
+    expect(classifyIdentifier("maya-rose")).toMatchObject({ kind: "username" });
+    expect(classifyIdentifier("maya_rose")).toMatchObject({ kind: "username" });
+    expect(classifyIdentifier("a.b+c@x.co")).toMatchObject({ kind: "username" });
   });
 });
 
@@ -95,7 +114,6 @@ describe("shapeRefusal", () => {
   const reasons: LoginRefusalReason[] = [
     "malformed_request",
     "empty_identifier",
-    "email_identifier",
     "invalid_username",
     "bad_credentials",
     "not_child",

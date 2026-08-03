@@ -230,10 +230,16 @@ describe("POST /api/fp/login — username-only resolution (Slice B U13)", () => 
     expect((authRef.calls[0] as { email: string }).email).not.toBe(INTERNAL_EMAIL);
   });
 
-  it("refuses an email-shaped identifier pre-DB with the generic 401", async () => {
+  it("treats an email-shaped identifier as a normal username (valid shape → one timing-uniform round-trip, generic 401 when unresolved)", async () => {
+    // Email-shaped usernames are now valid opaque handles (no early @-refusal). An
+    // email-shaped identifier that matches no child resolves to nothing, but the
+    // constant-work path still pays exactly ONE dummy round-trip — timing- and
+    // shape-indistinguishable from an unknown plain username or a wrong password,
+    // so no new enumeration oracle. The dummy never targets a real child identity.
     const res = await post({ identifier: "alex@example.com", password: "correct horse tulip" });
     expect(res.status).toBe(401);
-    expect(authRef.signIn).not.toHaveBeenCalled();
+    expect(authRef.signIn).toHaveBeenCalledTimes(1);
+    expect((authRef.calls[0] as { email: string }).email).not.toBe(INTERNAL_EMAIL);
   });
 
   it("preserves the origin gate — a disallowed Origin is 403, not the generic 401", async () => {

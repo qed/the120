@@ -135,3 +135,33 @@ describe("parseConsentAccept", () => {
     expect(parseConsentAccept(null).ok).toBe(false);
   });
 });
+
+describe("2026-08-03.1 policy bump (Phase A cohort instrument)", () => {
+  it("yesterday's current version (2026-08-01.1) now resolves to STALE via the published-registry branch, not version_mismatch", () => {
+    // The exact scenario the bump creates: a real, older, PUBLISHED version.
+    // Pins the isPublishedConsentVersion short-circuit so a future registry
+    // edit cannot silently flip this refusal to version_mismatch.
+    const oldText =
+      "I confirm I am the parent or legal guardian of the child named in this " +
+      "signup, and I am at least 18 years old. I consent to First Profit creating " +
+      "an account for my child so they can play and learn, and to First Profit " +
+      "collecting and storing the limited information needed to run that account " +
+      "(my child's first name, age band, and their saved game progress). I " +
+      "understand this is a game-like business simulator for learners, that I can " +
+      "review or delete my child's account by contacting First Profit, and that my " +
+      "consent is recorded with the version of this notice shown above.";
+    expect(consentVerdict({ echoedVersion: "2026-08-01.1", echoedHash: hashPolicyText(oldText) })).toBe("stale");
+  });
+
+  it("the current policy text discloses every Phase A collection surface (birth year + stuck notes + retention)", () => {
+    // Ties the legal text to the collection surfaces (fp/grade birth-year
+    // write; fp_task_feedback stuck notes with the ~12-month purge). A copy
+    // edit that drops a disclosure must fail here, not in a lawyer's inbox.
+    expect(FP_CONSENT_POLICY.text).toContain("birth year");
+    expect(FP_CONSENT_POLICY.text).toContain("stuck");
+    expect(FP_CONSENT_POLICY.text).toContain("twelve months");
+    expect(FP_CONSENT_POLICY.text).toContain("first name");
+    expect(FP_CONSENT_POLICY.text).toContain("age band");
+    expect(FP_CONSENT_POLICY.text).toContain("saved game progress");
+  });
+});

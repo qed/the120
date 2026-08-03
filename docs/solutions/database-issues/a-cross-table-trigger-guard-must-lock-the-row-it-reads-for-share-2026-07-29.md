@@ -48,7 +48,7 @@ Because `CREATE OR REPLACE FUNCTION` is idempotent, an already-applied trigger f
 
 ## Why This Works
 
-The race is two writers with no ordering: the state write (children) and the guarded write (projects) in separate transactions. `FOR SHARE` imposes the ordering at exactly the granularity needed — the guard's read serializes against writes to the one row whose value it is about to trust. Everything else (class keying, fail-closed unknown states, service_role exemption) stays unchanged.
+The race is two writers with no ordering: the state write (children) and the guarded write (projects) in separate transactions. `FOR SHARE` imposes the ordering at exactly the granularity needed — the guard's read serializes against writes to the one row whose value it is about to trust. Everything else (class keying, fail-closed unknown states, service_role exemption) stays unchanged. (2026-08-03 note: the service_role-only exemption assumption was later revised - a guard whose threat is PostgREST clients must also exempt JWT-less sessions, and a guard reading client-keyed state must gate on ownership BEFORE its lookup since BEFORE-ROW triggers fire ahead of RLS WITH CHECK; see [[before-row-trigger-fires-before-rls-with-check-gate-on-ownership-and-exempt-jwt-less-sessions-2026-08-03]].)
 
 ## Prevention
 

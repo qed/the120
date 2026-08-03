@@ -20,6 +20,8 @@
     "backfill:families": "tsx scripts/backfill-families.ts",
     "backfill:welcome": "tsx scripts/backfill-welcome-email.ts",
     "fp:backfill-usernames": "tsx scripts/backfill-fp-username.ts",
+    "fp:feedback:read": "tsx scripts/read-fp-task-feedback.ts",
+    "fp:feedback:purge": "tsx scripts/purge-fp-task-feedback.ts",
     "path:build": "tsx scripts/build-path-content.ts"
   },
   "dependencies": {

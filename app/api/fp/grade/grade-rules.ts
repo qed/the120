@@ -35,6 +35,17 @@
  * login. The write gate keeps garbage out; the read stays honest about what
  * the roster implies today.
  *
+ * ── Provenance: fill a blank, never overwrite ──
+ * `children.grade` is PARENT/STAFF-AUTHORITATIVE across The120 (progress-core
+ * band derivation, AddFounder, provision-core's bandVerdictForGrade, the CRM
+ * dossier, sibling-adoption conflict logic). The write route is therefore
+ * FILL-ONLY: it reads the row first and writes only when BOTH birth_year and
+ * grade are unset — a child-typed value fills a blank, never replaces roster
+ * truth. When either is already set the route answers with the derived-at-read
+ * value (resolveChildGrade) and performs no write. The SPA's ask-once flow
+ * only fires on a null grade anyway; the fill-only read closes the
+ * direct-call path.
+ *
  * ── Refusal posture ──
  * ONE refusal. `shapeGradeRefusal` takes a reason (for the caller's logs and
  * tests) and deliberately ignores it: every refusal is the same 401 with a

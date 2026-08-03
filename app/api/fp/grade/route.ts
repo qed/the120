@@ -2,11 +2,27 @@
  * POST /api/fp/grade — the First Profit SPA's ask-once BIRTH-YEAR capture
  * (full-path cohort readiness plan, Unit 3; R9, R10). An authenticated
  * cross-origin POST carrying the CHILD's Bearer session token (minted by
- * /api/fp/login) and `{birthYear}`; on acceptance it writes
+ * /api/fp/login) and `{birthYear}`; on acceptance — and only when BOTH roster
+ * columns are still unset (the fill-only provenance guard below) — it writes
  * `children.birth_year` (text, matching the column's existing string format)
  * plus the derived `children.grade` (keeps roster tooling working) via the
  * service role, and returns `{ok:true, grade}` so the client can adopt the
  * band without a re-login.
+ *
+ * ── FILL-ONLY: the provenance guard ──
+ * `children.grade` is PARENT/STAFF-AUTHORITATIVE roster truth across The120
+ * (progress-core derives the band from children.grade, AddFounder and
+ * provision-core's bandVerdictForGrade write it from staff/parent input, the
+ * CRM dossier and the sibling-adoption conflict logic read it as truth). A
+ * child-typed value must never REPLACE that truth: this route only fills a
+ * blank, never overwrites. After resolving the child row it reads the current
+ * birth_year + grade; if EITHER is already set (birth_year a non-empty
+ * string, or grade non-null) it performs NO write and returns 200 {ok:true,
+ * grade} carrying the same derived-at-read value the login route would
+ * produce for that row (resolveChildGrade) — idempotent, no oracle (it is the
+ * caller's own row), and the client adopts the authoritative value. Only when
+ * BOTH are unset does the write proceed. The SPA's ask-once flow only fires
+ * on a null grade anyway — this guard closes the direct-call path.
  *
  * Thin impure wrapper over ./grade-rules (pure, tested). CORS MIRROR of
  * /api/fp/login and /api/fp/signup/child: OPTIONS 204 with the echoed origin,
@@ -61,6 +77,7 @@ import {
   GRADE_IP_RATE_LIMIT,
   GRADE_RATE_LIMIT,
   parseGradeRequest,
+  resolveChildGrade,
   shapeGradeRefusal,
   unverifiedJwtSub,
   type GradeRefusalReason,
@@ -206,6 +223,50 @@ export async function POST(req: Request): Promise<Response> {
       // A genuine session that is not a child session: refuse generically;
       // the strike stands (this surface is for children only).
       return refuse("not_child");
+    }
+
+    // ── FILL-ONLY provenance guard ── children.grade is parent/staff-
+    // authoritative roster truth (see the header): this route only fills a
+    // blank, never overwrites. Read the caller's own row first; when either
+    // column is already set, skip the write entirely and answer with the same
+    // derived-at-read value the login route would produce — idempotent, and
+    // no oracle (the row is the session's own child).
+    const current = await admin
+      .from("children")
+      .select("birth_year, grade")
+      .eq("id", gate.data.child_id)
+      .maybeSingle();
+    if (current.error) {
+      console.error(`[fp/grade] roster read failed: ${current.error.message}`);
+      releaseStrikes();
+      return refuse("outage");
+    }
+    if (!current.data) {
+      // A mapped child whose children row is gone is a data fault, not a
+      // guess — release and refuse generically.
+      console.error(`[fp/grade] roster row missing for mapped child`);
+      releaseStrikes();
+      return refuse("outage");
+    }
+    const rosterBirthYear =
+      typeof current.data.birth_year === "string" ? current.data.birth_year : "";
+    const rosterGrade =
+      typeof current.data.grade === "number" && Number.isInteger(current.data.grade)
+        ? current.data.grade
+        : null;
+    if (rosterBirthYear !== "" || current.data.grade != null) {
+      // Already filled: the roster keeps its authority. Same normalization as
+      // the login route's candidate parse, same derivation. Never logged.
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          grade: resolveChildGrade(
+            { birthYear: rosterBirthYear, storedGrade: rosterGrade },
+            new Date()
+          ),
+        }),
+        { status: 200, headers }
+      );
     }
 
     // Targeted update of ONLY the columns this feature owns — birth_year in

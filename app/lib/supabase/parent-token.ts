@@ -29,6 +29,13 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * The anon key is the PostgREST `apikey`; the `Authorization: Bearer` header is
  * the per-request identity PostgREST evaluates RLS against. `persistSession`
  * is off — nothing about this client is stored between requests.
+ *
+ * ── Identity-agnostic despite the name ──
+ * Nothing here is parent-specific: the helper just binds the given Bearer
+ * access token to a per-request client. /api/fp/grade reuses it with the
+ * CHILD's session token purely for `auth.getUser()` verification (no
+ * PostgREST calls on that path). If you change this helper's semantics,
+ * audit those token-verification callers too.
  */
 export function supabaseParentToken(accessToken: string): SupabaseClient {
   return createClient(

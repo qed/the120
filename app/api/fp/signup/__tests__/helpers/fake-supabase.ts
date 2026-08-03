@@ -17,6 +17,15 @@
  * unique index; funnel_student_provisioning's UNIQUE(child_id) via upsert). It is
  * NOT a general Postgres. If a future core reaches for an operator not here, add
  * it here rather than widening a canned mock.
+ *
+ * FAULT INJECTION: `fakeClient(store, faults)` takes an optional plan keyed
+ * `"<op>:<table>"` (e.g. `"select:path_student_profiles"`) so route tests can
+ * exercise DB-error, zero-row, and trigger-coercion paths without a second
+ * mock layer: `error` short-circuits the op with a PostgREST-shaped error,
+ * `no-rows` reports success with nothing affected (and mutates nothing), and
+ * `coerce` (update only) applies extra values AFTER the patch — modeling a
+ * roster trigger rewriting what the caller wrote (the stale-status-echo
+ * learning).
  */
 
 import { randomUUID } from "node:crypto";
@@ -26,6 +35,15 @@ export type Store = Record<string, Row[]>;
 
 type PgError = { message: string; code?: string; details?: string } | null;
 type Predicate = (row: Row) => boolean;
+
+/** One injected fault — see the module header's FAULT INJECTION note. */
+export type Fault =
+  | { kind: "error"; error: NonNullable<PgError> }
+  | { kind: "no-rows" }
+  | { kind: "coerce"; values: Row };
+
+/** Faults keyed `"<op>:<table>"`, e.g. `"update:children"`. */
+export type FaultPlan = Record<string, Fault>;
 
 /** A per-table INSERT uniqueness guard: return a 23505-shaped error or null. */
 type UniqueGuard = (candidate: Row, existing: Row[]) => PgError;
@@ -80,7 +98,11 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   private onConflict: string[] = [];
   private ignoreDuplicates = false;
 
-  constructor(private store: Store, private table: string) {
+  constructor(
+    private store: Store,
+    private table: string,
+    private faults?: FaultPlan
+  ) {
     if (!store[table]) store[table] = [];
   }
 
@@ -175,6 +197,9 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
 
   /* -------- execution -------- */
   private execute(): { rows: Row[]; error: PgError } {
+    const fault = this.faults?.[`${this.op}:${this.table}`];
+    if (fault?.kind === "error") return { rows: [], error: fault.error };
+    if (fault?.kind === "no-rows") return { rows: [], error: null };
     switch (this.op) {
       case "insert": {
         const inserted: Row[] = [];
@@ -211,7 +236,12 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
       case "update": {
         const patch = this.payload[0];
         const hit = this.rows().filter((r) => matches(r, this.preds));
-        for (const r of hit) Object.assign(r, patch);
+        for (const r of hit) {
+          Object.assign(r, patch);
+          // A "coerce" fault models a BEFORE trigger rewriting the payload:
+          // the statement lands, but the stored (and echoed) values differ.
+          if (fault?.kind === "coerce") Object.assign(r, fault.values);
+        }
         return { rows: hit, error: null };
       }
       case "delete": {
@@ -284,9 +314,13 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   }
 }
 
-/** A fake SupabaseClient exposing only `.from(table)` over the shared store. */
-export function fakeClient(store: Store): { from: (t: string) => Builder } {
-  return { from: (table: string) => new Builder(store, table) };
+/** A fake SupabaseClient exposing only `.from(table)` over the shared store.
+ *  `faults` (optional) injects per-`"<op>:<table>"` failures — module header. */
+export function fakeClient(
+  store: Store,
+  faults?: FaultPlan
+): { from: (t: string) => Builder } {
+  return { from: (table: string) => new Builder(store, table, faults) };
 }
 
 /** A fresh store seeded with the fixtures every signup run assumes exist:

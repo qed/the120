@@ -245,7 +245,35 @@ describe("parseCandidateRow — fail-closed narrowing of the sign-in candidate j
       familyId: "fam-1",
       firstName: "Maya",
       username: "maya",
+      birthYear: "",
+      grade: null,
     });
+  });
+
+  it("carries birth_year and grade when the join selects them (Unit 3 read path)", () => {
+    const parsed = parseCandidateRow({
+      ...valid,
+      children: { first_name: "Maya", fp_username: "maya", birth_year: "2015", grade: 6 },
+    });
+    expect(parsed?.birthYear).toBe("2015");
+    expect(parsed?.grade).toBe(6);
+  });
+
+  it("narrows missing/malformed birth_year and grade to the unset sentinels — never a dropped row", () => {
+    // Grade is display plumbing: a bad roster value must not make a student
+    // vanish from the candidate set.
+    const malformed = parseCandidateRow({
+      ...valid,
+      children: { first_name: "Maya", fp_username: "maya", birth_year: 2015, grade: "6" },
+    });
+    expect(malformed).not.toBeNull();
+    expect(malformed?.birthYear).toBe("");
+    expect(malformed?.grade).toBeNull();
+    const fractional = parseCandidateRow({
+      ...valid,
+      children: { first_name: "Maya", fp_username: "maya", grade: 6.5 },
+    });
+    expect(fractional?.grade).toBeNull();
   });
 
   it("narrows a missing / non-string fp_username to null — a valid, unmatchable row", () => {

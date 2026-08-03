@@ -29,6 +29,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { extractSiteContent } from "@/app/fp/lib/fp-public-site-rules";
 
 export type Row = Record<string, unknown>;
 export type Store = Record<string, Row[]>;
@@ -66,6 +67,25 @@ const uniqueGuards: Record<string, UniqueGuard> = {
             'duplicate key value violates unique constraint "fp_parental_consent_active_attempt_uq"',
         }
       : null;
+  },
+  // Real-public-site Unit 2: the claim arbiter. Handle UNIQUE first (the
+  // designed `taken` branch), then the profile_id PK (one site per learner) —
+  // constraint names mirror the live ones so classifyClaimConflict's
+  // message-sniffing sees production shapes.
+  fp_public_sites: (cand, existing) => {
+    if (existing.some((r) => r.handle === cand.handle)) {
+      return {
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "fp_public_sites_handle_key"',
+      };
+    }
+    if (existing.some((r) => r.profile_id === cand.profile_id)) {
+      return {
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "fp_public_sites_pkey"',
+      };
+    }
+    return null;
   },
 };
 
@@ -319,8 +339,29 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
 export function fakeClient(
   store: Store,
   faults?: FaultPlan
-): { from: (t: string) => Builder } {
-  return { from: (table: string) => new Builder(store, table, faults) };
+): {
+  from: (t: string) => Builder;
+  rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: PgError }>;
+} {
+  return {
+    from: (table: string) => new Builder(store, table, faults),
+    // The one RPC the FP site routes call. Implemented via the EXECUTABLE TS
+    // SPEC of the SQL function (fp-public-site-rules extractSiteContent —
+    // "THE SPEC LIVES HERE"), so route-level tests exercise the real deps
+    // builder's RPC seam against the pinned semantics. Faultable like any op.
+    rpc: (fn: string, args?: Record<string, unknown>) => {
+      const fault = faults?.[`rpc:${fn}`];
+      if (fault?.kind === "error") return Promise.resolve({ data: null, error: fault.error });
+      if (fn === "fp_public_site_content") {
+        const { headline, oneLiner } = extractSiteContent(args?.p_doc);
+        return Promise.resolve({ data: [{ headline, one_liner: oneLiner }], error: null });
+      }
+      return Promise.resolve({
+        data: null,
+        error: { message: `fake-supabase: unknown rpc ${fn}` },
+      });
+    },
+  };
 }
 
 /** A fresh store seeded with the fixtures every signup run assumes exist:

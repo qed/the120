@@ -74,6 +74,7 @@ export type EraseFamilySummary = {
   scope: "family" | "child";
   childrenErased: number;
   deleted: {
+    fp_public_sites: number;
     fp_ledger: number;
     fp_player_saves: number;
     fp_player_profiles: number;
@@ -186,6 +187,7 @@ export async function eraseFamily(
     scope: childScoped ? "child" : "family",
     childrenErased: 0,
     deleted: {
+      fp_public_sites: 0,
       fp_ledger: 0,
       fp_player_saves: 0,
       fp_player_profiles: 0,
@@ -226,6 +228,38 @@ export async function eraseFamily(
       // must BLOCK the `children` anchor delete below, so a re-run re-enumerates
       // the survivor and summary.ok stays false. Snapshot the count to detect it.
       const strandedBefore = summary.stranded.length;
+
+      // 0: fp_public_sites (RESTRICT -> fp_player_profiles) — the child's public
+      //    page dies FIRST (the amended "sites → ledger → saves → profile →
+      //    child" ordering, migration 20260907120000). Handle disposition is
+      //    decided HERE, explicitly: deleting the row frees the handle and 404s
+      //    the page. An OPERATOR-LOCKED row is still deleted — a data-rights
+      //    erasure outranks a takedown lock — but NEVER SILENTLY: the release
+      //    is logged loudly and recorded in the order log so the operator sees
+      //    that a locked handle re-entered the pool via erasure.
+      for (const profileId of child.profileIds) {
+        const lockedSite = await db
+          .from("fp_public_sites")
+          .select("handle, operator_locked")
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (lockedSite.error) {
+          // The lock read is OBSERVABILITY, not a gate: a failed read must not
+          // block the erasure, but it must not silently skip the loud-release
+          // rule either — log the ambiguity (possibly locked) and proceed; the
+          // delete below strands loudly on its own if the DB is really down.
+          console.error(
+            `[erase] fp_public_sites lock read failed for profile ${profileId} (${lockedSite.error.message}) — proceeding; if this site was operator-locked, its handle release is NOT individually logged`
+          );
+          summary.order.push(`fp_public_sites:site-lock-read-failed(child:${childId})`);
+        } else if ((lockedSite.data as { operator_locked?: unknown } | null)?.operator_locked === true) {
+          console.error(
+            `[erase] releasing an OPERATOR-LOCKED public-site handle via erasure (profile ${profileId}) — deliberate, not silent`
+          );
+          summary.order.push(`fp_public_sites:site-locked-released(child:${childId})`);
+        }
+        summary.deleted.fp_public_sites += await del(db, "fp_public_sites", "profile_id", profileId, summary, `child:${childId}`);
+      }
 
       // 1-2: ledger + saves (both RESTRICT -> fp_player_profiles) — must precede
       //      the profile delete. Keyed on the profile ids.

@@ -20,7 +20,7 @@ import {
 type Rows = Record<string, unknown>[];
 type Tables = Record<string, Rows>;
 
-function makeDb(seed: Tables) {
+function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
   const t: Tables = JSON.parse(JSON.stringify(seed));
   const deleteLog: string[] = [];
 
@@ -34,7 +34,13 @@ function makeDb(seed: Tables) {
     for (const r of doomed) {
       if (table === "fp_player_profiles") {
         const pid = r.id;
-        if ((t.fp_ledger ?? []).some((x) => x.profile_id === pid) || (t.fp_player_saves ?? []).some((x) => x.profile_id === pid)) {
+        if (
+          (t.fp_ledger ?? []).some((x) => x.profile_id === pid) ||
+          (t.fp_player_saves ?? []).some((x) => x.profile_id === pid) ||
+          // Real-public-site Unit 2: fp_public_sites.profile_id is RESTRICT too —
+          // the site row must die FIRST or this raises (proving the order).
+          (t.fp_public_sites ?? []).some((x) => x.profile_id === pid)
+        ) {
           return { data: null, error: { message: `23503: fp_player_profiles ${pid} still referenced` } };
         }
       }
@@ -95,6 +101,11 @@ function makeDb(seed: Tables) {
     const exec = () => {
       if (state.op === "delete") return runDelete(state.table, state.filters);
       if (state.op === "update") return runUpdate(state.table, state.patch ?? {}, state.filters);
+      // Injected SELECT fault (the lock-read-error path): reads on the named
+      // table fail; deletes/updates still run.
+      if (opts.selectFaultTable === state.table) {
+        return { data: null, error: { message: "select fault (injected)" } };
+      }
       const rows = (t[state.table] ?? []).filter((r) => matches(r, state.filters));
       return { data: rows, error: null };
     };
@@ -532,5 +543,100 @@ describe("erase-family-rules pure helpers", () => {
     expect(RELEASED_CLAIM_PII_COLUMNS).toContain("email");
     expect(RELEASED_CLAIM_PII_COLUMNS).toContain("supabase_user_id");
     expect(RELEASED_CLAIM_PII_COLUMNS).not.toContain("local_part");
+  });
+});
+
+describe("eraseFamily — fp_public_sites dies FIRST (real-public-site Unit 2)", () => {
+  function seedWithSite(site: Record<string, unknown> = {}): Tables {
+    const t = seedPathBOnly();
+    t.fp_public_sites = [
+      {
+        profile_id: "ppB",
+        handle: "cedric",
+        published: true,
+        operator_locked: false,
+        first_published_at: "2026-08-03T00:00:00Z",
+        ...site,
+      },
+    ];
+    return t;
+  }
+
+  it("CHILD_LEAF_DELETE_ORDER lists fp_public_sites first; the executor deletes it before the profile (RESTRICT-proven)", async () => {
+    expect(CHILD_LEAF_DELETE_ORDER[0]).toBe("fp_public_sites");
+    const seed = seedWithSite();
+    const { db, t, deleteLog } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    const summary = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(summary.ok).toBe(true);
+    expect(summary.deleted.fp_public_sites).toBe(1);
+    expect(t.fp_public_sites).toHaveLength(0);
+    // The makeDb RESTRICT guard raises 23503 if the profile is deleted while a
+    // site row references it — so a green run PROVES the order. Assert it
+    // anyway off the delete log:
+    const siteAt = deleteLog.findIndex((d) => d.startsWith("fp_public_sites("));
+    const profileAt = deleteLog.findIndex((d) => d.startsWith("fp_player_profiles("));
+    expect(siteAt).toBeGreaterThanOrEqual(0);
+    expect(siteAt).toBeLessThan(profileAt);
+  });
+
+  it("an OPERATOR-LOCKED site is deleted (data rights outrank the lock) but NEVER silently: loud log + order marker", async () => {
+    const seed = seedWithSite({ operator_locked: true });
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const summary = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(summary.ok).toBe(true);
+    expect(summary.deleted.fp_public_sites).toBe(1);
+    expect(summary.order.some((o) => o.includes("site-locked-released"))).toBe(true);
+    expect(errors.mock.calls.some((c) => String(c[0]).includes("OPERATOR-LOCKED"))).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("a FAILED lock read does not block the erasure and does not silently skip observability: ambiguity marker + delete proceeds", async () => {
+    const seed = seedWithSite({ operator_locked: true });
+    const { db, t } = makeDb(seed, { selectFaultTable: "fp_public_sites" });
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const summary = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(summary.ok).toBe(true);
+    expect(summary.deleted.fp_public_sites).toBe(1);
+    expect(t.fp_public_sites).toHaveLength(0);
+    expect(summary.order.some((o) => o.includes("site-lock-read-failed"))).toBe(true);
+    // The read failure must NOT masquerade as the locked-release marker.
+    expect(summary.order.some((o) => o.includes("site-locked-released"))).toBe(false);
+    expect(errors.mock.calls.some((c) => String(c[0]).includes("lock read failed"))).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("idempotent re-run: a second erasure after a complete first run is a clean no-op for the site step", async () => {
+    const seed = seedWithSite();
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t);
+    deps.db = db;
+    const first = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(first.ok).toBe(true);
+    const second = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+    expect(second.ok).toBe(true);
+    expect(second.deleted.fp_public_sites).toBe(0);
+    expect(second.stranded).toHaveLength(0);
   });
 });

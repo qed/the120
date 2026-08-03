@@ -10,6 +10,7 @@
  * 20260817120000_funnel_student_provisioning.sql, 20260829120000_fp_signup_
  * consent.sql):
  *
+ *   fp_public_sites.profile_id      -> fp_player_profiles  ON DELETE RESTRICT
  *   fp_ledger.profile_id            -> fp_player_profiles  ON DELETE RESTRICT
  *   fp_player_saves.profile_id      -> fp_player_profiles  ON DELETE RESTRICT
  *   fp_player_profiles.user_id      -> auth.users          ON DELETE RESTRICT
@@ -34,6 +35,13 @@
  * corrects the earlier, wrong "CASCADE removes the claim" model.
  *
  * Therefore, per child:
+ *   0. fp_public_sites     (RESTRICT -> profiles: the child's public page dies
+ *      FIRST — the amended ordering "sites → ledger → saves → profile → child"
+ *      from migration 20260907120000_fp_public_sites.sql. Deleting the row
+ *      frees the handle and 404s the page; an OPERATOR-LOCKED row is still
+ *      deleted (a data-rights erasure outranks a takedown lock) but NEVER
+ *      SILENTLY: the executor logs it loudly and records `site-locked-released`
+ *      in the order log so the operator sees the lock was released by erasure)
  *   1. fp_ledger           (RESTRICT -> profiles: must precede the profile)
  *   2. fp_player_saves     (RESTRICT -> profiles: must precede the profile)
  *   3. fp_player_profiles  (RESTRICT -> children AND auth.users)
@@ -106,6 +114,7 @@
 /** The ordered per-child leaf tables (before the child's own auth + children
  *  row). Exported so the executor and its tests share ONE definition of order. */
 export const CHILD_LEAF_DELETE_ORDER = [
+  "fp_public_sites",
   "fp_ledger",
   "fp_player_saves",
   "fp_player_profiles",

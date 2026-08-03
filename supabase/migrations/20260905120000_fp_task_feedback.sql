@@ -37,13 +37,20 @@
 --
 -- RETENTION (~12-month purge ritual, review decision): feedback rows expire
 --   roughly 12 months after creation, INDEPENDENT of account deletion. No
---   pg_cron dependency — the owner runs this periodically (service role, e.g.
---   quarterly, alongside the R25 ledger purge review):
+--   pg_cron dependency — the owner runs the purge script periodically (service
+--   role, e.g. quarterly, alongside the R25 ledger purge review):
+--
+--     npx tsx scripts/purge-fp-task-feedback.ts             # dry-run: count only
+--     npx tsx scripts/purge-fp-task-feedback.ts --confirm   # batched delete
+--
+--   The script is DRY-RUN by default and deletes in id-selected batches (WAL
+--   discipline). What it does, as SQL:
 --
 --     -- delete from public.fp_task_feedback
 --     --  where created_at < now() - interval '12 months';
 --
---   (The append-only trigger below exempts service_role, so this DELETE runs.)
+--   (The append-only trigger below exempts service_role AND JWT-less sessions,
+--   so this DELETE runs.)
 --
 -- ACCEPTED RISK (R20-style, kid-data): the client-side UI hint ("no names or
 --   addresses"), the 1000-char CHECK, and the daily cap are the ONLY
@@ -57,7 +64,20 @@
 --     .insert() WITHOUT .select()). There is no SELECT grant or policy, so a
 --     returning insert would fail with 42501 even though the row landed.
 --   * A duplicate client-minted id fails 23505 — the client classifies that as
---     SUCCESS (outbox retry idempotency), same as fp_ledger.
+--     SUCCESS (outbox retry idempotency), same as fp_ledger. BECAUSE 23505 is
+--     treated as success, the client MUST mint ids with crypto.randomUUID()
+--     (collision-resistant); a weaker generator would silently swallow distinct
+--     reports as "already sent".
+--   * DAILY CAP → SQLSTATE 'FP429' (custom class, raised by the cap trigger
+--     below). The client contract: FP429 = capped → show an honest "could not
+--     send" (never "saved"), never park in the outbox, never silent-drop. It
+--     must NOT fall into the default P0001 terminal-drop path: a capped report
+--     can be legitimate (two devices; a local cap mirror desynced), so the
+--     child must see the truth rather than a fake success or silence.
+--   * 23503 (FK violation on profile_id) → RETRYABLE-park. A brand-new child's
+--     first tap can race the service-role profile provisioning; that timing
+--     gap is transient, so the client parks the report in the outbox and
+--     replays it once the profile exists.
 --   * task_id charset agreement (nesting invariant, see docs/solutions/
 --     best-practices/broadening-a-shared-charset-...-2026-08-04.md): the
 --     producer (the FP client's task-id synthesizer / generated content ids,
@@ -103,6 +123,20 @@ create index if not exists fp_task_feedback_profile_id_created_at_idx
 -- Append-only is STRUCTURAL, not merely policy-absence (fp_ledger discipline).
 -- service_role may still update/delete (the retention purge above, and any
 -- future PII-scrub request).
+--
+-- THREAT MODEL / who this guard is for: it is belt-and-suspenders against
+-- POSTGREST CLIENTS specifically (a child JWT reaching UPDATE/DELETE despite
+-- RLS + the revoked grants). It must therefore ALSO allow any session that
+-- carries NO PostgREST JWT at all — request.jwt.claims unset or empty. Such a
+-- session is by definition not a PostgREST client: it is the Supabase
+-- dashboard SQL editor, a maintenance script connected as postgres, or an
+-- Admin-API-triggered cascade. Without this allowance, a CASCADEd DELETE from
+-- an fp_player_profiles delete executed in one of those non-PostgREST
+-- contexts (which carry no service-role JWT, so auth.role() is not
+-- 'service_role') would fire this row-level guard and ABORT the whole profile
+-- deletion. RLS + the revoked grants still block actual child clients; every
+-- PostgREST request always carries request.jwt.claims, so this opens nothing
+-- to them.
 create or replace function public.fp_task_feedback_append_only_guard()
 returns trigger
 language plpgsql
@@ -110,7 +144,9 @@ security definer
 set search_path = public
 as $$
 begin
-  if auth.role() = 'service_role' then
+  if auth.role() = 'service_role'
+     or current_setting('request.jwt.claims', true) is null
+     or current_setting('request.jwt.claims', true) = '' then
     if TG_OP = 'DELETE' then
       return OLD;
     end if;
@@ -145,12 +181,27 @@ create trigger fp_task_feedback_append_only_guard
 -- concurrent writer of that row; here the trusted value is the same-table
 -- count, so the lock must be exclusive to impose the ordering.
 --
--- Lock-order note (same learning): every fp_task_feedback INSERT now acquires
--- fp_task_feedback-row → fp_player_profiles-row. Any multi-statement
--- transaction touching both tables must take the same order.
+-- Lock-order note (same learning, corrected in review): an INSERT locks no
+-- fp_task_feedback row — the ONLY lock this guard takes is the
+-- fp_player_profiles row (the per-profile mutex; the new tuple is not yet
+-- visible to anyone and carries no lock another transaction can wait on). The
+-- ordering obligation for the future is therefore: any multi-statement
+-- transaction that will BOTH insert fp_task_feedback rows AND touch
+-- fp_player_profiles rows must acquire the fp_player_profiles row FIRST (as
+-- this guard does), so it cannot deadlock against a concurrent insert's guard.
 --
 -- The lock also makes the FK race moot: a profile mid-delete blocks here, then
 -- the re-check finds it gone and refuses (or the FK does).
+--
+-- OWNERSHIP GATE (cross-tenant oracle, security review P1): this is a
+-- BEFORE-ROW trigger, so it fires BEFORE the RLS WITH CHECK is evaluated.
+-- Without a gate, a child inserting against a FOREIGN profile_id would reach
+-- the lookup/count below and could distinguish outcomes for a profile they do
+-- not own (FK error shape vs cap raise vs RLS denial) — an existence/cap-state
+-- oracle across tenants. So: for any profile the caller does not own, return
+-- NEW immediately and SILENTLY, doing no lookup and no count — the RLS WITH
+-- CHECK then rejects the row and produces the ONE uniform denial shape for
+-- every foreign profile, owned-elsewhere and nonexistent alike.
 create or replace function public.fp_task_feedback_daily_cap_guard()
 returns trigger
 language plpgsql
@@ -164,6 +215,14 @@ begin
   if auth.role() = 'service_role' then
     return NEW;
   end if;
+  if NEW.profile_id not in (
+    select id from public.fp_player_profiles
+    where user_id = (select auth.uid())
+  ) then
+    -- Not the caller's profile (or no such profile): stand aside silently and
+    -- let the RLS WITH CHECK produce the uniform denial. See OWNERSHIP GATE.
+    return NEW;
+  end if;
   select id into v_profile
     from public.fp_player_profiles
    where id = NEW.profile_id
@@ -172,12 +231,21 @@ begin
     -- no such profile; let the FK produce the canonical error shape.
     return NEW;
   end if;
+  -- Day window pinned to REAL UTC, independent of the session timezone: the
+  -- truncation wraps only now() (the boundary constant), never the column, so
+  -- the predicate stays sargable on created_at and the
+  -- (profile_id, created_at) index still serves it (profile_id prefix + range
+  -- scan on created_at).
   select count(*) into v_count
     from public.fp_task_feedback
    where profile_id = NEW.profile_id
-     and created_at >= date_trunc('day', now());
+     and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc';
   if v_count >= 50 then
-    raise exception 'fp_task_feedback: daily feedback cap reached';
+    -- Distinct SQLSTATE so the SPA outbox can tell "capped" apart from the
+    -- default P0001 terminal-drop class — see CLIENT CONTRACT NOTES (FP429:
+    -- honest "could not send", never parked, never silently dropped).
+    raise exception 'fp_task_feedback: daily feedback cap reached'
+      using errcode = 'FP429';
   end if;
   return NEW;
 end;
@@ -219,9 +287,16 @@ create policy "fp feedback: insert own" on public.fp_task_feedback
 -- NO select/update/delete policies for authenticated — deliberate, not an
 -- omission (the rls-enabled-zero-policies learning requires this to be said
 -- out loud): children write reports, only the owner reads them. The owner's
--- read is service-role (bypasses RLS), e.g.:
+-- read is service-role (bypasses RLS) via the reader script:
 --
---   -- select f.task_id, f.band, f.body, f.created_at, p.handle
+--   npx tsx scripts/read-fp-task-feedback.ts [--days N]
+--
+-- which joins profile handle + child name/grade, newest first. What it does,
+-- as SQL:
+--
+--   -- select f.task_id, f.band, f.body, f.created_at, p.handle,
+--   --        c.first_name, c.grade
 --   --   from public.fp_task_feedback f
 --   --   join public.fp_player_profiles p on p.id = f.profile_id
+--   --   left join public.children c on c.id = p.child_id
 --   --  order by f.created_at desc;

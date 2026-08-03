@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   FEEDBACK_BANDS,
   FEEDBACK_BODY_MAX_CHARS,
+  FEEDBACK_CAP_ERRCODE,
   FEEDBACK_DAILY_CAP,
   FEEDBACK_TASK_ID_MAX_CHARS,
   FEEDBACK_TASK_ID_PATTERN,
@@ -112,6 +113,69 @@ describe("migration parity: fp_task_feedback.sql", () => {
     // the 49+49 race would survive — the lock must be exclusive.
     expect(/create\s+trigger\s+fp_task_feedback_daily_cap_guard\s+before\s+insert\s+on\s+public\.fp_task_feedback/i.test(sql)).toBe(true);
     expect(/from\s+public\.fp_player_profiles\s+where\s+id\s*=\s*NEW\.profile_id\s+for\s+update/i.test(sql)).toBe(true);
+  });
+
+  // Everything below inspects the daily-cap guard FUNCTION BODY specifically
+  // (between its `create or replace function` and its closing `$$;`), so an
+  // assertion can never be satisfied by a lookalike elsewhere in the file.
+  const capGuardBody = (() => {
+    const start = sql.search(/create\s+or\s+replace\s+function\s+public\.fp_task_feedback_daily_cap_guard/i);
+    expect(start, "daily-cap guard function exists").toBeGreaterThanOrEqual(0);
+    const end = sql.indexOf("$$;", start);
+    expect(end, "daily-cap guard closes with $$;").toBeGreaterThan(start);
+    return sql.slice(start, end);
+  })();
+
+  it("the cap guard's day window is pinned to real UTC and wraps only the boundary, never the column", () => {
+    // FIX: date_trunc in the SESSION timezone would move the cap boundary per
+    // client timezone. The truncation must wrap now() (twice: truncate in UTC,
+    // then back to timestamptz) while created_at stays bare — sargable, so the
+    // (profile_id, created_at) index still serves prefix + range.
+    expect(
+      /created_at\s*>=\s*date_trunc\s*\(\s*'day'\s*,\s*now\(\)\s+at\s+time\s+zone\s+'utc'\s*\)\s+at\s+time\s+zone\s+'utc'/i.test(capGuardBody)
+    ).toBe(true);
+    // The column itself is never wrapped in a timezone conversion.
+    expect(/created_at\s+at\s+time\s+zone/i.test(capGuardBody)).toBe(false);
+  });
+
+  it("the cap guard early-exits for service_role", () => {
+    expect(/if\s+auth\.role\(\)\s*=\s*'service_role'\s+then\s+return\s+NEW\s*;/i.test(capGuardBody)).toBe(true);
+  });
+
+  it("the cap guard stands aside silently for profiles the caller does not own (anti-oracle gate)", () => {
+    // BEFORE-ROW triggers fire before the RLS WITH CHECK; without this gate a
+    // foreign profile's existence/cap state leaks through distinguishable
+    // errors. The gate must return NEW (silently) for unowned profile_ids.
+    expect(
+      /if\s+NEW\.profile_id\s+not\s+in\s*\(\s*select\s+id\s+from\s+public\.fp_player_profiles\s+where\s+user_id\s*=\s*\(\s*select\s+auth\.uid\(\)\s*\)\s*\)\s*then\s+return\s+NEW\s*;/i.test(capGuardBody)
+    ).toBe(true);
+  });
+
+  it("the cap guard takes the profile lock BEFORE counting (ordering, not just presence)", () => {
+    const lockAt = capGuardBody.toLowerCase().indexOf("for update");
+    const countAt = capGuardBody.toLowerCase().indexOf("count(*)");
+    expect(lockAt).toBeGreaterThanOrEqual(0);
+    expect(countAt).toBeGreaterThanOrEqual(0);
+    expect(lockAt).toBeLessThan(countAt);
+  });
+
+  it("the cap refusal carries the distinct FEEDBACK_CAP_ERRCODE (never default P0001)", () => {
+    // P0001 is the SPA outbox's terminal-drop class; a capped report must be
+    // distinguishable so the client can show an honest "could not send".
+    const m = capGuardBody.match(/using\s+errcode\s*=\s*'([^']+)'/i);
+    expect(m, "raise ... using errcode = '<code>'").not.toBeNull();
+    expect(m![1]).toBe(FEEDBACK_CAP_ERRCODE);
+  });
+
+  it("the append-only guard also allows JWT-less (non-PostgREST) sessions, so CASCADE deletes survive", () => {
+    // A cascaded delete from fp_player_profiles run in the dashboard / a
+    // maintenance session carries no PostgREST JWT and no service_role claim;
+    // the guard must not abort it. The guard targets PostgREST clients only.
+    const start = sql.search(/create\s+or\s+replace\s+function\s+public\.fp_task_feedback_append_only_guard/i);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const body = sql.slice(start, sql.indexOf("$$;", start));
+    expect(/current_setting\s*\(\s*'request\.jwt\.claims'\s*,\s*true\s*\)\s+is\s+null/i.test(body)).toBe(true);
+    expect(/current_setting\s*\(\s*'request\.jwt\.claims'\s*,\s*true\s*\)\s*=\s*''/i.test(body)).toBe(true);
   });
 
   it("profile_id is ON DELETE CASCADE — the documented R14 divergence from the RESTRICT tables", () => {

@@ -39,6 +39,14 @@ export const FEEDBACK_BODY_MAX_CHARS = 1000;
  *  refusal is unreachable in normal use. */
 export const FEEDBACK_DAILY_CAP = 50;
 
+/** The SQLSTATE the daily-cap trigger raises (custom class 'FP'). Client
+ *  contract: FP429 = capped → show an honest "could not send" (never "saved"),
+ *  never park in the outbox, never silent-drop. Distinct from P0001 so the
+ *  outbox's terminal-drop default cannot swallow a legitimate capped report
+ *  (two devices; local cap mirror desynced). Must equal the migration's
+ *  `using errcode` literal byte-for-byte (parity test). */
+export const FEEDBACK_CAP_ERRCODE = "FP429";
+
 /** The task-id shape: three dot-separated integer components ("1.2.5").
  *  SOURCE string kept separately so the migration-parity test can compare it
  *  byte-for-byte against the SQL `~` pattern. */

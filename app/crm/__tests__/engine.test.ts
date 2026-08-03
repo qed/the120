@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  DIRECT_RESERVE_MARKER,
   deriveStage,
+  directReserveChildIds,
+  withDirectReserveMarker,
   shouldClearOverride,
   suggestHeat,
   deriveNextMove,
@@ -9,6 +12,72 @@ import {
   type FamilyForCopilot,
   type LibraryItemForSuggestion,
 } from "@/app/crm/lib/engine";
+
+/* ------------------------------------------------- directReserveChildIds */
+
+describe("directReserveChildIds — the paid-but-never-applied population (U5)", () => {
+  const kid = (id: string, status: string) => ({ id, status });
+  const dep = (child_id: string, status: string) => ({ child_id, status });
+
+  it("marks every PRE-OFFER paid child; offer-first payers are NOT marked", () => {
+    expect(directReserveChildIds([kid("a", "draft")], [dep("a", "paid")])).toEqual(["a"]);
+    // The whole-branch review's cascade: a pay-then-submit family keeps the
+    // marker through submitted/in_review/invited — staff still owe them the
+    // Sept-19 confirmation, and the trigger fixes exist so this progression
+    // happens. Only a staff SEAT decision clears it.
+    expect(directReserveChildIds([kid("a", "submitted")], [dep("a", "paid")])).toEqual(["a"]);
+    expect(directReserveChildIds([kid("a", "in_review")], [dep("a", "paid")])).toEqual(["a"]);
+    expect(directReserveChildIds([kid("a", "invited")], [dep("a", "paid")])).toEqual(["a"]);
+    // Offer-first / staff-confirmed: no marker (regression pin).
+    expect(directReserveChildIds([kid("a", "offered")], [dep("a", "paid")])).toEqual([]);
+    expect(directReserveChildIds([kid("a", "member")], [dep("a", "paid")])).toEqual([]);
+    // Unknown status: fail quiet, never a false badge.
+    expect(directReserveChildIds([kid("a", "garbage")], [dep("a", "paid")])).toEqual([]);
+  });
+
+  it("pending/refunded deposits never mark; unpaid drafts never mark", () => {
+    expect(directReserveChildIds([kid("a", "draft")], [dep("a", "pending")])).toEqual([]);
+    expect(directReserveChildIds([kid("a", "draft")], [dep("a", "refunded")])).toEqual([]);
+    expect(directReserveChildIds([kid("a", "draft")], [])).toEqual([]);
+  });
+
+  it("multi-row history: refunded + paid rows for one child still mark (the hasPaidDeposit lesson)", () => {
+    // A refund-then-repay child has multiple rows; a single find() can grab
+    // the refunded one while a paid one exists — the Set over ALL rows must
+    // not repeat that bug.
+    expect(
+      directReserveChildIds([kid("a", "draft")], [dep("a", "refunded"), dep("a", "paid")])
+    ).toEqual(["a"]);
+  });
+
+  it("per-child, not per-family: only the direct-reserved sibling is marked", () => {
+    expect(
+      directReserveChildIds(
+        [kid("a", "submitted"), kid("b", "draft")],
+        [dep("b", "paid")]
+      )
+    ).toEqual(["b"]);
+  });
+
+  it("the marker label is the one spelling stageDetail renders", () => {
+    expect(DIRECT_RESERVE_MARKER).toBe("direct reserve — no application");
+  });
+
+  it("withDirectReserveMarker rides EVERY stage's detail — a member sibling can't hide it", () => {
+    // deriveStage lets a sibling's member review outrank deposit_paid at
+    // the family level; the marker composition is stage-blind so the
+    // paid-but-never-applied child stays visible regardless (U5 review).
+    const children = [kid("m", "member"), kid("b", "draft")];
+    const deposits = [dep("m", "paid"), dep("b", "paid")];
+    expect(withDirectReserveMarker("Member · dossier queue", children, deposits)).toBe(
+      `Member · dossier queue · ${DIRECT_RESERVE_MARKER}`
+    );
+    // No direct-reserve child → the detail passes through untouched.
+    expect(
+      withDirectReserveMarker("Deposit paid · via Stripe", [kid("a", "offered")], [dep("a", "paid")])
+    ).toBe("Deposit paid · via Stripe");
+  });
+});
 
 /* ------------------------------------------------------------ deriveStage */
 

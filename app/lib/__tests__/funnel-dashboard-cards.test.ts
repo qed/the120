@@ -75,6 +75,47 @@ describe("cardVerdict — NULL applicant_state is the legacy card, unchanged", (
   });
 });
 
+describe("cardVerdict — the secondary reserve CTA (direct reserve 2026-08-02)", () => {
+  const reserve = { kind: "reserve", label: "Reserve seat · $250" };
+
+  it("every pre-submission cell carries the secondary reserve when the gate passes", () => {
+    // The feature's core: added / project_created / submitted / in_review
+    // keep their primary CTA AND gain the secondary reserve action.
+    expect(funnel(cardVerdict(child("added"), none, false)).secondaryReserveCta).toEqual(reserve);
+    expect(
+      funnel(cardVerdict(child("project_created"), none, true)).secondaryReserveCta
+    ).toEqual(reserve);
+    expect(funnel(cardVerdict(child("submitted"), none, true)).secondaryReserveCta).toEqual(
+      reserve
+    );
+    expect(funnel(cardVerdict(child("in_review"), none, true)).secondaryReserveCta).toEqual(
+      reserve
+    );
+    // The primary CTA is untouched by the addition (added keeps Continue).
+    expect(funnel(cardVerdict(child("added"), none, false)).primaryCta?.kind).toBe("start");
+  });
+
+  it("a pending (clearing) debit suppresses the secondary reserve and shows the note — every pre-submission cell", () => {
+    for (const state of ["added", "project_created", "submitted", "in_review"] as const) {
+      const v = funnel(cardVerdict(child(state), pending, true));
+      expect(v.secondaryReserveCta, state).toBeUndefined();
+      expect(v.note, state).toContain("Payment processing");
+    }
+  });
+
+  it("cells that must NEVER carry it: waitlisted, offered/next_steps (reserve is primary there), paid bridge", () => {
+    expect(funnel(cardVerdict(child("waitlisted"), none, true)).secondaryReserveCta).toBeUndefined();
+    const offered = funnel(cardVerdict(child("offered"), none, true));
+    expect(offered.secondaryReserveCta).toBeUndefined();
+    expect(offered.primaryCta?.kind).toBe("reserve");
+    const paidCard = funnel(cardVerdict(child("added"), paid, false));
+    expect(paidCard.statusLine).toBe("SEAT RESERVED");
+    expect(paidCard.secondaryReserveCta).toBeUndefined();
+    // ...and the paid pre-submission card carries NO submitted-only review link.
+    expect(paidCard.secondaryReviewLink).toBeUndefined();
+  });
+});
+
 describe("cardVerdict — one verdict per ladder state", () => {
   it("added → APPLICATION JUST STARTED with a blue CONTINUE APPLICATION into the mini-app", () => {
     const v = funnel(cardVerdict(child("added"), none, false));
@@ -186,14 +227,16 @@ describe("cardVerdict — one verdict per ladder state", () => {
     ).toBe(true);
   });
 
-  it("offered but the legacy column has not caught up → NO reserve CTA (the gate refuses)", () => {
-    // Impossible for sync-trigger rows, but the card must never render a CTA
-    // the route will refuse: the gate is the same predicate on both sides.
+  it("offered with a lagging legacy column → reserve CTA STAYS (direct reserve admits it)", () => {
+    // Pre-2026-08-02 this cell refused (the status ladder gated it). Direct
+    // reserve retired the ladder for parents: the only refusals left are
+    // paid/pending and waitlisted-on-either-column, so the card and the route
+    // both admit this row — still the same predicate on both sides.
     const v = funnel(cardVerdict(child("offered", "in_review"), none, true));
-    expect(v.primaryCta).toBeUndefined();
+    expect(v.primaryCta).toEqual({ kind: "reserve", label: "Reserve seat · $250" });
     expect(
       canReserveSeatForChild({ status: "in_review", applicantState: "offered", deposits: none })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("offered with a clearing (pending) debit → no CTA, the processing note instead", () => {

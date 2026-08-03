@@ -11,9 +11,11 @@ import {
   NEXT_STEPS,
   POLICY_CLAIMS_FOR_PETER,
   REFUND_POLICY,
+  fulfilVerdict,
   nextStepsReachable,
   policyVersionAtLeast,
   resolveOrigin,
+  webhookPlan,
 } from "@/app/lib/funnel/deposit-rules";
 import {
   buildCheckoutSessionParams,
@@ -87,14 +89,18 @@ describe("R51a — the policy record", () => {
     // With a child-scoped key and stable params, Stripe replays the same
     // session; expires_at shortens the window to the 30-minute minimum.
     const consent = buildCheckoutSessionParams(SESSION_INPUT, "consent_tick");
-    expect(consent.idempotencyKey).toBe("deposit:child-1");
+    // Since U3 the key carries the policy VERSION: the params embed the
+    // policy text, and a text bump under a version-blind key collides with
+    // Stripe's 24h-retained pre-bump entry (idempotency_error → generic 500
+    // lockout for that child). Stable within an era; rotates with the params.
+    expect(consent.idempotencyKey).toBe(`deposit:child-1:${REFUND_POLICY.version}`);
     expect(consent.params.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
     // The degraded mode uses a DIFFERENT (still child-scoped) key: Stripe
     // stores the first result under a key — including the missing-ToS
     // error — and refuses the same key with different params, so the
     // text-only retry must not reuse the consent-mode key.
     const degraded = buildCheckoutSessionParams(SESSION_INPUT, "text_only");
-    expect(degraded.idempotencyKey).toBe("deposit:child-1:notos");
+    expect(degraded.idempotencyKey).toBe(`deposit:child-1:${REFUND_POLICY.version}:notos`);
     const src = read("app/api/checkout/route.ts");
     // The attempt row remains the R51a presentation record, linked post-create.
     expect(src).toContain('.update({ stripe_session_id: session.id })');
@@ -236,10 +242,10 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
     expect(first.consentTick).toBe(false);
     expect(calls).toHaveLength(2);
     expect(calls[0].params.consent_collection).toEqual({ terms_of_service: "required" });
-    expect(calls[0].key).toBe("deposit:child-1");
+    expect(calls[0].key).toBe(`deposit:child-1:${REFUND_POLICY.version}`);
     expect(calls[1].params.consent_collection).toBeUndefined();
     expect(calls[1].params.custom_text).toEqual({ submit: { message: REFUND_POLICY.text } });
-    expect(calls[1].key).toBe("deposit:child-1:notos"); // never reuse a key with different params
+    expect(calls[1].key).toBe(`deposit:child-1:${REFUND_POLICY.version}:notos`); // never reuse a key with different params
     // ONCE per process: the next checkout goes straight to text_only.
     const second = await createCheckoutSessionWithConsent(deps, SESSION_INPUT);
     expect(second.consentTick).toBe(false);
@@ -305,10 +311,90 @@ describe("consent at checkout (P0 2026-07-30) — the policy renders and is acce
   });
 });
 
+describe("the policy version↔text bind (U3): a text edit MUST bump the version", () => {
+  it("pins the live version AND the live text's hash together", () => {
+    // "Change the TEXT → bump the VERSION, always" was a comment, not a
+    // mechanism (U3 review): the membership and phrase pins are blind to a
+    // text edit that keeps both phrases and forgets the bump — silently
+    // decoupling recorded acceptances from what a parent actually saw. This
+    // pin makes the rule executable: edit the text and this hash reddens;
+    // the fix is ALWAYS all three together — new text, bumped version,
+    // PUBLISHED_POLICY_VERSIONS append — then update this pin.
+    expect(REFUND_POLICY.version).toBe("2026-08-02.1");
+    expect(policyHash(REFUND_POLICY.text)).toBe(
+      "2430855d2621f2702f5a5e018ae80cebbc1a4dd477512938beae75377371c0ba"
+    );
+  });
+
+  it("the 2026-08-02.1 clause is application-neutral — the substantive change is pinned", () => {
+    // Direct reserve lets a parent pay before any application exists; the
+    // consent clause must never re-couple to one.
+    expect(REFUND_POLICY.text).toContain("the child this deposit reserves a seat for");
+    expect(REFUND_POLICY.text).not.toContain("named on this application");
+  });
+});
+
+describe("direct reserve end-to-end — a real-flow child through gate → webhook → gate (U2)", () => {
+  // The fixture-derivation lesson (docs/solutions 2026-08-01): the child is
+  // shaped exactly as the CREATION paths write it (FP signup and funnel
+  // add-child both insert status='draft', applicant_state='added'), and the
+  // deposit list is a stateful store later steps read from — never a
+  // hand-seeded "offered" row.
+  it("draft+added child: gate opens → fulfil writes → gate closes → replay is a noop", () => {
+    const child = { status: "draft", applicantState: "added" };
+    const deposits: { status: string; refunded_at: string | null }[] = [];
+
+    // 1. The gate the route consults is OPEN pre-decision (the shortcut's point).
+    expect(canReserveSeatForChild({ ...child, deposits })).toBe(true);
+
+    // 2. Stripe completes with payment_status paid → the webhook plans a fulfil.
+    expect(webhookPlan({ type: "checkout.session.completed", paymentStatus: "paid" })).toEqual({
+      kind: "fulfil",
+    });
+
+    // 3. No existing row → write; the store now holds the paid deposit.
+    expect(fulfilVerdict(deposits[0] ?? null)).toBe("write");
+    deposits.push({ status: "paid", refunded_at: null });
+
+    // 4. The SAME gate, reading the store the webhook wrote, is now closed.
+    expect(canReserveSeatForChild({ ...child, deposits })).toBe(false);
+
+    // 5. A redelivered completed event replays as a noop — never a second write.
+    expect(fulfilVerdict(deposits[0])).toBe("replay_noop");
+  });
+
+  it("the trigger fixes ride along: first pick lands while paid; first submission still seeds (migration scan)", () => {
+    // The U2 adversarial review's two cascades, pinned against the migration
+    // text: (1) the group lock guards only CHANGES of an already-set group
+    // (an early payer's FIRST pick must land); (2) the seeding trigger's
+    // live-paid skip exempts the first submission and first pick (a
+    // pay-then-submit family must not lose its child_reviews row forever).
+    const sql = read("supabase/migrations/20260902120000_direct_reserve_trigger_fixes.sql");
+    expect(sql).toContain("coalesce(OLD.group_slug, '') <> ''"); // lock: changes only
+    expect(sql).toContain("(OLD.status = 'draft' and NEW.status = 'submitted')");
+    expect(sql).toContain("coalesce(OLD.group_slug, '') = ''"); // seed: first pick exempt
+  });
+
+  it("the route no longer carries a draft-block — the gate is the only status arbiter (wiring scan)", () => {
+    const src = read("app/api/checkout/route.ts");
+    expect(src).not.toContain('child.status === "draft"');
+    expect(src).not.toContain("Submit the application before reserving a seat.");
+    // The checks that MUST survive the removal, still present:
+    expect(src).toContain("canReserveSeatForChild");
+    expect(src).toContain('d.status === "pending"');
+    expect(src).toContain("getSeatsRemainingStrict");
+  });
+});
+
 describe("the server gates", () => {
-  it("ownership refusal equals non-existent child (RLS answers both with no rows) — and pre-offer states refuse", () => {
+  it("ownership refusal equals non-existent child (RLS answers both with no rows) — and only waitlisted refuses", () => {
+    // Direct reserve (2026-08-02): pre-offer states pass the gate now — the
+    // refusals left are paid/pending and waitlisted on either column.
     expect(
       canReserveSeatForChild({ status: "submitted", applicantState: "in_review", deposits: [] })
+    ).toBe(true);
+    expect(
+      canReserveSeatForChild({ status: "submitted", applicantState: "waitlisted", deposits: [] })
     ).toBe(false);
     expect(
       canReserveSeatForChild({ status: "offered", applicantState: "offered", deposits: [] })

@@ -8,7 +8,7 @@ import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
 import {
   type Child,
   PATH_TASK_TOTAL,
-  canReserveSeat,
+  canReserveSeatForChild,
   cardVerdict,
   childName,
   completeness,
@@ -214,6 +214,28 @@ export default function DashboardApp({
           Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
         </p>
       </>
+    );
+  };
+
+  // Direct reserve (2026-08-02): the SECONDARY reserve action on
+  // pre-submission cards — outlined twin below the primary application CTA,
+  // same reserveSeat path (dispute-evidence posture never forks), same
+  // double-click guard as the primary reserve button.
+  const renderSecondaryReserve = (c: Child, label: string) => {
+    const reserving = reservingId === c.id;
+    return (
+      <div className="mt-3 flex flex-col items-end">
+        <button
+          onClick={() => reserveSeat(c.id)}
+          disabled={reserving}
+          className={`${reviewPillClass} disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          {reserving ? "Opening checkout…" : label}
+        </button>
+        <p className="mt-2 text-right font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
+          Fully refundable until {DEPOSIT_REFUND_DEADLINE_LABEL}
+        </p>
+      </div>
     );
   };
 
@@ -484,6 +506,12 @@ export default function DashboardApp({
                       ) : null}
                     </div>
                   )}
+                  {/* Direct reserve (2026-08-02): the secondary reserve twin
+                      on pre-submission cards (path register parity). */}
+                  {verdict.kind === "funnel" &&
+                    verdict.secondaryReserveCta &&
+                    cta?.kind !== "reserve" &&
+                    renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
                   {/* R1: the reserve block already carries the pill twin;
                       render here only when it did not. */}
                   {verdict.kind === "funnel" &&
@@ -611,9 +639,13 @@ export default function DashboardApp({
                 const childDeposits = depositsFor(c.id);
                 const paid = hasPaidDeposit(childDeposits);
                 const pendingLegacy = childDeposits.some((d) => d.status === "pending");
-                // Approval gate (R11–R13): the same predicate the checkout
-                // route enforces — reservable only at `offered` or later.
-                const canReserve = canReserveSeat(c.status, childDeposits);
+                // Direct reserve (2026-08-02): the same predicate the checkout
+                // route enforces — any un-deposited, non-waitlisted child.
+                const canReserve = canReserveSeatForChild({
+                  status: c.status,
+                  applicantState: c.applicantState,
+                  deposits: childDeposits,
+                });
                 // Reconnect U3: funnel children (non-NULL applicant_state)
                 // render the state-aware card; NULL children fall through to
                 // the legacy card below, byte-for-byte as before.
@@ -703,6 +735,11 @@ export default function DashboardApp({
                             ) : null}
                           </div>
                         )}
+                        {/* Direct reserve (2026-08-02): the secondary reserve
+                            twin on pre-submission cards. */}
+                        {verdict.secondaryReserveCta &&
+                          cta?.kind !== "reserve" &&
+                          renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
                         {/* R1: the reserve block already carries the pill
                             twin; render here only when it did not. */}
                         {verdict.secondaryReviewLink && cta?.kind !== "reserve" && (
@@ -777,10 +814,10 @@ export default function DashboardApp({
                       </p>
                     </div>
 
-                    {/* Seat deposit CTA (R11–R13): paid always wins; the
-                        deposit unlocks only once admissions approves
-                        (status `offered` or later); every pre-approval
-                        stage shows the same blanket under-review message. */}
+                    {/* Seat deposit CTA: paid always wins; since direct
+                        reserve (2026-08-02) the deposit is open to every
+                        un-deposited, non-waitlisted child — no approval
+                        step precedes payment. */}
                     <div className="mt-4 border-t border-line pt-4">
                       {paid ? (
                         <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
@@ -792,11 +829,22 @@ export default function DashboardApp({
                           action needed.
                         </p>
                       ) : canReserve ? (
-                        renderReserveCta(c)
-                      ) : c.status === "waitlisted" ? (
-                        // W7: never "Under Review" for a waitlisted family —
-                        // they have been reviewed, and promising a deposit
-                        // step next is simply untrue for them.
+                        c.status === "draft" ? (
+                          // A draft child has nothing to "review" yet — the
+                          // top of the card already carries Continue
+                          // application to the same href, so the reserve
+                          // block renders the button-only twin (no review
+                          // link) rather than a misleading duplicate pair.
+                          renderSecondaryReserve(c, "Reserve seat · $250")
+                        ) : (
+                          renderReserveCta(c)
+                        )
+                      ) : (
+                        // Direct reserve (2026-08-02): the gate refuses only
+                        // waitlisted children now — the old "under review" and
+                        // "submit first" branches promised an approval step
+                        // that no longer precedes payment. W7 still holds:
+                        // never "Under Review" for a waitlisted family.
                         <>
                           <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
                             On the waitlist
@@ -805,19 +853,6 @@ export default function DashboardApp({
                             Seats open when plans change. We contact you first.
                           </p>
                         </>
-                      ) : c.status !== "draft" ? (
-                        <>
-                          <p className="font-mono text-[0.7rem] uppercase tracking-[0.1em] text-ink">
-                            Application Under Review
-                          </p>
-                          <p className="mt-2 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                            Upon Acceptance, the next step is a fully refundable $250 deposit.
-                          </p>
-                        </>
-                      ) : (
-                        <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-muted">
-                          Submit the application to reserve a seat ($250, refundable)
-                        </p>
                       )}
                     </div>
                   </div>

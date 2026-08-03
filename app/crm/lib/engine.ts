@@ -78,6 +78,61 @@ export function shouldClearOverride(truth: FamilyTruth): boolean {
   return hasPaidDeposit(truth) || hasMemberReview(truth);
 }
 
+/* ------------------------------------------------------- direct reserve */
+
+/** The staff-facing marker label — one spelling, consumed by stageDetail. */
+export const DIRECT_RESERVE_MARKER = "direct reserve — no application";
+
+/**
+ * Direct reserve (2026-08-02, nav-deposit-shortcut U5): the children whose
+ * seat was paid for BEFORE a staff decision — a live paid deposit on a
+ * child whose `status` sits before `offered`. Staff confirm each of them —
+ * spot or refund — by the Sept 19 kickoff, so the pipeline must keep them
+ * distinguishable until that confirmation happens.
+ *
+ * PRE-OFFER, not just draft (whole-branch review): a pay-then-submit
+ * family moves draft → submitted while staff still owe them the
+ * confirmation — the trigger fixes (20260902120000) exist precisely so
+ * that progression works. Keying the marker on `draft` alone made the
+ * family vanish from the pipeline at the moment of highest ambiguity.
+ * The marker clears exactly when staff act: move_candidate to `offered`/
+ * `member` (spot) or a refund (paid row gone). `invited` stays marked —
+ * staff engagement is not a seat decision. Derived from `children.status`
+ * alone (no applicant_state in the CRM fetch); unknown statuses stay
+ * unmarked (fail quiet, never a false badge).
+ */
+const PRE_OFFER_STATUSES = new Set(["draft", "submitted", "in_review", "invited"]);
+
+export function directReserveChildIds(
+  children: readonly { id: string; status: string }[],
+  deposits: readonly { child_id: string; status: string }[]
+): string[] {
+  const paid = new Set(
+    deposits.filter((d) => d.status === "paid").map((d) => d.child_id)
+  );
+  return children
+    .filter((c) => PRE_OFFER_STATUSES.has(c.status) && paid.has(c.id))
+    .map((c) => c.id);
+}
+
+/**
+ * Append the marker to a family's stage-detail string whenever a
+ * direct-reserve child exists — on EVERY stage, not just `deposit_paid`:
+ * a sibling's `member` review outranks the family stage (deriveStage), and
+ * hiding the marker behind the stage switch made exactly the child staff
+ * must confirm invisible in mixed families (U5 review). Pure, so the
+ * composition is testable without the server-only queries module.
+ */
+export function withDirectReserveMarker(
+  detail: string,
+  children: readonly { id: string; status: string }[],
+  deposits: readonly { child_id: string; status: string }[]
+): string {
+  return directReserveChildIds(children, deposits).length > 0
+    ? `${detail} · ${DIRECT_RESERVE_MARKER}`
+    : detail;
+}
+
 /* ----------------------------------------------------------- suggestHeat */
 
 /**

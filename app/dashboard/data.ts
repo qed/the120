@@ -66,9 +66,12 @@ export const statusMeta = (s: SeatStatus) => STATUS_FLOW[statusIndex(s)] ?? UNKN
 
 /** Gate-rejection copy shared by the checkout route and the dashboard client.
  *  The client renders the route's error verbatim, so this exact sentence (which
- *  deliberately doesn't suggest retrying) is what a gated family sees. */
+ *  deliberately doesn't suggest retrying) is what a gated family sees. Since
+ *  direct reserve (2026-08-02) the gate refuses only waitlisted children, so
+ *  this is waitlist copy — the old under-review sentence claimed an approval
+ *  step that no longer exists. */
 export const RESERVE_GATE_MESSAGE =
-  "Your application is still under review — checkout opens once it's approved.";
+  "The 120's seats are spoken for right now — your child is on the waitlist, and we'll email you the moment a spot opens.";
 
 /** A live paid deposit exists. Always derive from the FULL deposit list —
  *  a refund-then-repay child has multiple rows and a single find() can grab
@@ -77,12 +80,15 @@ export const hasPaidDeposit = (deposits: { status: string }[]) =>
   deposits.some((d) => d.status === "paid");
 
 /**
- * The seat-deposit approval gate (R11–R13), consumed by BOTH the dashboard
- * CTA and the checkout route so UI and server can never drift. Allow-list:
- * reservable only once staff move the child to `offered` — or any LATER
- * status, so a candidate advanced straight to `member` before paying is
- * never locked out — and only while no live paid deposit exists. Unknown
- * status strings fail closed.
+ * The OFFERED-OR-LATER ladder gate — since direct reserve (2026-08-02) this
+ * is the STAFF predicate only: its two remaining callers are the CRM
+ * offer-email gates (`offerButtonState` in app/crm/lib/offer-rules.ts and
+ * the send gate in app/crm/lib/actions/reviews.ts), where
+ * approval-precedes-send is still exactly right. The parent-facing deposit
+ * gate is `canReserveSeatForChild` below, which no longer composes this.
+ * Allow-list: `offered` or any LATER status — so a candidate advanced
+ * straight to `member` is never locked out — and only while no live paid
+ * deposit exists. Unknown status strings fail closed.
  */
 export function canReserveSeat(status: string, deposits: { status: string }[]): boolean {
   const idx = statusIndex(status as SeatStatus);
@@ -113,10 +119,25 @@ export function canReserveSeat(status: string, deposits: { status: string }[]): 
  * swapped and — for exactly those shared values — return a plausible wrong
  * answer. The overlap paragraph above is the reason this signature exists.
  *
- * Consulted by `/api/checkout` (the server gate). The dashboard CTA and the
- * two CRM gates still call `canReserveSeat` alone: their data paths don't
- * carry `applicant_state` yet, no funnel child exists until U6 ships, and
- * each adopts this predicate in the unit that loads the column into its view.
+ * Direct reserve (2026-08-02, nav-deposit-shortcut): this predicate no
+ * longer composes `canReserveSeat` — the offered-or-later status ladder was
+ * the approval gate the feature removes for parents. The refusals that
+ * remain are exactly the ones money-integrity and standing staff decisions
+ * demand: a live paid deposit, and `waitlisted` on EITHER column (the
+ * overlap paragraph above is why both columns are checked — the mistake
+ * fails open on the wrong column). Unknown applicant states still fail
+ * closed inside `applicantStateAllowsReserve`; unknown STATUS strings now
+ * pass, deliberately: the status ladder no longer gates parents, and the
+ * deposit/waitlist refusals carry the invariant.
+ *
+ * `canReserveSeat` itself is UNCHANGED and stays offered-or-later: its two
+ * staff CRM callers (`offerButtonState` in app/crm/lib/offer-rules.ts and
+ * the send gate in app/crm/lib/actions/reviews.ts) gate the OFFER EMAIL,
+ * where approval-precedes-send is still exactly right. A draft child must
+ * never become "sendable" — pinned in app/crm/__tests__/funnel-offer-rules.
+ *
+ * Consulted by `/api/checkout` (the server gate) and both dashboard card
+ * paths (funnel verdict + legacy card).
  */
 export function canReserveSeatForChild(opts: {
   status: string;
@@ -124,7 +145,8 @@ export function canReserveSeatForChild(opts: {
   deposits: { status: string }[];
 }): boolean {
   return (
-    canReserveSeat(opts.status, opts.deposits) &&
+    !hasPaidDeposit(opts.deposits) &&
+    opts.status !== "waitlisted" &&
     applicantStateAllowsReserve(opts.applicantState)
   );
 }
@@ -214,6 +236,14 @@ export type CardVerdict =
        *  "Open application" links are retired — every card carries only the
        *  blue CTA pair, Continue application / Review application). */
       secondaryReviewLink?: { label: string; href: string };
+      /** Direct reserve (2026-08-02): pre-submission cells whose child passes
+       *  the relaxed gate carry the reserve action as a SECONDARY button —
+       *  the primary CTA stays "Continue application" (the `/start` flow is
+       *  untouched by the shortcut; a mid-application child must not lose
+       *  their resume entry). The `next_steps` cells keep reserve as the
+       *  primary CTA exactly as before. Typed via Extract so the shape can
+       *  never drift from the reserve variant of FunnelCardCta. */
+      secondaryReserveCta?: Extract<FunnelCardCta, { kind: "reserve" }>;
     };
 
 /**
@@ -334,12 +364,16 @@ export function cardVerdict(
             statusLine: "APPLICATION JUST STARTED",
             tone: "red",
             primaryCta: { kind: "start", label: "Continue application", href: miniAppHref },
+            note: pendingNote,
+            secondaryReserveCta: reserveCta,
           }
         : {
             kind: "funnel",
             statusLine: "APPLICATION JUST STARTED",
             tone: "red",
             primaryCta: { kind: "compose", label: "Continue application", href: miniAppHref },
+            note: pendingNote,
+            secondaryReserveCta: reserveCta,
           };
     case "dashboard":
       // Only `dossier` reaches here — `legacy` and `enrolled` returned above.
@@ -352,6 +386,8 @@ export function cardVerdict(
         statusLine: activeProjectName?.trim() || "APPLICATION JUST STARTED",
         tone: "red",
         primaryCta: { kind: "continue_dossier", label: "Continue application", href: miniAppHref },
+        note: pendingNote,
+        secondaryReserveCta: reserveCta,
       };
     case "status_only":
       switch (next.intent) {
@@ -365,14 +401,18 @@ export function cardVerdict(
             kind: "funnel",
             statusLine: activeProjectName?.trim() || "SUBMITTED FOR REVIEW",
             tone: "red",
+            note: pendingNote,
             secondaryReviewLink,
+            secondaryReserveCta: reserveCta,
           };
         case "in_review":
           return {
             kind: "funnel",
             statusLine: activeProjectName?.trim() || "UNDER REVIEW",
             tone: "red",
+            note: pendingNote,
             secondaryReviewLink,
+            secondaryReserveCta: reserveCta,
           };
         case "waitlisted":
           // F7: never a payment CTA — checkout is closed for this family.

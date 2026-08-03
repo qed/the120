@@ -348,9 +348,18 @@ export function buildCheckoutSessionParams(
     params,
     // CHILD-scoped with STABLE params (no attempt id in metadata — the
     // attempt links to the session afterwards): a double-click replays the
-    // SAME open session instead of minting a second payable one.
+    // SAME open session instead of minting a second payable one. The POLICY
+    // VERSION is part of the key (2026-08-02, U3 review): the params embed
+    // REFUND_POLICY.text, so a text bump changes the params under a key
+    // Stripe retains for 24h — a child with an abandoned pre-bump session
+    // would hit idempotency_error (same key, different params) as a generic
+    // 500 on every retry until the key aged out. Versioned keys stay stable
+    // within a policy era (double-click still replays) and rotate exactly
+    // when the params do.
     idempotencyKey:
-      mode === "consent_tick" ? `deposit:${input.childId}` : `deposit:${input.childId}:notos`,
+      mode === "consent_tick"
+        ? `deposit:${input.childId}:${REFUND_POLICY.version}`
+        : `deposit:${input.childId}:${REFUND_POLICY.version}:notos`,
   };
 }
 

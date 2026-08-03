@@ -297,8 +297,12 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
   });
 
   it("both registers suppress the standalone review link when the reserve block already carries the pill", () => {
-    // The double-render guard exists at BOTH trailing render sites.
-    expect(app.match(/cta\?\.kind !== "reserve"/g)?.length).toBe(2);
+    // The double-render guard exists at BOTH trailing render sites — twice
+    // per site since direct reserve (2026-08-02): once for the review pill,
+    // once for the secondary reserve twin.
+    expect(app.match(/cta\?\.kind !== "reserve"/g)?.length).toBe(4);
+    // And the secondary reserve twin renders at both registers.
+    expect(app.match(/renderSecondaryReserve\(c, verdict\.secondaryReserveCta\.label\)/g)?.length).toBe(2);
   });
 
   it("the disabled twin blocks every input modality while checkout opens (anchor has no real disabled)", () => {

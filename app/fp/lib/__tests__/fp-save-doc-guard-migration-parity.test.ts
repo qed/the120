@@ -3,6 +3,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   SAVE_DOC_CARRIED_TOP_KEYS,
+  SAVE_DOC_DELETED_ID_MAX_CHARS,
+  SAVE_DOC_DELETED_IDS_KEY,
+  SAVE_DOC_DELETED_IDS_MAX,
   SAVE_DOC_IDEA_IDENTITY_KEY,
   SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
@@ -19,9 +22,18 @@ import {
 // operators that make omission key-level, the docVersion gate, the
 // element-count fuse, the never-reject posture (warn + return NEW, no `raise
 // exception`), and the service-role/JWT-less exemption.
-describe("migration parity: fp_save_doc_guard.sql", () => {
+//
+// v2 (idea tombstones): the guard function was REPLACED whole by
+// 20260911120000_fp_save_doc_guard_tombstones.sql (20260906 is applied
+// history and must not be amended in place), so this parity test parses the
+// v2 file — every v1 structural pin below still holds there, plus the new
+// deletedIdeaIds pins.
+describe("migration parity: fp_save_doc_guard_tombstones.sql (guard v2)", () => {
   const raw = readFileSync(
-    path.resolve(process.cwd(), "supabase/migrations/20260906120000_fp_save_doc_guard.sql"),
+    path.resolve(
+      process.cwd(),
+      "supabase/migrations/20260911120000_fp_save_doc_guard_tombstones.sql"
+    ),
     "utf8"
   );
   // Strip `--` line comments so structural assertions test the DDL, never the
@@ -31,7 +43,7 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
   // The guard function body (between its create statement and its closing $$;)
   // so no assertion can be satisfied by a lookalike elsewhere in the file.
   const body = (() => {
-    const start = sql.search(/create\s+or\s+replace\s+function\s+public\.fp_player_saves_doc_guard/i);
+    const start = sql.search(/create\s+(?:or\s+replace\s+)?function\s+public\.fp_player_saves_doc_guard/i);
     expect(start, "doc guard function exists").toBeGreaterThanOrEqual(0);
     const end = sql.indexOf("$$;", start);
     expect(end, "doc guard closes with $$;").toBeGreaterThan(start);
@@ -45,6 +57,20 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(
       /create\s+trigger\s+fp_player_saves_doc_guard\s+before\s+update\s+on\s+public\.fp_player_saves\s+for\s+each\s+row\s+execute\s+function\s+public\.fp_player_saves_doc_guard\(\)/i.test(sql)
     ).toBe(true);
+  });
+
+  it("v2 DROPs the trigger BEFORE the function it depends on, then recreates the function with every attribute re-established", () => {
+    // The 20260909 convention: a DROP discards attributes, so security
+    // definer and the search_path pin must be re-declared (v1 granted
+    // nothing explicitly on this trigger function, so there is no ACL to
+    // re-apply). The trigger drop must precede the function drop.
+    const trigDropAt = sql.search(/drop\s+trigger\s+if\s+exists\s+fp_player_saves_doc_guard/i);
+    const fnDropAt = sql.search(/drop\s+function\s+if\s+exists\s+public\.fp_player_saves_doc_guard\s*\(\s*\)/i);
+    const fnCreateAt = sql.search(/create\s+function\s+public\.fp_player_saves_doc_guard/i);
+    expect(trigDropAt).toBeGreaterThanOrEqual(0);
+    expect(fnDropAt).toBeGreaterThan(trigDropAt);
+    expect(fnCreateAt).toBeGreaterThan(fnDropAt);
+    expect(/security\s+definer\s+set\s+search_path\s*=\s*public/i.test(sql)).toBe(true);
   });
 
   it("the trigger name sorts before the revision guard's, so the repair runs first", () => {
@@ -172,9 +198,71 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     expect(/jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*i\s*\)\s*=\s*'object'/i.test(body)).toBe(true);
   });
 
-  it("appends unmatched OLD ideas at the tail (object entries only — no resurrection of junk)", () => {
-    const tail = /for\s+j\s+in\s+0\s*\.\.\s*jsonb_array_length\s*\(\s*v_old_ideas\s*\)\s*-\s*1\s+loop\s+if\s+not\s*\(\s*v_used\s+@>\s+array\[j\]\s*\)\s+and\s+jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*j\s*\)\s*=\s*'object'\s+then\s+v_out_ideas\s*:=\s*v_out_ideas\s*\|\|\s*jsonb_build_array\s*\(\s*v_old_ideas\s*->\s*j\s*\)/i;
+  it("appends unmatched OLD ideas at the tail (object entries only — no resurrection of junk) with the v2 tombstone skip FIRST", () => {
+    // The tail loop's gate (unused + object) is unchanged from v1; inside it,
+    // the tombstone skip runs BEFORE the append so a tombstoned id is the
+    // ONLY thing that can suppress the accidental-erasure protection.
+    const tail = new RegExp(
+      String.raw`for\s+j\s+in\s+0\s*\.\.\s*jsonb_array_length\s*\(\s*v_old_ideas\s*\)\s*-\s*1\s+loop\s+if\s+not\s*\(\s*v_used\s+@>\s+array\[j\]\s*\)\s+and\s+jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*j\s*\)\s*=\s*'object'\s+then\s+if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*->\s*j\s*->\s*'${SAVE_DOC_IDEA_IDENTITY_KEY}'\s*\)\s*=\s*'string'\s+and\s+v_tombstones\s+\?\s+\(\s*v_old_ideas\s*->\s*j\s*->>\s*'${SAVE_DOC_IDEA_IDENTITY_KEY}'\s*\)\s+then\s+continue\s*;\s*end\s+if\s*;\s*v_out_ideas\s*:=\s*v_out_ideas\s*\|\|\s*jsonb_build_array\s*\(\s*v_old_ideas\s*->\s*j\s*\)`,
+      "i"
+    );
     expect(tail.test(body)).toBe(true);
+  });
+
+  // ------------------------------------------------- tombstones (v2)
+
+  it("builds the tombstone set from NEW's deletedIdeaIds FIRST, then OLD's (NEW priority under the cap)", () => {
+    const newSide = new RegExp(
+      String.raw`case\s+when\s+s\s*=\s*1\s+then\s+NEW\.doc\s*->\s*'${SAVE_DOC_DELETED_IDS_KEY}'\s+else\s+OLD\.doc\s*->\s*'${SAVE_DOC_DELETED_IDS_KEY}'\s+end`,
+      "i"
+    );
+    expect(newSide.test(body)).toBe(true);
+  });
+
+  it(`scans only the first ${SAVE_DOC_DELETED_IDS_MAX} elements per side and caps the set at ${SAVE_DOC_DELETED_IDS_MAX} (bounded CPU, clamped output)`, () => {
+    expect(
+      new RegExp(
+        String.raw`least\s*\(\s*jsonb_array_length\s*\(\s*v_side\s*\)\s*,\s*${SAVE_DOC_DELETED_IDS_MAX}\s*\)\s*-\s*1`,
+        "i"
+      ).test(body),
+      "per-side scan bound"
+    ).toBe(true);
+    expect(
+      new RegExp(
+        String.raw`exit\s+when\s+jsonb_array_length\s*\(\s*v_tombstones\s*\)\s*>=\s*${SAVE_DOC_DELETED_IDS_MAX}`,
+        "i"
+      ).test(body),
+      "total cap"
+    ).toBe(true);
+  });
+
+  it(`keeps only string entries of 1..${SAVE_DOC_DELETED_ID_MAX_CHARS} chars, de-duplicated — never raises on junk`, () => {
+    expect(/jsonb_typeof\s*\(\s*v_entry\s*\)\s*=\s*'string'/i.test(body)).toBe(true);
+    expect(
+      new RegExp(
+        String.raw`char_length\s*\(\s*v_id\s*\)\s+between\s+1\s+and\s+${SAVE_DOC_DELETED_ID_MAX_CHARS}`,
+        "i"
+      ).test(body)
+    ).toBe(true);
+    expect(/not\s*\(\s*v_tombstones\s+\?\s+v_id\s*\)/i.test(body)).toBe(true);
+  });
+
+  it("writes the union back whenever non-empty OR NEW carried the key (clamp), never inventing it otherwise", () => {
+    const writeBack = new RegExp(
+      String.raw`if\s+jsonb_array_length\s*\(\s*v_tombstones\s*\)\s*>\s*0\s+or\s+NEW\.doc\s+\?\s+'${SAVE_DOC_DELETED_IDS_KEY}'\s+then\s+v_doc\s*:=\s*jsonb_set\s*\(\s*v_doc\s*,\s*'\{${SAVE_DOC_DELETED_IDS_KEY}\}'\s*,\s*v_tombstones\s*\)`,
+      "i"
+    );
+    expect(writeBack.test(body)).toBe(true);
+  });
+
+  it("runs the tombstone union INSIDE the protected region, before the ideas gate (so it applies even when idea handling is skipped)", () => {
+    const unionAt = body.search(new RegExp(String.raw`'\{${SAVE_DOC_DELETED_IDS_KEY}\}'`, "i"));
+    const ideasGateAt = body.search(
+      /if\s+jsonb_typeof\s*\(\s*v_old_ideas\s*\)\s*=\s*'array'\s+and\s+jsonb_typeof\s*\(\s*v_new_ideas\s*\)\s*=\s*'array'\s+then/i
+    );
+    const protectedAt = body.search(/begin\s+v_doc\s*:=\s*NEW\.doc/i);
+    expect(unionAt).toBeGreaterThan(protectedAt);
+    expect(unionAt).toBeLessThan(ideasGateAt);
   });
 
   // -------------------------------------------------- defensive shape gates
@@ -218,5 +306,12 @@ describe("migration parity: fp_save_doc_guard.sql", () => {
     // The apply ritual is not complete until the synthetic probe passes.
     expect(raw).toMatch(/POST-APPLY VERIFICATION/i);
     expect(raw).toMatch(/probe/i);
+  });
+
+  it("the v2 header carries the tombstone deploy ordering (guard BEFORE DELETE_IDEA), the applied-ledger note, and the projection-unchanged note", () => {
+    expect(raw).toMatch(/BEFORE\s+the[\s\S]{0,80}DELETE_IDEA/i);
+    expect(raw).toMatch(/20260910/);
+    expect(raw).toMatch(/docVersion is NOT bumped/i);
+    expect(raw).toMatch(/PROJECTION UNCHANGED/i);
   });
 });

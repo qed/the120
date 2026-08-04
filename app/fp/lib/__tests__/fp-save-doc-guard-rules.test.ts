@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  SAVE_DOC_DELETED_ID_MAX_CHARS,
+  SAVE_DOC_DELETED_IDS_MAX,
   SAVE_DOC_IDEAS_FUSE_LIMIT,
   SAVE_DOC_MONOTONIC_IDEA_KEYS,
   guardSaveDocUpdate,
@@ -343,8 +345,8 @@ describe("guardSaveDocUpdate — new-build writes are a semantic no-op", () => {
     const oldDoc = newBuildDoc();
     const incoming = newBuildDoc();
     // The new build did some work since loading:
-    incoming.ideas[0].doneByTask["1.1.2"] = true;
-    incoming.businesses[0].doneByTask["4.1.2"] = true;
+    (incoming.ideas[0].doneByTask as Record<string, boolean>)["1.1.2"] = true;
+    (incoming.businesses[0].doneByTask as Record<string, boolean>)["4.1.2"] = true;
     const before = JSON.parse(JSON.stringify(incoming));
     const out = guardSaveDocUpdate(oldDoc, incoming);
     expect(out).toEqual(before);
@@ -421,6 +423,211 @@ describe("guardSaveDocUpdate — defensive posture (repairs, never rejects)", ()
     guardSaveDocUpdate(oldDoc, incoming);
     expect(oldDoc).toEqual(oldSnapshot);
     expect(incoming).toEqual(newSnapshot);
+  });
+});
+
+describe("guardSaveDocUpdate — idea tombstones (v2, the DELETE_IDEA support)", () => {
+  it("honors a deletion: OLD has idea X, NEW omits it and tombstones X.id → NOT re-appended", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [
+        { id: "keep", fields: {}, done: {} },
+        { id: "gone", fields: { oneLiner: "deleted" }, done: { "1.1#0": true } },
+      ],
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "keep", fields: {}, done: {} }],
+      deletedIdeaIds: ["gone"],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as {
+      ideas: Record<string, unknown>[];
+      deletedIdeaIds: string[];
+    };
+    expect(out.ideas).toHaveLength(1);
+    expect(out.ideas[0].id).toBe("keep");
+    expect(out.deletedIdeaIds).toEqual(["gone"]);
+  });
+
+  it("an old-build save (field omitted entirely) can NOT resurrect: OLD's tombstones union in and are honored", () => {
+    // The critical monotonicity case: the old build knows no deletedIdeaIds
+    // and — worse — its doc may still CONTAIN the deleted idea. The guard
+    // re-adds OLD's tombstones and then honors them, so X stays deleted.
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [
+        { id: "keep", fields: {}, done: {} },
+        { id: "x", fields: { oneLiner: "was deleted" }, done: {} },
+      ],
+      deletedIdeaIds: ["x"],
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "keep", fields: {}, done: {} }],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as {
+      ideas: Record<string, unknown>[];
+      deletedIdeaIds: string[];
+    };
+    expect(out.ideas).toHaveLength(1); // x NOT re-appended
+    expect(out.ideas[0].id).toBe("keep");
+    expect(out.deletedIdeaIds).toEqual(["x"]); // union re-added the tombstone
+  });
+
+  it("unions tombstones monotonically (NEW's first, then OLD's additions, de-duplicated)", () => {
+    const oldDoc = { docVersion: 1, ideas: [], deletedIdeaIds: ["a", "b"] };
+    const incoming = { docVersion: 1, ideas: [], deletedIdeaIds: ["b", "c"] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { deletedIdeaIds: string[] };
+    expect(out.deletedIdeaIds).toEqual(["b", "c", "a"]);
+  });
+
+  it("never removes an idea PRESENT in NEW's ideas, even when its id is tombstoned", () => {
+    // Tombstones only suppress RE-APPEND; the guard never deletes from NEW.
+    const oldDoc = { docVersion: 1, ideas: [{ id: "x", fields: {}, done: {} }] };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "x", fields: {}, done: {} }],
+      deletedIdeaIds: ["x"],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas).toHaveLength(1);
+    expect(out.ideas[0].id).toBe("x");
+  });
+
+  it("still re-appends NON-tombstoned missing ideas (the accidental-erasure protection stays)", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [
+        { id: "kept", fields: {}, done: {} },
+        { id: "accident", fields: { oneLiner: "dropped by a bug" }, done: {} },
+        { id: "deleted", fields: {}, done: {} },
+      ],
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "kept", fields: {}, done: {} }],
+      deletedIdeaIds: ["deleted"],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas.map((i) => i.id)).toEqual(["kept", "accident"]);
+  });
+
+  it("works for legacy ids (legacy-idea-N)", () => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [
+        { id: "legacy-idea-0", fields: {}, done: {} },
+        { id: "legacy-idea-1", fields: {}, done: {} },
+      ],
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "legacy-idea-0", fields: {}, done: {} }],
+      deletedIdeaIds: ["legacy-idea-1"],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    expect(out.ideas.map((i) => i.id)).toEqual(["legacy-idea-0"]);
+  });
+
+  it("does NOT shield an id-LESS unmatched OLD idea (tombstones are id-keyed; it re-appends)", () => {
+    const oldDoc = { docVersion: 1, ideas: [{ fields: {}, done: {} }, { fields: { x: "y" }, done: {} }] };
+    const incoming = { docVersion: 1, ideas: [{ id: "a", fields: {}, done: {} }], deletedIdeaIds: ["a"] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { ideas: Record<string, unknown>[] };
+    // OLD[0] index-fuses with the id-bearing NEW idea; id-less OLD[1] is
+    // unmatched and NOT tombstoned (no id) → re-appended.
+    expect(out.ideas).toHaveLength(2);
+    expect(out.ideas[1]).toEqual({ fields: { x: "y" }, done: {} });
+  });
+
+  it(`clamps the union to ${SAVE_DOC_DELETED_IDS_MAX} entries (NEW's ids take priority under the cap)`, () => {
+    const many = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [],
+      deletedIdeaIds: many("old", SAVE_DOC_DELETED_IDS_MAX),
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      deletedIdeaIds: many("new", SAVE_DOC_DELETED_IDS_MAX + 50),
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { deletedIdeaIds: string[] };
+    expect(out.deletedIdeaIds).toHaveLength(SAVE_DOC_DELETED_IDS_MAX);
+    expect(out.deletedIdeaIds).toEqual(many("new", SAVE_DOC_DELETED_IDS_MAX));
+  });
+
+  it(`drops non-string entries, the empty string, and ids longer than ${SAVE_DOC_DELETED_ID_MAX_CHARS} chars`, () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      deletedIdeaIds: ["ok", 7, null, "", { id: "x" }, "y".repeat(SAVE_DOC_DELETED_ID_MAX_CHARS + 1), "z".repeat(SAVE_DOC_DELETED_ID_MAX_CHARS), ["nested"]],
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { deletedIdeaIds: string[] };
+    expect(out.deletedIdeaIds).toEqual(["ok", "z".repeat(SAVE_DOC_DELETED_ID_MAX_CHARS)]);
+  });
+
+  it.each([
+    ["a string", "not-an-array"],
+    ["a number", 42],
+    ["an object", { "0": "x" }],
+    ["null", null],
+    ["a boolean", true],
+  ])("never raises when NEW's deletedIdeaIds is %s — clamped to the normalized set", (_name, bad) => {
+    const oldDoc = {
+      docVersion: 1,
+      ideas: [{ id: "a", fields: {}, done: {} }],
+      deletedIdeaIds: ["dead"],
+    };
+    const incoming = {
+      docVersion: 1,
+      ideas: [{ id: "a", fields: {}, done: {} }],
+      deletedIdeaIds: bad,
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { deletedIdeaIds: string[] };
+    // The malformed value is replaced by the normalized union (OLD's set).
+    expect(out.deletedIdeaIds).toEqual(["dead"]);
+  });
+
+  it("never raises on a HUGE adversarial deletedIdeaIds (scan bounded, output capped)", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = {
+      docVersion: 1,
+      ideas: [],
+      deletedIdeaIds: Array.from({ length: 100_000 }, (_, i) => `id-${i}`),
+    };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as { deletedIdeaIds: string[] };
+    expect(out.deletedIdeaIds).toHaveLength(SAVE_DOC_DELETED_IDS_MAX);
+  });
+
+  it("does not invent the key when NEITHER side has tombstones (absent-stays-absent)", () => {
+    const oldDoc = newBuildDoc();
+    const incoming = oldBuildRewriteOf(oldDoc);
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(Object.hasOwn(out, "deletedIdeaIds")).toBe(false);
+  });
+
+  it("keeps a present-but-empty [] on NEW as [] when OLD has none (clamp is a no-op)", () => {
+    const oldDoc = { docVersion: 1, ideas: [] };
+    const incoming = { docVersion: 1, ideas: [], deletedIdeaIds: [] };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.deletedIdeaIds).toEqual([]);
+  });
+
+  it("unions tombstones even when idea handling is skipped (NEW's ideas not an array)", () => {
+    // The union is top-level monotonic state — it must survive independently
+    // of the per-idea repair path.
+    const oldDoc = { docVersion: 1, ideas: [], deletedIdeaIds: ["x"] };
+    const incoming = { docVersion: 1, ideas: "junk" };
+    const out = guardSaveDocUpdate(oldDoc, incoming) as Record<string, unknown>;
+    expect(out.deletedIdeaIds).toEqual(["x"]);
+    expect(out.ideas).toBe("junk"); // untouched
+  });
+
+  it("the docVersion gate still wins: differing versions pass through WITHOUT a tombstone union", () => {
+    const oldDoc = { docVersion: 1, ideas: [], deletedIdeaIds: ["x"] };
+    const incoming = { docVersion: 2, ideas: [] };
+    expect(guardSaveDocUpdate(oldDoc, incoming)).toBe(incoming);
   });
 });
 

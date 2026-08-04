@@ -56,7 +56,10 @@ supabase/.temp
 scripts/.staff-passwords.local.txt
 scripts/.path-passwords.local.txt
 scripts/.fw-rehearsal.local.txt
+scripts/.fp-cohort-credentials.local.md
+scripts/.fp-cohort-roster.local.json
 scripts/.tmp/
 
 # ce:review / ce:work run artifacts (local, per-run)
 .context/
+scripts/.fp-cohort-emails.local.json

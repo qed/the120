@@ -57,11 +57,14 @@ export default function Trial({
   sources,
   instantSubmit = false,
   onFinish,
+  onExit,
 }: {
   sources: TrialSource[];
   /** opt-in speedrun mode: number answers auto-fire at full length */
   instantSubmit?: boolean;
   onFinish: (score: number, results: ProblemResult[]) => void;
+  /** Leave early while preserving the answers already completed. */
+  onExit: (score: number, results: ProblemResult[]) => void;
 }) {
   const nativeSources = useMemo(() => uniqueTrialSources(sources), [sources]);
   const [initial] = useState(() => buildInitialTrial(nativeSources));
@@ -101,6 +104,7 @@ export default function Trial({
   const [problem, setProblem] = useState<Problem>(initial.problem);
   const [input, setInput] = useState("");
   const [flash, setFlash] = useState<"" | "good" | "bad">("");
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [dealt, setDealt] = useState(initial.nextIndex);
   const resultsRef = useRef<ProblemResult[]>([]);
   const scoreRef = useRef(0);
@@ -152,6 +156,22 @@ export default function Trial({
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [onFinish]);
+
+  const leaveReview = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onExit(scoreRef.current, resultsRef.current);
+  }, [onExit]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || doneRef.current) return;
+      event.preventDefault();
+      setConfirmLeave((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const advance = useCallback(() => {
     const next = serveNext();
@@ -216,13 +236,22 @@ export default function Trial({
       }}
     >
       <div className="mx-auto w-full max-w-xl px-4 pt-5">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-center justify-between gap-3">
           <p className="font-mono text-xs uppercase tracking-[0.14em] text-amber-300">
             Mixed Review · Wave {wave + 1}
           </p>
-          <p className={`font-mono text-2xl font-bold tabular-nums ${seconds <= 5 ? "mr-timer-low" : "text-white"}`}>
-            {seconds}s
-          </p>
+          <div className="flex shrink-0 items-center gap-3">
+            <p className={`font-mono text-2xl font-bold tabular-nums ${seconds <= 5 ? "mr-timer-low" : "text-white"}`}>
+              {seconds}s
+            </p>
+            <button
+              type="button"
+              onClick={() => setConfirmLeave(true)}
+              className="rounded-lg bg-red-500/20 px-3 py-1.5 font-mono text-xs text-red-300 hover:bg-red-500/30"
+            >
+              Leave <span className="hidden text-red-300/55 sm:inline">· Esc</span>
+            </button>
+          </div>
         </div>
         <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/15">
           <div
@@ -308,13 +337,7 @@ export default function Trial({
               </div>
             )
           ) : (
-            <div
-              className={
-                problem.choices!.length <= 2
-                  ? "mt-4 flex justify-center gap-3"
-                  : "mt-4 grid grid-cols-2 gap-2 min-[480px]:grid-cols-3 sm:grid-cols-5"
-              }
-            >
+            <div className="mt-4 flex flex-wrap justify-center gap-2 sm:gap-3">
               {problem.choices!.map((c) => (
                 <button
                   key={c}
@@ -322,10 +345,10 @@ export default function Trial({
                     ensureAudio();
                     answer(c === problem.answer);
                   }}
-                  className={`rounded-xl border border-white/20 bg-white/5 font-mono font-medium text-white transition-colors hover:border-amber-400 hover:bg-amber-400/15 ${
+                  className={`flex min-w-0 items-center justify-center whitespace-normal break-words rounded-xl border border-white/20 bg-white/5 text-center font-mono font-medium leading-tight text-white transition-colors [overflow-wrap:anywhere] hover:border-amber-400 hover:bg-amber-400/15 ${
                     problem.choices!.length <= 2
-                      ? "min-w-0 whitespace-normal break-words px-6 py-4 text-lg leading-tight [overflow-wrap:anywhere]"
-                      : "min-w-0 whitespace-normal break-words px-2 py-3 text-sm leading-tight [overflow-wrap:anywhere]"
+                      ? "min-h-14 basis-40 px-6 py-4 text-lg max-[380px]:basis-[calc(50%-0.25rem)]"
+                      : "min-h-12 basis-[calc(50%-0.25rem)] px-2 py-3 text-sm min-[480px]:basis-[calc(33.333%-0.375rem)] sm:basis-[calc(20%-0.6rem)]"
                   }`}
                 >
                   {c}
@@ -335,6 +358,32 @@ export default function Trial({
           )}
         </div>
       </div>
+
+      {confirmLeave && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="mx-6 max-w-sm rounded-2xl border border-white/15 bg-[#0d1322] p-6 text-center">
+            <p className="text-lg font-bold">Leave Mixed Review?</p>
+            <p className="mt-1 text-sm text-white/60">Your completed answers will still save.</p>
+            <div className="mt-5 flex justify-center gap-3">
+              <button
+                autoFocus
+                type="button"
+                onClick={leaveReview}
+                className="rounded-xl bg-red-500 px-5 py-2.5 font-mono text-xs font-bold text-white hover:bg-red-400"
+              >
+                LEAVE
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmLeave(false)}
+                className="rounded-xl border border-white/25 px-5 py-2.5 font-mono text-xs text-white/80 hover:border-white/60"
+              >
+                KEEP REVIEWING
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

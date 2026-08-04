@@ -1030,7 +1030,7 @@ export default function GauntletGame({
   );
 
   const finishTrial = useCallback(
-    (score: number, results: ProblemResult[]) => {
+    (score: number, results: ProblemResult[], returnToMenu = false) => {
       const after = applyResultsToFacts(save.facts, results);
       const seasonAfter = applyResultsToFacts(save.seasonFacts, results);
       setTrialScore(score);
@@ -1042,7 +1042,7 @@ export default function GauntletGame({
       );
       const tested = new Set(results.map((r) => r.key).filter((k) => universe.has(k))).size;
       setLastRecap(universe.size > 0 ? { tested, total: universe.size } : null);
-      sfxDefeat();
+      if (!returnToMenu) sfxDefeat();
       setSave((prev) => ({
         ...prev,
         xp: prev.xp + score * 2,
@@ -1053,7 +1053,7 @@ export default function GauntletGame({
           : prev.seasonFacts,
         daily: bumpDaily(prev, score >= 10),
       }));
-      setPhase("trialEnd");
+      setPhase(returnToMenu ? "menu" : "trialEnd");
       postTournamentMastery(save.seasonFacts, seasonAfter);
     },
     [applyResultsToFacts, countNewlyMastered, postTournamentMastery, save, tournament.isLive, trialSources]
@@ -1530,7 +1530,12 @@ export default function GauntletGame({
         />
       )}
       {phase === "trial" && (
-        <Trial sources={trialSources} instantSubmit={save.instantSubmit} onFinish={finishTrial} />
+        <Trial
+          sources={trialSources}
+          instantSubmit={save.instantSubmit}
+          onFinish={finishTrial}
+          onExit={(score, results) => finishTrial(score, results, true)}
+        />
       )}
       {(phase === "victory" || phase === "defeat") && lastStats && (
         <Result

@@ -109,3 +109,24 @@ from public.families where /* ... your email set ... */;
 - `docs/solutions/security-issues/supabase-autoconfirm-forged-consent-email-confirmation-signup-retrofit-2026-07-13.md` — the same `on_parent_created` / email-merge / `consent_given` mechanics from the attack angle (email-ownership forgery). Read together: this doc is the safe-write side, that one is the hijack risk.
 - `docs/solutions/integration-issues/supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md` — the Management-API execution channel these SQL snippets run through (token from Windows Credential Manager, UTF-8 body encoding).
 - `docs/solutions/database-issues/silent-zero-row-update-em-dash-hyphen-title-drift-crm-library-2026-07-14.md` — why you verify with a `count(*)` after every Management-API write, and the em-dash→hyphen flattening trap.
+
+---
+
+## Amendments (2026-08-04, from the FP beta cohort provisioning run)
+
+Two rules in this doc are now known to be incomplete:
+
+1. **The dual-table pre-check is not sufficient.** This doc says to pre-check an
+   email against `families` and `parents` before inserting. An `auth.users` row
+   can exist with **no** `public.parents` row (live instance: a warm contact whose
+   signup stopped early), so that pair classifies the contact as new and you try
+   to create. Add a third probe against `auth.users`. See
+   [an-auth-user-can-exist-without-its-owning-application-row](../logic-errors/an-auth-user-can-exist-without-its-owning-application-row-so-adopt-write-nothing-fails-the-next-fk-insert-2026-08-04.md).
+
+2. **The consent guidance reasons only about your own explicit write.** "Import
+   with `consent_given = false`" and "never insert a second family for them" both
+   assume adoption is the safe path. It is not sufficient: the trigger's link
+   branch OR-merges consent and **resets `signup_at`**, reopening a nurture
+   window, and children inserted under an adopted parent make that parent
+   `isStalledDraft` — so a contact you wrote nothing to can still be mailed. See
+   [writing-nothing-to-a-row-does-not-protect-it](../logic-errors/writing-nothing-to-a-row-does-not-protect-it-an-adjacent-insert-plus-an-unattended-consumer-still-sends-mail-2026-08-04.md).

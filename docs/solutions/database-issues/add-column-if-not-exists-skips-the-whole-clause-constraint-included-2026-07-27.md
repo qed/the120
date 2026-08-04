@@ -45,3 +45,13 @@ Found by the Unit 6 data-migrations review of
 column had never pre-existed; first apply verified `confdeltype = 'r'`), recorded
 because the idiom is copied file-to-file in this repo and the next copier may not
 have a clean first apply.
+
+---
+
+## Amendment (2026-08-04)
+
+Where this doc says only the `pg_constraint` query against the live database
+answers whether a constraint is live, read that as: **only the live database
+answers it — via `pg_constraint`, or via data only the new constraint permits.**
+The second route needs no Management API and works from PostgREST alone. See
+[prove-a-constraint-is-live-from-postgrest-alone](../integration-issues/prove-a-constraint-is-live-from-postgrest-alone-by-probing-for-data-only-the-new-constraint-permits-2026-08-04.md).

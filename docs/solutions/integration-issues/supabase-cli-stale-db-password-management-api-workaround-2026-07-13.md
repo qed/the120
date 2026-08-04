@@ -150,3 +150,16 @@ Verified working 2026-07-13: applied all three CRM migrations, ran verification 
 - `artifacts/roadmap.md` §T6 — Supabase project ref and the stale-password file's rotation to-do.
 - `docs/solutions/integration-issues/vercel-dns-zone-not-provisioned-for-external-domain-2026-07-12.md` — sibling doc; thematic kinship only (infrastructure tool silently misbehaves; fix is an out-of-band channel).
 - GitHub issues: none related (searched `supabase OR migration OR password`, zero results).
+
+---
+
+## Amendment (2026-08-04)
+
+The channel table below presents the Management API as *the* schema channel and
+PostgREST as data-only. **Data can answer a schema question:** probing for a
+value that only the new constraint permits proves the constraint is live, with no
+Management API call at all. Useful when a preflight should not be coupled to a
+second credential channel — and necessary when the CLI token is not merely stale
+but flatly **unauthorized**, a failure mode this doc does not name and for which
+it offers no fallback. See
+[prove-a-constraint-is-live-from-postgrest-alone](prove-a-constraint-is-live-from-postgrest-alone-by-probing-for-data-only-the-new-constraint-permits-2026-08-04.md).

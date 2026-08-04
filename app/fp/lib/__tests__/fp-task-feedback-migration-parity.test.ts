@@ -6,6 +6,8 @@ import {
   FEEDBACK_BODY_MAX_CHARS,
   FEEDBACK_CAP_ERRCODE,
   FEEDBACK_DAILY_CAP,
+  FEEDBACK_KIND_DEFAULT,
+  FEEDBACK_KINDS,
   FEEDBACK_TASK_ID_MAX_CHARS,
   FEEDBACK_TASK_ID_PATTERN,
 } from "../fp-task-feedback-rules";
@@ -196,5 +198,69 @@ describe("migration parity: fp_task_feedback.sql", () => {
     expect(raw).toMatch(/BEFORE the first-profit client/i);
     // Retention ritual: a commented purge statement the owner can run.
     expect(raw).toMatch(/interval '12 months'/);
+  });
+});
+
+// ── The kind column (Change #9: task-level vs app-level suggestions) ──
+// Same parity discipline against its OWN migration file: the `kind` closed set
+// and default live in BOTH fp-task-feedback-rules.ts and the SQL, so they get
+// the parse-the-migration treatment; the structural assertions pin that the
+// migration stays ADDITIVE (no posture change smuggled in beside a column).
+describe("migration parity: fp_feedback_kind.sql", () => {
+  const raw = readFileSync(
+    path.resolve(process.cwd(), "supabase/migrations/20260910120000_fp_feedback_kind.sql"),
+    "utf8"
+  );
+  const sql = raw.replace(/--[^\n]*/g, "");
+
+  it("the `kind` CHECK lists exactly FEEDBACK_KINDS, in order", () => {
+    const m = sql.match(/check\s*\(\s*kind\s+in\s*\(([^)]*)\)/i);
+    expect(m, "check (kind in (...))").not.toBeNull();
+    const kinds = m![1]
+      .split(",")
+      .map((s) => s.trim().replace(/^'|'$/g, ""))
+      .filter(Boolean);
+    expect(kinds).toEqual([...FEEDBACK_KINDS]);
+  });
+
+  it("kind is not null with the TS default — an omitting (existing) client lands a task report", () => {
+    const m = sql.match(/kind\s+text\s+not\s+null\s+default\s+'([^']+)'/i);
+    expect(m, "kind text not null default '<kind>'").not.toBeNull();
+    expect(m![1]).toBe(FEEDBACK_KIND_DEFAULT);
+  });
+
+  it("the column add is idempotent (add column if not exists) on the feedback table", () => {
+    expect(
+      /alter\s+table\s+public\.fp_task_feedback\s+add\s+column\s+if\s+not\s+exists\s+kind/i.test(sql)
+    ).toBe(true);
+  });
+
+  it("the ONLY grant is the additive column-scoped INSERT of kind to authenticated", () => {
+    const grants = [...sql.matchAll(/grant\s+([^;]+?)\s+on\s+public\.fp_task_feedback\s+to\s+([^;]+);/gi)];
+    expect(grants).toHaveLength(1);
+    const [, what, whom] = grants[0]!;
+    expect(whom.trim()).toBe("authenticated");
+    const cols = what.match(/^insert\s*\(([^)]*)\)$/i);
+    expect(cols, "grant insert (<column list>) — never a table-wide grant").not.toBeNull();
+    const list = cols![1].split(",").map((s) => s.trim());
+    expect(list).toEqual(["kind"]);
+    // created_at stays server-managed; no SELECT/UPDATE/DELETE appears.
+    expect(/grant\s+(select|update|delete)/i.test(sql)).toBe(false);
+  });
+
+  it("stays additive: no new policies, no trigger changes, no drops", () => {
+    expect(/create\s+policy/i.test(sql)).toBe(false);
+    expect(/create\s+(or\s+replace\s+)?trigger/i.test(sql)).toBe(false);
+    expect(/create\s+or\s+replace\s+function/i.test(sql)).toBe(false);
+    expect(/\bdrop\b/i.test(sql)).toBe(false);
+    expect(/revoke/i.test(sql)).toBe(false);
+  });
+
+  it("the header carries the version ritual and the deploy-ordering warning", () => {
+    expect(raw).toMatch(/schema_migrations/);
+    expect(raw).toMatch(/RENAME this file/i);
+    expect(raw).toMatch(/DEPLOY ORDERING/);
+    // Both consumers named: the kind-sending FP client and the staff read route.
+    expect(raw).toMatch(/api\/fp\/suggestions/);
   });
 });

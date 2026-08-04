@@ -30,6 +30,20 @@
 export const FEEDBACK_BANDS = ["g3_5", "g6_8", "g9_12", "unknown"] as const;
 export type FeedbackBand = (typeof FEEDBACK_BANDS)[number];
 
+/** What a feedback row IS (migration 20260910120000_fp_feedback_kind.sql):
+ *  'task' = the per-task "Stuck? Tell us" report; 'app' = an app-level
+ *  suggestion. Must list EXACTLY the migration's `kind` CHECK set, in order.
+ *  task_id stays mandatory for BOTH kinds — an app-level suggestion stamps the
+ *  task that was ACTIVE at submission (where the thought occurred, not what it
+ *  is about). */
+export const FEEDBACK_KINDS = ["task", "app"] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
+
+/** The column default. A client that omits `kind` (every build predating the
+ *  column) lands a task report — backward compatible by construction. Must
+ *  equal the migration's `default` literal (parity test). */
+export const FEEDBACK_KIND_DEFAULT: FeedbackKind = "task";
+
 /** Upper bound on `body`. EMPTY STRING IS VALID — a tap with no words is
  *  "I'm stuck here" signal (R11/R13); only the maximum is constrained. */
 export const FEEDBACK_BODY_MAX_CHARS = 1000;
@@ -61,6 +75,24 @@ const TASK_ID_RE = new RegExp(FEEDBACK_TASK_ID_PATTERN);
 
 export function isValidFeedbackBand(value: string): value is FeedbackBand {
   return (FEEDBACK_BANDS as readonly string[]).includes(value);
+}
+
+export function isValidFeedbackKind(value: string): value is FeedbackKind {
+  return (FEEDBACK_KINDS as readonly string[]).includes(value);
+}
+
+/** OMISSION normalization, both sides of the wire:
+ *  - write side (the FP client's optional `kind` field): undefined → the
+ *    default; a valid literal passes through. An INVALID literal also
+ *    collapses to the default rather than being smuggled to the DB CHECK —
+ *    callers that must REFUSE bad input run isValidFeedbackKind first.
+ *  - read side (GET /api/fp/suggestions): a row read before the kind
+ *    migration applied has no `kind`; absence means 'task' by the same rule
+ *    the column default encodes. */
+export function normalizeFeedbackKind(value: unknown): FeedbackKind {
+  return typeof value === "string" && isValidFeedbackKind(value)
+    ? value
+    : FEEDBACK_KIND_DEFAULT;
 }
 
 export function isValidFeedbackTaskId(value: string): boolean {

@@ -3,10 +3,14 @@ import {
   FEEDBACK_BANDS,
   FEEDBACK_BODY_MAX_CHARS,
   FEEDBACK_DAILY_CAP,
+  FEEDBACK_KIND_DEFAULT,
+  FEEDBACK_KINDS,
   FEEDBACK_TASK_ID_MAX_CHARS,
   isValidFeedbackBand,
   isValidFeedbackBody,
+  isValidFeedbackKind,
   isValidFeedbackTaskId,
+  normalizeFeedbackKind,
 } from "../fp-task-feedback-rules";
 
 describe("fp-task-feedback rules — task_id", () => {
@@ -67,6 +71,33 @@ describe("fp-task-feedback rules — body", () => {
   it("accepts up to the cap, refuses one past it", () => {
     expect(isValidFeedbackBody("x".repeat(FEEDBACK_BODY_MAX_CHARS))).toBe(true);
     expect(isValidFeedbackBody("x".repeat(FEEDBACK_BODY_MAX_CHARS + 1))).toBe(false);
+  });
+});
+
+describe("fp-task-feedback rules — kind (Change #9)", () => {
+  it("accepts exactly the two kinds, task first (the default's position)", () => {
+    expect(FEEDBACK_KINDS).toEqual(["task", "app"]);
+    for (const kind of FEEDBACK_KINDS) {
+      expect(isValidFeedbackKind(kind)).toBe(true);
+    }
+  });
+
+  it("rejects anything else", () => {
+    for (const kind of ["", "TASK", "App", "task ", "suggestion", "null"]) {
+      expect(isValidFeedbackKind(kind), kind).toBe(false);
+    }
+  });
+
+  it("the default is 'task' — an omitting client stays a stuck report", () => {
+    expect(FEEDBACK_KIND_DEFAULT).toBe("task");
+  });
+
+  it("normalizeFeedbackKind: valid passes through; omission and junk collapse to the default", () => {
+    expect(normalizeFeedbackKind("task")).toBe("task");
+    expect(normalizeFeedbackKind("app")).toBe("app");
+    for (const v of [undefined, null, "", "APP", 7, {}, "suggestion"]) {
+      expect(normalizeFeedbackKind(v)).toBe(FEEDBACK_KIND_DEFAULT);
+    }
   });
 });
 

@@ -1,0 +1,69 @@
+-- First Profit game — fp_task_feedback.kind: distinguish TASK-LEVEL stuck
+-- reports from APP-LEVEL suggestions (first-profit "real public site" work,
+-- Change #9: the FP admin view at firstprofit.school/admin lists both).
+--
+-- One additive column on 20260905120000_fp_task_feedback.sql's table:
+--
+--   kind text not null default 'task' check (kind in ('task','app'))
+--
+--   * 'task' — the existing per-task "Stuck? Tell us" report (the default, so
+--     every existing row and every insert from a client that predates this
+--     column stays a task report — backward compatible by construction).
+--   * 'app'  — an app-level suggestion ("I wish First Profit could…").
+--     task_id stays MANDATORY for both kinds: an app-level suggestion stamps
+--     the task that was ACTIVE at submission, which the owner reads as "where
+--     in the path the thought occurred", not "what the thought is about".
+--
+-- ⚠ VERSION — AUTHORED, NOT YET APPLIED. The placeholder slot below assumes
+--   the top of supabase_migrations.schema_migrations is still 20260909120000
+--   fp_site_products (the latest file in this tree at authoring time; prior
+--   migrations THROUGH 20260909 are applied to production). The TRUE next-free
+--   slot MUST be reconfirmed against the LIVE ledger immediately before
+--   applying (a migration may have landed between authoring and the gate). If
+--   the live top is not 20260909120000, RENAME this file to the real next-free
+--   12:00:00 slot before applying. Apply via the Management API playbook
+--   (docs/solutions/integration-issues/
+--   supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md).
+--   Do NOT write schema_migrations by hand.
+--
+-- ⚠ DEPLOY ORDERING: this column AND a PostgREST schema-cache reload MUST be
+--   live in prod BEFORE either consumer deploys:
+--   * the FP client build that SENDS `kind` on its PostgREST insert — before
+--     the grant below lands, an insert naming `kind` fails 42501 (column not
+--     in the column-scoped insert grant); the current client omits the column
+--     entirely and is unaffected in every ordering.
+--   * GET /api/fp/suggestions (this repo, app/api/fp/suggestions/route.ts) —
+--     its select names `kind`, which is 42703 (undefined_column) until this
+--     applies. Apply + schema-reload here → verify column visible → deploy.
+--
+-- POSTURE UNCHANGED, deliberately:
+--   * The append-only guard trigger is column-agnostic (it refuses UPDATE and
+--     DELETE wholesale for PostgREST clients) — no change needed or made.
+--   * The daily-cap trigger counts rows regardless of kind — app-level
+--     suggestions spend the same per-profile daily budget, which is the
+--     intended abuse bound (one child, one instrument, one cap).
+--   * The insert policy's WITH CHECK is an ownership predicate over
+--     profile_id — it does not enumerate columns, so it already covers kind.
+--   * `grant insert (kind)` below is ADDITIVE to the existing column-scoped
+--     grant (Postgres column grants accumulate); created_at stays excluded
+--     and server-managed. Children still have no SELECT/UPDATE/DELETE — the
+--     owner reads via the service role (scripts/read-fp-task-feedback.ts and
+--     the staff-gated GET /api/fp/suggestions).
+--   * Retention, cascade posture, and the FP429 cap contract are inherited
+--     unchanged from 20260905120000_fp_task_feedback.sql.
+--
+-- TS mirror: app/fp/lib/fp-task-feedback-rules.ts (FEEDBACK_KINDS /
+-- FEEDBACK_KIND_DEFAULT); parity test:
+-- app/fp/lib/__tests__/fp-task-feedback-migration-parity.test.ts.
+--
+-- Idempotent throughout (add column if not exists; a re-run of the grant is a
+-- no-op). Additive-only.
+
+alter table public.fp_task_feedback
+  add column if not exists kind text not null default 'task'
+    check (kind in ('task', 'app'));
+
+-- Additive column grant: children may now supply kind on INSERT (omitting it
+-- still lands 'task' via the default). The existing grant's column set is
+-- extended, never replaced — created_at remains server-managed.
+grant insert (kind) on public.fp_task_feedback to authenticated;

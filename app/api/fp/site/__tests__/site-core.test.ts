@@ -139,7 +139,7 @@ describe("readSiteStatus — the split-storage read-back", () => {
       ok: true,
       handle: "cedric",
       status: "claimed",
-      projected: { headline: "", oneLiner: "" },
+      projected: { headline: "", oneLiner: "", products: [] },
     });
 
     Object.assign(store.fp_public_sites[0], { published: true, first_published_at: "2026-08-03" });
@@ -170,7 +170,11 @@ describe("readSiteStatus — the split-storage read-back", () => {
       ok: true,
       handle: "cedric",
       status: "claimed",
-      projected: { headline: "", oneLiner: "I walk dogs after school" },
+      projected: {
+        headline: "",
+        oneLiner: "I walk dogs after school",
+        products: [{ n: 1, name: "", oneLiner: "I walk dogs after school" }],
+      },
     });
   });
 });
@@ -517,6 +521,77 @@ describe("publishSite — explicit go-live with parent notification", () => {
     const res = await publishSite(deps, { profileId: PROFILE, childId: CHILD });
     expect(res).toEqual({ ok: true, status: "published", firstPublish: true, parentNotified: false });
     expect(errors.mock.calls.some((c) => String(c[0]).includes("OPERATOR ATTENTION"))).toBe(true);
+  });
+});
+
+/* -------------------------------------------------- products projection */
+
+describe("products projection (fp_site_products migration, backend half)", () => {
+  it("claim backfill writes the sanitized products array beside headline/one_liner (row born content-complete)", async () => {
+    const store = seededStore();
+    (store.fp_player_saves[0] as { doc: Record<string, unknown> }).doc = {
+      docVersion: 1,
+      siteHeadline: "Headline",
+      ideas: [
+        { fields: { productName: "Dog Walking", oneLiner: "I walk dogs after school" }, done: {} },
+        { fields: {}, done: {} }, // fully empty → excluded, numbering preserved
+        { fields: { productName: "Lemonade Stand" }, done: {} },
+      ],
+      activeIdea: 0,
+    };
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    expect(siteRow(store)).toMatchObject({
+      products: [
+        { n: 1, name: "Dog Walking", oneLiner: "I walk dogs after school" },
+        { n: 3, name: "Lemonade Stand", oneLiner: "" },
+      ],
+    });
+  });
+
+  it("publish re-syncs products from the CURRENT doc; a blocked product name stores empty (per-field enforcement)", async () => {
+    const store = seededStore();
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    (store.fp_player_saves[0] as { doc: Record<string, unknown> }).doc = {
+      docVersion: 1,
+      siteHeadline: "Headline",
+      ideas: [{ fields: { productName: "f-u-c-k soda", oneLiner: "Still fine" }, done: {} }],
+      activeIdea: 0,
+    };
+    const res = await publishSite(deps, { profileId: PROFILE, childId: CHILD });
+    expect(res.ok).toBe(true);
+    expect(siteRow(store)).toMatchObject({
+      products: [{ n: 1, name: "", oneLiner: "Still fine" }],
+    });
+  });
+
+  it("docVersion gate covers products too: a version-2 doc contributes NOTHING and the prior products stand", async () => {
+    const store = seededStore();
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    const before = siteRow(store)?.products;
+    expect(before).toEqual([{ n: 1, name: "", oneLiner: "I walk dogs after school" }]);
+    (store.fp_player_saves[0] as { doc: Record<string, unknown> }).doc = {
+      docVersion: 2,
+      ideas: [{ fields: { productName: "future-shape" }, done: {} }],
+      activeIdea: 0,
+    };
+    await publishSite(deps, { profileId: PROFILE, childId: CHILD });
+    expect(siteRow(store)?.products).toEqual(before);
+  });
+
+  it("self-read projected.products surfaces exactly what the public page renders", async () => {
+    const store = seededStore();
+    const { deps } = makeDeps(store);
+    await claimSite(deps, { profileId: PROFILE, childId: CHILD, rawHandle: "cedric" });
+    const read = await readSiteStatus(deps.db, PROFILE);
+    expect(read.ok).toBe(true);
+    if (read.ok) {
+      expect(read.projected?.products).toEqual([
+        { n: 1, name: "", oneLiner: "I walk dogs after school" },
+      ]);
+    }
   });
 });
 

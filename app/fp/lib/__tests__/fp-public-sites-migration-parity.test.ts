@@ -569,6 +569,12 @@ describe("extractSiteContent (executable spec)", () => {
     expect(extractSiteContent(doc())).toEqual({
       headline: "Dog walking for busy neighbors",
       oneLiner: "I walk dogs after school",
+      // products v2 (20260909120000): every idea, n = 1-based position; the
+      // fixtures have no productName so name extracts as ''.
+      products: [
+        { n: 1, name: "", oneLiner: "I walk dogs after school" },
+        { n: 2, name: "", oneLiner: "Second idea one-liner" },
+      ],
     });
     expect(extractSiteContent(doc({ activeIdea: 1 })).oneLiner).toBe("Second idea one-liner");
   });
@@ -612,7 +618,7 @@ describe("extractSiteContent (executable spec)", () => {
 
   it("non-object docs skip everything: null, array, string, number", () => {
     for (const bad of [null, undefined, [], "doc", 7, true]) {
-      expect(extractSiteContent(bad)).toEqual({ headline: null, oneLiner: null });
+      expect(extractSiteContent(bad)).toEqual({ headline: null, oneLiner: null, products: null });
     }
   });
 

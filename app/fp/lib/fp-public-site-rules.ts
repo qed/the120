@@ -40,6 +40,18 @@ export const SITE_HEADLINE_MAX_CHARS = 120;
 /** Truncation cap on the public one-liner (same discipline as the headline). */
 export const SITE_ONE_LINER_MAX_CHARS = 140;
 
+/** Truncation cap on each product card's name (products projection —
+ *  20260909120000_fp_site_products.sql; same clamp discipline). */
+export const SITE_PRODUCT_NAME_MAX_CHARS = 60;
+
+/** Cap on the products array length = first-profit MAX_IDEAS (src/state/
+ *  gameCore.ts MAX_IDEAS = 5 — CREATE_IDEA refuses a sixth idea, so only a
+ *  hand-crafted doc can exceed it). Extraction iterates the FIRST
+ *  SITE_MAX_PRODUCTS ideas only; the table CHECK is the backstop. A
+ *  first-profit MAX_IDEAS change must consciously update this and the
+ *  migration together. */
+export const SITE_MAX_PRODUCTS = 5;
+
 /** Bound on the snapshotted first_name column (bounding discipline, like
  *  payer <= 80 on fp_ledger). Written by Unit 2 claim/publish only. */
 export const SITE_FIRST_NAME_MAX_CHARS = 80;
@@ -326,13 +338,35 @@ export function sanitizePublicText(value: string): string {
 
 /* --------------------------------------------- executable extraction spec */
 
+/**
+ * One public product card (products projection, 20260909120000). THE RENDERER
+ * CONTRACT — first-profit's public page consumes this element verbatim:
+ *   n        — the idea's ORIGINAL 1-based position in doc.ideas (drives the
+ *              "Product #N" numbering; fully-empty ideas are excluded from
+ *              the array but keep their slot via n, so numbering never
+ *              shifts).
+ *   name     — fields.productName, blocklist-enforced (blocked → ''), then
+ *              truncated to SITE_PRODUCT_NAME_MAX_CHARS.
+ *   oneLiner — fields.oneLiner, blocklist-enforced (blocked → ''), then
+ *              truncated to SITE_ONE_LINER_MAX_CHARS.
+ */
+export interface SiteProduct {
+  n: number;
+  name: string;
+  oneLiner: string;
+}
+
 /** Result of extracting public-site content from a save doc.
  *  NULL = "absent / not extractable — do not touch the column" (skip
  *  sentinel); EMPTY STRING = a legitimate value that OVERWRITES (clearing a
- *  headline must propagate; the public renderer falls back to defaults). */
+ *  headline must propagate; the public renderer falls back to defaults).
+ *  `products` follows the same discipline: NULL when doc.ideas is absent/not
+ *  an array; EMPTY ARRAY is a legitimate overwrite (all ideas emptied →
+ *  live cards clear). */
 export interface SiteContent {
   headline: string | null;
   oneLiner: string | null;
+  products: SiteProduct[] | null;
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -373,6 +407,7 @@ const ACTIVE_IDEA_RE = /^[0-9]{1,9}$/;
 export function extractSiteContent(doc: unknown): SiteContent {
   let headline: string | null = null;
   let oneLiner: string | null = null;
+  let products: SiteProduct[] | null = null;
   if (isJsonObject(doc)) {
     if (typeof doc.siteHeadline === "string") {
       headline = sanitizePublicText(doc.siteHeadline).slice(0, SITE_HEADLINE_MAX_CHARS);
@@ -390,6 +425,31 @@ export function extractSiteContent(doc: unknown): SiteContent {
         oneLiner = sanitizePublicText(idea.fields.oneLiner).slice(0, SITE_ONE_LINER_MAX_CHARS);
       }
     }
+    // Products v2 (mirrors the SQL loop): EVERY idea, first SITE_MAX_PRODUCTS
+    // only, independent of activeIdea. Per-idea defensiveness: a non-object
+    // element or non-object/absent `fields` yields '' leaves (→ excluded),
+    // never a throw. Fully-empty ideas are EXCLUDED; `n` (1-based position)
+    // preserves the Product #N numbering.
+    if (Array.isArray(ideas)) {
+      products = [];
+      const count = Math.min(ideas.length, SITE_MAX_PRODUCTS);
+      for (let i = 0; i < count; i++) {
+        const idea: unknown = ideas[i];
+        let name = "";
+        let productLiner = "";
+        if (isJsonObject(idea) && isJsonObject(idea.fields)) {
+          if (typeof idea.fields.productName === "string") {
+            name = sanitizePublicText(idea.fields.productName).slice(0, SITE_PRODUCT_NAME_MAX_CHARS);
+          }
+          if (typeof idea.fields.oneLiner === "string") {
+            productLiner = sanitizePublicText(idea.fields.oneLiner).slice(0, SITE_ONE_LINER_MAX_CHARS);
+          }
+        }
+        if (name !== "" || productLiner !== "") {
+          products.push({ n: i + 1, name, oneLiner: productLiner });
+        }
+      }
+    }
   }
-  return { headline, oneLiner };
+  return { headline, oneLiner, products };
 }

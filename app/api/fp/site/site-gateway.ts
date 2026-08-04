@@ -55,7 +55,7 @@ import {
 import { resolveFpChild, type SiteCoreDeps } from "./site-core";
 import { sendEmail } from "@/app/lib/email";
 import { SITE_URL } from "@/app/lib/site";
-import type { SiteContent } from "@/app/fp/lib/fp-public-site-rules";
+import type { SiteContent, SiteProduct } from "@/app/fp/lib/fp-public-site-rules";
 
 /**
  * The real SiteCoreDeps the claim/publish routes hand the cores. Content
@@ -76,12 +76,15 @@ export function buildSiteCoreDeps(admin: SupabaseClient): SiteCoreDeps {
           return null;
         }
         const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
-          | { headline?: unknown; one_liner?: unknown }
+          | { headline?: unknown; one_liner?: unknown; products?: unknown }
           | null
           | undefined;
         return {
           headline: typeof row?.headline === "string" ? row.headline : null,
           oneLiner: typeof row?.one_liner === "string" ? row.one_liner : null,
+          // The extraction's NULL sentinel (ideas absent/not an array) arrives
+          // as SQL null; anything else is the sanitized array (possibly []).
+          products: Array.isArray(row?.products) ? (row.products as SiteProduct[]) : null,
         };
       } catch (err) {
         console.error(

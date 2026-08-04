@@ -353,8 +353,11 @@ export function fakeClient(
       const fault = faults?.[`rpc:${fn}`];
       if (fault?.kind === "error") return Promise.resolve({ data: null, error: fault.error });
       if (fn === "fp_public_site_content") {
-        const { headline, oneLiner } = extractSiteContent(args?.p_doc);
-        return Promise.resolve({ data: [{ headline, one_liner: oneLiner }], error: null });
+        const { headline, oneLiner, products } = extractSiteContent(args?.p_doc);
+        return Promise.resolve({
+          data: [{ headline, one_liner: oneLiner, products }],
+          error: null,
+        });
       }
       return Promise.resolve({
         data: null,

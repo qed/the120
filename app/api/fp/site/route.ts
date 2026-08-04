@@ -15,10 +15,13 @@
  * Thin wrapper over ./site-gateway (CORS mirror + child gate + rate limit)
  * and ./site-core readSiteStatus. Contract for the FP client (first-profit
  * Unit 4): 200 {ok:true, handle: string|null, status, projected:
- * {headline: string, oneLiner: string} | null} on success — `projected` is
- * the OWN row's server-sanitized public content (null when no row), so the
- * FP room can show honestly what the public page renders (a blocklisted
- * string is stored empty; Unit 7 review, cross-repo divergence fix); a DB
+ * {headline: string, oneLiner: string, products: {n: number, name: string,
+ * oneLiner: string}[]} | null} on success — `projected` is the OWN row's
+ * server-sanitized public content (null when no row), so the FP room can
+ * show honestly what the public page renders (a blocklisted string is stored
+ * empty; Unit 7 review, cross-repo divergence fix). `products` is the
+ * product-cards projection (20260909120000_fp_site_products.sql): one
+ * element per non-empty idea, `n` = the idea's 1-based position; a DB
  * outage is the structured 200 {ok:false, reason:"outage"} (server-wide
  * state — no per-account oracle; the strikes are released). Every AUTH
  * refusal is the one generic 401.

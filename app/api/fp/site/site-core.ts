@@ -41,6 +41,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   SITE_DOC_VERSION_GATE,
   type SiteContent,
+  type SiteProduct,
 } from "@/app/fp/lib/fp-public-site-rules";
 import { buildFpSiteLiveNotice } from "@/app/fp/lib/parent-email/rules";
 import {
@@ -117,14 +118,40 @@ export async function resolveFpChild(
 /* --------------------------------------------------------------- self-read */
 
 /** The OWN row's projected (server-sanitized) public content — what the
- *  public page would render. Null when no row exists. */
-export type SiteProjectedContent = { headline: string; oneLiner: string };
+ *  public page would render. Null when no row exists. `products` is the
+ *  sanitized card array ({n, name, oneLiner} — see SiteProduct). */
+export type SiteProjectedContent = { headline: string; oneLiner: string; products: SiteProduct[] };
 
 export type SiteReadResult =
   | { ok: true; handle: string | null; status: SiteStatus; projected: SiteProjectedContent | null }
   | { ok: false; reason: "outage" };
 
-type SiteRow = SiteRowFlags & { handle: string; headline: string; one_liner: string };
+type SiteRow = SiteRowFlags & {
+  handle: string;
+  headline: string;
+  one_liner: string;
+  products: SiteProduct[];
+};
+
+/** Defensive element filter for the products column read-back (server-written
+ *  data, but the shape check keeps a malformed row from reaching the client). */
+function coerceProducts(value: unknown): SiteProduct[] {
+  if (!Array.isArray(value)) return [];
+  const out: SiteProduct[] = [];
+  for (const el of value) {
+    const p = el as { n?: unknown; name?: unknown; oneLiner?: unknown } | null;
+    if (
+      p !== null &&
+      typeof p === "object" &&
+      typeof p.n === "number" &&
+      typeof p.name === "string" &&
+      typeof p.oneLiner === "string"
+    ) {
+      out.push({ n: p.n, name: p.name, oneLiner: p.oneLiner });
+    }
+  }
+  return out;
+}
 
 async function readOwnSiteRow(
   db: SupabaseClient,
@@ -132,7 +159,7 @@ async function readOwnSiteRow(
 ): Promise<{ ok: true; row: SiteRow | null } | { ok: false }> {
   const res = await db
     .from("fp_public_sites")
-    .select("handle, headline, one_liner, published, operator_locked, first_published_at")
+    .select("handle, headline, one_liner, products, published, operator_locked, first_published_at")
     .eq("profile_id", profileId)
     .maybeSingle();
   if (res.error) {
@@ -144,6 +171,7 @@ async function readOwnSiteRow(
         handle?: unknown;
         headline?: unknown;
         one_liner?: unknown;
+        products?: unknown;
         published?: unknown;
         operator_locked?: unknown;
         first_published_at?: unknown;
@@ -157,6 +185,7 @@ async function readOwnSiteRow(
       handle: row.handle,
       headline: typeof row.headline === "string" ? row.headline : "",
       one_liner: typeof row.one_liner === "string" ? row.one_liner : "",
+      products: coerceProducts(row.products),
       published: row.published === true,
       operator_locked: row.operator_locked === true,
       first_published_at: typeof row.first_published_at === "string" ? row.first_published_at : null,
@@ -187,7 +216,7 @@ export async function readSiteStatus(
     handle: read.row?.handle ?? null,
     status: deriveSiteStatus(read.row),
     projected: read.row
-      ? { headline: read.row.headline, oneLiner: read.row.one_liner }
+      ? { headline: read.row.headline, oneLiner: read.row.one_liner, products: read.row.products }
       : null,
   };
 }
@@ -271,13 +300,14 @@ export type ClaimResult =
 async function currentContent(
   deps: SiteCoreDeps,
   profileId: string
-): Promise<{ headline: string | null; oneLiner: string | null }> {
+): Promise<{ headline: string | null; oneLiner: string | null; products: SiteProduct[] | null }> {
+  const none = { headline: null, oneLiner: null, products: null };
   const save = await deps.db
     .from("fp_player_saves")
     .select("doc")
     .eq("profile_id", profileId)
     .maybeSingle();
-  if (save.error || !save.data) return { headline: null, oneLiner: null };
+  if (save.error || !save.data) return none;
   const doc = (save.data as { doc?: unknown }).doc;
   // docVersion gate — the SAME rule as the projection trigger (a JSON number
   // whose text form is SITE_DOC_VERSION_GATE): an unknown/missing version must
@@ -285,11 +315,11 @@ async function currentContent(
   // contract for Unit 2 callers).
   const version = (doc as { docVersion?: unknown } | null | undefined)?.docVersion;
   if (typeof version !== "number" || String(version) !== SITE_DOC_VERSION_GATE) {
-    return { headline: null, oneLiner: null };
+    return none;
   }
   const extracted = await deps.extractContent(doc);
-  if (!extracted) return { headline: null, oneLiner: null };
-  return { headline: extracted.headline, oneLiner: extracted.oneLiner };
+  if (!extracted) return none;
+  return { headline: extracted.headline, oneLiner: extracted.oneLiner, products: extracted.products };
 }
 
 /** The child's roster first name (the120 profile is authoritative). */
@@ -335,6 +365,7 @@ export async function claimSite(
     first_name: firstName,
     headline: content.headline ?? "",
     one_liner: content.oneLiner ?? "",
+    products: content.products ?? [],
     published: false,
     operator_locked: false,
     first_published_at: null,
@@ -417,6 +448,7 @@ export async function publishSite(
     first_name: firstName,
     ...(content.headline !== null ? { headline: content.headline } : {}),
     ...(content.oneLiner !== null ? { one_liner: content.oneLiner } : {}),
+    ...(content.products !== null ? { products: content.products } : {}),
   };
   const nowIso = new Date().toISOString();
 

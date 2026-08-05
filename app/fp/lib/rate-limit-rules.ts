@@ -187,6 +187,34 @@ export const V3_COVER_NAMESPACE = "fp-v3-cover";
 
 export const V3_COVER_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 30 };
 
+/* ─────────────── New User Flow v3 handoff exchange (v3 Unit 5) ──────────── */
+
+/**
+ * `POST /api/fp/handoff/exchange` — the CROSS-ORIGIN, UNAUTHENTICATED door that
+ * turns a one-time code into a child's session. Its own namespace for the same
+ * reason `fp-login` has one: a flood here must never spend (or be spent by) the
+ * budget of any other surface, and the exchange is the only v3 bucket keyed on
+ * an anonymous caller.
+ *
+ * Recorded on the ATTESTED CLIENT IP, BEFORE any work — the login route's
+ * ordering. At that point the request carries nothing but a code, so there is no
+ * identity to key on, and the limiter is what bounds a code-guessing flood
+ * before a single DB round trip.
+ *
+ * ⚠ VOLUMETRIC ONLY, like every bucket here (in-memory, per-instance, empty on
+ * cold start). Nothing security-load-bearing rests on it: the code is >=128 bits
+ * of CSPRNG, stored only as sha256, single-use by a CAS, and dead after 120
+ * seconds. Guessing it is not a thing this limit is holding back — it is holding
+ * back VOLUME.
+ *
+ * Sized for the real caller: one exchange per handoff, plus a retry or two if a
+ * tab is reloaded. A family device behind one NAT signing several kids in one
+ * after another stays far inside 20/15min.
+ */
+export const V3_HANDOFF_NAMESPACE = "fp-v3-handoff";
+
+export const V3_HANDOFF_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

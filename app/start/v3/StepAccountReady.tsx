@@ -18,29 +18,50 @@
  * Promising a self-service recovery that does not exist strands the family
  * twice: once on the lost password, once on the empty dashboard.
  *
- * ── "KEEP BUILDING" IMPLEMENTS BOTH ENDINGS ──
- *   below `sm`  → SAME TAB. No popup juggling on a phone, where a second tab is
- *                 a tab the parent has to find again.
- *   `sm` and up → a NEW TAB, opened SYNCHRONOUSLY in the click handler BEFORE
- *                 any `await`. This ordering is the whole trick: a `window.open`
- *                 after an await has lost the user-gesture context and every
- *                 popup blocker eats it. The tab is opened blank, the mint is
- *                 awaited, and only then is the tab navigated.
- *                 `win === null` means the blocker won anyway — that case gets a
- *                 VISIBLE manual link, never a silent dead end.
- * Unit 5 replaces the mint's body; this component's two endings do not change.
+ * ── "KEEP BUILDING" OPENS A NEW TAB — ON EVERY DEVICE (Unit 5 review, FIX 1) ──
+ * A NEW TAB, opened SYNCHRONOUSLY in the click handler BEFORE any `await`. That
+ * ordering is the whole trick: a `window.open` after an await has lost the
+ * user-gesture context and every popup blocker eats it. The tab is opened blank,
+ * the mint is awaited, and only then is the tab navigated. `win === null` means
+ * the blocker won anyway — that case gets a VISIBLE manual link, never a silent
+ * dead end.
  *
- * ── THE MINT MUST NOT OUTLIVE THE COMPONENT (review FIX 5) ──
+ * ⚠ THIS SCREEN IS THE ONLY PLACE THE PASSWORD EXISTS, AND THAT IS WHY THE TAB
+ * IS NEW. The handoff deliberately never un-burns a consumed code
+ * (app/api/fp/handoff/handoff-core.ts states the reasoning), and one of its
+ * three legs is "the family is standing on the account-ready screen holding the
+ * username and password we just showed them, so signing in by hand is a real
+ * way in". Until this review the plan's MOBILE ending was `window.location
+ * .assign(destination)` — which LEAVES the120.school entirely, BEFORE the
+ * exchange has even run on the other origin. A transient exchange failure then
+ * left a phone family with a burned code, no password on screen, and no way
+ * back: pressing Back remounts this component, which re-provisions down the
+ * idempotent-replay path and — by design — shows "Already set on an earlier
+ * try" INSTEAD of the password. The original tab surviving is not a desktop
+ * nicety; it is the recovery path the whole design leans on. So both
+ * breakpoints now take the same ending, and the popup-blocked manual link is
+ * the phone's safety net exactly as it is the desktop's.
+ *
+ * (The cost the plan wanted to avoid — a second tab a parent has to find again
+ * on a phone — is real, and it is the right trade: a tab in the switcher is an
+ * inconvenience, an unrecoverable account is not.)
+ *
+ * ⚠ NO `noopener,noreferrer` IN THE FEATURE STRING. Per the HTML spec
+ * `window.open` returns NULL whenever `noopener` is requested — so the handle
+ * this ending needs was always null, and EVERY family was silently taking the
+ * "your browser blocked the new tab" manual-link path. The destination is
+ * first-party (firstprofit.school), so reverse-tabnabbing is not the threat it
+ * is for third-party links; `win.opener` is nulled directly instead, which
+ * gives the same hygiene AND a usable handle.
+ *
+ * ── THE MINT MUST NOT OUTLIVE THE COMPONENT (Unit 3 review, FIX 5) ──
  * The mint runs in a detached `void (async () => …)()`, so it keeps resolving
- * after this screen is gone. On the mobile ending it finished with an
- * UNCONDITIONAL `window.location.assign(destination)` — meaning a parent who
- * tapped the always-present "Parent dashboard" link (or pressed Back) while the
- * mint was in flight got yanked to firstprofit.school anyway: stale async work
- * overriding a LATER, EXPLICIT user intent. Every resolution point in that IIFE
- * now checks `mounted.current` first — before the same-tab assign and before any
- * setState. The `sm`+ path keeps its behaviour exactly (the sync open still
- * happens before any await); on unmount its already-opened tab is closed rather
- * than left blank.
+ * after this screen is gone. Every resolution point in that IIFE checks
+ * `mounted.current` first, before any setState; on unmount the already-opened
+ * tab is closed rather than left blank. (The hazard that guard was written for —
+ * a stale `window.location.assign` yanking a parent who had already tapped
+ * "Parent dashboard" — no longer exists at all now that this screen's tab never
+ * navigates.)
  */
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
@@ -142,46 +163,45 @@ export function StepAccountReady({
 
   const keepBuilding = () => {
     if (mintState === "minting") return;
-    // The breakpoint decision is made HERE, synchronously, from the same
-    // matchMedia the layout uses. `sm` is 640px in Tailwind's default scale,
-    // which this repo does not override.
-    const wide =
-      typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches;
-    // ⚠ SYNCHRONOUS OPEN, BEFORE ANY AWAIT. Moving this below the await is the
-    // bug the comment at the top of this file exists to prevent.
-    const win = wide ? window.open("", "_blank", "noopener,noreferrer") : null;
+    // ⚠ SYNCHRONOUS OPEN, BEFORE ANY AWAIT, ON EVERY DEVICE (review FIX 1).
+    // Moving this below the await is the bug the module header exists to
+    // prevent; making it conditional on a breakpoint is the OTHER bug the
+    // module header exists to prevent — THIS tab is the family's only copy of
+    // the password, so it must survive the handoff whatever the screen width.
+    const win = window.open("", "_blank");
+    // Same hygiene `noopener` would have bought, without null-ing the handle we
+    // need (see the module header). Guarded: a browser may refuse the write.
+    try {
+      if (win) win.opener = null;
+    } catch {
+      // Nothing to do — the destination is first-party either way.
+    }
     setMintState("minting");
     void (async () => {
       const result = await v3MintHandoffAction({ childId: account?.childId ?? null });
-      // ⚠ THE GUARD, CHECKED FIRST AND AGAIN BEFORE THE ASSIGN (review FIX 5).
-      // If this screen is gone the parent has already chosen somewhere else to
-      // be; the only thing left to do is not leave a blank popup behind.
+      // ⚠ THE GUARD (Unit 3 review, FIX 5). If this screen is gone the parent
+      // has already chosen somewhere else to be; the only thing left to do is
+      // not leave a blank popup behind.
       if (!mounted.current) {
         win?.close();
         return;
       }
-      const destination =
-        result.kind === "failed" ? null : result.destination;
-      if (!destination) {
+      if (result.kind === "failed") {
         win?.close();
         setMintState("idle");
         setFailure({ message: "We could not open First Profit just now. Try again.", retryable: true });
         return;
       }
-      if (!wide) {
-        // Re-checked immediately before the navigation itself: this is the one
-        // line that can override a later, explicit user intent.
-        if (!mounted.current) return;
-        window.location.assign(destination);
-        return;
-      }
+      // `minted` and `fallback` are both working endings and navigate alike: a
+      // fallback destination is the plain sign-in page, and the credentials to
+      // use on it are on this screen — which is still here.
       if (win) {
-        win.location.href = destination;
+        win.location.href = result.destination;
         setMintState("idle");
         return;
       }
       // The popup blocker won. Never a silent dead end: show the link.
-      setManualUrl(destination);
+      setManualUrl(result.destination);
       setMintState("blocked");
     })();
   };

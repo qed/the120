@@ -81,6 +81,7 @@ import {
   extractClientIp,
   parseLoginRequest,
   shapeRefusal,
+  type FpSessionBody,
   type LoginRefusalReason,
 } from "./login-rules";
 import { resolveChildGrade } from "../grade/grade-rules";
@@ -382,23 +383,26 @@ export async function POST(req: Request): Promise<Response> {
       // The account owner proved themselves; the (ip,name) strikes serve nothing
       // (the IP aggregate stands and ages out).
       clearRateLimitBucket(nameKey);
-      return new Response(
-        JSON.stringify({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-          profile: { handle: profile.handle, firstName: candidate.firstName },
-          // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
-          // across school years), stored children.grade as the fallback, null
-          // when neither. UNCLAMPED even outside 3-12 — display code decides
-          // banding (bandForGrade answers null outside the bands). NEVER
-          // logged, same rule as the credentials above.
-          grade: resolveChildGrade(
-            { birthYear: candidate.birthYear, storedGrade: candidate.grade },
-            new Date()
-          ),
-        }),
-        { status: 200, headers }
-      );
+      // ⚠ THE SHARED SIGN-IN CONTRACT. `FpSessionBody` lives in ./login-rules
+      // and is the SAME type /api/fp/handoff/exchange returns — the FP client
+      // adopts both through one path, so the annotation (not a comment) is what
+      // stops the two doors drifting. Field ORDER here is observable output:
+      // do not reorder.
+      const body: FpSessionBody = {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        profile: { handle: profile.handle, firstName: candidate.firstName },
+        // Derived AT READ TIME (Unit 3; R9): birth_year first (never stale
+        // across school years), stored children.grade as the fallback, null
+        // when neither. UNCLAMPED even outside 3-12 — display code decides
+        // banding (bandForGrade answers null outside the bands). NEVER
+        // logged, same rule as the credentials above.
+        grade: resolveChildGrade(
+          { birthYear: candidate.birthYear, storedGrade: candidate.grade },
+          new Date()
+        ),
+      };
+      return new Response(JSON.stringify(body), { status: 200, headers });
     }
 
     // Unknown username (empty candidate set, after its equalizing dummy auth

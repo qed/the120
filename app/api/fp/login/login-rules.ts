@@ -97,6 +97,64 @@ export function classifyIdentifier(identifier: string): IdentifierClassification
   return { kind: "username", normalized };
 }
 
+/* ------------------------------------------- THE SIGN-IN CONTRACT, ONCE ---- */
+
+/**
+ * ── THE ONE SOURCE OF TRUTH FOR "WHAT A SIGN-IN DOOR RETURNS" ──
+ *
+ * TWO routes now answer the question "can this device be signed in?":
+ * `/api/fp/login` (password) and `/api/fp/handoff/exchange` (one-time code,
+ * v3 Unit 5). The First Profit client adopts BOTH through the same code path,
+ * so the two responses must be identical field for field — and their refusals
+ * must be byte-identical, because a different string is a cheap oracle telling
+ * an attacker which endpoint they hit.
+ *
+ * Before this unit's review that parity was held by a comment, a hardcoded key
+ * array in a test, and a DUPLICATED `JSON.stringify` in handoff-rules.ts —
+ * three places that could drift silently. It now lives HERE, and both routes
+ * plus both parity tests derive from it.
+ */
+export type FpSessionBody = {
+  access_token: string;
+  refresh_token: string;
+  profile: { handle: string; firstName: string };
+  grade: number | null;
+};
+
+/**
+ * The key list, derived from the TYPE rather than restated beside it. The
+ * `Record<keyof …, true>` annotation is what makes drift a COMPILE error in
+ * both directions: adding a field to `FpSessionBody` without adding it here
+ * fails to satisfy the Record, and adding one here that the type does not have
+ * is an excess property. Tests read the exported arrays, so a parity assertion
+ * can never quietly pin a stale shape.
+ */
+const FP_SESSION_BODY_SHAPE: Record<keyof FpSessionBody, true> = {
+  access_token: true,
+  refresh_token: true,
+  profile: true,
+  grade: true,
+};
+
+const FP_SESSION_PROFILE_SHAPE: Record<keyof FpSessionBody["profile"], true> = {
+  handle: true,
+  firstName: true,
+};
+
+export const FP_SESSION_BODY_KEYS: readonly string[] = Object.keys(FP_SESSION_BODY_SHAPE);
+
+export const FP_SESSION_PROFILE_KEYS: readonly string[] = Object.keys(FP_SESSION_PROFILE_SHAPE);
+
+/**
+ * The SERIALIZED refusal body — one string, built once at module load, returned
+ * verbatim by every refusal of every sign-in door. Exported so the handoff
+ * exchange returns THE SAME BYTES rather than its own equal-looking copy.
+ */
+export const FP_SIGN_IN_REFUSAL_BODY = JSON.stringify({
+  success: false,
+  error: SIGN_IN_FAILED_MESSAGE,
+});
+
 /* --------------------------------------------------------- refusal shaping */
 
 export type LoginRefusalReason =
@@ -108,10 +166,6 @@ export type LoginRefusalReason =
   | "rate_limited"
   | "outage";
 
-// Serialized ONCE at module load: refusals are byte-identical by construction,
-// not by convention. Same copy as /fp sign-in (one voice, no new oracle).
-const REFUSAL_BODY = JSON.stringify({ success: false, error: SIGN_IN_FAILED_MESSAGE });
-
 export const LOGIN_REFUSAL_STATUS = 401;
 
 /**
@@ -120,7 +174,7 @@ export const LOGIN_REFUSAL_STATUS = 401;
  */
 export function shapeRefusal(reason: LoginRefusalReason): { status: 401; body: string } {
   void reason; // deliberately unused — the output must not vary with it
-  return { status: LOGIN_REFUSAL_STATUS, body: REFUSAL_BODY };
+  return { status: LOGIN_REFUSAL_STATUS, body: FP_SIGN_IN_REFUSAL_BODY };
 }
 
 /* ----------------------------------------------------------- origin checks */

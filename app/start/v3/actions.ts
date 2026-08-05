@@ -54,6 +54,11 @@ import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
 import { createChild } from "@/app/api/fp/signup/child-core";
 import type { SignupCoreDeps } from "@/app/api/fp/signup/signup-core";
 import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
+import { mintHandoffCode } from "@/app/api/fp/handoff/handoff-core";
+import {
+  HANDOFF_CODE_BYTES,
+  isHandoffLandingLive,
+} from "@/app/api/fp/handoff/handoff-rules";
 import {
   v3AddKid,
   v3EditKid,
@@ -462,31 +467,80 @@ export async function v3ProvisionAction(input: unknown): Promise<V3ProvisionResu
 }
 
 /**
- * UNIT 5 SEAM — the "Keep building" handoff.
+ * THE "KEEP BUILDING" HANDOFF (plan Unit 5).
  *
- * Unit 5 owns the real mint: a one-time, hashed, child-bound, 120s code that
- * First Profit exchanges for a session. Until it lands this action returns
- * `not_ready` with the plain sign-in destination, and the account-ready screen
- * sends the family there with the username and password it just showed them.
- * That is a WORKING ending, not a dead one — which is what lets this page be
- * publicly routable from its first commit.
+ * Mints a one-time, hashed, child-bound, 120-second code and returns the
+ * FRAGMENT destination First Profit's `/auth/enter` landing consumes. The
+ * account-ready screen's ending (sync-open a tab, await this, navigate it) is
+ * unchanged: it sends the tab to `destination` whatever kind comes back.
  *
- * The SHAPE is already final, so Unit 5 only replaces the body: sync-open the
- * tab, await this, then navigate it. A `not_ready` result navigates to
- * `destination` exactly as a `minted` one will.
+ * ⚠ AUTHORIZATION IS THE SESSION PLUS AN OWNERSHIP PROOF. The `childId` in the
+ * argument arrives from the client and authorizes nothing; `mintHandoffCode`
+ * puts `parent_id` in the WHERE clause, so a child this parent does not own
+ * returns no row and no code (the bearer-credential learning, 2026-08-05).
+ *
+ * ⚠ NO `V3_START_LIVE` CHECK HERE, AND THAT IS DELIBERATE. `v3EntryOpen` gates
+ * UNAUTHENTICATED NEW-SIGNUP entry; this action is session-gated by
+ * construction and can only act on a child the caller already owns — which
+ * means it is one of the signed-in paths the lever must never strand (the same
+ * reasoning steps 2-5 carry). A caller with no session gets `failed` before any
+ * privileged client is constructed.
+ *
+ * ⚠ THERE IS A SECOND, DIFFERENT LEVER, AND IT IS CHECKED HERE (review FIX 2).
+ * `FP_HANDOFF_LANDING_LIVE` says whether firstprofit.school/auth/enter EXISTS
+ * yet — it ships in the other repo, in plan Unit 6. Until it is on, this action
+ * MINTS NOTHING and answers `fallback` with the plain sign-in page: a code that
+ * cannot be redeemed is worse than no code, because clicking burns it and lands
+ * the family on a 404 holding a password they have one chance to read. The
+ * check is HERE rather than where the button renders, because a Server Action
+ * is a separately-addressable POST endpoint and a page-level flag gates nothing
+ * (the page-vs-action gating learning, 2026-08-05). Fail-closed: unset = off.
+ *
+ * The code is minted HERE because `node:crypto` is an impure edge; the core
+ * takes it as an injected effect so tests never touch a CSPRNG.
  */
 export async function v3MintHandoffAction(
   input: unknown
 ): Promise<
-  | { kind: "not_ready"; destination: string }
   | { kind: "minted"; destination: string }
+  | { kind: "fallback"; destination: string }
   | { kind: "failed" }
 > {
   try {
     const ctx = await parentContext();
     if (!ctx) return { kind: "failed" };
-    void input;
-    return { kind: "not_ready", destination: FIRST_PROFIT_SIGN_IN_URL };
+    const budget = onboardingBudget(ctx.parentId);
+    if (!budget.allowed) return { kind: "failed" };
+    // THE FAR SIDE MUST EXIST BEFORE A CODE IS WORTH MINTING. Checked before
+    // any privileged client is constructed and before any row is written — the
+    // point is that no unredeemable code ever comes into being. The strike is
+    // handed back: the caller did nothing wrong and got nothing.
+    if (!isHandoffLandingLive(process.env.FP_HANDOFF_LANDING_LIVE)) {
+      releaseRateLimitEvent(budget.key);
+      return { kind: "fallback", destination: FIRST_PROFIT_SIGN_IN_URL };
+    }
+    const result = await mintHandoffCode(
+      {
+        // supabaseAdmin() is justified for the same reason the rest of this file
+        // justifies it, and the migration says it outright: fp_handoff_codes is
+        // RLS-on with ZERO policies because a row there is a bearer credential
+        // for a child's session. A FACTORY, so no privileged client exists until
+        // the core has a caller and a well-formed request.
+        db: () => supabaseAdmin(),
+        mintCode: () => randomBytes(HANDOFF_CODE_BYTES).toString("base64url"),
+        now: () => Date.now(),
+      },
+      input,
+      { parentId: ctx.parentId },
+      FIRST_PROFIT_SIGN_IN_URL
+    );
+    // ONLY `fallback` refunds: it is OUR fault (an unreadable roster, a failed
+    // insert) and the family gets no code out of it. `failed` is not refunded —
+    // it covers a malformed argument and a child the caller does not own, both
+    // of which are caller-induced, and refunding a foreign-child probe would
+    // make probing free (the refunded-strike-refunds-the-attacker learning).
+    if (result.kind === "fallback") releaseRateLimitEvent(budget.key);
+    return result;
   } catch (err) {
     console.error(`[fp/v3-onboarding] handoff threw: ${err instanceof Error ? err.message : String(err)}`);
     return { kind: "failed" };

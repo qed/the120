@@ -213,12 +213,24 @@ redesigned. Additional planning-time boundaries:
   `win === null` → visible manual link (R14). Replay of a consumed code is
   logged. No PKCE; audience binding + Origin check suffice (two first-party
   sites, hardcoded destination).
-- **Mobile ending is same-tab.** Below `sm`, "Keep building" navigates the same
-  tab to FP (no popup juggling on phones) with a "Parent dashboard" link shown on
-  the account-ready screen first; the new-tab behavior is the `sm`+ path. This is
-  a deliberate refinement of origin R10's "new tab", resolving the flow-analysis
-  mobile gap; the origin's intent (parent keeps their context) is preserved on
-  desktop where it matters.
+- **~~Mobile ending is same-tab.~~ REVERSED by Unit 5's review (FIX 1) — the
+  ending is a NEW TAB on every device.** The original decision (below `sm`,
+  "Keep building" navigates the same tab, no popup juggling on phones) was
+  adopted before the handoff's refusal semantics existed. Those semantics
+  deliberately never un-burn a consumed code, and one of the three legs holding
+  that up is "the family is standing on the account-ready screen holding the
+  username and password we just showed them". A same-tab navigation LEAVES
+  the120.school before the exchange has even run on the other origin, so a
+  transient exchange failure stranded a phone family with a burned code, no
+  password on screen, and no way back — Back remounts the account-ready screen
+  onto the idempotent-replay path, which by design shows "Already set on an
+  earlier try" instead of the password. Options weighed: (a) new tab everywhere;
+  (b) same-tab plus a durable stash of the credentials — rejected, it means
+  persisting a child's password in a phone's storage on what is often a shared
+  family device, trading an outage risk for a standing one. (a) it is: the cost
+  is a tab in the switcher, and the popup-blocked manual link (already built) is
+  the phone's safety net exactly as it is the desktop's. R10's "new tab" is
+  therefore honoured as written, not refined.
 - **Second-handoff collision:** FP's `/auth/enter` adopts the new session through
   the shared `adoptSession` (wipe → profile → hydrate), so kid B's handoff cleanly
   replaces kid A's session; The120 side shows "this will sign the device into
@@ -558,9 +570,9 @@ no child on compensated failure (dashboard shows neither draft nor kid); the
 retry path treats an unconsumed draft + `child_created` attempt as the core's
 idempotent-replay case. The page carries the fail-closed `V3_START_LIVE` check
 from its first commit (see go-live lever decision — it is publicly routable the
-moment it merges). The account-ready "Keep building" implements BOTH endings:
-same-tab navigation below `sm`, sync-open/async-navigate new tab at `sm`+
-(mobile decision), consuming Unit 5's mint action. Attempts minted for
+moment it merges). The account-ready "Keep building" uses ONE ending on
+every device: sync-open/async-navigate a new tab, consuming Unit 5's mint
+action (see the reversed mobile-ending decision above — Unit 5 review FIX 1). Attempts minted for
 signed-in parents at loop entry are created in state `verified` with parent_id
 linked — a stated invariant, not a bypass (`recordConsent` refuses
 non-verified attempts). Prototype's paper-grain aesthetic is the design
@@ -654,14 +666,26 @@ exchange route returning login-shaped tokens.
 **Files:**
 - Create: `app/api/fp/handoff/exchange/route.ts`, `app/api/fp/handoff/handoff-core.ts`,
   `handoff-rules.ts`; mint action added to `app/start/v3/actions.ts`
-- Test: `app/api/fp/handoff/__tests__/handoff-core.test.ts`
+- Modify: `app/api/fp/login/login-rules.ts` (the shared sign-in contract —
+  `FpSessionBody`, `FP_SESSION_BODY_KEYS`, `FP_SIGN_IN_REFUSAL_BODY` — so the
+  two doors' 200 and 401 bodies have ONE source rather than two hand-kept
+  copies; review FIX 5), `app/api/fp/login/route.ts` (annotate its 200 with it)
+- Test: `app/api/fp/handoff/__tests__/handoff-core.test.ts`,
+  `handoff-rules.test.ts`, `mint-action.test.ts`, `exchange-route.test.ts`
+  (execution-level: real POST/OPTIONS through the handler, core + limiter mocked
+  — the source-position pins are documentation, not the guarantee; review FIX 4)
 
 **Approach:** Mint requires the parent cookie session AND that the child belongs
 to that parent; ≥128-bit CSPRNG, hash stored, 120s TTL. Exchange route reuses the
 login route's Origin allowlist helper (`app/api/fp/login/login-rules.ts`
 `buildAllowedOrigins`) and rate-limit-before-work ordering; consume is one
 conditional UPDATE...RETURNING; consumed-code replay attempts are logged as a
-signal. Response body byte-shape-matches `/api/fp/login` success.
+signal. Response body byte-shape-matches `/api/fp/login` success — enforced by
+SHARING the type and the serialized refusal string with the login route rather
+than by comment (review FIX 5). The mint action additionally refuses to mint
+while `FP_HANDOFF_LANDING_LIVE` is off (review FIX 2): the destination page
+ships in the other repo, and a burned code pointing at a 404 is worse than no
+code at all.
 
 **Test scenarios:**
 - Happy: mint→exchange→token pair; row marked used.
@@ -684,6 +708,23 @@ with clean session adoption.
 
 **Dependencies:** Unit 5 (API contract; deployable behind absence-tolerance — an
 FP deploy with no The120 exchange route just shows the login fallback)
+
+**Carried forward from Unit 5's review (binding on this unit):**
+- **FIX 1 — `/auth/enter` MUST render an explicit OUTAGE state that names the
+  way back.** The handoff never un-burns a consumed code, and the account-ready
+  tab (which is where the password lives) is now a *different tab* rather than
+  this one. So when the exchange refuses, this screen is the only thing the
+  family is looking at, and "something went wrong" is not enough: it must say
+  the code is spent, that this tab can be closed, that the tab they came from
+  still has their username and password, and offer the plain sign-in form —
+  plus the `admissions@the120.school` line for a family who closed that tab.
+  A bare failure here re-creates exactly the strand FIX 1 removed.
+- **FIX 2 — this unit owns the `FP_HANDOFF_LANDING_LIVE` flip.** Unit 5's mint
+  action refuses to mint at all while that env flag is off, answering with the
+  plain sign-in destination instead, so no code can be minted against a route
+  that does not exist yet. Flipping it ON in The120's Vercel project is a
+  step of THIS unit's deploy, after `/auth/enter` is confirmed serving in
+  production — not a Unit 9 go-live task.
 
 **Files:**
 - Create: `first-profit:src/screens/auth/enterLink.ts` (fragment read + strip —
@@ -984,9 +1025,20 @@ resolve.
   `COVER_AI_LIVE`), Gemini `personGeneration` allowlist request (future), Vercel
   Blob store creation + env vars in both Vercel projects, `V3_START_LIVE` flip as
   the launch act, launch-email script run after flip.
+- **Two env levers, and they are NOT the same lever** (Unit 5 review, FIX 2).
+  `V3_START_LIVE` = "the v3 front door is open to new families"; it is the
+  launch act. `FP_HANDOFF_LANDING_LIVE` (The120) = "firstprofit.school/auth/enter
+  EXISTS"; it is a cross-repo deploy-ordering interlock, flipped as the last
+  step of Unit 6's deploy, and it is checked in `v3MintHandoffAction` itself
+  rather than in the page. Both are fail-closed and both accept `1|true|on`.
+  While `FP_HANDOFF_LANDING_LIVE` is off, "Keep building" mints NOTHING and
+  sends the family to the plain First Profit sign-in page with the credentials
+  the screen just showed them — so a code that cannot be redeemed can never come
+  into existence, by construction rather than by remembering the deploy order.
 - Deploy order for ship 1: The120 (Units 1–5, Unit 7's The120-side response
-  changes, 8, 9 with flag off) → first-profit (Units 6–7) → flip `V3_START_LIVE`
-  (by promoting a known-good deployment) → launch email. Each side degrades
+  changes, 8, 9 with flag off) → first-profit (Units 6–7) → flip
+  `FP_HANDOFF_LANDING_LIVE` once `/auth/enter` is confirmed serving → flip
+  `V3_START_LIVE` (by promoting a known-good deployment) → launch email. Each side degrades
   gracefully alone (R14 phase-gap state; Unit 7 profile fields optional). Note:
   Unit 8's dashboard changes (hasPassword derivation, path-register widening)
   take effect for the live beta cohort at The120 deploy time, before the flip —

@@ -66,12 +66,18 @@ export function V3Flow({
   draft,
   parentEmail,
   consentPolicy,
+  coverAiLive,
 }: {
   initialStep: V3Step;
   facts: V3FlowFacts;
   draft: V3DraftView | null;
   parentEmail: string | null;
   consentPolicy: { version: string; hash: string; text: string };
+  /** Server-read `COVER_AI_LIVE` (v3 Unit 4). Off = the cover step shows no
+   *  photo affordance at all, because there is no vendor to send a minor's
+   *  photo to and no store to put it in. The endpoint refuses a photo body
+   *  independently, so a stale bundle cannot re-open the door. */
+  coverAiLive: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -168,6 +174,7 @@ export function V3Flow({
                 draftId={draftId}
                 firstName={firstName}
                 age={draft?.age ?? null}
+                coverAiLive={coverAiLive}
                 onContinue={() => go("story")}
                 onBack={() => go("kid")}
               />

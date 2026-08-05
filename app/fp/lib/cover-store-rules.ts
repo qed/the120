@@ -190,6 +190,39 @@ export const STATUSES_IMPLYING_COVER_BLOB: readonly CoverStatus[] = [
 export const statusImpliesCoverBlob = (status: CoverStatus): boolean =>
   STATUSES_IMPLYING_COVER_BLOB.includes(status);
 
+/**
+ * WHICH STATUSES A ROW MAY BE LEFT SITTING IN FOREVER.
+ *
+ * An ALLOWLIST, not a denylist, so adding a status to `COVER_STATUSES` forces
+ * someone to decide which side of this line it falls on rather than inheriting
+ * "terminal" by default.
+ *
+ * `generating` is the one non-terminal value: it means A REQUEST IS IN FLIGHT,
+ * and the only thing that ever advances it is that same request's settle write.
+ * If the request dies between the reservation CAS and the settle — a crashed
+ * function, a settle that will not persist — the row is stranded, because
+ * nothing else in this codebase reprocesses it (the plan's reaper sweeps
+ * stale-`generating` DRAFTS; it does not fix children).
+ *
+ * That is why `planCoverCarry` refuses to carry it: a stranded draft must not be
+ * able to mint a permanently-stranded CHILD, whose `fp_cover_status` no reaper,
+ * cron, or backfill anywhere would ever touch.
+ *
+ * Everything else is somewhere a row can honestly rest: `none` (nothing tried),
+ * the three picture states, `cap_exhausted` (spent), `reaped` (deleted).
+ */
+export const TERMINAL_COVER_STATUSES: readonly CoverStatus[] = [
+  "none",
+  "final",
+  "fallback_pending_regen",
+  "fallback_permanent",
+  "cap_exhausted",
+  "reaped",
+];
+
+export const isTerminalCoverStatus = (status: CoverStatus): boolean =>
+  TERMINAL_COVER_STATUSES.includes(status);
+
 /* ------------------------------------------- rule (1): blob before row status */
 
 export type CoverStatusWriteDecision =
@@ -197,12 +230,33 @@ export type CoverStatusWriteDecision =
   | { ok: false; reason: "blob_not_confirmed" | "key_not_owned"; detail: string };
 
 /**
+ * WHERE THE PICTURE COMES FROM (New User Flow v3, Unit 4).
+ *
+ *   - `blob`    — the bytes live in the object store. Rule (1) applies in full:
+ *                 a status implying a picture requires a CONFIRMED key.
+ *   - `derived` — the picture is the DETERMINISTIC template
+ *                 (app/fp/lib/cover-template.ts), re-computed from the row's own
+ *                 name/age/answers on every request. There are no bytes to
+ *                 confirm and no key to name.
+ *
+ * This is a generalization of rule (1), NOT a relaxation of it. The invariant
+ * rule (1) protects is "a row must never claim a picture that cannot be
+ * produced" — the harm being a permanently broken image on a child's profile.
+ * A pure function of columns the row already carries can always be produced, so
+ * the invariant holds by construction. What a `derived` write may NOT do is name
+ * a blob key: that is the actual dangerous claim (it would make the reaper and
+ * the R28 erasure believe an object exists), so it is refused explicitly below.
+ */
+export type CoverPictureSource = "blob" | "derived";
+
+/**
  * Rule (1). May this row be updated to this cover status yet?
  *
- * A status that implies a blob requires BOTH a key and a CONFIRMED write of that
- * key (the caller passes what its `head`/`put` actually returned, never what it
- * intended to write). A status that implies no blob passes regardless. The key,
- * when present, must also live in the owner's own namespace.
+ * A status that implies a picture requires BOTH a key and a CONFIRMED write of
+ * that key (the caller passes what its `head`/`put` actually returned, never
+ * what it intended to write) — unless the picture is `derived`, in which case it
+ * requires the ABSENCE of a key. A status that implies no picture passes
+ * regardless. The key, when present, must live in the owner's own namespace.
  */
 export function decideCoverStatusWrite(input: {
   status: CoverStatus;
@@ -211,8 +265,20 @@ export function decideCoverStatusWrite(input: {
   coverBlobKey?: string | null;
   /** True only if the store CONFIRMED the object exists (a head/put result). */
   blobConfirmed: boolean;
+  /** Defaults to `blob` — the pre-existing behaviour, unchanged. */
+  source?: CoverPictureSource;
 }): CoverStatusWriteDecision {
   const key = input.coverBlobKey?.trim() ?? "";
+  if (input.source === "derived") {
+    if (key.length > 0) {
+      return {
+        ok: false,
+        reason: "blob_not_confirmed",
+        detail: `a derived cover must not name a blob key (got ${key}) — nothing wrote those bytes`,
+      };
+    }
+    return { ok: true };
+  }
   if (key.length > 0 && !keyBelongsTo(key, input.scope, input.ownerId)) {
     return {
       ok: false,
@@ -299,8 +365,10 @@ export type CoverCarryPlan = {
  *
  * The generation count carries so a family cannot reset their vendor spend by
  * finishing signup. A draft whose status does not imply a blob carries the
- * status only (a `cap_exhausted` or `generating` draft becomes a child in the
- * same state, with the count intact).
+ * status only, PROVIDED that status is terminal — a `cap_exhausted` draft
+ * becomes a `cap_exhausted` child with the count intact, while a `generating`
+ * draft becomes a `none` child (see `TERMINAL_COVER_STATUSES`). The count
+ * carries either way: a stranded generation is still a generation spent.
  */
 export function planCoverCarry(input: {
   draftId: string;
@@ -316,14 +384,42 @@ export function planCoverCarry(input: {
   const carryable =
     from.length > 0 &&
     statusImpliesCoverBlob(input.draftCoverStatus) &&
-    keyBelongsTo(from, "draft", input.draftId);
+    keyBelongsTo(from, "draft", input.draftId) &&
+    // TOTAL, NEVER THROWING (v3 Unit 4). `blobKey` -> `blobPrefix` THROWS on an
+    // owner id it cannot namespace safely, and the one caller,
+    // `v3ProvisionKid`, invokes this AFTER the child has been minted and
+    // OUTSIDE any try — so a child id that is not uuid-shaped (a future
+    // provisioning path, a fixture, a migrated legacy id) would turn a
+    // successful mint into an unhandled throw and lose the family their
+    // just-created account. Decoration must never fail provisioning: an
+    // un-namespaceable child id simply carries no cover, which is the same
+    // degradation an absent cover already produces.
+    isSafeOwnerId(input.childId);
 
   if (!carryable) {
+    // A draft that NAMED a key we could not carry (a foreign key, an
+    // un-namespaceable child id) must not hand the child a picture-implying
+    // status: the bytes exist, the child just cannot reach them, and a status
+    // saying otherwise is the broken-image failure rule (1) exists to prevent.
+    // A draft that named NO key keeps its status verbatim — that is the DERIVED
+    // template cover (source: "derived"), which the child re-computes from its
+    // own name/age/answers and therefore carries perfectly with no bytes at all.
+    const unreachableBlob = from.length > 0 && statusImpliesCoverBlob(input.draftCoverStatus);
+    // A NON-TERMINAL draft status is never carried either (v3 Unit 4 review,
+    // FIX 2). `generating` means "a request is mid-flight on the DRAFT"; that
+    // request can only ever settle the draft, never the child it was not aware
+    // of. Copying the word onto a child mints a row stuck in a state nothing in
+    // this codebase advances — the reaper's stale-`generating` sweep is scoped
+    // to drafts. `none` is the truthful carry: no cover, and the dashboard's
+    // ordinary "draw one" affordance applies.
     return {
       copy: null,
       child: {
         fp_cover_blob_key: null,
-        fp_cover_status: input.draftCoverStatus,
+        fp_cover_status:
+          unreachableBlob || !isTerminalCoverStatus(input.draftCoverStatus)
+            ? "none"
+            : input.draftCoverStatus,
         fp_cover_generation_count: count,
       },
     };

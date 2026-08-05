@@ -10,6 +10,7 @@ import {
   parseBlobKey,
   planCoverCarry,
   statusImpliesCoverBlob,
+  isTerminalCoverStatus,
   COVER_STATUSES,
 } from "../cover-store-rules";
 import {
@@ -320,7 +321,7 @@ describe("rule 4 — the draft to child carry COPIES the cover to a child-namesp
   });
 
   it("carries status + count with NO copy when the draft status implies no blob", () => {
-    for (const status of ["none", "generating", "cap_exhausted"] as const) {
+    for (const status of ["none", "cap_exhausted"] as const) {
       const plan = planCoverCarry({
         draftId: DRAFT,
         childId: CHILD,
@@ -422,5 +423,148 @@ describe("rule 4 — the draft to child carry COPIES the cover to a child-namesp
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.copied).toBe(false);
     expect(store.ops).toEqual([]);
+  });
+});
+
+/* ------------------------------------ the DERIVED picture source (v3 Unit 4) */
+
+describe("rule 1, derived arm — a picture that needs no bytes", () => {
+  it("permits a picture-implying status with NO key when the picture is derived", () => {
+    // The template cover (app/fp/lib/cover-template.ts) is a pure function of
+    // the row's own name/age/answers, so it can always be produced and there is
+    // nothing to confirm. This is what lets Unit 4 write zero blobs.
+    for (const status of ["final", "fallback_pending_regen", "fallback_permanent"] as const) {
+      expect(
+        decideCoverStatusWrite({
+          status,
+          scope: "draft",
+          ownerId: DRAFT,
+          coverBlobKey: null,
+          blobConfirmed: false,
+          source: "derived",
+        }).ok
+      ).toBe(true);
+    }
+  });
+
+  it("REFUSES a derived write that names a blob key — nothing wrote those bytes", () => {
+    const v = decideCoverStatusWrite({
+      status: "final",
+      scope: "draft",
+      ownerId: DRAFT,
+      coverBlobKey: blobKey({ scope: "draft", ownerId: DRAFT, kind: "cover", sequence: 1 }),
+      blobConfirmed: true,
+      source: "derived",
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("blob_not_confirmed");
+  });
+
+  it("leaves the default (blob) behaviour exactly as it was", () => {
+    expect(
+      decideCoverStatusWrite({
+        status: "final",
+        scope: "draft",
+        ownerId: DRAFT,
+        coverBlobKey: null,
+        blobConfirmed: true,
+      }).ok
+    ).toBe(false);
+  });
+});
+
+describe("planCoverCarry is TOTAL — decoration never fails provisioning", () => {
+  it("does not throw on a child id it cannot namespace, and carries no cover", () => {
+    // v3ProvisionKid calls this AFTER the child is minted and OUTSIDE any try;
+    // a throw here would lose a family the account they just created.
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: "not a uuid / ../escape",
+      draftCoverKey: `fp/v3/drafts/${DRAFT}/cover-1.png`,
+      draftCoverStatus: "final",
+      draftGenerationCount: 2,
+    });
+    expect(plan.copy).toBeNull();
+    expect(plan.child.fp_cover_blob_key).toBeNull();
+    // The bytes exist but the child cannot reach them, so the child must NOT
+    // claim a picture status it cannot show.
+    expect(plan.child.fp_cover_status).toBe("none");
+    // The cap still carries: an un-namespaceable id is not a refund.
+    expect(plan.child.fp_cover_generation_count).toBe(2);
+  });
+
+  it("carries a DERIVED cover's status verbatim, because the child re-derives it", () => {
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      draftCoverKey: null,
+      draftCoverStatus: "fallback_pending_regen",
+      draftGenerationCount: 1,
+    });
+    expect(plan.copy).toBeNull();
+    expect(plan.child.fp_cover_blob_key).toBeNull();
+    expect(plan.child.fp_cover_status).toBe("fallback_pending_regen");
+    expect(plan.child.fp_cover_generation_count).toBe(1);
+  });
+
+  /**
+   * ── A STRANDED DRAFT MUST NOT MINT A STRANDED CHILD (v3 Unit 4 review, FIX 2) ──
+   * `generating` is the one NON-TERMINAL cover status: the only writer that ever
+   * advances it is the in-flight request that set it. If that request dies
+   * between the reservation CAS and the settle, the draft sits on `generating`
+   * — and if the status were then copied verbatim onto the child, the child
+   * would carry it FOREVER, because nothing in this codebase reprocesses a
+   * child's `fp_cover_status` (the reaper's stale-`generating` sweep is scoped
+   * to drafts). Unit 7 renders that status as work-in-progress, so the family
+   * would watch a cover be "drawn" for the life of the account.
+   */
+  it("refuses to carry a NON-TERMINAL draft status, and mints `none` instead", () => {
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      draftCoverKey: null,
+      draftCoverStatus: "generating",
+      draftGenerationCount: 2,
+    });
+    expect(plan.copy).toBeNull();
+    expect(plan.child.fp_cover_blob_key).toBeNull();
+    expect(plan.child.fp_cover_status).toBe("none");
+    expect(isTerminalCoverStatus(plan.child.fp_cover_status)).toBe(true);
+    // The count still carries: a stranded generation is a generation spent.
+    expect(plan.child.fp_cover_generation_count).toBe(2);
+  });
+
+  it("only ever mints a child in a TERMINAL status, whatever the draft held", () => {
+    // Whole-set: a status added to COVER_STATUSES cannot become carryable
+    // without someone deciding whether a row may rest in it.
+    for (const status of COVER_STATUSES) {
+      for (const key of [null, `fp/v3/drafts/${DRAFT}/cover-1.png`]) {
+        const plan = planCoverCarry({
+          draftId: DRAFT,
+          childId: CHILD,
+          draftCoverKey: key,
+          draftCoverStatus: status,
+          draftGenerationCount: 1,
+        });
+        expect(isTerminalCoverStatus(plan.child.fp_cover_status)).toBe(true);
+      }
+    }
+  });
+
+  it("names `generating` as the ONLY non-terminal status", () => {
+    expect(COVER_STATUSES.filter((s) => !isTerminalCoverStatus(s))).toEqual(["generating"]);
+  });
+
+  it("degrades an UNREACHABLE blob-backed cover to none", () => {
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      // A key belonging to someone else: real bytes, wrong namespace.
+      draftCoverKey: `fp/v3/drafts/${CHILD}/cover-1.png`,
+      draftCoverStatus: "final",
+      draftGenerationCount: 1,
+    });
+    expect(plan.copy).toBeNull();
+    expect(plan.child.fp_cover_status).toBe("none");
   });
 });

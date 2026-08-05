@@ -7,6 +7,7 @@ import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consen
 import { loadV3OnboardingState } from "@/app/lib/v3-signup/v3-onboarding-core";
 import { resolveV3Step } from "@/app/lib/v3-signup/flow-rules";
 import { isV3StartLive, v3UnauthenticatedEntryOpen } from "@/app/lib/v3-signup/v3-signup-rules";
+import { isCoverAiLive } from "@/app/api/fp/cover/cover-rules";
 import { V3Flow } from "./V3Flow";
 import { HoldingPage } from "./HoldingPage";
 
@@ -121,6 +122,11 @@ export default async function V3StartPage({
         hash: currentPolicyHash(),
         text: FP_CONSENT_POLICY.text,
       }}
+      // v3 Unit 4. Read on the SERVER: the flag decides whether a minor's photo
+      // is collected at all, so it must not be inferable or overridable from the
+      // client bundle. Off today, and the cover endpoint refuses a photo body
+      // regardless of what any bundle believes.
+      coverAiLive={isCoverAiLive(process.env.COVER_AI_LIVE)}
     />
   );
 }

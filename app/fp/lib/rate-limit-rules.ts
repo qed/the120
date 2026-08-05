@@ -163,6 +163,30 @@ export const V3_ONBOARDING_NAMESPACE = "fp-v3-onboarding";
 
 export const V3_ONBOARDING_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 40 };
 
+/* ─────────────── New User Flow v3 cover generation (v3 Unit 4) ───────────── */
+
+/**
+ * `POST /api/fp/cover`. Its OWN namespace — never the onboarding action budget —
+ * because the cover endpoint is a ROUTE HANDLER reachable independently of the
+ * Server Actions, and because a family re-running their cover a few times must
+ * not spend the budget that their provisioning retry needs.
+ *
+ * Recorded on the ATTESTED CLIENT IP, before any authorization work, because at
+ * that point in the request there is no authenticated identity to key on — the
+ * whole point of putting the limiter first is that it costs nothing and bounds
+ * unauthenticated floods before the session probe and the DB reads.
+ *
+ * ⚠ VOLUMETRIC ONLY, like every bucket in this module (the store is in-memory
+ * and empty on cold start). The load-bearing per-kid ceiling is the DURABLE
+ * `generation_count` column on `fp_onboarding_drafts` / `children`, enforced by
+ * a compare-and-set on the observed value (app/api/fp/cover/cover-core.ts,
+ * COVER_GENERATION_CAP). A family behind one NAT with three kids, each redrawing
+ * a few times, stays far inside this.
+ */
+export const V3_COVER_NAMESPACE = "fp-v3-cover";
+
+export const V3_COVER_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 30 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

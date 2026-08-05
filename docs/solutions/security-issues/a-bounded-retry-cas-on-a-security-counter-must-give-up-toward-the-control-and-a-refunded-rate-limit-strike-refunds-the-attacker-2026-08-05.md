@@ -107,6 +107,41 @@ The rate-limit refund is the same reasoning one layer up. A refund is a judgment
 whether or not the system managed to record it, so refunding it converts the volumetric
 backstop into a no-op precisely when the durable control is also degraded.
 
+## It recurred four days' work later, in a different endpoint (2026-08-05)
+
+`POST /api/fp/cover` shipped its own bounded-retry CAS — a generation-count
+reservation guarding a per-kid cap — and got the give-up direction right: exhaustion
+returns a refusal, no generation happens, the count is untouched. Then it did this:
+
+```ts
+export const isCoverInfraFailure = (reason: CoverRefusalReason): boolean =>
+  reason === "outage" || reason === "busy";      // busy == CAS exhausted
+// ...route.ts
+if (isCoverInfraFailure(reason)) releaseRateLimitEvent(key);
+```
+
+Same refund, same reasoning ("we could not complete this, so it should not cost the
+caller"), same consequence: CAS exhaustion is produced by concurrent writers on one
+row, so the only party who can reliably trigger it is someone hammering that row — and
+each free attempt still spent an authenticate round trip, a service-role read, two
+consent reads, and up to four CAS statements.
+
+Two things are worth recording about the recurrence:
+
+- **This doc is what caught it.** The learning was surfaced during review of the new
+  unit and matched against the new code; nothing about the endpoint's own tests would
+  have. The value was in the search, not in anyone remembering.
+- **The original framing was too narrow.** This was filed as being about *a security
+  counter*. The cover cap is a cost/abuse control, not an auth control, and the trap
+  was identical. The rule is about **any** bounded-retry CAS whose exhaustion condition
+  is caller-producible — which is nearly all of them, since contention is what exhausts
+  a CAS.
+
+The fix that stuck was structural rather than a corrected boolean: the refundable set
+is now an explicit allowlist (`COVER_REFUNDED_REFUSALS = ["outage"]`) with a test that
+asserts the WHOLE set, so a newly added refusal reason cannot quietly become refundable
+by default. Prefer that shape over an `||` chain.
+
 ## Prevention
 
 - **Enumerate a retry loop's give-up branch as a security decision.** Ask: who causes

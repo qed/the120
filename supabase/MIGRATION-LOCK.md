@@ -1,8 +1,27 @@
-# Migration lock — NO LONGER CONTENDED (2026-07-29)
+# Migration lock — CONTENDED AGAIN: THREE LANES (2026-08-05)
 
-**The two-lane setup is retired** (see `docs/LANES.md`). The second
-worktree is gone, so there is one working tree and no second author to
-race. The holder line below is historical.
+**Three worktrees are live right now**, so the "no longer contended" note
+below (2026-07-29) is out of date and is kept only as history:
+
+| Lane | Worktree / branch | Migrations authored |
+|------|-------------------|---------------------|
+| v3 new-user flow | `120-The120` on `feat/new-user-flow-v3` | through `20260916120000_fp_reserved_handle_auth` |
+| Watchtower | `120-The120-watchtower` on `feat/watchtower` | none yet |
+| Image Lab | `120-The120-image-lab` on `feat/image-lab` | `20260917120000_fp_image_lab` (authored, **not yet applied**) |
+
+**Holder: Image Lab**, for `20260917120000_fp_image_lab.sql` only. Ask Peter
+before a second lane authors while that is outstanding.
+
+This section is being restored because the file said the opposite of the
+truth while three lanes ran, and that is exactly the precondition for
+collision #4: the next author reads this at session start, concludes no
+coordination is needed, and takes an already-claimed version. The recorded
+failure mode below (a lane reading this file once and treating a mutable,
+contended file as durable state) is the same one.
+
+**The ledger query is not optional regardless of what this table says** —
+an applied-but-unmerged migration in another lane is invisible to both the
+file listing AND this table.
 
 **What survives, and is not optional:** query the live ledger for the next
 free version immediately before authoring a migration —

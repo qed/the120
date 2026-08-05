@@ -14,7 +14,9 @@ import {
   type HandoffMintDeps,
 } from "../handoff-core";
 import {
+  deriveCoverSessionFields,
   FP_SESSION_BODY_KEYS,
+  FP_SESSION_BODY_REQUIRED_KEYS,
   FP_SESSION_PROFILE_KEYS,
 } from "@/app/api/fp/login/login-rules";
 import {
@@ -45,9 +47,26 @@ const OTHER_PARENT = "parent-b";
 const FALLBACK = "https://firstprofit.school/";
 const NOW = 1_700_000_000_000;
 
+/** Stands in for the ONE artifact `POST /api/fp/cover` rendered at signup and
+ *  provisioning carried onto the child. Nothing in this file renders a cover —
+ *  that is the point of the Unit 7 rework. The end-to-end tie between what
+ *  signup rendered and what this door serves is
+ *  app/fp/lib/__tests__/cover-one-render.test.ts. */
+const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+
 type Kid = { childId: string; userId: string; firstName: string };
 
-function seedKid(store: Store, cfg: { parentId?: string; firstName?: string; grade?: number } = {}): Kid {
+function seedKid(
+  store: Store,
+  cfg: {
+    parentId?: string;
+    firstName?: string;
+    grade?: number;
+    coverStatus?: string | null;
+    coverBlobKey?: string | null;
+    coverDataUrl?: string | null;
+  } = {}
+): Kid {
   const childId = randomUUID();
   const userId = randomUUID();
   store.children.push({
@@ -56,6 +75,9 @@ function seedKid(store: Store, cfg: { parentId?: string; firstName?: string; gra
     first_name: cfg.firstName ?? "Remi",
     birth_year: "",
     grade: cfg.grade ?? 5,
+    fp_cover_status: cfg.coverStatus ?? null,
+    fp_cover_blob_key: cfg.coverBlobKey ?? null,
+    fp_cover_data_url: cfg.coverDataUrl ?? null,
   });
   store.path_student_profiles.push({
     id: randomUUID(),
@@ -237,7 +259,11 @@ describe("exchange — the code is the only thing that authorizes", () => {
     // shared `FpSessionBody` type via a `Record<keyof …, true>` — so a field
     // added to ONE door either appears at BOTH or fails to compile. The old
     // hardcoded array here would have passed happily while the two drifted.
-    expect(Object.keys(res.body).sort()).toEqual([...FP_SESSION_BODY_KEYS].sort());
+    // This kid has no cover, so the body is exactly the REQUIRED keys — the
+    // optional Unit 7 cover fields are OMITTED, never nulled (they have their
+    // own cases below). Every emitted key is still one the contract names.
+    expect(Object.keys(res.body).sort()).toEqual([...FP_SESSION_BODY_REQUIRED_KEYS].sort());
+    for (const key of Object.keys(res.body)) expect(FP_SESSION_BODY_KEYS).toContain(key);
     expect(Object.keys(res.body.profile).sort()).toEqual([...FP_SESSION_PROFILE_KEYS].sort());
     expect(res.body.access_token).toBe(`access-${kid.childId}`);
     expect(res.body.refresh_token).toBe(`refresh-${kid.childId}`);
@@ -256,6 +282,95 @@ describe("exchange — the code is the only thing that authorizes", () => {
     // child's auth user, which is what makes the session playable.
     expect(h.store.fp_player_profiles).toHaveLength(1);
     expect(h.store.fp_player_profiles[0].child_id).toBe(kid.childId);
+  });
+
+  /* ────────────── the comic cover, in LOCKSTEP with /api/fp/login ────────── */
+
+  it("serves the child's ONE STORED cover — the same artifact the login route serves", async () => {
+    const h = harness();
+    const kid = seedKid(h.store, {
+      firstName: "Remi",
+      coverStatus: "final",
+      coverBlobKey: null,
+      coverDataUrl: STORED_COVER,
+    });
+    await mintHandoffCode(h.mintDeps, { childId: kid.childId }, { parentId: PARENT }, FALLBACK);
+    const res = await exchangeHandoffCode(
+      h.exchangeDeps,
+      { code: h.codes[0] },
+      { ip: "203.0.113.9", ua: "vitest" }
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // THE PARITY PROPERTY, and note WHAT it is asserted against: the bytes on
+    // the child row, not a second call to a renderer. Both doors read the same
+    // column through the same pure function, so "the same kid sees the same
+    // cover whichever way they signed in" is a fact about the shape of the
+    // code. app/api/fp/login/__tests__/route.test.ts asserts its 200 against
+    // this identical constant, and app/fp/lib/__tests__/cover-one-render.test.ts
+    // ties the constant back to what signup actually rendered.
+    expect(res.body.coverUrl).toBe(STORED_COVER);
+    expect(res.body).toMatchObject(
+      deriveCoverSessionFields({
+        coverStatus: "final",
+        coverBlobKey: null,
+        coverDataUrl: STORED_COVER,
+      })
+    );
+    expect(Object.keys(res.body).sort()).toEqual([...FP_SESSION_BODY_KEYS].sort());
+  });
+
+  it("omits the cover url for a blob-backed cover it cannot produce, and everything for none at all", async () => {
+    const h = harness();
+    const blobKid = seedKid(h.store, {
+      firstName: "Bo",
+      coverStatus: "final",
+      coverBlobKey: "fp/v3/children/bo/cover-1.png",
+      coverDataUrl: STORED_COVER,
+    });
+    await mintHandoffCode(h.mintDeps, { childId: blobKid.childId }, { parentId: PARENT }, FALLBACK);
+    const blobRes = await exchangeHandoffCode(
+      h.exchangeDeps,
+      { code: h.codes[0] },
+      { ip: "203.0.113.9", ua: "vitest" }
+    );
+    expect(blobRes.ok).toBe(true);
+    if (!blobRes.ok) return;
+    expect(blobRes.body.coverStatus).toBe("final");
+    expect("coverUrl" in blobRes.body).toBe(false);
+
+    // A pre-v3 child: no cover columns at all, so NEITHER key is emitted. This
+    // is also the whole "children provisioned before the artifact migration"
+    // cohort — no cover fields, and deliberately no re-rendered substitute.
+    const plainKid = seedKid(h.store, { firstName: "Ada" });
+    await mintHandoffCode(h.mintDeps, { childId: plainKid.childId }, { parentId: PARENT }, FALLBACK);
+    const plainRes = await exchangeHandoffCode(
+      h.exchangeDeps,
+      { code: h.codes[1] },
+      { ip: "203.0.113.9", ua: "vitest" }
+    );
+    expect(plainRes.ok).toBe(true);
+    if (!plainRes.ok) return;
+    expect("coverStatus" in plainRes.body).toBe(false);
+    expect("coverUrl" in plainRes.body).toBe(false);
+  });
+
+  it("a `final` child with NO stored artifact gets the status and NO picture", async () => {
+    // Provisioned between Unit 4 and the artifact migration. The honest answer
+    // is "there is one, but not from here"; the client shows the sprite.
+    const h = harness();
+    const kid = seedKid(h.store, { firstName: "Ada", coverStatus: "final", coverBlobKey: null });
+    await mintHandoffCode(h.mintDeps, { childId: kid.childId }, { parentId: PARENT }, FALLBACK);
+    const res = await exchangeHandoffCode(
+      h.exchangeDeps,
+      { code: h.codes[0] },
+      { ip: "203.0.113.9", ua: "vitest" }
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.body.coverStatus).toBe("final");
+    expect("coverUrl" in res.body).toBe(false);
   });
 
   it("a code minted for child A can NEVER yield a session for child B", async () => {

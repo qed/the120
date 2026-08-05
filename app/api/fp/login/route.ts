@@ -77,6 +77,7 @@ import {
   checkOrigin,
   classifyAuthError,
   classifyIdentifier,
+  deriveCoverSessionFields,
   deriveRateLimitKeys,
   extractClientIp,
   parseLoginRequest,
@@ -200,7 +201,7 @@ export async function POST(req: Request): Promise<Response> {
     const res = await admin
       .from("path_student_profiles")
       .select(
-        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade)"
+        "id, user_id, child_id, family_id, children!inner(first_name, fp_username, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url)"
       )
       .order("created_at", { ascending: true });
     if (res.error) {
@@ -401,6 +402,17 @@ export async function POST(req: Request): Promise<Response> {
           { birthYear: candidate.birthYear, storedGrade: candidate.grade },
           new Date()
         ),
+        // The comic cover (v3 Unit 7; R12). SPREAD, so the keys are ABSENT —
+        // not null — for a child with no cover, which is every child
+        // provisioned before v3. This SERVES the one artifact stored on the
+        // child row at signup; it renders nothing. The same pure function runs
+        // on the same three columns in the handoff exchange, so the two doors
+        // cannot answer differently for one kid. NEVER logged.
+        ...deriveCoverSessionFields({
+          coverStatus: candidate.coverStatus,
+          coverBlobKey: candidate.coverBlobKey,
+          coverDataUrl: candidate.coverDataUrl,
+        }),
       };
       return new Response(JSON.stringify(body), { status: 200, headers });
     }

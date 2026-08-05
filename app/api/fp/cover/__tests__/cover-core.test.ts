@@ -414,6 +414,71 @@ describe("template generation", () => {
     expect(h.draftRow().updated_at).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
+  /* ── PERSISTENCE: the render happens once, and the row keeps it (U7) ── */
+
+  it("PERSISTS the rendered artifact in the same write that settles the status", async () => {
+    const h = harness();
+    const authz = await authorizeCoverGeneration(h.deps, { body: { draftId: h.draftId } });
+    if (!authz.ok) throw new Error("expected authorization to pass");
+    const done = await performCoverGeneration(h.deps, authz.authorized, h.emit);
+
+    expect(done.kind).toBe("ready");
+    if (done.kind !== "ready") return;
+    // The bytes the parent was just shown are now ON THE ROW — byte-for-byte,
+    // not a re-derivable recipe for them. This is the owner rework: one render,
+    // stored, carried to the child, served verbatim at every sign-in.
+    expect(h.draftRow().cover_data_url).toBe(done.coverUrl);
+    expect(h.draftRow().cover_status).toBe(TEMPLATE_COVER_STATUS);
+    // Exactly one render for one request.
+    expect(h.counts().renderCalls).toBe(1);
+  });
+
+  it("NULLS the stored artifact when it takes the slot, so `generating` never carries a picture", async () => {
+    // A redraw invalidates the previous cover the moment it reserves. Nothing
+    // serves a picture for `generating`, so bytes sitting there could only ever
+    // let the row disagree with itself.
+    const h = harness({
+      draft: { cover_status: "final", cover_data_url: "data:image/svg+xml;base64,T0xE" },
+      faults: {
+        // Fail every settle attempt AND the compensation, so the run stops with
+        // the row still on `generating` — the only way to observe that state.
+        "update:fp_onboarding_drafts": {
+          kind: "error",
+          error: { message: "boom" },
+          onCalls: [2, 3, 4, 5],
+        },
+      },
+    });
+    const authz = await authorizeCoverGeneration(h.deps, { body: { draftId: h.draftId } });
+    if (!authz.ok) throw new Error("expected authorization to pass");
+    await performCoverGeneration(h.deps, authz.authorized, h.emit);
+
+    expect(h.draftRow().cover_status).toBe("generating");
+    expect(h.draftRow().cover_data_url).toBeNull();
+  });
+
+  it("the COMPENSATION leaves no bytes behind beside its `none`", async () => {
+    const h = harness({
+      faults: {
+        // The three settle attempts fail; the compensation (call 5) lands.
+        "update:fp_onboarding_drafts": {
+          kind: "error",
+          error: { message: "boom" },
+          onCalls: [2, 3, 4],
+        },
+      },
+    });
+    const authz = await authorizeCoverGeneration(h.deps, { body: { draftId: h.draftId } });
+    if (!authz.ok) throw new Error("expected authorization to pass");
+    const done = await performCoverGeneration(h.deps, authz.authorized, h.emit);
+
+    expect(done.kind).toBe("refused");
+    expect(h.draftRow().cover_status).toBe("none");
+    // `none` claims no picture, so it may hold none. A row carrying bytes it
+    // will never serve is a leak with extra steps.
+    expect(h.draftRow().cover_data_url).toBeNull();
+  });
+
   it("refuses when the RESERVATION write errors, having drawn nothing", async () => {
     // The first `update:fp_onboarding_drafts` of the run IS the reservation CAS.
     const h = harness({

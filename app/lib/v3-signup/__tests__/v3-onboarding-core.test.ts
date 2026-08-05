@@ -494,6 +494,61 @@ describe("v3ProvisionKid — the idempotent-replay path", () => {
   });
 });
 
+describe("v3ProvisionKid — the cover artifact carry (v3 Unit 7, owner rework)", () => {
+  const STORED = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+
+  it("copies the draft's RENDERED cover onto the child, byte-for-byte", async () => {
+    // The owner requirement at the provisioning hop: the picture the parent
+    // approved at signup becomes the child's one and only cover. Provisioning
+    // has no renderer, so a copy is the only thing it can do — this pins that
+    // it does it, and that the column is actually selected and written.
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    Object.assign(store.fp_onboarding_drafts[0], {
+      cover_status: "final",
+      cover_blob_key: null,
+      cover_data_url: STORED,
+      generation_count: 1,
+    });
+
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+
+    expect(store.children.find((c) => c.id === mintedChildIds[0])).toMatchObject({
+      fp_cover_status: "final",
+      fp_cover_blob_key: null,
+      fp_cover_data_url: STORED,
+      fp_cover_generation_count: 1,
+    });
+  });
+
+  it("carries NO artifact for a draft that never generated one", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+    expect(store.children.find((c) => c.id === mintedChildIds[0])).toMatchObject({
+      fp_cover_status: "none",
+      fp_cover_data_url: null,
+    });
+  });
+
+  it("drops a malformed stored artifact and still provisions the child", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    Object.assign(store.fp_onboarding_drafts[0], {
+      cover_status: "final",
+      cover_blob_key: null,
+      cover_data_url: "https://evil.example/cover.svg",
+      generation_count: 1,
+    });
+
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+    expect(store.children.find((c) => c.id === mintedChildIds[0])).toMatchObject({
+      fp_cover_status: "final",
+      fp_cover_data_url: null,
+    });
+  });
+});
+
 describe("v3ProvisionKid — decoration never fails provisioning", () => {
   it("a cover-carry COPY failure degrades the child to status 'none' rather than pointing at bytes nobody wrote", async () => {
     const { store, deps, mintedChildIds } = harness({

@@ -234,18 +234,22 @@ export type CoverStatusWriteDecision =
  *
  *   - `blob`    — the bytes live in the object store. Rule (1) applies in full:
  *                 a status implying a picture requires a CONFIRMED key.
- *   - `derived` — the picture is the DETERMINISTIC template
- *                 (app/fp/lib/cover-template.ts), re-computed from the row's own
- *                 name/age/answers on every request. There are no bytes to
+ *   - `derived` — the picture is the template render
+ *                 (app/fp/lib/cover-template.ts), and it lives IN THE ROW as a
+ *                 `data:` URL (`cover_data_url` / `fp_cover_data_url`, migration
+ *                 20260917120000). There are no bytes in the object store to
  *                 confirm and no key to name.
  *
  * This is a generalization of rule (1), NOT a relaxation of it. The invariant
  * rule (1) protects is "a row must never claim a picture that cannot be
  * produced" — the harm being a permanently broken image on a child's profile.
- * A pure function of columns the row already carries can always be produced, so
- * the invariant holds by construction. What a `derived` write may NOT do is name
- * a blob key: that is the actual dangerous claim (it would make the reaper and
- * the R28 erasure believe an object exists), so it is refused explicitly below.
+ * A picture stored in the row itself is produced by reading the row, so the
+ * invariant holds by construction. (Until v3 Unit 7 the argument here was
+ * "re-computed on every request from name/age/answers" — that was wrong, and the
+ * module header of cover-template.ts records why.) What a `derived` write may
+ * NOT do is name a blob key: that is the actual dangerous claim (it would make
+ * the reaper and the R28 erasure believe an object exists), so it is refused
+ * explicitly below.
  */
 export type CoverPictureSource = "blob" | "derived";
 
@@ -349,8 +353,43 @@ export type CoverCarryPlan = {
     fp_cover_blob_key: string | null;
     fp_cover_status: CoverStatus;
     fp_cover_generation_count: number;
+    /**
+     * The RENDERED COVER, carried verbatim (v3 Unit 7, owner rework; migration
+     * 20260917120000). Never re-rendered — this is the whole point: the kid
+     * sees in First Profit the exact picture their parent was shown at signup.
+     * Null whenever the child is not getting a derived picture.
+     */
+    fp_cover_data_url: string | null;
   };
 };
+
+/**
+ * A stored cover artifact is a `data:image/svg+xml;base64,…` URL of about 2 KB.
+ * This ceiling is three orders of magnitude above that and exists only so a
+ * corrupted or hostile column value cannot be carried onto a child row (and from
+ * there onto every sign-in response). Over the bound is REFUSED, never
+ * truncated: half a data URL is a broken image, which is worse than none.
+ */
+export const COVER_DATA_URL_MAX = 256 * 1024;
+
+/** The one form a stored cover may take, restated here (rather than imported
+ *  from the template module) because this module is the storage authority and
+ *  must be able to reject a value the template module never produced. */
+export const COVER_DATA_URL_PREFIX = "data:image/svg+xml;base64,";
+
+/**
+ * Narrow a stored cover artifact, or null. The gate is a WHITELIST of the one
+ * shape `renderTemplateCover` emits, bounded in length — applied at every
+ * boundary the value crosses (the carry, and each sign-in door's derivation) so
+ * a bad row degrades to "no cover" rather than to a broken `<img>` on a child's
+ * journey. Decoration must never be able to cost anyone anything.
+ */
+export function asStoredCoverDataUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (value.length <= COVER_DATA_URL_PREFIX.length) return null;
+  if (value.length > COVER_DATA_URL_MAX) return null;
+  return value.startsWith(COVER_DATA_URL_PREFIX) ? value : null;
+}
 
 /**
  * Rule (4). Plan the draft -> child carry at provisioning time.
@@ -369,6 +408,21 @@ export type CoverCarryPlan = {
  * becomes a `cap_exhausted` child with the count intact, while a `generating`
  * draft becomes a `none` child (see `TERMINAL_COVER_STATUSES`). The count
  * carries either way: a stranded generation is still a generation spent.
+ *
+ * ── THE RENDERED ARTIFACT CARRIES TOO (v3 Unit 7, owner rework) ──
+ * `draftCoverDataUrl` is the picture `POST /api/fp/cover` rendered and stored,
+ * and it moves onto the child BY COPY OF THE BYTES, exactly as the status and
+ * the count do. It is carried on precisely one arm: the DERIVED arm, where the
+ * draft named no blob key and its status is terminal and implies a picture.
+ *
+ * Everywhere else it is null, and the reasons differ but all reduce to honesty:
+ *   - a BLOB-backed cover's picture is the object, not this column;
+ *   - an unreachable blob or a non-terminal status carries `none`, and bytes
+ *     beside `none` would be a picture no reader may serve;
+ *   - a draft that never generated has nothing to carry.
+ *
+ * This is what makes the owner's requirement structural rather than incidental:
+ * there is no path here that could produce a cover, only one that copies one.
  */
 export function planCoverCarry(input: {
   draftId: string;
@@ -376,7 +430,10 @@ export function planCoverCarry(input: {
   draftCoverKey?: string | null;
   draftCoverStatus: CoverStatus;
   draftGenerationCount: number;
+  /** `fp_onboarding_drafts.cover_data_url` — the artifact rendered at signup. */
+  draftCoverDataUrl?: string | null;
 }): CoverCarryPlan {
+  const dataUrl = asStoredCoverDataUrl(input.draftCoverDataUrl);
   const count = Number.isInteger(input.draftGenerationCount) && input.draftGenerationCount > 0
     ? input.draftGenerationCount
     : 0;
@@ -402,8 +459,10 @@ export function planCoverCarry(input: {
     // status: the bytes exist, the child just cannot reach them, and a status
     // saying otherwise is the broken-image failure rule (1) exists to prevent.
     // A draft that named NO key keeps its status verbatim — that is the DERIVED
-    // template cover (source: "derived"), which the child re-computes from its
-    // own name/age/answers and therefore carries perfectly with no bytes at all.
+    // template cover (source: "derived"), whose bytes travel with it in
+    // `fp_cover_data_url`. (Before v3 Unit 7 this comment claimed the child
+    // "re-computes it from its own name/age/answers"; it could not — age and
+    // answers die with the draft. The bytes are copied now.)
     const unreachableBlob = from.length > 0 && statusImpliesCoverBlob(input.draftCoverStatus);
     // A NON-TERMINAL draft status is never carried either (v3 Unit 4 review,
     // FIX 2). `generating` means "a request is mid-flight on the DRAFT"; that
@@ -412,15 +471,21 @@ export function planCoverCarry(input: {
     // this codebase advances — the reaper's stale-`generating` sweep is scoped
     // to drafts. `none` is the truthful carry: no cover, and the dashboard's
     // ordinary "draw one" affordance applies.
+    const status: CoverStatus =
+      unreachableBlob || !isTerminalCoverStatus(input.draftCoverStatus)
+        ? "none"
+        : input.draftCoverStatus;
     return {
       copy: null,
       child: {
         fp_cover_blob_key: null,
-        fp_cover_status:
-          unreachableBlob || !isTerminalCoverStatus(input.draftCoverStatus)
-            ? "none"
-            : input.draftCoverStatus,
+        fp_cover_status: status,
         fp_cover_generation_count: count,
+        // The artifact rides the status. It is carried ONLY where the status
+        // still implies a picture — a `none` / `cap_exhausted` / `reaped` child
+        // holding cover bytes would be a row disagreeing with itself, and every
+        // reader keys on the pair.
+        fp_cover_data_url: statusImpliesCoverBlob(status) ? dataUrl : null,
       },
     };
   }
@@ -441,6 +506,10 @@ export function planCoverCarry(input: {
       fp_cover_blob_key: to,
       fp_cover_status: input.draftCoverStatus,
       fp_cover_generation_count: count,
+      // A BLOB-backed cover's picture is the object under `to`. The column is
+      // for the derived path only; carrying both would give one row two answers
+      // to "where is the picture", and the readers would have to pick.
+      fp_cover_data_url: null,
     },
   };
 }

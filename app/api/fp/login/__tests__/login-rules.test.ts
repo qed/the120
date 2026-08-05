@@ -4,12 +4,24 @@ import {
   checkOrigin,
   classifyAuthError,
   classifyIdentifier,
+  deriveCoverSessionFields,
   deriveRateLimitKeys,
   extractClientIp,
   parseLoginRequest,
   shapeRefusal,
+  FP_SESSION_BODY_KEYS,
+  FP_SESSION_BODY_OPTIONAL_KEYS,
+  FP_SESSION_BODY_REQUIRED_KEYS,
   type LoginRefusalReason,
 } from "../login-rules";
+import {
+  COVER_DATA_URL_MAX,
+  COVER_DATA_URL_PREFIX,
+  STATUSES_IMPLYING_COVER_BLOB,
+} from "@/app/fp/lib/cover-store-rules";
+// `cover-core` is `server-only`; a TEST may import across that boundary, and
+// this one must — see "the write word and the read rule" below.
+import { TEMPLATE_COVER_STATUS } from "@/app/api/fp/cover/cover-core";
 
 /* ------------------------------------------------------------ request parse */
 
@@ -314,5 +326,183 @@ describe("classifyAuthError", () => {
     expect(classifyAuthError(undefined)).toBe("outage");
     expect(classifyAuthError("boom")).toBe("outage");
     expect(classifyAuthError({})).toBe("outage");
+  });
+});
+
+/* ------------------------------------------- the cover session fields (U7) */
+
+/** A stand-in for the artifact `POST /api/fp/cover` stored at signup. These
+ *  tests never render one: the point of the rework is that only the signup path
+ *  has a renderer, so a read-side test that produced its own picture would be
+ *  testing a code path the product does not have. */
+const STORED = `${COVER_DATA_URL_PREFIX}PHN2Zz48L3N2Zz4=`;
+
+describe("deriveCoverSessionFields — the one READ BOTH sign-in doors call", () => {
+  it("emits NOTHING for a child with no cover columns (every pre-v3 child)", () => {
+    expect(
+      deriveCoverSessionFields({ coverStatus: null, coverBlobKey: null, coverDataUrl: null })
+    ).toEqual({});
+    // Whitespace is not a status.
+    expect(
+      deriveCoverSessionFields({ coverStatus: "  ", coverBlobKey: null, coverDataUrl: STORED })
+    ).toEqual({});
+  });
+
+  it("serves the STORED artifact VERBATIM — byte-identical, not a look-alike", () => {
+    const fields = deriveCoverSessionFields({
+      coverStatus: "final",
+      coverBlobKey: null,
+      coverDataUrl: STORED,
+    });
+    expect(fields.coverStatus).toBe("final");
+    // `toBe`, deliberately: the requirement is not "a cover" but "THE cover".
+    expect(fields.coverUrl).toBe(STORED);
+  });
+
+  it("never renders — two different children with the same name get their OWN stored covers", () => {
+    // Under the old re-derivation this was impossible: the picture was a
+    // function of the NAME, so two kids called Maya were handed identical
+    // bytes and neither matched what their parent approved.
+    const a = `${COVER_DATA_URL_PREFIX}QUFB`;
+    const b = `${COVER_DATA_URL_PREFIX}QkJC`;
+    const fa = deriveCoverSessionFields({
+      coverStatus: "final",
+      coverBlobKey: null,
+      coverDataUrl: a,
+    });
+    const fb = deriveCoverSessionFields({
+      coverStatus: "final",
+      coverBlobKey: null,
+      coverDataUrl: b,
+    });
+    expect(fa.coverUrl).toBe(a);
+    expect(fb.coverUrl).toBe(b);
+  });
+
+  it("is a pure read — repeated calls on one row are identical and touch nothing", () => {
+    const input = { coverStatus: "final", coverBlobKey: null, coverDataUrl: STORED } as const;
+    expect(deriveCoverSessionFields(input)).toEqual(deriveCoverSessionFields(input));
+  });
+
+  it("refuses to claim a URL for a cover whose bytes live in a blob it cannot read", () => {
+    // A future AI-drawn cover. Status yes, picture no — never a broken image.
+    expect(
+      deriveCoverSessionFields({
+        coverStatus: "final",
+        coverBlobKey: "fp/v3/children/abc/cover-1.png",
+        coverDataUrl: STORED,
+      })
+    ).toEqual({ coverStatus: "final" });
+  });
+
+  it("gives a `final` child with NO stored artifact the status and NO url", () => {
+    // Every child provisioned between v3 Unit 4 and this migration. There is
+    // deliberately no backfill — re-rendering from the name is the bug.
+    expect(
+      deriveCoverSessionFields({ coverStatus: "final", coverBlobKey: null, coverDataUrl: null })
+    ).toEqual({ coverStatus: "final" });
+  });
+
+  it("passes a picture-free status through VERBATIM and never serves bytes beside it", () => {
+    for (const status of ["none", "generating", "cap_exhausted", "reaped"]) {
+      expect(
+        deriveCoverSessionFields({ coverStatus: status, coverBlobKey: null, coverDataUrl: STORED })
+      ).toEqual({ coverStatus: status });
+    }
+  });
+
+  it("passes an UNKNOWN status through verbatim and serves nothing for it", () => {
+    // A word this build does not know is not a licence to hand over a picture.
+    expect(
+      deriveCoverSessionFields({
+        coverStatus: "some_future_word",
+        coverBlobKey: null,
+        coverDataUrl: STORED,
+      })
+    ).toEqual({ coverStatus: "some_future_word" });
+  });
+
+  it("REFUSES a stored value that is not a bounded base64 SVG data URL", () => {
+    // The column is service-role-written, but it still becomes an `<img src>`
+    // in a child's browser. Corruption degrades to "no picture", never to a
+    // broken image and never to a megabyte on the wire.
+    for (const hostile of [
+      "https://evil.example/cover.svg",
+      "javascript:alert(1)",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "data:image/svg+xml;utf8,<svg/>",
+      COVER_DATA_URL_PREFIX, // prefix, no payload
+      "",
+      `${COVER_DATA_URL_PREFIX}${"A".repeat(COVER_DATA_URL_MAX)}`, // oversized
+    ]) {
+      expect(
+        deriveCoverSessionFields({
+          coverStatus: "final",
+          coverBlobKey: null,
+          coverDataUrl: hostile,
+        })
+      ).toEqual({ coverStatus: "final" });
+    }
+  });
+});
+
+/* --------------------------------------------------- the key-list contract */
+
+describe("FP_SESSION_BODY_* key lists", () => {
+  it("splits the contract into always-present and cover-only keys", () => {
+    expect([...FP_SESSION_BODY_REQUIRED_KEYS].sort()).toEqual([
+      "access_token",
+      "grade",
+      "profile",
+      "refresh_token",
+    ]);
+    expect([...FP_SESSION_BODY_OPTIONAL_KEYS].sort()).toEqual(["coverStatus", "coverUrl"]);
+    expect([...FP_SESSION_BODY_KEYS].sort()).toEqual(
+      [...FP_SESSION_BODY_REQUIRED_KEYS, ...FP_SESSION_BODY_OPTIONAL_KEYS].sort()
+    );
+  });
+
+  it("names every key the read can emit", () => {
+    const emitted = Object.keys(
+      deriveCoverSessionFields({ coverStatus: "final", coverBlobKey: null, coverDataUrl: STORED })
+    );
+    for (const key of emitted) expect(FP_SESSION_BODY_OPTIONAL_KEYS).toContain(key);
+  });
+});
+
+/* ----------------------------- the write word vs. the read rule (U7 FIX A) */
+
+describe("the status the writer settles on is a status the reader will serve", () => {
+  /**
+   * WHAT THIS REPLACES, AND WHY THE SHAPE CHANGED.
+   *
+   * The reviewed build had TWO independently-declared `"final"` constants —
+   * `TEMPLATE_COVER_STATUS` on the write side and `TEMPLATE_COVER_SESSION_STATUS`
+   * on the read side — each pinned only by its own `toBe("final")`. Renaming
+   * either one would have silently stopped every child getting a cover with both
+   * suites green, because neither test knew the other constant existed.
+   *
+   * The read side no longer branches on a status WORD at all: it asks the shared
+   * vocabulary `statusImpliesCoverBlob` whether the row claims a picture, and
+   * the second constant is deleted. So the only coupling left is MEMBERSHIP —
+   * the word the writer settles on must be one the shared vocabulary counts as
+   * claiming a picture — and this asserts exactly that, BY VALUE, across the
+   * `server-only` boundary. Rename `TEMPLATE_COVER_STATUS` to a word that is not
+   * in the list and this fails; rename it to one that is, and the product is
+   * genuinely still correct.
+   */
+  it("TEMPLATE_COVER_STATUS is a member of STATUSES_IMPLYING_COVER_BLOB", () => {
+    expect(STATUSES_IMPLYING_COVER_BLOB).toContain(TEMPLATE_COVER_STATUS);
+  });
+
+  it("and a row settled at that status, with the stored artifact, is actually served", () => {
+    // The membership above, exercised end to end through the real read.
+    expect(
+      deriveCoverSessionFields({
+        coverStatus: TEMPLATE_COVER_STATUS,
+        coverBlobKey: null,
+        coverDataUrl: STORED,
+      })
+    ).toEqual({ coverStatus: TEMPLATE_COVER_STATUS, coverUrl: STORED });
   });
 });

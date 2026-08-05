@@ -60,6 +60,11 @@ const SESSION_BODY = {
   refresh_token: "refresh-xyz",
   profile: { handle: "remi", firstName: "Remi" },
   grade: 5,
+  // The v3 Unit 7 cover fields ride the SAME body. Present here so the wire is
+  // pinned against the FULL contract (a route that dropped an optional field
+  // while re-serializing would pass a required-keys-only assertion).
+  coverStatus: "final",
+  coverUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
 };
 
 type Init = { origin?: string | null; body?: string; json?: unknown };

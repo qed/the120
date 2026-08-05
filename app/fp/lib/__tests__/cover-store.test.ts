@@ -337,6 +337,93 @@ describe("rule 4 — the draft to child carry COPIES the cover to a child-namesp
     }
   });
 
+  /* ─────── the RENDERED ARTIFACT carry (v3 Unit 7, owner rework) ─────── */
+
+  it("copies the stored cover onto the child VERBATIM, alongside the status", () => {
+    // The owner requirement in one assertion: the same string, not a new one.
+    // There is no renderer reachable from this module, so "verbatim" is the
+    // only thing it CAN do — the test pins that it actually does it.
+    const stored = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      draftCoverKey: null,
+      draftCoverStatus: "final",
+      draftGenerationCount: 1,
+      draftCoverDataUrl: stored,
+    });
+    expect(plan.copy).toBeNull(); // no blob: the picture is the column
+    expect(plan.child.fp_cover_data_url).toBe(stored);
+    expect(plan.child.fp_cover_status).toBe("final");
+    expect(plan.child.fp_cover_blob_key).toBeNull();
+  });
+
+  it("drops the artifact whenever the carried status stops claiming a picture", () => {
+    const stored = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+    // `generating` is non-terminal ⇒ carried as `none`; `cap_exhausted` and
+    // `reaped` are terminal but claim nothing. Bytes beside any of them would
+    // be a row disagreeing with itself, and every reader keys on the pair.
+    for (const status of ["generating", "cap_exhausted", "reaped", "none"] as const) {
+      const plan = planCoverCarry({
+        draftId: DRAFT,
+        childId: CHILD,
+        draftCoverKey: null,
+        draftCoverStatus: status,
+        draftGenerationCount: 1,
+        draftCoverDataUrl: stored,
+      });
+      expect(plan.child.fp_cover_data_url).toBeNull();
+    }
+  });
+
+  it("drops the artifact for a BLOB-backed cover — one row, one answer to 'where is the picture'", () => {
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      draftCoverKey: draftCover,
+      draftCoverStatus: "final",
+      draftGenerationCount: 1,
+      draftCoverDataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    });
+    expect(plan.copy).not.toBeNull();
+    expect(plan.child.fp_cover_blob_key).toBe(plan.copy?.to);
+    expect(plan.child.fp_cover_data_url).toBeNull();
+  });
+
+  it("REFUSES a malformed or oversized stored artifact rather than carrying it", () => {
+    for (const hostile of [
+      "https://evil.example/cover.svg",
+      "data:image/svg+xml;utf8,<svg/>",
+      "",
+      `data:image/svg+xml;base64,${"A".repeat(512 * 1024)}`,
+    ]) {
+      const plan = planCoverCarry({
+        draftId: DRAFT,
+        childId: CHILD,
+        draftCoverKey: null,
+        draftCoverStatus: "final",
+        draftGenerationCount: 1,
+        draftCoverDataUrl: hostile,
+      });
+      // The status is still carried — the row honestly says a cover existed —
+      // but no bad bytes reach a child's `<img src>`.
+      expect(plan.child.fp_cover_status).toBe("final");
+      expect(plan.child.fp_cover_data_url).toBeNull();
+    }
+  });
+
+  it("a draft with NO artifact carries none — never a re-rendered stand-in", () => {
+    const plan = planCoverCarry({
+      draftId: DRAFT,
+      childId: CHILD,
+      draftCoverKey: null,
+      draftCoverStatus: "final",
+      draftGenerationCount: 1,
+    });
+    expect(plan.child.fp_cover_data_url).toBeNull();
+    expect(plan.child.fp_cover_status).toBe("final");
+  });
+
   it("refuses to carry a cover key that does not belong to the draft", () => {
     const plan = planCoverCarry({
       draftId: DRAFT,

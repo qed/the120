@@ -404,15 +404,16 @@ function toConsentRows(data: unknown): PhotoConsentRow[] {
  * ── WHY THIS IS SAFE AGAINST THE BLOB RULES ──
  * `final` is in `STATUSES_IMPLYING_COVER_BLOB`, but this write names NO key and
  * declares `source: "derived"` — the arm `decideCoverStatusWrite` documents as
- * "a pure function of columns the row already carries can always be produced",
- * and which REFUSES a derived write that names a key. So the invariant rule (1)
- * protects (never claim a picture that cannot be produced) holds by
- * construction, and it is proved to the rule rather than asserted by us.
+ * "the picture does not live in the object store", and which REFUSES a derived
+ * write that names a key. Since v3 Unit 7 the picture is not re-derived either:
+ * it is PERSISTED in `cover_data_url` by the same statement that writes this
+ * status. So the invariant rule (1) protects (never claim a picture that cannot
+ * be produced) still holds by construction — the bytes are literally in the row.
  *
  * Consumers checked: `statusImpliesCoverBlob` (true, and correct — there IS a
  * picture), `decideCoverStatusWrite` derived arm (permits it, key-free),
- * `planCoverCarry` (no key + terminal ⇒ carried verbatim; the child re-derives
- * it), `isTerminalCoverStatus` (true), `coverSettled` in
+ * `planCoverCarry` (no key + terminal ⇒ status AND artifact carried verbatim to
+ * the child), `isTerminalCoverStatus` (true), `coverSettled` in
  * app/lib/v3-signup/v3-onboarding-core.ts (`!== "none"` ⇒ the flow resolver
  * moves the family past the cover step), and the migration CHECK list (already
  * contains `final`; no migration edit, no COVER_STATUSES change, no parity-test
@@ -463,6 +464,12 @@ export async function performCoverGeneration(
   if (!reserved.ok) return { kind: "refused", reason: reserved.reason };
   emit({ stage: "reserved" });
 
+  // ⚠ THE ONE RENDERER CALL SITE IN THE PRODUCT (v3 Unit 7, owner rework).
+  // The cover is created HERE, once, during parent signup — and then it is
+  // PERSISTED (below) and served verbatim forever after. Nothing downstream
+  // re-renders: not provisioning, not either sign-in door, not First Profit.
+  // If you are adding a second call to `renderTemplateCover` anywhere, stop:
+  // a second render is a second picture, which is the bug this shape fixes.
   const render = deps.renderCover ?? renderTemplateCover;
   const coverUrl = render({
     firstName: authorized.firstName,
@@ -486,7 +493,7 @@ export async function performCoverGeneration(
     return { kind: "refused", reason: "outage" };
   }
 
-  const settled = await settleDraftCover(deps, authorized);
+  const settled = await settleDraftCover(deps, authorized, coverUrl);
   if (!settled.ok) {
     // ── THE STRANDED-`generating` HAZARD, AND WHY THIS IS A REFUSAL ──
     // The reservation and the settle are two statements; between them the row
@@ -522,6 +529,16 @@ export async function performCoverGeneration(
 /**
  * SETTLE THE ROW OFF `generating`, AND DO NOT GIVE UP QUIETLY.
  *
+ * ── THIS IS ALSO WHERE THE PICTURE IS PERSISTED (v3 Unit 7, owner rework) ──
+ * The rendered artifact is written in the SAME UPDATE that settles the status,
+ * so `cover_status = 'final'` and the bytes that status claims can never be
+ * written apart — there is no window in which a row says it has a cover that
+ * nothing can produce, and none in which bytes sit beside a status that does
+ * not mean them. The compensation nulls the artifact for exactly the same
+ * reason. (This replaces the old "the cover is re-derivable, so store nothing"
+ * design: it was only re-derivable from the DRAFT's name+age+answers, and the
+ * draft is consumed at provisioning. See migration 20260917120000.)
+ *
  * The write is a single UPDATE by primary key with FIXED values — no predicate
  * on anything we observed — so it is perfectly idempotent and retrying it is
  * free of race consequences. `COVER_SETTLE_RETRIES` attempts, then a
@@ -536,9 +553,10 @@ export async function performCoverGeneration(
  */
 async function settleDraftCover(
   deps: CoverDeps,
-  authorized: AuthorizedCover
+  authorized: AuthorizedCover,
+  coverUrl: string
 ): Promise<{ ok: true } | { ok: false }> {
-  const write = (status: CoverStatus) =>
+  const write = (status: CoverStatus, dataUrl: string | null) =>
     authorized.db
       .from("fp_onboarding_drafts")
       .update({
@@ -547,6 +565,8 @@ async function settleDraftCover(
         // blob-backed generation must not leave the previous key behind on a row
         // whose picture is now derived.
         cover_blob_key: null,
+        // The artifact itself, atomic with the status it belongs to.
+        cover_data_url: dataUrl,
         updated_at: new Date(deps.now()).toISOString(),
       })
       .eq("id", authorized.draftId)
@@ -555,7 +575,7 @@ async function settleDraftCover(
       .select("id");
 
   for (let i = 0; i < COVER_SETTLE_RETRIES; i += 1) {
-    const res = await write(TEMPLATE_COVER_STATUS);
+    const res = await write(TEMPLATE_COVER_STATUS, coverUrl);
     if (!res.error) return { ok: true };
     console.error(
       `[fp/cover] settle write failed (attempt ${i + 1}/${COVER_SETTLE_RETRIES}) for draft ${authorized.draftId}: ${res.error.message}`
@@ -563,8 +583,10 @@ async function settleDraftCover(
   }
 
   // Compensation. The picture was never persisted, so `none` is the truth, and
-  // it is a status the family's next redraw can move off normally.
-  const compensated = await write("none");
+  // it is a status the family's next redraw can move off normally. The artifact
+  // is nulled with it — bytes beside a `none` status would be a picture no
+  // reader is allowed to serve, which is just a leak with extra steps.
+  const compensated = await write("none", null);
   if (compensated.error) {
     console.error(
       `[fp/cover] settle COMPENSATION failed for draft ${authorized.draftId}: ${compensated.error.message} — row may be stranded on 'generating'; planCoverCarry refuses to carry it to a child`
@@ -601,6 +623,12 @@ async function reserveGenerationSlot(
       .update({
         generation_count: cap.next,
         cover_status: "generating",
+        // A redraw invalidates the previous picture the moment it takes the
+        // slot: `generating` is not a status any reader serves a cover for, so
+        // leaving the old artifact behind could only ever let a row disagree
+        // with itself. The settle writes the new one; the compensation leaves
+        // it null.
+        cover_data_url: null,
         updated_at: new Date(deps.now()).toISOString(),
       })
       .eq("id", authorized.draftId)

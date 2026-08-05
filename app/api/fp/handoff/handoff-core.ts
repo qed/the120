@@ -37,7 +37,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
 import { resolveChildGrade } from "../grade/grade-rules";
-import type { FpSessionBody } from "../login/login-rules";
+import { deriveCoverSessionFields, type FpSessionBody } from "../login/login-rules";
 import { ensurePlayerProfile, type EnsureProfileResult } from "../login/profile-core";
 import {
   buildHandoffDestination,
@@ -238,7 +238,9 @@ export async function exchangeHandoffCode(
   // which is precisely why a code minted for kid A cannot produce kid B.
   const child = await db
     .from("children")
-    .select("id, first_name, birth_year, grade")
+    .select(
+      "id, first_name, birth_year, grade, fp_cover_status, fp_cover_blob_key, fp_cover_data_url"
+    )
     .eq("id", childId)
     .maybeSingle();
   if (child.error) {
@@ -340,6 +342,19 @@ export async function exchangeHandoffCode(
         },
         new Date(deps.now())
       ),
+      // The comic cover (v3 Unit 7; R12) — the IDENTICAL pure read the login
+      // route runs, on the identical three columns, so the two doors cannot
+      // answer differently for the same child. It SERVES the artifact stored at
+      // signup and renders nothing. Spread, so the keys are absent rather than
+      // null when there is no cover. NEVER logged.
+      ...deriveCoverSessionFields({
+        coverStatus:
+          typeof child.data.fp_cover_status === "string" ? child.data.fp_cover_status : null,
+        coverBlobKey:
+          typeof child.data.fp_cover_blob_key === "string" ? child.data.fp_cover_blob_key : null,
+        coverDataUrl:
+          typeof child.data.fp_cover_data_url === "string" ? child.data.fp_cover_data_url : null,
+      }),
     },
   };
 }

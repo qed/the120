@@ -50,7 +50,12 @@ import { recordConsent } from "@/app/api/fp/signup/consent-core";
 import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consent-rules";
 import type { CreateChildInput, CreateChildResult } from "@/app/api/fp/signup/child-core";
 import { isTestSignup, type SignupGateEnv } from "@/app/api/fp/signup/signup-rules";
-import { planCoverCarry, type CoverStatus, isCoverStatus } from "@/app/fp/lib/cover-store-rules";
+import {
+  asStoredCoverDataUrl,
+  planCoverCarry,
+  type CoverStatus,
+  isCoverStatus,
+} from "@/app/fp/lib/cover-store-rules";
 import { buildChildPassword } from "./credentials-rules";
 import {
   ageBandForAge,
@@ -140,6 +145,9 @@ export type V3DraftView = {
   answers: Record<string, string>;
   coverStatus: CoverStatus;
   coverBlobKey: string | null;
+  /** The rendered cover stored by POST /api/fp/cover (v3 Unit 7). Carried to
+   *  the child verbatim; never re-rendered anywhere. */
+  coverDataUrl: string | null;
   generationCount: number;
   status: "active" | "consumed" | "reaped";
 };
@@ -170,6 +178,10 @@ function parseDraftRow(row: DraftRow | null): V3DraftView | null {
     answers,
     coverStatus: isCoverStatus(row.cover_status) ? row.cover_status : "none",
     coverBlobKey: typeof row.cover_blob_key === "string" ? row.cover_blob_key : null,
+    // Gated on the way OUT of the database, not merely narrowed: this value
+    // ends up in an `<img src>` in a child's browser, so the one shape it may
+    // take is checked at every boundary it crosses.
+    coverDataUrl: asStoredCoverDataUrl(row.cover_data_url),
     generationCount:
       typeof row.generation_count === "number" && Number.isInteger(row.generation_count)
         ? row.generation_count
@@ -179,7 +191,7 @@ function parseDraftRow(row: DraftRow | null): V3DraftView | null {
 }
 
 const DRAFT_COLUMNS =
-  "id, signup_attempt_id, child_id, kid_first_name, kid_last_name, kid_age, answers, cover_status, cover_blob_key, generation_count, status, updated_at";
+  "id, signup_attempt_id, child_id, kid_first_name, kid_last_name, kid_age, answers, cover_status, cover_blob_key, cover_data_url, generation_count, status, updated_at";
 
 /* ------------------------------------------------------------------- load */
 
@@ -724,20 +736,24 @@ export async function v3ProvisionKid(
     );
   }
 
-  // ── the cover carry (Unit 4 seam) ──
-  // The plan is computed from the DRAFT's own columns; today `cover_status` is
-  // always 'none' (no generator has shipped), so `copy` is null and the child's
-  // cover columns are written as the empty state. When Unit 4 lands, the same
-  // call starts returning a copy to perform, and `copyCoverBlob` performs it.
-  // Two-store rule (1): the child row only claims a status implying a blob
-  // AFTER the copy is confirmed, so a failed/absent copy degrades the child to
-  // `none` rather than pointing at bytes that are not there.
+  // ── the cover carry (Unit 4 seam; Unit 7 owner rework) ──
+  // The plan is computed from the DRAFT's own columns. On today's template path
+  // `copy` is null (no blob key was ever written) and the carry's real work is
+  // moving the RENDERED ARTIFACT — `cover_data_url` → `fp_cover_data_url` — onto
+  // the child alongside the status and the count. That copy of the bytes IS the
+  // owner requirement: the picture the parent was shown at signup is the picture
+  // the kid sees in First Profit, because it is literally the same string, and
+  // nothing downstream of here has a renderer to disagree with.
+  // Two-store rule (1) still governs the blob path: the child row only claims a
+  // status implying a blob AFTER the copy is confirmed, so a failed/absent copy
+  // degrades the child to `none` rather than pointing at bytes that are not there.
   const carry = planCoverCarry({
     draftId: draft.id,
     childId,
     draftCoverKey: draft.coverBlobKey,
     draftCoverStatus: draft.coverStatus,
     draftGenerationCount: draft.generationCount,
+    draftCoverDataUrl: draft.coverDataUrl,
   });
   let coverFields = carry.child;
   if (carry.copy) {
@@ -746,7 +762,13 @@ export async function v3ProvisionKid(
       console.error(
         `[fp/v3-onboarding] cover carry copy failed/unsupported for child ${childId} — child keeps no cover (decoration never fails provisioning)`
       );
-      coverFields = { fp_cover_blob_key: null, fp_cover_status: "none", fp_cover_generation_count: carry.child.fp_cover_generation_count };
+      coverFields = {
+        fp_cover_blob_key: null,
+        fp_cover_status: "none",
+        fp_cover_generation_count: carry.child.fp_cover_generation_count,
+        // `none` claims no picture, so it may carry no bytes either.
+        fp_cover_data_url: null,
+      };
     }
   }
   const coverWrite = await deps.db.from("children").update(coverFields).eq("id", childId);

@@ -9,23 +9,37 @@
  * as a pure function of (first name, age, story answers) — all three of which
  * already live on `fp_onboarding_drafts` / `children`.
  *
- * That has one consequence worth stating loudly, because it is what lets Unit 4
- * ship with no `@vercel/blob` and no bytes at rest:
+ * ── ⚠ DETERMINISTIC IS NOT THE SAME AS RE-DERIVABLE LATER (v3 Unit 7) ──
+ * Unit 4 concluded from purity that the cover needed no storage: it could be
+ * re-computed from the row at any time, so only the STATUS was recorded. That
+ * was wrong, and the way it was wrong is worth keeping written down.
  *
- *     A DETERMINISTIC COVER NEEDS NO STORAGE. It can be re-derived, byte for
- *     byte, from the row that describes the kid, at any time, on any instance.
+ * The picture varies on (first name, AGE, STORY ANSWERS). Only the first of
+ * those survives provisioning — `kid_age` and `answers` live on
+ * `fp_onboarding_drafts`, which is consumed and reaped once the child exists.
+ * So anything re-rendering from the CHILD row later has the name and nothing
+ * else, and produces a DIFFERENT picture: different palette (the palette hashes
+ * the whole key), no age badge, generic captions instead of the kid's own
+ * words. Determinism was never in doubt; the INPUTS were.
  *
- * So nothing here is persisted. The endpoint returns the SVG inline (as a
- * `data:` URL), the draft/child row records only the STATUS, and no row ever
- * names a blob key that does not exist. The two-store consistency rules in
- * ./cover-store-rules.ts are therefore not merely satisfied — they are vacuous
- * on this path, since there is no second store. See `decideCoverStatusWrite`'s
- * `source: "derived"` arm, which is the executable statement of exactly that.
+ * The rule now, from the owner: THERE IS EXACTLY ONE RENDER, and it happens in
+ * `POST /api/fp/cover` during parent signup. That render is persisted verbatim
+ * (`fp_onboarding_drafts.cover_data_url` → `children.fp_cover_data_url`,
+ * migration 20260917120000) and served verbatim to every surface forever after.
+ * Both FP sign-in doors read the column; neither imports this module.
+ *
+ * ⚠ IF YOU ARE ABOUT TO CALL `renderTemplateCover` FROM SOMEWHERE NEW, STOP.
+ * There is one call site (app/api/fp/cover/cover-core.ts, phase two) and adding
+ * a second means some kid somewhere sees two different covers. Read the stored
+ * artifact instead.
+ *
+ * The two-store consistency rules in ./cover-store-rules.ts remain vacuous on
+ * this path: the artifact is a column, not an object, so there is still no
+ * second store, no blob key, and nothing for an orphan sweep or an R28 blob
+ * erasure to chase. See `decideCoverStatusWrite`'s `source: "derived"` arm.
  *
  * ── NO NEXT, NO SUPABASE, NO server-only ──
- * Pure by repo convention, and deliberately importable from a client component
- * too (the FP-side cover surfaces in plan Unit 7 can re-derive the same picture
- * rather than fetch one). The only Node builtin used is `Buffer`, for the data
+ * Pure by repo convention. The only Node builtin used is `Buffer`, for the data
  * URL, and that is confined to `coverTemplateDataUrl` so the SVG builder itself
  * is environment-free.
  *
@@ -173,9 +187,10 @@ export const COVER_CAPTION_MAX = 64;
 
 /**
  * The personalization key: everything the picture varies on, in a fixed order.
- * Exported because it is also the CACHE IDENTITY of a template cover — two calls
- * with the same key produce byte-identical SVG, which is what makes the cover
- * re-derivable instead of stored.
+ * Exported because it is the honest statement of what the cover DEPENDS ON —
+ * name, age, and every answer. Two of those three do not survive provisioning,
+ * which is exactly why the render is stored rather than repeated (see the
+ * module header). Same key ⇒ byte-identical SVG.
  */
 export function coverTemplateKey(input: CoverTemplateInput): string {
   const answers = input.answers ?? {};
@@ -191,8 +206,9 @@ export function coverTemplateKey(input: CoverTemplateInput): string {
  *
  * The result is always a complete standalone SVG (its own `xmlns`), because it
  * is delivered as a `data:` URL to an `<img>`, which parses it as a document in
- * a sandbox with no script execution. The escaping above is still absolute: the
- * same string is also what plan Unit 7 may inline on the FP side.
+ * a sandbox with no script execution. The escaping above is still absolute:
+ * these exact bytes are stored and later handed to First Profit, which renders
+ * them ONLY as an `<img src>` and never inlines them into the DOM.
  */
 export function coverTemplateSvg(input: CoverTemplateInput): string {
   const rawName = (input.firstName ?? "").trim();

@@ -1,6 +1,7 @@
 ---
 title: "Value filtering is not key filtering — a prototype-shadowing key survives a typed map narrow and detonates in the consumer"
 date: 2026-08-05
+last_updated: 2026-08-05
 category: security-issues
 module: fp-progress-rules
 problem_type: security_issue
@@ -229,6 +230,123 @@ hostile condition, verify that the fixture actually contains it before trusting
 a green result.** One assertion on the fixture itself
 (`expect(Object.hasOwn(hostile.doneByTask, "__proto__")).toBe(true)`) is enough,
 and it is the difference between a regression test and a decoration.
+
+## Amendment (2026-08-05, later the same day): the ENTRY CAP had a sibling bug in the same family
+
+The same walk carries `PROGRESS_MAP_ENTRIES_CAP = 500`, a bound on how many
+entries one map may contribute. It is a **keys** problem too, and it failed for a
+reason adjacent to the one above: the cap loop assumed **JSON insertion order**
+held.
+
+The first half was found and fixed on its own terms. A `false` is not a
+completion anywhere in this module, and counting one against the cap was
+exploitable: a doc writing 500 junk `false` keys *before* the real work exhausts
+the budget first, so the filtered map comes back empty, the child reads as "never
+reached this criterion", and their own client shows full progress. The fix — stop
+counting non-completions — is correct and shipped.
+
+It was also only half of the exploit, and the remaining half does not depend on
+write order at all. **ECMAScript enumerates array-index-like keys FIRST, in
+ascending numeric order, regardless of insertion order.** So:
+
+```json
+{"doneByTask": {"1.2.3": true, "0": true, "1": true, "…": true, "499": true}}
+```
+
+hands back `"0"`, `"1"` … `"499"` before `"1.2.3"` ever appears, whatever order
+the child's client wrote them in. The real task id lands at position 500 —
+**exactly one past the cap** — and is evicted, while the junk survives. And the
+junk values are `true`, so the `false` filter never sees them. Verified in node:
+
+```js
+const m = { "1.2.3": true }; for (let i = 0; i < 600; i++) m[String(i)] = true;
+Object.keys(m)[0]   // "0"   — not "1.2.3"
+```
+
+That premise is now asserted inside the regression test itself, so the exploit's
+mechanism cannot silently stop being true:
+
+```ts
+    const hostile: Record<string, boolean> = { "1.2.3": true };
+    for (let i = 0; i < PROGRESS_MAP_ENTRIES_CAP + 100; i++) hostile[String(i)] = true;
+    // The premise: JS really does hand back the numeric keys first.
+    expect(Object.keys(hostile)[0]).toBe("0");
+```
+
+### Why the suite was green on the mitigated half only
+
+Every pre-existing cap test padded its map with `junk-N` or `k-N` keys:
+
+```ts
+    for (let i = 0; i < PROGRESS_MAP_ENTRIES_CAP + 100; i++) padded[`junk-${i}`] = false;
+```
+
+Those **do** preserve insertion order — they are ordinary string keys. So the
+tests exercised precisely the variant the `false` fix had already closed and were
+structurally incapable of reaching the variant it had not. A green suite that
+covers the half you already fixed reads exactly like a green suite that covers
+both.
+
+### The fix: make the cap's order writer-independent
+
+Not by sorting. Sorting the map before capping would work and costs an
+O(n log n) sort on the one input an attacker controls the size of, on a path that
+runs for every child on every refresh. Instead, exclude the keys that jump the
+queue:
+
+```ts
+function isArrayIndexLikeKey(key: string): boolean {
+  const asNumber = Number(key);
+  return (
+    Number.isInteger(asNumber) &&
+    asNumber >= 0 &&
+    asNumber < 2 ** 32 - 1 &&
+    String(asNumber) === key
+  );
+}
+```
+
+folded into the same single predicate that already carries the shadowing and
+length exclusions, so a future narrow cannot remember one and forget another:
+
+```ts
+function isKeepableMapKey(key: string, budget: WalkBudget): boolean {
+  if (isUnsafeMapKey(key)) return false;
+  if (isArrayIndexLikeKey(key)) return false;
+  if (key.length > PROGRESS_MAP_KEY_MAX_CHARS) {
+    budget.truncated = true;
+    return false;
+  }
+  return true;
+}
+```
+
+The exclusion is **exact, not heuristic**, and that is what makes it safe on a
+server that deliberately holds no task-id domain knowledge: no stable task id
+(`1.2.3` — always three dot-joined segments) and no legacy `${stepId}#${index}`
+key (always contains `#`) can be an array index. `"01"`, `"1.0"` and `"-1"` are
+**not** array indices — their canonical spellings differ — so they remain
+ordinary string keys, and that boundary is pinned:
+
+```ts
+    expect(Object.keys(walked.ideas[0]!.doneByTask).sort()).toEqual(
+      ["-1", "07", "1.0", "1.2.3"].sort()
+    );
+```
+
+### The lesson, plainly
+
+**"JSON preserves insertion order" is true of `JSON.parse` and NOT true of
+`Object.entries` / `Object.keys` / `for…in` over the resulting object whenever
+any key looks like an array index.** Integer-like keys are hoisted to the front
+in ascending numeric order by the language itself. Any budget, cap, first-N, or
+early-break that walks an untrusted map is therefore not walking it in the order
+the writer chose — it is walking it in an order the *attacker* chose, by naming
+their keys.
+
+Same family as the body of this document: a narrow that answers the question it
+was written for (are the values right?) and is mute on the keys. There the keys
+were dangerous by *name*; here they are dangerous by *position*.
 
 ## Prevention
 

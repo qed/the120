@@ -232,8 +232,15 @@ rounding error in the payload to the dominant one.
 
 50 ideas plus 50 businesses carrying 400,000-character ids compress far under the
 `pg_column_size(doc) <= 262144` CHECK — pglz eats a repeated character — and
-project to roughly 60MB, which 500s the **unpaginated, full-cohort** staff
+project to roughly 60MB, which overruns the **whole-cohort** staff
 response. One child's doc, every child's dashboard.
+
+*(Amended 2026-08-05, later the same day: this said "the unpaginated,
+full-cohort staff response". The endpoint is now keyset-paged with a row cap and
+carries an aggregate response-byte budget that refuses in its own voice, so
+neither "unpaginated" nor an uncontrolled 500 describes it any more. The
+60MB-from-one-doc measurement, which is what this document is actually about,
+stands — the budget now catches it instead of the platform.)*
 
 This is a second, independent occurrence of the thesis already documented in
 `docs/solutions/database-issues/a-pg-column-size-check-bounds-the-compressed-datum-not-the-projection-your-read-path-builds-2026-08-05.md`

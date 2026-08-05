@@ -8,7 +8,7 @@ component: database
 symptoms:
   - "A jsonb column capped at 262144 bytes by `check (pg_column_size(doc) <= 262144)` yields an 8.3 MB JSON projection from a single row"
   - "MEASURED 31.6x amplification: a 262,142-byte doc holding 87,377 `{}` idea entries walked and stringified to 8,289,706 bytes in 94ms"
-  - "One child's crafted save row exceeds the serverless response body limit and 500s the full-cohort staff dashboard for every child, not just that one"
+  - "One child's crafted save row exceeds the serverless response body limit and 500s the whole-cohort staff dashboard for every child, not just that one"
   - "Nothing upstream bounds element count — the write-side save-doc guard passes an over-fuse doc THROUGH rather than refusing it"
 root_cause: missing_validation
 resolution_type: code_fix
@@ -57,8 +57,10 @@ projects from it.
 
 The new staff cohort-progress feed (`app/api/fp/progress/`) walks each child's
 doc server-side and projects every idea and business into the full wire shape.
-It is an **unpaginated, full-cohort export** — one response containing every
-child in the beta.
+At the time of writing it was an **unpaginated, whole-cohort export** — one
+response containing every child in the beta. (See the second postscript: it is
+neither unpaginated nor unbounded any more. The amplification argument below is
+unaffected — it is about ONE doc — but the blast-radius claims are historical.)
 
 ## Symptoms
 
@@ -83,7 +85,8 @@ The consequence in context is not a slow response, it is a cohort-wide outage:
 
 1. One child's doc pushes the response past Vercel's serverless response body
    limit, so the request fails.
-2. Because the endpoint is a **full-cohort export**, that failure takes down the
+2. Because the endpoint returned the **whole cohort in one response**, that
+   failure takes down the
    staff dashboard **for every child** — the exact "a stalled kid is invisible"
    failure the dashboard exists to prevent, caused by the dashboard's own read
    path.
@@ -200,6 +203,23 @@ bounding the *walk*, i.e. the intermediate structures and the per-child CPU and
 memory this endpoint spends for every child in the cohort on every refresh. When
 a downstream filter appears, re-derive what each cap is still for rather than
 deleting it or leaving its rationale to rot.
+
+**Postscript 2 (2026-08-05, same round).** Two more things landed that this
+document's framing predates, and the first postscript should have caught both:
+
+- The endpoint is **no longer unpaginated**. Every cross-children read is keyset
+  paged (`.gt(key, lastSeen).order(key).limit(n)`) and refuses past
+  `PROGRESS_MAX_ROWS` rather than truncating, so "one response containing every
+  child" is only true up to that bound.
+- The "500s the dashboard" outcome is **no longer how this fails**. The route now
+  accumulates the serialized body and refuses past `PROGRESS_MAX_RESPONSE_BYTES`
+  with its own 400-class response, precisely so the platform never emits its
+  CORS-less 500 — a different response shape is an oracle, and an unreachable
+  error page is not a refusal anyone can act on.
+
+The lesson generalizes past the correction: a postscript written for ONE change
+in a round of changes will be stale by the end of that round. Re-read the whole
+document when the round closes, not each finding as it lands.
 
 ## Why This Works
 

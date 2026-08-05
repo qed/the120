@@ -6,11 +6,33 @@
  * ONE definition of "how long we are willing to wait" instead of three.
  *
  * CONSUMERS OUTSIDE `app/fp/` (recorded so "who may use it" is answered here, not
- * only at each import): `app/crm/lib/auth.ts` and `app/lib/staff-bar/actions.ts`,
- * since Staff Front Door Unit 5. The `fw` prefix names where this file grew up, not
- * who may call it — but anything ADDED here must stay app-neutral, because an
- * FW-specific default would now silently change the CRM gate's behaviour too. If
- * this list grows again, move the module to `app/lib/` instead of extending it.
+ * only at each import). Re-derived by grep on 2026-08-05, because a list kept by
+ * memory is a list that is wrong:
+ *   - `app/crm/lib/auth.ts` (Staff Front Door Unit 5)
+ *   - `app/lib/staff-bar/actions.ts` (Staff Front Door Unit 5)
+ *   - `app/api/fp/progress/route.ts` (Watchtower Unit 2) — `withFwTimeout` only
+ *
+ * The `fw` prefix names where this file grew up, not who may call it — but
+ * anything ADDED here must stay app-neutral, because an FW-specific default
+ * would now silently change the CRM gate's and the Watchtower's behaviour too.
+ *
+ * ── The "move it to app/lib/" trigger, answered rather than ignored ──
+ * The previous version of this note said: "If this list grows again, move the
+ * module to `app/lib/` instead of extending it." The list has now grown, and the
+ * DELIBERATE decision is NOT to move it in this change — recorded here so the
+ * trigger is answered rather than quietly stepped over a second time.
+ *
+ * Why not: the Watchtower consumer imports exactly ONE symbol (`withFwTimeout`)
+ * and adds nothing to this file, so it is the cheap kind of growth the rule was
+ * not aimed at; and moving the module touches ~16 unrelated FW files in a change
+ * whose subject is a staff API route, which is how a refactor ends up reviewed
+ * by nobody.
+ *
+ * The trigger is therefore RE-ARMED, sharper: move this module to `app/lib/` the
+ * next time a consumer outside `app/fp/` needs something ADDED to it, or the
+ * next time this file is the subject of a change rather than a dependency of one.
+ * Growth in the import list alone is no longer the signal — it was too weak to
+ * act on, which is exactly why it was ignored.
  *
  * ── Why this got extracted rather than copied
  *

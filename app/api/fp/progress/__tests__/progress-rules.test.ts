@@ -16,6 +16,7 @@ import {
   PROGRESS_ID_MAX_CHARS,
   PROGRESS_MAP_ENTRIES_CAP,
   PROGRESS_MAP_KEY_MAX_CHARS,
+  PROGRESS_MAP_SCAN_CAP,
   PROGRESS_MAX_REQUESTED_TASK_IDS,
   PROGRESS_MAX_TIMESTAMP_MS,
   PROGRESS_RATE_LIMIT,
@@ -563,6 +564,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: { "1.1.1": true, "1.1.2": true },
             doneAtByTask: { "1.1.1": 1_754_000_000_000, "1.1.2": 1_754_100_000_000 },
             lastCompletionAt: 1_754_100_000_000,
+            recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
         ],
@@ -574,6 +576,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: { "4.1.1": true },
             doneAtByTask: { "4.1.1": 1_754_300_000_000 },
             lastCompletionAt: 1_754_300_000_000,
+            recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
         ],
@@ -591,6 +594,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: {},
             doneAtByTask: {},
             lastCompletionAt: null,
+            recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
         ],
@@ -952,6 +956,7 @@ describe("progress rules — walkSaveDoc: legacy maps", () => {
         doneByTask: {},
         doneAtByTask: {},
         lastCompletionAt: 1_700_000_001_000,
+        recencyClamped: false,
       },
     ]);
   });
@@ -978,6 +983,7 @@ describe("progress rules — walkSaveDoc: the idea label is never read", () => {
       "id",
       "index",
       "lastCompletionAt",
+      "recencyClamped",
     ].sort());
     expect(JSON.stringify(walked)).not.toContain("KID-TYPED");
   });
@@ -1078,6 +1084,7 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
       doneByTask: {},
       doneAtByTask: {},
       lastCompletionAt: null,
+      recencyClamped: false,
     });
   });
 
@@ -1111,6 +1118,7 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
           doneByTask: {},
           doneAtByTask: { real: 3 },
           lastCompletionAt: 3,
+          recencyClamped: false,
         },
       ],
       businesses: [
@@ -1121,6 +1129,7 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
           doneByTask: { real: true },
           doneAtByTask: {},
           lastCompletionAt: null,
+          recencyClamped: false,
         },
       ],
     });
@@ -1201,6 +1210,7 @@ describe("progress rules — walkSaveDoc: ORIGINAL idea indices", () => {
       doneByTask: {},
       doneAtByTask: {},
       lastCompletionAt: null,
+      recencyClamped: false,
     });
   });
 
@@ -1284,6 +1294,7 @@ describe("progress rules — walkSaveDoc: businesses", () => {
         doneByTask: { "4.1.1": true },
         doneAtByTask: {},
         lastCompletionAt: null,
+        recencyClamped: false,
       },
     ]);
   });
@@ -1334,6 +1345,7 @@ describe("progress rules — walkSaveDoc: businesses", () => {
         doneByTask: { "4.1.1": true },
         doneAtByTask: { "4.1.1": 5 },
         lastCompletionAt: 5,
+        recencyClamped: false,
       },
     ]);
   });
@@ -1566,6 +1578,51 @@ describe("progress rules — future-dated stamps are CLAMPED to the walk clock",
     expect(idea.lastCompletionAt).not.toBeNull();
   });
 
+  it("THE CLAMP ALONE DOES NOT FIX IT — recencyClamped is the half that does", () => {
+    // The clamp rewrites the RESPONSE, never the stored row. So the same
+    // forward-dated stamp clamps to whatever `now` each request happens to
+    // carry, and `lastCompletionAt` reads "just now" on every request, forever:
+    // permanently active, never stalled, invisible in the one column that
+    // matters. The docstring used to claim the clamp was "self-correcting as
+    // soon as the next real stamp lands", which never fires — a forward-clocked
+    // device writes every later stamp in the future too, and an abandoned child
+    // writes none.
+    const stamp = PROGRESS_MAX_TIMESTAMP_MS;
+    const first = stampsOf({ "9.9.9": stamp }, NOW);
+    const weekLater = new Date(NOW_MS + 7 * 86_400_000);
+    const second = stampsOf({ "9.9.9": stamp }, weekLater);
+
+    // The defect itself, pinned: recency regenerates with no new activity.
+    expect(second.lastCompletionAt).toBeGreaterThan(first.lastCompletionAt!);
+    // The mitigation: both responses declare the number synthetic, so a client
+    // applying the documented semantics withholds "active" rather than crediting
+    // an idea nobody has touched.
+    expect(first.recencyClamped).toBe(true);
+    expect(second.recencyClamped).toBe(true);
+  });
+
+  it("recencyClamped is FALSE for ordinary and merely-skewed stamps", () => {
+    expect(stampsOf({ past: NOW_MS - 1_000 }).recencyClamped).toBe(false);
+    // At the tolerance, not past it: untouched, so not flagged.
+    expect(
+      stampsOf({ skew: NOW_MS + PROGRESS_FUTURE_STAMP_TOLERANCE_MS }).recencyClamped
+    ).toBe(false);
+    // An absurd value is DROPPED, not clamped — a different mechanism, and it
+    // must not borrow this flag.
+    expect(stampsOf({ absurd: PROGRESS_MAX_TIMESTAMP_MS + 1 }).recencyClamped).toBe(false);
+  });
+
+  it("a business carries its OWN recencyClamped, from its own stamps", () => {
+    const walked = walkSaveDoc(
+      doc({
+        ideas: [{ id: "i", doneAtByTask: { "1.1.1": NOW_MS - 1_000 } }],
+        businesses: [{ id: "b", doneAtByTask: { "4.1.1": PROGRESS_MAX_TIMESTAMP_MS } }],
+      })
+    );
+    expect(walked.ideas[0]!.recencyClamped).toBe(false);
+    expect(walked.businesses[0]!.recencyClamped).toBe(true);
+  });
+
   it("a clamp is a repair, not a loss — it does not flag truncation", () => {
     const walked = walkSaveDoc(
       doc({ ideas: [{ id: "i", doneAtByTask: { future: NOW_MS + 86_400_000 } }] })
@@ -1763,6 +1820,55 @@ describe("progress rules — the entry cap counts completions, not entries", () 
     )[0]!;
     expect(row.ideas[0]!.doneByTask).toEqual({ "1.1.5": true });
     expect(row.ideas[0]!.hasCompletionsOutsideRequest).toBe(true);
+  });
+
+  it("NUMERIC junk keys cannot push a real task id past the entry cap", () => {
+    // The second half of the entry-cap exploit, and the one the `false` fix
+    // missed. ECMAScript enumerates ARRAY-INDEX-LIKE keys FIRST, ascending,
+    // whatever order they were written in — so a doc can park the real id at
+    // position 500 without depending on insertion order at all. The values are
+    // `true`, so the false-filter never sees them. Left open, the child ships
+    // `doneByTask:{}` with `hasCompletionsOutsideRequest:false` and reads as
+    // "never reached this criterion" while their own client shows full progress.
+    const hostile: Record<string, boolean> = { "1.2.3": true };
+    for (let i = 0; i < PROGRESS_MAP_ENTRIES_CAP + 100; i++) hostile[String(i)] = true;
+    // The premise: JS really does hand back the numeric keys first.
+    expect(Object.keys(hostile)[0]).toBe("0");
+
+    const walked = walkSaveDoc(doc({ ideas: [{ id: "i", doneByTask: hostile }] }));
+    expect(walked.ideas[0]!.doneByTask).toEqual({ "1.2.3": true });
+  });
+
+  it("drops array-index-like keys but keeps look-alikes that are ordinary strings", () => {
+    const walked = walkSaveDoc(
+      doc({
+        ideas: [
+          {
+            id: "i",
+            // "7" is an array index; the rest are not (their canonical
+            // spellings differ), so they stay ordinary string keys.
+            doneByTask: { "7": true, "07": true, "1.0": true, "-1": true, "1.2.3": true },
+          },
+        ],
+      })
+    );
+    expect(Object.keys(walked.ideas[0]!.doneByTask).sort()).toEqual(
+      ["-1", "07", "1.0", "1.2.3"].sort()
+    );
+  });
+
+  it("the SCAN is bounded too, not just the output", () => {
+    // The entry cap bounds what reaches the wire; nothing bounded what walking
+    // costs, and narrowTimestampMap deliberately scans PAST the cap to compute
+    // recency. A million-key map is cheap to store (the doc CHECK measures the
+    // COMPRESSED datum) and expensive to walk, for every child, every refresh.
+    const huge: Record<string, number> = {};
+    for (let i = 0; i < PROGRESS_MAP_SCAN_CAP + 500; i++) huge[`k-${i}`] = 1_000 + i;
+    const walked = walkSaveDoc(doc({ ideas: [{ id: "i", doneAtByTask: huge }] }));
+    expect(walked.truncated).toBe(true);
+    // Recency covers everything SCANNED, and stops where the scan stopped —
+    // stated so the bound is understood as a deliberate loss, not a bug.
+    expect(walked.ideas[0]!.lastCompletionAt).toBe(1_000 + PROGRESS_MAP_SCAN_CAP - 1);
   });
 
   it("500 REAL completions still cap and flag", () => {

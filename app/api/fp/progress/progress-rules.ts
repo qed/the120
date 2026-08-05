@@ -109,9 +109,11 @@
  * 200 {ok:true, children:[{
  *        username, truncated, docUnreadable,
  *        ideas:[{index, id, done, doneAt, doneByTask, doneAtByTask,
- *                lastCompletionAt, hasCompletionsOutsideRequest}],
+ *                lastCompletionAt, recencyClamped,
+ *                hasCompletionsOutsideRequest}],
  *        businesses:[{id, ideaId, archived, doneByTask, doneAtByTask,
- *                     lastCompletionAt, hasCompletionsOutsideRequest}]
+ *                     lastCompletionAt, recencyClamped,
+ *                     hasCompletionsOutsideRequest}]
  *      }]}
  * The server sends the four per-idea maps essentially RAW (defensively
  * narrowed; keys untouched EXCEPT for the exclusions documented at
@@ -168,6 +170,64 @@ export function shapeProgressRefusal(
 ): { status: 401; body: string } {
   void reason; // deliberately unused — the output must not vary with it
   return { status: PROGRESS_REFUSAL_STATUS, body: REFUSAL_BODY };
+}
+
+/**
+ * Why a request was refused for a reason that is NOT about authorization.
+ *
+ * Two families, one rule. Both are reachable ONLY after both halves of the staff
+ * gate have passed, and neither says anything about who the caller is:
+ *
+ *   - the `?tasks=` list was unusable (a `RequestedTaskIdsRefusal`), and
+ *   - the cohort exceeded a CAPACITY bound — more rows than PROGRESS_MAX_ROWS,
+ *     or a shaped body past PROGRESS_MAX_RESPONSE_BYTES.
+ *
+ * Capacity used to answer the byte-identical 401, and that was wrong in a way
+ * only the CLIENT reveals: the staff SPA reads 401 as "not staff" for the whole
+ * shell, so the day a cap is crossed staff are signed out of the entire
+ * Watchtower — and since a capacity breach is DETERMINISTIC, signing back in
+ * reproduces it, while the deliberate no-refund policy means ~60 attempts
+ * saturate the limiter and hold the 401 for a further 15 minutes even after
+ * someone raises the cap. "Your school got too big" is not "you are not staff".
+ * The route already carved out exactly this reasoning for a malformed parameter;
+ * capacity belongs on the same side of the line.
+ */
+export type ProgressBadRequestReason =
+  | RequestedTaskIdsRefusal
+  /**
+   * A read matched more rows than PROGRESS_MAX_ROWS, or exhausted its page /
+   * round-trip budget. Deliberately DISTINCT from `outage`: an outage is a blip
+   * and the route REFUNDS the rate-limit strike for it, while a capacity breach
+   * is deterministic and repeatable — refunding it would make the most expensive
+   * path in the service free to loop.
+   */
+  | "too_many_rows"
+  /** The shaped body exceeded PROGRESS_MAX_RESPONSE_BYTES. Deterministic like
+   *  `too_many_rows`, and refunded like it: never. */
+  | "too_large";
+
+/**
+ * The ONE documented exception to the byte-identical-401 rule (see
+ * ProgressBadRequestReason for what reaches it and why).
+ *
+ * Byte-identical across reasons for the same reason the 401 is — the reason
+ * parameter exists for the caller's log and for the test that pins
+ * indistinguishability, and the OUTPUT never varies with it. Critically it never
+ * echoes a submitted id (R3 extends to caller-supplied request input), which is
+ * why this takes a value-free code rather than the offending list.
+ */
+const BAD_REQUEST_BODY = JSON.stringify({
+  success: false,
+  error: "That request could not be completed.",
+});
+
+export const PROGRESS_BAD_REQUEST_STATUS = 400;
+
+export function shapeProgressBadRequest(
+  reason: ProgressBadRequestReason
+): { status: 400; body: string } {
+  void reason; // deliberately unused — the output must not vary with it
+  return { status: PROGRESS_BAD_REQUEST_STATUS, body: BAD_REQUEST_BODY };
 }
 
 /* ---------------------------------------------------------- rate limiting */
@@ -253,8 +313,41 @@ export const PROGRESS_BUSINESSES_CAP = 50;
  * exploitable: JSON preserves insertion order, so 500 junk `false` keys written
  * BEFORE the real work would exhaust the cap first and leave the child reading
  * as "never reached this criterion" while their own client shows full progress.
+ *
+ * That fix was only HALF of the exploit, which is the more interesting half.
+ * "JSON preserves insertion order" is not true of all keys: ECMAScript
+ * enumerates ARRAY-INDEX-LIKE keys FIRST, in ascending numeric order, before any
+ * string key and regardless of when it was written. So
+ * `{"0":true, …, "499":true, "1.2.3":true}` puts the real task id at position
+ * 500 — one past the cap — no matter what order the child's client wrote them
+ * in, and the `true` values sail past the `false` filter. Same outcome: an empty
+ * map, `hasCompletionsOutsideRequest:false`, a child who reads as "never got
+ * here" while their own screen shows full progress.
+ *
+ * Closed at the KEY level rather than by sorting: `isArrayIndexLikeKey` drops
+ * those keys outright, so the cap's order is writer-independent by construction
+ * (see `isKeepableMapKey`). Sorting the whole map before capping would also
+ * work, and costs an O(n log n) sort on the very input an attacker controls the
+ * size of — the wrong trade on a path that runs for every child on every
+ * refresh.
  */
 export const PROGRESS_MAP_ENTRIES_CAP = 500;
+
+/**
+ * The bound on the SCAN, as distinct from the bound on the output.
+ *
+ * PROGRESS_MAP_ENTRIES_CAP bounds what a map contributes to the response, but
+ * not what walking it COSTS: `narrowTimestampMap` deliberately keeps scanning
+ * past the cap so `lastCompletionAt` covers the whole map, so a doc packing a
+ * million keys into one map spends a million iterations per child, per refresh,
+ * before any cap fires. The doc CHECK cannot stop this — it measures the
+ * COMPRESSED datum, and a million short repetitive keys compress to nothing.
+ *
+ * 5,000 is ten times the entry cap: a real map is under 200 entries, so nothing
+ * legitimate is near it, and a map that reaches it has already told us
+ * everything true it had to say. Hitting it flags the child as truncated.
+ */
+export const PROGRESS_MAP_SCAN_CAP = 5_000;
 
 /**
  * Per-map KEY bound, again on the WALK. Real keys are `1.1.3` (5 chars) or the
@@ -306,12 +399,163 @@ export const PROGRESS_MAX_TIMESTAMP_MS = 8.64e15;
  * whose entire job is noticing who has stopped. A tablet with a forward-set clock
  * does this by accident.
  *
- * Such a stamp is CLAMPED to the walk's `now`, not dropped: dropping would make a
- * legitimately forward-clocked child read as never-active, while clamping reads
- * as "just active" — honest, and self-correcting as soon as the next real stamp
- * lands.
+ * Such a stamp is CLAMPED to the walk's `now` rather than dropped, because
+ * dropping would make a legitimately forward-clocked child read as never-active.
+ *
+ * ⚠️ THE CLAMP ALONE DOES NOT SOLVE THE PROBLEM ABOVE, and an earlier version of
+ * this docstring claimed it did ("self-correcting as soon as the next real stamp
+ * lands"). Nothing here writes to the database: the stored stamp is still in the
+ * future on the NEXT request, and on the one after that, so it clamps to each
+ * new `now` in turn and `lastCompletionAt` reads "just now" FOREVER. The escape
+ * hatch never fires either — a device with a forward-set clock writes every
+ * later stamp in the future too, and a child who has abandoned the game writes
+ * none at all. That is precisely the "active forever, never in the stalled
+ * column" state this constant exists to prevent.
+ *
+ * What actually preserves the signal is `recencyClamped`: the clamp bounds the
+ * VALUE so the client's renderer cannot throw, and the flag tells the client the
+ * value is synthetic so it can withhold "active" rather than credit it. Both
+ * halves are required; neither is sufficient. A test that issues ONE request
+ * cannot see this — it takes two, with different `now`s.
  */
 export const PROGRESS_FUTURE_STAMP_TOLERANCE_MS = 5 * 60_000;
+
+/* ------------------------------------------------------------- read bounds */
+
+/*
+ * The route's I/O bounds live HERE, with the rest of the caps, rather than in
+ * route.ts: house convention, matching the sibling's SUGGESTIONS_PAGE_CAP. It
+ * also keeps `route.ts` exporting only handlers and Next's own config fields,
+ * which is worth something on its own — a `route.ts` export that is neither is a
+ * shape Next may one day reject.
+ */
+
+/**
+ * How many rows one page asks for.
+ *
+ * ASSUMPTION, not a measurement: PostgREST's `max-rows` on this project is taken
+ * to be 1000, on the authority of docs/solutions/integration-issues/
+ * postgrest-max-rows-1000-silently-truncates-unranged-select-paginate-and-refuse-
+ * 2026-07-24.md, which measured it against production on 2026-07-24 for a
+ * DIFFERENT table. This work measured nothing; an earlier draft of this comment
+ * inherited that doc's "measured against production" wording verbatim and
+ * claimed it as its own, which is the kind of borrowed certainty that makes a
+ * stale number impossible to re-question.
+ *
+ * Nothing here DEPENDS on the assumption being right, which is why it is
+ * tolerable: paging is KEYSET (`.gt(id, lastSeen).order(id).limit(N)`) and
+ * terminates only on an EMPTY page, so a server cap smaller than this page size
+ * costs an extra round trip and returns every row anyway. Under the old
+ * offset-derived-from-page-INDEX scheme it silently truncated instead — with a
+ * cap of 500 and 1200 children the route answered 200 with 500 of them.
+ */
+export const PROGRESS_PAGE_SIZE = 1000;
+
+/**
+ * The page size for `fp_player_saves`, which is NOT row-shaped like the others.
+ *
+ * A children page is ~50 bytes a row. A saves page carries `doc`, whose CHECK
+ * bounds `pg_column_size(doc) <= 262144` — the COMPRESSED size — so a page of
+ * 1000 docs is a quarter of a gigabyte of transfer in the worst case. That page
+ * cannot land inside PROGRESS_READ_TIMEOUT_MS on transfer volume alone, and the
+ * failure is worse than slow: a timeout classifies as `outage`, an outage
+ * REFUNDS the rate-limit strike, and the caller retries forever at zero budget
+ * cost against a database that is perfectly healthy. Row caps do not see this at
+ * all, because the row count is fine.
+ *
+ * 200 keeps the worst-case page at ~50 MB and the realistic one at a few hundred
+ * KB. Paging cost is one extra round trip per 200 children, which the deadline
+ * and round-trip budgets below bound in turn.
+ */
+export const PROGRESS_SAVES_PAGE_SIZE = 200;
+
+/**
+ * The hard bound on any one read, in pages. Four pages is 4,000 rows against a
+ * real roster of tens — three orders of magnitude of headroom — so reaching it
+ * means something is wrong (a runaway import, a join that fanned out), and the
+ * right answer to "something is wrong" on a dashboard staff use to decide who to
+ * help is a refusal, not a shorter list that reads as fewer children.
+ */
+export const PROGRESS_MAX_PAGES = 4;
+
+/**
+ * The bound on ROUND TRIPS for one logical read, counted ACROSS its id chunks.
+ *
+ * A page bound alone is per-`readAllPages` call, and `readByIdSet` makes one such
+ * call per chunk — so 8 chunks × 5 pages was 40 round trips for a single id-set
+ * read, and the "bound" multiplied out to no bound at all. This is the same
+ * mistake the row budget already fixed by carrying `rows.length` across chunks;
+ * trips now carry the same way.
+ *
+ * Sized off the smallest page size, which is the worst case: PROGRESS_MAX_ROWS
+ * at PROGRESS_SAVES_PAGE_SIZE is 20 full pages, plus one terminating empty page
+ * per chunk (8 chunks at PROGRESS_ID_CHUNK) — 28, rounded up for headroom.
+ */
+export const PROGRESS_MAX_ROUND_TRIPS = 40;
+
+/**
+ * The whole-invocation deadline, as a duration from the first line of the
+ * handler.
+ *
+ * Per-call timeouts do not bound their SUM, and four reviewers found the same
+ * arithmetic independently: today's 17-child cohort already makes 8 bounded
+ * calls, and 8 × PROGRESS_READ_TIMEOUT_MS is 64 s against a 60 s `maxDuration`.
+ * Every call can sit comfortably inside its own budget while the invocation is
+ * killed by the platform — which answers with a CORS-less error page, the exact
+ * different-response-shape oracle this endpoint is organised around avoiding.
+ *
+ * So the route takes ONE deadline at entry and hands each call whatever remains,
+ * refusing as `outage` when nothing does. 45 s leaves 15 s of headroom under
+ * `maxDuration` for shaping, serialization and the response itself, so the LAST
+ * refusal is always ours.
+ */
+export const PROGRESS_TOTAL_BUDGET_MS = 45_000;
+
+/**
+ * The test-pinned row cap. Rows PAST it are refused, never dropped — so exactly
+ * PROGRESS_MAX_ROWS is SERVED and PROGRESS_MAX_ROWS + 1 refuses. Both read paths
+ * (`readAllPages` and `readByIdSet`) apply that same boundary; they disagreed
+ * before, one refusing AT the cap and the other accepting it.
+ */
+export const PROGRESS_MAX_ROWS = PROGRESS_PAGE_SIZE * PROGRESS_MAX_PAGES;
+
+/**
+ * How many ids go into one `.in(...)` filter. PostgREST puts the whole set in the
+ * query string, so an unchunked 4,000-uuid filter is a ~150KB URL that proxies
+ * reject — a failure that only appears at scale, the same shape of bug as the row
+ * cap above.
+ */
+export const PROGRESS_ID_CHUNK = 500;
+
+/**
+ * The AGGREGATE response budget, in bytes of serialized body.
+ *
+ * The per-child caps bound one child; nothing bounded the cohort. The task-id
+ * filter made that far less likely (a request is ~6 ids, not 125) but not
+ * bounded: PROGRESS_MAX_ROWS children × PROGRESS_IDEAS_CAP ideas × 32 requested
+ * ids across four maps is hundreds of megabytes, and the platform's own limit
+ * for an oversized response is a 500 emitted WITHOUT this route's CORS headers —
+ * a different response shape, which is exactly the oracle the byte-identical 401
+ * exists to avoid. Refusing ourselves keeps every failure in one voice.
+ *
+ * 4 MB sits under the 4.5 MB serverless response limit with room for headers,
+ * and three orders of magnitude above a real cohort's payload.
+ */
+export const PROGRESS_MAX_RESPONSE_BYTES = 4_000_000;
+
+/**
+ * The cap on any single Supabase round trip this route makes.
+ *
+ * Nothing in the Supabase client sets a fetch timeout, so an unwrapped call can
+ * hang until the platform's own ceiling — app/crm/lib/auth.ts documents that
+ * exact hazard on the staff front door ("a stalled round trip held the front
+ * door open for the whole serverless budget"). This route makes MANY calls, so
+ * the per-call budget must be well under `maxDuration` in route.ts. Deliberately
+ * the same 8 s as FW_CALL_TIMEOUT_MS — a staff refresh over a hotel wifi is the
+ * same waiting human — but its OWN constant, because nothing about this route
+ * should change when the FW venue budget is retuned.
+ */
+export const PROGRESS_READ_TIMEOUT_MS = 8_000;
 
 /* ------------------------------------------------- the requested task ids */
 
@@ -474,6 +718,19 @@ export type WalkedIdea = ProgressCompletionMaps & {
    * report a months-old recency and vanish into the stalled column.
    */
   lastCompletionAt: number | null;
+  /**
+   * Did the future-stamp clamp actually fire anywhere in this idea's timestamp
+   * maps? Value-free — a boolean, never the offending stamp.
+   *
+   * Read it as "`lastCompletionAt` here is SYNTHETIC — it is this request's
+   * clock, not a moment the child did anything". The clamp regenerates on every
+   * request (see PROGRESS_FUTURE_STAMP_TOLERANCE_MS), so without this flag a
+   * single forward-clocked tablet makes an idea permanently "just active" and it
+   * can never appear in the stalled column — on a board whose entire job is
+   * noticing who has stopped. The client must EXCLUDE a flagged unit from
+   * "active" rather than credit it.
+   */
+  recencyClamped: boolean;
 };
 
 /** The `hasCompletionsOutsideRequest` flag, shared by ideas and businesses. */
@@ -534,6 +791,8 @@ export type WalkedBusiness = {
    * and this is the only recency it has.
    */
   lastCompletionAt: number | null;
+  /** As `WalkedIdea.recencyClamped`, over this business's own stamps. */
+  recencyClamped: boolean;
 };
 
 /** One business record as the staff client receives it. */
@@ -628,14 +887,40 @@ function isUnsafeMapKey(key: string): boolean {
 }
 
 /**
- * Is this key usable at all? Shadowing keys and over-long keys are the two
- * reasons to skip one; both are hostile-writer hygiene rather than task-id
- * domain knowledge (no real task id or legacy `${stepId}#${index}` key can be
- * either). An over-long key flags the child as truncated so the loss is
- * visible; a shadowing key does not, because it was never a completion.
+ * Keys JavaScript enumerates BEFORE every string key, in ascending numeric
+ * order, whatever order they were written in — the canonical decimal spellings
+ * of 0 … 2³²−2, which the spec calls array indices.
+ *
+ * They are the second half of the entry-cap exploit documented at
+ * PROGRESS_MAP_ENTRIES_CAP: they let a hostile doc push a real task id past the
+ * cap without depending on insertion order at all. Dropping them is exact rather
+ * than heuristic — no stable task id (`1.2.3`, always three dot-joined segments)
+ * and no legacy `${stepId}#${index}` key (always contains `#`) can be one, so
+ * this excludes nothing a real client writes. `"01"`, `"1.0"` and `"-1"` are NOT
+ * array indices (their canonical spellings differ), so they stay ordinary string
+ * keys and are handled by the pattern-free rules around them.
+ */
+function isArrayIndexLikeKey(key: string): boolean {
+  const asNumber = Number(key);
+  return (
+    Number.isInteger(asNumber) &&
+    asNumber >= 0 &&
+    asNumber < 2 ** 32 - 1 &&
+    String(asNumber) === key
+  );
+}
+
+/**
+ * Is this key usable at all? Shadowing keys, ARRAY-INDEX-LIKE keys and over-long
+ * keys are the three reasons to skip one; all three are hostile-writer hygiene
+ * rather than task-id domain knowledge (no real task id or legacy
+ * `${stepId}#${index}` key can be any of them). An over-long key flags the child
+ * as truncated so the loss is visible; the other two do not, because neither was
+ * ever a completion.
  */
 function isKeepableMapKey(key: string, budget: WalkBudget): boolean {
   if (isUnsafeMapKey(key)) return false;
+  if (isArrayIndexLikeKey(key)) return false;
   if (key.length > PROGRESS_MAP_KEY_MAX_CHARS) {
     budget.truncated = true;
     return false;
@@ -658,22 +943,38 @@ function narrowBooleanMap(value: unknown, budget: WalkBudget): Record<string, bo
   const out: Record<string, boolean> = {};
   if (!isJsonObject(value)) return out;
   let kept = 0;
-  for (const [key, entry] of Object.entries(value)) {
-    if (entry !== true) continue;
+  let scanned = 0;
+  // `for…in` + hasOwn rather than Object.entries: entries EAGERLY materialises
+  // an array of every [key, value] pair before the loop body runs even once, so
+  // the scan cap below could not bound a hostile map's cost at all.
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    if (++scanned > PROGRESS_MAP_SCAN_CAP) {
+      budget.truncated = true;
+      break;
+    }
+    if (value[key] !== true) continue;
     if (!isKeepableMapKey(key, budget)) continue;
     if (kept >= PROGRESS_MAP_ENTRIES_CAP) {
       budget.truncated = true;
       break;
     }
-    out[key] = entry;
+    out[key] = true;
     kept++;
   }
   return out;
 }
 
-/** A narrowed timestamp map, plus the largest stamp seen while narrowing it —
- *  including entries the entry cap then dropped. */
-type NarrowedStamps = { map: Record<string, number>; max: number | null };
+/**
+ * A narrowed timestamp map, the largest stamp seen while narrowing it (including
+ * entries the entry cap then dropped), and whether the future-stamp CLAMP
+ * actually fired on any of them.
+ */
+type NarrowedStamps = {
+  map: Record<string, number>;
+  max: number | null;
+  clamped: boolean;
+};
 
 /**
  * A timestamp map (epoch ms), filtered to FINITE numbers in
@@ -693,17 +994,30 @@ type NarrowedStamps = { map: Record<string, number>; max: number | null };
 function narrowTimestampMap(value: unknown, budget: WalkBudget): NarrowedStamps {
   const map: Record<string, number> = {};
   let max: number | null = null;
-  if (!isJsonObject(value)) return { map, max };
+  let clamped = false;
+  if (!isJsonObject(value)) return { map, max, clamped };
   const ceiling = budget.nowMs + PROGRESS_FUTURE_STAMP_TOLERANCE_MS;
   let kept = 0;
-  for (const [key, entry] of Object.entries(value)) {
+  let scanned = 0;
+  // See narrowBooleanMap for why this is `for…in` and not Object.entries.
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    if (++scanned > PROGRESS_MAP_SCAN_CAP) {
+      budget.truncated = true;
+      break;
+    }
+    const entry = value[key];
     if (typeof entry !== "number" || !Number.isFinite(entry)) continue;
     if (entry < 0 || entry > PROGRESS_MAX_TIMESTAMP_MS) continue;
     if (!isKeepableMapKey(key, budget)) continue;
-    const stamp = entry > ceiling ? budget.nowMs : entry;
+    let stamp = entry;
+    if (entry > ceiling) {
+      stamp = budget.nowMs;
+      clamped = true;
+    }
     if (max === null || stamp > max) max = stamp;
     // `continue`, not `break`: the cap stops the map growing, but the scan runs
-    // on so `max` covers the whole map.
+    // on so `max` covers the whole map (up to the scan cap).
     if (kept >= PROGRESS_MAP_ENTRIES_CAP) {
       budget.truncated = true;
       continue;
@@ -711,7 +1025,7 @@ function narrowTimestampMap(value: unknown, budget: WalkBudget): NarrowedStamps 
     map[key] = stamp;
     kept++;
   }
-  return { map, max };
+  return { map, max, clamped };
 }
 
 /** The larger of two recencies, either of which may be absent. */
@@ -744,6 +1058,7 @@ function placeholderIdea(index: number): WalkedIdea {
     doneByTask: {},
     doneAtByTask: {},
     lastCompletionAt: null,
+    recencyClamped: false,
   };
 }
 
@@ -786,6 +1101,7 @@ function walkIdeas(rawIdeas: unknown, budget: WalkBudget): WalkedIdea[] {
       doneByTask: narrowBooleanMap(raw.doneByTask, budget),
       doneAtByTask: doneAtByTask.map,
       lastCompletionAt: laterOf(doneAt.max, doneAtByTask.max),
+      recencyClamped: doneAt.clamped || doneAtByTask.clamped,
     });
   }
   return out;
@@ -821,6 +1137,7 @@ function walkBusinesses(rawBusinesses: unknown, budget: WalkBudget): WalkedBusin
       doneByTask: narrowBooleanMap(raw.doneByTask, budget),
       doneAtByTask: doneAtByTask.map,
       lastCompletionAt: doneAtByTask.max,
+      recencyClamped: doneAtByTask.clamped,
     });
   }
   return out;
@@ -1002,12 +1319,34 @@ function projectBusiness(
  * row would make a stalled kid invisible, which is the exact failure this
  * dashboard exists to prevent.
  */
+/**
+ * An operator-facing note about ONE walked doc, keyed by `profile_id`.
+ *
+ * Why `profile_id` and not the username: the username is child data and R3
+ * forbids it in a log line, while `profile_id` is an opaque uuid that names the
+ * ROW an operator would have to open to repair the doc. Without it, "some child
+ * has a doc that trips the caps" is a fact nobody can act on — never-log
+ * discipline had accidentally made the abnormal-doc signal unusable.
+ */
+export type ProgressWalkNote = {
+  profileId: string;
+  truncated: boolean;
+  docUnreadable: boolean;
+};
+
 export function shapeProgress(
   children: readonly ProgressChildRowLike[],
   profiles: readonly ProgressProfileRowLike[],
   saves: readonly ProgressSaveRowLike[],
   requestedTaskIds: readonly string[],
-  now: Date
+  now: Date,
+  /**
+   * Optional collector for the notes above. APPENDED to, never read — the module
+   * still logs nothing and decides nothing from it, so the function stays pure
+   * in the sense this file cares about (no clock, no I/O, same output for the
+   * same input). The route owns whether any of it is worth a log line.
+   */
+  walkNotes?: ProgressWalkNote[]
 ): ProgressChild[] {
   const taskIds = new Set(requestedTaskIds);
   if (taskIds.size === 0) return [];
@@ -1032,6 +1371,13 @@ export function shapeProgress(
     const walked: WalkedSaveDoc = save
       ? walkSaveDoc(save.doc, now)
       : { ideas: [], businesses: [], truncated: false, docUnreadable: false };
+    if (walkNotes && save && (walked.truncated || walked.docUnreadable)) {
+      walkNotes.push({
+        profileId: save.profile_id,
+        truncated: walked.truncated,
+        docUnreadable: walked.docUnreadable,
+      });
+    }
     out.push({
       username: child.fp_username,
       truncated: walked.truncated,

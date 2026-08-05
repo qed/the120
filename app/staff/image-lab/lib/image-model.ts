@@ -64,7 +64,7 @@ import {
   generateImage,
   generateText,
 } from "ai";
-import type { ImageLabMimeType } from "./image-lab-rules";
+import { isImageLabLive, type ImageLabMimeType } from "./image-lab-rules";
 import {
   IMAGE_LAB_SAFETY_REASONS,
   pickUsableFile,
@@ -96,25 +96,22 @@ type MutableProviderOptions = Record<string, Record<string, string | string[]>>;
 // ── The go-live flag ─────────────────────────────────────────────────────────
 
 /**
- * Generation is off unless `IMAGE_LAB_LIVE` is explicitly on.
+ * Re-exported from the PLAIN `./image-lab-rules`, where the implementation now
+ * lives, so existing importers of `@/app/staff/image-lab/lib/image-model` keep
+ * working unchanged.
  *
- * A FLAG, NOT A KEY SNIFF: gateway auth is implicit, so a key may well be
- * present in every environment the moment the funnel works — making key-presence
- * a gate that is already open everywhere and gates nothing. This flag is the
- * deliberate act of switching a priced bench on.
+ * The move is the repo's documented split (docs/solutions/best-practices/
+ * server-only-import-breaks-tsx-scripts-plain-core-re-export-2026-07-21.md):
+ * reading one env var must not drag `server-only`, the `ai` SDK and the model
+ * registry into a caller. `/staff`'s hub card needs exactly this boolean and
+ * nothing else in this file — importing it from here made the staff front door
+ * pay for the whole image stack, and pushed
+ * `app/staff/__tests__/staff-route.test.ts` (which dynamic-imports that page)
+ * against the 5000ms default timeout on a cold run.
  *
- * Read at CALL TIME, never captured at module load: a module-level constant
- * would freeze the value into a warm serverless instance, so flipping the flag
- * would take effect only for containers that happened to cold-start after it.
- *
- * Allowlisted values only. `IMAGE_LAB_LIVE=false` and `=0` are the two ways an
- * operator says "off" in a dashboard, and a plain truthiness check reads BOTH
- * as on — the single most expensive way to misread an env var here.
+ * NEW CALLERS THAT ONLY WANT THE FLAG SHOULD IMPORT `./image-lab-rules`.
  */
-export function isImageLabLive(): boolean {
-  const raw = process.env.IMAGE_LAB_LIVE?.trim().toLowerCase();
-  return raw === "1" || raw === "true";
-}
+export { isImageLabLive } from "./image-lab-rules";
 
 // ── Injected edges ───────────────────────────────────────────────────────────
 

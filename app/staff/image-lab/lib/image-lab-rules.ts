@@ -21,6 +21,37 @@
  * exports `isTusUrlExpired` rather than making callers subtract against a TTL).
  */
 
+// ── The go-live flag ──────────────────────────────────────────────────────────
+
+/**
+ * Generation is off unless `IMAGE_LAB_LIVE` is explicitly on.
+ *
+ * A FLAG, NOT A KEY SNIFF: gateway auth is implicit, so a key may well be
+ * present in every environment the moment the funnel works — making key-presence
+ * a gate that is already open everywhere and gates nothing. This flag is the
+ * deliberate act of switching a priced bench on.
+ *
+ * Read at CALL TIME, never captured at module load: a module-level constant
+ * would freeze the value into a warm serverless instance, so flipping the flag
+ * would take effect only for containers that happened to cold-start after it.
+ *
+ * Allowlisted values only. `IMAGE_LAB_LIVE=false` and `=0` are the two ways an
+ * operator says "off" in a dashboard, and a plain truthiness check reads BOTH
+ * as on — the single most expensive way to misread an env var here.
+ *
+ * LIVES IN THIS PLAIN MODULE, not in the `server-only` `./image-model` that
+ * consumes it, because its other readers are SHELL surfaces — the `/staff` hub
+ * card and the bench notice — that want one boolean and nothing else. Reading
+ * it from the adapter dragged `server-only`, the `ai` SDK and the 454-line
+ * registry into the staff front door. `./image-model` re-exports it, so its
+ * existing importers are unchanged. (docs/solutions/best-practices/
+ * server-only-import-breaks-tsx-scripts-plain-core-re-export-2026-07-21.md)
+ */
+export function isImageLabLive(): boolean {
+  const raw = process.env.IMAGE_LAB_LIVE?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 /** The private bucket the migration creates. Never public; reads are signed. */

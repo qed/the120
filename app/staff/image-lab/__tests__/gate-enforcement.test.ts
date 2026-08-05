@@ -1,0 +1,534 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { glob } from "tinyglobby";
+
+/**
+ * The Image Lab's GATE WIRING (first-profit repo:
+ * docs/plans/2026-08-05-002-feat-image-lab-v1-plan.md, Unit 3; requirements in
+ * first-profit repo: docs/brainstorms/2026-08-05-image-lab-requirements.md, R1).
+ *
+ * This file is the SECURITY BOUNDARY for the whole feature, so it asserts
+ * BEHAVIOUR first and source second. The distinction is the whole point:
+ *
+ *   A SOURCE SCAN CANNOT ANSWER "WAS THE GATE REACHED".
+ *
+ * The previous version of this file was a scan only, and review defeated it
+ * three ways with the full suite green: an inner-scope `const requireStaff =
+ * async () => {}` shadowing the real import; an ungated `api/generate/route.ts`
+ * that the `{page,layout}` glob never looked at; and a gate behind
+ * `if (process.env.NODE_ENV !== "production")`. Each of those is a completely
+ * open surface that a diff review also misses, because the import block is
+ * untouched.
+ *
+ * So: `requireStaff` is MOCKED WITH A SPY, every routable module under the Lab
+ * is dynamically imported, its entry points are actually INVOKED, and the spy
+ * must have been called. A gate that is shadowed, deleted, or never reached
+ * fails, because the mock is the only thing that could have answered.
+ *
+ * The source scan is kept as a SUPPLEMENTARY fence for the two properties a
+ * spy cannot see — that the gate is the authoritative import rather than any
+ * function of that name, and that it is UNCONDITIONAL (under `NODE_ENV=test`
+ * a production-only bypass calls the spy quite happily).
+ *
+ * Prior art for why wiring gets asserted at all:
+ *   docs/solutions/security-issues/guard-function-with-no-callers-is-not-a-\
+ *     mechanism-client-side-supabase-auth-bypasses-server-guards-2026-07-23.md
+ *   docs/solutions/security-issues/an-inert-defensive-branch-has-no-\
+ *     behavioural-signature-assert-the-wiring-2026-07-27.md
+ *
+ * ── Why the file list is DISCOVERED, not written down ──────────────────────
+ * The failure worth catching is a module added under `/staff/image-lab` in
+ * Units 4–6 that forgets the gate — Unit 5 adds exactly a POST route that calls
+ * a PAID model, and ROUTE HANDLERS AND SERVER ACTIONS DO NOT RENDER THROUGH
+ * LAYOUTS AT ALL, so the layout gate provably cannot cover them. (`proxy.ts` is
+ * a JWT-only outer fence and its own docblock says it does not reliably cover
+ * Server Function calls.) The glob therefore covers every Next routable
+ * convention, and there is deliberately NO pinned list of today's files to
+ * update: a checklist a new page must be added to trains the next author to
+ * update the checklist, which is the habit that neuters the guard.
+ *
+ * Resolved relative to THIS FILE, never `process.cwd()`: a scan that reads no
+ * file is worse than no scan, because it passes.
+ */
+
+// ── The spy ──────────────────────────────────────────────────────────────────
+
+const { requireStaffSpy } = vi.hoisted(() => ({ requireStaffSpy: vi.fn() }));
+
+vi.mock("@/app/crm/lib/auth", () => ({ requireStaff: requireStaffSpy }));
+
+beforeEach(() => {
+  requireStaffSpy.mockReset();
+  requireStaffSpy.mockResolvedValue({
+    staffId: "00000000-0000-4000-8000-000000000000",
+    email: "gate-test@the120.example",
+  });
+});
+
+// ── Discovery ────────────────────────────────────────────────────────────────
+
+const dir = fileURLToPath(new URL(".", import.meta.url));
+/** `app/staff/image-lab/__tests__/` → the repo root. Four levels up. */
+const REPO_ROOT = fileURLToPath(new URL("../../../../", `file://${dir}`));
+const LAB = "app/staff/image-lab/";
+
+/**
+ * EVERY Next routable convention under the Lab.
+ *
+ * `page`/`layout`/`template`/`default` render; `route` does not render at all
+ * and is reached directly. Missing `route` is what let an ungated
+ * `api/generate/route.ts` sit invisible under the old `{page,layout}` glob.
+ */
+const ROUTABLE_GLOB = `${LAB}**/{page,layout,template,default,route}.{ts,tsx}`;
+
+const routableFiles = async (): Promise<string[]> => {
+  const files = await glob([ROUTABLE_GLOB], {
+    cwd: REPO_ROOT,
+    absolute: false,
+    ignore: ["**/__tests__/**"],
+  });
+  // An empty expansion would make every assertion below pass vacuously.
+  expect(files.length).toBeGreaterThan(0);
+  return files.map((f) => f.replace(/\\/g, "/")).sort();
+};
+
+/** Repo-relative path → a specifier this test can `import()`. */
+const specifierFor = (file: string) => `../${file.slice(LAB.length)}`;
+
+/**
+ * Comments removed before any scan.
+ *
+ * These files are heavily commented by design, and every comment here NAMES
+ * `requireStaff` while explaining why it is called twice. A scan over raw source
+ * could not tell the explanation from the call, so deleting the call would leave
+ * the supplementary fence green. Same helper shape as `bar-wiring.test.ts`; fix
+ * the scan, never the comment.
+ */
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+const sourceOf = (file: string) =>
+  stripComments(readFileSync(`${REPO_ROOT}${file}`, "utf8"));
+
+/**
+ * Timeout for the tests that DYNAMICALLY IMPORT page modules.
+ *
+ * Vitest's 5000ms default is a transform budget, not a work budget: the first
+ * test to import a `page.tsx` pays for Vite to transform it and its whole
+ * import graph (react, next/link), and under a full-suite run that alone
+ * exceeds the default on a cold cache. A behavioural gate test cannot be
+ * allowed to red on machine load — a security test that flakes is a security
+ * test that gets skipped.
+ */
+const IMPORT_TIMEOUT_MS = 30_000;
+
+const HTTP_METHODS = [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+] as const;
+
+/**
+ * The entry points Next itself can call on a module.
+ *
+ * `page`/`layout`/`template`/`default` are reached through the DEFAULT export;
+ * a ROUTE HANDLER HAS NO DEFAULT EXPORT AT ALL — it exports `GET`/`POST`/… — so
+ * anything keyed on `export default` passes vacuously over exactly the module
+ * type that layouts cannot protect.
+ */
+const entryPointsOf = (mod: Record<string, unknown>, file: string) => {
+  const entries: { name: string; call: () => unknown }[] = [];
+  if (/\/route\.tsx?$/.test(file)) {
+    for (const method of HTTP_METHODS) {
+      const handler = mod[method];
+      if (typeof handler === "function") {
+        entries.push({
+          name: method,
+          call: () =>
+            (handler as (...a: unknown[]) => unknown)(
+              new Request("http://localhost/staff/image-lab", { method }),
+              { params: Promise.resolve({}) }
+            ),
+        });
+      }
+    }
+    return entries;
+  }
+  if (typeof mod.default === "function") {
+    entries.push({
+      name: "default",
+      call: () =>
+        (mod.default as (...a: unknown[]) => unknown)({
+          children: null,
+          params: Promise.resolve({}),
+          searchParams: Promise.resolve({}),
+        }),
+    });
+  }
+  return entries;
+};
+
+// ── The headline assertion: the gate is REACHED ──────────────────────────────
+
+describe("every routable Image Lab module actually REACHES the gate (R1)", () => {
+  it("invoking each entry point calls the authoritative requireStaff", async () => {
+    const files = await routableFiles();
+
+    for (const file of files) {
+      const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
+        string,
+        unknown
+      >;
+      const entries = entryPointsOf(mod, file);
+
+      // A routable module with nothing to invoke is not "gated by default", it
+      // is an untested surface — and for a `route.ts` it means the method
+      // exports are a shape this test does not know how to call.
+      expect(
+        entries.map((e) => e.name),
+        `${file} exposes no entry point this test can invoke`
+      ).not.toEqual([]);
+
+      for (const entry of entries) {
+        requireStaffSpy.mockClear();
+        try {
+          await entry.call();
+        } catch {
+          // Irrelevant. What matters is whether the gate was reached BEFORE
+          // whatever threw — a module that throws before gating fails below.
+        }
+        expect(
+          requireStaffSpy,
+          `${file} → ${entry.name}() did not call requireStaff()`
+        ).toHaveBeenCalled();
+      }
+    }
+  }, IMPORT_TIMEOUT_MS);
+
+  it("the discovery finds the layout and all three segment pages, and no list pins it", async () => {
+    // NOT an equality assertion against a written-down list — that is what
+    // trains an author to edit the list instead of adding the gate. This only
+    // proves the glob's expansion is real and covers the known shapes.
+    const files = await routableFiles();
+    expect(files).toContain(`${LAB}layout.tsx`);
+    expect(files).toContain(`${LAB}page.tsx`);
+    expect(files.filter((f) => /\/page\.tsx$/.test(f)).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ── Supplementary source fence ───────────────────────────────────────────────
+
+/**
+ * The function body starting at `start`, bounded by the first closing brace in
+ * COLUMN ZERO.
+ *
+ * Bounding matters: a slice that runs to end of file is satisfied by a dead
+ * `await requireStaff()` sitting in an uncalled helper BELOW the export, which
+ * is a mutation review used to defeat the previous version of this file.
+ */
+const functionBody = (code: string, start: number) => {
+  // Step over the PARAMETER LIST first. A destructured signature closes on a
+  // line of its own (`}: Readonly<{ children }>) {`), so searching for the
+  // column-zero brace from `start` would end the "body" before it began.
+  let i = code.indexOf("(", start);
+  for (let depth = 0; i > -1 && i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) {
+      i++;
+      break;
+    }
+  }
+  const open = code.indexOf("{", i);
+  if (open === -1) return "";
+  const end = code.indexOf("\n}", open);
+  return code.slice(open, end === -1 ? code.length : end);
+};
+
+/** Every exported entry point in a module, as source slices. */
+const exportedFunctionBodies = (code: string) => {
+  const bodies: string[] = [];
+  const re =
+    /export\s+(?:default\s+)?(?:async\s+function\b|const\s+\w+\s*(?::[^=\n]+)?=\s*async\b)/g;
+  for (const match of code.matchAll(re)) {
+    bodies.push(functionBody(code, match.index));
+  }
+  return bodies;
+};
+
+const GATE_CALL = /await\s+requireStaff\s*\(\s*\)/;
+
+/**
+ * Awaits that may legitimately precede the gate.
+ *
+ * `const { runId } = await params;` is the STANDARD Next 16 way to read a
+ * dynamic segment, and Units 4–6 add dynamic segments. A rule that reddens on
+ * correct code is a rule that gets deleted, so the ordering assertion allows
+ * awaits whose operand is the route props (`params`, `searchParams`, `props`,
+ * `props.params`, …) and nothing else. Everything else — a DB read, a fetch, a
+ * storage call — must come after the gate, or the work is done, the row is
+ * touched, and only then is the visitor redirected.
+ */
+const ALLOWED_EARLY_AWAIT = /^\s*(params|searchParams|props(\.\w+)?)\b/;
+
+describe("supplementary source fence — properties a spy cannot see", () => {
+  it("each module imports the ONE authoritative gate", async () => {
+    // Not any function of that name: `app/crm/lib/auth.ts` verifies the session
+    // against the auth server AND the `staff` row's `is_active`, memoized per
+    // request.
+    for (const file of await routableFiles()) {
+      expect(sourceOf(file), file).toMatch(
+        /import\s*\{[^}]*\brequireStaff\b[^}]*\}\s*from\s*["']@\/app\/crm\/lib\/auth["']/
+      );
+    }
+  });
+
+  it("the identifier is never re-bound or aliased inside a module", async () => {
+    // The inner-scope shadow: `const requireStaff = async () => {};` in the page
+    // body, real import untouched. The behavioural test above already reddens on
+    // it; this names the cause in the failure message and covers a shadow in a
+    // module the invoker could not reach.
+    for (const file of await routableFiles()) {
+      const code = sourceOf(file);
+      expect(code, `${file} re-binds requireStaff`).not.toMatch(
+        /(?:const|let|var|function)\s+requireStaff\b/
+      );
+      expect(code, `${file} aliases requireStaff`).not.toMatch(
+        /\brequireStaff\s+as\s+\w+/
+      );
+    }
+  });
+
+  it("the gate is an UNCONDITIONAL top-level statement in every entry point", async () => {
+    // `if (process.env.NODE_ENV !== "production") await requireStaff();` calls
+    // the spy under vitest and is off in production — invisible to a
+    // behavioural test, and the reason this fence exists.
+    for (const file of await routableFiles()) {
+      const bodies = exportedFunctionBodies(sourceOf(file));
+      expect(bodies.length, `${file}: no exported entry point found`).toBeGreaterThan(0);
+
+      for (const body of bodies) {
+        const gateAt = body.search(GATE_CALL);
+        expect(gateAt, `${file}: an exported entry point never awaits the gate`).toBeGreaterThan(-1);
+
+        // Its own statement, on its own line — not a branch tail.
+        const line = body.slice(0, gateAt).split("\n").pop()! + body.slice(gateAt).split("\n")[0];
+        expect(line.trim(), `${file}: the gate is not a standalone statement`).toMatch(
+          /^(?:(?:const|let)\s+(?:\{[^}]*\}|\w+)\s*=\s*)?await\s+requireStaff\s*\(\s*\)\s*;$/
+        );
+
+        // …and nothing branches between the entry point and the gate, so the
+        // standalone statement above cannot be standalone INSIDE an `if` block.
+        expect(
+          body.slice(0, gateAt),
+          `${file}: the gate sits behind a branch`
+        ).not.toMatch(/\b(?:if|else|switch|try|catch|for|while)\s*[({]/);
+      }
+    }
+  });
+
+  it("the gate is the FIRST await — only route props may be read before it", async () => {
+    for (const file of await routableFiles()) {
+      for (const body of exportedFunctionBodies(sourceOf(file))) {
+        const gateAt = body.search(GATE_CALL);
+        const before = body.slice(0, gateAt);
+        for (const match of before.matchAll(/\bawait\s/g)) {
+          const operand = before.slice(match.index + match[0].length);
+          expect(
+            ALLOWED_EARLY_AWAIT.test(operand),
+            `${file}: "await ${operand.split("\n")[0].trim()}" precedes the gate`
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("every `use server` file under the Lab gates each of its exported actions", async () => {
+    // Server Actions do not render through a layout either, and `proxy.ts` does
+    // not reliably cover Server Function calls. Nothing under the Lab declares
+    // `"use server"` today, so this is a forward fence for Units 4–6 — it is
+    // BEHAVIOURAL rather than a scan for the same reason as everything above.
+    const sources = await glob([`${LAB}**/*.{ts,tsx}`], {
+      cwd: REPO_ROOT,
+      absolute: false,
+      ignore: ["**/__tests__/**"],
+    });
+    const actionFiles = sources
+      .map((f) => f.replace(/\\/g, "/"))
+      .filter((f) => /^\s*["']use server["']/m.test(readFileSync(`${REPO_ROOT}${f}`, "utf8")));
+
+    for (const file of actionFiles) {
+      const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
+        string,
+        unknown
+      >;
+      const actions = Object.entries(mod).filter(
+        ([, value]) => typeof value === "function"
+      );
+      expect(actions.length, `${file} declares "use server" but exports no action`).toBeGreaterThan(0);
+
+      for (const [name, action] of actions) {
+        requireStaffSpy.mockClear();
+        try {
+          await (action as (...a: unknown[]) => unknown)();
+        } catch {
+          // See above: only "was the gate reached" is under test.
+        }
+        expect(
+          requireStaffSpy,
+          `${file} → ${name}() did not call requireStaff()`
+        ).toHaveBeenCalled();
+      }
+    }
+  }, IMPORT_TIMEOUT_MS);
+});
+
+// ── Route segment config ─────────────────────────────────────────────────────
+
+describe("Image Lab route segment config (R5a — noindex, force-dynamic)", () => {
+  /**
+   * Imported for their MODULE-SCOPE exports only. `metadata` and `dynamic` are
+   * plain values evaluated at import, so this reads the real exports Next reads
+   * rather than a copy of them — the `staff-route.test.ts` technique.
+   */
+  it("every rendering module declares force-dynamic", async () => {
+    // Including the LAYOUT, which gates and reads the session and was the one
+    // guarded module in the Lab whose dynamic-ness was neither declared nor
+    // pinned. Route handlers are excluded: they are dynamic by default and
+    // carry no rendering config.
+    const files = (await routableFiles()).filter((f) => !/\/route\.tsx?$/.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
+        string,
+        unknown
+      >;
+      expect(mod.dynamic, `${file} must declare force-dynamic`).toBe("force-dynamic");
+    }
+  }, IMPORT_TIMEOUT_MS);
+
+  it("the layout declares noindex, and no module declares anything weaker", async () => {
+    // Next merges `metadata` shallowly from the root segment DOWN, nearest
+    // wins. The LAYOUT's declaration is the one that covers every page beneath
+    // it — including the bench, which deliberately declares no `metadata` of its
+    // own because it would be byte-identical. Without a declaration ANYWHERE
+    // under /staff, the root layout's PUBLIC marketing metadata is what a staff
+    // surface inherits.
+    const layout = (await import("../layout")) as Record<string, unknown>;
+    expect((layout.metadata as { robots: unknown }).robots).toEqual({
+      index: false,
+      follow: false,
+    });
+
+    for (const file of await routableFiles()) {
+      const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
+        string,
+        unknown
+      >;
+      const metadata = mod.metadata as { robots?: unknown } | undefined;
+      if (metadata === undefined) continue;
+      expect(metadata.robots, `${file} declares metadata without noindex`).toEqual({
+        index: false,
+        follow: false,
+      });
+    }
+  }, IMPORT_TIMEOUT_MS);
+});
+
+// ── The shell renders its own copy ───────────────────────────────────────────
+
+/** `…/image-lab/page.tsx` → "bench"; `…/image-lab/history/page.tsx` → "history". */
+const segmentOf = (file: string) => {
+  const rest = file.slice(LAB.length).replace(/\/?page\.tsx$/, "");
+  return rest === "" ? "bench" : rest.split("/").pop()!;
+};
+
+describe("each page renders ITS OWN segment and ITS OWN copy", () => {
+  const pageFiles = async () =>
+    (await routableFiles()).filter((f) => /\/page\.tsx$/.test(f));
+
+  it("passes the segment its path says it is, and the panel that says so", async () => {
+    // The three page files are near-identical copies — exactly the shape where a
+    // paste leaves the wrong segment, driving `aria-current` and the active
+    // style onto the wrong tab with every test green. The expectation is DERIVED
+    // FROM THE PATH, so a fourth segment is covered the day it is added.
+    for (const file of await pageFiles()) {
+      const segment = segmentOf(file);
+      const code = sourceOf(file);
+      expect(code, `${file} must pass current="${segment}"`).toContain(
+        `current="${segment}"`
+      );
+      // And the copy constant that belongs to THIS surface. With no jsdom,
+      // nothing else in the suite would notice a page rendering another
+      // segment's strings — or rendering none at all.
+      expect(code, `${file} must render its own copy`).toContain(
+        `IMAGE_LAB_${segment.toUpperCase()}_COPY`
+      );
+      // The shell's entire product until Units 4–6 IS copy on a screen, so the
+      // panel that carries it has to be mounted.
+      expect(code, `${file} must mount ImageLabPanel`).toMatch(/<ImageLabPanel[\s/>]/);
+    }
+  });
+
+  it("the bench passes the notice's tone to the panel", async () => {
+    // Dropping `tone` renders the generation notice in the NEUTRAL skin — the
+    // off state looks exactly like the two informational panels beside it — with
+    // every test green.
+    const bench = sourceOf(`${LAB}page.tsx`);
+    expect(bench).toMatch(/<ImageLabPanel[\s\S]{0,120}?tone=\{notice\.tone\}/);
+  });
+});
+
+// ── The card and the bench cannot disagree ───────────────────────────────────
+
+describe("the hub card carries the generation state (Unit 3 requirement 4)", () => {
+  const HUB = () => sourceOf("app/staff/page.tsx");
+
+  it("links to the Lab", () => {
+    expect(HUB()).toMatch(/href="\/staff\/image-lab"/);
+  });
+
+  it("BOTH call sites read the same live flag through their pure rule", () => {
+    /**
+     * The pair is the subject, not either half.
+     *
+     * `shell-rules.test.ts` proves the two pure functions agree with EACH OTHER
+     * for a given boolean; it cannot see what boolean the pages pass. Change the
+     * bench to `imageLabGenerationNotice(false)` — a plausible shape while
+     * stubbing Units 4–6 — and the whole suite stays green while the hub card
+     * reads "Generation is on" and the bench it links to reads "Generation is
+     * off". That is precisely the disagreement the pure module exists to
+     * prevent, so both call sites are pinned here, together.
+     */
+    expect(HUB(), "the /staff card must render the live flag").toContain(
+      "imageLabCardLine(isImageLabLive())"
+    );
+    expect(
+      sourceOf(`${LAB}page.tsx`),
+      "the bench must render the same live flag"
+    ).toContain("imageLabGenerationNotice(isImageLabLive())");
+  });
+
+  it("reads the flag SERVER-side — no NEXT_PUBLIC_ variant exists anywhere", async () => {
+    // The flag is an operational fact about the deployment. A NEXT_PUBLIC_ copy
+    // would be a second reader of the same switch, resolved at BUILD time, that
+    // could disagree with the server's answer on a warm deploy.
+    //
+    // Scanned REPO-WIDE, not just `app/**`: `next.config.ts`, `proxy.ts`, and a
+    // root `.env*` are all places a build-time public copy would be introduced,
+    // and all three were outside the old glob.
+    const sources = await glob(
+      ["app/**/*.{ts,tsx}", "scripts/**/*.{ts,tsx}", "*.{ts,tsx,mjs,js,json}", ".env*"],
+      { cwd: REPO_ROOT, absolute: false, dot: true, ignore: ["**/__tests__/**"] }
+    );
+    expect(sources.length).toBeGreaterThan(0);
+    const offenders = sources.filter((f) =>
+      /NEXT_PUBLIC_IMAGE_LAB/.test(readFileSync(`${REPO_ROOT}${f}`, "utf8"))
+    );
+    expect(offenders).toEqual([]);
+  });
+});

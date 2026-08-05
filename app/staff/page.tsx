@@ -5,6 +5,16 @@ import { getSeatsRemaining } from "@/app/lib/seats";
 import { SEATS_REMAINING } from "@/app/lib/site";
 import { withFwTimeout } from "@/app/fp/lib/fw-call";
 import { crmCardLine } from "@/app/staff/lib/hub-rules";
+// Both from PLAIN modules. The flag reader lives in `image-lab-rules` rather
+// than the `server-only` `image-model` adapter it is re-exported from, so the
+// staff front door does not pull the `ai` SDK and the model registry in to read
+// one env var (docs/solutions/best-practices/
+// server-only-import-breaks-tsx-scripts-plain-core-re-export-2026-07-21.md).
+import { isImageLabLive } from "@/app/staff/image-lab/lib/image-lab-rules";
+import {
+  imageLabCardLine,
+  IMAGE_LAB_HUB_COPY,
+} from "@/app/staff/image-lab/lib/shell-rules";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row
@@ -101,6 +111,29 @@ export default async function StaffHubPage() {
             First Profit Tracker
           </span>
           <span className="mt-1 block text-sm text-hq-ink-soft">Coming Soon</span>
+        </Link>
+
+        {/* Image Lab (first-profit repo:
+            docs/plans/2026-08-05-002-feat-image-lab-v1-plan.md, Unit 3;
+            requirements in first-profit repo:
+            docs/brainstorms/2026-08-05-image-lab-requirements.md, R1).
+            Its line is the
+            GENERATION STATE, read server-side from the same flag the bench
+            reads, so a staff member learns the bench is switched off BEFORE
+            walking into it rather than after composing a prompt. */}
+        <Link
+          href="/staff/image-lab"
+          className="block rounded-xl border border-hq-border bg-hq-surface p-5 shadow-hq transition-colors hover:border-hq-border-strong"
+        >
+          <span className="block font-path-display text-lg text-hq-ink">
+            {IMAGE_LAB_HUB_COPY.title}
+          </span>
+          <span className="mt-1 block text-sm text-hq-ink-soft">
+            {IMAGE_LAB_HUB_COPY.blurb}
+          </span>
+          <span className="mt-3 block font-path-mono text-[13px] text-crm-blue">
+            {imageLabCardLine(isImageLabLive())}
+          </span>
         </Link>
       </nav>
     </main>

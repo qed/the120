@@ -72,9 +72,12 @@ amplification:              31.6x
 ```
 
 Each 3-byte `{}` source entry becomes a ~95-byte projected skeleton — `index`,
-`id`, `label`, and four empty maps — because the read path's job is precisely to
-turn a terse stored shape into a complete, uniform wire shape. Expansion *is*
-the feature.
+`id`, and four empty maps — because the read path's job is precisely to turn a
+terse stored shape into a complete, uniform wire shape. Expansion *is* the
+feature. (The measurement above was taken while the skeleton also carried a
+child-authored `label`; that field was removed on 2026-08-05 for unrelated
+privacy reasons, which lowers the constant and changes nothing about the
+argument.)
 
 The consequence in context is not a slow response, it is a cohort-wide outage:
 
@@ -126,8 +129,23 @@ storage constraint, exported, and test-pinned:
 export const PROGRESS_IDEAS_CAP = 50;
 export const PROGRESS_BUSINESSES_CAP = 50;
 export const PROGRESS_MAP_ENTRIES_CAP = 500;
-export const PROGRESS_LABEL_MAX_CHARS = 200;
+export const PROGRESS_MAP_KEY_MAX_CHARS = 64;
+export const PROGRESS_ID_MAX_CHARS = 64;
 ```
+
+**Cap every dimension the attacker can grow, not just the obvious one.** The
+first three bound how MANY things a doc contains; the last two bound how BIG one
+thing can be, and they are the strongest instance of this document's own thesis —
+a *single* map key or a *single* id, padded to 400,000 characters of one
+repeated character, compresses to almost nothing under pglz and sails under the
+CHECK. Measured: 50 ideas plus 50 businesses carrying 400,000-character ids
+compress far under 256 KiB and project to tens of megabytes. Entry counts were
+capped and the payload was still unbounded, because nothing bounded the size of
+an entry.
+
+Neither is truncated to a prefix — both are **skipped whole**. A sliced key or id
+would collide with a real one and silently credit the wrong task or mis-link a
+business to the wrong idea, which is worse than losing it visibly.
 
 Each cap truncates and raises a **visible** flag rather than dropping silently
 or throwing. The truncation flag is threaded through the whole walk as a small
@@ -135,11 +153,11 @@ mutable budget, so any cap firing anywhere in one child's document surfaces on
 that child's row:
 
 ```ts
-type WalkBudget = { truncated: boolean };
+type WalkBudget = { truncated: boolean; nowMs: number };
 
-function walkIdeas(rawIdeas: unknown, budget: WalkBudget): ProgressIdea[] {
+function walkIdeas(rawIdeas: unknown, budget: WalkBudget): WalkedIdea[] {
   if (!Array.isArray(rawIdeas)) return [];
-  const out: ProgressIdea[] = [];
+  const out: WalkedIdea[] = [];
   for (let index = 0; index < rawIdeas.length; index++) {
     if (out.length >= PROGRESS_IDEAS_CAP) {
       budget.truncated = true;
@@ -171,8 +189,17 @@ it("the 31x amplification case is bounded: a huge all-{} ideas array yields a sm
 The caps are sized against reality with an order of magnitude of headroom: the
 FP client caps a kid at 5 ideas and the one-active-business invariant means a
 handful of business records ever, while the full path is 25 criteria of a few
-tasks each — well under 200 map entries for a *completed* child. 50/50/500
-cannot be reached honestly.
+tasks each — well under 200 map entries for a *completed* child, whose keys are
+`1.1.3` and whose ids are UUIDs. 50/50/500/64/64 cannot be reached honestly.
+
+**Postscript (2026-08-05).** The response later gained a second, independent
+bound — the wire is filtered to an explicit, pattern-validated list of at most 32
+task ids — so a padded map KEY can no longer reach a client at all. The caps
+above did not become redundant: they moved from bounding the *response* to
+bounding the *walk*, i.e. the intermediate structures and the per-child CPU and
+memory this endpoint spends for every child in the cohort on every refresh. When
+a downstream filter appears, re-derive what each cap is still for rather than
+deleting it or leaving its rationale to rot.
 
 ## Why This Works
 
@@ -210,6 +237,11 @@ and investigate.
   observation surface. A silently short list and a complete list are the same
   type, so nothing downstream can tell them apart; a `truncated: true` field
   makes partiality a rendered fact.
+- **Cap the SIZE of an element, not only the NUMBER of them.** "How many things
+  can this contain" is half the question; the other half is "how big can one of
+  those things be". Every free-length string an untrusted writer controls — map
+  keys, ids, anything not enumerated — needs its own bound, and a bound that
+  skips rather than slices, so a shortened value cannot collide with a real one.
 - **Fixture-scale tests cannot see an amplification bug.** Every existing test
   seeded a handful of ideas and passed. Assert against a realistic *adversarial*
   document — thousands of entries — and assert on the **output size**, not just

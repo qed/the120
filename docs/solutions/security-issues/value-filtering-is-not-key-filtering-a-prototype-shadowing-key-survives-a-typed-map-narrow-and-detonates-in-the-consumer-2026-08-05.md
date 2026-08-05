@@ -58,10 +58,10 @@ m.hasOwnProperty('x')  // TypeError: m.hasOwnProperty is not a function
 `${m}`                 // TypeError: Cannot convert object to primitive value
 ```
 
-The React client that renders the cohort table does both of these things
-routinely — a membership check per task id, a template interpolation per label.
-A throw during render unwinds the whole tree, so **one child's crafted doc
-blanks the entire cohort table**, not that child's row. The dashboard whose
+The React client that renders the cohort table does a membership check per task
+id on every one of these maps, which is the first call above verbatim. A throw
+during render unwinds the whole tree, so **one child's crafted doc blanks the
+entire cohort table**, not that child's row. The dashboard whose
 purpose is noticing a stalled kid shows nothing for anyone.
 
 ## Symptoms
@@ -135,21 +135,37 @@ would drift when the language adds a member. `__proto__` is named separately
 because it is an accessor on `Object.prototype` reachable by `in`, and naming it
 makes the intent legible at the call site.
 
-Wired into both narrowing helpers alongside the value filter:
+Wired into both narrowing helpers alongside the value filter. It is reached
+through one `isKeepableMapKey` predicate, which also carries the key-LENGTH bound
+added later — the two are always applied together, so fusing them removes the
+chance of a future narrow that remembers one and forgets the other:
 
 ```ts
+function isKeepableMapKey(key: string, budget: WalkBudget): boolean {
+  if (isUnsafeMapKey(key)) return false;
+  if (key.length > PROGRESS_MAP_KEY_MAX_CHARS) {
+    budget.truncated = true;
+    return false;
+  }
+  return true;
+}
+
 function narrowBooleanMap(value: unknown, budget: WalkBudget): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   if (!isJsonObject(value)) return out;
   let kept = 0;
   for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry !== "boolean") continue;
-    if (isUnsafeMapKey(key)) continue;
+    if (entry !== true) continue;
+    if (!isKeepableMapKey(key, budget)) continue;
     ...
   }
   return out;
 }
 ```
+
+Note the two exclusions differ in one deliberate way: an over-long key raises the
+child's `truncated` flag (a real completion may have been lost) while a shadowing
+key does not (it was never a completion).
 
 This is JS object hygiene, not domain knowledge, so it does not breach the
 server's deliberate rule about staying out of the task-id content domain — no

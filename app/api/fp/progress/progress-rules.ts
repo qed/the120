@@ -8,8 +8,27 @@
  * suggestions-rules.ts is the direct sibling precedent and this module is a
  * deliberate file-for-file mirror of it; the ROUTE reuses login-rules'
  * origin/IP contract and grade-rules' bearer/sub helpers rather than
- * duplicating them, while THIS module imports grade-rules' resolveChildGrade
- * directly — see the band section).
+ * duplicating them).
+ *
+ * ── The 2026-08-05 redesign (Unit 1R) ──
+ * The Watchtower became an aggregate FLOW BOARD — throughput, median cycle time
+ * and active/stalled WIP per unit task — rather than a per-child export. Three
+ * consequences land in this module:
+ *   1. `band` LEFT the wire shape: no view segments by it, so it was pure
+ *      exposure. (The derivation was correct on its own terms — birth year wins
+ *      over the stored grade, `resolveChildGrade` → `bandForGrade`; that is the
+ *      authority to re-consult if band ever returns.)
+ *   2. The child-authored idea `label` LEFT the wire shape: free text a kid
+ *      typed, shipped to a staff screen, is a moderation surface and an
+ *      amplification vector for zero flow value. `username` STAYS — the WIP
+ *      drill-down ("who do I nudge today?") is the one surface that names a
+ *      child, and the client must not render it until staff drill in.
+ *   3. The completion maps are FILTERED to an explicit, caller-supplied list of
+ *      task ids (`deriveRequestedTaskIds` → `filterMapsToTaskIds`). The server
+ *      honours a LIST — set membership, not sequence knowledge — so it still
+ *      holds zero task-id domain knowledge, and the payload is ~6 values per
+ *      idea instead of the whole curriculum. See `deriveRequestedTaskIds` for
+ *      why an explicit list replaced an earlier criterion-PREFIX design.
  *
  * ── The staff gate, stated once ──
  * Identical posture to the suggestions endpoint: staff ARE Supabase auth users
@@ -51,45 +70,58 @@
  * Origin.
  *
  * ── Never-log discipline (R3) ──
- * Usernames, idea labels, and tokens are child data. Nothing in this module
- * throws — and no message it could ever produce embeds a value from its input.
- * The walk below is fail-CLOSED and total: hostile or half-written jsonb
- * degrades to empty structures, never an exception the route would have to
- * describe.
+ * Usernames and tokens are child data. Nothing in this module throws — and no
+ * message it could ever produce embeds a value from its input. The walk below
+ * is fail-CLOSED and total: hostile or half-written jsonb degrades to empty
+ * structures, never an exception the route would have to describe.
  *
- * ── Bounded output (the amplification fuse) ──
- * `fp_player_saves.doc` is capped by `pg_column_size(doc) <= 262144`, which
- * measures the COMPRESSED size. A highly compressible doc — thousands of `{}`
- * idea entries — therefore fits under the DB cap while expanding, MEASURED, by
- * more than 30x once every entry is projected into the full wire shape. One
- * such child would blow the response past the platform's limit and 500 the
- * dashboard for the ENTIRE cohort. So every unbounded dimension is capped
- * (ideas, businesses, map entries, label length) and the caps TRUNCATE rather
- * than throw — degrade-never-throw, with `truncated: true` on the affected
- * child so the loss is visible to staff instead of silent. Truncation never
- * disturbs the original-index invariant below.
+ * R3 EXTENDS to the requested task-id list: it is caller-supplied REQUEST
+ * INPUT, so it must never reach a log line and must never be echoed in a
+ * response. `deriveRequestedTaskIds` therefore returns a value-free reason code
+ * and never the offending value.
+ *
+ * ── What bounds the RESPONSE, and what bounds the WALK ──
+ * These are two different jobs, and the 2026-08-05 redesign moved the first one.
+ *
+ * The RESPONSE is now bounded by the TASK-ID FILTER: every requested id is
+ * pattern-validated to at most 8 characters and there are at most 32 of them, so
+ * no map key a child authored can reach the wire at all, however long. What is
+ * left unbounded on the wire is the per-child ENTRY COUNT (ideas, businesses)
+ * and the child-authored IDs — hence `PROGRESS_IDEAS_CAP`,
+ * `PROGRESS_BUSINESSES_CAP` and `PROGRESS_ID_MAX_CHARS`.
+ *
+ * The WALK still needs its own bounds, and this is where the compression
+ * argument now lives: `fp_player_saves.doc` is capped by
+ * `pg_column_size(doc) <= 262144`, which measures the COMPRESSED size, so a
+ * highly compressible doc — thousands of `{}` idea entries, or 500 map keys each
+ * padded to kilobytes of one repeated character — fits under the DB cap while
+ * expanding by orders of magnitude once walked. `PROGRESS_MAP_ENTRIES_CAP` and
+ * `PROGRESS_MAP_KEY_MAX_CHARS` bound the intermediate structures and the
+ * per-child CPU/memory this route spends, for every child in the cohort, on
+ * every staff refresh.
+ *
+ * All of them TRUNCATE rather than throw — degrade-never-throw, with
+ * `truncated: true` on the affected child (see `ProgressChild.truncated` for
+ * what that flag does and does NOT mean). Truncation never disturbs the
+ * original-index invariant below.
  *
  * ── Response contract (documented for the FP staff client in route.ts) ──
  * 200 {ok:true, children:[{
- *        username, band, truncated, docUnreadable,
- *        ideas:[{index, id, label, done, doneAt, doneByTask, doneAtByTask}],
- *        businesses:[{id, ideaId, archived, doneByTask, doneAtByTask}]
+ *        username, truncated, docUnreadable,
+ *        ideas:[{index, id, done, doneAt, doneByTask, doneAtByTask,
+ *                lastCompletionAt, hasCompletionsOutsideRequest}],
+ *        businesses:[{id, ideaId, archived, doneByTask, doneAtByTask,
+ *                     lastCompletionAt, hasCompletionsOutsideRequest}]
  *      }]}
  * The server sends the four per-idea maps essentially RAW (defensively
- * narrowed; keys untouched EXCEPT for the prototype-shadowing exclusion
- * documented at `isUnsafeMapKey`) and the two per-business maps; the CLIENT
- * owns all semantics — legacy-key remapping, the union rules, and every view
- * computation. The server stays free of task-id domain knowledge on purpose
- * (plan: "Server sends raw maps, client owns semantics").
+ * narrowed; keys untouched EXCEPT for the exclusions documented at
+ * `isKeepableMapKey`) and the two per-business maps, then FILTERS every one of
+ * them to the requested task ids; the CLIENT owns all semantics — legacy-key
+ * remapping, the union rules, and every view computation. The server stays free
+ * of task-id domain knowledge on purpose (plan: "Server sends raw maps, client
+ * owns semantics").
  */
 
-import type { Band } from "@/app/fp/content/types";
-import { bandForGrade } from "@/app/fp/lib/progress-core";
-// Deliberate CROSS-ENDPOINT dependency, not a layering accident: the grade
-// route owns the birth-year → grade derivation the login route already reads
-// with, so the dashboard's band must come from that one authority rather than a
-// second copy that could drift a school year out of step.
-import { resolveChildGrade } from "@/app/api/fp/grade/grade-rules";
 import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
 import {
   encodeRateLimitSegment,
@@ -193,40 +225,224 @@ export function deriveProgressRateLimitKeys(
 export const PROGRESS_DOC_VERSION = 1;
 
 /**
- * Per-child output bounds. Generous against reality and tight against abuse:
- * the FP client caps a kid at MAX_IDEAS = 5 and the one-active-business
- * invariant means a handful of business records ever, so 50 of each is roughly
- * an order of magnitude of headroom for a legitimate doc while bounding the
- * compressible-jsonb amplification described in the module header.
+ * Per-child ENTRY bounds — the dimension the task-id filter does NOT bound (see
+ * the module header). Generous against reality and tight against abuse: the FP
+ * client caps a kid at MAX_IDEAS = 5 and the one-active-business invariant means
+ * a handful of business records ever, so 50 of each is roughly an order of
+ * magnitude of headroom for a legitimate doc.
+ *
+ * Unit 4: these bound BYTES, not a child's contribution to an AVERAGE. One child
+ * with 50 ideas carrying crafted stamp pairs can move the cohort median and
+ * inflate a task's WIP by 50 while reporting `truncated: false` and no anomaly
+ * of any kind. The aggregation layer must bound per-child influence (weight,
+ * exclude, or surface the concentration) — the server cannot, because it does
+ * not know what an average is.
  */
 export const PROGRESS_IDEAS_CAP = 50;
 export const PROGRESS_BUSINESSES_CAP = 50;
 
 /**
- * Per-map entry bound. The full path is 25 criteria of a handful of tasks each
- * — well under 200 entries for a completed kid — so 500 cannot be reached
- * honestly, while a doc packing thousands of one-character keys into a map is
- * bounded here rather than in the response body.
+ * Per-map entry bound, and a bound on the WALK rather than on the response (the
+ * filter bounds the response). The full path is 25 criteria of a handful of
+ * tasks each — well under 200 entries for a completed kid — so 500 cannot be
+ * reached honestly, while a doc packing thousands of keys into one map is
+ * bounded here instead of costing per-child CPU for the whole cohort.
+ *
+ * Only entries that are actually COMPLETIONS count against it. A `false` is not
+ * a completion anywhere in this module, and letting one consume budget was
+ * exploitable: JSON preserves insertion order, so 500 junk `false` keys written
+ * BEFORE the real work would exhaust the cap first and leave the child reading
+ * as "never reached this criterion" while their own client shows full progress.
  */
 export const PROGRESS_MAP_ENTRIES_CAP = 500;
 
-/** Idea labels are a product name or a one-liner. Truncated, never dropped. */
-export const PROGRESS_LABEL_MAX_CHARS = 200;
+/**
+ * Per-map KEY bound, again on the WALK. Real keys are `1.1.3` (5 chars) or the
+ * legacy `1.1#0`, so 64 is roughly an order of magnitude of headroom.
+ *
+ * The doc CHECK measures `pg_column_size(doc)` — the COMPRESSED size — so 500
+ * keys each padded to kilobytes of one repeated character sit comfortably under
+ * it while expanding to megabytes of intermediate structure. Such a key can no
+ * longer reach the wire (no requested id is longer than 8 chars), but walking
+ * and holding it still costs, for every child, on every refresh. An over-long
+ * key is SKIPPED — never truncated to a prefix, which would collide with a real
+ * id and silently credit the wrong task — and flags truncation.
+ */
+export const PROGRESS_MAP_KEY_MAX_CHARS = 64;
 
 /**
- * The largest epoch-ms value `new Date()` can represent. A stamp past it is
- * doubly poisonous: `new Date(x).toISOString()` THROWS RangeError in the
- * client's renderer, and a max-of-stamps recency makes the child look
- * permanently fresh — silently removing them from the stuck list, which is the
- * exact failure this dashboard exists to prevent. Dropped, so the completion
- * degrades to "done at an unknown time" — a state the client already models.
+ * Child-authored ID bound: `ideas[].id`, `businesses[].id`, `businesses[].ideaId`.
+ *
+ * These are NOT map keys, so PROGRESS_MAP_KEY_MAX_CHARS misses them, and since
+ * the idea `label` left the wire they are the DOMINANT payload term — the maps
+ * are now at most 32 keys of at most 8 characters. Measured: 50 ideas plus 50
+ * businesses carrying 400,000-character ids compress far under the 256KiB doc
+ * CHECK and emit tens of megabytes.
+ *
+ * An over-long id is SKIPPED, never truncated, for the same reason as a map key:
+ * a sliced id would collide with another and mis-link `Business.ideaId`. A UUID
+ * (36) and a minted `legacy-idea-{n}` are both well inside 64.
+ */
+export const PROGRESS_ID_MAX_CHARS = 64;
+
+/**
+ * The largest epoch-ms value `new Date()` can represent. A stamp past it makes
+ * `new Date(x).toISOString()` THROW RangeError in the client's renderer, so it
+ * is DROPPED outright — the completion degrades to "done at an unknown time", a
+ * state the client already models. This is the absurd-value guard; ordinary
+ * future stamps are handled by the clamp below, not by this.
  */
 export const PROGRESS_MAX_TIMESTAMP_MS = 8.64e15;
 
+/**
+ * How far ahead of the server's clock a stamp may sit before it is treated as
+ * wrong rather than merely skewed.
+ *
+ * Stamps are written by the CHILD'S device, so a few minutes of drift is normal
+ * and must pass through untouched. Past that the value is not a time, and it is
+ * load-bearing input: `lastCompletionAt` feeds the client's 30-day active/stalled
+ * split, so a stamp of `8.64e15` (which clears the absurd-value guard) would make
+ * a child look freshly active FOREVER — no WIP, no stalled, invisible on a board
+ * whose entire job is noticing who has stopped. A tablet with a forward-set clock
+ * does this by accident.
+ *
+ * Such a stamp is CLAMPED to the walk's `now`, not dropped: dropping would make a
+ * legitimately forward-clocked child read as never-active, while clamping reads
+ * as "just active" — honest, and self-correcting as soon as the next real stamp
+ * lands.
+ */
+export const PROGRESS_FUTURE_STAMP_TOLERANCE_MS = 5 * 60_000;
+
+/* ------------------------------------------------- the requested task ids */
+
+/**
+ * How many task ids one request may name. A criterion view is ~5 tasks plus the
+ * ONE predecessor id, so 32 is generous by 5x.
+ *
+ * What it actually buys: a bound on the PAYLOAD of a single response, and on the
+ * per-request work the walk does. It is NOT an exfiltration control — it holds
+ * no cross-request state, and 125 ids is four requests against a 60-per-15-min
+ * budget. Cumulative exfiltration is bounded by the rate limiter
+ * (PROGRESS_RATE_LIMIT / PROGRESS_IP_RATE_LIMIT) and made accountable by the
+ * route's audit breadcrumb; this constant only stops any ONE response from
+ * being the whole curriculum. Pinned at both boundaries by test (32 accepted,
+ * 33 refused) so relaxing it is a deliberate edit.
+ */
+export const PROGRESS_MAX_REQUESTED_TASK_IDS = 32;
+
+/**
+ * The two id shapes the FP content pipeline actually mints, and nothing else:
+ *   - a STABLE task id — `phase.criterion.task`, e.g. `1.1.3`
+ *     (src/data/pathContent.generated.ts: 5 phases × 5 criteria × ~5 tasks,
+ *     every segment 1-based with no leading zeros), and
+ *   - a LEGACY `${criterionId}#${index}` key, e.g. `1.1#0`
+ *     (src/data/taskRemap.ts LEGACY_KEY_REMAP), whose index IS 0-based.
+ * Two digits per segment is deliberate headroom over today's single digits.
+ *
+ * Deliberately NOT lenient: no whitespace is trimmed and no case is folded.
+ * The only legitimate caller reads these ids straight out of CRITERION_SEQUENCE,
+ * so `"1.2.3 "` is a client bug, and silently repairing a client bug on a
+ * security-relevant validator is how the validator stops being one. Note the
+ * pattern bounds length to 8 chars — far inside PROGRESS_MAP_KEY_MAX_CHARS,
+ * which the test pins so the two can never drift into disagreement.
+ */
+export const PROGRESS_TASK_ID_PATTERN = /^[1-9][0-9]?\.[1-9][0-9]?(?:\.[1-9][0-9]?|#[0-9]{1,2})$/;
+
+/** Why a task-id list was refused. VALUE-FREE by construction — see R3 in the
+ *  module header: these codes are the ONLY thing a caller or a log may learn
+ *  about a bad list, never the list itself. */
+export type RequestedTaskIdsRefusal =
+  | "not_a_list"
+  | "empty"
+  | "too_many"
+  | "malformed";
+
+/** A discriminated result rather than a throw or a bare null: the route must be
+ *  able to answer 400-with-a-generic-body without inventing its own vocabulary,
+ *  and a thrown Error would tempt someone into putting the input in `message`. */
+export type RequestedTaskIdsResult =
+  | { ok: true; ids: string[] }
+  | { ok: false; reason: RequestedTaskIdsRefusal };
+
+/**
+ * Parse the caller's task-id list.
+ *
+ * Accepts an array of strings, or a single comma-separated string (the `?tasks=`
+ * query-parameter form the route receives). Empty segments are dropped so a
+ * trailing comma is not a refusal; everything else must be well-formed.
+ *
+ * ── Why an explicit LIST, not a criterion prefix ──
+ * An earlier design had the server filter by criterion prefix and INFER each
+ * idea's predecessor as "the highest-stamped key outside the criterion". That
+ * inference is unsound: in the FP client `COMPLETE_TASK` → `markTaskDone` has NO
+ * predecessor guard — ordering is enforced by the UI's unlock logic, not by the
+ * data — and the save doc is child-writable directly via PostgREST. Out-of-order
+ * stamps are therefore possible, and "highest stamp outside" would pick the
+ * WRONG predecessor and produce a wrong cycle time with no symptom. With an
+ * explicit list the predecessor is EXACT (the client reads it from
+ * CRITERION_SEQUENCE), the server needs no prefix logic, and it holds no
+ * sequence knowledge at all — honouring a list is set membership.
+ *
+ * ── The list is UNTRUSTED REQUEST INPUT ──
+ * It is capped BEFORE de-duplication, so 32 copies of one id cannot be used to
+ * inflate work past the cap, and it is de-duplicated after, so a duplicated list
+ * costs one lookup per distinct id. Nothing here throws, and no refusal carries
+ * an echo of the input (R3).
+ */
+export function deriveRequestedTaskIds(raw: unknown): RequestedTaskIdsResult {
+  let entries: unknown[];
+  if (Array.isArray(raw)) {
+    entries = raw;
+  } else if (typeof raw === "string") {
+    // Segment-splitting only — never a trim of the segment itself (see the
+    // pattern's docstring). An empty segment is a delimiter artifact, not an id.
+    entries = raw.split(",").filter((part) => part.length > 0);
+  } else {
+    return { ok: false, reason: "not_a_list" };
+  }
+
+  if (entries.length === 0) return { ok: false, reason: "empty" };
+  // Bounded BEFORE any per-entry work, and against the RAW length.
+  if (entries.length > PROGRESS_MAX_REQUESTED_TASK_IDS) {
+    return { ok: false, reason: "too_many" };
+  }
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (typeof entry !== "string") return { ok: false, reason: "malformed" };
+    if (!PROGRESS_TASK_ID_PATTERN.test(entry)) return { ok: false, reason: "malformed" };
+    if (seen.has(entry)) continue; // duplicates COLLAPSE — they are not a refusal
+    seen.add(entry);
+    ids.push(entry);
+  }
+  // Unreachable while the cap is checked above (a de-duplicated list can only
+  // shrink), but a list that de-duplicated to nothing would be a silent
+  // "everything" filter, which is the one failure mode worth being paranoid
+  // about here.
+  if (ids.length === 0) return { ok: false, reason: "empty" };
+  return { ok: true, ids };
+}
+
 /* ------------------------------------------------------------ wire contract */
 
-/** One idea's raw completion state, as the staff client receives it. */
-export type ProgressIdea = {
+/** The four completion maps of one idea, as narrowed off the save doc. */
+export type ProgressCompletionMaps = {
+  /** Legacy `${stepId}#${index}` keyed maps. */
+  done: Record<string, boolean>;
+  doneAt: Record<string, number>;
+  /** Stable task-id keyed maps. */
+  doneByTask: Record<string, boolean>;
+  doneAtByTask: Record<string, number>;
+};
+
+/**
+ * One idea as the WALK produces it: maps still UNFILTERED, so the recency
+ * number below is computed over everything the child has ever completed.
+ *
+ * @internal Not the wire shape — `shapeProgress` projects this to ProgressIdea.
+ */
+export type WalkedIdea = ProgressCompletionMaps & {
   /**
    * The idea's ORIGINAL position in `doc.ideas` — NOT its position in this
    * array, and NOT renumbered by truncation. The original index is
@@ -236,20 +452,54 @@ export type ProgressIdea = {
    */
   index: number;
   id: string | null;
-  /** fields.productName → fields.oneLiner → null, trimmed, truncated to
-   *  PROGRESS_LABEL_MAX_CHARS. */
-  label: string | null;
-  /** Legacy `${stepId}#${index}` keyed maps. */
-  done: Record<string, boolean>;
-  doneAt: Record<string, number>;
-  /** Stable task-id keyed maps. */
-  doneByTask: Record<string, boolean>;
-  doneAtByTask: Record<string, number>;
+  /**
+   * The largest stamp anywhere in this idea's timestamp maps, computed BEFORE
+   * any task-id filtering, or null when the idea carries no stamp at all.
+   *
+   * Load-bearing for the client's active/stalled split: the 30-day recency test
+   * CANNOT run against the filtered maps, because an idea working happily in a
+   * LATER criterion has no stamps inside the requested window and would read as
+   * stalled. One number is also a deliberately minimal disclosure — it is the
+   * only thing that leaves the unrequested part of the doc.
+   *
+   * NOT gated on a matching `done: true`. The field answers "when did this idea
+   * last MOVE?", and a stamp is evidence the child's client wrote something at
+   * that instant whether or not the paired boolean survived. Gating it would
+   * make an abandoned-looking idea out of a doc mid-convergence. What defends it
+   * against a forged far-future stamp is the CLAMP, not a gate — see
+   * PROGRESS_FUTURE_STAMP_TOLERANCE_MS.
+   *
+   * Computed over every TYPE-VALID entry, including ones the entry cap dropped:
+   * a doc whose newest stamps happen to sit past entry 500 in key order must not
+   * report a months-old recency and vanish into the stalled column.
+   */
+  lastCompletionAt: number | null;
 };
 
-/** One business record. Stable-id maps only — by design there are no legacy
- *  maps on a Business (the record postdates the stable-id migration). */
-export type ProgressBusiness = {
+/** The `hasCompletionsOutsideRequest` flag, shared by ideas and businesses. */
+type OutsideRequestFlag = {
+  /**
+   * Does this record have completions OUTSIDE the requested ids? Lets the client
+   * tell "hasn't reached this criterion yet" from "already moved past it" — and
+   * account for flow units parked outside the visible window in the WIP
+   * sum-check — WITHOUT receiving a single unrequested task id.
+   */
+  hasCompletionsOutsideRequest: boolean;
+};
+
+/** One idea's completion state, as the staff client receives it: maps filtered
+ *  to exactly the requested task ids. */
+export type ProgressIdea = WalkedIdea & OutsideRequestFlag;
+
+/**
+ * One business record as the WALK produces it. Stable-id maps only — by design
+ * there are no legacy maps on a Business (the record postdates the stable-id
+ * migration).
+ *
+ * @internal Not the wire shape — `shapeProgress` projects this to
+ * ProgressBusiness.
+ */
+export type WalkedBusiness = {
   id: string;
   /**
    * The linked idea's id. NULL only when the doc omits it, or carries a
@@ -269,16 +519,48 @@ export type ProgressBusiness = {
   archived: boolean;
   doneByTask: Record<string, boolean>;
   doneAtByTask: Record<string, number>;
+  /**
+   * The business's OWN recency, pre-filter — and NOT a duplicate of its idea's.
+   *
+   * Phase 4-5 completions write ONLY here: `markTaskDone` in the FP client's
+   * src/state/gameCore.ts branches on grow/scale and returns after writing the
+   * BUSINESS maps, never touching the idea's. So a child completing Grow tasks
+   * every day has an idea `lastCompletionAt` frozen at their last Validate
+   * stamp. Reading recency off the idea alone would report the cohort's most
+   * ACTIVE children as stalled and paint the whole Grow/Scale half of the board
+   * 100% stalled.
+   *
+   * An idea-less business (dangling or absent `ideaId`) is its own flow unit,
+   * and this is the only recency it has.
+   */
+  lastCompletionAt: number | null;
 };
 
+/** One business record as the staff client receives it. */
+export type ProgressBusiness = WalkedBusiness & OutsideRequestFlag;
+
 export type ProgressChild = {
-  /** children.fp_username. Rendered by staff, NEVER logged. */
+  /**
+   * children.fp_username. NEVER logged, and never rendered by the client until
+   * staff DRILL IN to a WIP bucket — the main flow board is aggregate-only. It
+   * is on the wire from the first load precisely so the drill-down needs no
+   * second request; the rendering discipline is the client's to keep.
+   */
   username: string;
-  /** resolveChildGrade (birth year WINS over the stored grade) → bandForGrade.
-   *  Null when neither source resolves — this module refuses to guess. */
-  band: Band | null;
-  /** A cap fired somewhere in this child's walk (see the module header): what
-   *  is here is real, but it is not everything. Staff-visible on purpose. */
+  /**
+   * A walk bound fired somewhere in THIS CHILD'S DOC — it exceeded an entry cap,
+   * a map-key length, or an id length (see the module header).
+   *
+   * Read it as "this doc is abnormal", NOT as "your view is incomplete". The
+   * losses it reports happen BEFORE the task-id filter, so a child can be
+   * flagged while every id the caller actually requested was delivered intact —
+   * and equally, a normal-looking row is not a promise that nothing was lost
+   * somewhere the caller did not ask about.
+   *
+   * The aggregate view must DECIDE what to do with a flagged child. Today they
+   * are folded silently into throughput, the median and WIP like anyone else; if
+   * that is not what Unit 4 wants, this flag is the hook.
+   */
   truncated: boolean;
   /**
    * A save row EXISTS but its doc could not be read — not an object, or a
@@ -293,12 +575,11 @@ export type ProgressChild = {
 
 /* -------------------------------------------------------------- row inputs */
 
+/** Only the two columns the shape actually reads. `birth_year` / `grade` left
+ *  with band in the 2026-08-05 redesign. */
 export type ProgressChildRowLike = {
   id: string;
   fp_username?: unknown;
-  /** text column; '' is the unset sentinel (see grade-rules). */
-  birth_year?: unknown;
-  grade?: unknown;
 };
 
 export type ProgressProfileRowLike = { id: string; child_id: string };
@@ -314,8 +595,16 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Mutable truncation flag threaded through one child's walk. */
-type WalkBudget = { truncated: boolean };
+/**
+ * State threaded through one child's walk: the truncation flag, and the ceiling
+ * every stamp is clamped against.
+ *
+ * `nowMs` lives here rather than being read from the clock inside the walk so
+ * the module stays pure and the whole cohort is clamped against ONE instant —
+ * two children clamped against different `new Date()` calls would disagree by
+ * milliseconds for no reason a reader could ever explain.
+ */
+type WalkBudget = { truncated: boolean; nowMs: number };
 
 /**
  * Keys that would SHADOW something on `Object.prototype` if written into a
@@ -339,19 +628,39 @@ function isUnsafeMapKey(key: string): boolean {
 }
 
 /**
- * A boolean completion map, filtered to ACTUAL booleans. A string "true", a 1,
- * or a null is a writer we do not recognise — dropped rather than coerced, so
- * the client never counts a completion the kid's own client would not. Keys are
- * otherwise passed through untouched (no remapping, no normalisation) apart
- * from the isUnsafeMapKey exclusion.
+ * Is this key usable at all? Shadowing keys and over-long keys are the two
+ * reasons to skip one; both are hostile-writer hygiene rather than task-id
+ * domain knowledge (no real task id or legacy `${stepId}#${index}` key can be
+ * either). An over-long key flags the child as truncated so the loss is
+ * visible; a shadowing key does not, because it was never a completion.
+ */
+function isKeepableMapKey(key: string, budget: WalkBudget): boolean {
+  if (isUnsafeMapKey(key)) return false;
+  if (key.length > PROGRESS_MAP_KEY_MAX_CHARS) {
+    budget.truncated = true;
+    return false;
+  }
+  return true;
+}
+
+/**
+ * A boolean completion map, filtered to actual `true` entries.
+ *
+ * A string "true", a 1, or a null is a writer we do not recognise — dropped
+ * rather than coerced, so the client never counts a completion the kid's own
+ * client would not. An explicit `false` is dropped too: it is not a completion
+ * (absent and false are the same thing to every consumer), and keeping it let a
+ * doc spend the entry cap on non-completions — see PROGRESS_MAP_ENTRIES_CAP.
+ * Keys are otherwise passed through untouched (no remapping, no normalisation)
+ * apart from the `isKeepableMapKey` exclusions.
  */
 function narrowBooleanMap(value: unknown, budget: WalkBudget): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   if (!isJsonObject(value)) return out;
   let kept = 0;
   for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry !== "boolean") continue;
-    if (isUnsafeMapKey(key)) continue;
+    if (entry !== true) continue;
+    if (!isKeepableMapKey(key, budget)) continue;
     if (kept >= PROGRESS_MAP_ENTRIES_CAP) {
       budget.truncated = true;
       break;
@@ -362,65 +671,79 @@ function narrowBooleanMap(value: unknown, budget: WalkBudget): Record<string, bo
   return out;
 }
 
+/** A narrowed timestamp map, plus the largest stamp seen while narrowing it —
+ *  including entries the entry cap then dropped. */
+type NarrowedStamps = { map: Record<string, number>; max: number | null };
+
 /**
  * A timestamp map (epoch ms), filtered to FINITE numbers in
- * [0, PROGRESS_MAX_TIMESTAMP_MS]. String stamps, NaN, Infinity, negatives, and
- * out-of-Date-range values are dropped: every one of them would poison the
- * client's recency math, and a dropped stamp degrades to "completion with
- * unknown time" — a state the client already models — where a poisoned one
- * would silently mis-sort or crash the whole cohort view.
+ * [0, PROGRESS_MAX_TIMESTAMP_MS] and clamped to the walk's `now`.
+ *
+ * String stamps, NaN, Infinity, negatives, and out-of-Date-range values are
+ * dropped: every one of them would poison the client's recency math, and a
+ * dropped stamp degrades to "completion with unknown time" — a state the client
+ * already models — where a poisoned one would silently mis-sort or crash the
+ * whole cohort view. A merely FUTURE stamp is clamped rather than dropped (see
+ * PROGRESS_FUTURE_STAMP_TOLERANCE_MS).
+ *
+ * `max` is tracked over every type-valid entry BEFORE the entry cap can
+ * short-circuit the map — the cap bounds what goes on the wire, and must not
+ * silently bound the child's recency as well.
  */
-function narrowTimestampMap(value: unknown, budget: WalkBudget): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!isJsonObject(value)) return out;
+function narrowTimestampMap(value: unknown, budget: WalkBudget): NarrowedStamps {
+  const map: Record<string, number> = {};
+  let max: number | null = null;
+  if (!isJsonObject(value)) return { map, max };
+  const ceiling = budget.nowMs + PROGRESS_FUTURE_STAMP_TOLERANCE_MS;
   let kept = 0;
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry !== "number" || !Number.isFinite(entry)) continue;
     if (entry < 0 || entry > PROGRESS_MAX_TIMESTAMP_MS) continue;
-    if (isUnsafeMapKey(key)) continue;
+    if (!isKeepableMapKey(key, budget)) continue;
+    const stamp = entry > ceiling ? budget.nowMs : entry;
+    if (max === null || stamp > max) max = stamp;
+    // `continue`, not `break`: the cap stops the map growing, but the scan runs
+    // on so `max` covers the whole map.
     if (kept >= PROGRESS_MAP_ENTRIES_CAP) {
       budget.truncated = true;
-      break;
+      continue;
     }
-    out[key] = entry;
+    map[key] = stamp;
     kept++;
   }
-  return out;
+  return { map, max };
 }
 
-/** A non-empty trimmed string, or null. */
-function trimmedOrNull(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+/** The larger of two recencies, either of which may be absent. */
+function laterOf(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a > b ? a : b;
 }
 
 /**
- * Idea label: `fields.productName` → `fields.oneLiner` → null, trimmed
- * (whitespace-only reads as absent), then truncated to
- * PROGRESS_LABEL_MAX_CHARS. Mirrors the label precedence in the first-profit
- * repo's src/state/floorSelectors.ts. Child data — never logged.
+ * A child-authored id, or null. Skipped whole past PROGRESS_ID_MAX_CHARS —
+ * never truncated, because a sliced id collides and mis-links Business.ideaId.
  */
-function deriveIdeaLabel(idea: Record<string, unknown>, budget: WalkBudget): string | null {
-  const fields = idea.fields;
-  if (!isJsonObject(fields)) return null;
-  const label = trimmedOrNull(fields.productName) ?? trimmedOrNull(fields.oneLiner);
-  if (label === null) return null;
-  if (label.length <= PROGRESS_LABEL_MAX_CHARS) return label;
-  budget.truncated = true;
-  return label.slice(0, PROGRESS_LABEL_MAX_CHARS);
+function narrowAuthoredId(value: unknown, budget: WalkBudget): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (value.length > PROGRESS_ID_MAX_CHARS) {
+    budget.truncated = true;
+    return null;
+  }
+  return value;
 }
 
-/** The wire entry for an idea slot the walk could not read as an object. */
-function placeholderIdea(index: number): ProgressIdea {
+/** The walked entry for an idea slot the walk could not read as an object. */
+function placeholderIdea(index: number): WalkedIdea {
   return {
     index,
     id: null,
-    label: null,
     done: {},
     doneAt: {},
     doneByTask: {},
     doneAtByTask: {},
+    lastCompletionAt: null,
   };
 }
 
@@ -439,9 +762,9 @@ function placeholderIdea(index: number): ProgressIdea {
  * the first N entries the walk emits and stops; it never renumbers what it
  * keeps.
  */
-function walkIdeas(rawIdeas: unknown, budget: WalkBudget): ProgressIdea[] {
+function walkIdeas(rawIdeas: unknown, budget: WalkBudget): WalkedIdea[] {
   if (!Array.isArray(rawIdeas)) return [];
-  const out: ProgressIdea[] = [];
+  const out: WalkedIdea[] = [];
   for (let index = 0; index < rawIdeas.length; index++) {
     if (out.length >= PROGRESS_IDEAS_CAP) {
       budget.truncated = true;
@@ -453,14 +776,16 @@ function walkIdeas(rawIdeas: unknown, budget: WalkBudget): ProgressIdea[] {
       out.push(placeholderIdea(index));
       continue;
     }
+    const doneAt = narrowTimestampMap(raw.doneAt, budget);
+    const doneAtByTask = narrowTimestampMap(raw.doneAtByTask, budget);
     out.push({
       index,
-      id: typeof raw.id === "string" && raw.id.length > 0 ? raw.id : null,
-      label: deriveIdeaLabel(raw, budget),
+      id: narrowAuthoredId(raw.id, budget),
       done: narrowBooleanMap(raw.done, budget),
-      doneAt: narrowTimestampMap(raw.doneAt, budget),
+      doneAt: doneAt.map,
       doneByTask: narrowBooleanMap(raw.doneByTask, budget),
-      doneAtByTask: narrowTimestampMap(raw.doneAtByTask, budget),
+      doneAtByTask: doneAtByTask.map,
+      lastCompletionAt: laterOf(doneAt.max, doneAtByTask.max),
     });
   }
   return out;
@@ -475,9 +800,9 @@ function walkIdeas(rawIdeas: unknown, budget: WalkBudget): ProgressIdea[] {
  * the child's own Phase 4/5 progress in the staff view. Everything else about
  * an entry degrades rather than disqualifies.
  */
-function walkBusinesses(rawBusinesses: unknown, budget: WalkBudget): ProgressBusiness[] {
+function walkBusinesses(rawBusinesses: unknown, budget: WalkBudget): WalkedBusiness[] {
   if (!Array.isArray(rawBusinesses)) return [];
-  const out: ProgressBusiness[] = [];
+  const out: WalkedBusiness[] = [];
   const seen = new Set<string>();
   for (const raw of rawBusinesses) {
     if (out.length >= PROGRESS_BUSINESSES_CAP) {
@@ -485,23 +810,25 @@ function walkBusinesses(rawBusinesses: unknown, budget: WalkBudget): ProgressBus
       break;
     }
     if (!isJsonObject(raw)) continue;
-    const id = typeof raw.id === "string" && raw.id.length > 0 ? raw.id : null;
+    const id = narrowAuthoredId(raw.id, budget);
     if (id === null || seen.has(id)) continue;
     seen.add(id);
+    const doneAtByTask = narrowTimestampMap(raw.doneAtByTask, budget);
     out.push({
       id,
-      ideaId: typeof raw.ideaId === "string" && raw.ideaId.length > 0 ? raw.ideaId : null,
+      ideaId: narrowAuthoredId(raw.ideaId, budget),
       archived: raw.archived === true,
       doneByTask: narrowBooleanMap(raw.doneByTask, budget),
-      doneAtByTask: narrowTimestampMap(raw.doneAtByTask, budget),
+      doneAtByTask: doneAtByTask.map,
+      lastCompletionAt: doneAtByTask.max,
     });
   }
   return out;
 }
 
 export type WalkedSaveDoc = {
-  ideas: ProgressIdea[];
-  businesses: ProgressBusiness[];
+  ideas: WalkedIdea[];
+  businesses: WalkedBusiness[];
   truncated: boolean;
   docUnreadable: boolean;
 };
@@ -517,56 +844,173 @@ export type WalkedSaveDoc = {
  * ideas out of the doc either, so honoring them here would show staff FEWER
  * ideas than the child sees. Do not "fix" this without changing both.
  *
+ * `now` is the clamp ceiling for every stamp in the doc (see
+ * PROGRESS_FUTURE_STAMP_TOLERANCE_MS). It is a parameter, not a `new Date()`
+ * inside, so the module stays pure and the whole cohort is clamped against one
+ * instant.
+ *
  * @internal Exported as a test seam, not part of the route contract.
  */
-export function walkSaveDoc(doc: unknown): WalkedSaveDoc {
+export function walkSaveDoc(doc: unknown, now: Date): WalkedSaveDoc {
   if (!isJsonObject(doc) || doc.docVersion !== PROGRESS_DOC_VERSION) {
     return { ideas: [], businesses: [], truncated: false, docUnreadable: true };
   }
-  const budget: WalkBudget = { truncated: false };
+  const budget: WalkBudget = { truncated: false, nowMs: now.getTime() };
   const ideas = walkIdeas(doc.ideas, budget);
   const businesses = walkBusinesses(doc.businesses, budget);
   return { ideas, businesses, truncated: budget.truncated, docUnreadable: false };
 }
 
-/* --------------------------------------------------------- band derivation */
+/* ------------------------------------------------------- task-id filtering */
+
+/** One map, keys restricted to the requested set. */
+function keepRequestedKeys<V>(
+  map: Record<string, V>,
+  taskIds: ReadonlySet<string>
+): Record<string, V> {
+  const out: Record<string, V> = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (taskIds.has(key)) out[key] = value;
+  }
+  return out;
+}
 
 /**
- * Band from the roster row via the authority the login/grade routes already
- * use: `resolveChildGrade` (a set birth_year WINS over the stored grade, so the
- * value never goes stale across school years) → `bandForGrade`. Null when
- * neither source resolves, or when the grade falls outside the three bands —
- * the client renders "—" and groups nulls last.
+ * The completion maps, filtered to exactly the requested task ids.
+ *
+ * PURE SET MEMBERSHIP and nothing else: no criteria, no prefixes, no ordering,
+ * no notion of a "predecessor". The client already put the predecessor id in the
+ * list, so the server cannot get it wrong — which is precisely why this design
+ * replaced prefix filtering (see `deriveRequestedTaskIds`). A legacy
+ * `${stepId}#${index}` key matches by exact string like any other; the client
+ * sends whichever form it wants.
+ *
+ * Applied AFTER `lastCompletionAt` is computed — the order is load-bearing and
+ * is structurally guaranteed by `walkSaveDoc` producing that number and this
+ * function never seeing it.
  *
  * @internal Exported as a test seam, not part of the route contract.
  */
-export function bandForChildRow(child: ProgressChildRowLike, now: Date): Band | null {
-  const birthYear = typeof child.birth_year === "string" ? child.birth_year : "";
-  const storedGrade = typeof child.grade === "number" ? child.grade : null;
-  return bandForGrade(resolveChildGrade({ birthYear, storedGrade }, now));
+export function filterMapsToTaskIds(
+  maps: ProgressCompletionMaps,
+  taskIds: ReadonlySet<string>
+): ProgressCompletionMaps {
+  return {
+    done: keepRequestedKeys(maps.done, taskIds),
+    doneAt: keepRequestedKeys(maps.doneAt, taskIds),
+    doneByTask: keepRequestedKeys(maps.doneByTask, taskIds),
+    doneAtByTask: keepRequestedKeys(maps.doneAtByTask, taskIds),
+  };
+}
+
+/**
+ * Does this record carry any COMPLETION the caller did not ask about? Must be
+ * given the UNFILTERED maps (post-filter it is trivially false).
+ *
+ * A completion is a `true` in a BOOLEAN map, and only that. The client's union
+ * rule is explicit that a timestamp without its `done: true` never mints a
+ * completion, so a bare stamp must not answer this question either — otherwise
+ * `{done:{"1.2#4":false}, doneAt:{"1.2#4":10}}` would report the idea as having
+ * moved past a criterion it never completed. (The two timestamp maps are
+ * therefore not read here at all: any stamp that IS a completion has its `true`
+ * in the boolean map beside it.)
+ *
+ * Why a `false` is untrusted rather than merely uninteresting: the save doc is
+ * child-WRITABLE via PostgREST, so a `false` is attacker-supplied input, not a
+ * record of anything the game did. (The FP client itself has no un-complete
+ * action — `GameAction` is `COMPLETE_TASK` and `RESET_SESSION`, and
+ * `markTaskDone` only ever writes `true` — so a `false` never comes from normal
+ * play at all.) The walk already drops them; this is the second half of the same
+ * rule, kept explicit so removing one does not silently disarm the other.
+ *
+ * It is deliberately SEPARATE from `filterMapsToTaskIds` rather than fused into
+ * one projection helper: they answer different questions (what to send vs. what
+ * was left behind), and fusing them would couple the flag to the projection.
+ *
+ * @internal Exported as a test seam, not part of the route contract.
+ */
+export function hasCompletionsOutsideRequest(
+  maps: Readonly<{ done: Record<string, boolean>; doneByTask: Record<string, boolean> }>,
+  taskIds: ReadonlySet<string>
+): boolean {
+  for (const [key, value] of Object.entries(maps.done)) {
+    if (value && !taskIds.has(key)) return true;
+  }
+  for (const [key, value] of Object.entries(maps.doneByTask)) {
+    if (value && !taskIds.has(key)) return true;
+  }
+  return false;
+}
+
+/** Walked idea → wire idea: filter the maps, keep the pre-filter recency, and
+ *  record whether anything was left behind. */
+function projectIdea(idea: WalkedIdea, taskIds: ReadonlySet<string>): ProgressIdea {
+  return {
+    ...idea,
+    ...filterMapsToTaskIds(idea, taskIds),
+    hasCompletionsOutsideRequest: hasCompletionsOutsideRequest(idea, taskIds),
+  };
+}
+
+/** Walked business → wire business. Same two steps as an idea, over the two
+ *  stable maps a Business has. */
+function projectBusiness(
+  business: WalkedBusiness,
+  taskIds: ReadonlySet<string>
+): ProgressBusiness {
+  return {
+    ...business,
+    doneByTask: keepRequestedKeys(business.doneByTask, taskIds),
+    doneAtByTask: keepRequestedKeys(business.doneAtByTask, taskIds),
+    hasCompletionsOutsideRequest: hasCompletionsOutsideRequest(
+      { done: {}, doneByTask: business.doneByTask },
+      taskIds
+    ),
+  };
 }
 
 /* ------------------------------------------------------------ row shaping */
 
 /**
  * Pure Map-join + projection (the suggestions id-set style): roster rows →
- * profiles by child_id → saves by profile_id → the wire contract. `now` is a
- * parameter rather than a `new Date()` inside so the module stays pure and the
- * band derivation is testable at a pinned instant.
+ * profiles by child_id → saves by profile_id → the wire contract, with every
+ * completion map filtered to `requestedTaskIds`.
+ *
+ * `requestedTaskIds` MUST be the `ids` of a successful `deriveRequestedTaskIds`
+ * result. Nothing in the type system links the two, so enforcing the cap and the
+ * id pattern is the ROUTE'S job — this function trusts the list it is handed.
+ * It is REQUIRED and has no "unfiltered" spelling on purpose: a caller that
+ * forgets it must fail to compile, not quietly ship the whole curriculum.
+ *
+ * An EMPTY list yields NO CHILDREN AT ALL, deliberately. It is tempting to let
+ * it mean "empty maps", but the result would be actively misleading rather than
+ * merely empty: `hasCompletionsOutsideRequest` is computed against that same
+ * empty set, so it reads TRUE for every child who has ever completed anything,
+ * each with a real `lastCompletionAt`. A client applying the documented
+ * semantics would draw a confident board saying every child has moved past every
+ * requested criterion and all of them are active. A visibly empty board is an
+ * honest one. (`deriveRequestedTaskIds` never returns an empty list, so this is
+ * the guard for a caller that bypassed it.)
+ *
+ * `now` is the clamp ceiling for every stamp in every doc, threaded from a
+ * single `new Date()` at the route boundary — one clock for the whole cohort.
  *
  * A child with no fp_username is skipped (the route's query already excludes
  * them; this is the fail-closed second half). A child with no profile row or no
  * save row is PRESENT in the output with empty ideas/businesses and
- * `docUnreadable: false` — that is the "never started" signal the stuck list is
- * built from, and dropping the row would make a stalled kid invisible, which is
- * the exact failure this dashboard exists to prevent.
+ * `docUnreadable: false` — that is the "never started" signal, and dropping the
+ * row would make a stalled kid invisible, which is the exact failure this
+ * dashboard exists to prevent.
  */
 export function shapeProgress(
   children: readonly ProgressChildRowLike[],
   profiles: readonly ProgressProfileRowLike[],
   saves: readonly ProgressSaveRowLike[],
+  requestedTaskIds: readonly string[],
   now: Date
 ): ProgressChild[] {
+  const taskIds = new Set(requestedTaskIds);
+  if (taskIds.size === 0) return [];
   // First row wins on duplicates: the schema is one profile per child
   // (child_id unique) and one save per profile (profile_id PK), so this is
   // unreachable — and inventing a merge rule here would hide a data bug behind
@@ -586,15 +1030,14 @@ export function shapeProgress(
     const profile = profileByChildId.get(child.id);
     const save = profile ? saveByProfileId.get(profile.id) : undefined;
     const walked: WalkedSaveDoc = save
-      ? walkSaveDoc(save.doc)
+      ? walkSaveDoc(save.doc, now)
       : { ideas: [], businesses: [], truncated: false, docUnreadable: false };
     out.push({
       username: child.fp_username,
-      band: bandForChildRow(child, now),
       truncated: walked.truncated,
       docUnreadable: walked.docUnreadable,
-      ideas: walked.ideas,
-      businesses: walked.businesses,
+      ideas: walked.ideas.map((idea) => projectIdea(idea, taskIds)),
+      businesses: walked.businesses.map((business) => projectBusiness(business, taskIds)),
     });
   }
   return out;

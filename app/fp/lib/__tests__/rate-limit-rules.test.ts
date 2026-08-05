@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  encodeRateLimitSegment,
   evaluateRateLimit,
   INVITE_ACCEPT_RATE_LIMIT,
   INVITE_CREATE_RATE_LIMIT,
@@ -189,5 +190,33 @@ describe("invite configurations (Unit 15 — pinned like every prior config)", (
     expect(
       evaluateRateLimit({ events: ten.slice(1), now: NOW, ...INVITE_ACCEPT_RATE_LIMIT }).allowed
     ).toBe(true);
+  });
+});
+
+describe("encodeRateLimitSegment — total escaping for composite key segments", () => {
+  it("is identical to encodeURIComponent for well-formed input (shipped key formats unchanged)", () => {
+    for (const s of ["1.2.3.4", "2001:db8::1", "user:x", "sub-1", "", "a b/c?d&e=f", "\\", "%", "é😀"]) {
+      expect(encodeRateLimitSegment(s), JSON.stringify(s)).toBe(encodeURIComponent(s));
+    }
+  });
+
+  it("does NOT throw on a lone surrogate, which encodeURIComponent does", () => {
+    // A JWT `sub` is attacker-supplied and JSON can carry an unpaired
+    // surrogate. Every FP route derives its buckets BEFORE any DB I/O, so a
+    // URIError here would skip both rate-limit strikes.
+    const high = JSON.parse('"\ud800"') as string;
+    const low = JSON.parse('"\udc00"') as string;
+    expect(() => encodeURIComponent(high)).toThrow();
+    expect(() => encodeRateLimitSegment(high)).not.toThrow();
+    expect(() => encodeRateLimitSegment(low)).not.toThrow();
+    expect(() => encodeRateLimitSegment(`a${high}b${low}c`)).not.toThrow();
+  });
+
+  it("leaves VALID surrogate pairs intact — only unpaired units are replaced", () => {
+    expect(encodeRateLimitSegment("😀")).toBe(encodeURIComponent("😀"));
+  });
+
+  it("still separates distinct well-formed segments (no new aliasing on real input)", () => {
+    expect(encodeRateLimitSegment("2001:db8")).not.toBe(encodeRateLimitSegment("2001%3Adb8"));
   });
 });

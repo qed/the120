@@ -1,0 +1,51 @@
+-- New User Flow v3 (Unit 6, review FIX 1): reserve the handle `auth`.
+-- Plan: docs/plans/2026-08-05-001-feat-new-user-flow-v3-plan.md (Unit 6 — the
+-- handoff landing at firstprofit.school/auth/enter).
+--
+-- ⚠ VERSION — AUTHORED, NOT YET APPLIED, AND THE LIVE LEDGER WAS NOT READABLE
+--   AT AUTHORING TIME. The canonical pre-authoring query
+--
+--     select version, name from supabase_migrations.schema_migrations
+--     order by version desc limit 5;
+--
+--   COULD NOT BE RUN when this file was written (the SUPABASE_ACCESS_TOKEN in
+--   .env.local returns 401 — a dead token), so the slot below is PROVISIONAL:
+--   it is derived only from the repo file listing, whose top was
+--   20260915120000_fp_v3_draft_active_kid_unique, and the repo listing is
+--   explicitly NOT the truth (docs/LANES.md: three version collisions are on
+--   record, all from applied-but-unmerged migrations). RUN THE QUERY ABOVE
+--   IMMEDIATELY BEFORE APPLYING and RENAME this file (and its v3 siblings,
+--   20260912120000 / 20260913120000 / 20260914120000 / 20260915120000, keeping
+--   their relative order — this one only needs to land AFTER
+--   20260907120000_fp_public_sites, which creates the table) to the real
+--   next-free 12:00:00 slots if any of these versions are taken. Apply via the
+--   Management API playbook (docs/solutions/integration-issues/
+--   supabase-cli-stale-db-password-management-api-workaround-2026-07-13.md).
+--   Do NOT write schema_migrations by hand beyond recording the version.
+--
+-- AMENDMENT LOG (in-place amendments allowed ONLY while this file is
+--   branch-only / never applied; once applied, changes stack as a new
+--   migration):
+--   * (none yet — initial authoring.)
+--
+-- ⚠ DEPLOY ORDERING: this is a pure seed row, inert on its own and safe to
+--   apply at any time. It should land BEFORE handle claiming is enabled to any
+--   real cohort; until it does, `auth` is claimable by a learner.
+--
+-- ── WHAT THIS FIXES ──
+-- Unit 6 added `auth` to RESERVED_HANDLES in app/fp/lib/fp-public-site-rules.ts
+-- and to first-profit's vercel.json exclusion list, but NOT to this table. The
+-- table is the SERVER-SIDE authority (the availability + claim endpoints read
+-- it, and fp_public_sites_reserved_guard enforces it structurally), so without
+-- this row a learner could actually claim `auth` — putting a child's public
+-- page one segment above the /auth/enter sign-in surface on the same origin.
+--
+-- Seeded idempotently in the 20260907120000_fp_public_sites style, so re-apply
+-- is a no-op. The TS↔SQL parity test
+-- (app/fp/lib/__tests__/fp-public-sites-migration-parity.test.ts) reads the
+-- UNION of this file's seed and the original one, and pins it to
+-- RESERVED_HANDLES — so a future addition must always land in both places.
+
+insert into public.fp_reserved_handles (handle, reason) values
+  ('auth',        'route: handoff sign-in surface (/auth/enter) + impersonation risk')
+on conflict (handle) do nothing;

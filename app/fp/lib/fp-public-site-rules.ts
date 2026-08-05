@@ -79,6 +79,12 @@ export const RESERVED_HANDLES = [
   "login",
   "logout",
   "verify",
+  // The handoff sign-in entry point lives at /auth/enter (v3 Unit 6). The route
+  // is multi-segment so first-profit's rewrite needs no change — but `auth` is
+  // reserved anyway so no kid's public site can sit ONE SEGMENT ABOVE a sign-in
+  // surface on the same origin. Seeded by
+  // supabase/migrations/20260916120000_fp_reserved_handle_auth.sql.
+  "auth",
   "app",
   "parent",
   "admin",

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -170,16 +170,37 @@ describe("migration parity: fp_public_sites.sql", () => {
   });
 
   it("the reserved-handle seed is exactly RESERVED_HANDLES (set equality, no drift)", () => {
-    const block = raw.match(/insert into public\.fp_reserved_handles[\s\S]*?on conflict \(handle\) do nothing;/i);
-    expect(block, "seed insert block").not.toBeNull();
-    const seeded = [...block![0].matchAll(/\(\s*'([a-z0-9-]+)'\s*,/g)].map((m) => m[1]!);
+    // The seed is spread across MIGRATIONS, not one file: 20260907120000 laid
+    // down the original 48, and later units stack additions (v3 Unit 6 added
+    // `auth` in 20260916120000_fp_reserved_handle_auth.sql — a seed row cannot
+    // be added by editing an applied migration). So parity is the UNION of
+    // every seed block in the migrations directory against RESERVED_HANDLES:
+    // discovered by scan, so the next addition needs no test edit here, only a
+    // migration + the TS list. Whichever side is missing an entry fails.
+    const migrationsDir = path.resolve(process.cwd(), "supabase/migrations");
+    const seeded: string[] = [];
+    const reasons: string[] = [];
+    let blocks = 0;
+    for (const file of readdirSync(migrationsDir).sort()) {
+      if (!file.endsWith(".sql")) continue;
+      const text = readFileSync(path.join(migrationsDir, file), "utf8");
+      for (const block of text.matchAll(
+        /insert into public\.fp_reserved_handles[\s\S]*?on conflict \(handle\) do nothing;/gi
+      )) {
+        blocks += 1;
+        seeded.push(...[...block[0].matchAll(/\(\s*'([a-z0-9-]+)'\s*,/g)].map((m) => m[1]!));
+        // Every seeded reason is non-empty (the rationale lives WITH the row).
+        reasons.push(...[...block[0].matchAll(/,\s*'([^']*)'\s*\)/g)].map((m) => m[1]!));
+      }
+    }
+    expect(blocks, "at least one seed insert block").toBeGreaterThan(0);
     expect(new Set(seeded).size, "no duplicate seed rows").toBe(seeded.length);
     // Exact count pinned (a review found conflicting reports; the number is
-    // load-bearing for the Unit 3 vercel.json exclusion cross-check).
-    expect(seeded).toHaveLength(48);
+    // load-bearing for the Unit 3 vercel.json exclusion cross-check, which
+    // first-profit's api/_lib/__tests__/vercelConfig.test.ts pins at the SAME
+    // number against its own copy of the list).
+    expect(seeded).toHaveLength(49);
     expect([...seeded].sort()).toEqual([...RESERVED_HANDLES].sort());
-    // And every seeded reason is non-empty (the rationale lives WITH the row).
-    const reasons = [...block![0].matchAll(/,\s*'([^']*)'\s*\)/g)].map((m) => m[1]!);
     expect(reasons).toHaveLength(seeded.length);
     for (const reason of reasons) expect(reason.length).toBeGreaterThan(0);
   });

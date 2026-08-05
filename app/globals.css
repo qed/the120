@@ -127,6 +127,61 @@
   --font-path-display: var(--font-fraunces), "Fraunces", Georgia, serif;
   --font-path-body: var(--font-inter), "Inter", system-ui, sans-serif;
   --font-path-mono: var(--font-spline-mono), "Spline Sans Mono", ui-monospace, monospace;
+
+  /* ============================================================
+     NEW USER FLOW v3 (/start/v3) — the paper-grain comic register
+     ------------------------------------------------------------
+     From the design prototype (artifacts/New Login Flow Aug 2026),
+     ported from its Tailwind 3 `theme.extend` config to Tailwind 4
+     CSS-first tokens. Its palette OVERLAPS the marketing names
+     (`ink`, `paper`) with DIFFERENT values — prototype ink is a
+     warm #1B1815, the site's is #131416 — so every token is
+     `v3-` namespaced rather than merged. Two registers, no silent
+     drift, and nothing outside /start/v3 changes colour.
+     Fonts are NOT re-declared: the prototype's display face IS
+     Fraunces, already loaded as --font-path-display, and its mono
+     role maps to --font-path-mono. Its handwriting face (Caveat)
+     is deliberately NOT added — one more webfont for a caption is
+     not worth the request; those lines use the display serif in
+     italic instead. */
+  --color-v3-ink: #1b1815;
+  --color-v3-cream: #faf7f1;
+  --color-v3-paper: #f2ece0;
+  --color-v3-profit: #1f7a48;
+  --color-v3-profit-dark: #17603a;
+  --color-v3-one20: #e0201b;
+  --color-v3-sun: #f2b307;
+  --color-v3-stone: #6b6259;
+  --shadow-v3-frame: 0 18px 40px -18px rgb(27 24 21 / 0.35);
+  --shadow-v3-card: 0 2px 0 0 rgb(27 24 21 / 0.08);
+}
+
+/* ---- New User Flow v3 (/start/v3) ---- */
+
+/* The mono eyebrow/label idiom, used on every v3 screen. A class rather than a
+   utility stack because it is four properties that must always travel together;
+   the site's own `.eyebrow` is the same idea in the marketing register. */
+.v3-label {
+  font-family: var(--font-path-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* The paper texture behind the whole flow: a 1px dot lattice, the prototype's
+   `paper-grain`. Inert everywhere else (scoped to the flow's root element). */
+.v3-grain {
+  background-image: radial-gradient(rgb(27 24 21 / 0.045) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* The cover's staged "drawing" progress bar. Width is driven by an inline
+   custom property so the stage count stays in the component. */
+@media (prefers-reduced-motion: reduce) {
+  .v3-progress-fill {
+    transition: none;
+  }
 }
 
 /* Anchor jumps are instant — smooth scrolling read as dizzying on long pages. */

@@ -138,6 +138,31 @@ export const V3_VERIFY_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, li
 
 export const V3_VERIFY_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 60 * 60_000, limit: 100 };
 
+/* ─────────────── New User Flow v3 steps 2-5 (v3 Unit 3, review FIX 7) ─────── */
+
+/**
+ * The signed-in half of the v3 flow (add-kid, edit-kid, save-story, provision)
+ * gets a per-PARENT budget.
+ *
+ * It was justified as "not a public surface", which is true and insufficient: a
+ * single verified session can loop `v3AddKidAction` with `differentChild: true`,
+ * and each call mints an `fp_signup_attempts` row + an `fp_parental_consent`
+ * row + a draft carrying a minor's name — all of it BEFORE
+ * `MAX_CHILDREN_PER_FAMILY` gets a say, since that cap lives inside
+ * `createChild` at provisioning time. The durable ceiling is
+ * `V3_MAX_ACTIVE_DRAFTS_PER_PARENT` (app/lib/v3-signup/v3-onboarding-core.ts);
+ * this bounds the remaining reachable abuse, which is the add → provision →
+ * add CYCLE (each cycle frees a draft slot by consuming it).
+ *
+ * Sized so an honest family never notices: adding three kids in one sitting,
+ * with back-navigation, story edits and a provisioning retry each, is well under
+ * 40 calls. Volumetric only, per the store's own header — the load-bearing
+ * bounds are the draft cap above and the family cap in child-core.
+ */
+export const V3_ONBOARDING_NAMESPACE = "fp-v3-onboarding";
+
+export const V3_ONBOARDING_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 40 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

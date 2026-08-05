@@ -64,7 +64,7 @@ import { consentGate } from "./consent-core";
 import { ensurePlayerProfile } from "../login/profile-core";
 import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
 import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
-import { mintUsername } from "@/app/fp/lib/fp-username-rules";
+import { mintUsernameFromNames } from "@/app/fp/lib/fp-username-rules";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 
@@ -121,6 +121,21 @@ export type CreateChildInput = {
   parentToken: string;
   /** The child's display first name (also the derived-handle + username seed). */
   firstName: string;
+  /**
+   * OPTIONAL last name (New User Flow v3 Unit 3). The FP HTTP door collects a
+   * first name only and omits this, in which case EVERY behaviour below is
+   * byte-identical to before: `mintUsernameFromNames` with no last name IS
+   * `mintUsername`, and `last_name` keeps the column's `''` default.
+   *
+   * When present it does two things: it is stored on the roster row (the
+   * dashboard and every downstream surface already read `children.last_name`),
+   * and it widens the username base to `firstname.lastname` — the v3 handle
+   * shape. It is deliberately NOT part of the password's name guard here;
+   * `validateStudentPassword` is still called with the first name, and the v3
+   * credential builder applies the stricter full-name check before it ever gets
+   * this far.
+   */
+  lastName?: string | null;
   /**
    * Optional grade. First Profit's signup captures an age band, not a grade
    * (public.children.grade is nullable), so grade is only stored/validated when
@@ -223,6 +238,9 @@ export async function createChild(
   //    auth-account mint below; failing fast here only avoids wasted writes.)
   const firstName = input.firstName.trim();
   if (firstName.length === 0) return { ok: false, reason: "invalid_child" };
+  // Bounded like the funnel's own name fields; an absent last name stays the
+  // column's `''` default rather than becoming a literal "null".
+  const lastName = (input.lastName ?? "").trim().slice(0, 80);
   let grade: number | null = null;
   if (input.grade !== undefined && input.grade !== null && input.grade !== "") {
     const verdict = gradeVerdict(input.grade);
@@ -285,6 +303,7 @@ export async function createChild(
       .insert({
         parent_id: parentId,
         first_name: firstName,
+        last_name: lastName,
         grade,
         status: "draft",
         applicant_state: APPLICANT_ENTRY_STATE,
@@ -314,7 +333,7 @@ export async function createChild(
     // base is `mintUsername`'s own (empty predicate → attempt 1 → the bare base),
     // which also applies the `student` fallback for an unfoldable first name, so
     // the `base%` prefix probe stays cheap and index-friendly either way.
-    const seedBase = mintUsername({ firstName, isTaken: () => false });
+    const seedBase = mintUsernameFromNames({ firstName, lastName, isTaken: () => false });
     if (seedBase.ok) {
       const existing = await admin
         .from("children")
@@ -334,7 +353,7 @@ export async function createChild(
     let usernameClaimed = false;
     let claimedUsername = "";
     for (let attempt = 0; attempt < MAX_USERNAME_INSERT_RETRIES; attempt += 1) {
-      const pick = mintUsername({ firstName, isTaken: (c) => taken.has(c) });
+      const pick = mintUsernameFromNames({ firstName, lastName, isTaken: (c) => taken.has(c) });
       if (!pick.ok) {
         console.error(`[fp/signup/child] username exhausted for attempt ${input.attemptId}`);
         break;

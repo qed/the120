@@ -42,17 +42,36 @@ import {
   releaseRateLimitEvent,
 } from "@/app/fp/lib/rate-limit-store";
 import {
+  V3_ONBOARDING_RATE_LIMIT,
   V3_START_IP_RATE_LIMIT,
   V3_START_RATE_LIMIT,
   V3_VERIFY_IP_RATE_LIMIT,
   V3_VERIFY_RATE_LIMIT,
 } from "@/app/fp/lib/rate-limit-rules";
 import { extractClientIp } from "@/app/api/fp/signup/signup-rules";
+import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
+import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
+import { createChild } from "@/app/api/fp/signup/child-core";
 import type { SignupCoreDeps } from "@/app/api/fp/signup/signup-core";
+import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
 import {
+  v3AddKid,
+  v3EditKid,
+  v3ProvisionKid,
+  v3SaveStory,
+  type V3AddKidResult,
+  type V3OnboardingDeps,
+  type V3ParentContext,
+  type V3ProvisionResult,
+  type V3SaveResult,
+} from "@/app/lib/v3-signup/v3-onboarding-core";
+import {
+  deriveV3OnboardingRateLimitKey,
   deriveV3StartRateLimitKeys,
   deriveV3VerifyRateLimitKeys,
   formatVerificationCode,
+  isV3StartLive,
+  v3UnauthenticatedEntryOpen,
   VERIFICATION_CODE_SPACE,
 } from "@/app/lib/v3-signup/v3-signup-rules";
 import {
@@ -141,6 +160,43 @@ async function requestContext(): Promise<{ ip: string; ua: string }> {
   return { ip: extractClientIp(h), ua: h.get("user-agent") ?? "" };
 }
 
+/* ------------------------------------------------------- the go-live gate */
+
+/**
+ * ⚠ THE FLAG IS ENFORCED HERE, NOT ONLY ON THE PAGE (review FIX 1).
+ *
+ * `app/start/v3/page.tsx` chooses between `<HoldingPage/>` and `<V3Flow/>` on
+ * `V3_START_LIVE`. That gates the RENDER and nothing else. A Server Action is a
+ * separately-addressable POST endpoint: its id is baked into the client bundle
+ * of any build where this module exists, and no page render stands in front of
+ * it. With the flag off, an unauthenticated caller could therefore POST
+ * `v3StartAction` / `v3VerifyCodeAction` / `v3ResendCodeAction` /
+ * `v3EditEmailAction` directly and drive REAL parent-account creation, real
+ * verification mail, and a real cookie session — the entire thing the lever
+ * exists to hold back.
+ *
+ * WHAT IS STILL ALLOWED WITH THE FLAG OFF: a caller who ALREADY HAS A SESSION.
+ * The lever gates unauthenticated NEW-SIGNUP entry only (plan: "v3 go-live
+ * lever"), because Unit 8's dashboard retarget and Unit 9's v2 remap deploy
+ * before the flip and must not strand a returning family. Steps 2-5 are
+ * session-gated by construction and so need no flag check of their own.
+ */
+async function v3EntryOpen(): Promise<boolean> {
+  if (isV3StartLive(process.env.V3_START_LIVE)) return true;
+  let hasSession = false;
+  try {
+    const supabase = await supabaseServer();
+    const { data } = await supabase.auth.getUser();
+    hasSession = Boolean(data?.user?.id);
+  } catch (err) {
+    // FAIL CLOSED. An unreadable session is not a session, and the flag is off.
+    console.error(
+      `[fp/v3-signup] go-live session probe threw: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  return v3UnauthenticatedEntryOpen({ live: false, hasSession });
+}
+
 /** The email a rate-limit key needs, read defensively straight off the unparsed
  *  input: the key must be recorded BEFORE the core parses anything, so a
  *  malformed body still costs the caller a strike (otherwise the parser is a
@@ -163,6 +219,9 @@ function rateLimitVerifyEmail(input: unknown): string {
 
 export async function v3StartAction(input: unknown): Promise<V3StartResult> {
   try {
+    // The go-live gate, BEFORE any work: refused traffic costs nothing and
+    // leaves nothing behind (no strike, no row, no mail).
+    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip, ua } = await requestContext();
     const { emailKey, ipKey } = deriveV3StartRateLimitKeys(ip, rateLimitEmail(input));
     // Both buckets record before either verdict — a short-circuit would leave
@@ -189,6 +248,7 @@ export async function v3StartAction(input: unknown): Promise<V3StartResult> {
 
 export async function v3VerifyCodeAction(input: unknown): Promise<V3VerifyResult> {
   try {
+    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip } = await requestContext();
     const { emailKey, ipKey } = deriveV3VerifyRateLimitKeys(ip, rateLimitVerifyEmail(input));
     const emailCheck = checkAndRecordRateLimit(emailKey, V3_VERIFY_RATE_LIMIT);
@@ -219,6 +279,7 @@ export async function v3VerifyCodeAction(input: unknown): Promise<V3VerifyResult
 
 export async function v3ResendCodeAction(input: unknown): Promise<V3ResendResult> {
   try {
+    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip } = await requestContext();
     // Resend shares the verify budget: both act on one attempt, and letting
     // resend have its own budget would hand an attacker a second lever on the
@@ -240,8 +301,201 @@ export async function v3ResendCodeAction(input: unknown): Promise<V3ResendResult
   }
 }
 
+/* ------------------------------------------------- steps 2-5 (plan Unit 3) */
+
+/**
+ * The SIGNED-IN half of the flow. Everything below requires a cookie session —
+ * which only the code redeem in `v3VerifyCodeAction` can mint — so these actions
+ * are not a PUBLIC surface, and the expensive, enumerable work (mail, account
+ * creation) all lives above.
+ *
+ * ⚠ "NOT PUBLIC" IS NOT "UNBOUNDED" (review FIX 7). One verified session can
+ * loop `v3AddKidAction` with `differentChild: true`, and every call mints an
+ * attempt row + a consent record + a draft carrying a minor's name.
+ * `MAX_CHILDREN_PER_FAMILY` (10) only bites inside `createChild`, long after
+ * that litter has accumulated. Two bounds now apply, and they cover different
+ * things:
+ *   - DURABLE, in the core: `V3_MAX_ACTIVE_DRAFTS_PER_PARENT` caps live drafts,
+ *     and the partial unique index caps duplicates by name;
+ *   - VOLUMETRIC, here: a per-PARENT budget over all four actions, which is what
+ *     bounds the remaining reachable abuse — the add → provision → add CYCLE,
+ *     where each provisioning frees a draft slot.
+ * The strike is released only on OUR failures, the same rule the actions above
+ * follow.
+ *
+ * The parent's identity is read from the SESSION on every call, never from the
+ * argument. `parentToken` comes from the same session and is what `createChild`
+ * builds its RLS-scoped client from — the service-role client never inserts a
+ * child row (Slice B Plan Revision 1).
+ */
+async function parentContext(): Promise<V3ParentContext | null> {
+  const supabase = await supabaseServer();
+  // getUser() verifies the JWT with the auth server; getSession() alone would
+  // trust a cookie this process never validated.
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData?.user;
+  if (!user?.id || !user.email) return null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) return null;
+  const { ip, ua } = await requestContext();
+  return { parentId: user.id, parentEmail: user.email, parentToken: token, ip, ua };
+}
+
+/** Record the steps 2-5 strike and report whether the call may proceed. Atomic
+ *  check-and-record, before any DB work — the ordering the start action uses. */
+function onboardingBudget(parentId: string): { allowed: boolean; key: string } {
+  const key = deriveV3OnboardingRateLimitKey(parentId);
+  return { allowed: checkAndRecordRateLimit(key, V3_ONBOARDING_RATE_LIMIT).allowed, key };
+}
+
+function buildOnboardingDeps(): V3OnboardingDeps {
+  const admin = supabaseAdmin();
+  return {
+    // supabaseAdmin() is justified for the same reason the start action
+    // justifies it: fp_onboarding_drafts, fp_signup_attempts and
+    // fp_parental_consent are ALL RLS-on with ZERO policies (service-role
+    // only). Every query in the core is scoped by the session-derived
+    // parent_id, which is the access control the missing policies would be.
+    db: admin,
+    createChild: (childInput) =>
+      createChild(
+        {
+          admin,
+          parentClient: (accessToken) => supabaseParentToken(accessToken),
+          createAuthUser: async ({ childId, password }) => {
+            const res = await admin.auth.admin.createUser(
+              buildStudentCreateUserPayload({ childId, password })
+            );
+            if (res.error || !res.data?.user?.id) {
+              console.error(`[fp/v3-onboarding] child createUser failed: ${res.error?.message ?? "no user"}`);
+              return { ok: false };
+            }
+            return { ok: true, userId: res.data.user.id };
+          },
+          deleteAuthUser: async (userId) => {
+            const del = await admin.auth.admin.deleteUser(userId);
+            if (del.error) {
+              console.error(`[fp/v3-onboarding] child deleteUser failed for ${userId}: ${del.error.message}`);
+            }
+            return { ok: !del.error };
+          },
+          now: () => Date.now(),
+        },
+        childInput
+      ),
+    // Unit 4 SEAM: no cover generator has shipped, so no draft ever carries a
+    // cover to copy. Left undefined deliberately rather than stubbed to `ok`,
+    // which would let a future carry claim a status implying bytes nobody wrote.
+    copyCoverBlob: undefined,
+    now: () => Date.now(),
+    // The per-kid password fallback must not be predictable across families,
+    // so the draw is a CSPRNG, not Math.random.
+    random: () => randomInt(0, 1_000_000) / 1_000_000,
+    env: { FP_SIGNUP_TEST_ALLOWLIST: process.env.FP_SIGNUP_TEST_ALLOWLIST },
+  };
+}
+
+export async function v3AddKidAction(input: unknown): Promise<V3AddKidResult> {
+  try {
+    const ctx = await parentContext();
+    if (!ctx) return { kind: "failed" };
+    const budget = onboardingBudget(ctx.parentId);
+    if (!budget.allowed) return { kind: "failed" };
+    const result = await v3AddKid(buildOnboardingDeps(), input, ctx);
+    if (result.kind === "failed") releaseRateLimitEvent(budget.key);
+    return result;
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] add-kid threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
+export async function v3EditKidAction(input: unknown): Promise<V3AddKidResult> {
+  try {
+    const ctx = await parentContext();
+    if (!ctx) return { kind: "failed" };
+    const budget = onboardingBudget(ctx.parentId);
+    if (!budget.allowed) return { kind: "failed" };
+    const result = await v3EditKid(buildOnboardingDeps(), input, ctx);
+    if (result.kind === "failed") releaseRateLimitEvent(budget.key);
+    return result;
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] edit-kid threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
+export async function v3SaveStoryAction(input: unknown): Promise<V3SaveResult> {
+  try {
+    const ctx = await parentContext();
+    if (!ctx) return { kind: "failed" };
+    const budget = onboardingBudget(ctx.parentId);
+    if (!budget.allowed) return { kind: "failed" };
+    const result = await v3SaveStory(buildOnboardingDeps(), input, ctx);
+    if (result.kind === "failed") releaseRateLimitEvent(budget.key);
+    return result;
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] save-story threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
+export async function v3ProvisionAction(input: unknown): Promise<V3ProvisionResult> {
+  try {
+    const ctx = await parentContext();
+    if (!ctx) return { kind: "failed" };
+    const budget = onboardingBudget(ctx.parentId);
+    if (!budget.allowed) return { kind: "failed" };
+    const result = await v3ProvisionKid(buildOnboardingDeps(), input, ctx);
+    // `retryable` is OUR outage, and the screen's retry button re-invokes
+    // immediately — charging a family for our fault would spend their budget on
+    // a loop they did not choose.
+    if (result.kind === "failed" || result.kind === "retryable") {
+      releaseRateLimitEvent(budget.key);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] provision threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
+/**
+ * UNIT 5 SEAM — the "Keep building" handoff.
+ *
+ * Unit 5 owns the real mint: a one-time, hashed, child-bound, 120s code that
+ * First Profit exchanges for a session. Until it lands this action returns
+ * `not_ready` with the plain sign-in destination, and the account-ready screen
+ * sends the family there with the username and password it just showed them.
+ * That is a WORKING ending, not a dead one — which is what lets this page be
+ * publicly routable from its first commit.
+ *
+ * The SHAPE is already final, so Unit 5 only replaces the body: sync-open the
+ * tab, await this, then navigate it. A `not_ready` result navigates to
+ * `destination` exactly as a `minted` one will.
+ */
+export async function v3MintHandoffAction(
+  input: unknown
+): Promise<
+  | { kind: "not_ready"; destination: string }
+  | { kind: "minted"; destination: string }
+  | { kind: "failed" }
+> {
+  try {
+    const ctx = await parentContext();
+    if (!ctx) return { kind: "failed" };
+    void input;
+    return { kind: "not_ready", destination: FIRST_PROFIT_SIGN_IN_URL };
+  } catch (err) {
+    console.error(`[fp/v3-onboarding] handoff threw: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "failed" };
+  }
+}
+
 export async function v3EditEmailAction(input: unknown): Promise<V3StartResult> {
   try {
+    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip, ua } = await requestContext();
     // Edit-email IS a start (since review FIX 1 it is nothing else), so it draws
     // on the START budget, keyed by the NEW address it is submitting.

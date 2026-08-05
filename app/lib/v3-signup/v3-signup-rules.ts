@@ -78,11 +78,54 @@
 import { z } from "zod";
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import {
+  V3_ONBOARDING_NAMESPACE,
   V3_START_NAMESPACE,
   V3_START_IP_NAMESPACE,
   V3_VERIFY_NAMESPACE,
   V3_VERIFY_IP_NAMESPACE,
 } from "@/app/fp/lib/rate-limit-rules";
+
+/* ------------------------------------------------------------ go-live lever */
+
+/**
+ * `V3_START_LIVE`, as a PURE decision over the raw env value (review FIX 1).
+ *
+ * Affirmative-only: an explicit `1` / `true` / `on` turns unauthenticated entry
+ * on; unset, empty, `0`, `false`, or any typo leaves it off. There is no
+ * "default on" and no inverted "disable" flag — a mis-spelled disable flag is
+ * how a surface goes live by accident.
+ *
+ * ── IT LIVES HERE BECAUSE IT IS ENFORCED IN TWO PLACES, NOT ONE ──
+ * The lever originally existed only in `app/start/v3/page.tsx`, which chose
+ * between the holding page and the flow. That gated the PAGE and nothing else:
+ * a Server Action is a SEPARATELY-ADDRESSABLE POST endpoint, reachable by any
+ * caller who knows its id, with no page render in front of it. With the flag
+ * off, `v3StartAction` / `v3VerifyCodeAction` / `v3ResendCodeAction` /
+ * `v3EditEmailAction` would still mint accounts, send mail and hand out cookie
+ * sessions. The flag is therefore asserted at the ACTION boundary too, and this
+ * one function is what both surfaces call so they can never disagree.
+ *
+ * WHAT IT GATES, PRECISELY: unauthenticated NEW-SIGNUP entry. A signed-in parent
+ * is always let through — plan Unit 8's dashboard retarget and Unit 9's v2 remap
+ * deploy BEFORE the flip, and gating them too would strand a returning family on
+ * a holding page while v2 is already archived. See `v3UnauthenticatedEntryOpen`.
+ */
+export function isV3StartLive(raw: string | undefined | null): boolean {
+  const v = (raw ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+
+/**
+ * The one gate both the page and the four unauthenticated-reachable actions
+ * apply: entry is open when the lever is on, OR when the caller already holds a
+ * session (the signed-in resume paths, always live — see `isV3StartLive`).
+ */
+export function v3UnauthenticatedEntryOpen(input: {
+  live: boolean;
+  hasSession: boolean;
+}): boolean {
+  return input.live || input.hasSession;
+}
 
 /* --------------------------------------------------------------- the code */
 
@@ -240,6 +283,17 @@ export function deriveV3VerifyRateLimitKeys(
     emailKey: `${V3_VERIFY_NAMESPACE}:${ipEnc}:${encodeURIComponent(email.trim().toLowerCase())}`,
     ipKey: `${V3_VERIFY_IP_NAMESPACE}:${ipEnc}`,
   };
+}
+
+/**
+ * The steps 2-5 budget key (review FIX 7). Keyed by the PARENT ID from the
+ * cookie session — not the IP, because the abuse this bounds is one authenticated
+ * account looping row-minting actions, and not the email, because the session is
+ * the thing that already proved who the caller is. Encoded for the same
+ * delimiter-collision reason as the keys above.
+ */
+export function deriveV3OnboardingRateLimitKey(parentId: string): string {
+  return `${V3_ONBOARDING_NAMESPACE}:${encodeURIComponent(parentId)}`;
 }
 
 /* ------------------------------------------------------------- the mail */

@@ -535,8 +535,12 @@ behind the template until Unit 4 merges)
 **Files:**
 - Create: `app/start/v3/{page.tsx,V3Flow.tsx}` + step components
   (`StepParent.tsx`, `StepAddKid.tsx`, `StepCover.tsx`, `StepStory.tsx`,
-  `StepAccountReady.tsx`), `app/start/v3/story-questions.ts` (the 6 prototype
-  questions)
+  `StepAccountReady.tsx`), `app/lib/v3-signup/story-questions.ts` (the 6
+  prototype questions — authored under `app/start/v3/` and MOVED to `app/lib`
+  during Unit 3's review: a `server-only` core in `app/lib` must not import from
+  a route folder, and both consumers — `v3-onboarding-core.ts` and
+  `credentials-rules.ts` — now read the ids from that one place. Unit 9's
+  `app/start/v3` → `app/start` move therefore does not touch it.)
 - Modify: `app/fp/lib/fp-username-rules.ts` (two-name local part + suffix-before-@),
   `app/lib/v3-signup/v3-signup-rules.ts` (password word extraction + per-kid
   random fallback)

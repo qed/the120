@@ -96,11 +96,70 @@ export function generateUsernameBase(firstName: string): UsernameBaseVerdict {
   }
 }
 
+/* --------------------------------------------- two-name base (v3 Unit 3) */
+
+/**
+ * The v3 onboarding flow collects the kid's FULL name and mints
+ * `firstname.lastname` (`Remi Newal` → `remi.newal`) — a friendlier, far less
+ * collision-prone handle than the first-name-only base above, which the FP HTTP
+ * door keeps using (it only ever collects a first name).
+ *
+ * ── THE THREE-PARTY NESTING INVARIANT, RE-VERIFIED FOR THE DOT ──
+ * `generateUsernameBase` guarantees each SEGMENT is `^[a-z0-9]+$`; joining two
+ * with a single `.` yields `^[a-z0-9]+\.[a-z0-9]+$`. That is still a strict
+ * SUBSET of both acceptors, which is the whole invariant (generator ⊆ CHECK ===
+ * login regex):
+ *   - `children_fp_username_format` (migration 20260904120000):
+ *     `^[a-z0-9]([a-z0-9._+@-]*[a-z0-9])?$` — `.` is an interior character and
+ *     both ends are alphanumeric, so a dotted base passes;
+ *   - login's `USERNAME_FORMAT` (app/api/fp/login/login-rules.ts): the SAME
+ *     regex, so a dotted handle classifies as a username and resolves.
+ * The dot can never be leading, trailing, or doubled here, because each side is
+ * a non-empty `[a-z0-9]+` run by construction — that is exactly why this builds
+ * on `generateUsernameBase` rather than slugging the whole name in one pass.
+ *
+ * DEGRADES, NEVER FAILS ON A HALF-NAME: an underivable LAST name (absent,
+ * emoji-only, pure punctuation) yields the first-name base alone — never
+ * `remi.` — so a one-name kid gets `remi`, exactly what the old generator would
+ * have given them. Only an underivable FIRST name is a verdict-level refusal,
+ * and `mintUsernameFromNames` answers that with the same `student` fallback.
+ */
+export function generateUsernameLocalPart(
+  firstName: string,
+  lastName?: string | null
+): UsernameBaseVerdict {
+  const first = generateUsernameBase(firstName);
+  if (!first.ok) return first;
+  const last = generateUsernameBase(lastName ?? "");
+  if (!last.ok) return first;
+  return { ok: true, base: `${first.base}.${last.base}` };
+}
+
 /* ------------------------------------------------------------- suffixer */
 
 export type UsernamePick =
   | { ok: true; username: string; attempt: number }
   | { ok: false; reason: "exhausted"; detail: string };
+
+/**
+ * Place a collision suffix on a base — `remi.newal` → `remi.newal2`.
+ *
+ * THE SUFFIX GOES BEFORE THE `@` when the base is email-shaped. No GENERATOR in
+ * this module emits an `@` (both bases are alphanumerics and at most one dot),
+ * so today this is always a plain append and the behaviour of every existing
+ * caller is byte-identical. It matters because the storage CHECK and the login
+ * regex both ADMIT email-shaped usernames (migration 20260904120000): a handle
+ * adopted from that space and re-suffixed naively would become
+ * `cedric@firstprofit.school2`, which is a different mailbox-looking string and
+ * — worse — could collide with a genuinely different address. Suffixing the
+ * LOCAL PART keeps the domain intact and the result inside both acceptors.
+ */
+export function appendUsernameSuffix(base: string, attempt: number): string {
+  if (attempt <= 1) return base;
+  const at = base.indexOf("@");
+  if (at === -1) return `${base}${attempt}`;
+  return `${base.slice(0, at)}${attempt}${base.slice(at)}`;
+}
 
 /**
  * Pick the first free username for a base, appending a numeric suffix until
@@ -118,7 +177,7 @@ export function pickUniqueUsername(input: {
   isTaken: (candidate: string) => boolean;
 }): UsernamePick {
   for (let attempt = 1; attempt <= MAX_USERNAME_ATTEMPTS; attempt += 1) {
-    const username = attempt === 1 ? input.base : `${input.base}${attempt}`;
+    const username = appendUsernameSuffix(input.base, attempt);
     if (!input.isTaken(username)) return { ok: true, username, attempt };
   }
   return {
@@ -168,7 +227,25 @@ export function mintUsername(input: {
   firstName: string;
   isTaken: (candidate: string) => boolean;
 }): UsernameMint {
-  const derived = generateUsernameBase(input.firstName);
+  return mintUsernameFromNames({ firstName: input.firstName, isTaken: input.isTaken });
+}
+
+/**
+ * The v3 variant: the SAME primitive, but the base is `firstname.lastname` when
+ * a usable last name is supplied (`generateUsernameLocalPart`). With no last
+ * name it is byte-identical to `mintUsername` — which is exactly how
+ * `mintUsername` is now implemented, so the two can never diverge on the
+ * fallback, the suffixer, or the exhaustion bound.
+ *
+ * The `student` fallback still applies to an underivable FIRST name, so a child
+ * is never blocked from getting a loginable handle.
+ */
+export function mintUsernameFromNames(input: {
+  firstName: string;
+  lastName?: string | null;
+  isTaken: (candidate: string) => boolean;
+}): UsernameMint {
+  const derived = generateUsernameLocalPart(input.firstName, input.lastName);
   const base = derived.ok ? derived.base : USERNAME_FALLBACK_BASE;
   const pick = pickUniqueUsername({ base, isTaken: input.isTaken });
   if (!pick.ok) return pick;

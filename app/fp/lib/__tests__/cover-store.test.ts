@@ -9,6 +9,9 @@ import {
   normalizeImageExtension,
   parseBlobKey,
   planCoverCarry,
+  planRedrawCarry,
+  KID_AGE_MIN,
+  KID_AGE_MAX,
   statusImpliesCoverBlob,
   isTerminalCoverStatus,
   COVER_STATUSES,
@@ -22,6 +25,7 @@ import {
   type BlobObject,
   type BlobPort,
 } from "../cover-store";
+import { FP_CONSENT_POLICY } from "@/app/api/fp/signup/consent-rules";
 
 const DRAFT = "11111111-1111-4111-8111-111111111111";
 const CHILD = "22222222-2222-4222-8222-222222222222";
@@ -653,5 +657,70 @@ describe("planCoverCarry is TOTAL — decoration never fails provisioning", () =
     });
     expect(plan.copy).toBeNull();
     expect(plan.child.fp_cover_status).toBe("none");
+  });
+});
+
+/**
+ * THE REDRAW INPUTS (v3 Unit 8, owner request; migration 20260918120000).
+ *
+ * Deliberately NOT part of `planCoverCarry`: that function has arms that null
+ * the cover fields when a picture cannot honestly be claimed, and the redraw
+ * inputs are true about the KID whatever happened to the picture.
+ */
+describe("planRedrawCarry", () => {
+  it("carries a sane age and the answers verbatim", () => {
+    expect(
+      planRedrawCarry({ draftKidAge: 9, draftAnswers: { idea: "lemonade", matters: "hot days" } })
+    ).toEqual({ fp_kid_age: 9, fp_story_answers: { idea: "lemonade", matters: "hot days" } });
+  });
+
+  it("mirrors the draft CHECK's range, inclusive at both ends", () => {
+    expect(planRedrawCarry({ draftKidAge: KID_AGE_MIN, draftAnswers: {} }).fp_kid_age).toBe(
+      KID_AGE_MIN
+    );
+    expect(planRedrawCarry({ draftKidAge: KID_AGE_MAX, draftAnswers: {} }).fp_kid_age).toBe(
+      KID_AGE_MAX
+    );
+    expect(planRedrawCarry({ draftKidAge: KID_AGE_MIN - 1, draftAnswers: {} }).fp_kid_age).toBeNull();
+    expect(planRedrawCarry({ draftKidAge: KID_AGE_MAX + 1, draftAnswers: {} }).fp_kid_age).toBeNull();
+  });
+
+  it("drops a non-integer, absent or NaN age to null — children carries no CHECK", () => {
+    for (const bad of [9.5, NaN, null, undefined]) {
+      expect(planRedrawCarry({ draftKidAge: bad as number, draftAnswers: {} }).fp_kid_age).toBeNull();
+    }
+  });
+
+  it("normalizes the answers bag: only string values survive, and absent is {}", () => {
+    expect(
+      planRedrawCarry({
+        draftKidAge: 9,
+        draftAnswers: { idea: "ok", junk: 7 as unknown as string, other: null as unknown as string },
+      }).fp_story_answers
+    ).toEqual({ idea: "ok" });
+    expect(planRedrawCarry({ draftKidAge: 9, draftAnswers: null }).fp_story_answers).toEqual({});
+    expect(planRedrawCarry({ draftKidAge: 9, draftAnswers: undefined }).fp_story_answers).toEqual({});
+  });
+
+  it("NEVER throws — it runs after the child is minted and outside any try", () => {
+    expect(() =>
+      planRedrawCarry({
+        draftKidAge: Number.POSITIVE_INFINITY,
+        draftAnswers: {} as Record<string, string>,
+      })
+    ).not.toThrow();
+  });
+});
+
+describe("the consent that covers the redraw inputs (v3 Unit 8)", () => {
+  it("the policy text already discloses storing the answers ON THE CHILD'S PROFILE", () => {
+    // Verified rather than assumed, and pinned so a later narrowing of the
+    // notice reddens HERE — beside the code that relies on it — instead of
+    // silently leaving two columns outside what families agreed to.
+    const text = FP_CONSENT_POLICY.text;
+    expect(text).toContain("storing my child's answers to the signup questions");
+    expect(text).toContain("on my child's profile");
+    // Age is disclosed in the same paragraph, in the account-data list.
+    expect(text).toMatch(/first name, last name, age/);
   });
 });

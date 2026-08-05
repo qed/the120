@@ -549,6 +549,113 @@ describe("v3ProvisionKid — the cover artifact carry (v3 Unit 7, owner rework)"
   });
 });
 
+describe("v3ProvisionKid — the REDRAW inputs carry (v3 Unit 8, owner request)", () => {
+  const STORED = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+
+  it("a provisioned child holds EVERYTHING a future redraw needs", async () => {
+    // The whole point of the chunk, in one assertion. Age and answers live only
+    // on `fp_onboarding_drafts`, and the reaper deletes those rows after 30
+    // days — so without this carry every child provisioned today becomes
+    // PERMANENTLY un-redrawable, and the deferred AI adapter would have nothing
+    // but the name (a different palette, no age badge, generic captions: the
+    // "one kid, two pictures" failure Unit 7 already diagnosed once).
+    //
+    // NOT a parity test. Parity is Unit 7's, and it is exact: the cover is one
+    // string, copied, never re-derived. This asserts REDRAWABILITY.
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    await v3SaveStory(
+      deps,
+      { draftId, answers: { idea: "lemonade on hot days", matters: "nobody buys" } },
+      ctx
+    );
+    Object.assign(store.fp_onboarding_drafts[0], {
+      cover_status: "final",
+      cover_blob_key: null,
+      cover_data_url: STORED,
+      generation_count: 1,
+    });
+
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+
+    const child = store.children.find((c) => c.id === mintedChildIds[0]) as Row;
+    // NAME — from the mint itself.
+    expect(child.first_name).toBe("Remi");
+    expect(child.last_name).toBe("Newal");
+    // AGE — the value the parent typed, not grade + 5.
+    expect(child.fp_kid_age).toBe(9);
+    // ANSWERS — verbatim.
+    expect(child.fp_story_answers).toEqual({
+      idea: "lemonade on hot days",
+      matters: "nobody buys",
+    });
+    // ...and the cover that was already being carried, unaffected.
+    expect(child.fp_cover_data_url).toBe(STORED);
+    // The draft may now be reaped without losing anything.
+    for (const key of ["first_name", "last_name", "fp_kid_age", "fp_story_answers"]) {
+      expect(child[key], key).not.toBeUndefined();
+    }
+  });
+
+  it("carries the redraw inputs even when the COVER carry degrades to `none`", async () => {
+    // The coupling that must NOT exist. `planCoverCarry` nulls its fields when a
+    // picture cannot be honestly claimed; the redraw inputs are true about the
+    // KID regardless — and a child with no cover is exactly the child a redraw
+    // is most needed for. Folding them into one plan would put them behind the
+    // wrong guard.
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    await v3SaveStory(deps, { draftId, answers: { idea: "dog walking" } }, ctx);
+
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+    expect(store.children.find((c) => c.id === mintedChildIds[0])).toMatchObject({
+      fp_cover_status: "none",
+      fp_cover_data_url: null,
+      fp_kid_age: 9,
+      fp_story_answers: { idea: "dog walking" },
+    });
+  });
+
+  it("an EMPTY answer sheet carries as {} — 'the step ran and was skipped', not 'unknown'", async () => {
+    const { store, deps, mintedChildIds } = harness();
+    const draftId = await seedDraft(deps, store);
+    expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+    expect(store.children.find((c) => c.id === mintedChildIds[0])).toMatchObject({
+      fp_story_answers: {},
+      fp_kid_age: 9,
+    });
+  });
+
+  it("a NONSENSE age on the draft carries as NULL — children has no CHECK to catch it", async () => {
+    // The child table deliberately carries no CHECK (populated-table rule), so
+    // this function is the guard. Banking a nonsense age would hand the adapter
+    // an input it cannot use and a row nothing would ever correct.
+    for (const bad of [0, -1, 3, 26, 9.5, null]) {
+      const { store, deps, mintedChildIds } = harness();
+      const draftId = await seedDraft(deps, store);
+      Object.assign(store.fp_onboarding_drafts[0], { kid_age: bad });
+      expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind, String(bad)).toBe("provisioned");
+      expect(
+        (store.children.find((c) => c.id === mintedChildIds[0]) as Row).fp_kid_age,
+        String(bad)
+      ).toBeNull();
+    }
+  });
+
+  it("the boundary ages the draft CHECK admits are carried, not clamped", async () => {
+    for (const age of [4, 25]) {
+      const { store, deps, mintedChildIds } = harness();
+      const draftId = await seedDraft(deps, store);
+      Object.assign(store.fp_onboarding_drafts[0], { kid_age: age });
+      expect((await v3ProvisionKid(deps, { draftId }, ctx)).kind).toBe("provisioned");
+      expect(
+        (store.children.find((c) => c.id === mintedChildIds[0]) as Row).fp_kid_age,
+        String(age)
+      ).toBe(age);
+    }
+  });
+});
+
 describe("v3ProvisionKid — decoration never fails provisioning", () => {
   it("a cover-carry COPY failure degrades the child to status 'none' rather than pointing at bytes nobody wrote", async () => {
     const { store, deps, mintedChildIds } = harness({

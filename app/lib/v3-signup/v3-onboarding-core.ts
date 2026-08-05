@@ -53,6 +53,7 @@ import { isTestSignup, type SignupGateEnv } from "@/app/api/fp/signup/signup-rul
 import {
   asStoredCoverDataUrl,
   planCoverCarry,
+  planRedrawCarry,
   type CoverStatus,
   isCoverStatus,
 } from "@/app/fp/lib/cover-store-rules";
@@ -771,7 +772,23 @@ export async function v3ProvisionKid(
       };
     }
   }
-  const coverWrite = await deps.db.from("children").update(coverFields).eq("id", childId);
+  // ── the REDRAW inputs carry (Unit 8, owner request; migration 20260918120000) ──
+  // Age and answers live ONLY on the draft, and the reaper deletes drafts after
+  // 30 days. Without this line every child provisioned today would be
+  // permanently un-redrawable — the deferred AI adapter needs name + age +
+  // answers, and the name alone yields a different picture. Written in the SAME
+  // statement as the cover fields (one UPDATE, one failure mode) but computed
+  // SEPARATELY: they are true about the kid whatever happened to the picture,
+  // and a child whose cover degraded to `none` is the one who most needs a
+  // redraw.
+  const redraw = planRedrawCarry({
+    draftKidAge: draft.age,
+    draftAnswers: draft.answers,
+  });
+  const coverWrite = await deps.db
+    .from("children")
+    .update({ ...coverFields, ...redraw })
+    .eq("id", childId);
   if (coverWrite.error) {
     // DECORATION NEVER FAILS PROVISIONING (plan: System-Wide Impact). Logged
     // and moved past; the child is minted and playable.

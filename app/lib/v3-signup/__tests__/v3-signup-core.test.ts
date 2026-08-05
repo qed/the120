@@ -43,9 +43,13 @@ import {
 } from "@/app/api/fp/signup/verify-store";
 // The REAL dashboard gate — imported, not re-implemented, so the happy-path
 // assertion is about what /dashboard will actually do.
-import { dashboardGateVerdict } from "@/app/lib/funnel/session-rules";
-import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
+import {
+  dashboardGateVerdict,
+  dashboardRegister,
+  deriveHasPassword,
+} from "@/app/lib/funnel/session-rules";
 import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
+import { V3_ADD_KID_HREF } from "@/app/lib/v3-signup/remap-rules";
 
 const EMAIL = "robin@example.com";
 const PASSWORD = "correct horse battery";
@@ -92,24 +96,37 @@ const verify = (
 /**
  * Exactly the facts `app/dashboard/page.tsx` assembles for a freshly-verified
  * v3 parent, built from the harness's OWN state rather than hand-written: a
- * live cookie session, `hasPassword` derived by the REAL `isFunnelProvisioned`
- * over the `app_metadata` the provisioner stamped, and this parent's children
- * read back through the REAL `parseApplicantState` (plus the legacy `status`
- * column, which `deriveEnrolled` consults).
+ * live cookie session, `hasPassword` derived by the REAL `deriveHasPassword`
+ * over the `app_metadata` the provisioner stamped AND the family's real
+ * `fp_username` values, and this parent's children read back through the REAL
+ * `parseApplicantState` (plus the legacy `status` column, which
+ * `deriveEnrolled` consults).
+ *
+ * v3 Unit 8 changed exactly one line of this helper — `isFunnelProvisioned`
+ * became `deriveHasPassword`, and `fp_username` joined the mapped rows. That is
+ * the whole fix, and the test below is what proves it lands.
  */
-const gateFacts = (h: ReturnType<typeof makeHarness>, parentId: string) => ({
-  hasSession: true,
-  hasPassword: !isFunnelProvisioned(h.parentAppMetadata.get(parentId) ?? null),
-  children: h.store.children
+const gateFacts = (h: ReturnType<typeof makeHarness>, parentId: string) => {
+  const children = h.store.children
     .filter((c) => c.parent_id === parentId)
     .map((c) => ({
       id: String(c.id),
       applicantState: parseApplicantState(c.applicant_state),
       createdAt: String(c.created_at ?? "2026-08-01T12:00:00.000Z"),
       status: c.status,
-    })),
-  stay: false,
-});
+      // The per-child FP discriminator, exactly as `createChild` claimed it.
+      fpUsername: typeof c.fp_username === "string" ? c.fp_username : null,
+    }));
+  return {
+    hasSession: true,
+    hasPassword: deriveHasPassword({
+      appMetadata: h.parentAppMetadata.get(parentId) ?? null,
+      children,
+    }),
+    children,
+    stay: false,
+  };
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -171,7 +188,7 @@ describe("happy path: start → code → verify → a cookie session the dashboa
     expect(dashboardGateVerdict(facts)).toEqual({ action: "render" });
   });
 
-  it("a v3 parent WITH a minted child hits the discriminating branch — today a mini_app redirect (Unit 8 flips this)", async () => {
+  it("a v3 parent WITH a minted child RENDERS the dashboard — the Unit 8 flip of the confirmed misroute", async () => {
     const store = newStore();
     const h = makeHarness(store);
     await v3StartSignup(h.v3Deps, startInput(), CTX);
@@ -204,33 +221,51 @@ describe("happy path: start → code → verify → a cookie session the dashboa
 
     const facts = gateFacts(h, verified.parentId);
     expect(facts.children).toHaveLength(1);
+    // The row shape FP signup really writes: the entry rung, no arrival, and a
+    // claimed `fp_username`. Every one of those is what v2 read as "this family
+    // abandoned an application on step one".
     expect(facts.children[0].applicantState).toBe("added");
-    // hasPassword is FALSE here — `isFunnelProvisioned` reads the `funnel: true`
-    // stamp the provisioner puts on EVERY account it creates, v3 included. That
-    // is the bit that decides this row, and it is the bit the assertion below
-    // is sensitive to (flip it and the verdict becomes `render`).
-    expect(facts.hasPassword).toBe(false);
+    expect(facts.children[0].fpUsername).toBe(minted.username);
 
-    // ── WHAT IS CORRECT *TODAY*, NOT WHAT WE WANT ─────────────────────────
-    // `resolveResumeChild` picks this child, `childNextScreen('added')` yields
-    // `mini_app`, and the gate redirects into the v2 mini-app. That IS the
-    // plan's "confirmed misroute" (Key Technical Decisions: "FP kids have
-    // arrived_at = NULL and applicant_state 'added', so dashboardGateVerdict
-    // today redirects an FP/v3 parent into /start/child/<id>"). Unit 2 does not
-    // fix it and must not pretend to: the fix is UNIT 8's derivation change
-    // (`hasPassword` = funnel-stamped AND not-FP, plus the per-child
-    // `fp_username` discriminator). WHEN UNIT 8 LANDS, THIS EXPECTATION FLIPS
-    // TO `{ action: "render" }` — that flip is the Unit 8 regression test.
-    expect(dashboardGateVerdict(facts)).toEqual({
+    // ── THE UNIT 8 FLIP (this expectation was `redirect` until this unit) ──
+    // The account still carries `app_metadata.funnel === true` — the
+    // provisioner stamps it on every account it creates, v3 included — so
+    // `isFunnelProvisioned` alone still says "no password". What changed is the
+    // DERIVATION: `deriveHasPassword` ORs in the per-child `fp_username`
+    // discriminator, and this parent has a First Profit child, so they are a
+    // password family and the gate renders.
+    expect(facts.hasPassword).toBe(true);
+    expect(dashboardGateVerdict(facts)).toEqual({ action: "render" });
+
+    // ⚠ AND THE FIX MUST NOT WIDEN. Strip the discriminator and nothing else —
+    // a GENUINE v2 funnel parent, whose children were inserted by the funnel's
+    // own parent-token path and can never carry an fp_username — and the old
+    // verdict comes straight back. That is the assertion that the second
+    // disjunct is doing the work, and that it is doing it for exactly one
+    // cohort.
+    const genuineV2 = {
+      ...facts,
+      children: facts.children.map((c) => ({ ...c, fpUsername: null })),
+    };
+    expect(
+      deriveHasPassword({ appMetadata: { funnel: true }, children: genuineV2.children })
+    ).toBe(false);
+    // The DESTINATION is now the remap table's (v3 Unit 8 review, FIX 1) — the
+    // v2 mini-app literal is gone from this gate. What this assertion pins is
+    // unchanged and is the point: a genuine v2 family still REDIRECTS, an FP
+    // family still renders.
+    expect(dashboardGateVerdict({ ...genuineV2, hasPassword: false })).toEqual({
       action: "redirect",
       childId: minted.childId,
-      route: `/start/child/${minted.childId}`,
+      route: V3_ADD_KID_HREF,
     });
 
-    // And the branch is genuinely load-bearing: the SAME children, read as a
-    // password family, render. This is what makes the row above an assertion
-    // about the gate's wiring rather than about an empty array.
-    expect(dashboardGateVerdict({ ...facts, hasPassword: true })).toEqual({ action: "render" });
+    // The register flips WITH the gate, off the same discriminator: an FP kid
+    // never arrives through the funnel (`arrived_at` stays NULL forever), so
+    // without the widened predicate this family would sit in the APPLICATION
+    // register being offered a $250 seat deposit for a program they are in.
+    expect(dashboardRegister(facts.children)).toBe("path");
+    expect(dashboardRegister(genuineV2.children)).toBe("application");
   });
 });
 

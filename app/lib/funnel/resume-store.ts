@@ -62,7 +62,16 @@ export type ResumeStore = {
   ) => Promise<
     | {
         ok: true;
-        rows: { id: string; applicantState: unknown; createdAt: string; status: unknown }[];
+        rows: {
+          id: string;
+          applicantState: unknown;
+          createdAt: string;
+          status: unknown;
+          /** The v3 per-child FP discriminator (plan Unit 8). Optional: a
+           *  store built before this unit is a shape we tolerate, and absent
+           *  reads as "not FP". */
+          fpUsername?: string | null;
+        }[];
       }
     | { ok: false }
   >;
@@ -187,7 +196,7 @@ export function realResumeStore(
     async loadChildren(parentId) {
       const { data, error } = await admin
         .from("children")
-        .select("id, applicant_state, created_at, status")
+        .select("id, applicant_state, created_at, status, fp_username")
         .eq("parent_id", parentId)
         .limit(200);
       if (error) return { ok: false };
@@ -198,6 +207,7 @@ export function realResumeStore(
           applicantState: k.applicant_state,
           createdAt: String(k.created_at),
           status: k.status,
+          fpUsername: typeof k.fp_username === "string" ? k.fp_username : null,
         })),
       };
     },

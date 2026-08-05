@@ -17,7 +17,17 @@ import {
   reserveRefusalMessage,
   type CardVerdict,
 } from "@/app/dashboard/data";
-import { childNextScreen } from "@/app/lib/funnel/session-rules";
+import {
+  childNextRoute,
+  childNextScreen,
+  resolveReentry,
+  screenRoute,
+} from "@/app/lib/funnel/session-rules";
+import {
+  SET_PASSWORD_PATH,
+  V3_ADD_KID_HREF,
+  type RemapContext,
+} from "@/app/lib/v3-signup/remap-rules";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
@@ -121,22 +131,27 @@ describe("cardVerdict — one verdict per ladder state", () => {
     const v = funnel(cardVerdict(child("added"), none, false));
     expect(v.statusLine).toBe("APPLICATION JUST STARTED");
     expect(v.tone).toBe("red");
+    // v3 Unit 8 review (FIX 1): the destination comes from the ONE remap table,
+    // not a v2 literal built here. The v2 mini-app is retired at the hard
+    // launch; the equivalent obligation for this child is a First Profit
+    // account, i.e. the kid step.
     expect(v.primaryCta).toEqual({
       kind: "start",
       label: "Continue application",
-      href: "/start/child/kid-1",
+      href: V3_ADD_KID_HREF,
     });
     expect(v.secondaryReviewLink).toBeUndefined();
   });
 
-  it("project_created WITH a composed project → CONTINUE APPLICATION links into the merged flow (U9: the landing rule picks the step, no ?step=)", () => {
+  it("project_created WITH a composed project → NO primary CTA: the remap's answer is the dashboard they are already on (v3 Unit 8 review)", () => {
     const v = funnel(cardVerdict(child("project_created"), none, true));
     expect(v.statusLine).toBe("APPLICATION JUST STARTED");
-    expect(v.primaryCta).toEqual({
-      kind: "continue_dossier",
-      label: "Continue application",
-      href: "/start/child/kid-1",
-    });
+    // The v2 dossier editor is retired with the flow, so `dashboard.dossier`
+    // remaps to `dashboard` — and a "Continue application" button that links to
+    // the page it sits on is a no-op wearing a promise. The card keeps its
+    // status line; the button is gone.
+    expect(v.primaryCta).toBeUndefined();
+    expect(childNextRoute({ surface: "dashboard", intent: "dossier" })).toBe("/dashboard");
   });
 
   it("the review states carry the company name too (item 37): submitted/in_review read the NAME when known", () => {
@@ -182,7 +197,7 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.primaryCta).toEqual({
       kind: "compose",
       label: "Continue application",
-      href: "/start/child/kid-1",
+      href: V3_ADD_KID_HREF,
     });
   });
 
@@ -365,6 +380,88 @@ describe("cardVerdict × childNextScreen — the card's CTA agrees with the shar
   });
 });
 
+/**
+ * THE ANTI-DRIFT PIN (v3 Unit 8 review, FIX 1).
+ *
+ * The bug this closes was not a wrong URL — it was TWO PRODUCERS. An emailed
+ * resume link and `/start` sent a mid-application v2 family into the v3 kid
+ * flow; their own dashboard card sent them into the still-live v2 mini-app,
+ * where they could finish a v2 dossier with no First Profit account. That is
+ * the split state the hard launch exists to close, and it is invisible unless
+ * the two producers are asked about THE SAME CHILD in one assertion.
+ */
+describe("the card and resolveReentry/screenRoute agree — for the same child", () => {
+  const kid = (applicantState: "added" | "project_created") => ({
+    id: "kid-1",
+    applicantState,
+    createdAt: "2026-07-27T10:00:00Z",
+    hasComposedProject: false,
+  });
+
+  const reentryHref = (
+    applicantState: "added" | "project_created",
+    ctx?: RemapContext
+  ) =>
+    screenRoute(
+      resolveReentry({
+        hasSession: true,
+        link: "valid",
+        hasPassword: false,
+        enrolled: false,
+        children: [kid(applicantState)],
+      }),
+      ctx
+    );
+
+  const cardHref = (
+    applicantState: "added" | "project_created",
+    ctx?: RemapContext
+  ) => {
+    const v = cardVerdict(child(applicantState), none, false, null, ctx);
+    const cta = v.kind === "funnel" ? v.primaryCta : undefined;
+    return cta && "href" in cta ? cta.href : null;
+  };
+
+  it("both send an un-diverted v2 family to the kid step", () => {
+    for (const state of ["added", "project_created"] as const) {
+      expect(cardHref(state), state).toBe(V3_ADD_KID_HREF);
+      expect(reentryHref(state), state).toBe(V3_ADD_KID_HREF);
+      expect(cardHref(state), state).toBe(reentryHref(state));
+    }
+  });
+
+  it("both honour the converted-funnel-parent divert, and both let it terminate", () => {
+    const pending: RemapContext = {
+      funnelStamped: true,
+      passwordChosen: false,
+      hasFpChild: false,
+    };
+    const done: RemapContext = { ...pending, passwordChosen: true };
+    for (const state of ["added", "project_created"] as const) {
+      expect(cardHref(state, pending), state).toBe(SET_PASSWORD_PATH);
+      expect(reentryHref(state, pending), state).toBe(SET_PASSWORD_PATH);
+      expect(cardHref(state, done), state).toBe(V3_ADD_KID_HREF);
+      expect(reentryHref(state, done), state).toBe(V3_ADD_KID_HREF);
+    }
+  });
+
+  it("NO card CTA in this file is a v2 /start/child link any more", () => {
+    // The review-walk pill is the one deliberate survivor (it opens the
+    // read-only walkthrough, which still exists until Unit 9 archives the
+    // route); every PRIMARY CTA must be a remap answer.
+    for (const state of APPLICANT_STATES) {
+      for (const deposits of [none, paid, refunded, pending]) {
+        for (const composed of [true, false]) {
+          const v = cardVerdict(child(state), deposits, composed);
+          const cta = v.kind === "funnel" ? v.primaryCta : undefined;
+          const href = cta && "href" in cta ? cta.href : undefined;
+          if (href) expect(href, `${state} ${href}`).not.toContain("/start/child/");
+        }
+      }
+    }
+  });
+});
+
 describe("cardVerdict — copy rules (handoff): no em dashes, never 'failed'", () => {
   it("holds for every status line, note and label the cards can render", () => {
     const verdicts: CardVerdict[] = [];
@@ -498,6 +595,24 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     expect(src).not.toContain("bandNote(");
   });
 
+  it("the v3 Unit 8 branches are actually wired (review FIX 5b)", () => {
+    // Source scan, and named as one: this repo's vitest is node-env with no
+    // DOM, so DashboardApp — a hook-and-context client component — cannot be
+    // mounted. What CAN be pinned is that each new branch is consumed, in both
+    // registers, and that the null-consent rule is the component's rule too.
+    const src = read("app/dashboard/DashboardApp.tsx");
+    // The credentials panel renders in BOTH registers and on every card...
+    expect(src.match(/credentialsPanel\(c\)/g)?.length).toBeGreaterThanOrEqual(2);
+    // ...and it is gated on the policy bundle: no server-computed policy, no
+    // panel, because the echo would have nothing to bind to.
+    expect(src).toContain("consentPolicy ? (");
+    // The failed-consent-read rule, at the component boundary: `null` short
+    // -circuits BEFORE `.includes`, so a read failure can never read as "closed".
+    expect(src).toContain("photoConsentChildIds === null ? null : photoConsentChildIds.includes(id)");
+    // The FP cell's CTA is an external origin — a plain anchor, never next/Link.
+    expect(src).toMatch(/cta\?\.kind === "keep_building"/);
+  });
+
   it("U9: the embedded editor views are unreachable — every entry point is a link into the flow", () => {
     const src = read("app/dashboard/DashboardApp.tsx");
     // The view state machine and its consumers are gone…
@@ -509,15 +624,76 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     // rule owns the step; R5).
     expect(src).toContain("const flowHref = (id: string) => `/start/child/${id}`");
     expect(src).not.toMatch(/\/start\/child\/[^`"']*\?step=/);
-    // ADD A CHILD routes to the funnel's add-child flow (server-action
-    // creation — the store's local-first addChild is retired). Since
-    // 2026-07-30 /start/children IS the add-only page (no picker grid).
-    expect(src).toContain('const ADD_CHILD_HREF = "/start/children"');
+    // v3 Unit 8 review (FIX 1): the CARD's CTA no longer builds a v2 literal at
+    // all — `cardVerdict` reads `childNextRoute`, the one remap table, and the
+    // page hands it the same `remapCtx` the gate used. Pinned as source text
+    // because a card that silently re-grew its own literal is exactly the
+    // divergence this fix closed.
+    const data = read("app/dashboard/data.ts");
+    expect(data).toContain("const ctaHref = childNextRoute(next, remapCtx)");
+    expect(src).toContain("remapCtx");
+    // ADD A CHILD routes into the V3 KID FLOW (v3 Unit 8) — v2's
+    // /start/children add-only page is retired with the rest of the funnel.
+    // TWO assertions, because the value moved into the remap module: the render
+    // reads the shared constant, AND the constant is the URL we mean. Pinning
+    // only the identifier would let the destination change silently; pinning
+    // only the value would let the render stop using it.
+    expect(src).toContain("const ADD_CHILD_HREF = V3_ADD_KID_HREF");
+    expect(src).not.toContain('"/start/children"');
+    expect(V3_ADD_KID_HREF).toBe("/start/v3?step=kid");
     expect(src).not.toContain("addChild(");
   });
 
   it("the store reads applicant_state through parseApplicantState (fail-closed)", () => {
     const src = read("app/dashboard/store.tsx");
     expect(src).toContain("parseApplicantState(r.applicant_state)");
+  });
+});
+
+/* ─────────────────── v3 Unit 8: the First Profit card cell ─────────────────── */
+
+describe("the FP card cell — no 'Continue application', no live $250 CTA", () => {
+  const fpKid = (over: Partial<ReturnType<typeof emptyChild>> = {}) => ({
+    ...emptyChild("kid-1"),
+    applicantState: "added" as ApplicantState,
+    fpUsername: "remi.newal",
+    ...over,
+  });
+
+  it("an FP child renders the Keep-building cell whatever applicant_state the row holds", () => {
+    for (const state of [null, ...APPLICANT_STATES]) {
+      const verdict = cardVerdict(fpKid({ applicantState: state }), [], false, null);
+      expect(verdict.kind).toBe("funnel");
+      if (verdict.kind !== "funnel") throw new Error("unreachable");
+      expect(verdict.statusLine).toBe("FIRST PROFIT");
+      expect(verdict.primaryCta).toEqual({
+        kind: "keep_building",
+        label: "Keep building",
+        href: "https://firstprofit.school/",
+      });
+    }
+  });
+
+  it("carries NO reserve CTA and NO application review link — nothing to reserve, nothing to continue", () => {
+    // The whole reason the cell returns above the reserve computation: an FP kid
+    // sits on `added` with no deposit, which the funnel cells read as
+    // "mid-application, un-deposited" and answer with a live $250 checkout.
+    const verdict = cardVerdict(fpKid(), [], false, null);
+    if (verdict.kind !== "funnel") throw new Error("unreachable");
+    expect(verdict.secondaryReserveCta).toBeUndefined();
+    expect(verdict.secondaryReviewLink).toBeUndefined();
+    expect(verdict.primaryCta?.kind).not.toBe("reserve");
+  });
+
+  it("a sibling WITHOUT an fp_username keeps its v2 cell — the discriminator is per child", () => {
+    const v2 = cardVerdict(
+      { ...emptyChild("kid-2"), applicantState: "added", fpUsername: null },
+      [],
+      false,
+      null
+    );
+    if (v2.kind !== "funnel") throw new Error("unreachable");
+    expect(v2.statusLine).toBe("APPLICATION JUST STARTED");
+    expect(v2.primaryCta?.kind).toBe("start");
   });
 });

@@ -6,11 +6,13 @@ import { emitFunnelEvent } from "@/app/lib/funnel/events";
 import { readCtaSource } from "@/app/lib/cta-source";
 import {
   deriveEnrolled,
+  deriveHasPassword,
+  familyHasFpChild,
   resolveReentry,
   screenRoute,
 } from "@/app/lib/funnel/session-rules";
 import { parseApplicantState } from "@/app/lib/funnel/applicant-rules";
-import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
+import { hasChosenPassword, isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
 
 /**
  * `/start` — the funnel spine (funnel U6; R28–R30a, R32).
@@ -66,7 +68,8 @@ export default async function StartPage({
     // empty list (children grid), same as before.
     const { data: childRows } = await supabase
       .from("children")
-      .select("id, applicant_state, created_at, status")
+      // `fp_username` is the v3 per-child FP discriminator (plan Unit 8).
+      .select("id, applicant_state, created_at, status, fp_username")
       .order("created_at", { ascending: true });
     const rows = childRows ?? [];
 
@@ -92,17 +95,29 @@ export default async function StartPage({
       createdAt: String(c.created_at),
       hasComposedProject: composed.has(String(c.id)),
       status: c.status as unknown,
+      fpUsername: typeof c.fp_username === "string" ? c.fp_username : null,
     }));
     const dest = resolveReentry({
       hasSession: true,
       link: "none",
-      hasPassword: !isFunnelProvisioned(user.app_metadata),
+      // The v3 derivation (plan Unit 8): funnel-stamped AND not-FP. A First
+      // Profit parent has a chosen password even though the funnel stamp says
+      // otherwise, so without this they would be routed as a link-only family.
+      hasPassword: deriveHasPassword({ appMetadata: user.app_metadata, children }),
       enrolled: deriveEnrolled(children),
       children,
     });
     // redirect() throws NEXT_REDIRECT by design and must stay OUTSIDE a try —
     // a caught one reports failure on success, which this repo has shipped once.
-    redirect(screenRoute(dest) ?? "/dashboard");
+    // The route comes from the v2→v3 remap table, and the context is what lets
+    // it divert a converted funnel parent through the set-password step.
+    redirect(
+      screenRoute(dest, {
+        funnelStamped: isFunnelProvisioned(user.app_metadata),
+        passwordChosen: hasChosenPassword(user.app_metadata),
+        hasFpChild: familyHasFpChild(children),
+      }) ?? "/dashboard"
+    );
   }
 
   return (

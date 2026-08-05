@@ -22,6 +22,8 @@ import { REFUND_POLICY } from "@/app/lib/funnel/deposit-rules";
 import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
 import SignIn from "./SignIn";
+import KidCredentials, { type ConsentPolicyBundle } from "./KidCredentials";
+import { V3_ADD_KID_HREF, type RemapContext } from "@/app/lib/v3-signup/remap-rules";
 
 /**
  * The two-register seam (reconnect U11, R12): which whole-dashboard skeleton
@@ -59,9 +61,25 @@ export default function DashboardApp({
   seatsRemaining = SEATS_REMAINING,
   register = "application",
   verifiedTaskCounts = null,
+  photoConsentChildIds = null,
+  consentPolicy,
+  remapCtx,
 }: {
   seatsRemaining?: number;
   register?: DashboardRegister;
+  /** Child ids whose photo/cover consent gate is OPEN (v3 Unit 8); null = the
+   *  server read failed, and the panel then offers neither affordance. */
+  photoConsentChildIds?: string[] | null;
+  /** The v2→v3 remap's contextual override facts for this family (v3 Unit 8
+   *  review, FIX 1), derived server-side by the dashboard gate and handed to
+   *  EVERY card so a CTA's destination is the same one the gate would have
+   *  redirected to. Optional so the tests that mount this component without a
+   *  server keep compiling; absent means "no override". */
+  remapCtx?: RemapContext;
+  /** The rendered consent policy + its hash, computed server-side. Optional so
+   *  the many tests that mount this component without it keep compiling; the
+   *  panel simply does not render without one. */
+  consentPolicy?: ConsentPolicyBundle;
   /** Child id → REAL verified fp task count, loaded server-side by the gate
    *  (dashboard-gate-core) fresh on each page load. Absent key = no fp
    *  profile yet = a true 0; null = counts read failed OR application
@@ -251,9 +269,22 @@ export default function DashboardApp({
   // add-child flow (the store's local-first addChild raced its own debounced
   // insert against the navigation, so the server-action flow owns creation).
   const flowHref = (id: string) => `/start/child/${id}`;
-  // 2026-07-30: /start/children IS the add-only page now (the picker grid
-  // is retired — existing children live on this dashboard).
-  const ADD_CHILD_HREF = "/start/children";
+  // v3 Unit 8: ADD A CHILD re-enters the V3 KID FLOW, not v2's add-child page.
+  // The literal lives in the remap module (`V3_ADD_KID_HREF`) with every other
+  // v3 destination, so Unit 9's `app/start/v3` → `app/start` move is one edit
+  // there rather than a hunt through render files. The source-text pin in
+  // app/lib/__tests__/funnel-dashboard-cards.test.ts asserts THIS line and the
+  // constant's value together.
+  const ADD_CHILD_HREF = V3_ADD_KID_HREF;
+
+  // null = the consent read failed; `.includes` on a real array is the only
+  // "open" answer, and the panel treats null as "offer nothing".
+  const consentFor = (id: string): boolean | null =>
+    photoConsentChildIds === null ? null : photoConsentChildIds.includes(id);
+  const credentialsPanel = (c: Child) =>
+    consentPolicy ? (
+      <KidCredentials child={c} photoConsentOpen={consentFor(c.id)} policy={consentPolicy} />
+    ) : null;
 
   const isPath = register === "path";
 
@@ -335,6 +366,15 @@ export default function DashboardApp({
             You hold the reviewer keys now. Every child&rsquo;s rung at a glance; verify real work
             against the Done-when line, warmly.
           </p>
+          {/* TRIAL MESSAGING (R13), DELIBERATELY TERMS-NEUTRAL. It names no
+              length ("30 days", "for now"), makes no promise about beta, and
+              commits to nothing but notice. Every version that reads better
+              than this one does so by implying a term we have not decided —
+              and a parent who plans around an implied term and is wrong has
+              been misled by us, not by their own reading. */}
+          <p className="mt-3 max-w-md font-path-mono text-[0.6rem] uppercase leading-5 tracking-[0.1em] text-hq-ink-muted">
+            Your family is on a free trial. We will email you before anything changes.
+          </p>
         </div>
         <div className="flex-none rounded-xl bg-hq-sunken px-6 py-4 text-center">
           <p className="font-path-mono text-3xl font-semibold leading-none text-verified">
@@ -384,7 +424,8 @@ export default function DashboardApp({
               c,
               depositsFor(c.id),
               composedChildIds.has(c.id),
-              projectNames.get(c.id) ?? null
+              projectNames.get(c.id) ?? null,
+              remapCtx
             );
             const arrived = c.arrivedAt != null;
             const header = (
@@ -453,6 +494,7 @@ export default function DashboardApp({
                       Keep building
                     </Link>
                   </div>
+                  {credentialsPanel(c)}
                 </div>
               );
             }
@@ -477,7 +519,14 @@ export default function DashboardApp({
                     renderReserveCta(c, verdict.kind === "funnel" ? verdict.secondaryReviewLink : undefined)
                   ) : (
                     <div className="flex items-center justify-end gap-3">
-                      {cta?.kind === "start" ||
+                      {cta?.kind === "keep_building" ? (
+                        // THE FP CELL (v3 Unit 8): this kid has a First Profit
+                        // account, so the destination is First Profit itself.
+                        // An external origin, hence a plain anchor and no Link.
+                        <a href={cta.href} className={pathPill}>
+                          {cta.label}
+                        </a>
+                      ) : cta?.kind === "start" ||
                       cta?.kind === "compose" ||
                       cta?.kind === "continue_dossier" ? (
                         // All three link into the merged flow (R5) — the
@@ -524,6 +573,7 @@ export default function DashboardApp({
                       </p>
                     )}
                 </div>
+                {credentialsPanel(c)}
               </div>
             );
           })}
@@ -653,7 +703,8 @@ export default function DashboardApp({
                   c,
                   childDeposits,
                   composedChildIds.has(c.id),
-                  projectNames.get(c.id) ?? null
+                  projectNames.get(c.id) ?? null,
+                  remapCtx
                 );
                 if (verdict.kind === "funnel") {
                   const statusTone =
@@ -710,7 +761,19 @@ export default function DashboardApp({
                           // ONE right-justified button, same position on
                           // every card.
                           <div className="flex items-end justify-end gap-4">
-                            {cta?.kind === "start" ||
+                            {cta?.kind === "keep_building" ? (
+                              // The FP cell (v3 Unit 8). An FP child puts the
+                              // WHOLE family in the path register, so this arm
+                              // is defensive rather than reachable — but a CTA
+                              // kind that silently renders nothing is how a
+                              // card loses its only action.
+                              <a
+                                href={cta.href}
+                                className={`${pillClass} bg-crm-green transition-opacity hover:opacity-90`}
+                              >
+                                {cta.label}
+                              </a>
+                            ) : cta?.kind === "start" ||
                             cta?.kind === "compose" ||
                             cta?.kind === "continue_dossier" ? (
                               // All three link into the merged flow (R5) —
@@ -749,6 +812,7 @@ export default function DashboardApp({
                             </a>
                           </p>
                         )}
+                        {credentialsPanel(c)}
                       </div>
                     </div>
                   );
@@ -854,6 +918,7 @@ export default function DashboardApp({
                           </p>
                         </>
                       )}
+                      {credentialsPanel(c)}
                     </div>
                   </div>
                 );

@@ -82,3 +82,28 @@ export function resumeVerdict(row: ResumeTokenRecord | null, nowMs: number): Res
 export function isFunnelProvisioned(appMetadata: Record<string, unknown> | null | undefined): boolean {
   return appMetadata?.funnel === true;
 }
+
+/** The app_metadata key v3 stamps when a parent's OWN chosen password is set. */
+export const PASSWORD_CHOSEN_METADATA_KEY = "password_chosen";
+
+/**
+ * Did this parent ever type a password we then set on their account? (plan Unit
+ * 8, the converted-funnel-parent step.)
+ *
+ * A DURABLE STAMP, not an inference. `isFunnelProvisioned` cannot answer this:
+ * it is true for a v2 capture account holding a random never-disclosed password
+ * AND for a v3 parent who typed one at the verify step thirty seconds ago. The
+ * stamp is written by v3's `setParentPassword` in the same call that sets the
+ * password, so it can never claim a password that was not set.
+ *
+ * Absent means "we do not know", and every consumer treats that conservatively:
+ * `needsSetPasswordStep` additionally requires the family to have NO First
+ * Profit child, which excludes the pre-stamp cohorts (the beta families and
+ * anyone provisioned through the FP HTTP door, who all chose real passwords at
+ * `verifyCompletion`) from being asked for a password they already have.
+ */
+export function hasChosenPassword(
+  appMetadata: Record<string, unknown> | null | undefined
+): boolean {
+  return appMetadata?.[PASSWORD_CHOSEN_METADATA_KEY] === true;
+}

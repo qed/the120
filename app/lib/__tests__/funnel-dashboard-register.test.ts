@@ -92,8 +92,13 @@ describe("the dashboard gate loads the flip fact (dashboard-gate-core + page.tsx
   const core = read("app/lib/funnel/dashboard-gate-core.ts");
   const page = read("app/dashboard/page.tsx");
 
-  it("selects arrived_at with the other child columns — the ONE children read serves the flip", () => {
-    expect(core).toMatch(/select\("id, applicant_state, created_at, status, arrived_at"\)/);
+  it("selects arrived_at AND fp_username with the other child columns — the ONE children read serves the flip", () => {
+    // v3 Unit 8 widened the flip fact to two columns. Both must ride the same
+    // single read: a second query for the discriminator would be a second
+    // failure mode for one decision.
+    expect(core).toMatch(
+      /select\("id, applicant_state, created_at, status, arrived_at, fp_username"\)/
+    );
   });
 
   it("the page delegates loading to the core inside its cache() wrapper", () => {
@@ -261,7 +266,7 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
       app.indexOf("min-h-screen bg-hq-canvas")
     );
     expect(home).toMatch(
-      /cardVerdict\(\s*c,\s*depositsFor\(c\.id\),\s*composedChildIds\.has\(c\.id\),\s*projectNames\.get\(c\.id\) \?\? null,?\s*\)/
+      /cardVerdict\(\s*c,\s*depositsFor\(c\.id\),\s*composedChildIds\.has\(c\.id\),\s*projectNames\.get\(c\.id\) \?\? null,\s*remapCtx,?\s*\)/
     );
     expect(home).toMatch(/verdict\.statusLine/);
     // The reserve block is the ONE shared renderReserveCta — the dispute-
@@ -344,7 +349,13 @@ describe("the screen-16 bars carry REAL verified counts, not the 0 placeholder",
   });
 
   it("counts load only for a path-register family, and a failure keeps children (fail open to the floor)", () => {
-    expect(core).toMatch(/childRows\.some\(\(c\) => c\.arrived_at != null\)/);
+    // ⚠ THE COUPLED-PREDICATE PIN (v3 Unit 8). The load condition IS
+    // `dashboardRegister`, not a hand-inlined copy of its predicate — which is
+    // what it used to be, and which v3 would have broken: widening the register
+    // to FP children while the load still tested `arrived_at` alone gives every
+    // v3 family a permanent 0 floor on the bars the register exists to show.
+    expect(core).toMatch(/if \(dashboardRegister\(children\) === "path"\)/);
+    expect(core).not.toMatch(/childRows\.some\(\(c\) => c\.arrived_at != null\)/);
     expect(core).toMatch(/verifiedTaskCounts = counts === null \? null : Object\.fromEntries\(counts\)/);
   });
 });

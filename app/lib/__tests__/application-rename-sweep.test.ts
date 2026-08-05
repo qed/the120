@@ -76,6 +76,15 @@ const ALLOWLIST: ReadonlyArray<{ file: string; count: number; reason: string }> 
     reason: "Consumes the same `\"dossier\"` intent discriminant (one guard).",
   },
   {
+    file: "app/lib/v3-signup/remap-rules.ts",
+    count: 2,
+    reason:
+      "The v2→v3 remap table's KEY for that same intent discriminant " +
+      "(`ChildNextKey` member + its table row). The key is `surface.intent` " +
+      "by construction, so it is spelled by session-rules' union, not chosen " +
+      "here — a code key no parent ever sees.",
+  },
+  {
     file: "app/lib/nurture/rules.ts",
     count: 2,
     reason:

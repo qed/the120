@@ -215,6 +215,29 @@ export const V3_HANDOFF_NAMESPACE = "fp-v3-handoff";
 
 export const V3_HANDOFF_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
 
+/* ────────── New User Flow v3 per-kid credentials recovery (v3 Unit 8) ────── */
+
+/**
+ * The dashboard's per-kid "set a new password" action, and the legacy-consent
+ * capture/revocation that sit beside it. Keyed on the PARENT ID from the cookie
+ * session — the caller is authenticated by construction, so the IP is the wrong
+ * unit, and the parent is the account whose looping this bounds.
+ *
+ * Its OWN namespace rather than sharing `fp-v3-onboarding`: a family hammering
+ * the recovery form (a kid who keeps forgetting, a parent retrying a flaky
+ * network) must not spend the budget that lets them add another child, and vice
+ * versa. Sized generously — this is a form a parent uses a handful of times a
+ * year, and every refusal here is a real family locked out of helping their kid
+ * log in.
+ *
+ * ⚠ VOLUMETRIC ONLY. Nothing security-load-bearing rests on it: the action
+ * refuses any child the caller does not own via a WHERE-clause predicate, so
+ * there is no enumeration to slow down — only volume.
+ */
+export const V3_KID_RESET_NAMESPACE = "fp-v3-kid-reset";
+
+export const V3_KID_RESET_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

@@ -424,6 +424,66 @@ export function asStoredCoverDataUrl(value: unknown): string | null {
  * This is what makes the owner's requirement structural rather than incidental:
  * there is no path here that could produce a cover, only one that copies one.
  */
+/* ------------------------------------------------- the REDRAW inputs carry */
+
+/** The sanity range `fp_onboarding_drafts_kid_age_sane` enforces on the draft
+ *  (migration 20260912120000). Mirrored here because `children` deliberately
+ *  carries no CHECK (populated-table rule) — so this function is the guard. */
+export const KID_AGE_MIN = 4;
+export const KID_AGE_MAX = 25;
+
+export type RedrawCarry = {
+  fp_kid_age: number | null;
+  fp_story_answers: Record<string, string>;
+};
+
+/**
+ * WHAT A FUTURE REDRAW NEEDS, CARRIED ONTO THE CHILD (v3 Unit 8, owner request;
+ * migration 20260918120000).
+ *
+ * ⚠ THIS IS NOT ABOUT PARITY, AND CONFLATING THE TWO WOULD UNDO UNIT 7. The
+ * signup cover and the served cover are ALREADY the same string: rendered once,
+ * stored on the draft, copied verbatim by `planCoverCarry`, served byte-for-byte
+ * by both doors. Nothing re-derives it and nothing here does either.
+ *
+ * The problem this solves is that the deferred AI adapter will need NAME + AGE +
+ * ANSWERS to draw a personalized cover, and age and answers live only on
+ * `fp_onboarding_drafts` — which the reaper deletes after 30 days. Every child
+ * provisioned without this carry becomes PERMANENTLY un-redrawable; the name
+ * alone yields a different palette, no age badge and generic captions, which is
+ * exactly the "one kid, two pictures" failure Unit 7 diagnosed.
+ *
+ * ── WHY IT IS SEPARATE FROM `planCoverCarry` ──
+ * `planCoverCarry` has arms that null the cover fields (an unreachable blob, a
+ * non-terminal status) because a child row must never claim a picture it cannot
+ * serve. The redraw inputs have no such coupling: they are true about the KID
+ * regardless of what happened to the picture, and a child whose cover carry
+ * degraded to `none` is precisely the child a redraw is most needed for. Folding
+ * them into the same plan would put them behind the wrong guard.
+ *
+ * TOTAL and never throwing, for the same reason `planCoverCarry` is: the one
+ * caller invokes it AFTER the child is minted and OUTSIDE any try. A nonsense
+ * age carries as NULL rather than banking it on a child row that has no CHECK.
+ */
+export function planRedrawCarry(input: {
+  /** `fp_onboarding_drafts.kid_age`. */
+  draftKidAge: number | null | undefined;
+  /** `fp_onboarding_drafts.answers`, already narrowed to string values. */
+  draftAnswers: Record<string, string> | null | undefined;
+}): RedrawCarry {
+  const age = input.draftKidAge;
+  const sane =
+    typeof age === "number" &&
+    Number.isInteger(age) &&
+    age >= KID_AGE_MIN &&
+    age <= KID_AGE_MAX;
+  const answers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input.draftAnswers ?? {})) {
+    if (typeof v === "string") answers[k] = v;
+  }
+  return { fp_kid_age: sane ? age : null, fp_story_answers: answers };
+}
+
 export function planCoverCarry(input: {
   draftId: string;
   childId: string;

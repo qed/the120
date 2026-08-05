@@ -23,6 +23,7 @@ import {
   type ResumeStore,
   type StoredResumeToken,
 } from "@/app/lib/funnel/resume-store";
+import { V3_ADD_KID_HREF } from "@/app/lib/v3-signup/remap-rules";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string) => readFileSync(path.resolve(HERE, rel), "utf8");
@@ -119,7 +120,14 @@ function fakeDeps(
     claimRows?: number | null;
     mintFails?: boolean;
     childrenFail?: boolean;
-    children?: { id: string; applicantState: unknown; createdAt: string; status: unknown }[];
+    children?: {
+      id: string;
+      applicantState: unknown;
+      createdAt: string;
+      status: unknown;
+      /** The v3 per-child FP discriminator (Unit 8). */
+      fpUsername?: string | null;
+    }[];
     /** Children holding an active project (reconnect U1's uniform landing). */
     composedChildIds?: string[];
     projectsReadFails?: boolean;
@@ -378,7 +386,10 @@ describe("redeemResumeTokenCore", () => {
       children: [{ id: "c1", applicantState: "added", createdAt: iso(NOW - 1), status: "draft" }],
     });
     const out = await redeemResumeTokenCore({ token: TOKEN }, deps);
-    expect(out).toEqual({ success: true, destination: "/start/child/c1" });
+    // v3 Unit 8: a funnel family with a v2 `added` child is a converted funnel
+    // parent, so the remap inserts the one-time set-password step ahead of the
+    // v3 kid flow. The SEQUENCE this test exists to pin is unchanged.
+    expect(out).toEqual({ success: true, destination: "/set-password" });
     expect(calls.indexOf("cookieProbe")).toBeLessThan(calls.indexOf("claim"));
     expect(calls.indexOf("claim")).toBeLessThan(calls.indexOf("mint"));
     expect(calls).not.toContain("unclaim");
@@ -448,7 +459,11 @@ describe("redeemResumeTokenCore", () => {
   it("self-heals a missing parents row after the claim (inbox control just proven)", async () => {
     const { calls, deps } = fakeDeps({ token: FRESH, parentRowExists: false });
     const out = await redeemResumeTokenCore({ token: TOKEN }, deps);
-    expect(out).toEqual({ success: true, destination: "/start/children" });
+    // v3 Unit 8: a childless FUNNEL family redeeming a link is a converted
+    // funnel parent — random never-disclosed password, no FP child, no
+    // `password_chosen` stamp — so the remap inserts the set-password step
+    // before the kid flow. (Pre-v3 this was v2's /start/children grid.)
+    expect(out).toEqual({ success: true, destination: "/set-password" });
     expect(calls.indexOf("healParent")).toBeGreaterThan(calls.indexOf("claim"));
     expect(calls.indexOf("healParent")).toBeLessThan(calls.indexOf("mint"));
   });
@@ -498,9 +513,12 @@ describe("redeemResumeTokenCore", () => {
       ],
       composedChildIds: [],
     });
+    // The v2 mini-app compose is retired: the remap sends this family into the
+    // v3 kid flow — via the set-password step, since they are a funnel family
+    // who has never chosen a password (v3 Unit 8).
     expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
       success: true,
-      destination: "/start/child/c1",
+      destination: "/set-password",
     });
   });
 
@@ -512,9 +530,143 @@ describe("redeemResumeTokenCore", () => {
       ],
       projectsReadFails: true,
     });
+    // Same degrade, same v3 destination: a wrong ROOM, never an error and never
+    // the dashboard. The room is now the v3 kid flow (behind set-password).
     expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
       success: true,
-      destination: "/start/child/c1",
+      destination: "/set-password",
+    });
+  });
+
+  /* ─────── v3 Unit 8 review: the divert must TERMINATE, and mixed families ─────── */
+
+  it("FIX 5c: once `password_chosen` is stamped, the SAME family redeems into the kid step", async () => {
+    // Every other test in this block proves the divert STARTS. This one proves
+    // it ENDS. Without it, a bug that made `needsSetPasswordStep` unconditional
+    // would leave a family bouncing at /set-password forever with a suite that
+    // never noticed — the step's whole job is to be one-time.
+    const { deps } = fakeDeps({
+      token: FRESH,
+      appMetadata: { funnel: true, role: "parent", password_chosen: true },
+      children: [{ id: "c1", applicantState: "added", createdAt: iso(NOW - 1), status: "draft" }],
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: V3_ADD_KID_HREF,
+    });
+  });
+
+  it("FIX 5c: a funnel family who ALREADY has an FP child skips the step too (the beta cohort)", async () => {
+    // The third condition, on the redemption path: they chose a real password
+    // at verifyCompletion and simply predate the stamp. `deriveHasPassword`
+    // then lands them on the dashboard, which is their home.
+    const { deps } = fakeDeps({
+      token: FRESH,
+      appMetadata: { funnel: true, role: "parent" },
+      children: [
+        { id: "c1", applicantState: "added", createdAt: iso(NOW - 1), status: "draft", fpUsername: "remi.newal" },
+      ],
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/dashboard",
+    });
+  });
+
+  it("FIX 5d: a MIXED family (one FP kid + one v2 applicant mid-funnel) lands on the DASHBOARD", async () => {
+    // The composition case, and the one most likely to regress: the family has
+    // BOTH a child who is already playing First Profit AND a sibling still
+    // sitting on a half-finished v2 application. `resolveResumeChild` picks the
+    // furthest rung, and either choice must end at the dashboard — the FP child
+    // makes this a password family, and the v2 sibling's unfinished work is a
+    // CARD on that dashboard, not a step the whole family is dragged into.
+    for (const siblingState of ["added", "project_created"] as const) {
+      const { deps } = fakeDeps({
+        token: FRESH,
+        appMetadata: { funnel: true, role: "parent" },
+        children: [
+          {
+            id: "fp-kid",
+            applicantState: "added",
+            createdAt: iso(NOW - 2),
+            status: "draft",
+            fpUsername: "remi.newal",
+          },
+          {
+            id: "v2-kid",
+            applicantState: siblingState,
+            createdAt: iso(NOW - 1),
+            status: "draft",
+            fpUsername: null,
+          },
+        ],
+      });
+      expect(await redeemResumeTokenCore({ token: TOKEN }, deps), siblingState).toEqual({
+        success: true,
+        destination: "/dashboard",
+      });
+    }
+  });
+
+  /* ───────── v3 Unit 8: the FP discriminator on the redemption path ───────── */
+
+  it("a BETA family's old resume link redeems into the dashboard, not the v2 mini-app", async () => {
+    // The confirmed misroute, on the resume door. `app_metadata.funnel` is true
+    // for these parents even though `verifyCompletion` gave them a chosen
+    // password, and their FP children sit on `added` with no arrival — exactly
+    // the shape v2 read as "resume the mini-app".
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        {
+          id: "c1",
+          applicantState: "added",
+          createdAt: iso(NOW - 1),
+          status: "draft",
+          fpUsername: "remi.newal",
+        },
+      ],
+    });
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/dashboard",
+    });
+  });
+
+  it("a WAITLISTED family's old link redeems into v3 — never a retired route", async () => {
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        { id: "c1", applicantState: "waitlisted", createdAt: iso(NOW - 1), status: "waitlisted" },
+      ],
+    });
+    const out = await redeemResumeTokenCore({ token: TOKEN }, deps);
+    expect(out).toEqual({ success: true, destination: "/dashboard" });
+    // The success criterion, stated as an assertion: no v2 deep route survives
+    // on this path, so no bookmark or year-old email lands on a 404.
+    expect(out).not.toMatchObject({ destination: expect.stringContaining("/start/child/") });
+  });
+
+  it("a MIXED family (one v2 applicant kid + one FP kid) lands on the dashboard", async () => {
+    const { deps } = fakeDeps({
+      token: FRESH,
+      children: [
+        { id: "v2", applicantState: "added", createdAt: iso(NOW - 2), status: "draft" },
+        {
+          id: "fp",
+          applicantState: "added",
+          createdAt: iso(NOW - 1),
+          status: "draft",
+          fpUsername: "remi.newal",
+        },
+      ],
+    });
+    // The FP child makes this a password family (`deriveHasPassword`), so
+    // matrix rule 2 owns them and the whole family lands on their home — where
+    // BOTH cards render, each with its own cell.
+    expect(await redeemResumeTokenCore({ token: TOKEN }, deps)).toEqual({
+      success: true,
+      destination: "/dashboard",
     });
   });
 });

@@ -37,6 +37,7 @@ import { sendEmail } from "@/app/lib/email";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { provisionOrRecognizeAccount } from "@/app/lib/funnel/account";
+import { PASSWORD_CHOSEN_METADATA_KEY } from "@/app/lib/funnel/resume-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
@@ -112,7 +113,16 @@ function buildDeps(): V3SignupDeps {
         }),
       }),
     setParentPassword: async (userId, password) => {
-      const res = await admin.auth.admin.updateUserById(userId, { password });
+      const res = await admin.auth.admin.updateUserById(userId, {
+        password,
+        // THE DURABLE "THIS PARENT CHOSE THEIR OWN PASSWORD" STAMP (plan Unit
+        // 8). Written in the SAME call that sets the password, so it can never
+        // claim one that was not set. It is what tells a converted v2 funnel
+        // parent (random, never-disclosed password) apart from a v3 parent who
+        // typed one — `isFunnelProvisioned` is true for both. app_metadata is
+        // merged key-wise by Supabase, so the `funnel` stamp is untouched.
+        app_metadata: { [PASSWORD_CHOSEN_METADATA_KEY]: true },
+      });
       if (res.error) console.error(`[fp/v3-signup] set password failed: ${res.error.message}`);
       return { ok: !res.error };
     },

@@ -83,6 +83,10 @@ export type ChildRow = {
    *  EVER completed arrival. Server-stamped (provision driver), monotonic —
    *  and since U9 the store holds NO children write path at all. */
   arrived_at: string | null;
+  /** The First Profit login handle (v3 Unit 8). Service-role-write-only
+   *  (migration 20260831120000's trigger); the parent's RLS read sees it, which
+   *  is what lets the credentials panel show it without a server round-trip. */
+  fp_username?: string | null;
 };
 
 export function rowToChild(r: ChildRow): Child {
@@ -109,6 +113,7 @@ export function rowToChild(r: ChildRow): Child {
     // card), never coerces to a rung the row does not hold.
     applicantState: parseApplicantState(r.applicant_state),
     arrivedAt: r.arrived_at ?? null,
+    fpUsername: r.fp_username ?? null,
   };
 }
 

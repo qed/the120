@@ -32,6 +32,13 @@ import {
   APPLICANT_STATES,
   type ApplicantState,
 } from "@/app/lib/funnel/applicant-rules";
+import { isFunnelProvisioned } from "@/app/lib/funnel/resume-rules";
+import {
+  childNextVerdictKey,
+  remapV2Verdict,
+  v3RemapRoute,
+  type RemapContext,
+} from "@/app/lib/v3-signup/remap-rules";
 
 /**
  * The destination vocabulary. Symbolic ids, not routes: U5–U8 own the routes
@@ -96,7 +103,66 @@ export type ReentryChild = {
    * but this default cannot even produce one.
    */
   hasComposedProject?: boolean;
+  /**
+   * `children.fp_username` — the per-child FP discriminator (plan Unit 8).
+   * Non-null iff this child holds a First Profit account. FP signup is its ONLY
+   * writer (service-role, trigger-guarded by migration 20260831120000, already
+   * backfilled for the beta cohort), which is what makes it trustworthy as an
+   * authorization-adjacent fact rather than a heuristic. Optional so contexts
+   * built before this unit keep compiling; absent reads as "not FP".
+   */
+  fpUsername?: string | null;
 };
+
+/* ─────────────────── the FP-family derivations (plan Unit 8) ─────────────────── */
+
+/** Does this ONE child hold a First Profit account? */
+export const isFpChild = (c: { fpUsername?: string | null }): boolean =>
+  typeof c.fpUsername === "string" && c.fpUsername.length > 0;
+
+/** Does ANY child in this family? Null (read failed / signed out) is `false`:
+ *  the derivations below all fail toward the pre-unit behaviour. */
+export const familyHasFpChild = (
+  children: readonly { fpUsername?: string | null }[] | null | undefined
+): boolean => (children ?? []).some(isFpChild);
+
+/**
+ * THE `hasPassword` DERIVATION, FIXED AT ITS SOURCE (plan Unit 8).
+ *
+ * `isFunnelProvisioned` reads `app_metadata.funnel === true`, the stamp
+ * `account.ts` puts on every account IT creates. That stamp is SEMANTICALLY
+ * STALE for a First Profit parent: the FP signup path (`verifyCompletion`, and
+ * v3's code redeem) sets a password the parent CHOSE and typed, yet the account
+ * still carries the funnel stamp — so every consumer of the bit concluded "this
+ * family has no password, route them at a resume link" and, for the dashboard
+ * gate, "bounce them into the v2 mini-app". That is the confirmed misroute.
+ *
+ * ONE derivation change routes FP parents as password families everywhere at
+ * once, because every producer takes `hasPassword` as an INPUT computed by its
+ * caller — so there is exactly one shape of caller to fix, not one branch per
+ * surface.
+ *
+ * ⚠ WHY THIS CANNOT WIDEN TO A GENUINE v2 FUNNEL PARENT. The second disjunct is
+ * not "looks like a First Profit family" — it is `children.fp_username IS NOT
+ * NULL` on at least one row. That column has exactly one writer: `createChild`,
+ * through the service-role admin client, behind a DB trigger that raises on any
+ * non-service-role write (migration 20260831120000). A v2 funnel family's
+ * children were inserted by the funnel's own parent-token path, which cannot
+ * set the column even if it tried, so every one of their rows is NULL, the
+ * disjunct is false, `hasPassword` stays false, and they keep routing to
+ * sign_in — where a resume link, not a password form, is still their door.
+ * There is no state a v2 funnel family can reach that sets an `fp_username`
+ * without also giving them a First Profit account with a chosen password.
+ */
+export function deriveHasPassword(input: {
+  /** The session user's `app_metadata`; null when there is no session. */
+  appMetadata: Record<string, unknown> | null | undefined;
+  /** The family's children; null = the read failed. */
+  children: readonly { fpUsername?: string | null }[] | null | undefined;
+}): boolean {
+  if (!isFunnelProvisioned(input.appMetadata)) return true;
+  return familyHasFpChild(input.children);
+}
 
 /**
  * CONTRACT: every field describes ONE family — the family the caller has
@@ -185,7 +251,15 @@ export type ChildNextVerdict =
   | { surface: "arrival"; intent: "arrival" }
   /** A status line and nothing actionable. `waitlisted` is here on purpose:
    *  F7 closes checkout at zero seats, so it must never yield a payment CTA. */
-  | { surface: "status_only"; intent: "submitted" | "in_review" | "waitlisted" };
+  | { surface: "status_only"; intent: "submitted" | "in_review" | "waitlisted" }
+  /** THE v3 CELL (plan Unit 8). A First Profit child — one whose
+   *  `children.fp_username` is set — has an account and is playing. They are
+   *  NOT mid-application, whatever `applicant_state` says: FP signup leaves
+   *  every child it mints on `added` with `arrived_at` NULL, which is exactly
+   *  the shape v2 reads as "owes a mini-app resume". This cell is how that
+   *  collision is resolved once, in the shared mapping, so no surface can
+   *  answer differently. */
+  | { surface: "first_profit"; intent: "keep_building" };
 
 /**
  * The per-child applicant-state → next-surface mapping (reconnect R3): ONE
@@ -208,8 +282,21 @@ export function childNextScreen(facts: {
   applicantState: ApplicantState | null;
   liveDeposit: boolean;
   hasComposedProject: boolean;
+  /**
+   * THE PER-CHILD FP DISCRIMINATOR (plan Unit 8): `children.fp_username IS NOT
+   * NULL`. It is checked FIRST and it outranks every applicant state, because
+   * an FP child's `applicant_state` is meaningless — `createChild` stamps the
+   * entry rung (`added`) on every child it mints and never advances it, so the
+   * v2 ladder reads a playing First Profit kid as a family who abandoned an
+   * application on step one. No FP child may ever owe a `mini_app` verdict; the
+   * guarantee lives HERE rather than in each consumer so a surface cannot
+   * outrun it. Optional so contexts built before this unit keep compiling;
+   * absent reads as "not FP", which is the pre-unit behaviour.
+   */
+  fpProvisioned?: boolean;
 }): ChildNextVerdict {
   const { applicantState, liveDeposit, hasComposedProject } = facts;
+  if (facts.fpProvisioned) return { surface: "first_profit", intent: "keep_building" };
   if (applicantState === null) return { surface: "dashboard", intent: "legacy" };
   switch (applicantState) {
     case "added":
@@ -315,6 +402,10 @@ export function resolveReentry(ctx: ReentryContext): ReentryDestination {
     if (!child) return { screen: "children_grid", reason: "resume" };
     const next = childNextScreen({
       applicantState: child.applicantState,
+      // The FP discriminator rides along so an FP child can never resolve to
+      // the mini-app here either (plan Unit 8) — the guarantee is the mapping's,
+      // and every call site must hand it the fact.
+      fpProvisioned: isFpChild(child),
       // Family-level only: any deposited/enrolled child makes `enrolled` true
       // (deriveEnrolled) and rule 1 owns the family before this line, so the
       // live-deposit axis cannot influence THIS verdict — false is not a
@@ -380,6 +471,12 @@ export function dashboardGateVerdict(facts: {
   children: readonly DashboardGateChild[] | null;
   /** An explicit stay parameter was present on the URL (any value). */
   stay: boolean;
+  /**
+   * The converted-funnel-parent facts (`needsSetPasswordStep`), so this gate's
+   * redirect goes through the SAME remap table every other producer reads.
+   * Optional: absent means "no override", the un-diverted destination.
+   */
+  remapCtx?: RemapContext;
 }): DashboardGateVerdict {
   const { hasSession, hasPassword, children, stay } = facts;
   if (!hasSession) return { action: "render" }; // SignIn swap stays client-side
@@ -391,6 +488,12 @@ export function dashboardGateVerdict(facts: {
   if (!child) return { action: "render" };
   const next = childNextScreen({
     applicantState: child.applicantState,
+    // BELT AND BRACES (plan Unit 8). `deriveHasPassword` already renders every
+    // FP family above, so in practice no FP child reaches this line. The axis
+    // is passed anyway because this is THE redirect that misrouted them, and a
+    // gate whose safety depends on an upstream derivation staying correct is one
+    // refactor away from being no gate at all.
+    fpProvisioned: isFpChild(child),
     // Unreachable for this cohort: any deposited/enrolled child makes
     // `deriveEnrolled` true and the family rendered above, so no child the
     // live-deposit axis could influence ever reaches this call — false is
@@ -398,9 +501,19 @@ export function dashboardGateVerdict(facts: {
     liveDeposit: false,
     hasComposedProject: child.hasComposedProject ?? false,
   });
-  return next.surface === "mini_app"
-    ? { action: "redirect", childId: child.id, route: `/start/child/${child.id}` }
-    : { action: "render" };
+  if (next.surface !== "mini_app") return { action: "render" };
+  // THE DESTINATION COMES FROM THE REMAP TABLE (v3 Unit 8 review, FIX 1). This
+  // line used to build the v2 literal `/start/child/<id>` — a SECOND producer,
+  // and the loudest one: it server-redirects the whole page, so a
+  // mid-application v2 family never even reached the card whose CTA the review
+  // caught. Both are now the one table.
+  const route = childNextRoute(next, facts.remapCtx);
+  // Defensive, not decorative: a redirect to the dashboard FROM the dashboard
+  // is an infinite loop. No `mini_app` cell remaps there today (they answer the
+  // kid step, or the set-password divert), and this guard is what keeps that
+  // true if a cell is ever re-pointed.
+  if (!route || route === "/dashboard") return { action: "render" };
+  return { action: "redirect", childId: child.id, route };
 }
 
 /* ─────────────── the register flip (reconnect U11, R12 flip tier) ─────────────── */
@@ -425,41 +538,65 @@ export function dashboardGateVerdict(facts: {
  * funnel. Evaluated per page-load, server-side; an open tab flips on next
  * navigation, not live.
  */
+/**
+ * THE PATH-REGISTER PREDICATE, EXPORTED (plan Unit 8).
+ *
+ * ⚠ THIS PREDICATE AND `dashboard-gate-core`'s `verifiedTaskCounts` LOAD
+ * CONDITION ARE ONE THING, AND THEY ARE COUPLED. The counts read is made only
+ * for a path-register family; widening the register without widening the load
+ * gives every v3 family a permanent 0 floor on the bars the register exists to
+ * show, and widening the load without the register does pointless work. The
+ * coupling is not maintained by remembering it: the gate core calls
+ * `dashboardRegister(children) === "path"` — this same function, over the same
+ * mapped rows — so there is literally one predicate and the pair cannot drift.
+ *
+ * v3 widens it by one disjunct. `arrivedAt` is the v2 sticky arrival fact (a
+ * funnel child who completed the arrival flow); `fpUsername` is the v3 fact (a
+ * child who HAS a First Profit account). An FP child never arrives through the
+ * funnel — `arrived_at` stays NULL forever — so without this disjunct a v3
+ * family would sit in the APPLICATION register, which renders "Continue
+ * application" and a live $250 reserve CTA at people who are already playing.
+ */
+export const isPathRegisterChild = (
+  c: Pick<DashboardGateChild, "arrivedAt"> & { fpUsername?: string | null }
+): boolean => c.arrivedAt != null || isFpChild(c);
+
 export function dashboardRegister(
-  children: readonly Pick<DashboardGateChild, "arrivedAt">[] | null
+  children: readonly (Pick<DashboardGateChild, "arrivedAt"> & {
+    fpUsername?: string | null;
+  })[] | null
 ): "application" | "path" {
   if (!children) return "application";
-  return children.some((c) => c.arrivedAt != null) ? "path" : "application";
+  return children.some(isPathRegisterChild) ? "path" : "application";
 }
 
 /**
- * Routes for the navigable screens. `link_expired` / `link_used` are states
- * the resume landing renders in place — asking for their route is a caller
- * bug, answered with the landing's own null rather than a throw.
+ * Routes for the navigable screens — SINCE v3 UNIT 8, THROUGH THE REMAP TABLE.
  *
- * These literals are the funnel's route plan as of U2; the units that build
- * each route (U5–U8) adjust HERE if reality lands elsewhere — one mapper,
- * not per-screen literals scattered across callers. The `never` guard makes
- * vocabulary growth a compile error, not a silent `undefined` return.
+ * The v2 literals (`/start`, `/start/children`, `/start/child/<id>`) are gone
+ * from this function, and that is the point: every producer that asks "where
+ * does this destination go" now reads `app/lib/v3-signup/remap-rules.ts`, so a
+ * v2 verdict resolves to a v3 route in ONE place instead of six. `link_expired`
+ * / `link_used` still answer `null` — they are states the resume landing draws
+ * in place, which is why the table is verdict→verdict rather than route→route.
+ *
+ * `ctx` is optional and carries the converted-funnel-parent facts (see
+ * `needsSetPasswordStep`). Producers that hold a user record should pass it;
+ * those that do not (a logged-out resume landing) reach only override-immune
+ * cells anyway.
  */
-export function screenRoute(dest: ReentryDestination): string | null {
-  switch (dest.screen) {
-    case "capture":
-      return "/start";
-    case "children_grid":
-      return "/start/children";
-    case "child_resume":
-      return `/start/child/${dest.childId}`;
-    case "sign_in":
-    case "dashboard":
-      // The dashboard renders SignIn when logged out — one route, two screens.
-      return "/dashboard";
-    case "link_expired":
-    case "link_used":
-      return null;
-    default: {
-      const exhaustive: never = dest;
-      return exhaustive;
-    }
-  }
+export function screenRoute(dest: ReentryDestination, ctx?: RemapContext): string | null {
+  const cell = remapV2Verdict(`reentry:${dest.screen}`, ctx);
+  return v3RemapRoute(cell.verdict);
+}
+
+/**
+ * The per-child route, through the same table: what a dashboard card's CTA or a
+ * per-child landing should link at. `childNextScreen`'s verdict in, v3 URL out.
+ */
+export function childNextRoute(
+  verdict: ChildNextVerdict,
+  ctx?: RemapContext
+): string | null {
+  return v3RemapRoute(remapV2Verdict(`child:${childNextVerdictKey(verdict)}`, ctx).verdict);
 }

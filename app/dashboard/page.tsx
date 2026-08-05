@@ -9,6 +9,10 @@ import {
   dashboardRegister,
 } from "@/app/lib/funnel/session-rules";
 import { loadDashboardGateFactsCore } from "@/app/lib/funnel/dashboard-gate-core";
+import {
+  currentPolicyHash,
+  FP_CONSENT_POLICY,
+} from "@/app/api/fp/signup/consent-rules";
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
@@ -49,6 +53,20 @@ export default async function DashboardPage({
         seatsRemaining={seatsRemaining}
         register={register}
         verifiedTaskCounts={facts.verifiedTaskCounts}
+        photoConsentChildIds={facts.photoConsentChildIds}
+        // The SAME override facts the gate above just used, so a card's CTA and
+        // the gate's redirect can never name two different destinations for one
+        // child (v3 Unit 8 review, FIX 1).
+        remapCtx={facts.remapCtx}
+        // The consent bundle travels as a PROP because `consent-rules` imports
+        // node:crypto and the panel that renders it is a client component. The
+        // text and the hash are computed together here, so what the browser
+        // displays and what it echoes can never be two different strings.
+        consentPolicy={{
+          version: FP_CONSENT_POLICY.version,
+          hash: currentPolicyHash(),
+          text: FP_CONSENT_POLICY.text,
+        }}
       />
     </DashboardProvider>
   );

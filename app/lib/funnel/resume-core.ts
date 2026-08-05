@@ -74,6 +74,7 @@ import {
   RESUME_REQUEST_IP_RATE_LIMIT,
   RESUME_REQUEST_RATE_LIMIT,
   RESUME_TOKEN_TTL_MS,
+  hasChosenPassword,
   isFunnelProvisioned,
   resumeVerdict,
 } from "@/app/lib/funnel/resume-rules";
@@ -86,6 +87,8 @@ import {
 } from "@/app/lib/funnel/resume-store";
 import {
   deriveEnrolled,
+  deriveHasPassword,
+  familyHasFpChild,
   resolveReentry,
   screenRoute,
   type ReentryChild,
@@ -360,20 +363,35 @@ export async function redeemResumeTokenCore(
       createdAt: k.createdAt,
       hasComposedProject: composed.has(k.id),
       status: k.status,
+      // The v3 FP discriminator (plan Unit 8) — see `deriveHasPassword`.
+      fpUsername: k.fpUsername,
     }));
     const enrolled = deriveEnrolled(children);
 
     const dest = resolveReentry({
       hasSession: true,
       link: "valid",
-      hasPassword: !isFunnelProvisioned(minted.user.appMetadata),
+      // v3 (plan Unit 8): funnel-stamped AND not-FP. A beta family redeeming an
+      // old link is a First Profit family with a real chosen password; routing
+      // them as a link-only funnel family is the misroute this closes.
+      hasPassword: deriveHasPassword({ appMetadata: minted.user.appMetadata, children }),
       enrolled,
       children,
     });
     // hasSession is true and link is valid, so the matrix can only return a
     // navigable screen — the ?? is unreachable, and is a fallback rather
     // than a `!` so a future vocabulary change degrades instead of throwing.
-    return { success: true, destination: screenRoute(dest) ?? "/dashboard" };
+    // The destination comes from the v2→v3 remap table, so a waitlisted family's
+    // year-old link redeems into the v3 world instead of a retired route.
+    return {
+      success: true,
+      destination:
+        screenRoute(dest, {
+          funnelStamped: isFunnelProvisioned(minted.user.appMetadata),
+          passwordChosen: hasChosenPassword(minted.user.appMetadata),
+          hasFpChild: familyHasFpChild(children),
+        }) ?? "/dashboard",
+    };
   } catch (err) {
     console.error("[funnel/resume] redeem exception:", err);
     return { success: false, state: "error" };

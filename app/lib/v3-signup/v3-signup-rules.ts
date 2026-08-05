@@ -78,6 +78,7 @@
 import { z } from "zod";
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import {
+  V3_KID_RESET_NAMESPACE,
   V3_ONBOARDING_NAMESPACE,
   V3_START_NAMESPACE,
   V3_START_IP_NAMESPACE,
@@ -295,6 +296,33 @@ export function deriveV3VerifyRateLimitKeys(
 export function deriveV3OnboardingRateLimitKey(parentId: string): string {
   return `${V3_ONBOARDING_NAMESPACE}:${encodeURIComponent(parentId)}`;
 }
+
+/**
+ * The dashboard credentials-recovery / legacy-consent budget key (v3 Unit 8).
+ * Parent-id keyed for the same reason as the onboarding key above, encoded for
+ * the same delimiter-collision reason as every key in this file.
+ */
+export function deriveV3KidResetRateLimitKey(
+  parentId: string,
+  scope: V3KidActionScope
+): string {
+  return `${V3_KID_RESET_NAMESPACE}:${scope}:${encodeURIComponent(parentId)}`;
+}
+
+/**
+ * ONE BUCKET PER ACTION, NOT ONE PER PARENT (v3 Unit 8 review, FIX 6).
+ *
+ * The four dashboard actions used to share a single namespace+key per parent,
+ * so looping any one of them exhausted all four. Self-limited to the account
+ * holder, so it was never a bypass — but "nuisance" is the wrong word for one
+ * of these pairings: WITHDRAWING PHOTO CONSENT IS A PRIVACY RIGHT, and a parent
+ * who has just spent their budget retrying a flaky password reset must not
+ * discover that the withdraw button now refuses them for fifteen minutes.
+ * Unrelated journeys, unrelated budgets. The scope rides in the key (not a
+ * second namespace) so the shared config, the shared docblock and the shared
+ * derivation stay one thing.
+ */
+export type V3KidActionScope = "password" | "consent" | "revoke" | "set-parent-password";
 
 /* ------------------------------------------------------------- the mail */
 

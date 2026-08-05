@@ -22,6 +22,7 @@
 import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
 import type { SignupCoreDeps } from "../../signup-core";
 import type { CreateChildDeps } from "../../child-core";
+import type { V3SignupDeps } from "@/app/lib/v3-signup/v3-signup-core";
 import { fakeClient, newStore, type Store } from "./fake-supabase";
 
 const BASE_NOW = Date.parse("2026-08-01T12:00:00.000Z");
@@ -33,6 +34,15 @@ export type HarnessOptions = {
   signInOutage?: boolean;
   /** Force the verification mail send to fail (strands the parent → compensate). */
   mailFails?: boolean;
+  /** (v3) Force the COOKIE session mint to fail after the password is set. */
+  cookieSignInFails?: boolean;
+  /** (v3) Make the cookie-writability probe throw — the Server-Component shape
+   *  the funnel's probe exists to catch. */
+  cookiesUnwritable?: boolean;
+  /** (v3) Fixed sequence of 6-digit codes `mintCode` hands out, cycling. When
+   *  absent the harness mints `100001`, `100002`, … so every code is distinct
+   *  and a test can force a COLLISION by pinning two harnesses to one value. */
+  codes?: readonly string[];
 };
 
 export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}) {
@@ -42,6 +52,8 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
   // after inbox proof.
   const authByEmail = new Map<string, { id: string; password: string | null }>();
   const authById = new Map<string, { email: string; password: string | null }>();
+  /** parent user id → app_metadata, as the real provisioner stamps it. */
+  const parentAppMetadata = new Map<string, Record<string, unknown>>();
   let authSeq = 0;
 
   const createAuth = (email: string, password: string | null): { id: string } | "exists" => {
@@ -58,15 +70,42 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
     if (!rec) return true; // already gone — idempotent
     authById.delete(userId);
     authByEmail.delete(rec.email);
+    parentAppMetadata.delete(userId);
     return true;
   };
 
   // ── effect logs the tests assert against ────────────────────────────────
-  const sentMail: Array<{ to: string; subject: string; token: string | null }> = [];
+  // `token` is the LINK mode secret parsed out of the mail body; `code` is the
+  // v3 CODE mode secret. Exactly one of them is ever non-null per mail, which
+  // is itself the cross-mode assertion several tests lean on.
+  const sentMail: Array<{
+    to: string;
+    subject: string;
+    token: string | null;
+    code: string | null;
+  }> = [];
   const mintedTokens: string[] = [];
+  const mintedCodes: string[] = [];
   const opsAlerts: Array<{ subject: string; body: string }> = [];
   let tokenSeq = 0;
+  let codeSeq = 0;
   let forceCleanupFail = false;
+  let cookiesUnwritable = opts.cookiesUnwritable ?? false;
+  /** Runtime-flippable siblings of the constructor options, so ONE harness (and
+   *  therefore one auth model + one store) can carry a family across a fault and
+   *  out the other side — which is the only way to test that a failure left a
+   *  recoverable state rather than merely that it failed. */
+  let mailFails = opts.mailFails ?? false;
+  let setPasswordFails = false;
+  let cookieSignInFails = opts.cookieSignInFails ?? false;
+  /** (v3) Every cookie-session mint this run performed, in order. */
+  const cookieSessions: Array<{ email: string; password: string }> = [];
+  /** (v3) One entry per cookie-writability probe, so a test can assert the
+   *  probe ran BEFORE the irreversible redeem (order, not just presence). */
+  const effectLog: string[] = [];
+  /** The harness clock, advanceable so cooldown/TTL branches are reachable
+   *  without real waiting. Every dep reads through this. */
+  let clock = BASE_NOW;
 
   const db = fakeClient(store) as unknown as SignupCoreDeps["db"];
 
@@ -80,9 +119,15 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
       const made = createAuth(email, null);
       if (made === "exists") return { kind: "existing_account" };
       store.families.push({ id: `fam-${made.id}`, parent_id: made.id, is_test: false });
+      // The real provisioner stamps `{ role: "parent", funnel: true }`, and the
+      // dashboard gate derives `hasPassword` from exactly that bit
+      // (isFunnelProvisioned). Modeled here so a v3 test can assert the gate's
+      // verdict against the REAL derivation rather than a hand-made fact.
+      parentAppMetadata.set(made.id, { role: "parent", funnel: true });
       return { kind: "provisioned", userId: made.id };
     },
     setParentPassword: async (userId, password) => {
+      if (setPasswordFails) return { ok: false };
       const rec = authById.get(userId);
       if (!rec) return { ok: false };
       rec.password = password;
@@ -113,9 +158,10 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
       return { ok: true, accessToken: `ptok:${rec.id}`, refreshToken: `rtok:${rec.id}` };
     },
     sendMail: async ({ to, subject, text }) => {
-      if (opts.mailFails) return { ok: false, error: "smtp down" };
+      if (mailFails) return { ok: false, error: "smtp down" };
       const m = /token=([^\s&]+)/.exec(text ?? "");
-      sentMail.push({ to, subject, token: m?.[1] ?? null });
+      const c = /code is (\d{6})/.exec(text ?? "");
+      sentMail.push({ to, subject, token: m?.[1] ?? null, code: c?.[1] ?? null });
       return { ok: true };
     },
     mintToken: () => {
@@ -123,7 +169,13 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
       mintedTokens.push(t);
       return t;
     },
-    now: () => BASE_NOW,
+    mintCode: () => {
+      const fixed = opts.codes;
+      const code = fixed && fixed.length > 0 ? fixed[codeSeq++ % fixed.length] : String(100001 + codeSeq++);
+      mintedCodes.push(code);
+      return code;
+    },
+    now: () => clock,
   };
 
   /* ───────────────────────── CreateChildDeps ───────────────────────── */
@@ -152,7 +204,29 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
       return { ok: true, userId: made.id };
     },
     deleteAuthUser: async (userId) => ({ ok: deleteAuth(userId) }),
-    now: () => BASE_NOW,
+    now: () => clock,
+  };
+
+  /* ───────────────────────── V3SignupDeps (v3 Unit 2) ───────────────────────── */
+  // The SAME signup effect bundle the code path reuses, plus the two cookie
+  // effects the v3 core adds. `env` carries no allowlist, so `isTestSignup`
+  // decides purely on the `@test.the120.invalid` domain — exactly what the
+  // action's real env does for a family that is not explicitly allowlisted.
+  const v3Deps: V3SignupDeps = {
+    signup: signupDeps,
+    assertCookiesWritable: async () => {
+      effectLog.push("cookieProbe");
+      if (cookiesUnwritable) throw new Error("cookies not writable");
+    },
+    signInCookieSession: async (email, password) => {
+      effectLog.push("cookieSignIn");
+      if (cookieSignInFails) return { ok: false };
+      const rec = authByEmail.get(email.trim().toLowerCase());
+      if (!rec || rec.password == null || rec.password !== password) return { ok: false };
+      cookieSessions.push({ email: email.trim().toLowerCase(), password });
+      return { ok: true };
+    },
+    env: {},
   };
 
   return {
@@ -160,17 +234,48 @@ export function makeHarness(store: Store = newStore(), opts: HarnessOptions = {}
     db,
     signupDeps,
     childDeps,
+    v3Deps,
     // effect logs + models
     sentMail,
     mintedTokens,
+    mintedCodes,
+    cookieSessions,
+    effectLog,
     opsAlerts,
     authByEmail,
     authById,
+    parentAppMetadata,
     childAuthEmails,
     // knobs
     setCleanupFail: (v: boolean) => {
       forceCleanupFail = v;
     },
+    /** (v3) Flip the cookie-writability probe mid-run — the same harness (and
+     *  therefore the same auth model) can then prove a refused verify left the
+     *  code intact and still redeemable. */
+    setCookiesUnwritable: (v: boolean) => {
+      cookiesUnwritable = v;
+    },
+    /** Flip the mailer mid-run — the resume re-issue's mail-failure branch
+     *  (review FIX 2) needs a working start followed by a failing send. */
+    setMailFails: (v: boolean) => {
+      mailFails = v;
+    },
+    /** (v3) Fail `setParentPassword` — the FIRST post-redeem step (review
+     *  FIX 5): the single-use code is already spent when this bites. */
+    setPasswordFails: (v: boolean) => {
+      setPasswordFails = v;
+    },
+    /** (v3) Fail the cookie-session mint — the SECOND post-redeem step. */
+    setCookieSignInFails: (v: boolean) => {
+      cookieSignInFails = v;
+    },
+    /** Move the harness clock forward — the only way to reach the TTL and
+     *  resend-cooldown branches without waiting in real time. */
+    advanceClock: (ms: number) => {
+      clock += ms;
+    },
+    clockNow: () => clock,
     now: BASE_NOW,
   };
 }

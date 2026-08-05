@@ -906,6 +906,13 @@ deletion, grep-to-zero, beta bookmark/nurture-link audit + redirects.
   `scripts/fw-ops.ts`
 - Keep deliberately: `fp-save-doc-guard-rules.ts` + tests (executable spec of two
   applied migrations) — relocate, don't delete
+- ⚠ **The v3 front door imports from `app/fp/lib` too.** `app/lib/v3-signup/*`
+  (`v3-signup-rules.ts` → `rate-limit-rules`) and `app/start/v3/*`
+  (`actions.ts` → `rate-limit-rules` AND `rate-limit-store`) are NOT in the
+  `app/api/fp/*` import set the relocate list enumerates. They must move with
+  the rest in the SAME commit or `/start` v3 — the live signup door by then —
+  breaks. Add them to the import-site sweep explicitly; a grep for
+  `@/app/fp/lib/rate-limit` is the check.
 
 **Approach:** Relocate first (suite green), delete second (grep identifiers to
 zero — retirement learning). Before deletion: audit every URL in beta onboarding

@@ -163,6 +163,7 @@ export async function POST(req: Request): Promise<Response> {
       },
       sendMail: (await import("@/app/lib/email")).sendEmail, // unused
       mintToken: () => "", // unused
+      mintCode: () => "", // unused (verify-completion mints no secret)
       now: () => Date.now(),
     };
 

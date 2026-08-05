@@ -160,6 +160,7 @@ function makeDeps(db: SignupCoreDeps["db"], o: DepOverrides = {}) {
         return { ok: true };
       }),
     mintToken: o.mintToken ?? (() => "raw-token-abc"),
+    mintCode: o.mintCode ?? (() => "424242"),
     now: o.now ?? (() => 1000),
   };
   return { deps, record };

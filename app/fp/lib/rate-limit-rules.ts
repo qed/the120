@@ -99,6 +99,45 @@ export const FW_RESIDUE_REPORT_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60
 
 export const FW_MATCH_LOOKUP_RATE_LIMIT: RateLimitConfig = { windowMs: 10 * 60_000, limit: 60 };
 
+/* ───────────────── New User Flow v3 parent step (v3 Unit 2) ───────────────── */
+
+/**
+ * The v3 `/start` Server Actions get their OWN namespaces so their strikes can
+ * never interact with `fp-signup` (the firstprofit.school HTTP front door) or
+ * `fp-login`. Two live front doors share the `fp_signup_attempts` table; they
+ * must not share a rate-limit bucket, or a spike at one would lock out the
+ * other for the same family.
+ *
+ * ⚠ BOTH of these are VOLUMETRIC BACKSTOPS ONLY. This store is in-memory,
+ * per-instance, and empty on cold start (see rate-limit-store.ts' own header),
+ * so nothing security-load-bearing may rest on it. The control that actually
+ * bounds code guessing is the DURABLE `code_guess_count` on the attempt row
+ * (app/api/fp/signup/verify-store.ts MAX_CODE_GUESSES). These limits exist to
+ * bound VOLUME — mail sends, account-creation probes, request floods — not to
+ * bound guesses.
+ */
+export const V3_START_NAMESPACE = "fp-v3-start";
+export const V3_START_IP_NAMESPACE = "fp-v3-start-ip";
+export const V3_VERIFY_NAMESPACE = "fp-v3-verify";
+export const V3_VERIFY_IP_NAMESPACE = "fp-v3-verify-ip";
+
+/** Start is the heavy door — it mints an auth account and sends mail — so the
+ *  per-(ip,email) budget is tight; it still covers a typo'd password, an
+ *  edit-email, and a couple of retries in one sitting. */
+export const V3_START_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 5 };
+
+/** The per-IP backstop a varying email cannot dodge. Generous enough for a
+ *  school open-house on one NAT, far below what enumerating a list needs. */
+export const V3_START_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 60 * 60_000, limit: 20 };
+
+/** Verify + resend share this per-(ip,email) budget. Sized ABOVE
+ *  MAX_CODE_GUESSES on purpose: the durable counter is what must decide a
+ *  lockout, and a volumetric limit that bit first would mask it (and would
+ *  reset itself on the next cold start, which the durable counter never does). */
+export const V3_VERIFY_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 20 };
+
+export const V3_VERIFY_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 60 * 60_000, limit: 100 };
+
 /** Events still inside the window (future-stamped ones included). Non-mutating. */
 export function pruneEvents(events: readonly number[], now: number, windowMs: number): number[] {
   return events.filter((t) => now - t < windowMs);

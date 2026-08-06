@@ -411,6 +411,8 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
           // this is what stops an idea working in a later criterion from
           // reading as stalled.
           lastCompletionAt: OUTSIDE_STAMP,
+          // `3.1.1` is a real completion, so it is also the timing evidence.
+          lastCorroboratedCompletionAt: OUTSIDE_STAMP,
           recencyClamped: false,
           hasCompletionsOutsideRequest: true,
         },
@@ -423,6 +425,7 @@ describe("GET /api/fp/progress — staff cohort progress (Watchtower Unit 2)", (
           doneByTask: {},
           doneAtByTask: {},
           lastCompletionAt: null,
+          lastCorroboratedCompletionAt: null,
           recencyClamped: false,
           hasCompletionsOutsideRequest: false,
         },

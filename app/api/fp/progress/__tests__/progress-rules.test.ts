@@ -93,9 +93,19 @@ describe("progress rules — refusal shaping", () => {
 
 describe("progress rules — rate limiting", () => {
   it("pins the budgets so a future tightening is a deliberate edit", () => {
-    expect(PROGRESS_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 60 });
-    expect(PROGRESS_IP_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 120 });
+    expect(PROGRESS_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 300 });
+    expect(PROGRESS_IP_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 600 });
     expect(PROGRESS_IP_RATE_LIMIT.limit).toBeGreaterThanOrEqual(PROGRESS_RATE_LIMIT.limit);
+  });
+
+  it("fits a whole-curriculum sweep of the flow board several times over", () => {
+    // The board issues ONE request per criterion selection, and the curriculum
+    // is 25 criteria — plus a phase click, a Refresh and a Retry each. A budget
+    // that a single human reading pattern can exhaust turns the limiter's 401
+    // into an authorization signal, which is the seam this sizing closes.
+    const criteriaInTheCurriculum = 25;
+    const oneSweepWithHeadroom = criteriaInTheCurriculum + 5;
+    expect(PROGRESS_RATE_LIMIT.limit).toBeGreaterThanOrEqual(oneSweepWithHeadroom * 5);
   });
 
   it("pins the EXACT key format (both segments present, own namespace)", () => {
@@ -564,6 +574,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: { "1.1.1": true, "1.1.2": true },
             doneAtByTask: { "1.1.1": 1_754_000_000_000, "1.1.2": 1_754_100_000_000 },
             lastCompletionAt: 1_754_100_000_000,
+            lastCorroboratedCompletionAt: 1_754_100_000_000,
             recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
@@ -576,6 +587,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: { "4.1.1": true },
             doneAtByTask: { "4.1.1": 1_754_300_000_000 },
             lastCompletionAt: 1_754_300_000_000,
+            lastCorroboratedCompletionAt: 1_754_300_000_000,
             recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
@@ -594,6 +606,7 @@ describe("progress rules — shapeProgress happy path", () => {
             doneByTask: {},
             doneAtByTask: {},
             lastCompletionAt: null,
+            lastCorroboratedCompletionAt: null,
             recencyClamped: false,
             hasCompletionsOutsideRequest: false,
           },
@@ -716,8 +729,13 @@ describe("progress rules — shapeProgress filters maps to the requested task id
     // client could subtract. (Without this the test's assertions would be
     // content-identical to the plain membership test above.)
     expect(idea!.lastCompletionAt).toBe(9_000_000);
+    expect(idea!.lastCorroboratedCompletionAt).toBe(9_000_000);
+    // TWICE, and only as the two RECENCY numbers — `1.1.4` is a real completion,
+    // so it is legitimately the timing evidence too. What must never happen is
+    // its appearance in a filtered map, where the client would subtract it.
     const occurrences = JSON.stringify(idea).split("9000000").length - 1;
-    expect(occurrences).toBe(1);
+    expect(occurrences).toBe(2);
+    expect(JSON.stringify(idea!.doneAtByTask)).not.toContain("9000000");
   });
 
   it("an idea with NO completions in the window is still PRESENT, with empty maps", () => {
@@ -864,6 +882,119 @@ describe("progress rules — lastCompletionAt is computed BEFORE filtering", () 
   });
 });
 
+describe("progress rules — lastCorroboratedCompletionAt is the TIMING EVIDENCE", () => {
+  // `lastCompletionAt` is deliberately NOT done-gated, so on its own it cannot
+  // tell a real completion from a bare stamp. This field is the second number
+  // that can: the client compares the pair instead of trusting a timing-free
+  // `hasCompletionsOutsideRequest` flag, which a child who completed one task a
+  // year ago and quit carries forever, for every criterion.
+
+  it("equals lastCompletionAt when the newest stamp IS a completion", () => {
+    const [idea] = ideasFor(
+      {
+        ideas: [
+          {
+            id: "i",
+            doneByTask: { "1.1.5": true, "3.1.1": true },
+            doneAtByTask: { "1.1.5": 1_000, "3.1.1": 9_999_999 },
+          },
+        ],
+      },
+      ["1.1.5"]
+    );
+    // Out of the request, and still the evidence: the client's "working in a
+    // later criterion" case must keep reading as active.
+    expect(idea!.lastCompletionAt).toBe(9_999_999);
+    expect(idea!.lastCorroboratedCompletionAt).toBe(9_999_999);
+  });
+
+  it("LAGS lastCompletionAt when the newest stamp has no `true` beside it", () => {
+    // THE ATTACK. A bare `doneAtByTask` key mints no completion anywhere in the
+    // system, yet it moves `lastCompletionAt` to "just now".
+    const [idea] = ideasFor(
+      {
+        ideas: [
+          {
+            id: "i",
+            doneByTask: { "1.1.5": true },
+            doneAtByTask: { "1.1.5": 1_000, "1.2.2": 9_999_999 },
+          },
+        ],
+      },
+      ["1.1.5", "1.2.2"]
+    );
+    expect(idea!.lastCompletionAt).toBe(9_999_999);
+    expect(idea!.lastCorroboratedCompletionAt).toBe(1_000);
+  });
+
+  it("is null when a record carries stamps but not one completion", () => {
+    const [idea] = ideasFor(
+      { ideas: [{ id: "i", doneAtByTask: { "1.1.5": 5_000 } }] },
+      ["1.1.5"]
+    );
+    expect(idea!.lastCompletionAt).toBe(5_000);
+    expect(idea!.lastCorroboratedCompletionAt).toBeNull();
+  });
+
+  it("takes the max across BOTH the legacy and the stable pairs", () => {
+    const [idea] = ideasFor(
+      {
+        ideas: [
+          {
+            id: "i",
+            done: { "1.1#0": true },
+            doneAt: { "1.1#0": 8_000 },
+            doneByTask: { "1.1.1": true },
+            doneAtByTask: { "1.1.1": 3_000 },
+          },
+        ],
+      },
+      ASK_UNUSED
+    );
+    expect(idea!.lastCorroboratedCompletionAt).toBe(8_000);
+  });
+
+  it("a legacy stamp whose `done` is FALSE is not evidence", () => {
+    const [idea] = ideasFor(
+      {
+        ideas: [{ id: "i", done: { "1.1#0": false }, doneAt: { "1.1#0": 8_000 } }],
+      },
+      ASK_UNUSED
+    );
+    expect(idea!.lastCompletionAt).toBe(8_000);
+    expect(idea!.lastCorroboratedCompletionAt).toBeNull();
+  });
+
+  it("a BUSINESS carrying one fresh bare stamp reports no evidence at all", () => {
+    // The fold makes this the sharper half: this record's recency lands on the
+    // idea it links to, so without the evidence number it revives a long-dead
+    // idea into `active`.
+    const walked = walkSaveDoc(
+      doc({ businesses: [{ id: "b", ideaId: "i-1", doneAtByTask: { "4.1.1": 9_999_999 } }] })
+    );
+    expect(walked.businesses[0]!.lastCompletionAt).toBe(9_999_999);
+    expect(walked.businesses[0]!.lastCorroboratedCompletionAt).toBeNull();
+  });
+
+  it("is CLAMPED exactly like lastCompletionAt — never a raw future stamp", () => {
+    const now = new Date(NOW_MS);
+    const walked = walkSaveDoc(
+      doc({
+        ideas: [
+          {
+            id: "i",
+            doneByTask: { "1.1.1": true },
+            doneAtByTask: { "1.1.1": NOW_MS + 400 * 86_400_000 },
+          },
+        ],
+      }),
+      now
+    );
+    expect(walked.ideas[0]!.lastCorroboratedCompletionAt).toBe(NOW_MS);
+    expect(walked.ideas[0]!.recencyClamped).toBe(true);
+  });
+});
+
 describe("progress rules — shapeProgress missing and unreadable rows", () => {
   it("a child with a profile but NO save row is present as 'never started', not unreadable", () => {
     const rows = shapeProgress([child()], [{ id: "p-1", child_id: "c-1" }], [], ASK_ALL);
@@ -956,6 +1087,7 @@ describe("progress rules — walkSaveDoc: legacy maps", () => {
         doneByTask: {},
         doneAtByTask: {},
         lastCompletionAt: 1_700_000_001_000,
+        lastCorroboratedCompletionAt: 1_700_000_001_000,
         recencyClamped: false,
       },
     ]);
@@ -983,6 +1115,7 @@ describe("progress rules — walkSaveDoc: the idea label is never read", () => {
       "id",
       "index",
       "lastCompletionAt",
+      "lastCorroboratedCompletionAt",
       "recencyClamped",
     ].sort());
     expect(JSON.stringify(walked)).not.toContain("KID-TYPED");
@@ -1084,6 +1217,7 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
       doneByTask: {},
       doneAtByTask: {},
       lastCompletionAt: null,
+      lastCorroboratedCompletionAt: null,
       recencyClamped: false,
     });
   });
@@ -1118,6 +1252,9 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
           doneByTask: {},
           doneAtByTask: { real: 3 },
           lastCompletionAt: 3,
+          // A stamp with no `true` beside it in the boolean map is NOT a
+          // completion, so it never becomes timing evidence.
+          lastCorroboratedCompletionAt: null,
           recencyClamped: false,
         },
       ],
@@ -1129,6 +1266,7 @@ describe("progress rules — walkSaveDoc: fail-closed narrowing", () => {
           doneByTask: { real: true },
           doneAtByTask: {},
           lastCompletionAt: null,
+          lastCorroboratedCompletionAt: null,
           recencyClamped: false,
         },
       ],
@@ -1210,6 +1348,7 @@ describe("progress rules — walkSaveDoc: ORIGINAL idea indices", () => {
       doneByTask: {},
       doneAtByTask: {},
       lastCompletionAt: null,
+      lastCorroboratedCompletionAt: null,
       recencyClamped: false,
     });
   });
@@ -1294,6 +1433,7 @@ describe("progress rules — walkSaveDoc: businesses", () => {
         doneByTask: { "4.1.1": true },
         doneAtByTask: {},
         lastCompletionAt: null,
+        lastCorroboratedCompletionAt: null,
         recencyClamped: false,
       },
     ]);
@@ -1345,6 +1485,7 @@ describe("progress rules — walkSaveDoc: businesses", () => {
         doneByTask: { "4.1.1": true },
         doneAtByTask: { "4.1.1": 5 },
         lastCompletionAt: 5,
+        lastCorroboratedCompletionAt: 5,
         recencyClamped: false,
       },
     ]);
@@ -1358,6 +1499,40 @@ describe("progress rules — walkSaveDoc: businesses", () => {
   it("an entry with no usable id is dropped (the client keys rows by id)", () => {
     const walked = walkSaveDoc(doc({ businesses: [{ ideaId: "idea-1" }, { id: "" }, { id: "keep" }] }));
     expect(walked.businesses.map((b) => b.id)).toEqual(["keep"]);
+  });
+
+  // ── Every silent drop is a NUMBER, never a filter ──
+  // A business has no `index`, so unlike a malformed idea it leaves no
+  // placeholder and the client's only loss detector (`idea.index`) cannot see
+  // it. `truncated` is the one channel that can carry the loss.
+  it("a NON-OBJECT business entry flags the child as truncated", () => {
+    const walked = walkSaveDoc(doc({ businesses: [{ id: "keep" }, "MALFORMED"] }));
+    expect(walked.businesses.map((b) => b.id)).toEqual(["keep"]);
+    expect(walked.truncated).toBe(true);
+  });
+
+  it("a business with a missing or empty id flags the child as truncated", () => {
+    expect(walkSaveDoc(doc({ businesses: [{ ideaId: "idea-1" }] })).truncated).toBe(true);
+    expect(walkSaveDoc(doc({ businesses: [{ id: "" }] })).truncated).toBe(true);
+    expect(walkSaveDoc(doc({ businesses: [{ id: 7 }] })).truncated).toBe(true);
+  });
+
+  it("a DUPLICATE business id flags the child as truncated", () => {
+    const walked = walkSaveDoc(
+      doc({ businesses: [{ id: "b1", doneByTask: { "4.1.1": true } }, { id: "b1" }] })
+    );
+    expect(walked.businesses).toHaveLength(1);
+    expect(walked.truncated).toBe(true);
+  });
+
+  it("a well-formed businesses array does NOT flag truncated", () => {
+    // The zero: without it, an unconditional `budget.truncated = true` anywhere
+    // in the loop would satisfy every assertion above.
+    const walked = walkSaveDoc(
+      doc({ businesses: [{ id: "b1", ideaId: "i-1" }, { id: "b2" }] })
+    );
+    expect(walked.businesses).toHaveLength(2);
+    expect(walked.truncated).toBe(false);
   });
 
   it("business map values are narrowed exactly like the idea maps", () => {

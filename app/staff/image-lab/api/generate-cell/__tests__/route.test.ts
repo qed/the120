@@ -239,6 +239,27 @@ describe("delegation and outcome shaping", () => {
     ["already_finalized", 409],
     ["retry_refused", 409],
     ["run_purged", 409],
+    ["stale_latched", 409],
+    ["not_attempted", 409],
+    ["prompt_missing", 409],
+    // ⚠ THE GATE REFUSALS. `statusFor` returning 200 for all three passed the
+    // whole suite: the table covered only the four kinds that predate the gate,
+    // so a privacy refusal could regress to "ok" with nothing going red.
+    //
+    // 403 and not 409/400: the request is well-formed and the cell is in a
+    // perfectly good state — what is refused is the COMBINATION, and a caller
+    // that retries it unchanged is refused identically forever.
+    //
+    // ⚠ THE TWO GATE REFUSALS SHARE 403 DELIBERATELY. The `reason` on the body
+    // and the composer's copy already distinguish the text leg from the
+    // reference leg (both pinned elsewhere); inventing a status distinction here
+    // would pin a difference that does not exist and cannot be relied on.
+    ["child_text_gate", 403],
+    ["child_reference_gate", 403],
+    ["unknown_model_gate", 403],
+    ["reference_unavailable", 503],
+    ["cooldown", 429],
+    ["invalid_input", 400],
     ["unavailable", 503],
   ])("maps outcome %s to HTTP %i", async (kind, status) => {
     generateCellSpy.mockResolvedValue({ kind, imageId: IMAGE_ID, reason: "timeout" });

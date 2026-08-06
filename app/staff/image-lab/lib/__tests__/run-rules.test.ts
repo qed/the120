@@ -1009,6 +1009,87 @@ describe("decideChildTextGate — the one non-overridable rule", () => {
       }).ok
     ).toBe(false);
   });
+
+  /**
+   * ⚠ THE GATE IS KEYED ON `provider`, AND THAT PROPERTY MUST SCALE WITH THE
+   * REGISTRY RATHER THAN WITH THIS FILE'S FIXTURES.
+   *
+   * `entry.provider !== "openai"` → `entry.id !== "gpt-image-2"` survives the
+   * whole suite today, for the only reason that could make it survive: gpt-image-2
+   * is currently the sole OpenAI entry, so the two predicates are behaviourally
+   * identical. The DAY a second OpenAI model lands in `model-registry.ts`, an
+   * id-keyed gate ships green and that model receives child-authored text.
+   *
+   * So the model ids below are DERIVED FROM THE REGISTRY, never listed. A new
+   * OpenAI entry joins the first loop automatically; a new Google entry joins the
+   * second. Neither list can drift, because neither list exists.
+   */
+  describe("the gate scales with the REGISTRY, not with a list of ids", () => {
+    const CHILDS_OWN_WORDS = "Hi, I am Maya and I make collectible cards on my street";
+    const openaiEntries = IMAGE_LAB_MODELS.filter((entry) => entry.provider === "openai");
+    const otherEntries = IMAGE_LAB_MODELS.filter((entry) => entry.provider !== "openai");
+
+    /** A vacuous `forEach` over an empty filter would pass forever. */
+    it("has at least one entry on each side, so neither loop is vacuous", () => {
+      expect(openaiEntries.length).toBeGreaterThan(0);
+      expect(otherEntries.length).toBeGreaterThan(0);
+    });
+
+    it("EVERY openai entry is gated on a provenance-bearing run", () => {
+      for (const entry of openaiEntries) {
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: true,
+            promptText: CHILDS_OWN_WORDS,
+          }),
+          entry.id
+        ).toEqual({ ok: false, reason: "child_text_to_openai" });
+        // …and on an UNATTESTED run with no provenance at all — the template door.
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: false,
+            promptText: CHILDS_OWN_WORDS,
+          }),
+          entry.id
+        ).toEqual({ ok: false, reason: "child_text_to_openai" });
+        // …and its references are refused on a provenance run.
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: true,
+            promptText: derived,
+            hasReferences: true,
+          }),
+          entry.id
+        ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+      }
+    });
+
+    /**
+     * ⚠ THE OVER-RESTRICTION PROPERTY SCALES TOO, AND IT IS NOT A COURTESY.
+     * The Gemini paid tier is contractually no-training with no under-18
+     * processing bar; gating it would remove the per-model prompt
+     * experimentation the Lab exists for. A future non-OpenAI entry inherits
+     * that, and this loop is what says so.
+     */
+    it("NO non-openai entry is gated — not its text, not its references", () => {
+      for (const entry of otherEntries) {
+        for (const childProvenance of [true, false]) {
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance,
+              promptText: CHILDS_OWN_WORDS,
+              hasReferences: true,
+            }),
+            entry.id
+          ).toEqual({ ok: true });
+        }
+      }
+    });
+  });
 });
 
 describe("decideRunComposition — the per-cell prompt", () => {

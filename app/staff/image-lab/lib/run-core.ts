@@ -587,6 +587,9 @@ export async function createRun(
         template,
         resolvedPrompt: decision.resolved.text,
         referenceIds: input.referenceIds ?? [],
+        // ⚠ PART OF THE COMPOSITION, NOT A FLAG BESIDE IT — see the equality
+        // check in `resolveExistingRun`.
+        noChildContentAttested: attested,
       },
     });
   }
@@ -664,6 +667,9 @@ async function resolveExistingRun(
       template: string;
       resolvedPrompt: string;
       referenceIds: readonly string[];
+      /** See the equality check below — the attestation is composition, not
+       *  metadata about it. */
+      noChildContentAttested: boolean;
     };
   }
 ): Promise<CreateRunResult> {
@@ -681,9 +687,26 @@ async function resolveExistingRun(
   if (!existing) return { ok: false, reason: "unavailable" };
 
   // The stored run is the authority on what this key bought.
+  //
+  // ⚠ THE ATTESTATION IS PART OF THE COMPOSITION, and leaving it out was the
+  // one way this repair could still mint a MISMATCHED ROW. Template, prompt and
+  // references can all match across two composes that DISAGREE about whether the
+  // text was vouched for — and when they do, the repair inserts the incoming
+  // (attested ⇒ possibly AUTHORED) cells against the stored (UNATTESTED) run.
+  // The result is an authored OpenAI cell on a run whose row says "not
+  // attested", which only the dispatch-side gate then catches. Two composes that
+  // disagree about the attestation are not the same composition; treating them
+  // as identical is exactly the confusion that produces that row.
+  //
+  // The real composer cannot reach here — `noChildContentAttested` is already in
+  // `compositionSignature`, so a changed attestation mints a new idempotency key
+  // — which means the only caller that CAN is a hand-rolled POST reusing a key.
+  // That is precisely the threat model the gate exists for, so the honest answer
+  // is `idempotency_conflict` rather than somebody else's composition.
   if (
     existing.template !== input.composition.template ||
     existing.resolvedPrompt !== input.composition.resolvedPrompt ||
+    existing.noChildContentAttested !== input.composition.noChildContentAttested ||
     existing.referenceIds.length !== input.composition.referenceIds.length ||
     existing.referenceIds.some((id, i) => id !== input.composition.referenceIds[i])
   ) {

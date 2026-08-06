@@ -1269,6 +1269,43 @@ describe("the interrupted-insert repair cannot attach a DIFFERENT composition", 
     expect(second.refusal.reason).toBe("idempotency_conflict");
   });
 
+  /**
+   * ⚠ THE ATTESTATION IS PART OF THE COMPOSITION, AND LEAVING IT OUT WAS A REAL
+   * HOLE — the only remaining way this repair could mint a MISMATCHED ROW.
+   *
+   * Template, resolved prompt and references all match here; the two composes
+   * differ ONLY in whether the staff member vouched for the text. The stored run
+   * is UNATTESTED, so its row arms the gate; the incoming compose is ATTESTED, so
+   * ITS cells carry the authored words. The old equality check saw "same
+   * composition" and inserted the second's cells against the first's run —
+   * producing an authored OpenAI cell on a run that says "not attested", which
+   * nothing but the dispatch-side gate then catches.
+   *
+   * The real composer cannot get here (`compositionSignature` in
+   * `RunComposer.tsx` includes `noChildContentAttested`, so flipping it mints a
+   * fresh key). A hand-rolled POST reusing a key can, and that is precisely the
+   * threat model the gate exists for.
+   */
+  it("REFUSES a key collision whose ATTESTATION disagrees", async () => {
+    const h = makeHarness();
+    const first = await createRun(h.deps, composeInput({ noChildContentAttested: false }));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.run.noChildContentAttested).toBe(false);
+    // The first compose died between the two inserts — the state the repair
+    // exists to fix, and the state that makes the mismatch reachable.
+    for (const cell of first.cells) h.cells.delete(cell.id);
+
+    const second = await createRun(h.deps, composeInput({ noChildContentAttested: true }));
+    expect(second.ok).toBe(false);
+    if (second.ok || !("refusal" in second)) return;
+    expect(second.refusal.reason).toBe("idempotency_conflict");
+
+    // And nothing was attached: the unattested run did not silently acquire
+    // cells composed under a different claim about its own text.
+    expect([...h.cells.values()].filter((c) => c.runId === first.run.id)).toHaveLength(0);
+  });
+
   it("still repairs a MATCHING compose whose cells never landed", async () => {
     const h = makeHarness();
     const first = await createRun(h.deps, composeInput());
@@ -1887,6 +1924,115 @@ describe("the per-cell prompt and the OpenAI child-text gate", () => {
     // never sent.
     expect(row.resolvedPrompt).toBe("Draw sticker packs");
     expect(row.promptDerived).toBe(false);
+  });
+
+  /**
+   * ⚠ THE DISPATCH GATE READS THE RUN'S ATTESTATION FROM THE ROW, AND THAT READ
+   * IS THE DEFENCE-IN-DEPTH THIS UNIT CLAIMS.
+   *
+   * Hardcoding `noChildContentAttested: true` in `generateCell`'s gate call
+   * survived the whole suite, because every other gate test either carries
+   * verified provenance (which arms the gate on its own) or never gets an
+   * authored string onto an unattested row — compose forces derived, so the row
+   * the gate sees is already lawful.
+   *
+   * But the mismatched row is REACHABLE. `resolveExistingRun` compares template,
+   * resolved prompt and reference ids; until this unit it did NOT compare the
+   * attestation, so an idempotency-key collision between an unattested first
+   * compose that died before its cell insert and an attested second one attached
+   * AUTHORED cells to an UNATTESTED run. That compose-side door is now shut (see
+   * the idempotency describe above) — and this test shuts the other half: the
+   * row is constructed directly, and the gate has to refuse it on the strength of
+   * `run.noChildContentAttested` alone, with NO provenance to fall back on.
+   *
+   * Defence in depth that is claimed but unverified is not defence.
+   */
+  it("an UNATTESTED run with an AUTHORED cell is refused at DISPATCH, on the row's attestation alone", async () => {
+    const h = makeHarness();
+    const created = await createRun(
+      h.deps,
+      composeInput({
+        template: "Hi, I am Maya, and I make collectible cards on my street",
+        noChildContentAttested: false,
+      })
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    // ⚠ NO PROVENANCE. If the gate leaned on `sourceChildId` here it would have
+    // nothing to lean on — the run's attestation is the ONLY thing arming it.
+    expect(created.run.sourceChildId).toBeNull();
+    expect(created.run.noChildContentAttested).toBe(false);
+
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(true);
+
+    // The mismatched row: authored text on a run that never vouched for it —
+    // exactly what the un-compared attestation used to let the repair mint.
+    h.cells.set(cell.id, {
+      ...h.cells.get(cell.id)!,
+      resolvedPrompt: "Hi, I am Maya, and I make collectible cards on my street",
+      promptDerived: false,
+    });
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome).toEqual({ kind: "child_text_gate" });
+
+    // Nothing dialled, nothing billed, and the cell still re-generatable.
+    expect(h.dispatched).toEqual([]);
+    const row = h.cells.get(cell.id)!;
+    expect(row.state).toBe("requested");
+    expect(row.attemptedAtMs).toBeNull();
+    expect(row.billed).toBe(false);
+  });
+
+  /**
+   * ⚠ THE OTHER FAILURE MODE: THE TOOL QUIETLY STOPS WORKING.
+   *
+   * `deriveCategoryPrompt(input.slotValues)` → `deriveCategoryPrompt({})` passed
+   * every test in this repo. Every OpenAI cell degrades to the single generic
+   * fallback string: membership in the closed vocabulary still holds, the gate
+   * still passes, the preview still agrees with dispatch, and not one privacy
+   * assertion notices. SAFE BUT USELESS — the OpenAI leg of a PROMPT BENCH stops
+   * varying with its input, and the bench's whole output becomes one string.
+   *
+   * So the property is stated positively and end to end, through `createRun`:
+   * two DIFFERENT classifiable businesses must dispatch DIFFERENT prompts. That
+   * is the assertion that catches a classifier which has stopped classifying, as
+   * opposed to one that has started leaking.
+   */
+  it("two different classifiable businesses DERIVE different prompts, end to end", async () => {
+    const drinks = provenanced({
+      slotValues: { product: "lemonade", pitch: "I sell fresh cold lemonade on hot days" },
+    });
+    const jewelry = provenanced({
+      slotValues: {
+        product: "friendship bracelets",
+        pitch: "I make beaded bracelets and necklaces for my friends",
+      },
+    });
+
+    const a = await createRun(drinks.h.deps, drinks.input);
+    const b = await createRun(jewelry.h.deps, jewelry.input);
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+
+    const cellA = a.cells[0]!;
+    const cellB = b.cells[0]!;
+    // Both derived, both inside the closed vocabulary — the privacy property is
+    // untouched…
+    expect(cellA.promptDerived).toBe(true);
+    expect(cellB.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cellA.resolvedPrompt)).toBe(true);
+    expect(isCategoryDerivedPrompt(cellB.resolvedPrompt)).toBe(true);
+    // …and the classifier is still a function of its input.
+    expect(cellA.resolvedPrompt).not.toBe(cellB.resolvedPrompt);
+
+    // Through the paid path too, so the difference is what the VENDOR sees and
+    // not merely what the row records.
+    await generateCell(drinks.h.deps, { staffId: "staff-1", imageId: cellA.id });
+    await generateCell(jewelry.h.deps, { staffId: "staff-1", imageId: cellB.id });
+    expect(drinks.h.dispatched[0]!.prompt).not.toBe(jewelry.h.dispatched[0]!.prompt);
   });
 
   /**

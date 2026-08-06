@@ -91,7 +91,34 @@ version and sha256 bumped in the SAME change on both sides (a drift test guards
 it). It binds only parents who attest AFTER it ships; the 17 already-enrolled
 children's consent cannot be retroactively widened.
 
-**CHECK 1 — PROVIDER TERMS: FAILS on OpenAI, closeable on Google.**
+**CHECK 1 — PROVIDER TERMS: GOOGLE CLOSED 2026-08-06. OPENAI — fix in flight.**
+
+> **GOOGLE: CLOSED (owner confirmation, 2026-08-06).** The owner confirms the
+> Gemini key bills against a **paid** project and that all prompts go through the
+> paid tier. Under the Gemini API Additional Terms effective **2026-03-23**, paid
+> tier means Google "doesn't use your prompts … or responses to improve our
+> products", with limited-period logging solely for policy enforcement. That is
+> the whole dependency, and it is met.
+>
+> One standing operational condition, not a blocker: **no fallback path may route
+> a prompt through unpaid quota** — a dev key, AI Studio, or quota overflow would
+> land under the unpaid terms, which ARE trained on and human-reviewed. Keep the
+> production credential paid-only. (EEA/CH/UK users get paid-tier protection even
+> on free quota, so the exposure there is narrower.)
+>
+> **OPENAI: fix in flight — `feat/image-lab-category-prompts`.** Rather than wait
+> on a sales-gated ZDR contract, we remove the condition that requires it:
+> gpt-image-2 will never receive a child's own words. When a run carries child
+> provenance, **every** model gets a prompt derived from a closed vocabulary of
+> business-category terms — not per-model, because sanitizing only OpenAI would
+> mean a compare run sent different inputs to different models and silently
+> stopped comparing like with like. Once that ships, OpenAI's under-18 rule
+> ("do not process personal data of under-13s without ZDR") no longer binds this
+> pipeline, because no personal data of a child is sent. Until it ships, this half
+> stays open — and `IMAGE_LAB_REAL_CONTENT_LIVE` stays off regardless, because
+> CHECK 2 is independent of it (see below).
+
+Original finding, retained for the record:
 
 *Google — closeable today.* Gemini API Additional Terms (effective 2026-03-23):
 paid tier, Google "doesn't use your prompts … or responses to improve our

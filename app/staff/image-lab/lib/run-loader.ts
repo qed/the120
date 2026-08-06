@@ -31,6 +31,8 @@ import {
 import {
   isImageLabFailureReason,
   isImageLabImageState,
+  isImageLabOpenReferences,
+  isImageLabOpenVocabulary,
   isImageLabRealContentLive,
 } from "./image-lab-rules";
 import { verifySourceToken } from "./source-token";
@@ -277,6 +279,17 @@ export function runDeps(db: ImageLabDb): RunDeps {
         : { ok: false };
     },
     isRealContentLive: () => isImageLabRealContentLive(),
+    // ⚠ THUNKS, NOT CAPTURED BOOLEANS. Both readers hit the env var at call time
+    // by design; evaluating them here at deps-construction would be a per-request
+    // read too, but the thunks keep the property true even if this factory is
+    // ever hoisted or memoized.
+    //
+    // ⚠ TWO SEPARATE VARIABLES, READ SEPARATELY. Text and reference images are
+    // independent channels with independent reversal — see the decision block
+    // above `isImageLabOpenVocabulary`. Collapsing these into one read would
+    // re-couple them.
+    isOpenVocabulary: () => isImageLabOpenVocabulary(),
+    isOpenReferences: () => isImageLabOpenReferences(),
 
     async insertRun(row) {
       const { data, error } = await bounded(() => db

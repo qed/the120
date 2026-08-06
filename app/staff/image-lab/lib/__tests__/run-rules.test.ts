@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildGrid,
   canRetryCell,
@@ -15,6 +15,7 @@ import {
   describeGenerateOutcome,
   describeUnverified,
   estimateRunCostUsd,
+  forcedPromptMode,
   formatGenerationBreadcrumb,
   formatUsd,
   generateCellRateLimitKey,
@@ -38,7 +39,11 @@ import {
   IMAGE_LAB_MODELS,
   unverifiedItems,
 } from "../model-registry";
-import { IMAGE_LAB_STALE_AFTER_MS } from "../image-lab-rules";
+import {
+  IMAGE_LAB_STALE_AFTER_MS,
+  isImageLabOpenReferences,
+  isImageLabOpenVocabulary,
+} from "../image-lab-rules";
 import {
   allCategoryPrompts,
   isCategoryDerivedPrompt,
@@ -1035,35 +1040,82 @@ describe("decideChildTextGate — the one non-overridable rule", () => {
       expect(otherEntries.length).toBeGreaterThan(0);
     });
 
-    it("EVERY openai entry is gated on a provenance-bearing run", () => {
+    /**
+     * ⚠ THIS TEST IS NOW FLAG-CONDITIONAL, AND ITS MIRROR IS BELOW.
+     *
+     * It is not wrong and it has not been weakened: with
+     * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` and `IMAGE_LAB_OPENAI_OPEN_REFERENCES`
+     * both unset — which is the CODE DEFAULT, and what any deployment that has
+     * not taken the owner's 2026-08-06 decision runs — every assertion here still
+     * holds exactly as written. Both the omitted and the explicitly-false
+     * spelling are asserted, because "absent is false" is the property that makes
+     * the default safe.
+     */
+    it("EVERY openai entry is gated on a provenance-bearing run, with BOTH flags OFF", () => {
       for (const entry of openaiEntries) {
-        expect(
-          decideChildTextGate({
-            modelId: entry.id,
-            childProvenance: true,
-            promptText: CHILDS_OWN_WORDS,
-          }),
-          entry.id
-        ).toEqual({ ok: false, reason: "child_text_to_openai" });
-        // …and on an UNATTESTED run with no provenance at all — the template door.
-        expect(
-          decideChildTextGate({
-            modelId: entry.id,
-            childProvenance: false,
-            promptText: CHILDS_OWN_WORDS,
-          }),
-          entry.id
-        ).toEqual({ ok: false, reason: "child_text_to_openai" });
-        // …and its references are refused on a provenance run.
-        expect(
-          decideChildTextGate({
-            modelId: entry.id,
-            childProvenance: true,
-            promptText: derived,
-            hasReferences: true,
-          }),
-          entry.id
-        ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+        for (const off of [
+          {},
+          { openVocabulary: false, openReferences: false },
+        ]) {
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance: true,
+              promptText: CHILDS_OWN_WORDS,
+              ...off,
+            }),
+            entry.id
+          ).toEqual({ ok: false, reason: "child_text_to_openai" });
+          // …and on an UNATTESTED run with no provenance at all — the template door.
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance: false,
+              promptText: CHILDS_OWN_WORDS,
+              ...off,
+            }),
+            entry.id
+          ).toEqual({ ok: false, reason: "child_text_to_openai" });
+          // …and its references are refused on a provenance run.
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance: true,
+              promptText: derived,
+              hasReferences: true,
+              ...off,
+            }),
+            entry.id
+          ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+        }
+      }
+    });
+
+    /**
+     * ⚠ THE MIRROR. Every refusal above, asserted as an ADMISSION with BOTH
+     * flags on — and derived from the registry for the same reason: the day a
+     * second OpenAI model lands, it must inherit the decision, not a fixture.
+     *
+     * ⚠ IT TAKES BOTH FLAGS BECAUSE IT ASSERTS BOTH CHANNELS. A version passing
+     * only `openVocabulary` while sending `hasReferences: true` would be
+     * asserting that the text flag opens the reference channel, which is the
+     * exact coupling the split removed.
+     */
+    it("EVERY openai entry is ungated with BOTH flags ON — text and references alike", () => {
+      for (const entry of openaiEntries) {
+        for (const childProvenance of [true, false]) {
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance,
+              promptText: CHILDS_OWN_WORDS,
+              hasReferences: true,
+              openVocabulary: true,
+              openReferences: true,
+            }),
+            entry.id
+          ).toEqual({ ok: true });
+        }
       }
     });
 
@@ -1091,6 +1143,466 @@ describe("decideChildTextGate — the one non-overridable rule", () => {
     });
   });
 });
+
+/**
+ * ── THE OWNER'S DECISION, 2026-08-06 — ONE DECISION, TWO INDEPENDENT FLAGS ──
+ *
+ * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` opens the OpenAI TEXT channel;
+ * `IMAGE_LAB_OPENAI_OPEN_REFERENCES` opens the OpenAI REFERENCE-IMAGE channel.
+ * WHAT was decided, BY WHOM, WHEN, ON WHAT BASIS, and why one decision is
+ * carried by two switches is recorded in full above `isImageLabOpenVocabulary`
+ * in `../image-lab-rules.ts`.
+ *
+ * ⚠ THE BLOCK ABOVE IS NOT DELETED AND MUST NOT BE. It is the both-flags-OFF
+ * half of the same behaviour, it is what the code does by default, and it is
+ * what a deployment that has not taken this decision runs. This block is the
+ * mirror, not the replacement.
+ *
+ * ⚠ AND IT IS PARAMETERISED ACROSS ALL FOUR STATES, not written twice for two.
+ * The interesting failures of a two-flag design are not "on" and "off" — they
+ * are the CROSS terms: one flag quietly opening the other's channel. A suite
+ * that only tested both-off and both-on would pass with the two flags wired to
+ * the same boolean, which is precisely the coupling the split exists to remove.
+ * `text-open + references-closed` is the recommended production posture and
+ * `text-closed + references-open` is odd but must still be coherent; both are
+ * real rows below.
+ */
+describe("the OpenAI channel flags — the 2026-08-06 decision", () => {
+  const derived = allCategoryPrompts()[0]!;
+  const CHILDS_OWN_WORDS = "Hi, I am Maya and I make collectible cards on my street";
+
+  // ⚠ EXPLICIT, because `unstubEnvs` is NOT set in `vitest.config.ts`. A stubbed
+  // privacy flag left standing would be silently on for every later test in this
+  // file.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // ── The env readers ────────────────────────────────────────────────────────
+
+  /**
+   * ⚠ MUTATION: make either code default ON — `raw !== "0" && raw !== "false"`,
+   * or simply `return true` — and this reddens.
+   *
+   * The flags are set in production. The CODE defaults are restrictive so that a
+   * fork, a preview deploy, a local run, or a rebuild of this repo by anyone who
+   * has never heard of the decision is safe without action. A default that
+   * matched production would make the decision travel with the source.
+   *
+   * ⚠ BOTH VARIABLES, IN ONE TEST, ON PURPOSE. Mirroring the shape for the second
+   * flag is the whole point: a new switch that defaults open is the same defect
+   * as the first one defaulting open.
+   */
+  it("a GENUINELY UNSET flag reads as OFF — both code defaults are restrictive", () => {
+    const originals = {
+      IMAGE_LAB_OPENAI_OPEN_VOCABULARY: process.env.IMAGE_LAB_OPENAI_OPEN_VOCABULARY,
+      IMAGE_LAB_OPENAI_OPEN_REFERENCES: process.env.IMAGE_LAB_OPENAI_OPEN_REFERENCES,
+    };
+    delete process.env.IMAGE_LAB_OPENAI_OPEN_VOCABULARY;
+    delete process.env.IMAGE_LAB_OPENAI_OPEN_REFERENCES;
+    try {
+      expect(process.env.IMAGE_LAB_OPENAI_OPEN_VOCABULARY).toBeUndefined();
+      expect(process.env.IMAGE_LAB_OPENAI_OPEN_REFERENCES).toBeUndefined();
+      expect(isImageLabOpenVocabulary()).toBe(false);
+      expect(isImageLabOpenReferences()).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries(originals)) {
+        if (value !== undefined) process.env[key] = value;
+      }
+    }
+  });
+
+  /** A plain truthiness check reads "false" and "0" as ON — the two ways an
+   *  operator says "off" in a dashboard, and here that would silently re-open a
+   *  channel an operator had just closed. */
+  it.each(["", "false", "0", "no", "off", "TRUE-ish"])(
+    "the value %s reads as OFF on BOTH flags",
+    (value) => {
+      vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_VOCABULARY", value);
+      vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_REFERENCES", value);
+      expect(isImageLabOpenVocabulary()).toBe(false);
+      expect(isImageLabOpenReferences()).toBe(false);
+    }
+  );
+
+  it.each(["1", "true", "TRUE", " true "])(
+    "the value %s reads as ON on BOTH flags",
+    (value) => {
+      vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_VOCABULARY", value);
+      vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_REFERENCES", value);
+      expect(isImageLabOpenVocabulary()).toBe(true);
+      expect(isImageLabOpenReferences()).toBe(true);
+    }
+  );
+
+  /**
+   * ⚠ MUTATION: wire one reader to the other's variable (a copy-paste that is
+   * genuinely easy to make in two near-identical four-line functions) and this
+   * reddens. Nothing else in the suite would catch it: both readers would still
+   * answer correctly whenever the two variables happened to agree, which is
+   * three of the four states.
+   */
+  it("each reader reads its OWN variable — they are not aliases", () => {
+    vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_VOCABULARY", "1");
+    vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_REFERENCES", "0");
+    expect(isImageLabOpenVocabulary()).toBe(true);
+    expect(isImageLabOpenReferences()).toBe(false);
+
+    vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_VOCABULARY", "0");
+    vi.stubEnv("IMAGE_LAB_OPENAI_OPEN_REFERENCES", "1");
+    expect(isImageLabOpenVocabulary()).toBe(false);
+    expect(isImageLabOpenReferences()).toBe(true);
+  });
+
+  // ── All four states ────────────────────────────────────────────────────────
+
+  /**
+   * The four deployments this code must be coherent under. `expected*` are
+   * written as the RULE ("text passes iff the text flag is set"), not copied from
+   * the implementation, so a change to the gate's structure has to argue with the
+   * table rather than silently re-derive it.
+   */
+  const STATES = [
+    {
+      label: "both closed — the code default, and the pre-decision behaviour",
+      openVocabulary: false,
+      openReferences: false,
+    },
+    {
+      label: "text OPEN, references CLOSED — the recommended production posture",
+      openVocabulary: true,
+      openReferences: false,
+    },
+    {
+      label: "text CLOSED, references OPEN — odd, but it must not couple or crash",
+      openVocabulary: false,
+      openReferences: true,
+    },
+    { label: "both OPEN", openVocabulary: true, openReferences: true },
+  ] as const;
+
+  describe.each(STATES)("$label", ({ openVocabulary, openReferences }) => {
+    const flags = { openVocabulary, openReferences };
+
+    /**
+     * ⚠ MUTATION: delete the text flag's early return, or make the text leg read
+     * `openReferences`, and this reddens in two of the four rows.
+     */
+    it(`OpenAI text passes iff the vocabulary flag is set (${openVocabulary})`, () => {
+      const verdict = decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: CHILDS_OWN_WORDS,
+        ...flags,
+      });
+      expect(verdict).toEqual(
+        openVocabulary ? { ok: true } : { ok: false, reason: "child_text_to_openai" }
+      );
+    });
+
+    /**
+     * ⚠ MUTATION: make the reference leg read `openVocabulary`, or drop its flag
+     * guard entirely, and this reddens in two of the four rows.
+     *
+     * The prompt is DERIVED here, so the text leg cannot be what decides the
+     * verdict — this isolates the reference channel.
+     */
+    it(`OpenAI references pass iff the references flag is set (${openReferences})`, () => {
+      const verdict = decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+        hasReferences: true,
+        ...flags,
+      });
+      expect(verdict).toEqual(
+        openReferences
+          ? { ok: true }
+          : { ok: false, reason: "child_reference_to_openai" }
+      );
+    });
+
+    /**
+     * ⚠ THE REAL DISPATCH SHAPE: child wording AND references on one call. The
+     * reference refusal is checked FIRST, so this pins the precedence as well as
+     * the two conditions — and it is the assertion that would catch a gate which
+     * happened to return the right verdict for the wrong reason.
+     */
+    it("text + references together resolves references first, then text", () => {
+      const verdict = decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: CHILDS_OWN_WORDS,
+        hasReferences: true,
+        ...flags,
+      });
+      const expected = !openReferences
+        ? { ok: false, reason: "child_reference_to_openai" }
+        : openVocabulary
+          ? { ok: true }
+          : { ok: false, reason: "child_text_to_openai" };
+      expect(verdict).toEqual(expected);
+    });
+
+    /**
+     * ⚠ MUTATION: let either flag reach a non-OpenAI provider and this reddens.
+     * Over-restriction is a real defect, and it is a defect in all four states —
+     * the flags RELAX the OpenAI leg, and a rule that reached Google could only
+     * ever tighten it.
+     */
+    it("NEVER gates a Google cell — text or references, provenance or not", () => {
+      for (const entry of IMAGE_LAB_MODELS.filter((m) => m.provider !== "openai")) {
+        for (const childProvenance of [true, false]) {
+          expect(
+            decideChildTextGate({
+              modelId: entry.id,
+              childProvenance,
+              promptText: CHILDS_OWN_WORDS,
+              hasReferences: true,
+              ...flags,
+            }),
+            entry.id
+          ).toEqual({ ok: true });
+        }
+      }
+    });
+
+    /** ⚠ HYGIENE, UNRELATED TO THE DECISION, AND CLOSED IN ALL FOUR STATES. An
+     *  id the registry has never heard of has no nameable vendor and no nameable
+     *  terms, so no policy call can apply to it. Both flag checks sit AFTER the
+     *  registry lookup for exactly this reason. */
+    it("ALWAYS fails closed on an unknown model id", () => {
+      for (const childProvenance of [true, false]) {
+        expect(
+          decideChildTextGate({
+            modelId: "gpt-image-9-turbo",
+            childProvenance,
+            promptText: derived,
+            hasReferences: true,
+            ...flags,
+          })
+        ).toEqual({ ok: false, reason: "unknown_model" });
+      }
+    });
+
+    /**
+     * ⚠ MUTATION: remove `derived` as a selectable option under the text flag —
+     * have `promptModeFor` force `"authored"` when `openVocabulary` is set, or
+     * drop `"derived"` from `IMAGE_LAB_PROMPT_MODES` — and this reddens.
+     *
+     * The decision made `derived` OPTIONAL. It did not make it unavailable, in
+     * any state. Comparing a category-derived prompt against the child's own
+     * wording on the same model is one of the most informative experiments this
+     * bench can run, and the Lab is a prompt bench: removing an option is the
+     * same mistake as forcing one, pointing the other way.
+     */
+    it("keeps `derived` SELECTABLE on OpenAI — optional, never unavailable", () => {
+      const decision = decideRunComposition({
+        template: "Draw {{product}}",
+        slotValues: { product: "collectible cards" },
+        modelIds: ["gpt-image-2"],
+        imageCount: 1,
+        childProvenance: true,
+        openVocabulary,
+        promptModes: { "gpt-image-2": "derived" },
+      });
+      expect(decision.ok).toBe(true);
+      if (!decision.ok) return;
+      expect(decision.promptByModel["gpt-image-2"]!.derived).toBe(true);
+      expect(isCategoryDerivedPrompt(decision.promptByModel["gpt-image-2"]!.text)).toBe(
+        true
+      );
+    });
+
+    /**
+     * ⚠ `prompt_derived` AND `resolved_prompt` ARE NOT PART OF THE DECISION. The
+     * bench's whole value is "this phrasing beat that one on this model", and
+     * that is true in every state. A composition still records per-cell text and
+     * per-cell derived-ness.
+     */
+    it("still records the exact per-cell prompt and its derived flag", () => {
+      const decision = decideRunComposition({
+        template: "Draw {{product}}",
+        slotValues: { product: "collectible cards" },
+        modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+        imageCount: 2,
+        childProvenance: true,
+        openVocabulary,
+      });
+      expect(decision.ok).toBe(true);
+      if (!decision.ok) return;
+      expect(decision.cells).toHaveLength(4);
+      for (const cell of decision.cells) {
+        expect(cell.promptText).toBe(
+          openVocabulary ? "Draw collectible cards" : cell.promptText
+        );
+        expect(typeof cell.promptText).toBe("string");
+        expect(cell.promptText.length).toBeGreaterThan(0);
+        expect(typeof cell.promptDerived).toBe("boolean");
+      }
+    });
+  });
+
+  // ── The two flags do not imply each other ──────────────────────────────────
+
+  /**
+   * ⚠ MUTATION: `openReferences` set ALSO opens the text channel — e.g. a text
+   * leg reading `input.openVocabulary === true || input.openReferences === true`
+   * — and this reddens.
+   *
+   * This is the cross term the whole split exists for. It is asserted on its own
+   * rather than left to the table above so that its failure names the coupling
+   * directly.
+   */
+  it("the REFERENCES flag does not open the TEXT channel", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: CHILDS_OWN_WORDS,
+        openVocabulary: false,
+        openReferences: true,
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+  });
+
+  /**
+   * ⚠ MUTATION: `openVocabulary` set ALSO opens the reference channel — which is
+   * exactly what the FIRST implementation did, with one flag covering both — and
+   * this reddens.
+   *
+   * Text-open + references-closed is the recommended production posture, so this
+   * is the assertion that keeps the recommended posture actually available.
+   */
+  it("the VOCABULARY flag does not open the REFERENCE channel", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+        hasReferences: true,
+        openVocabulary: true,
+        openReferences: false,
+      })
+    ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+  });
+
+  /**
+   * ⚠ AND NEITHER FLAG IS WIRED TO THE OTHER'S PARAMETER. Same class as the env
+   * reader test above, one layer down: two boolean parameters of the same shape
+   * on one function are trivially swappable, and three of the four states would
+   * hide it.
+   */
+  it("the two parameters are not swapped — each governs its own channel", () => {
+    // Text open only: wording passes, references still refused.
+    const textOnly = { openVocabulary: true, openReferences: false };
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: CHILDS_OWN_WORDS,
+        ...textOnly,
+      })
+    ).toEqual({ ok: true });
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+        hasReferences: true,
+        ...textOnly,
+      })
+    ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+
+    // References open only: references pass, wording still refused.
+    const refsOnly = { openVocabulary: false, openReferences: true };
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+        hasReferences: true,
+        ...refsOnly,
+      })
+    ).toEqual({ ok: true });
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: CHILDS_OWN_WORDS,
+        ...refsOnly,
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+  });
+
+  // ── The text flag's effect on composition ──────────────────────────────────
+
+  /**
+   * ⚠ THE FORCED MODE IS GONE UNDER THE TEXT FLAG, IN BOTH DIRECTIONS. Nothing
+   * is compelled, and an explicit `authored` — which the old rule could not
+   * honour at all on a provenance run — is now respected.
+   */
+  it("stops FORCING a mode on OpenAI under the text flag, without removing either option", () => {
+    expect(
+      forcedPromptMode("gpt-image-2", {
+        childProvenance: true,
+        noChildContentAttested: false,
+        openVocabulary: true,
+      })
+    ).toBeNull();
+    expect(
+      promptModeFor("gpt-image-2", true, { "gpt-image-2": "derived" }, false, true)
+    ).toBe("derived");
+    expect(
+      promptModeFor("gpt-image-2", true, { "gpt-image-2": "authored" }, false, true)
+    ).toBe("authored");
+  });
+
+  /** The default under the text flag is `authored` — the same default Google has
+   *  always had, which is the whole shape of "the same terms as Gemini". */
+  it("defaults an OpenAI model to `authored` under the text flag, in every provenance/attestation combination", () => {
+    for (const childProvenance of [true, false]) {
+      for (const attested of [true, false]) {
+        expect(
+          defaultPromptMode("gpt-image-2", childProvenance, attested, true),
+          `provenance=${childProvenance} attested=${attested}`
+        ).toBe("authored");
+      }
+    }
+  });
+
+  /**
+   * ⚠ THE PREVIEW MUST NOT KEEP SAYING "REQUIRED". The note under a derived
+   * OpenAI row is the surface this feature's own docs call the last human check
+   * before child-authored text leaves for a vendor; telling staff the vendor
+   * requires a choice the owner just made optional is a printed instruction to
+   * stop running the experiment they were authorized to run.
+   */
+  it("the preview calls a derived OpenAI prompt CHOSEN, not required, under the text flag", () => {
+    const copy = IMAGE_LAB_RUN_COPY.composer.preview;
+    const withFlag = decideRunComposition({
+      template: "Draw {{product}}",
+      slotValues: { product: "collectible cards" },
+      modelIds: ["gpt-image-2"],
+      imageCount: 1,
+      childProvenance: true,
+      openVocabulary: true,
+      promptModes: { "gpt-image-2": "derived" },
+    });
+    expect(previewRows(withFlag)[0]!.note).toBe(copy.derivedChosenOpenAi);
+
+    // …and WITHOUT it the preview still names the vendor rule, unchanged.
+    const withoutFlag = decideRunComposition({
+      template: "Draw {{product}}",
+      slotValues: { product: "collectible cards" },
+      modelIds: ["gpt-image-2"],
+      imageCount: 1,
+      childProvenance: true,
+    });
+    expect(previewRows(withoutFlag)[0]!.note).toBe(copy.derivedRequired);
+  });
+});
+
 
 describe("decideRunComposition — the per-cell prompt", () => {
   const base = {

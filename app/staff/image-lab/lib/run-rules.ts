@@ -387,6 +387,27 @@ export type PromptGateContext = {
   /** Did the caller explicitly assert the template and slot values are free of
    *  child-authored content? Absent is false, and false is the safe answer. */
   readonly noChildContentAttested: boolean;
+  /**
+   * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` — the TEXT half of the owner's 2026-08-06
+   * decision: scrubbed, identifier-free business text is not personal data, so
+   * the OpenAI leg needs no closed vocabulary. See `isImageLabOpenVocabulary` in
+   * `./image-lab-rules.ts` for the decision, its provenance, and what it does
+   * and does not cover.
+   *
+   * ⚠ TEXT ONLY. The reference-image channel is `openReferences`, a SEPARATE and
+   * fully independent switch — see {@link decideChildTextGate}. This one never
+   * opens it.
+   *
+   * ⚠ ABSENT IS FALSE, AND FALSE IS THE PRE-DECISION BEHAVIOUR. Every function
+   * in this module that takes it defaults it off, so a caller that has never
+   * heard of the flag gets the restrictive answer. The flag reaches this layer
+   * only from a SERVER read — `run-loader` wires `deps.isOpenVocabulary`, and
+   * the composer receives a prop from the bench page. This module never reads
+   * `process.env` itself: it is imported by a client component, where a server
+   * env var is `undefined` and would silently mean "restrictive" while the
+   * server said otherwise.
+   */
+  readonly openVocabulary?: boolean;
 };
 
 /**
@@ -402,6 +423,12 @@ export function forcedPromptMode(
   ctx: PromptGateContext
 ): ImageLabPromptMode | null {
   if (findModelEntry(modelId)?.provider !== "openai") return null;
+  // ⚠ `derived` STOPS BEING COMPULSORY; IT DOES NOT STOP BEING AVAILABLE.
+  // Returning `null` here means "the staff choice stands", so both modes remain
+  // selectable on every model — comparing a derived prompt against an authored
+  // one is one of the experiments this bench exists to run, and removing the
+  // option would be the same mistake as forcing it, in the other direction.
+  if (ctx.openVocabulary === true) return null;
   return ctx.childProvenance || ctx.noChildContentAttested !== true ? "derived" : null;
 }
 
@@ -421,9 +448,16 @@ export function forcedPromptMode(
 export function defaultPromptMode(
   modelId: string,
   childProvenance: boolean,
-  noChildContentAttested = false
+  noChildContentAttested = false,
+  openVocabulary = false
 ): ImageLabPromptMode {
-  return forcedPromptMode(modelId, { childProvenance, noChildContentAttested }) ?? "authored";
+  return (
+    forcedPromptMode(modelId, {
+      childProvenance,
+      noChildContentAttested,
+      openVocabulary,
+    }) ?? "authored"
+  );
 }
 
 /**
@@ -450,14 +484,19 @@ export function promptModeFor(
   modelId: string,
   childProvenance: boolean,
   modes: PromptModes | undefined,
-  noChildContentAttested = false
+  noChildContentAttested = false,
+  openVocabulary = false
 ): ImageLabPromptMode {
-  const forced = forcedPromptMode(modelId, { childProvenance, noChildContentAttested });
+  const forced = forcedPromptMode(modelId, {
+    childProvenance,
+    noChildContentAttested,
+    openVocabulary,
+  });
   if (forced !== null) return forced;
   const chosen = modes?.[modelId];
   return isImageLabPromptMode(chosen)
     ? chosen
-    : defaultPromptMode(modelId, childProvenance, noChildContentAttested);
+    : defaultPromptMode(modelId, childProvenance, noChildContentAttested, openVocabulary);
 }
 
 /** The exact text one model's cells will carry, and whether it is derived. */
@@ -472,13 +511,15 @@ export function promptForModel(input: {
   slotValues: SlotValues;
   childProvenance: boolean;
   noChildContentAttested?: boolean;
+  openVocabulary?: boolean;
   promptModes?: PromptModes;
 }): CellPrompt {
   const mode = promptModeFor(
     input.modelId,
     input.childProvenance,
     input.promptModes,
-    input.noChildContentAttested === true
+    input.noChildContentAttested === true,
+    input.openVocabulary === true
   );
   if (mode === "authored") return { text: input.authoredText, derived: false };
   return { text: deriveCategoryPrompt(input.slotValues).text, derived: true };
@@ -543,6 +584,18 @@ export type ChildTextGateVerdict =
  * are the privacy problem. References are append-only and undeletable, so the mistake
  * is permanent. Refused on the OpenAI leg of a provenance-bearing run; NEVER on a
  * Google cell.
+ *
+ * ⚠ AND BOTH OF THOSE OPENAI RULES ARE NOW FLAG-CONDITIONAL — ON TWO SEPARATE,
+ * FULLY INDEPENDENT FLAGS. `openVocabulary` governs the TEXT leg and
+ * `openReferences` governs the REFERENCE leg; neither implies the other, and no
+ * combination of the two is special-cased. See the block above
+ * `isImageLabOpenVocabulary` in `./image-lab-rules.ts` for why the owner's one
+ * decision is carried by two switches (the two bets rest on different things: the
+ * text bet on a verified technical control, the reference bet on dialog copy).
+ *
+ * Everything else on this function is unconditional: Google is ungated in all
+ * FOUR flag states, and an unknown model id fails closed in all four, because
+ * neither of those is about the decision the flags carry.
  */
 export function decideChildTextGate(input: {
   modelId: string;
@@ -552,19 +605,61 @@ export function decideChildTextGate(input: {
   promptText: string;
   /** Is this dispatch carrying reference-image bytes? */
   hasReferences?: boolean;
+  /**
+   * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` — the TEXT leg only. See
+   * {@link PromptGateContext} and, for the decision itself,
+   * `isImageLabOpenVocabulary` in `./image-lab-rules.ts`.
+   *
+   * ⚠ IT DOES NOT DISARM THE REFERENCE GATE. That is `openReferences`.
+   * ⚠ AND ABSENT IS FALSE, so a caller that does not pass it — a test, a future
+   * call site, a partially-updated deployment — gets the pre-decision gate.
+   */
+  openVocabulary?: boolean;
+  /**
+   * `IMAGE_LAB_OPENAI_OPEN_REFERENCES` — the REFERENCE-IMAGE leg only. See
+   * `isImageLabOpenReferences` in `./image-lab-rules.ts`.
+   *
+   * ⚠ IT DOES NOT DISARM THE TEXT GATE. That is `openVocabulary`.
+   * ⚠ AND ABSENT IS FALSE, for the same reason.
+   */
+  openReferences?: boolean;
 }): ChildTextGateVerdict {
   const entry = findModelEntry(input.modelId);
   // FAIL CLOSED. Not "unknown ⇒ probably fine": unknown ⇒ we cannot name the
   // vendor, cannot name its terms, and cannot generate on it either.
+  //
+  // ⚠ BEFORE EITHER FLAG CHECK, AND THAT ORDER IS DELIBERATE. The flags say
+  // "OpenAI is no longer constrained"; they say nothing about a vendor we cannot
+  // name.
   if (!entry) return { ok: false, reason: "unknown_model" };
   if (entry.provider !== "openai") return { ok: true };
 
+  // ── THE REFERENCE LEG ─────────────────────────────────────────────────────
   // References answer to VERIFIED PROVENANCE only. The attestation below is an
   // assertion about the template and the slot values — the two things a staff
   // member types — and says nothing about what is inside an uploaded PNG.
-  if (input.childProvenance && input.hasReferences === true) {
+  //
+  // ⚠ IT IS TESTED BEFORE THE TEXT FLAG'S EARLY RETURN, AND THAT IS WHAT MAKES
+  // TEXT-OPEN + REFERENCES-CLOSED WORK. That combination is the recommended
+  // production posture. If the text flag returned `ok` first, opening the text
+  // channel would silently open the reference channel with it — which is exactly
+  // the coupling the split exists to remove.
+  if (
+    input.childProvenance &&
+    input.hasReferences === true &&
+    input.openReferences !== true
+  ) {
     return { ok: false, reason: "child_reference_to_openai" };
   }
+
+  // ── THE TEXT LEG ──────────────────────────────────────────────────────────
+  // With the text flag set, an OpenAI cell's WORDING answers to the same rules as
+  // a Google one's. The scrub (`content-picker-core.scrubNames`, re-run
+  // server-side in `createRun`) is what that rests on and is untouched here.
+  //
+  // Reached with references already blessed or absent, so text-closed +
+  // references-open lands here too and still holds the text to the vocabulary.
+  if (input.openVocabulary === true) return { ok: true };
 
   const constrained = input.childProvenance || input.noChildContentAttested !== true;
   if (!constrained) return { ok: true };
@@ -651,6 +746,16 @@ export type RunComposition = {
   readonly modelIds: readonly string[];
   /** What each selected model will actually be sent. Drives the preview. */
   readonly promptByModel: Readonly<Record<string, CellPrompt>>;
+  /**
+   * The `openVocabulary` this composition was decided under, echoed back.
+   *
+   * ⚠ IT IS ON THE RESULT SO THE PREVIEW CANNOT DISAGREE WITH THE COMPOSITION.
+   * {@link previewRows} has to say WHY an OpenAI cell is derived — "required by
+   * the vendor rule" and "chosen by staff" are different sentences and only one
+   * of them is true at a time. Reading a second copy of the flag there would be
+   * a second reader that can drift; reading it off the decision cannot.
+   */
+  readonly openVocabulary: boolean;
 };
 
 export type RunCompositionDecision = RunComposition | RunCompositionRefusal;
@@ -682,6 +787,12 @@ export function decideRunComposition(input: {
    * OpenAI cell onto the derived vocabulary exactly as provenance does.
    */
   noChildContentAttested?: boolean;
+  /**
+   * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` — see {@link PromptGateContext}. ABSENT
+   * IS FALSE. `createRun` passes the server's read; the composer passes the prop
+   * the bench page read server-side, so the preview and the run agree.
+   */
+  openVocabulary?: boolean;
   promptModes?: PromptModes;
 }): RunCompositionDecision {
   const template = input.template ?? "";
@@ -723,6 +834,7 @@ export function decideRunComposition(input: {
 
   const childProvenance = input.childProvenance === true;
   const noChildContentAttested = input.noChildContentAttested === true;
+  const openVocabulary = input.openVocabulary === true;
   const slotValues = input.slotValues ?? {};
   const promptByModel: Record<string, CellPrompt> = {};
   for (const modelId of modelIds) {
@@ -732,6 +844,7 @@ export function decideRunComposition(input: {
       slotValues,
       childProvenance,
       noChildContentAttested,
+      openVocabulary,
       promptModes: input.promptModes,
     });
   }
@@ -756,6 +869,7 @@ export function decideRunComposition(input: {
     resolved,
     modelIds,
     promptByModel,
+    openVocabulary,
   };
 }
 
@@ -1439,9 +1553,16 @@ export function previewRows(decision: RunCompositionDecision): PromptPreviewRow[
       modelId,
       text: prompt.text,
       derived: prompt.derived,
+      // ⚠ THE NOTE MUST NOT SAY "REQUIRED" WHEN IT IS NOT. With
+      // `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` on, a derived OpenAI cell is a staff
+      // experiment like any other, and telling a staff member the vendor
+      // requires it would be a printed instruction to stop trying the thing the
+      // owner just authorized.
       note: prompt.derived
         ? findModelEntry(modelId)?.provider === "openai"
-          ? copy.derivedRequired
+          ? decision.openVocabulary
+            ? copy.derivedChosenOpenAi
+            : copy.derivedRequired
           : copy.derivedChosen
         : "",
     };
@@ -1763,6 +1884,13 @@ export const IMAGE_LAB_RUN_COPY = {
         "Required on this model: OpenAI's under-18 API guidance bars processing an under-13's personal data without zero data retention, which we do not have. This prompt is built from a closed category vocabulary and carries none of the child's wording.",
       derivedChosen:
         "Chosen for this model. Nothing requires it here — the Gemini paid tier does not train on prompts and has no under-18 processing bar — so this is an experiment, not a restriction.",
+      /**
+       * ⚠ THE SAME SENTENCE FOR OPENAI, UNDER THE OPEN-VOCABULARY FLAG. It says
+       * "chosen" rather than "required" because that is now the truth, and it
+       * names the scrub because the scrub is what the decision rests on.
+       */
+      derivedChosenOpenAi:
+        "Chosen for this model. Nothing requires it here — this deployment sends OpenAI the child's own name-scrubbed wording on the same terms as Gemini — so this is an experiment, not a restriction.",
       lockedNote:
         "This model cannot send the child's wording while the run carries child provenance, so the choice is fixed.",
       /** The same lock, the OTHER cause — and it names the box that lifts it,
@@ -1775,8 +1903,25 @@ export const IMAGE_LAB_RUN_COPY = {
     attestation: {
       label: "The template and slot values below are my own wording — no child wrote any of it.",
       hint: "Leave this unticked if you are unsure. Unticked, OpenAI models send the category-derived prompt instead of your text, and hand-typed slot values are refused; Google models are unaffected either way. What you tick is recorded on the run against your staff id.",
+      /**
+       * ⚠ THE BOX STAYS, AND ITS HINT STOPS PROMISING SOMETHING IT NO LONGER
+       * DOES. With `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` on, the attestation no
+       * longer decides the OpenAI prompt — but it still decides whether
+       * hand-typed slot values are accepted at all (`unverified_slot_source`,
+       * which is provider-agnostic and untouched by the decision), and it is
+       * still written to `no_child_content_attested` against the staff id. A
+       * hint that kept describing the old effect would train staff to tick a box
+       * for a reason that has stopped being true.
+       */
+      hintOpenVocabulary:
+        "Leave this unticked if you are unsure. Unticked, hand-typed slot values are refused — this bench cannot tell your wording from a replay of a child's. It no longer changes which prompt a model is sent: on this deployment every model can be sent your text or the category-derived prompt, your choice, per model. What you tick is recorded on the run against your staff id.",
       lockedByProvenance:
         "This run was filled from a child's business content, so OpenAI models derive regardless of what is ticked here.",
+      /** The same disabled box, under the open-vocabulary decision: it is off
+       *  because the statement would be FALSE, not because it would unlock
+       *  anything. */
+      provenanceOpenVocabulary:
+        "This run was filled from a child's business content, so this cannot be ticked — it would be a false statement recorded against your staff id. The child's names and username are scrubbed from everything sent, on every model.",
     },
 
     models: {

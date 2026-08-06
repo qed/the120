@@ -135,12 +135,24 @@ function browserIdempotencyStore(): IdempotencyStore {
 export function RunComposer({
   live,
   pickerLive,
+  openVocabulary = false,
 }: {
   /** `IMAGE_LAB_LIVE`, read SERVER-side and handed down. */
   live: boolean;
   /** `IMAGE_LAB_REAL_CONTENT_LIVE` — a SEPARATE switch. Unset means the picker is
    *  absent while manual prompts still generate. */
   pickerLive: boolean;
+  /**
+   * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY`, read SERVER-side and handed down — the
+   * owner's 2026-08-06 decision. See `isImageLabOpenVocabulary` in
+   * `./lib/image-lab-rules.ts`.
+   *
+   * ⚠ DEFAULTS FALSE, and it is the restrictive answer. This component is a
+   * client component: it can never read the env var itself, so "not told" must
+   * mean "assume the gate is armed" — the preview then under-promises, which is
+   * the harmless direction. The enforcement is server-side regardless.
+   */
+  openVocabulary?: boolean;
 }) {
   const [template, setTemplate] = useState<string>(COPY.composer.template.placeholder);
   const [slotValues, setSlotValues] = useState<SlotValues>({});
@@ -254,6 +266,7 @@ export function RunComposer({
         referenceIds,
         childProvenance,
         noChildContentAttested,
+        openVocabulary,
         promptModes,
       }),
     [
@@ -264,6 +277,7 @@ export function RunComposer({
       referenceIds,
       childProvenance,
       noChildContentAttested,
+      openVocabulary,
       promptModes,
     ]
   );
@@ -306,7 +320,10 @@ export function RunComposer({
     // released; while waiting, select gemini-3-pro-image, set its mode, deselect
     // it again; press Generate → different signature → fresh key → the server
     // sees no collision → a SECOND run with a full second fan.
-    modelIds.map((id) => [id, promptModeFor(id, childProvenance, promptModes, noChildContentAttested)]),
+    modelIds.map((id) => [
+      id,
+      promptModeFor(id, childProvenance, promptModes, noChildContentAttested, openVocabulary),
+    ]),
     childProvenance,
     noChildContentAttested,
   ]);
@@ -675,6 +692,18 @@ export function RunComposer({
             refusal copy used to recommend doing exactly that. Unticked is the
             safe answer and costs nothing: OpenAI cells derive, Google cells are
             untouched, and nothing is refused. See run-rules `PromptGateContext`. */}
+        {/* ⚠ THE BOX SURVIVES THE 2026-08-06 DECISION, ITS HINT CHANGES. With
+            `openVocabulary` on it no longer decides which prompt OpenAI is sent
+            — but it still decides whether hand-typed slot values are accepted
+            (`unverified_slot_source`, provider-agnostic), and it is still
+            recorded on the run against the staff id.
+
+            ⚠ IT STAYS DISABLED ON A PROVENANCE RUN IN BOTH FLAG STATES, and
+            that is NOT a leftover of the old gate. The box asserts "no child
+            wrote any of it" on a run the server has VERIFIED was filled from a
+            child's saved work — a false statement, recorded against a named
+            staff id. Enabling it because it no longer changes the prompt would
+            trade a lock for a corrupted record. Only its explanation changes. */}
         <label className="mt-3 flex items-start gap-2 text-sm text-hq-ink">
           <input
             type="checkbox"
@@ -687,8 +716,12 @@ export function RunComposer({
             <span className="text-pretty">{COPY.composer.attestation.label}</span>
             <span className="text-pretty text-xs text-hq-ink-soft">
               {childProvenance
-                ? COPY.composer.attestation.lockedByProvenance
-                : COPY.composer.attestation.hint}
+                ? openVocabulary
+                  ? COPY.composer.attestation.provenanceOpenVocabulary
+                  : COPY.composer.attestation.lockedByProvenance
+                : openVocabulary
+                  ? COPY.composer.attestation.hintOpenVocabulary
+                  : COPY.composer.attestation.hint}
             </span>
           </span>
         </label>
@@ -910,9 +943,18 @@ export function RunComposer({
             // ⚠ TWO CAUSES, ONE LOCK, AND THE NOTE SAYS WHICH. Provenance is not
             // liftable; a missing attestation is, by ticking the box above — and
             // a lock with no stated escape is exactly the trap this replaced.
-            const lockedByProvenance = childProvenance && entry.provider === "openai";
+            // ⚠ AND WITH `openVocabulary` ON THERE IS NO LOCK AT ALL — on any
+            // model. `derived` stays in the select as a CHOICE; what goes away
+            // is the compulsion. Reading the lock off `promptModeFor`'s own
+            // inputs rather than recomputing the rule would be better still, but
+            // the two causes need distinct copy, so the shape is kept and the
+            // flag is applied to both.
+            const lockedByProvenance =
+              !openVocabulary && childProvenance && entry.provider === "openai";
             const lockedToDerived =
-              entry.provider === "openai" && (childProvenance || !noChildContentAttested);
+              !openVocabulary &&
+              entry.provider === "openai" &&
+              (childProvenance || !noChildContentAttested);
             return (
               <li key={entry.id}>
                 <button
@@ -964,7 +1006,8 @@ export function RunComposer({
                         entry.id,
                         childProvenance,
                         promptModes,
-                        noChildContentAttested
+                        noChildContentAttested,
+                        openVocabulary
                       )}
                       disabled={lockedToDerived}
                       onChange={(e) =>

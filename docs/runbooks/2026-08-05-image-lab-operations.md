@@ -66,16 +66,128 @@ Then `NOTIFY pgrst, 'reload schema'` before anything writes these tables.
 
 ---
 
-## 2. The two go-live flags
+## 2. The four go-live flags
 
-Both are **server-side only** and read per request. Neither is `NEXT_PUBLIC_`,
+All four are **server-side only** and read per request. None is `NEXT_PUBLIC_`,
 deliberately: a build-time public copy could disagree with the server on a warm
-deploy.
+deploy. A repo-wide test pins the absence of a `NEXT_PUBLIC_IMAGE_LAB*` twin.
 
 | Flag | Gates | Unset behaviour |
 |---|---|---|
 | `IMAGE_LAB_LIVE` | **Generation.** Whether any model may be called at all. | The bench renders in full; the adapter returns `unconfigured` and attempts no network call; the page shows an explicit "generation off" notice and the `/staff` hub card carries a matching badge. |
 | `IMAGE_LAB_REAL_CONTENT_LIVE` | **All child content, on every leg.** Whether a real child's authored text may be loaded into the slot panel, AND whether `createImageLabRun` will accept, scrub or record a compose claiming child provenance. | The picker is absent; a provenance-bearing compose is refused outright (`content_picker_off`) rather than silently recorded; manual prompts still compose and generate normally. |
+| `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` | **The OpenAI PROMPT-TEXT channel, and nothing else.** Set, an OpenAI cell may carry the child's own name-scrubbed wording instead of a string from the closed category vocabulary, and `authored` vs `derived` becomes a free per-cell staff choice on every model. **It does not open the reference-image channel.** | OpenAI cells on a provenance-bearing or un-attested run are forced to the closed category vocabulary; anything else is refused at dispatch (`child_text_gate`, HTTP 403). |
+| `IMAGE_LAB_OPENAI_OPEN_REFERENCES` | **The OpenAI REFERENCE-IMAGE channel, and nothing else.** Set, an OpenAI cell on a provenance-bearing run may carry the run's reference images. **It does not open the prompt-text channel.** | Reference images are refused on OpenAI cells of a provenance-bearing run at dispatch (`child_reference_gate`, HTTP 403), with its own reason code so History can tell the two refusals apart. |
+
+**The last two are fully independent, in both directions.** Neither implies the
+other and no combination is special-cased. All four states are coherent and
+covered by parameterised tests:
+
+| `..._VOCABULARY` | `..._REFERENCES` | Posture |
+|---|---|---|
+| unset | unset | The code default, and the pre-2026-08-06 behaviour exactly. |
+| **set** | unset | **The recommended production posture** — see the accepted-risk note below. |
+| unset | set | Odd, but coherent: references ride, prompts stay on the vocabulary. |
+| set | set | Both channels open. |
+
+### `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` / `IMAGE_LAB_OPENAI_OPEN_REFERENCES` — the 2026-08-06 owner decision
+
+**What was decided.** The OpenAI leg is no longer confined to the 200-string
+category vocabulary, and its reference-image leg is no longer refused.
+gpt-image-2 may receive child-authored, name-scrubbed business text and the run's
+reference images on the same terms Gemini already may.
+
+**By whom, and when.** The product owner, on 2026-08-06, in two parts: the text
+channel first, then the reference channel the same day when asked whether
+handwriting and likeness in a photographed drawing warranted separate treatment
+("please open that too").
+
+**On what basis.** The owner's reading of OpenAI's under-18 API guidance ("do not
+process personal data of children under 13 without zero data retention"): that
+scrubbed business text carrying no identifiers is not personal data. The owner
+reports outside research and consultation with legal supporting that reading. The
+constraint it replaces was the *conservative* reading of the same guidance, in
+which a child's authored business writing was treated as personal data — an
+engineering default adopted in the absence of a decision, not a finding. **The
+analysis below in CHECK 1 is not superseded and must not be deleted**: it records
+why the question was asked and what the alternatives were. What changed is the
+answer, and it changed by decision, not by discovery.
+
+**What it covers.** Both OpenAI channels — prompt text and reference images —
+**but through two separate switches, one per channel.** An earlier draft used a
+single flag. That was wrong: the two bets rest on different things. The text bet
+rests on a technical control that exists and is verified (the name scrub removes
+the identifiers the reading turns on). The reference bet rests on upload-dialog
+copy and nothing else. Coupled, walking back a reference incident would also close
+a text channel that is fine to leave open — the wrong choice to hand an operator
+mid-incident. Two env vars cost nothing; granular reversal is worth real money
+exactly once.
+
+**What NEITHER flag covers.**
+
+- **Google.** Ungated in all four flag states, before and after. Nothing about this
+  decision touches the Gemini posture, and gating a Google cell would be a defect.
+- **The name scrub.** `scrubNames` still runs on the template, every slot value,
+  the note and every picked idea field, server-side on the paid path, for every
+  model. It is now **load-bearing**: the decision's premise is "no identifiers",
+  and the scrub is what makes that true. It is not redundant defence in depth and
+  must not be weakened as though it were. Neither flag touches it.
+- **Unknown model ids.** Still fail closed (`unknown_model_gate`, 403). Hygiene,
+  unrelated to the decision.
+- **`IMAGE_LAB_REAL_CONTENT_LIVE`.** Independent of both. With it off, no child content
+  reaches any model regardless of either flag.
+- **The evidence trail.** `resolved_prompt` and `prompt_derived` are still
+  recorded per cell in all four flag states.
+- **The `no_child_content_attested` column.** Retained. With the TEXT flag on it no
+  longer decides the OpenAI prompt, but it is still a staff assertion recorded
+  against a staff id and a timestamp, and it still governs whether hand-typed slot
+  values are accepted at all (`unverified_slot_source` — provider-agnostic, and
+  never part of this decision).
+- **`derived` as an option.** Still selectable on every model. It stopped being
+  compulsory; it did not stop being available. An authored-vs-derived comparison
+  on the same model is a first-class experiment on a prompt bench.
+
+**⚠ ACCEPTED RISK — THIS PARAGRAPH IS ABOUT `IMAGE_LAB_OPENAI_OPEN_REFERENCES`
+ONLY, AND DOES NOT APPLY TO `IMAGE_LAB_OPENAI_OPEN_VOCABULARY`.**
+
+With **`IMAGE_LAB_OPENAI_OPEN_REFERENCES`** set, the reference channel has **no
+technical control at all**. The only thing standing between a photo of a child's
+drawing or hand-lettered sign and OpenAI is the warning copy in the upload dialog.
+The bytes are dispatched uninspected — there is no equivalent of the name scrub
+for an image — and references are **append-only and undeletable**, not by staff
+and not by an operator, so a mistake there is **permanent**. This is an accepted
+risk under the owner's decision, not a gap awaiting a fix. Operators should know it
+is the shape of what was accepted, and that it is the specific reason this switch
+is separate: **unsetting `IMAGE_LAB_OPENAI_OPEN_REFERENCES` is the whole and only
+reversal needed for it**, and it leaves the text channel untouched.
+
+The text channel does **not** carry this risk. `IMAGE_LAB_OPENAI_OPEN_VOCABULARY`
+rests on the name scrub, which runs on every leg, server-side, on the paid path,
+under test.
+
+**How to reverse either one.** **Unset that flag's environment variable.** No
+deploy, no code change, no migration. The gate reads both flags at *dispatch*, not
+at compose, so a run composed while a flag was on is refused the moment that
+variable goes away — `child_text_gate` for the text flag, `child_reference_gate`
+for the references flag, nothing dialled, nothing billed, the cell still
+re-generatable. Because they are read independently, **unsetting one leaves the
+other's channel exactly where it was**. Both code defaults are restrictive, so any
+deployment of this repo that has not set the variables is safe without anyone
+knowing this decision was taken.
+
+**Where they live in code.** `isImageLabOpenVocabulary()` and
+`isImageLabOpenReferences()` in `app/staff/image-lab/lib/image-lab-rules.ts` (the
+full decision record, and why it is two switches, is in the block above them).
+Both are threaded through `decideChildTextGate` in `run-rules.ts` as explicit
+parameters — never read from `process.env` in that module, which a client
+component imports and where a server env var would silently read as restrictive
+while the server disagreed. `forcedPromptMode` / `decideRunComposition` take the
+text flag only; reference images are not composed, only dispatched. Both are
+injected into the run core as `RunDeps.isOpenVocabulary` / `RunDeps.isOpenReferences`
+and read at dispatch. Only the text flag reaches the composer, as a prop the bench
+page reads server-side. All four flag states are covered by parameterised tests in
+`run-rules.test.ts` and `run-core.test.ts`, including named tests that neither flag
+opens the other's channel.
 
 ### ⚠ STATUS 2026-08-06 (FINAL) — `IMAGE_LAB_LIVE` ON, `IMAGE_LAB_REAL_CONTENT_LIVE` **OFF**. BOTH CHECKS WERE RUN AND **BOTH FAILED**.
 
@@ -177,6 +289,29 @@ for manual review (non-waivable). Three paths:
       rather than the child's own words** — likely the cheapest defensible path,
       since the prompt only needs to convey what to draw. Note this is a real code
       change in the Lab, not a config flip.
+
+### CHECK 1, OPENAI HALF — **SUPERSEDED BY OWNER DECISION, 2026-08-06**
+
+> **⚠ READ THIS BEFORE THE SECTION BELOW.** On 2026-08-06 the product owner took
+> the *narrow* reading of OpenAI's under-18 guidance — that a child's scrubbed,
+> identifier-free business text is not personal data — on the strength of their own
+> outside research and a legal consultation, and extended it to reference images
+> the same day. `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` implements that decision; see
+> §2 above for its full scope, its accepted risks, and how to reverse it.
+>
+> **Everything below stays, and stays accurate, for three reasons.** (1) It is the
+> flag-OFF behaviour, which is the code default and what any deployment without
+> the variable runs. (2) The three holes it documents — the template door, the
+> inverted `IMAGE_LAB_REAL_CONTENT_LIVE` conjunct, and the ungated reference leg —
+> were **real defects that were fixed**, and the fixes are still in place; only
+> whether the OpenAI gate *arms* is now a flag. (3) The reasoning that produced
+> path (c) is what a future reader needs in order to re-open the question with the
+> facts, rather than re-deriving it. The question was asked, and it was answered by
+> a decision, not by a discovery — nothing here was found to be wrong.
+>
+> One item below is now **also** load-bearing rather than merely prudent: the
+> **name scrub**. With the flag on it carries the legal argument, because the
+> argument is precisely "no identifiers".
 
 ### CHECK 1, OPENAI HALF — path (c) IMPLEMENTED, **NOT YET CLOSED**
 

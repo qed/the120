@@ -1,5 +1,5 @@
 import { requireStaff } from "@/app/crm/lib/auth";
-import { isImageLabLive } from "./lib/image-lab-rules";
+import { isImageLabLive, isImageLabOpenVocabulary } from "./lib/image-lab-rules";
 import {
   imageLabGenerationNotice,
   IMAGE_LAB_BENCH_COPY,
@@ -71,13 +71,33 @@ export default async function ImageLabBenchPage() {
           strictest limit across the chosen models), so `ReferenceLibrary` is no
           longer mounted here.
 
-          BOTH FLAGS ARE READ SERVER-SIDE AND HANDED DOWN, never re-read in the
+          EVERY FLAG IS READ SERVER-SIDE AND HANDED DOWN, never re-read in the
           browser: they are operational facts about the deployment, and a
           `NEXT_PUBLIC_` copy would be a second reader resolved at BUILD time that
           could disagree with the server on a warm deploy. They gate different
           things — `live` is whether a model may be called, `pickerLive` is
-          whether a real child's authored text may be loaded at all. */}
-      <RunComposer live={isImageLabLive()} pickerLive={isImageLabRealContentLive()} />
+          whether a real child's authored text may be loaded at all, and
+          `openVocabulary` is the TEXT half of the owner's 2026-08-06 decision
+          that the OpenAI leg takes name-scrubbed child wording on the same terms
+          as Gemini (see `isImageLabOpenVocabulary`).
+
+          ⚠ `IMAGE_LAB_OPENAI_OPEN_REFERENCES` — the decision's other half — is
+          DELIBERATELY NOT PASSED. The composer's only use for a flag here is
+          deciding which prompt each model will be sent and whether that select is
+          locked, and reference images are not part of the prompt: they are loaded
+          and gated at dispatch, in `generateCell`. Handing the browser a switch it
+          has no surface for would be a second reader that can only drift.
+
+          ⚠ THE COMPOSER USES IT ONLY TO TELL THE TRUTH ABOUT WHAT WILL HAPPEN —
+          which prompt each model will be sent, and whether the select is locked.
+          The enforcement is `decideChildTextGate`, server-side, at dispatch, off
+          the server's OWN read of the same flag. A browser that lies about this
+          prop changes nothing but its own preview. */}
+      <RunComposer
+        live={isImageLabLive()}
+        pickerLive={isImageLabRealContentLive()}
+        openVocabulary={isImageLabOpenVocabulary()}
+      />
     </>
   );
 }

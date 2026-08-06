@@ -229,6 +229,40 @@ export type RunDeps = {
   /** Is the consent flag on? Injected so the sequence is testable without env. */
   isRealContentLive(): boolean;
 
+  /**
+   * Is `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` on? — the TEXT half of the owner's
+   * 2026-08-06 decision: the OpenAI leg takes name-scrubbed child WORDING on the
+   * same terms as Gemini. See `isImageLabOpenVocabulary` in
+   * `./image-lab-rules.ts` for the decision and its provenance.
+   *
+   * ⚠ TEXT ONLY — the reference channel is {@link isOpenReferences}, a separate
+   * and independent switch.
+   *
+   * ⚠ INJECTED AND REQUIRED, exactly like {@link isRealContentLive} beside it,
+   * for the same two reasons: the sequence stays testable in every flag state
+   * without touching `process.env`, and a REQUIRED member means TypeScript names
+   * every construction site the day a new one appears. An optional member would
+   * make "nobody wired it" indistinguishable from "the operator left it off" —
+   * safe, but silently so, which is how a flag ends up dead in production.
+   *
+   * ⚠ READ PER CALL, NOT CAPTURED. `run-loader` wires it to a function that
+   * reads the env var at call time, so flipping the flag takes effect on warm
+   * instances too — the same rule the flag readers themselves document.
+   */
+  isOpenVocabulary(): boolean;
+
+  /**
+   * Is `IMAGE_LAB_OPENAI_OPEN_REFERENCES` on? — the REFERENCE-IMAGE half of the
+   * same decision, carried separately because the two bets rest on different
+   * things: the text bet on a verified technical control (the name scrub), the
+   * reference bet on upload-dialog copy alone. See `isImageLabOpenReferences` in
+   * `./image-lab-rules.ts`.
+   *
+   * ⚠ REFERENCES ONLY, AND INDEPENDENT OF ITS SIBLING IN BOTH DIRECTIONS.
+   * Required and read per call, for the reasons given above.
+   */
+  isOpenReferences(): boolean;
+
   generate(request: {
     modelId: string;
     prompt: string;
@@ -529,6 +563,16 @@ export async function createRun(
     // never heard of this field therefore gets the safe composition, which is the
     // whole design: the lazy path must be the safe one.
     noChildContentAttested: attested,
+    // ⚠ THE SERVER'S READ OF THE FLAG, not a client claim — there is no wire
+    // field for it and there must not be one. The composer passes the same value
+    // to its own `decideRunComposition` because the bench page read it
+    // server-side and handed it down, which is what keeps the preview honest.
+    //
+    // ⚠ ONLY THE TEXT FLAG APPEARS HERE, AND ITS SIBLING'S ABSENCE IS CORRECT.
+    // Composition decides which STRING each cell carries; reference images are
+    // not composed, they are loaded at dispatch. `IMAGE_LAB_OPENAI_OPEN_REFERENCES`
+    // therefore has nothing to say to this call and is read in `generateCell`.
+    openVocabulary: deps.isOpenVocabulary(),
     promptModes: input.promptModes,
   });
   if (!decision.ok) return { ok: false, refusal: decision };
@@ -866,6 +910,15 @@ export async function generateCell(
     // is known from the run row now — the gate must not be asked to bless a call
     // whose second payload it never saw.
     hasReferences: run.referenceIds.length > 0,
+    // ⚠ BOTH READ AT DISPATCH, NOT AT COMPOSE, AND THAT IS THE POINT OF READING
+    // THEM HERE. The gate is the enforcement; it must answer with the
+    // deployment's CURRENT posture. A run composed while a flag was on and
+    // retried after an operator unset it is refused on the retry — which is what
+    // "reversing the decision is unsetting the env var, no deploy needed"
+    // actually means. And because they are read independently, unsetting one
+    // leaves the other's channel exactly where it was.
+    openVocabulary: deps.isOpenVocabulary(),
+    openReferences: deps.isOpenReferences(),
   });
   if (!gate.ok) {
     // Ids and the closed-set reason only — no prompt, no slot value, no child id.

@@ -464,6 +464,30 @@ function trailingBoundaryOk(
 /**
  * Remove a child's own name and username from text bound for a model.
  *
+ * ⚠ THIS FUNCTION NOW CARRIES THE LEGAL ARGUMENT, NOT MERELY DEFENCE IN DEPTH.
+ *
+ * On 2026-08-06 the product owner decided (on their own outside research and
+ * legal consultation) that a child's scrubbed business text carrying no
+ * identifiers is not personal data under OpenAI's under-18 API guidance, and
+ * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` opens the OpenAI text and reference
+ * channels on that basis — see `isImageLabOpenVocabulary` in
+ * `./image-lab-rules.ts` for the full record of the decision.
+ *
+ * The premise of that reading is exactly "no identifiers". This function is
+ * what makes the premise true. Before the decision it was one of several
+ * overlapping controls on the OpenAI leg (the closed derived vocabulary was the
+ * one doing the real work); with the flag on it is the MAIN remaining technical
+ * control on the text side. Weakening it — narrowing the boundary rules,
+ * dropping the fold, skipping a field, making it conditional on anything —
+ * silently removes the ground the decision stands on.
+ *
+ * Its coverage, as of that date: every picked idea field (`productName`,
+ * `oneLiner`, `pitch`, `label`), and — re-run SERVER-SIDE in `createRun`, on
+ * the paid path, against tokens looked up from the child row rather than from
+ * the request — the TEMPLATE, every SLOT VALUE, and the free-text NOTE. It runs
+ * for Google exactly as for OpenAI. Nothing in this feature sends prose to a
+ * vendor that has not passed through here.
+ *
  * ⚠ FOLDED, BOUNDARY-AWARE, AND DELIBERATELY OVER-EAGER. A child called Art
  * selling art supplies will see "[name] supplies", and that is the correct trade:
  * an over-scrubbed prompt makes a slightly worse picture, an under-scrubbed one

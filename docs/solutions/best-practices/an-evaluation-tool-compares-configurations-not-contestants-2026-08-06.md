@@ -25,6 +25,69 @@ tags:
 
 # Evaluation tools compare configurations, not contestants
 
+## ⚠ CORRECTION, 2026-08-06 (later the same day) — the OpenAI constraint was lifted BY DECISION
+
+**Scope of this note: one sentence in this document is now wrong.** Below, under
+*"Bind a per-target constraint to the target that actually has it"*, this document
+says **"The OpenAI rule survives."** It no longer does, in production.
+
+**What changed.** The product owner took the *narrow* reading of OpenAI's under-18
+API guidance — that a child's scrubbed, identifier-free business text is not
+personal data — on the strength of their own outside research and a legal
+consultation, and extended it to reference images the same day. Two flags implement
+that: `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` opens the prompt-text channel and
+`IMAGE_LAB_OPENAI_OPEN_REFERENCES` opens the reference-image channel. Both code
+defaults are restrictive, so the behaviour this document describes is still exactly
+what the code does with them unset. See
+`docs/runbooks/2026-08-05-image-lab-operations.md` §2 for the full record.
+
+**Two flags, not one — and that is this document's own rule applied again.** The
+first implementation used a single switch. The two channels rest on different
+things: the text bet on a technical control that exists and is verified (the name
+scrub), the reference bet on upload-dialog copy alone, over bytes that are
+append-only and undeletable. Coupling them would force an operator walking back a
+permanent reference mistake to also close a text channel that is fine to leave
+open. **Bind a constraint to the thing that actually has it** — the same sentence
+this document uses to keep the OpenAI rule off Google keeps the reference rule off
+the text channel. A constraint scoped to the wrong unit is a defect whether it is
+too wide across vendors or too wide across channels.
+
+**It changed by DECISION, not by DISCOVERY.** Nothing here was found to be wrong.
+The original constraint was the *conservative* reading of the same guidance, adopted
+as an engineering default in the absence of a decision. A future reader re-opening
+this is re-weighing a risk appetite, not correcting a bug — and should re-open it
+with these facts rather than re-deriving them.
+
+**Everything else in this document stands, and the thesis is unaffected.** Note
+carefully that this correction *vindicates* the document's central rule rather than
+undermining it:
+
+- **"Over-restriction is a real defect, not the safe default"** — still true, and
+  now demonstrated twice. The lifted constraint is exactly the kind of restriction
+  that keeps a bench running while it stops answering the question it was built for.
+- **"Bind a per-target constraint to the target that actually has it"** — the
+  *method* is unchanged; only the finding about what OpenAI's terms require of us
+  changed. Google was never gated and still is not, in any of the four flag states.
+- **"Preserve interpretability by RECORDING, not by forcing"** — unchanged and
+  untouched. `resolved_prompt` and `prompt_derived` are still stored per cell in
+  all four flag states.
+- **`derived` remains SELECTABLE on every model.** It stopped being compulsory; it
+  did not stop being available. Removing the option would be this document's own
+  mistake pointing the other way — an authored-vs-derived comparison on the same
+  model is precisely the kind of configuration search this document argues for.
+
+**One thing became MORE important, not less.** With the OpenAI text channel open,
+the **name scrub** (`content-picker-core.scrubNames`) carries the legal argument
+rather than acting as defence in depth: the reading is "text with no identifiers is
+not personal data", and the scrub is what makes that true. It must not be weakened
+as though it had become redundant. The reference channel has no equivalent — that
+asymmetry is exactly why the two channels got separate switches.
+
+**Code drift:** the `defaultPromptMode` snippet in *Examples* below has since gained
+`openVocabulary` as a fourth parameter, and `decideChildTextGate` gained both
+`openVocabulary` and `openReferences` inputs. The snippets are left as they were
+written — the shape of the argument they illustrate is unchanged.
+
 ## Context
 
 The Image Lab exists to answer one question: **which image model, driven how,

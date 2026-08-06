@@ -80,6 +80,121 @@ export function isImageLabRealContentLive(): boolean {
   return raw === "1" || raw === "true";
 }
 
+/**
+ * ── THE 2026-08-06 OWNER DECISION, AND WHY IT IS *TWO* SWITCHES ─────────────
+ *
+ * The two flag readers below implement one decision across two independent
+ * channels. Read this block once; each function then states only what is true of
+ * its own channel.
+ *
+ * WHAT was decided: the OpenAI leg of this bench is no longer confined to the
+ * 200-string category vocabulary, and its reference-image leg is no longer
+ * refused. `gpt-image-2` may be sent child-authored, name-scrubbed business text
+ * and the run's reference images on the terms Gemini already may be. Per-cell
+ * `authored` vs `derived` becomes a free staff choice on every model.
+ *
+ * BY WHOM: the product owner.
+ * WHEN: 2026-08-06, in two parts — the text channel first, the reference channel
+ * on the same day when asked whether it should follow ("please open that too").
+ * ON WHAT BASIS: the owner's stated reading of OpenAI's under-18 API guidance
+ * ("do not process personal data of children under 13 without zero data
+ * retention"), namely that scrubbed business text carrying no identifiers is not
+ * personal data. The owner reports outside research and consultation with legal
+ * supporting that reading.
+ *
+ * WHAT IT REPLACES: the original constraint was the conservative reading of the
+ * same guidance, in which a child's authored business writing WAS treated as
+ * personal data. That reading was an engineering default adopted in the absence
+ * of a decision, not a finding — nothing was discovered that changed it, and
+ * nothing has been discovered since that would change it back. A future reader
+ * re-opening the question is re-weighing a risk appetite, not correcting a bug.
+ *
+ * ⚠ WHY TWO FLAGS AND NOT ONE. The first implementation used a single switch.
+ * That was wrong, and the reason is the shape of the two bets, not their size:
+ *
+ *   * THE TEXT BET RESTS ON A TECHNICAL CONTROL THAT EXISTS AND IS VERIFIED.
+ *     The reading is "no identifiers"; `scrubNames` removes them, on every leg,
+ *     server-side, under test.
+ *   * THE REFERENCE BET RESTS ON UPLOAD-DIALOG COPY AND NOTHING ELSE. Reference
+ *     bytes are dispatched uninspected; references are append-only and
+ *     undeletable, so a mistake there is PERMANENT.
+ *
+ * Coupled, walking back a reference incident would also close a text channel that
+ * — by the owner's own reasoning — is fine to leave open. That is the wrong choice
+ * to hand someone mid-incident. Granular reversal is worth real money exactly
+ * once, and two env vars cost the operator nothing.
+ *
+ * ⚠ THEY ARE INDEPENDENT IN BOTH DIRECTIONS. Neither implies the other and no
+ * combination is special-cased. All four states are coherent and tested:
+ * both-closed (the code default, and the pre-decision behaviour exactly);
+ * text-open + references-closed (the recommended production posture);
+ * text-closed + references-open (odd, but it must not couple or crash — the
+ * references pass and the text stays on the vocabulary); both-open.
+ *
+ * ⚠ THE NAME SCRUB IS WHAT MAKES THE NARROW READING TRUE. The reading is
+ * precisely "text with no identifiers is not personal data", so `scrubNames`
+ * (content-picker-core.ts, re-run server-side in `createRun`) is carrying the
+ * legal argument rather than acting as defence in depth. NEITHER flag touches it
+ * and neither must ever be extended to.
+ *
+ * ⚠ NEITHER TOUCHES THE OTHER RULES. Google is ungated in every one of the four
+ * states, unknown model ids still fail closed, `prompt_derived` and
+ * `resolved_prompt` are still recorded per cell, and the
+ * `no_child_content_attested` column and its restrictive default remain — with
+ * the text flag on it no longer gates OpenAI text, but it is still a recorded
+ * staff assertion with an owner and a timestamp.
+ *
+ * ⚠ BOTH DEFAULT RESTRICTIVE, AND DELIBERATELY SO. The flags are set in
+ * production; any other deployment of this code — a fork, a preview, a local run
+ * — is safe without anyone having to know this decision was taken. REVERSING
+ * EITHER IS UNSETTING ITS ENV VAR; no deploy needed, and unsetting one leaves the
+ * other exactly where it was.
+ *
+ * Both are read at CALL TIME and allowlisted, and both are SERVER-SIDE ONLY with
+ * no `NEXT_PUBLIC_` twin — for the same reasons as their two siblings above.
+ */
+
+/**
+ * The THIRD switch: may an OpenAI cell carry the child's own (name-scrubbed)
+ * WORDING, rather than a string from the closed category vocabulary?
+ *
+ * ⚠ TEXT ONLY. It says nothing about reference images — see
+ * {@link isImageLabOpenReferences}, which is a separate switch with a separate
+ * risk profile. Setting this one does NOT open the reference channel, and a test
+ * pins that.
+ *
+ * The composer receives it as a prop from a server component and never re-reads
+ * it: `run-rules.ts` is imported by a client component, where `process.env` is
+ * `undefined` and would silently read as restrictive while the server disagreed.
+ */
+export function isImageLabOpenVocabulary(): boolean {
+  const raw = process.env.IMAGE_LAB_OPENAI_OPEN_VOCABULARY?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
+/**
+ * The FOURTH switch: may an OpenAI cell on a provenance-bearing run carry the
+ * run's REFERENCE IMAGES?
+ *
+ * ⚠ REFERENCE IMAGES ONLY. It says nothing about prompt text — see
+ * {@link isImageLabOpenVocabulary}. Setting this one does NOT open the text
+ * channel, and a test pins that.
+ *
+ * ⚠ ACCEPTED RISK, AND IT BELONGS TO THIS FLAG ALONE. With this set, the
+ * reference channel has NO technical control at all: the only thing between a
+ * photo of a child's drawing or hand-lettered sign and OpenAI is the warning copy
+ * in the upload dialog. The bytes are dispatched uninspected — there is no
+ * equivalent of the name scrub for an image — and references are append-only and
+ * undeletable, not by staff and not by an operator, so a mistake here is
+ * PERMANENT. That is an accepted risk under the owner's decision above, recorded
+ * here so it is not mistaken for an oversight, and so that unsetting THIS
+ * variable is the whole and only reversal needed for it.
+ */
+export function isImageLabOpenReferences(): boolean {
+  const raw = process.env.IMAGE_LAB_OPENAI_OPEN_REFERENCES?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 /** The private bucket the migration creates. Never public; reads are signed. */

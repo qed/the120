@@ -83,6 +83,20 @@ type Harness = {
     }) => Promise<NormalizedImageResult>;
     /** `IMAGE_LAB_REAL_CONTENT_LIVE`, as the core sees it. */
     realContentLive: boolean;
+    /**
+     * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY`, as the core sees it — the TEXT half of
+     * the owner's 2026-08-06 decision (see `isImageLabOpenVocabulary`).
+     *
+     * ⚠ DEFAULTS FALSE ON EVERY HARNESS, so every pre-existing test in this file
+     * keeps asserting the pre-decision behaviour without being touched. The
+     * flag-ON mirrors set it explicitly.
+     */
+    openVocabulary: boolean;
+    /**
+     * `IMAGE_LAB_OPENAI_OPEN_REFERENCES` — the REFERENCE-IMAGE half, and a fully
+     * INDEPENDENT switch. Also defaults false.
+     */
+    openReferences: boolean;
     /** The provenance verifier. The staff id the core presented is recorded on
      *  the harness as `verifiedFor` — the real verifier binds a token to the
      *  staff member it was minted for, and can only do so if the core hands it
@@ -140,6 +154,12 @@ function makeHarness(): Harness {
     // OFF by default, exactly as production is: an ordinary manual compose must
     // work with no token and no flag. The provenance tests turn it on.
     realContentLive: false,
+    // ⚠ BOTH OFF BY DEFAULT, AND THAT IS THE CODE DEFAULT UNDER TEST. Production
+    // sets the env vars; the code without them must reproduce the pre-decision
+    // gate. A harness that defaulted either ON would make the matching gate
+    // assertions below vacuous.
+    openVocabulary: false,
+    openReferences: false,
     verifyToken: (presented) => {
       const parts = presented.split(":");
       if (parts[0] !== "tok" || parts.length !== 4) return { ok: false };
@@ -168,6 +188,11 @@ function makeHarness(): Harness {
       return hooks.verifyToken(token);
     },
     isRealContentLive: () => hooks.realContentLive,
+    // ⚠ THUNKS OVER THE HOOKS, NOT CAPTURED VALUES — a test that flips a flag
+    // between compose and dispatch (the "reversal takes effect without a deploy"
+    // property) needs the core to see the CURRENT value at each read.
+    isOpenVocabulary: () => hooks.openVocabulary,
+    isOpenReferences: () => hooks.openReferences,
 
     async insertRun(row) {
       journal.push("insertRun");
@@ -2379,5 +2404,399 @@ describe("the per-cell prompt and the OpenAI child-text gate", () => {
     expect(outcome).toEqual({ kind: "prompt_missing" });
     expect(h.dispatched).toEqual([]);
     expect(h.cells.get(cell.id)!.attemptedAtMs).toBeNull();
+  });
+});
+// ── 5. The owner's 2026-08-06 decision, end to end ───────────────────────────
+
+/**
+ * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` (text) and `IMAGE_LAB_OPENAI_OPEN_REFERENCES`
+ * (reference images) — one owner decision on 2026-08-06 (outside research plus
+ * legal consultation), carried by TWO independent switches because the two bets
+ * rest on different things: the text bet on a technical control that exists and
+ * is verified (the name scrub), the reference bet on upload-dialog copy alone.
+ * The full record is above `isImageLabOpenVocabulary` in `../image-lab-rules.ts`.
+ *
+ * ⚠ THE BLOCK ABOVE IS THE OTHER HALF OF THIS ONE, NOT ITS PREDECESSOR. Every
+ * refusal it asserts still fires with the flags unset, which is the code default
+ * and what any deployment that has not taken this decision runs. Neither half may
+ * be deleted in favour of the other.
+ *
+ * ⚠ AND THE SCRUB IS PINNED HERE, ON THE FLAG-ON PATH, DELIBERATELY. The
+ * decision's premise is "scrubbed text carrying no identifiers is not personal
+ * data" — so with the text flag on, `scrubNames` is not defence in depth any
+ * more, it is the thing making the premise true. A test that only proved the
+ * scrub under the old, gated configuration would prove it exactly where it did
+ * not matter.
+ */
+describe("the OpenAI channel flags — the decision, on the paid path", () => {
+  /**
+   * A provenance-bearing compose with a chosen flag posture.
+   *
+   * ⚠ THE FLAGS ARE SEPARATE ARGUMENTS AND BOTH DEFAULT OFF. A helper that set
+   * both from one boolean would make every test below blind to the coupling the
+   * split exists to remove.
+   */
+  const openVocab = (
+    flags: { openVocabulary?: boolean; openReferences?: boolean } = {},
+    over: Record<string, unknown> = {}
+  ) => {
+    const h = makeHarness();
+    h.hooks.realContentLive = true;
+    h.hooks.openVocabulary = flags.openVocabulary === true;
+    h.hooks.openReferences = flags.openReferences === true;
+    return {
+      h,
+      input: composeInput({
+        template: "Draw {{product}}",
+        slotValues: { product: "sticker packs", pitch: "I draw my own stickers" },
+        sourceToken: VALID_SOURCE_TOKEN,
+        ...over,
+      }),
+    };
+  };
+
+  /**
+   * ⚠ MUTATION: remove the text flag's early return from `decideChildTextGate`,
+   * or stop passing `deps.isOpenVocabulary()` from `createRun`, and this reddens.
+   * It is the text half of the decision, end to end: composed authored, stored
+   * authored, dispatched authored, billed.
+   */
+  it("an OpenAI cell on a provenance run sends the CHILD'S OWN WORDING and dispatches", async () => {
+    const { h, input } = openVocab({ openVocabulary: true });
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    expect(cell.modelId).toBe("gpt-image-2");
+    // NOT the closed vocabulary — the composition itself changed, not just the gate.
+    expect(cell.promptDerived).toBe(false);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(false);
+    expect(cell.resolvedPrompt).toBe("Draw sticker packs");
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    // ⚠ THE ADAPTER GOT THE EXACT STORED STRING. `resolved_prompt` is the
+    // evidence trail, and the trail is only worth anything if it is what ran.
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: "Draw sticker packs" },
+    ]);
+  });
+
+  /**
+   * ⚠ MUTATION: leave the reference gate armed under its own flag, or wire
+   * `deps.isOpenReferences()` to the text reader, and this reddens.
+   */
+  it("an OpenAI cell CARRIES REFERENCE IMAGES under the references flag", async () => {
+    const { h, input } = openVocab({ openReferences: true }, { referenceIds: ["ref-1"] });
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const outcome = await generateCell(h.deps, {
+      staffId: "staff-1",
+      imageId: created.cells[0]!.id,
+    });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toHaveLength(1);
+  });
+
+  /**
+   * ⚠ THE RECOMMENDED PRODUCTION POSTURE, ON THE PAID PATH: text open, references
+   * closed. This is the combination the split exists to make available, and it is
+   * the one a single flag could not express.
+   *
+   * ⚠ MUTATION: have the text flag also open the reference channel — which is
+   * what the FIRST implementation did — and this reddens.
+   */
+  it("text OPEN + references CLOSED: wording dispatches, but a run carrying references is refused", async () => {
+    // No references on the run: the wording goes.
+    const plain = openVocab({ openVocabulary: true, openReferences: false });
+    const created = await createRun(plain.h.deps, plain.input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const outcome = await generateCell(plain.h.deps, {
+      staffId: "staff-1",
+      imageId: created.cells[0]!.id,
+    });
+    expect(outcome.kind).toBe("done");
+    expect(plain.h.dispatched[0]!.prompt).toBe("Draw sticker packs");
+
+    // Same posture, same wording, but the run carries a reference: refused, with
+    // the REFERENCE reason — not the text one.
+    const withRefs = openVocab(
+      { openVocabulary: true, openReferences: false },
+      { referenceIds: ["ref-1"] }
+    );
+    const created2 = await createRun(withRefs.h.deps, withRefs.input);
+    expect(created2.ok).toBe(true);
+    if (!created2.ok) return;
+    const outcome2 = await generateCell(withRefs.h.deps, {
+      staffId: "staff-1",
+      imageId: created2.cells[0]!.id,
+    });
+    expect(outcome2).toEqual({ kind: "child_reference_gate" });
+    expect(withRefs.h.dispatched).toEqual([]);
+  });
+
+  /**
+   * ⚠ THE ODD POSTURE, AND IT MUST BE COHERENT: references open, text closed.
+   * Nobody is likely to run this, which is exactly why it is the state most
+   * likely to crash or silently couple. The references ride along; the text is
+   * still held to the closed vocabulary, composed derived and dispatched derived.
+   *
+   * ⚠ MUTATION: have the references flag also open the text channel and this
+   * reddens.
+   */
+  it("references OPEN + text CLOSED: references ride, the prompt is still the vocabulary", async () => {
+    const { h, input } = openVocab(
+      { openVocabulary: false, openReferences: true },
+      { referenceIds: ["ref-1"] }
+    );
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    // The TEXT flag is off, so composition still forces the derived vocabulary.
+    expect(cell.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(true);
+
+    // …and the dispatch succeeds, because the reference channel is open.
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: cell.resolvedPrompt },
+    ]);
+
+    // And a row forced back to authored text is STILL refused on the text leg,
+    // proving the reference flag bought nothing on the text channel.
+    const second = openVocab({ openVocabulary: false, openReferences: true });
+    const created2 = await createRun(second.h.deps, second.input);
+    expect(created2.ok).toBe(true);
+    if (!created2.ok) return;
+    const cell2 = created2.cells[0]!;
+    second.h.cells.set(cell2.id, {
+      ...second.h.cells.get(cell2.id)!,
+      resolvedPrompt: "Draw sticker packs",
+      promptDerived: false,
+    });
+    expect(
+      await generateCell(second.h.deps, { staffId: "staff-1", imageId: cell2.id })
+    ).toEqual({ kind: "child_text_gate" });
+  });
+
+  /**
+   * ⚠ MUTATION: make the scrub conditional on either flag — `openVocabulary ?
+   * text : scrubNames(text, tokens)`, which is the "we do not need it any more"
+   * refactor a future reader is most likely to reach for — and this reddens.
+   *
+   * It must not be reachable. The decision rests on the text carrying no
+   * identifiers; the scrub is what removes them. Weakening it does not relax a
+   * control that has become redundant, it removes the ground the decision stands
+   * on. Asserted on the template, the slot values, the resolved prompt, the note,
+   * AND the string the adapter actually received — with BOTH flags open, which is
+   * the most permissive state the code has.
+   */
+  it("STILL SCRUBS the child's name from everything dispatched — no flag touches it", async () => {
+    const { h, input } = openVocab(
+      { openVocabulary: true, openReferences: true },
+      {
+        template: "Draw {{product}} for Maya Chen",
+        slotValues: { product: "Maya's Street Cards" },
+        note: "Maya's second attempt at the sticker panel",
+      }
+    );
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    expect(created.run.template).not.toMatch(/maya/i);
+    expect(created.run.slotValues.product).not.toMatch(/maya/i);
+    expect(created.run.resolvedPrompt).not.toMatch(/maya/i);
+    expect(created.run.note).not.toMatch(/maya/i);
+
+    const cell = created.cells[0]!;
+    expect(cell.resolvedPrompt).not.toMatch(/maya/i);
+    // …and the vendor really did receive the scrubbed string.
+    await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(h.dispatched).toHaveLength(1);
+    expect(h.dispatched[0]!.prompt).not.toMatch(/maya/i);
+  });
+
+  /**
+   * ⚠ MUTATION: force `authored` on OpenAI under the text flag, or drop `derived`
+   * from the mode set, and this reddens.
+   *
+   * `derived` became OPTIONAL, not unavailable. An authored-vs-derived comparison
+   * on the SAME model is a first-class experiment on a prompt bench, and it must
+   * still compose, store and dispatch as the closed vocabulary.
+   */
+  it("still lets staff CHOOSE the derived prompt on OpenAI, and sends it", async () => {
+    const { h, input } = openVocab(
+      { openVocabulary: true },
+      { promptModes: { "gpt-image-2": "derived" } }
+    );
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(true);
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: cell.resolvedPrompt },
+    ]);
+  });
+
+  /**
+   * ⚠ MUTATION: let either flag reach a non-OpenAI provider and this reddens.
+   * Google was never gated and is not gated now — over-restriction remains a
+   * defect, in ALL FOUR states, which is why all four are asserted here.
+   */
+  it("leaves a Google cell exactly as it was, in every flag combination", async () => {
+    for (const openVocabulary of [true, false]) {
+      for (const openReferences of [true, false]) {
+        const label = `vocab=${openVocabulary} refs=${openReferences}`;
+        const { h, input } = openVocab(
+          { openVocabulary, openReferences },
+          { modelIds: ["gemini-3-pro-image"], referenceIds: ["ref-1"] }
+        );
+        const created = await createRun(h.deps, input);
+        expect(created.ok, label).toBe(true);
+        if (!created.ok) return;
+        expect(created.cells[0]!.promptDerived, label).toBe(false);
+
+        const outcome = await generateCell(h.deps, {
+          staffId: "staff-1",
+          imageId: created.cells[0]!.id,
+        });
+        expect(outcome.kind, label).toBe("done");
+      }
+    }
+  });
+
+  /** ⚠ HYGIENE, UNRELATED TO THE DECISION, AND STILL CLOSED WITH BOTH FLAGS ON. */
+  it("still refuses a cell naming a model the registry does not know", async () => {
+    const { h, input } = openVocab({ openVocabulary: true, openReferences: true });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+    const cell = created.cells[0]!;
+    h.cells.set(cell.id, { ...h.cells.get(cell.id)!, modelId: "gpt-image-9-turbo" });
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome).toEqual({ kind: "unknown_model_gate" });
+    expect(h.dispatched).toEqual([]);
+  });
+
+  /**
+   * ⚠ THE ATTESTATION COLUMN SURVIVES THE DECISION. It no longer gates the
+   * OpenAI prompt, but it is still a recorded staff assertion with an owner and a
+   * timestamp, and it still governs whether hand-typed slot values are accepted
+   * at all (`unverified_slot_source`, which is provider-agnostic and was never
+   * part of this decision).
+   */
+  it("still records `noChildContentAttested`, and still refuses unattested hand-typed slots", async () => {
+    const h = makeHarness();
+    h.hooks.openVocabulary = true;
+    h.hooks.openReferences = true;
+
+    const attested = await createRun(
+      h.deps,
+      composeInput({ slotValues: { product: "sticker packs" }, noChildContentAttested: true })
+    );
+    expect(attested.ok).toBe(true);
+    if (!attested.ok) return;
+    expect(attested.run.noChildContentAttested).toBe(true);
+
+    const unattested = await createRun(
+      h.deps,
+      composeInput({
+        idempotencyKey: "compose-key-0002",
+        slotValues: { product: "sticker packs" },
+        noChildContentAttested: false,
+      })
+    );
+    expect(unattested.ok).toBe(false);
+    if (unattested.ok || !("refusal" in unattested)) return;
+    expect(unattested.refusal.reason).toBe("unverified_slot_source");
+  });
+
+  /**
+   * ⚠ REVERSING EITHER DECISION IS UNSETTING ITS ENV VAR — NO DEPLOY, AND NO
+   * MIGRATION OF THE RUNS COMPOSED WHILE IT WAS ON.
+   *
+   * The gate reads both flags at DISPATCH, not at compose, so a run composed with
+   * authored text under the text flag is refused the moment an operator turns it
+   * off. That is what makes "unset the variable" a real reversal rather than a
+   * change that only affects future composes.
+   */
+  it("a run composed with the text flag ON is REFUSED at dispatch once it goes off", async () => {
+    const { h, input } = openVocab({ openVocabulary: true });
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(false);
+
+    // The operator unsets the variable. No deploy, no code change.
+    h.hooks.openVocabulary = false;
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome).toEqual({ kind: "child_text_gate" });
+    expect(h.dispatched).toEqual([]);
+    // Nothing dialled, nothing billed, cell still re-generatable.
+    const row = h.cells.get(cell.id)!;
+    expect(row.state).toBe("requested");
+    expect(row.attemptedAtMs).toBeNull();
+  });
+
+  /**
+   * ⚠ AND THE REVERSALS ARE INDEPENDENT — THE WHOLE POINT OF THE SPLIT.
+   *
+   * Unsetting `IMAGE_LAB_OPENAI_OPEN_REFERENCES` mid-incident must close the
+   * reference channel and leave the text channel exactly where it was. Coupled,
+   * an operator walking back a permanent reference mistake would also have to
+   * close a text channel that, by the owner's own reasoning, is fine to leave
+   * open — the wrong choice to hand someone during an incident.
+   */
+  it("unsetting the REFERENCES flag mid-incident leaves the TEXT channel open", async () => {
+    const both = { openVocabulary: true, openReferences: true };
+
+    // A run with references, composed and dispatched while both were open.
+    const withRefs = openVocab(both, { referenceIds: ["ref-1"] });
+    const a = await createRun(withRefs.h.deps, withRefs.input);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+
+    // A second, reference-free run on the SAME deployment.
+    const textOnly = openVocab(both, { idempotencyKey: "compose-key-0009" });
+    const b = await createRun(textOnly.h.deps, textOnly.input);
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    expect(b.cells[0]!.promptDerived).toBe(false);
+
+    // The operator closes the reference channel ONLY.
+    withRefs.h.hooks.openReferences = false;
+    textOnly.h.hooks.openReferences = false;
+
+    // The reference-bearing run is refused…
+    expect(
+      await generateCell(withRefs.h.deps, { staffId: "staff-1", imageId: a.cells[0]!.id })
+    ).toEqual({ kind: "child_reference_gate" });
+    expect(withRefs.h.dispatched).toEqual([]);
+
+    // …and the text-only run still dispatches the child's own wording, untouched.
+    const outcome = await generateCell(textOnly.h.deps, {
+      staffId: "staff-1",
+      imageId: b.cells[0]!.id,
+    });
+    expect(outcome.kind).toBe("done");
+    expect(textOnly.h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: "Draw sticker packs" },
+    ]);
   });
 });

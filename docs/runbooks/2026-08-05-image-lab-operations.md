@@ -65,7 +65,73 @@ deploy.
 | `IMAGE_LAB_LIVE` | **Generation.** Whether any model may be called at all. | The bench renders in full; the adapter returns `unconfigured` and attempts no network call; the page shows an explicit "generation off" notice and the `/staff` hub card carries a matching badge. |
 | `IMAGE_LAB_REAL_CONTENT_LIVE` | **All child content, on every leg.** Whether a real child's authored text may be loaded into the slot panel, AND whether `createImageLabRun` will accept, scrub or record a compose claiming child provenance. | The picker is absent; a provenance-bearing compose is refused outright (`content_picker_off`) rather than silently recorded; manual prompts still compose and generate normally. |
 
-### ⚠ STATUS 2026-08-06 — BOTH FLAGS ARE ON IN PRODUCTION, WITH TWO CHECKS OUTSTANDING
+### ⚠ STATUS 2026-08-06 (FINAL) — `IMAGE_LAB_LIVE` ON, `IMAGE_LAB_REAL_CONTENT_LIVE` **OFF**. BOTH CHECKS WERE RUN AND **BOTH FAILED**.
+
+`IMAGE_LAB_REAL_CONTENT_LIVE` was briefly set on as an accepted risk, then the two
+checks were actually performed and **neither closes**. The flag was removed the
+same day. Nothing was ever exposed: the PR was unmerged throughout, so no code
+ran with it on.
+
+**CHECK 2 — CONSENT: FAILS.** Policy `2026-08-05.1` (verified against the backend
+source of truth, `app/api/fp/signup/consent-rules.ts`, not just the client
+snapshot) grants exactly ONE third-party AI disclosure and it is bound to the
+photo:
+
+> "I consent to First Profit collecting **a photo of my child** … and to **that
+> photo** being sent to a third-party artificial intelligence image service that
+> draws a personalized comic book cover starring my child"
+
+Every other clause is First Profit *collecting and storing*, not disclosing — and
+the notes clause is scope-limited ("used only to improve First Profit"). The Lab
+with this flag on sends the child's **authored business text** (product name,
+one-liner, pitch, sale details) to OpenAI and Google. The photo clause does not
+stretch to cover written work. **To close: a consent version bump** adding a
+clause for child-authored content going to a third-party AI service — text,
+version and sha256 bumped in the SAME change on both sides (a drift test guards
+it). It binds only parents who attest AFTER it ships; the 17 already-enrolled
+children's consent cannot be retroactively widened.
+
+**CHECK 1 — PROVIDER TERMS: FAILS on OpenAI, closeable on Google.**
+
+*Google — closeable today.* Gemini API Additional Terms (effective 2026-03-23):
+paid tier, Google "doesn't use your prompts … or responses to improve our
+products"; logging is limited-period for policy enforcement only. Unpaid tier IS
+used for training and human review. EEA/CH/UK get paid-tier protection even on
+free quota. **The whole dependency is: confirm the production key bills against a
+PAID project, and that no fallback (dev key, AI Studio, quota overflow) can route
+child text through unpaid quota.**
+
+*OpenAI — NOT closeable today, and the blocker is their own rule.* Training is
+fine by default (no training on API data since 2023-03-01; 30-day abuse-monitoring
+retention). But OpenAI's under-18 API guidance
+(`developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance`)
+states:
+
+> "You should not use OpenAI services to process any personal data of children
+> under 13 or the applicable age of digital consent without first implementing
+> zero data retention in our API."
+
+The beta cohort includes under-13s (band `g3_5`). ZDR **is** supported for the
+`gpt-image-*` models but is **approval-gated through OpenAI sales — not
+self-serve** — and even under ZDR, image endpoints retain suspected-CSAM matches
+for manual review (non-waivable). Three paths:
+  (a) start the ZDR request with OpenAI sales;
+  (b) route under-13 accounts to Gemini paid tier only, leaving gpt-image-2 for
+      synthetic prompts; or
+  (c) **send gpt-image-2 a sanitized prompt derived from the business CATEGORY
+      rather than the child's own words** — likely the cheapest defensible path,
+      since the prompt only needs to convey what to draw. Note this is a real code
+      change in the Lab, not a config flip.
+
+⚠ Three openai.com pages (usage-policies, enterprise-privacy, trust portal)
+returned **403 to automated fetch again on 2026-08-06** and remain UNREAD. A human
+must open them for the usage-policies effective date and minors clause, the
+enterprise-privacy retention table, and trust-portal artifacts. Do not close this
+item on the strength of pages nobody has read.
+
+---
+
+### Historical note — the accepted-risk window (superseded by the above)
 
 `IMAGE_LAB_LIVE=1` and `IMAGE_LAB_REAL_CONTENT_LIVE=1` were set on the `the120`
 Vercel project (production) on 2026-08-06. **`IMAGE_LAB_REAL_CONTENT_LIVE` was

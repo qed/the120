@@ -133,6 +133,11 @@ export function shapeRefusal(reason: LoginRefusalReason): { status: 401; body: s
 export function buildAllowedOrigins(previewOrigin: string | undefined): readonly string[] {
   const base = [
     "https://firstprofit.school",
+    // www serves the SAME SPA (Vercel attaches both hosts to the project). The
+    // canonical fix is first-profit's www→apex redirect, but a tab already
+    // sitting on www must still be able to sign in — refusing it was the
+    // Aug 2026 "first-login 403" (BUG-001).
+    "https://www.firstprofit.school",
     "http://localhost:5173",
     "http://localhost:3000",
   ];

@@ -178,10 +178,46 @@ for manual review (non-waivable). Three paths:
       since the prompt only needs to convey what to draw. Note this is a real code
       change in the Lab, not a config flip.
 
-### CHECK 1, OPENAI HALF — CLOSED IN CODE 2026-08-06 by path (c)
+### CHECK 1, OPENAI HALF — path (c) IMPLEMENTED, **NOT YET CLOSED**
 
-Path (c) is now **implemented**, on branch `feat/image-lab-category-prompts`.
-What shipped is narrower and more useful than "sanitize the Lab":
+> **⚠ THIS SECTION CLAIMED "CLOSED IN CODE" ON 2026-08-06 AND THAT WAS WRONG.**
+> Review found three ways child content reaches gpt-image-2 without ever arming
+> the gate. Fixes are in flight on `feat/image-lab-category-prompts`; until they
+> land and are mutation-verified, **treat the OpenAI half of CHECK 1 as OPEN and
+> leave `IMAGE_LAB_REAL_CONTENT_LIVE` off.**
+>
+> The root cause is worth stating plainly, because it will recur: **provenance is
+> a property of the FETCH PATH, not of the CONTENT.** The gate arms on
+> `run.source_child_id`, which is set only when a picker-minted token verifies.
+> Child text that arrives any other way is invisible to it.
+>
+> 1. **The template is not inspected.** The compensating refusal checks slot
+>    values only. Put the child's pitch in the template, omit the token, leave
+>    slots empty → no refusal, the name scrub is skipped entirely (no tokens to
+>    scrub), the gate returns ok on its first line, and verbatim child prose is
+>    dispatched. **The `unverified_slot_source` refusal copy actively recommended
+>    this** ("or put the wording straight into the template instead"), and a test
+>    pinned the behaviour as correct, so the suite could never catch it.
+> 2. **Turning `IMAGE_LAB_REAL_CONTENT_LIVE` OFF widens the guard.** The flag is a
+>    conjunct of that same refusal, so the position an operator picks to mean
+>    "stop touching child content" disables the only check on unprovenanced slot
+>    content. The switch is inverted for that one branch.
+> 3. **Reference images are ungated.** The gate's input is
+>    `{modelId, childProvenance, promptText}` — it is a TEXT gate. Up to 16
+>    reference objects ride the same paid call to gpt-image-2, controlled only by
+>    warning copy in the upload dialog. A photo of the child's hand-lettered sign
+>    carries their handwriting and business name — while the derived prompt in the
+>    same request instructs "no lettering, no logos, no brand names" precisely
+>    because those are a privacy problem. References are append-only and
+>    undeletable, so the mistake is permanent.
+>
+> Also found: the gate **fails open** on an unrecognized model id (`entry?.provider
+> ?? null` is not `"openai"`, so it passes), held closed today only by the
+> adapter's separate lookup in another module — one plausible registry
+> copy-paste turns it into a live bypass.
+
+Path (c) is **implemented** on branch `feat/image-lab-category-prompts`. What
+shipped is narrower and more useful than "sanitize the Lab":
 
 - **The prompt is a PER-MODEL, staff-controlled choice.** The Lab is a PROMPT
   bench, not a model tournament — finding that `gpt-image-2` needs different
@@ -190,7 +226,14 @@ What shipped is narrower and more useful than "sanitize the Lab":
   cell carries `authored` (template × slot values) or `derived` text.
 - **ONE non-overridable rule, enforced SERVER-SIDE at dispatch.** A cell
   targeting an **OpenAI** model, on a run with **verified child provenance**,
-  must carry a prompt from a closed category vocabulary
+  must carry a prompt from a closed category vocabulary. *(In flight: the arming
+  condition is being widened, because "verified child provenance" was too narrow
+  — see the warning above. An OpenAI compose that carries no verified provenance
+  will have to carry an explicit, staff-attributed attestation that the template
+  holds no child-authored content; absent that, OpenAI cells are forced to
+  derived. The safe path becomes the default and the lazy path becomes safe,
+  while staff-authored prompt experiments on OpenAI stay fully available.)* The
+  vocabulary lives in
   (`app/staff/image-lab/lib/category-prompt-rules.ts`). Anything else is
   **REFUSED** (`child_text_gate`, HTTP 403) — never silently rewritten, because a
   row that reports a prompt it did not send corrupts the evidence the Lab exists

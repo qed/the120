@@ -12,6 +12,11 @@
  *     finishes. RESTRICT guarantees a child is never half-deleted (its
  *     descendants are removed before the child row), so re-enumeration is always
  *     consistent.
+ *   - EXTERNAL OBJECTS TOO: the v3 cover/photo blobs named by
+ *     `fp_onboarding_drafts.{photo,cover}_blob_key` and
+ *     `children.fp_cover_blob_key` are deleted at the STORE, object before row
+ *     (a row delete only drops the pointer; the bytes stay readable forever).
+ *     A missing object is success; a store outage is stranded, never swallowed.
  *   - The Workspace suspend+delete is GATED on `workspaceConfigured`: with no
  *     `GOOGLE_WORKSPACE_SA_KEY` the Google legs are skipped (counted `skipped`),
  *     exactly as provisioning parks `pending`. The one live exercise is Unit 11.
@@ -33,9 +38,13 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  CHILD_BLOB_KEY_COLUMNS,
   dedupeAuthUserIds,
+  DRAFT_BLOB_KEY_COLUMNS,
   hasWorkspaceMailbox,
+  planSubjectBlobDeletes,
   RELEASED_CLAIM_PII_COLUMNS,
+  type PlannedBlobDelete,
 } from "./erase-family-rules";
 
 export type EraseFamilyDeps = {
@@ -51,6 +60,24 @@ export type EraseFamilyDeps = {
   /** False when GOOGLE_WORKSPACE_SA_KEY is absent: the core SKIPS both Google
    *  legs entirely (no real Directory call in normal build/test). */
   workspaceConfigured: boolean;
+  /**
+   * Delete ONE object from the blob store, by key. Idempotent by contract:
+   * "missing" (already gone) is SUCCESS, exactly like the Directory legs' 404
+   * handling. "error" is a real store failure and is reported honestly — the
+   * core strands it, so a blob-store outage can never be mistaken for an
+   * erasure. Never throws in a well-behaved adapter; the core defends anyway.
+   */
+  deleteBlob?: (key: string) => Promise<"deleted" | "missing" | "error">;
+  /**
+   * False when no blob adapter is wired (today: always — the cover path is
+   * template-only and no `@vercel/blob` adapter exists yet; see the seam at the
+   * bottom of app/lib/fp/cover-store.ts). UNLIKE `workspaceConfigured`, this is
+   * NOT a benign skip: if a row actually names an object and there is no way to
+   * delete it, the core STRANDS the key rather than proceeding, because an
+   * undeleted object is the data-rights failure itself. With no keys present
+   * (the shipped reality) it is simply never consulted.
+   */
+  blobConfigured: boolean;
   now: () => number;
 };
 
@@ -79,12 +106,30 @@ export type EraseFamilySummary = {
     fp_player_saves: number;
     fp_player_profiles: number;
     path_student_profiles: number;
+    /** v3: one-time sign-in codes bound to the child. */
+    fp_handoff_codes: number;
+    /** v3: the kid-first onboarding drafts (name, age, story answers, cover). */
+    fp_onboarding_drafts: number;
     children: number;
     authUsers: number;
     fp_parental_consent: number;
     fp_signup_attempts: number;
   };
   workspace: { suspended: number; deleted: number; missing: number; skipped: number; errored: number };
+  /**
+   * External blob objects (cover / source photo). `missing` is a SUCCESS
+   * (already-deleted is a completed erasure); `errored` is a store outage and
+   * `unconfigured` is "a key exists and there is no adapter to delete it" —
+   * both are also recorded in `stranded`, so neither can pass as done.
+   * `refused` is a key outside the subject's own namespace, never deleted.
+   */
+  blobs: {
+    deleted: number;
+    missing: number;
+    errored: number;
+    refused: number;
+    unconfigured: number;
+  };
   /** Released provisioning claims whose residual PII was scrubbed after the child
    *  delete (row + local_part preserved; email/attempted-email/supabase_user_id
    *  nulled). See RELEASED_CLAIM_PII_COLUMNS. */
@@ -120,6 +165,170 @@ async function del(
   const n = (data ?? []).length;
   if (n > 0) summary.order.push(`${table}:${label}(${n})`);
   return n;
+}
+
+/**
+ * Delete the external objects a subject owns, OBJECT BEFORE ROW (see the blob
+ * rule in erase-family-rules.ts). Every outcome is accounted for:
+ *
+ *   deleted / missing → success (missing = already gone = a completed erasure)
+ *   error             → the store failed. STRANDED + logged; never swallowed.
+ *   unconfigured      → a key exists with no adapter to delete it. STRANDED.
+ *   not owned         → refused (never deleted) + STRANDED for triage.
+ *
+ * Because every non-success lands in `summary.stranded`, the caller's existing
+ * per-child strand guard preserves the `children` anchor, and `summary.ok`
+ * goes false — a blob failure downgrades the whole run exactly like a failed
+ * row delete does.
+ */
+async function eraseBlobs(
+  deps: EraseFamilyDeps,
+  summary: EraseFamilySummary,
+  plan: readonly PlannedBlobDelete[],
+  label: string
+): Promise<void> {
+  for (const item of plan) {
+    if (!item.owned) {
+      console.error(
+        `[erase] STRANDED: refusing to delete blob key outside the ${item.scope} ${item.ownerId} namespace (${label})`
+      );
+      summary.blobs.refused++;
+      summary.stranded.push(`blob:not_owned:${label}:${item.key}`);
+      continue;
+    }
+    const del = deps.deleteBlob;
+    if (!deps.blobConfigured || !del) {
+      console.error(
+        `[erase] STRANDED: ${label} names blob ${item.key} but no blob adapter is configured — the object SURVIVES this erasure; wire the adapter and re-run`
+      );
+      summary.blobs.unconfigured++;
+      summary.stranded.push(`blob:unconfigured:${label}:${item.key}`);
+      continue;
+    }
+    let outcome: "deleted" | "missing" | "error";
+    try {
+      outcome = await del(item.key);
+    } catch (err) {
+      // A throwing adapter is an outage, not a success. Same branch as "error".
+      console.error(
+        `[erase] blob delete threw for ${item.key} (${label}): ${err instanceof Error ? err.message : String(err)}`
+      );
+      outcome = "error";
+    }
+    if (outcome === "deleted") {
+      summary.blobs.deleted++;
+      summary.order.push(`blob:deleted(${label})`);
+    } else if (outcome === "missing") {
+      // Already gone. Idempotent re-run, or a reaper that got there first.
+      summary.blobs.missing++;
+      summary.order.push(`blob:missing(${label})`);
+    } else {
+      console.error(
+        `[erase] STRANDED: blob delete failed for ${item.key} (${label}) — the object may still exist; re-run after the store recovers`
+      );
+      summary.blobs.errored++;
+      summary.stranded.push(`blob:error:${label}:${item.key}`);
+    }
+  }
+}
+
+/** One onboarding draft's identity + the objects it names. */
+type DraftRow = {
+  id: string;
+  blobKeys: (string | null)[];
+};
+
+/** Read the drafts matching one filter, with the two blob-key columns. A read
+ *  failure is STRANDED, never treated as "no drafts": silently proceeding would
+ *  delete the anchor and orphan the row this step exists to remove. */
+async function readDrafts(
+  db: Db,
+  column: "child_id" | "parent_id",
+  value: string,
+  summary: EraseFamilySummary,
+  label: string
+): Promise<{ ok: boolean; drafts: DraftRow[] }> {
+  // The projection is a STATIC literal (supabase-js types it at compile time and
+  // cannot parse an interpolated one) — it MUST list every DRAFT_BLOB_KEY_COLUMNS
+  // entry. `readKeys` below strands loudly if it ever stops doing so, so the two
+  // cannot drift into a silently-unerased object.
+  const { data, error } = await db
+    .from("fp_onboarding_drafts")
+    .select("id, photo_blob_key, cover_blob_key")
+    .eq(column, value);
+  if (error) {
+    console.error(
+      `[erase] STRANDED: fp_onboarding_drafts read (${column}=${value}, ${label}) failed: ${error.message}`
+    );
+    summary.stranded.push(`fp_onboarding_drafts:read:${label}:${error.message}`);
+    return { ok: false, drafts: [] };
+  }
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  return {
+    ok: true,
+    drafts: rows.map((r) => ({
+      id: String(r.id),
+      blobKeys: readKeys(r, DRAFT_BLOB_KEY_COLUMNS),
+    })),
+  };
+}
+
+/**
+ * Pull the blob-key columns off a row. Absent / null / non-string all mean "this
+ * subject owns no object here", which is the overwhelmingly common case (and the
+ * only case in production today).
+ *
+ * The risk this cannot see is a PROJECTION DRIFT: someone adds a third key
+ * column to DRAFT_BLOB_KEY_COLUMNS and forgets the static `.select(...)` literal
+ * above, so the value arrives undefined and the object is never deleted. That is
+ * guarded one level up instead, by the coverage test
+ * (__tests__/erase-family-schema-coverage.test.ts), which asserts every column
+ * named by those constants literally appears in this file's projections.
+ */
+function readKeys(row: Record<string, unknown>, columns: readonly string[]): (string | null)[] {
+  return columns.map((col) => (typeof row[col] === "string" ? (row[col] as string) : null));
+}
+
+/**
+ * The v3 draft step, shared by the per-child pass and the family-level
+ * parent-scoped sweep: blobs first (object before row), then the rows. A read
+ * failure or a stranded blob leaves the rows in place for the re-run.
+ */
+async function eraseDrafts(
+  deps: EraseFamilyDeps,
+  summary: EraseFamilySummary,
+  column: "child_id" | "parent_id",
+  value: string,
+  label: string
+): Promise<void> {
+  const read = await readDrafts(deps.db, column, value, summary, label);
+  if (!read.ok || read.drafts.length === 0) return;
+  const strandedBefore = summary.stranded.length;
+  for (const draft of read.drafts) {
+    await eraseBlobs(
+      deps,
+      summary,
+      planSubjectBlobDeletes({ scope: "draft", ownerId: draft.id, keys: draft.blobKeys }),
+      `draft:${draft.id}`
+    );
+  }
+  if (summary.stranded.length > strandedBefore) {
+    // Object before row: a key we could not delete must keep its row, or the
+    // bytes become unreachable forever.
+    console.error(
+      `[erase] fp_onboarding_drafts rows for ${column}=${value} PRESERVED — a blob delete did not succeed; re-run to finish`
+    );
+    summary.order.push(`fp_onboarding_drafts:preserved(${label})`);
+    return;
+  }
+  summary.deleted.fp_onboarding_drafts += await del(
+    deps.db,
+    "fp_onboarding_drafts",
+    column,
+    value,
+    summary,
+    label
+  );
 }
 
 type ChildRow = {
@@ -192,12 +401,15 @@ export async function eraseFamily(
       fp_player_saves: 0,
       fp_player_profiles: 0,
       path_student_profiles: 0,
+      fp_handoff_codes: 0,
+      fp_onboarding_drafts: 0,
       children: 0,
       authUsers: 0,
       fp_parental_consent: 0,
       fp_signup_attempts: 0,
     },
     workspace: { suspended: 0, deleted: 0, missing: 0, skipped: 0, errored: 0 },
+    blobs: { deleted: 0, missing: 0, errored: 0, refused: 0, unconfigured: 0 },
     scrubbedReleasedClaims: 0,
     parentAccountDeleted: false,
     order: [],
@@ -208,7 +420,14 @@ export async function eraseFamily(
     // ── Resolve the children in scope. Always re-read (resumability): a re-run
     //    sees only the survivors. Child-scoped runs verify ownership via the
     //    parent_id filter so a caller can never erase another family's child.
-    let childQuery = db.from("children").select("id").eq("parent_id", input.parentUserId);
+    //    The cover blob key rides along on this read: it names an EXTERNAL
+    //    object the `children` delete cannot reach (v3 blob rule).
+    //    (static projection — must list every CHILD_BLOB_KEY_COLUMNS entry;
+    //    `readKeys` strands loudly if it stops doing so.)
+    let childQuery = db
+      .from("children")
+      .select("id, fp_cover_blob_key")
+      .eq("parent_id", input.parentUserId);
     if (childScoped) childQuery = childQuery.in("id", input.childIds as string[]);
     const childrenRes = await childQuery;
     if (childrenRes.error) {
@@ -217,7 +436,14 @@ export async function eraseFamily(
       summary.stranded.push(`children:enumerate:${childrenRes.error.message}`);
       return summary;
     }
-    const childIds = ((childrenRes.data ?? []) as { id: string }[]).map((r) => r.id);
+    const childRows = (childrenRes.data ?? []) as unknown as Record<string, unknown>[];
+    const childIds = childRows.map((r) => String(r.id));
+    const childBlobKeys = new Map<string, (string | null)[]>(
+      childRows.map((r) => [
+        String(r.id),
+        readKeys(r, CHILD_BLOB_KEY_COLUMNS),
+      ])
+    );
 
     // ── Per child, delete the leaf graph in FK-safe order, then the mailbox,
     //    then the child's own auth accounts, then the roster row.
@@ -272,6 +498,20 @@ export async function eraseFamily(
       // 4: path_student_profiles (RESTRICT -> children AND auth.users)
       summary.deleted.path_student_profiles += await del(db, "path_student_profiles", "child_id", childId, summary, `child:${childId}`);
 
+      // 4a (v3): fp_handoff_codes — the one-time sign-in codes bound to this
+      //     child. CASCADE-backed by the children delete, but removed HERE and
+      //     EXPLICITLY: a live sign-in credential must stop working before the
+      //     identity it grants is torn down, and an implicit cascade would be
+      //     invisible in the summary and the order log.
+      summary.deleted.fp_handoff_codes += await del(db, "fp_handoff_codes", "child_id", childId, summary, `child:${childId}`);
+
+      // 4b (v3): fp_onboarding_drafts for this child — kid name, age, story
+      //     answers, the inline cover data URL, and the two blob keys. MUST
+      //     precede the `children` delete: child_id is ON DELETE SET NULL, so a
+      //     roster delete first would leave this row alive and unfindable by
+      //     child. Blobs are deleted before the row (see the blob rule).
+      await eraseDrafts(deps, summary, "child_id", childId, `child:${childId}`);
+
       // 5: Workspace mailbox (path b) — SUSPEND then DELETE, read the address
       //    BEFORE the child delete cascades the provisioning claim away.
       if (hasWorkspaceMailbox(child.workspaceEmail)) {
@@ -313,6 +553,23 @@ export async function eraseFamily(
           summary.stranded.push(`auth_users:${authUserId}`);
         }
       }
+
+      // 6b (v3): the child's OWN cover object. `children.fp_cover_blob_key` is a
+      //     pointer into the blob store; the roster delete below removes the
+      //     pointer but NOT the bytes, and a Blob URL stays readable forever
+      //     until the object is deleted. Object BEFORE row, and BEFORE the
+      //     strand guard below, so a store failure preserves the anchor for the
+      //     re-run instead of orphaning the picture.
+      await eraseBlobs(
+        deps,
+        summary,
+        planSubjectBlobDeletes({
+          scope: "child",
+          ownerId: childId,
+          keys: childBlobKeys.get(childId) ?? [],
+        }),
+        `child:${childId}`
+      );
 
       // FIX 1c: a child still present with ZERO resolvable auth identities is a
       // partial-erasure resume (profiles already deleted, no claim to recover the
@@ -377,6 +634,16 @@ export async function eraseFamily(
     //    the parent account is deleted only after) and parent_email (a stable
     //    handle if a prior partial run already nulled parent_id).
     if (!childScoped) {
+      // 7c (v3): the PARENT-SCOPED draft sweep. An abandoned signup leaves a
+      //     draft with `child_id` still NULL — the kid's name, age, story
+      //     answers and cover, reachable ONLY by parent_id. Step 9's parent auth
+      //     delete CASCADEs those rows away silently (parent_id -> auth.users ON
+      //     DELETE CASCADE), taking the row but NOT the objects it names, so the
+      //     sweep must happen HERE, blobs first, while a handle still exists.
+      //     Child-scoped runs deliberately skip it: the parent survives and
+      //     their other kids' drafts are not this run's business.
+      await eraseDrafts(deps, summary, "parent_id", input.parentUserId, "family");
+
       // 8: consent evidence — the EXPLICIT, deliberate final removal (see
       //    erase-family-rules.ts). fp_parental_consent by parent_id.
       summary.deleted.fp_parental_consent += await del(db, "fp_parental_consent", "parent_id", input.parentUserId, summary, "family");

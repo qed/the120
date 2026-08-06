@@ -99,6 +99,12 @@ export function scriptEraseFamilyDeps(): EraseFamilyDeps {
   return {
     db,
     workspaceConfigured: saKeyRaw().length > 0,
+    // Mirror of realEraseFamilyDeps: there is no blob adapter in the repo yet
+    // (the cover path is template-only and writes NULL blob keys), so there is
+    // nothing honest to inject. `false` is not a skip — the core STRANDS any
+    // non-null key it finds rather than deleting the row that names it. Keep
+    // this in lockstep with provision-deps.ts when the adapter lands.
+    blobConfigured: false,
     deleteAuthUser: async (userId) => {
       const res = await db.auth.admin.deleteUser(userId);
       if (res.error) {

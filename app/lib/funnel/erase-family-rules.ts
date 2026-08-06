@@ -60,6 +60,77 @@
  *      supabase_user_id) while PRESERVING local_part — the true-erasure step the
  *      never-reissue ledger's survival makes necessary
  *
+ * ── NEW USER FLOW v3: THE KID-FIRST ONBOARDING TABLES (2026-08-06) ──────────
+ * v3 added two tables and six `children` columns that hold a child's personal
+ * data, and the erasure above knew about none of them. They are folded into the
+ * SAME plan (no second mechanism), at these positions:
+ *
+ *   fp_handoff_codes        (20260913120000) — one-time sign-in codes bound to a
+ *     child. `child_id -> children ON DELETE CASCADE`, so the roster delete
+ *     would take them anyway; they are deleted EXPLICITLY and EARLY (leaf order,
+ *     before the auth accounts) because a live sign-in credential must stop
+ *     working before the identity it grants is torn down, and because an
+ *     explicit delete is the only one that shows up in the summary and the
+ *     order log. Idempotent (0 rows on a re-run).
+ *
+ *   fp_onboarding_drafts    (20260912120000 + 20260914/20260917) — the whole
+ *     pre-account record: kid_first_name, kid_last_name, kid_age, the story
+ *     `answers`, cover_data_url (the picture, INLINE in the row) and the two
+ *     blob keys. Deleted PER CHILD by `child_id` BEFORE the `children` row, and
+ *     that order is LOAD-BEARING, not cosmetic: `child_id -> children ON DELETE
+ *     SET NULL`, so a `children` delete that got there first would leave the
+ *     draft alive with its child pointer NULLED — a row full of a minor's data
+ *     that a re-run could no longer FIND by child. The only remaining handle
+ *     would be parent_id, and in a full-family erasure the parent auth delete
+ *     CASCADEs the drafts away silently, taking the row but NOT the external
+ *     blobs it names. Drafts first; then the child; then the parent.
+ *
+ *   children.fp_cover_* / fp_kid_age / fp_story_answers (20260914/17/18) — the
+ *     carried copy of the same data. The COLUMNS need no step of their own: the
+ *     `children` row is deleted outright (step 7), which takes every column with
+ *     it. The ONE exception is `fp_cover_blob_key`, which does not hold data —
+ *     it NAMES BYTES IN AN EXTERNAL STORE that a row delete cannot reach. See
+ *     the blob rule below.
+ *
+ * ── THE BLOB RULE (external objects outlive the row that names them) ────────
+ * `fp_onboarding_drafts.{photo_blob_key,cover_blob_key}` and
+ * `children.fp_cover_blob_key` name objects in the blob store. A Blob URL is
+ * permanent until the object is deleted, so deleting the row is NOT erasure —
+ * it only destroys the last pointer to a minor's picture, leaving the bytes
+ * readable forever by anyone holding the URL. The erasure therefore deletes the
+ * OBJECT FIRST and the ROW SECOND, which INVERTS the pipeline's normal rule (2)
+ * ("a blob is deleted only after no row references its key",
+ * app/lib/fp/cover-store-rules.ts) — deliberately, and only here:
+ *
+ *   - Rule (2) protects LIVE rows from dangling references. In an erasure the
+ *     referencing row is being destroyed in the next breath, so the reference it
+ *     briefly dangles has no reader and no future.
+ *   - The opposite order is unrecoverable: delete the row first and a crash
+ *     leaves an object nothing points at, in a namespace nothing will ever
+ *     enumerate again. That is the stranded-row hazard this file's RESUMABILITY
+ *     section already forbids, applied to bytes instead of tuples.
+ *   - This mirrors the reaper's documented sequence (plan: "CAS flip → delete
+ *     blob(s) → null blob keys only after confirmed deletion"), which is the
+ *     same object-before-pointer discipline.
+ *
+ * A blob delete is idempotent by contract: "missing" (already gone) is SUCCESS.
+ * A store outage is "error", which is STRANDED — never swallowed, never counted
+ * as done, and (via the existing per-child stranded guard) it BLOCKS that
+ * child's `children` anchor delete so a re-run can finish the job. A key that
+ * does not belong to the subject being erased is REFUSED and stranded rather
+ * than deleted (`keyBelongsTo`): a mistaken caller must only ever fail to
+ * delete, never delete another child's art.
+ *
+ * WITH NO BLOB ADAPTER CONFIGURED the erasure does NOT quietly skip a key it
+ * found. Unlike the Workspace legs — a separate system whose absence is benign —
+ * an undeleted object IS the data-rights failure, so a present key with no way
+ * to delete it is stranded loudly (`blobUnconfigured`). Today this cannot fire:
+ * the shipped cover path is TEMPLATE-ONLY, writes the picture INLINE as a data
+ * URL, and sets `cover_blob_key = null` (verified 2026-08-06 against production:
+ * zero non-null blob keys in `children` or `fp_onboarding_drafts`, and no
+ * `@vercel/blob` dependency or adapter exists in the repo). The step is built now
+ * so that the day the AI path lands, erasure is already correct.
+ *
  * ── RESUMABILITY (why the auth id must be recoverable across a profile delete) ──
  * enumerateChild derives a child's auth ids from BOTH profile rows AND the claim's
  * `supabase_user_id`. RESTRICT forces profiles (3-4) to be deleted before the auth
@@ -92,6 +163,14 @@
  * handoff (plan line 220) likewise lists fp_ledger first. We honor the schema.
  *
  * Then, ONCE per family (full-family erasure):
+ *   7c. the PARENT-SCOPED draft sweep: `fp_onboarding_drafts` rows for this
+ *      parent that never reached a child (an abandoned signup — the kid's name,
+ *      age, story answers and cover, with `child_id` still NULL). They are
+ *      reachable ONLY by parent_id, and step 9's parent auth delete CASCADEs
+ *      them away silently, so they must be swept HERE, blobs first, while a
+ *      handle to them still exists. Full-family scope only: in a child-scoped
+ *      erasure the parent survives and their other kids' drafts are none of
+ *      this run's business.
  *   8. fp_parental_consent + fp_signup_attempts — the CONSENT EVIDENCE. Per the
  *      SET-NULL posture these SURVIVE the account/child deletes above (a routine
  *      delete must never be blocked by, nor silently destroy, compliance
@@ -111,6 +190,11 @@
  * local_part must stay burned.
  */
 
+// The blob namespace scheme + its ownership guard. `cover-store-rules` is PURE
+// (no SDK, no Supabase, no Next), so importing it here keeps this file pure too;
+// the vendor-facing side of the port lives behind an injected dep in the core.
+import { keyBelongsTo, type CoverOwnerScope } from "@/app/lib/fp/cover-store-rules";
+
 /** The ordered per-child leaf tables (before the child's own auth + children
  *  row). Exported so the executor and its tests share ONE definition of order. */
 export const CHILD_LEAF_DELETE_ORDER = [
@@ -119,7 +203,20 @@ export const CHILD_LEAF_DELETE_ORDER = [
   "fp_player_saves",
   "fp_player_profiles",
   "path_student_profiles",
+  // v3: the sign-in codes die before the identity they grant (CASCADE-backed,
+  // deleted explicitly so it is visible and countable).
+  "fp_handoff_codes",
+  // v3: MUST precede the `children` delete — child_id is ON DELETE SET NULL, so
+  // a roster delete first would orphan a row full of a minor's data.
+  "fp_onboarding_drafts",
 ] as const;
+
+/**
+ * Tables swept ONCE per family, keyed on `parent_id`, for rows that never
+ * reached a child (and so are invisible to the per-child pass). Ordered before
+ * the parent auth delete, whose CASCADE would otherwise take them silently.
+ */
+export const PARENT_SCOPED_DELETE_ORDER = ["fp_onboarding_drafts"] as const;
 
 /** The family-level evidence tables removed as the deliberate final step. */
 export const FAMILY_EVIDENCE_DELETE_ORDER = ["fp_parental_consent", "fp_signup_attempts"] as const;
@@ -137,6 +234,17 @@ export const RELEASED_CLAIM_PII_COLUMNS = [
   "email",
   "workspace_attempted_email",
   "supabase_user_id",
+  // Added 2026-08-06 with the v3 coverage ledger, which forced a per-column
+  // decision on this SURVIVING row and surfaced two more identity-bearing
+  // columns on it:
+  //   forwarding_target — the PARENT'S email address (20260819120000), sitting
+  //     on a row that outlives the whole family by design.
+  //   last_error        — the last Directory/API failure string, which routinely
+  //     embeds the child's full mailbox address. It is operational diagnostics
+  //     with no value once the claim is released, so it is nulled rather than
+  //     left as a back door to the address every other column just gave up.
+  "forwarding_target",
+  "last_error",
 ] as const;
 
 /**
@@ -145,6 +253,54 @@ export const RELEASED_CLAIM_PII_COLUMNS = [
  * next same-name child, exactly the failure the total-unique index prevents.
  */
 export const RELEASED_CLAIM_PRESERVED_COLUMN = "local_part" as const;
+
+/* ────────────────────────── external objects (the blob rule) ────────────── */
+
+/** Columns on `fp_onboarding_drafts` that NAME an object in the blob store.
+ *  `photo_blob_key` is the source photo of a minor; `cover_blob_key` is the
+ *  generated art. Both must be deleted at the store, not merely dereferenced. */
+export const DRAFT_BLOB_KEY_COLUMNS = ["photo_blob_key", "cover_blob_key"] as const;
+
+/** The same, on `children` (the copy made at the draft→child carry). */
+export const CHILD_BLOB_KEY_COLUMNS = ["fp_cover_blob_key"] as const;
+
+/** One object an erasure intends to delete, with the ownership verdict already
+ *  applied. `owned:false` means the key does not live in this subject's own
+ *  namespace and MUST NOT be deleted (refused + stranded instead). */
+export type PlannedBlobDelete = {
+  key: string;
+  scope: CoverOwnerScope;
+  ownerId: string;
+  owned: boolean;
+};
+
+/**
+ * Turn a subject's raw key columns into the ordered, de-duplicated delete plan.
+ * Pure: blank/absent keys vanish (a row with no cover has nothing to delete, and
+ * that is the overwhelmingly common case), duplicates collapse (the same key can
+ * legitimately appear on two columns after a carry), and every survivor carries
+ * the `keyBelongsTo` verdict so the executor never has to re-derive it.
+ */
+export function planSubjectBlobDeletes(input: {
+  scope: CoverOwnerScope;
+  ownerId: string;
+  keys: readonly (string | null | undefined)[];
+}): PlannedBlobDelete[] {
+  const seen = new Set<string>();
+  const out: PlannedBlobDelete[] = [];
+  for (const raw of input.keys) {
+    const key = (raw ?? "").trim();
+    if (key.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      scope: input.scope,
+      ownerId: input.ownerId,
+      owned: keyBelongsTo(key, input.scope, input.ownerId),
+    });
+  }
+  return out;
+}
 
 /**
  * Dedupe the auth.users ids a child's identity spans. A path-a child has ONE

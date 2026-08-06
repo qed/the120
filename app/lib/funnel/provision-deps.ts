@@ -959,6 +959,22 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
   return {
     db,
     workspaceConfigured: saKeyRaw().length > 0,
+    // ── BLOB DELETION: NO ADAPTER EXISTS YET, AND THAT IS DECLARED, NOT HIDDEN ──
+    // The v3 cover pipeline ships TEMPLATE-ONLY: the picture is rendered inline
+    // as a data URL and `cover_blob_key` / `fp_cover_blob_key` are written NULL,
+    // so no object is ever created (verified 2026-08-06 against production: zero
+    // non-null blob keys). The Vercel Blob adapter is still the documented seam
+    // at the bottom of app/lib/fp/cover-store.ts, and until it lands there is
+    // nothing honest to inject here.
+    //
+    // `blobConfigured: false` therefore means "no way to delete an object", and
+    // the core treats that as a STRAND (not a benign skip) the moment it ever
+    // finds a non-null key — which is exactly the alarm we want on the day the
+    // AI path starts writing objects and this factory has not been updated.
+    // WHEN THE ADAPTER LANDS: set `blobConfigured` to whatever gates the store's
+    // token and supply `deleteBlob` mapping already-gone → "missing" (the SDK's
+    // `del()` is URL-addressed — see concern (a) in the cover-store seam note).
+    blobConfigured: false,
     deleteAuthUser: async (userId) => {
       const res = await db.auth.admin.deleteUser(userId);
       if (res.error) {

@@ -660,6 +660,9 @@ describe("deletion ordering — fp_public_sites dies FIRST", () => {
       suspendWorkspaceUser: async () => "missing" as const,
       deleteWorkspaceUser: async () => "missing" as const,
       workspaceConfigured: false,
+      // No blob adapter (production's shape today): these fixtures name no
+      // objects, so nothing is skipped and nothing is stranded.
+      blobConfigured: false,
       now: () => Date.now(),
     };
   }

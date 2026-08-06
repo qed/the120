@@ -27,6 +27,7 @@ import {
 // The TS bound the SQL CHECK mirrors. Imported, never retyped: a hardcoded 120
 // here lets the two drift while both stay green (review finding 24).
 import { IMAGE_LAB_REFERENCE_LABEL_MAX } from "../reference-rules";
+import { IMAGE_LAB_RESOLVED_MAX_CHARS } from "../run-rules";
 
 // ── Migration ↔ TS parity (the SQL is a copy the node suite cannot run) ──
 // Per docs/solutions/test-failures/security-definer-sql-case-third-untested-
@@ -558,5 +559,97 @@ describe("image-lab-rules: bounds", () => {
     // gpt-image-2 at high quality tops out around two minutes; retry must not be
     // offered while a call could still land.
     expect(IMAGE_LAB_STALE_AFTER_MS).toBeGreaterThan(2 * 60_000);
+  });
+});
+
+/**
+ * Migration parity: the ADDITIVE per-cell prompt migration.
+ *
+ * ⚠ ITS OWN GLOB, ITS OWN DESCRIBE. The `fp_image_lab` migration is APPLIED and
+ * must never be edited again, so the per-cell prompt columns arrived as a second
+ * file — and the assertions have to name that file, not the first one. Resolved
+ * by glob for the same reason the original is: the header ORDERS the applier to
+ * rename it to the real next-free ledger slot before applying, and a hardcoded
+ * filename would throw ENOENT at collection time, mid-apply, against production.
+ */
+describe("migration parity: fp_image_lab_cell_prompts.sql", () => {
+  const MIGRATIONS_DIR = path.resolve(process.cwd(), "supabase/migrations");
+  const matches = readdirSync(MIGRATIONS_DIR).filter((f) =>
+    /_fp_image_lab_cell_prompts\.sql$/.test(f)
+  );
+
+  it("exactly one fp_image_lab_cell_prompts migration file exists", () => {
+    expect(
+      matches,
+      `expected one *_fp_image_lab_cell_prompts.sql in ${MIGRATIONS_DIR}`
+    ).toHaveLength(1);
+  });
+
+  const raw = readFileSync(path.join(MIGRATIONS_DIR, matches[0]!), "utf8");
+  const sql = raw.replace(/--[^\n]*/g, "");
+
+  it("adds BOTH columns, additively and idempotently", () => {
+    // `add column if not exists` is what makes a re-apply a no-op rather than an
+    // error — this repo's standing rule, because authoring IS applying and there
+    // is no undo.
+    expect(
+      /alter\s+table\s+public\.fp_image_lab_images\s+add\s+column\s+if\s+not\s+exists\s+resolved_prompt\s+text/i.test(
+        sql
+      )
+    ).toBe(true);
+    expect(
+      /alter\s+table\s+public\.fp_image_lab_images\s+add\s+column\s+if\s+not\s+exists\s+prompt_derived\s+boolean\s+not\s+null\s+default\s+false/i.test(
+        sql
+      )
+    ).toBe(true);
+  });
+
+  it("leaves `resolved_prompt` NULLABLE — a pre-recording row is a real state", () => {
+    // A `not null` here would have needed a backfill of rows whose prompt we do
+    // not know, which is exactly the invented evidence this column exists to
+    // avoid. The readers render "not recorded" instead.
+    expect(/resolved_prompt\s+text\s+not\s+null/i.test(sql)).toBe(false);
+  });
+
+  it("bounds `resolved_prompt` at IMAGE_LAB_RESOLVED_MAX_CHARS, like the run's", () => {
+    const m = sql.match(
+      /resolved_prompt\s+is\s+null\s+or\s+char_length\s*\(\s*resolved_prompt\s*\)\s*<=\s*(\d+)/i
+    );
+    expect(m, "check (resolved_prompt is null or char_length(resolved_prompt) <= N)").not.toBeNull();
+    expect(Number(m![1])).toBe(IMAGE_LAB_RESOLVED_MAX_CHARS);
+  });
+
+  it("drops the constraint before adding it, so a re-apply is a no-op", () => {
+    expect(
+      /drop\s+constraint\s+if\s+exists\s+fp_image_lab_images_resolved_prompt_bounded/i.test(
+        sql
+      )
+    ).toBe(true);
+  });
+
+  it("adds NO policy and NO grant — the tables stay service-role only", () => {
+    // The whole Lab is RLS-on with zero policies and no anon/authenticated grant.
+    // An additive migration is the easiest place to lose that by accident.
+    expect(/create\s+policy/i.test(sql)).toBe(false);
+    expect(/\bgrant\b/i.test(sql)).toBe(false);
+    expect(/alter\s+table[^;]*disable\s+row\s+level\s+security/i.test(sql)).toBe(false);
+  });
+
+  it("touches ONLY fp_image_lab_images, and drops no column", () => {
+    const tables = [...sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?([a-z_.]+)/gi)].map(
+      (m) => m[1]!.toLowerCase()
+    );
+    expect(new Set(tables)).toEqual(new Set(["public.fp_image_lab_images"]));
+    expect(/drop\s+column/i.test(sql)).toBe(false);
+    expect(/drop\s+table/i.test(sql)).toBe(false);
+  });
+
+  it("carries the ledger ritual in its header, not just in the lock file", () => {
+    // MIGRATION-LOCK.md's own recorded lesson: a lane reads the lock file once at
+    // session start and treats a mutable contended file as durable state. The
+    // instruction has to be where the applier is looking.
+    expect(raw).toMatch(/supabase_migrations\.schema_migrations/);
+    expect(raw.toLowerCase()).toContain("rename");
+    expect(raw).toMatch(/notify\s+pgrst/i);
   });
 });

@@ -88,6 +88,17 @@ export type HistoryImageRow = {
   readonly verdict: ImageLabVerdict | null;
   readonly verdictNote: string;
   readonly verdictAtMs: number | null;
+  /**
+   * ⚠ THE PROMPT THIS ATTEMPT SENT, per attempt.
+   *
+   * The prompt is a per-model, staff-controlled choice, so the run's own
+   * `resolvedPrompt` is the run's DEFAULT and not necessarily what any given
+   * image was made from. History reads this one. Null means the row predates
+   * per-cell recording (`20260920120000`), which is a fact worth rendering
+   * rather than papering over with the run's text.
+   */
+  readonly resolvedPrompt: string | null;
+  readonly promptDerived: boolean;
 };
 
 /** One run row, as History renders it. */
@@ -1019,7 +1030,11 @@ export type KitResult = {
   readonly runId: string;
   readonly modelId: string;
   readonly slotValues: SlotValues;
+  /** ⚠ THE RUN'S DEFAULT. {@link promptText} is what this image actually sent. */
   readonly resolvedPrompt: string;
+  /** The exact text behind THIS kept image, or null for a pre-recording row. */
+  readonly promptText: string | null;
+  readonly promptDerived: boolean;
   readonly referenceLabels: readonly string[];
   readonly drillTags: readonly ImageLabDrillTag[];
   readonly verdictNote: string;
@@ -1052,6 +1067,16 @@ export type KitGroup = {
   readonly template: string;
   readonly results: readonly KitResult[];
   readonly modelIds: readonly string[];
+  /**
+   * ⚠ DOES ANY KEPT RESULT IN THIS GROUP COME FROM A CATEGORY-DERIVED PROMPT?
+   *
+   * The copy button hands over the TEMPLATE, unchanged — that is right and does
+   * not move. But a template whose evidence was produced from derived text is a
+   * template nobody has actually tested with a child's own wording in it, and the
+   * panel engine would inherit the prompt kit believing otherwise. So the Kit
+   * says which results are which, at the group and at the card.
+   */
+  readonly anyDerived: boolean;
 };
 
 /**
@@ -1112,6 +1137,8 @@ export function projectKit(
       modelId: image.modelId,
       slotValues: run.slotValues,
       resolvedPrompt: run.resolvedPrompt,
+      promptText: image.resolvedPrompt,
+      promptDerived: image.promptDerived,
       referenceLabels: run.referenceIds.map(
         (id) => labelById.get(id) ?? IMAGE_LAB_EVIDENCE_COPY.kit.unknownReference
       ),
@@ -1130,6 +1157,7 @@ export function projectKit(
       template,
       results,
       modelIds: [...new Set(results.map((result) => result.modelId))],
+      anyDerived: results.some((result) => result.promptDerived),
     })),
     unresolved,
   };
@@ -1467,6 +1495,15 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
     compare: "Compare run",
     iteratedOn: (model: string) => `Prompt iterated on ${model}`,
     sourceChild: "Built from a child's business content",
+    /** ⚠ PER ATTEMPT, because the prompt is a per-model choice. The run-level
+     *  line above is the run's DEFAULT, not necessarily what any image sent. */
+    imagePrompt: "Prompt sent",
+    imagePromptDerived: "Category-derived",
+    imagePromptAuthored: "As written",
+    imagePromptMissing:
+      "Not recorded — this attempt predates per-cell prompt recording.",
+    resolvedPromptIsDefault:
+      "The run's default. Each result below shows the text it was actually sent, which may differ per model.",
     noSlotValues: "No slot values — the template was sent as written.",
     noReferences: "No references attached.",
     noTags: "No drill tag.",
@@ -1520,6 +1557,16 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
 
   kit: {
     heading: "Kit",
+    /** ⚠ THE COPY BUTTON STILL YIELDS THE TEMPLATE, UNCHANGED. This says what the
+     *  evidence behind it was made from, which is a different fact and one the
+     *  panel engine would otherwise inherit as an assumption. */
+    derivedEvidence:
+      "Some kept results under this template were generated from a CATEGORY-DERIVED prompt, not from this template filled with a child's words. The template copies unchanged — but its evidence is about the derived wording, so re-test it before the panel engine relies on it.",
+    resultPromptHeading: "Prompt that produced this",
+    resultPromptDerived: "Category-derived",
+    resultPromptAuthored: "As written",
+    resultPromptMissing:
+      "Not recorded — this attempt predates per-cell prompt recording.",
     /** ⚠ EXPLICIT, and it says WHY it is empty — the Kit is derived from
      *  verdicts, so it stays empty until someone judges, not until someone
      *  generates. A blank page is indistinguishable from a broken query. */

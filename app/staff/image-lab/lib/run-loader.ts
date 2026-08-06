@@ -61,7 +61,10 @@ const RUN_COLUMNS =
 const IMAGE_COLUMNS =
   "id, run_id, model_id, cell_ordinal, state, attempted_at, billed, " +
   "failure_reason, failure_detail, storage_key, content_type, " +
-  "cost_estimated, cost_reported, gateway_generation_id, created_at";
+  "cost_estimated, cost_reported, gateway_generation_id, " +
+  // Per-cell prompt recording (20260920120000). NAMED, like everything else
+  // here: `*` would have picked these up silently on both legs.
+  "resolved_prompt, prompt_derived, created_at";
 
 /** Postgres unique_violation — here, the `(staff_id, idempotency_key)` index. */
 const UNIQUE_VIOLATION = "23505";
@@ -218,6 +221,13 @@ function toCellRow(raw: Record<string, unknown>): CellRow {
     billed: raw.billed === true,
     costEstimatedUsd: asNumberOrNull(raw.cost_estimated),
     costReportedUsd: asNumberOrNull(raw.cost_reported),
+    // ⚠ NULL IS A REAL ANSWER — "this attempt predates per-cell recording" — and
+    // is NOT coerced to the run's prompt here. The core does that fallback at
+    // dispatch, where it is one visible line; doing it in the mapper would make
+    // every reader unable to tell a recorded prompt from a reconstructed one.
+    resolvedPrompt:
+      typeof raw.resolved_prompt === "string" ? raw.resolved_prompt : null,
+    promptDerived: raw.prompt_derived === true,
   };
 }
 
@@ -327,6 +337,8 @@ export function runDeps(db: ImageLabDb): RunDeps {
             // identical across every row of this insert, so it can never order
             // the compare grid (migration header).
             cell_ordinal: row.cellOrdinal,
+            resolved_prompt: row.promptText,
+            prompt_derived: row.promptDerived,
             state: "requested",
           }))
         )

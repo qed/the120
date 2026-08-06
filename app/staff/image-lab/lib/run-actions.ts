@@ -68,6 +68,7 @@ import {
   IMAGE_LAB_MAX_IMAGE_COUNT,
   IMAGE_LAB_MAX_REFERENCES_PER_RUN,
   IMAGE_LAB_NOTE_MAX_CHARS,
+  IMAGE_LAB_PROMPT_MODES,
   IMAGE_LAB_SOURCE_ID_PATTERN,
   IMAGE_LAB_TEMPLATE_MAX_CHARS,
   type RunCompositionRefusal,
@@ -130,6 +131,20 @@ const createRunSchema = z.object({
    * nothing here for a caller to assert. See `./source-token.ts`.
    */
   sourceToken: z.string().min(16).max(1024).nullable().optional(),
+  /**
+   * Per-model prompt choice. Keys are model ids; unknown keys are harmless
+   * because only SELECTED models are ever looked up, and an unknown value fails
+   * the enum rather than being coerced.
+   *
+   * ⚠ ADVISORY ON PURPOSE. A hand-rolled POST asking for `authored` on an OpenAI
+   * model composes fine and is refused at DISPATCH by `decideChildTextGate`.
+   * Refusing here as well would look like defence in depth and would actually be
+   * the opposite: it would tempt a future edit to treat the compose check as the
+   * gate, which is the one place it cannot be.
+   */
+  promptModes: z
+    .record(z.string().max(120), z.enum(IMAGE_LAB_PROMPT_MODES))
+    .optional(),
 });
 
 /**
@@ -163,6 +178,11 @@ function refusalForIssues(error: z.ZodError): RunCompositionRefusal {
         };
       case "sourceToken":
         return { ok: false, reason: "bad_source_token" };
+      case "promptModes":
+        // Not a composition bound — a stale client sent a mode this build does
+        // not know. "Write a template first" would be a lie, so fall through to
+        // the honest floor below rather than naming the wrong field.
+        continue;
       default:
         continue;
     }
@@ -220,6 +240,7 @@ export async function createImageLabRun(input?: unknown): Promise<CreateRunResul
     iteratedOnModel: parsed.data.iteratedOnModel ?? null,
     iteratedFromRunId: parsed.data.iteratedFromRunId ?? null,
     sourceToken: parsed.data.sourceToken ?? null,
+    promptModes: parsed.data.promptModes,
   });
 }
 

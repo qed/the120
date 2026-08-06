@@ -115,6 +115,13 @@ function statusFor(outcome: GenerateCellOutcome): number {
       return 429;
     case "invalid_input":
       return 400;
+    // ⚠ 403, NOT 409 AND NOT 400. The request is well-formed and the cell is in a
+    // perfectly good state; what is refused is the COMBINATION — an OpenAI model,
+    // a run built from a child's business content, and a prompt that is not the
+    // category-derived one. That is a forbidden action, and a caller that retries
+    // it unchanged will be refused identically forever.
+    case "child_text_gate":
+      return 403;
     // A reference this run names could not be read: infrastructure, not a model
     // result, and nothing was dialled or written.
     case "reference_unavailable":

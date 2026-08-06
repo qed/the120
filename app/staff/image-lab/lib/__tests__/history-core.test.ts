@@ -45,6 +45,8 @@ const image = (over: Partial<HistoryImageRow> = {}): HistoryImageRow => ({
   failureDetail: null,
   storageKey: "runs/run-1/img-1",
   billed: true,
+  resolvedPrompt: "A bright panel.",
+  promptDerived: false,
   costEstimatedUsd: 0.053,
   costReportedUsd: null,
   verdict: null,

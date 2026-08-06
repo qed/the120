@@ -111,6 +111,18 @@ export function KitView({
               {group.template}
             </pre>
 
+            {/* ⚠ THE WARNING SITS WITH THE COPY BUTTON, not in a footnote. The
+                button hands over the template unchanged — correct, and unchanged
+                by this unit — but if the evidence behind it came from a
+                category-derived prompt, the panel engine would inherit a prompt
+                kit whose results were produced by different text than the kit
+                implies. */}
+            {group.anyDerived && (
+              <p className="mt-3 text-pretty rounded-lg border border-hq-border-strong p-3 text-xs leading-relaxed text-hq-ink">
+                {COPY.derivedEvidence}
+              </p>
+            )}
+
             <button
               type="button"
               onClick={() => copy(group)}
@@ -169,9 +181,20 @@ function KitCard({ result }: { result: KitResult }) {
             ? COPY.noReferences
             : result.referenceLabels.join(", ")}
         </dd>
+        {/* ⚠ THE TEXT THAT PRODUCED *THIS* RESULT, which since prompts became a
+            per-model choice is no longer the run's `resolvedPrompt`. Shown so the
+            reader can see what the template became — and deliberately NOT what
+            the copy button yields. */}
+        <dt className="uppercase tracking-wide">
+          {COPY.resultPromptHeading} ·{" "}
+          {result.promptDerived
+            ? COPY.resultPromptDerived
+            : COPY.resultPromptAuthored}
+        </dt>
+        <dd className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words">
+          {result.promptText ?? COPY.resultPromptMissing}
+        </dd>
         <dt className="uppercase tracking-wide">{COPY.resolvedHeading}</dt>
-        {/* Shown so the reader can see what the template became — and deliberately
-            NOT what the copy button yields. */}
         <dd className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words">
           {result.resolvedPrompt}
         </dd>

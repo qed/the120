@@ -66,6 +66,9 @@ import {
   estimateRunCostUsd,
   formatUsd,
   modelIdsFromCells,
+  previewPromptText,
+  previewRows,
+  promptModeFor,
   releaseIdempotencyKey,
   resolveIdempotencyKey,
   runWithConcurrency,
@@ -80,6 +83,8 @@ import {
   IMAGE_LAB_RUN_COPY,
   modelSummaryLine,
   type ComposerNotice,
+  type ImageLabPromptMode,
+  type PromptModes,
   type GenerateCellOutcome,
   type IdempotencyStore,
   type ImageLabComposerSection,
@@ -143,6 +148,13 @@ export function RunComposer({
   const [modelIds, setModelIds] = useState<string[]>([]);
   const [imageCount, setImageCount] = useState(1);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
+  /**
+   * ⚠ PER MODEL, AND EMPTY MEANS "TAKE THE DEFAULT" rather than "authored".
+   * `promptModeFor` owns the default — an OpenAI model on a provenance-bearing
+   * run derives, everything else sends what was written — so a model this map
+   * has never heard of still gets the lawful answer.
+   */
+  const [promptModes, setPromptModes] = useState<PromptModes>({});
 
   /**
    * ⚠ RESTORED AT FIRST RENDER, not in an effect.
@@ -215,6 +227,11 @@ export function RunComposer({
   const serverNow = () => Date.now() + clockOffsetMs.current;
   const [serverNowMs, setServerNowMs] = useState(() => Date.now());
 
+  /** ⚠ "THE PICKER MINTED A TOKEN", which is what the SERVER will verify. The
+   *  preview would otherwise show the wrong prompt for every provenance-bearing
+   *  compose — see `decideRunComposition`'s `childProvenance`. */
+  const childProvenance = sourceToken !== null;
+
   const decision = useMemo(
     () =>
       decideRunComposition({
@@ -223,8 +240,18 @@ export function RunComposer({
         modelIds,
         imageCount,
         referenceIds,
+        childProvenance,
+        promptModes,
       }),
-    [template, slotValues, modelIds, imageCount, referenceIds]
+    [
+      template,
+      slotValues,
+      modelIds,
+      imageCount,
+      referenceIds,
+      childProvenance,
+      promptModes,
+    ]
   );
 
   const cost = useMemo(
@@ -250,6 +277,13 @@ export function RunComposer({
     modelIds,
     imageCount,
     referenceIds,
+    // ⚠ THE PROMPT CHOICE IS PART OF THE COMPOSITION. Without it, switching a
+    // model from `authored` to `derived` and pressing Generate again would reuse
+    // the held idempotency key, collide with the earlier run, and return it — so
+    // the bench would answer the prompt experiment with the OTHER prompt's
+    // results, which is the exact comparison this unit exists to enable.
+    promptModes,
+    childProvenance,
   ]);
 
   // ── The picker ─────────────────────────────────────────────────────────────
@@ -465,6 +499,7 @@ export function RunComposer({
         imageCount,
         referenceIds,
         sourceToken,
+        promptModes,
       });
       // ⚠ THE KEY IS RELEASED THE MOMENT THE SERVER HAS ANSWERED, AND BEFORE THE
       // mounted check, so a staff member who navigated away is not left holding a
@@ -515,6 +550,8 @@ export function RunComposer({
           billed: cell.billed,
           costEstimatedUsd: cell.costEstimatedUsd,
           costReportedUsd: cell.costReportedUsd,
+          resolvedPrompt: cell.resolvedPrompt,
+          promptDerived: cell.promptDerived,
           hasObject: false,
           signedUrl: null,
         }))
@@ -759,12 +796,40 @@ export function RunComposer({
             ? COPY.composer.preview.hint
             : COPY.composer.preview.nextRunHint}
         </p>
-        {/* READ-ONLY, and the exact bytes that will be sent. */}
-        <pre className="mt-2 w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border bg-hq-surface p-3 text-sm text-hq-ink">
-          {decision.ok
-            ? decision.resolved.text
-            : COPY.composer.preview.empty}
-        </pre>
+        {/* ⚠ ONE BLOCK PER MODEL, AND THE TEXT COMES FROM `previewRows` — the
+            SAME pure function whose output `run-rules.test.ts` pins against the
+            `resolved_prompt` `createRun` writes on the image rows. A `.tsx` that
+            re-derived the string inline would put this surface outside every
+            test in the repo, which for "the last check before child-authored
+            content leaves for a vendor" is not a trade worth making. */}
+        {previewRows(decision).length === 0 ? (
+          <pre className="mt-2 w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border bg-hq-surface p-3 text-sm text-hq-ink">
+            {previewPromptText(decision)}
+          </pre>
+        ) : (
+          <ul className="mt-2 flex flex-col gap-3">
+            {previewRows(decision).map((row) => (
+              <li key={row.modelId}>
+                <p className="flex flex-wrap items-baseline gap-2 text-xs text-hq-ink">
+                  <span className="font-path-mono">{row.modelId}</span>
+                  <span className="rounded border border-hq-border-strong px-2 py-0.5">
+                    {row.derived
+                      ? COPY.composer.preview.derivedBadge
+                      : COPY.composer.preview.authoredBadge}
+                  </span>
+                </p>
+                {row.note !== "" && (
+                  <p className="mt-1 text-pretty text-xs text-hq-ink-soft">
+                    {row.note}
+                  </p>
+                )}
+                <pre className="mt-1 w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border bg-hq-surface p-3 text-sm text-hq-ink">
+                  {row.text}
+                </pre>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     ),
 
@@ -789,6 +854,11 @@ export function RunComposer({
         <ul className="mt-3 flex flex-col gap-2">
           {IMAGE_LAB_MODELS.map((entry) => {
             const picked = modelIds.includes(entry.id);
+            // ⚠ THE CONTROL IS DISABLED, AND THE SERVER STILL REFUSES. Disabling
+            // is courtesy — `decideChildTextGate` runs on the paid path against a
+            // crafted request, which is where the rule actually lives.
+            const lockedToDerived =
+              childProvenance && entry.provider === "openai";
             return (
               <li key={entry.id}>
                 <button
@@ -821,6 +891,40 @@ export function RunComposer({
                     </span>
                   ))}
                 </button>
+
+                {/* ⚠ THE PROMPT CHOICE LIVES ON THE MODEL, because the prompt is
+                    a per-model experiment — that is the feature, not a
+                    concession. It is shown only for a SELECTED model: an unused
+                    chip's prompt choice is noise, and the run records nothing
+                    about it. */}
+                {picked && (
+                  <label className="mt-2 flex flex-col gap-1 pl-1 text-xs text-hq-ink">
+                    {COPY.composer.preview.modeLabel}
+                    <select
+                      value={promptModeFor(entry.id, childProvenance, promptModes)}
+                      disabled={lockedToDerived}
+                      onChange={(e) =>
+                        setPromptModes((prev) => ({
+                          ...prev,
+                          [entry.id]: e.target.value as ImageLabPromptMode,
+                        }))
+                      }
+                      className="min-h-11 w-full rounded-lg border border-hq-border bg-hq-surface px-2 text-sm text-hq-ink disabled:opacity-60"
+                    >
+                      <option value="authored">
+                        {COPY.composer.preview.modeAuthored}
+                      </option>
+                      <option value="derived">
+                        {COPY.composer.preview.modeDerived}
+                      </option>
+                    </select>
+                    {lockedToDerived && (
+                      <span className="text-pretty text-hq-ink-soft">
+                        {COPY.composer.preview.lockedNote}
+                      </span>
+                    )}
+                  </label>
+                )}
               </li>
             );
           })}

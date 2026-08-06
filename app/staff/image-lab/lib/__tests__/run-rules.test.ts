@@ -4,8 +4,10 @@ import {
   canRetryCell,
   cellAttemptName,
   cellRenderState,
+  decideChildTextGate,
   decideGenerateAffordance,
   decideRunComposition,
+  defaultPromptMode,
   describeAttemptLine,
   describeAttemptNumbering,
   describeCellProgress,
@@ -24,6 +26,9 @@ import {
   IMAGE_LAB_RESOLVED_MAX_CHARS,
   IMAGE_LAB_RUN_COPY,
   maxFanCostUsd,
+  previewPromptText,
+  previewRows,
+  promptModeFor,
   resolvePrompt,
   runObjectKey,
   type CellRow,
@@ -34,6 +39,10 @@ import {
   unverifiedItems,
 } from "../model-registry";
 import { IMAGE_LAB_STALE_AFTER_MS } from "../image-lab-rules";
+import {
+  allCategoryPrompts,
+  isCategoryDerivedPrompt,
+} from "../category-prompt-rules";
 
 /**
  * The run flow's PURE decisions (first-profit repo:
@@ -54,6 +63,8 @@ const cell = (over: Partial<CellRow> = {}): CellRow => ({
   state: "requested",
   attemptedAtMs: null,
   createdAtMs: 1_000,
+  resolvedPrompt: "A bright panel.",
+  promptDerived: false,
   failureReason: null,
   failureDetail: null,
   storageKey: null,
@@ -131,7 +142,11 @@ describe("decideRunComposition", () => {
     });
     expect(decision.ok).toBe(true);
     if (!decision.ok) return;
-    expect(decision.cells).toEqual([
+    // The prompt fields are asserted in their own describe below; this test is
+    // about the FAN's shape and column order.
+    expect(
+      decision.cells.map((c) => ({ modelId: c.modelId, cellOrdinal: c.cellOrdinal }))
+    ).toEqual([
       { modelId: "gpt-image-2", cellOrdinal: 0 },
       { modelId: "gpt-image-2", cellOrdinal: 1 },
       { modelId: "gemini-3-pro-image", cellOrdinal: 0 },
@@ -240,8 +255,8 @@ describe("decideRunComposition", () => {
 describe("estimateRunCostUsd", () => {
   it("sums list prices at the registry's default tier", () => {
     const estimate = estimateRunCostUsd([
-      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 0 },
-      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 1 },
+      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 0, promptText: "p", promptDerived: false },
+      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 1, promptText: "p", promptDerived: false },
     ]);
     expect(estimate.totalUsd).toBeCloseTo(0.0672, 6);
   });
@@ -274,7 +289,9 @@ describe("estimateRunCostUsd", () => {
   it("prices an unknown model at zero rather than throwing", () => {
     // `decideRunComposition` refuses an unknown model long before this, so the
     // branch is defensive only — but a NaN in a money line is worse than a zero.
-    expect(estimateRunCostUsd([{ modelId: "not-a-model", cellOrdinal: 0 }]).totalUsd).toBe(0);
+    expect(estimateRunCostUsd([
+      { modelId: "not-a-model", cellOrdinal: 0, promptText: "p", promptDerived: false },
+    ]).totalUsd).toBe(0);
   });
 
   it("formats money the way each model needs to be read", () => {
@@ -695,5 +712,249 @@ describe("outcome copy", () => {
     // completes afterwards. Staff must be told before they press Retry.
     expect(IMAGE_LAB_RUN_COPY.grid.retryWarning).toMatch(/late|still/i);
     expect(IMAGE_LAB_RUN_COPY.grid.retryWarning).toMatch(/billed/i);
+  });
+});
+
+// ── The prompt choice, and the gate ──────────────────────────────────────────
+
+/**
+ * ⚠ THE ASYMMETRY IS THE DESIGN, NOT AN OVERSIGHT.
+ *
+ * OpenAI's under-18 API guidance bars processing an under-13's personal data
+ * without zero data retention, which is sales-approval gated and which we do not
+ * have. Google's paid tier is confirmed no-training under the 2026-03-23 Gemini
+ * API Additional Terms and carries no such bar. So the constraint lands on one
+ * vendor because the vendors' terms differ — not because we decided to be even
+ * handed.
+ *
+ * The tests below pin BOTH directions. Under-restriction leaks child text to a
+ * vendor that told us not to send it; OVER-restriction is a real defect too,
+ * because it would block the per-model prompt experimentation the Lab exists for.
+ */
+describe("defaultPromptMode / promptModeFor", () => {
+  it("derives for an OpenAI model ONLY when the run carries child provenance", () => {
+    expect(defaultPromptMode("gpt-image-2", true)).toBe("derived");
+    expect(defaultPromptMode("gpt-image-2", false)).toBe("authored");
+  });
+
+  it("leaves Google models on the authored prompt, provenance or not", () => {
+    expect(defaultPromptMode("gemini-3-pro-image", true)).toBe("authored");
+    expect(defaultPromptMode("gemini-3.1-flash-lite-image", true)).toBe("authored");
+  });
+
+  it("an explicit staff choice wins over the default, in both directions", () => {
+    expect(
+      promptModeFor("gemini-3-pro-image", true, { "gemini-3-pro-image": "derived" })
+    ).toBe("derived");
+    // ⚠ AND THE UNSAFE DIRECTION IS *ALLOWED HERE*. This function is a default
+    // resolver, not the gate: `decideChildTextGate` refuses this cell at dispatch.
+    // Making it silently clamp would put a second, weaker copy of the rule in the
+    // one place a caller can bypass.
+    expect(promptModeFor("gpt-image-2", true, { "gpt-image-2": "authored" })).toBe(
+      "authored"
+    );
+  });
+
+  it("a junk mode falls back to the default rather than throwing", () => {
+    expect(
+      promptModeFor("gpt-image-2", true, {
+        "gpt-image-2": "verbatim" as unknown as "authored",
+      })
+    ).toBe("derived");
+    expect(promptModeFor("gpt-image-2", true, undefined)).toBe("derived");
+  });
+});
+
+describe("decideChildTextGate — the one non-overridable rule", () => {
+  const derived = allCategoryPrompts()[0]!;
+
+  it("refuses an OpenAI cell whose prompt is not from the closed vocabulary", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: "Draw Maya's dog treat stand, she sells them on her street",
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+  });
+
+  it("admits an OpenAI cell carrying a derived prompt", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+      })
+    ).toEqual({ ok: true });
+  });
+
+  /**
+   * ⚠ MUTATION (f), AT THE RULES LAYER. Extending the gate to Google reddens
+   * this. The Gemini leg is governed by `IMAGE_LAB_REAL_CONTENT_LIVE` and the
+   * name scrub, not by this rule.
+   */
+  it("does NOT constrain Google models, even with child provenance", () => {
+    for (const modelId of ["gemini-3-pro-image", "gemini-3.1-flash-lite-image"]) {
+      expect(
+        decideChildTextGate({
+          modelId,
+          childProvenance: true,
+          promptText: "Draw Maya's dog treat stand, she sells them on her street",
+        })
+      ).toEqual({ ok: true });
+    }
+  });
+
+  it("does not constrain anything at all without child provenance", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: false,
+        promptText: "Draw a comic panel of a lemonade stand",
+      })
+    ).toEqual({ ok: true });
+  });
+
+  /**
+   * ⚠ IT JUDGES THE STRING IN HAND. There is no template parameter on this
+   * function and there must not be one: a template of pure `{{slot}}` tokens is
+   * innocent-looking and resolves to a child's whole pitch, so a template-level
+   * check proves nothing about what is dispatched.
+   */
+  it("judges the dispatched text — an innocent template cannot vouch for it", () => {
+    const dispatched = "I bake dog treats and my name is Maya";
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: dispatched,
+      }).ok
+    ).toBe(false);
+  });
+});
+
+describe("decideRunComposition — the per-cell prompt", () => {
+  const base = {
+    template: "Draw {{product}}",
+    slotValues: { product: "dog treats" },
+    imageCount: 1,
+  };
+
+  it("gives each model its own prompt, and stamps every cell with it", () => {
+    const decision = decideRunComposition({
+      ...base,
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+      childProvenance: true,
+    });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+
+    const openai = decision.cells.find((c) => c.modelId === "gpt-image-2")!;
+    const google = decision.cells.find((c) => c.modelId === "gemini-3-pro-image")!;
+    expect(openai.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(openai.promptText)).toBe(true);
+    expect(google.promptDerived).toBe(false);
+    expect(google.promptText).toBe("Draw dog treats");
+
+    // The RUN-level resolution stays the authored one — it is the default and
+    // the stored `resolved_prompt`, not a claim about what any cell sent.
+    expect(decision.resolved.text).toBe("Draw dog treats");
+  });
+
+  it("without provenance every cell carries the authored text", () => {
+    const decision = decideRunComposition({
+      ...base,
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    if (!decision.ok) return;
+    expect(decision.cells.every((c) => c.promptText === "Draw dog treats")).toBe(true);
+    expect(decision.cells.every((c) => c.promptDerived === false)).toBe(true);
+  });
+
+  it("staff can choose derived on a Google model — that is the experiment", () => {
+    const decision = decideRunComposition({
+      ...base,
+      modelIds: ["gemini-3-pro-image"],
+      childProvenance: true,
+      promptModes: { "gemini-3-pro-image": "derived" },
+    });
+    if (!decision.ok) return;
+    expect(decision.cells[0]!.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(decision.cells[0]!.promptText)).toBe(true);
+  });
+});
+
+describe("previewRows — the preview IS the dispatched string", () => {
+  it("one row per selected model, each holding that model's exact text", () => {
+    const decision = decideRunComposition({
+      template: "Draw {{product}}",
+      slotValues: { product: "dog treats" },
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+      imageCount: 2,
+      childProvenance: true,
+    });
+    if (!decision.ok) return;
+
+    const rows = previewRows(decision);
+    expect(rows.map((r) => r.modelId)).toEqual([
+      "gpt-image-2",
+      "gemini-3-pro-image",
+    ]);
+    // ⚠ THE EQUALITY THE WHOLE SURFACE RESTS ON. Every cell of a model must carry
+    // exactly the string this model's preview row shows.
+    for (const row of rows) {
+      for (const cell of decision.cells.filter((c) => c.modelId === row.modelId)) {
+        expect(cell.promptText).toBe(row.text);
+        expect(cell.promptDerived).toBe(row.derived);
+      }
+    }
+  });
+
+  it("says WHY a derived row is derived, and distinguishes required from chosen", () => {
+    const required = previewRows(
+      decideRunComposition({
+        template: "Draw {{product}}",
+        slotValues: { product: "dog treats" },
+        modelIds: ["gpt-image-2"],
+        imageCount: 1,
+        childProvenance: true,
+      })
+    );
+    expect(required[0]!.note).toBe(IMAGE_LAB_RUN_COPY.composer.preview.derivedRequired);
+
+    const chosen = previewRows(
+      decideRunComposition({
+        template: "Draw {{product}}",
+        slotValues: { product: "dog treats" },
+        modelIds: ["gemini-3-pro-image"],
+        imageCount: 1,
+        childProvenance: true,
+        promptModes: { "gemini-3-pro-image": "derived" },
+      })
+    );
+    expect(chosen[0]!.note).toBe(IMAGE_LAB_RUN_COPY.composer.preview.derivedChosen);
+
+    // An authored row says nothing extra — the text speaks for itself.
+    const authored = previewRows(
+      decideRunComposition({
+        template: "Draw {{product}}",
+        slotValues: { product: "dog treats" },
+        modelIds: ["gemini-3-pro-image"],
+        imageCount: 1,
+        childProvenance: true,
+      })
+    );
+    expect(authored[0]!.note).toBe("");
+  });
+
+  it("a refused composition previews nothing rather than a stale string", () => {
+    const decision = decideRunComposition({
+      template: "",
+      slotValues: {},
+      modelIds: ["gpt-image-2"],
+      imageCount: 1,
+    });
+    expect(previewRows(decision)).toEqual([]);
+    expect(previewPromptText(decision)).toBe(IMAGE_LAB_RUN_COPY.composer.preview.empty);
   });
 });

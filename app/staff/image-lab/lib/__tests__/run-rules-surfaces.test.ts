@@ -57,6 +57,8 @@ const cell = (over: Partial<CellRow> = {}): CellRow => ({
   state: "requested",
   attemptedAtMs: null,
   createdAtMs: 1_000,
+  resolvedPrompt: "A bright panel.",
+  promptDerived: false,
   failureReason: null,
   failureDetail: null,
   storageKey: null,

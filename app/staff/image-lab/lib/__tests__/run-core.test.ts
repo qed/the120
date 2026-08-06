@@ -9,7 +9,12 @@ import {
 } from "../run-core";
 import { generateLabImage } from "../image-model";
 import type { NormalizedImageResult } from "../image-model-rules";
-import type { CellRow } from "../run-rules";
+import {
+  decideRunComposition,
+  previewRows,
+  type CellRow,
+} from "../run-rules";
+import { isCategoryDerivedPrompt } from "../category-prompt-rules";
 import { IMAGE_LAB_STALE_AFTER_MS } from "../image-lab-rules";
 
 /**
@@ -65,10 +70,15 @@ type Harness = {
   /** Ordered record of every I/O the core performed. */
   journal: string[];
   audits: string[];
+  /** Every (model, prompt) pair the adapter was actually handed. */
+  dispatched: { modelId: string; prompt: string }[];
   setNow: (ms: number) => void;
   /** Hooks the tests reach into. */
   hooks: {
-    generate: (request: { modelId: string }) => Promise<NormalizedImageResult>;
+    generate: (request: {
+      modelId: string;
+      prompt: string;
+    }) => Promise<NormalizedImageResult>;
     /** `IMAGE_LAB_REAL_CONTENT_LIVE`, as the core sees it. */
     realContentLive: boolean;
     /** The provenance verifier. */
@@ -113,6 +123,8 @@ function makeHarness(): Harness {
   const objects = new Map<string, Uint8Array>();
   const journal: string[] = [];
   const audits: string[] = [];
+  /** Every (model, prompt) pair that actually reached the adapter. */
+  const dispatched: { modelId: string; prompt: string }[] = [];
   let seq = 0;
   let nowMs = 1_700_000_000_000;
 
@@ -183,6 +195,8 @@ function makeHarness(): Harness {
         runId: row.runId,
         modelId: row.modelId,
         cellOrdinal: row.cellOrdinal,
+        resolvedPrompt: row.promptText,
+        promptDerived: row.promptDerived,
         state: "requested",
         attemptedAtMs: null,
         // The TRANSACTION timestamp — identical across every row of one insert,
@@ -248,6 +262,7 @@ function makeHarness(): Harness {
 
     async generate(request) {
       journal.push(`ADAPTER:${request.modelId}`);
+      dispatched.push({ modelId: request.modelId, prompt: request.prompt });
       return hooks.generate(request);
     },
 
@@ -298,6 +313,7 @@ function makeHarness(): Harness {
     objects,
     journal,
     audits,
+    dispatched,
     setNow: (ms) => {
       nowMs = ms;
     },
@@ -1492,5 +1508,280 @@ describe("retryCell — a new row is the only re-entry", () => {
     expect(outcome.kind).toBe("done");
     expect(h.cells.get(created.cells[0]!.id)!.state).toBe("failed");
     expect(h.cells.get(retry.imageId)!.state).toBe("done");
+  });
+});
+
+// ── 4. The per-cell prompt, and the ONE non-overridable gate ─────────────────
+
+/**
+ * THE RULE, AND THE THING IT IS DELIBERATELY *NOT*.
+ *
+ * It is NOT "child text never leaves the building". Google's paid tier is
+ * confirmed no-training with no under-18 processing bar, so a Gemini cell may
+ * carry a child's own wording whenever `IMAGE_LAB_REAL_CONTENT_LIVE` is on — and
+ * over-restricting it would remove the experiment this bench exists to run.
+ *
+ * It IS "an OpenAI cell on a run built from a child's business content must carry
+ * a prompt from the closed derived vocabulary", because OpenAI's own under-18
+ * guidance bars processing an under-13's personal data without zero data
+ * retention we do not have.
+ *
+ * Every test below corresponds to a specific way of breaking that, and each one
+ * is named for the mutation it catches.
+ */
+describe("the per-cell prompt and the OpenAI child-text gate", () => {
+  const provenanced = (over: Record<string, unknown> = {}) => {
+    const h = makeHarness();
+    h.hooks.realContentLive = true;
+    return {
+      h,
+      input: composeInput({
+        slotValues: { product: "sticker packs", pitch: "I draw my own stickers" },
+        sourceToken: VALID_SOURCE_TOKEN,
+        ...over,
+      }),
+    };
+  };
+
+  /**
+   * ⚠ ALSO THE TEST THAT CATCHES MUTATION (a) AND MUTATION (c).
+   *   (a) a classifier that fell back to the child's text would produce a string
+   *       outside the closed vocabulary, which the gate refuses — this goes red.
+   *   (c) a gate that read `run.template` ("Draw {{product}}") instead of the
+   *       resolved dispatched string would refuse this perfectly lawful cell —
+   *       this goes red too.
+   */
+  it("an OpenAI cell on a provenance run sends the DERIVED prompt, and it dispatches", async () => {
+    const { h, input } = provenanced();
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(true);
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: cell.resolvedPrompt },
+    ]);
+    // The child's own words never reached the adapter.
+    expect(h.dispatched[0]!.prompt).not.toContain("sticker packs");
+    expect(h.dispatched[0]!.prompt).not.toContain("I draw my own stickers");
+  });
+
+  /**
+   * ⚠ THE NAMED TEST FOR MUTATION (a), AT THE DISPATCH GATE.
+   *
+   * A business this vocabulary cannot classify is the exact moment a "just send
+   * the text, we could not categorize it" fallback looks reasonable — and it is
+   * the vulnerability itself. Under that mutation the fallback prompt IS the
+   * child's text, the gate refuses it, and this test goes red on `outcome.kind`.
+   * The unclassifiable case must still generate: a refused cell here would push
+   * a staff member toward retyping the pitch into the template by hand.
+   */
+  it("an UNCLASSIFIABLE business still dispatches a derived prompt to OpenAI", async () => {
+    const { h, input } = provenanced({
+      slotValues: {
+        product: "quorbling flurbulator",
+        pitch: "zzqqx wibbleflam for the discerning zzqqx",
+      },
+    });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(true);
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched[0]!.prompt).not.toContain("quorbling");
+    expect(h.dispatched[0]!.prompt).not.toContain("zzqqx");
+    expect(h.dispatched[0]!.prompt).not.toContain("wibbleflam");
+  });
+
+  /**
+   * ⚠ MUTATION (f). Applying the gate to a Google model reddens this, and that is
+   * the point: over-restriction is a REAL DEFECT here, not a safe default. It
+   * would block the prompt experimentation the Lab exists for, on a vendor whose
+   * terms do not ask for it.
+   */
+  it("a Google cell on the SAME run sends the child's authored words", async () => {
+    const { h, input } = provenanced({
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+
+    const google = created.cells.find((c) => c.modelId === "gemini-3-pro-image")!;
+    expect(google.promptDerived).toBe(false);
+    expect(google.resolvedPrompt).toBe("Draw sticker packs");
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: google.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gemini-3-pro-image", prompt: "Draw sticker packs" },
+    ]);
+  });
+
+  /**
+   * ⚠ AND THE TWO LEGS OF ONE RUN MAY DIFFER, ON PURPOSE. This is the correction
+   * that reshaped this unit: the Lab is a PROMPT bench, not a model tournament,
+   * so "the same run sent different text to different models" is a feature the
+   * evidence has to be able to represent — not a confound to be normalized away.
+   */
+  it("one run can send two different prompts, and each row records its own", async () => {
+    const { h, input } = provenanced({
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+
+    const byModel = new Map(created.cells.map((c) => [c.modelId, c]));
+    const openai = byModel.get("gpt-image-2")!;
+    const google = byModel.get("gemini-3-pro-image")!;
+    expect(openai.resolvedPrompt).not.toBe(google.resolvedPrompt);
+
+    await generateCell(h.deps, { staffId: "staff-1", imageId: openai.id });
+    await generateCell(h.deps, { staffId: "staff-1", imageId: google.id });
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: openai.resolvedPrompt },
+      { modelId: "gemini-3-pro-image", prompt: google.resolvedPrompt },
+    ]);
+  });
+
+  /**
+   * ⚠ MUTATION (b) AND MUTATION (d), TOGETHER.
+   *   (b) moving the gate to the composer/client leaves this crafted compose
+   *       unguarded — the request never goes near the composer.
+   *   (d) making the gate SUBSTITUTE the derived prompt instead of refusing turns
+   *       `child_text_gate` into `done` and leaves a row whose `resolved_prompt`
+   *       is not what the vendor received.
+   */
+  it("a crafted OpenAI cell carrying authored text is REFUSED at dispatch, never rewritten", async () => {
+    const { h, input } = provenanced({
+      // Exactly what a replayed or hand-rolled POST would ask for.
+      promptModes: { "gpt-image-2": "authored" as const },
+    });
+    const created = await createRun(h.deps, input);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    // The compose is ALLOWED — nothing is sent at compose time, and refusing here
+    // would tempt a later edit to treat the compose check as the gate.
+    expect(cell.resolvedPrompt).toBe("Draw sticker packs");
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome).toEqual({ kind: "child_text_gate" });
+
+    // NOTHING was dialled and nothing was billed…
+    expect(h.dispatched).toEqual([]);
+    expect(h.journal.some((entry) => entry.startsWith("ADAPTER"))).toBe(false);
+    // …the cell is untouched, so fixing the prompt choice and composing again is
+    // a real recovery rather than a wedged row…
+    const row = h.cells.get(cell.id)!;
+    expect(row.state).toBe("requested");
+    expect(row.attemptedAtMs).toBeNull();
+    expect(row.billed).toBe(false);
+    // …and the row still reports the prompt it was composed with, NOT a derived
+    // one it never sent.
+    expect(row.resolvedPrompt).toBe("Draw sticker packs");
+    expect(row.promptDerived).toBe(false);
+  });
+
+  /**
+   * ⚠ MUTATION (e). Persisting the template but not the dispatched prompt reddens
+   * this: without `resolved_prompt` on the row there is nothing to compare, and
+   * "this phrasing beat that one on this model" becomes unanswerable.
+   */
+  it("every image row persists the exact text it will send, before anything is sent", async () => {
+    const { h, input } = provenanced({
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+      imageCount: 2,
+    });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+
+    expect(created.cells).toHaveLength(4);
+    for (const cell of created.cells) {
+      expect(typeof cell.resolvedPrompt).toBe("string");
+      expect(cell.resolvedPrompt).not.toBe("");
+      expect(cell.promptDerived).toBe(cell.modelId === "gpt-image-2");
+    }
+    // Written with the row, before any adapter call exists in the journal.
+    expect(h.journal).toEqual([
+      // The provenance chokepoint's roster lookup, then the two writes.
+      "loadChildIdentity",
+      "insertRun",
+      "insertCells:4",
+    ]);
+  });
+
+  /**
+   * ⚠ THE PREVIEW IS NOT A SECOND OPINION. `previewRows` is what the composer
+   * renders; this asserts it against what `createRun` actually put on the rows.
+   * A composer that showed the authored text while dispatching the derived one —
+   * or the reverse — reddens here.
+   */
+  it("the preview shows exactly the string each model is dispatched", async () => {
+    const { h, input } = provenanced({
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+
+    const decision = decideRunComposition({
+      template: input.template,
+      slotValues: input.slotValues,
+      modelIds: input.modelIds,
+      imageCount: input.imageCount,
+      childProvenance: true,
+    });
+    const preview = new Map(previewRows(decision).map((row) => [row.modelId, row.text]));
+
+    for (const cell of created.cells) {
+      expect(preview.get(cell.modelId)).toBe(cell.resolvedPrompt);
+    }
+
+    await generateCell(h.deps, { staffId: "staff-1", imageId: created.cells[0]!.id });
+    expect(h.dispatched[0]!.prompt).toBe(preview.get(h.dispatched[0]!.modelId));
+  });
+
+  it("a retry carries the SAME prompt as the attempt it replaces", async () => {
+    const { h, input } = provenanced();
+    const created = await createRun(h.deps, input);
+    if (!created.ok) return;
+    const first = created.cells[0]!;
+
+    h.hooks.generate = async () => ({ kind: "rate_limited" });
+    await generateCell(h.deps, { staffId: "staff-1", imageId: first.id });
+    const retry = await retryCell(h.deps, { imageId: first.id, staffId: "staff-1" });
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) return;
+
+    // ⚠ RE-DERIVING HERE WOULD MAKE THE TWO ATTEMPTS INCOMPARABLE, which is the
+    // one thing a retry at the same grid position must never do.
+    const appended = h.cells.get(retry.imageId)!;
+    expect(appended.resolvedPrompt).toBe(first.resolvedPrompt);
+    expect(appended.promptDerived).toBe(first.promptDerived);
+  });
+
+  it("a run WITHOUT provenance is unaffected — verbatim template, even to OpenAI", async () => {
+    const h = makeHarness();
+    const created = await createRun(h.deps, composeInput());
+    if (!created.ok) return;
+
+    const cell = created.cells[0]!;
+    expect(cell.promptDerived).toBe(false);
+    expect(cell.resolvedPrompt).toBe("Draw sticker packs");
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: "Draw sticker packs" },
+    ]);
   });
 });

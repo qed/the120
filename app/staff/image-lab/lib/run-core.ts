@@ -62,6 +62,7 @@ import {
 } from "./image-lab-rules";
 import {
   canRetryCell,
+  decideChildTextGate,
   decideRunComposition,
   formatGenerationBreadcrumb,
   isRecordableSourceId,
@@ -69,6 +70,7 @@ import {
   type CellRow,
   type CellSpec,
   type GenerateCellOutcome,
+  type PromptModes,
   type RunCompositionRefusal,
   type SlotValues,
 } from "./run-rules";
@@ -114,6 +116,9 @@ export type NewCellRow = {
   readonly runId: string;
   readonly modelId: string;
   readonly cellOrdinal: number;
+  /** ⚠ WRITTEN WITH THE ROW, before anything is sent. See {@link CellSpec}. */
+  readonly promptText: string;
+  readonly promptDerived: boolean;
 };
 
 /** The finalize patch. Shaped so the schema's CHECKs cannot be violated by a
@@ -307,6 +312,16 @@ export type CreateRunInput = {
    * `./source-token.ts` for what that closed.
    */
   sourceToken?: string | null;
+  /**
+   * Per-model prompt choice (`run-rules.PromptModes`).
+   *
+   * ⚠ ADVISORY, AND SAFE TO BE SO. A caller can ask for `authored` on an OpenAI
+   * model and this function will honour it — the row is written, nothing is sent,
+   * and {@link generateCell}'s gate refuses the cell at dispatch. The refusal is
+   * deliberately NOT moved here: compose is not the threat surface, dispatch is,
+   * and a compose-time rewrite would produce rows that misreport their own input.
+   */
+  promptModes?: PromptModes;
 };
 
 export type CreateRunResult =
@@ -429,6 +444,11 @@ export async function createRun(
     modelIds: input.modelIds,
     imageCount: input.imageCount,
     referenceIds: input.referenceIds,
+    // ⚠ FROM THE VERIFIED TOKEN, never from a client claim. The composer passes
+    // "the picker minted a token" to get an honest preview; this passes "the
+    // server verified one", which is the fact the prompt choice hangs off.
+    childProvenance: source !== null,
+    promptModes: input.promptModes,
   });
   if (!decision.ok) return { ok: false, refusal: decision };
 
@@ -515,6 +535,11 @@ function cellRowsFor(
     // TRANSACTION timestamp, so every cell in this insert shares it byte-for-byte
     // and ordering by it hands the compare grid's column order to the executor.
     cellOrdinal: cell.cellOrdinal,
+    // ⚠ THE PROMPT IS PERSISTED PER CELL, WITH THE ROW, BEFORE ANYTHING IS SENT.
+    // Same discipline as the row itself (intent stamped before the effect): a
+    // crash mid-generation leaves a row that says what was going to be sent.
+    promptText: cell.promptText,
+    promptDerived: cell.promptDerived,
   }));
 }
 
@@ -688,6 +713,44 @@ export async function generateCell(
     return { kind: "not_found" };
   }
 
+  // ── THE DISPATCH GATE. The one rule no staff choice can override. ─────────
+  //
+  // ⚠ IT RUNS HERE — SERVER-SIDE, ON THE PAID PATH, ON THE EXACT STRING ABOUT TO
+  // BE SENT — and every word of that is load-bearing:
+  //
+  //   * SERVER-SIDE, not in the composer. The composer's per-model selector is a
+  //     convenience; the threat is a crafted or replayed POST to this route, and
+  //     a client-side check is advisory against exactly that.
+  //   * ON THE RESOLVED STRING, not on `run.template` and not on the run's
+  //     default prompt. A template of pure `{{slot}}` tokens looks innocent and
+  //     resolves to the child's whole pitch; a template a staff member pasted the
+  //     derived wording into would clear a template-level check while this row
+  //     carried something else entirely.
+  //   * AND IT REFUSES RATHER THAN SUBSTITUTING. Swapping the derived prompt in
+  //     silently would leave a row whose `resolved_prompt` is not what the vendor
+  //     received — and every keep/reject judged on that image would be attributed
+  //     to a prompt that never ran. A refused cell is recoverable; corrupted
+  //     evidence is not.
+  //
+  // BEFORE THE CAS, so a refusal leaves the cell untouched and re-generatable
+  // once the prompt choice is fixed, with nothing dialled and nothing billed.
+  const dispatchPrompt = cell.resolvedPrompt ?? run.resolvedPrompt;
+  const gate = decideChildTextGate({
+    modelId: cell.modelId,
+    // From the ROW, which `createRun` derived from a verified token. Not from the
+    // request, which states nothing about provenance at all.
+    childProvenance: run.sourceChildId !== null,
+    promptText: dispatchPrompt,
+  });
+  if (!gate.ok) {
+    // Ids and the closed-set reason only — no prompt, no slot value, no child id.
+    console.warn(
+      `[image-lab/run] child-text gate refused: caller=${input.staffId} ` +
+        `image=${input.imageId} model=${cell.modelId} reason=${gate.reason}`
+    );
+    return { kind: "child_text_gate" };
+  }
+
   // ── REFERENCES BEFORE THE CAS, and that ordering is two fixes at once ─────
   //   * a storage fault no longer CONSUMES the cell. The old order claimed the
   //     row, failed the read, and filed the result as a vendor `provider_error`
@@ -747,7 +810,10 @@ export async function generateCell(
     try {
       result = await deps.generate({
         modelId: claimedCell.modelId,
-        prompt: loadedRun.resolvedPrompt,
+        // ⚠ THE CELL'S OWN PROMPT — the exact string the gate above just cleared
+        // and the exact string the row reports. The run-level fallback covers
+        // rows written before per-cell prompts existed and nothing else.
+        prompt: dispatchPrompt,
         referenceImages: references,
         abortSignal: input.abortSignal,
       });
@@ -1118,6 +1184,12 @@ export async function retryCell(
         runId: cell.runId,
         modelId: cell.modelId,
         cellOrdinal: cell.cellOrdinal,
+        // ⚠ THE ATTEMPT'S OWN PROMPT, CARRIED FORWARD VERBATIM. A retry is
+        // another attempt at the SAME experiment; re-deriving it here (or falling
+        // back to the run default) would silently make the two attempts
+        // incomparable, which is the one thing a retry must never do.
+        promptText: cell.resolvedPrompt ?? run.resolvedPrompt,
+        promptDerived: cell.promptDerived,
       },
     ]);
     if (!appended) return { ok: false, outcome: { kind: "unavailable" } };

@@ -123,6 +123,40 @@ for manual review (non-waivable). Three paths:
       since the prompt only needs to convey what to draw. Note this is a real code
       change in the Lab, not a config flip.
 
+### CHECK 1, OPENAI HALF — CLOSED IN CODE 2026-08-06 by path (c)
+
+Path (c) is now **implemented**, on branch `feat/image-lab-category-prompts`.
+What shipped is narrower and more useful than "sanitize the Lab":
+
+- **The prompt is a PER-MODEL, staff-controlled choice.** The Lab is a PROMPT
+  bench, not a model tournament — finding that `gpt-image-2` needs different
+  wording than `gemini-3-pro-image` is a RESULT the panel engine needs, so the
+  bench must be able to send different text to different models in one run. Each
+  cell carries `authored` (template × slot values) or `derived` text.
+- **ONE non-overridable rule, enforced SERVER-SIDE at dispatch.** A cell
+  targeting an **OpenAI** model, on a run with **verified child provenance**,
+  must carry a prompt from a closed category vocabulary
+  (`app/staff/image-lab/lib/category-prompt-rules.ts`). Anything else is
+  **REFUSED** (`child_text_gate`, HTTP 403) — never silently rewritten, because a
+  row that reports a prompt it did not send corrupts the evidence the Lab exists
+  to produce. Nothing is dialled and nothing is billed; the cell is untouched, so
+  fixing the prompt choice and generating again is a real recovery.
+- **Google models are deliberately NOT gated.** The Gemini paid tier is confirmed
+  no-training with no under-18 processing bar, and over-restricting it would block
+  the experimentation this bench is for. `IMAGE_LAB_REAL_CONTENT_LIVE` and the
+  name scrub still govern that leg.
+- **Every image row now records the exact text that produced it**
+  (`fp_image_lab_images.resolved_prompt` + `prompt_derived`, migration
+  `20260920120000_fp_image_lab_cell_prompts.sql` — **authored, NOT YET APPLIED**;
+  run the ledger query and rename to the real next-free slot first, per
+  `supabase/MIGRATION-LOCK.md` and the migration's own header). History, the
+  bench grid and the Kit all show it per result, labelled derived vs as-written.
+
+**CHECK 2 (consent) IS UNCHANGED AND STILL FAILS** for the Gemini leg, which is
+where child-authored text can still go. `IMAGE_LAB_REAL_CONTENT_LIVE` stays OFF
+until the consent version bump ships. The OpenAI blocker is what closed, not the
+consent one.
+
 ⚠ Three openai.com pages (usage-policies, enterprise-privacy, trust portal)
 returned **403 to automated fetch again on 2026-08-06** and remain UNREAD. A human
 must open them for the usage-policies effective date and minors clause, the

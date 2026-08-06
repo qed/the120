@@ -43,7 +43,10 @@
  */
 
 import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import {
+  encodeRateLimitSegment,
+  type RateLimitConfig,
+} from "@/app/fp/lib/rate-limit-rules";
 import {
   normalizeFeedbackKind,
   type FeedbackKind,
@@ -113,14 +116,20 @@ export const SUGGESTIONS_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_00
  * `:` join — an IPv6 ip or a `:` in a forged sub must never alias two distinct
  * (ip,user) pairs onto one bucket (see docs/solutions/security-issues/
  * composite-rate-limit-key-string-join-collides-*.md).
+ *
+ * `encodeRateLimitSegment` rather than a bare `encodeURIComponent`: the user
+ * segment is an attacker-supplied JWT `sub`, and a LONE SURROGATE in it makes
+ * encodeURIComponent THROW — before either strike is recorded, on a path the
+ * route runs pre-DB. Byte-identical output for well-formed input (pinned by
+ * test); see the helper for the accepted malformed-input collapse.
  */
 export function deriveSuggestionsRateLimitKeys(
   ip: string,
   userSegment: string
 ): { userKey: string; ipKey: string } {
-  const ipEnc = encodeURIComponent(ip);
+  const ipEnc = encodeRateLimitSegment(ip);
   return {
-    userKey: `fp-suggestions:${ipEnc}:${encodeURIComponent(userSegment)}`,
+    userKey: `fp-suggestions:${ipEnc}:${encodeRateLimitSegment(userSegment)}`,
     ipKey: `fp-suggestions-ip:${ipEnc}`,
   };
 }

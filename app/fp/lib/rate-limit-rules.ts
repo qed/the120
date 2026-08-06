@@ -127,3 +127,33 @@ export function evaluateRateLimit({
   const retryAfterMs = Math.min(Math.max(oldest + windowMs - now, 1), windowMs);
   return { allowed: false, retryAfterMs };
 }
+
+/**
+ * TOTAL escaping for one segment of a composite rate-limit key.
+ *
+ * WHY THIS EXISTS: every FP route derives its buckets as
+ * `namespace:encodeURIComponent(ip):encodeURIComponent(userSegment)`, and the
+ * user segment is the UNVERIFIED `sub` claim of an attacker-supplied JWT. A
+ * JSON string can carry a LONE SURROGATE (`"\ud800"` parses fine), and
+ * `encodeURIComponent` THROWS URIError on one. The house discipline records the
+ * rate-limit strikes BEFORE any DB I/O, so that throw lands before either
+ * bucket is written — a crafted token would bypass throttling entirely and 500
+ * instead of refusing.
+ *
+ * Lone surrogates are replaced with U+FFFD before encoding. WELL-FORMED input
+ * is byte-identical to a bare `encodeURIComponent` (the shipped key formats are
+ * unchanged and pinned by test). Two DISTINCT malformed segments can collapse
+ * onto one bucket; that is accepted deliberately — no legitimate `sub` or IP
+ * contains a lone surrogate, so collapsing only ever merges attacker traffic
+ * into a shared (i.e. STRICTER) bucket, never two real users into one.
+ */
+export function encodeRateLimitSegment(segment: string): string {
+  return encodeURIComponent(
+    // Unpaired high surrogate (not followed by a low one), or unpaired low
+    // surrogate (not preceded by a high one).
+    segment.replace(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+      "�"
+    )
+  );
+}

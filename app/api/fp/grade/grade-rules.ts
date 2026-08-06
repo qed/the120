@@ -62,7 +62,10 @@
 import { z } from "zod";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import {
+  encodeRateLimitSegment,
+  type RateLimitConfig,
+} from "@/app/fp/lib/rate-limit-rules";
 
 /* ------------------------------------------------- school-year derivation */
 
@@ -223,14 +226,20 @@ export const GRADE_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, lim
  * `:` join — an IPv6 ip or a `:` in a forged sub must never alias two
  * distinct (ip,user) pairs onto one bucket (see docs/solutions/security-
  * issues/composite-rate-limit-key-string-join-collides-*.md).
+ *
+ * `encodeRateLimitSegment` rather than a bare `encodeURIComponent`: the user
+ * segment is `unverifiedJwtSub`'s output — an attacker-supplied string that can
+ * contain a LONE SURROGATE, which makes encodeURIComponent THROW before either
+ * strike is recorded, on a path this route runs pre-DB. Byte-identical output
+ * for well-formed input (pinned by test).
  */
 export function deriveGradeRateLimitKeys(
   ip: string,
   userSegment: string
 ): { userKey: string; ipKey: string } {
-  const ipEnc = encodeURIComponent(ip);
+  const ipEnc = encodeRateLimitSegment(ip);
   return {
-    userKey: `fp-grade:${ipEnc}:${encodeURIComponent(userSegment)}`,
+    userKey: `fp-grade:${ipEnc}:${encodeRateLimitSegment(userSegment)}`,
     ipKey: `fp-grade-ip:${ipEnc}`,
   };
 }

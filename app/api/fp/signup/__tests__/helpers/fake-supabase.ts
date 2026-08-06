@@ -11,22 +11,52 @@
  * persisted.
  *
  * Scope on purpose: it implements only the PostgREST surface these cores use
- * (eq / is / gt / lt / neq / not-is-null / or / in / like / order / limit /
+ * (eq / is / gt / lt / neq / not.is / or / in / like / order / limit /
  * single / maybeSingle / insert.select / update.select / upsert / delete), and
  * only the constraints that change control flow (the fp_parental_consent partial
  * unique index; funnel_student_provisioning's UNIQUE(child_id) via upsert). It is
  * NOT a general Postgres. If a future core reaches for an operator not here, add
- * it here rather than widening a canned mock.
+ * it here rather than widening a canned mock. (Watchtower Unit 2 took that
+ * invitation: a server-side `max-rows` cap, an unordered-select perturbation, and
+ * a never-settling `hang` fault.)
  *
  * FAULT INJECTION: `fakeClient(store, faults)` takes an optional plan keyed
  * `"<op>:<table>"` (e.g. `"select:path_student_profiles"`) so route tests can
  * exercise DB-error, zero-row, and trigger-coercion paths without a second
  * mock layer: `error` short-circuits the op with a PostgREST-shaped error,
- * `no-rows` reports success with nothing affected (and mutates nothing), and
+ * `no-rows` reports success with nothing affected (and mutates nothing),
  * `coerce` (update only) applies extra values AFTER the patch — modeling a
  * roster trigger rewriting what the caller wrote (the stale-status-echo
- * learning).
- */
+ * learning) — and `hang` never settles at all, which is how a route's timeout
+ * can be tested (a stalled round trip is NOT an error the database returned;
+ * it is the absence of an answer, and only a fault that never resolves models
+ * it).
+ *
+ * ── Two FIDELITY gaps this harness used to have, and how they were closed ──
+ * A harness that is gentler than Postgres makes green tests lie, so the
+ * following is an opt-in knob rather than silent kindness (opt-in because
+ * hundreds of existing fixtures were written against the gentle behaviour, and
+ * flipping the default would be a repo-wide rewrite rather than a fidelity fix):
+ *
+ *   - `perturbUnordered` — an unordered select returned rows in INSERTION order,
+ *     so deleting every `.order()` from a paging route left its whole test suite
+ *     green while production scrambled. With this on, a select WITHOUT `.order()`
+ *     comes back in a deliberately perturbed (reversed) order, which is exactly
+ *     as valid as any other and reliably breaks anything that was quietly
+ *     relying on insertion order.
+ *
+ *   - `recordCalls` — `select()` DISCARDED its column list and every filter was
+ *     collapsed into an anonymous predicate, so the QUERY was unobservable and
+ *     only its RESULT could be asserted. That made "this endpoint does not read
+ *     column X" and "this read asks for page size N" untestable claims: adding
+ *     `parent_id, birth_year` back to a select, or deleting a `.limit()` the
+ *     harness's own `maxRows` then truncated identically, changed no response
+ *     body anywhere. With a sink array passed, every terminated call is recorded
+ *     as a `RecordedCall` — table, op, the literal column string, the filters in
+ *     call order, the order key and the client's own `.limit()`. Reading a
+ *     child's date of birth under the service role is exactly the kind of thing
+ *     a response-body assertion cannot see. Inert when the option is absent.
+  */
 
 import { randomUUID } from "node:crypto";
 import { extractSiteContent } from "@/app/fp/lib/fp-public-site-rules";
@@ -41,7 +71,9 @@ type Predicate = (row: Row) => boolean;
 export type Fault =
   | { kind: "error"; error: NonNullable<PgError> }
   | { kind: "no-rows" }
-  | { kind: "coerce"; values: Row };
+  | { kind: "coerce"; values: Row }
+  /** Never settles — models a round trip that stalls rather than fails. */
+  | { kind: "hang" };
 
 /** Faults keyed `"<op>:<table>"`, e.g. `"update:children"`. */
 export type FaultPlan = Record<string, Fault>;
@@ -106,7 +138,35 @@ function orPredicate(expr: string): Predicate {
   return (r: Row) => arms.some((a) => a(r));
 }
 
-type Op = "select" | "insert" | "update" | "delete" | "upsert";
+export type FakeOp = "select" | "insert" | "update" | "delete" | "upsert";
+type Op = FakeOp;
+
+/** One recorded filter, in the order the caller chained it. `not.is` is the one
+ *  compound form the harness models (`.not(col, "is", null)`). */
+export type RecordedFilter = {
+  op: "eq" | "neq" | "is" | "gt" | "lt" | "not.is" | "or" | "in" | "like" | "ilike";
+  col: string;
+  value: unknown;
+};
+
+/**
+ * One terminated call, recorded when `recordCalls` is supplied — the QUERY as
+ * issued, not the rows it returned. See the module header for why the result
+ * alone is not enough to pin a read.
+ */
+export type RecordedCall = {
+  table: string;
+  op: FakeOp;
+  /** Exactly the string handed to `.select()`; null if it was never called. */
+  columns: string | null;
+  filters: RecordedFilter[];
+  order: { col: string; ascending: boolean } | null;
+  /** The `.limit(n)` the CLIENT asked for — never the server's `maxRows` cap. */
+  limit: number | null;
+  /** Which terminal ended the call. A `hang` fault records and then never
+   *  settles, so a stalled round trip is still visible as an issued query. */
+  terminal: "then" | "single" | "maybeSingle";
+};
 
 class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   private preds: Predicate[] = [];
@@ -117,11 +177,15 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   private limitN: number | null = null;
   private onConflict: string[] = [];
   private ignoreDuplicates = false;
+  /** Recording state — written always, read only when `recordCalls` is set. */
+  private selectCols: string | null = null;
+  private filterLog: RecordedFilter[] = [];
 
   constructor(
     private store: Store,
     private table: string,
-    private faults?: FaultPlan
+    private faults?: FaultPlan,
+    private options: FakeClientOptions = {}
   ) {
     if (!store[table]) store[table] = [];
   }
@@ -130,9 +194,18 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
     return this.store[this.table];
   }
 
+  /** Push one filter onto the recording log. Cheap and unconditional: the sink
+   *  is consulted once, at the terminal, so recording stays inert by default. */
+  private note(op: RecordedFilter["op"], col: string, value: unknown): void {
+    this.filterLog.push({ op, col, value });
+  }
+
   /* -------- op setters -------- */
   select(cols?: string): this {
-    void cols; // column projection is not modeled — callers read named fields
+    // Column PROJECTION is still not modeled — callers read named fields off the
+    // stored row — but the requested list is RECORDED, so "this read asks for
+    // exactly these columns" is assertable rather than invisible.
+    this.selectCols = cols ?? null;
     this.returning = true;
     return this;
   }
@@ -160,40 +233,49 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
 
   /* -------- filters -------- */
   eq(col: string, val: unknown): this {
+    this.note("eq", col, val);
     this.preds.push((r) => r[col] === val);
     return this;
   }
   neq(col: string, val: unknown): this {
+    this.note("neq", col, val);
     this.preds.push((r) => r[col] !== val);
     return this;
   }
   is(col: string, val: null): this {
+    this.note("is", col, val);
     this.preds.push((r) => r[col] == null && val === null);
     return this;
   }
   gt(col: string, val: string | number): this {
+    this.note("gt", col, val);
     this.preds.push((r) => r[col] != null && (r[col] as string | number) > val);
     return this;
   }
   lt(col: string, val: string | number): this {
+    this.note("lt", col, val);
     this.preds.push((r) => r[col] != null && (r[col] as string | number) < val);
     return this;
   }
   not(col: string, op: string, val: null): this {
     if (op !== "is" || val !== null) throw new Error(`fake-supabase: unsupported not(${op})`);
+    this.note("not.is", col, val);
     this.preds.push((r) => r[col] != null);
     return this;
   }
   or(expr: string): this {
+    this.note("or", "", expr);
     this.preds.push(orPredicate(expr));
     return this;
   }
   in(col: string, vals: unknown[]): this {
+    this.note("in", col, vals);
     this.preds.push((r) => vals.includes(r[col]));
     return this;
   }
   like(col: string, pattern: string): this {
     const prefix = pattern.endsWith("%") ? pattern.slice(0, -1) : pattern;
+    this.note("like", col, pattern);
     this.preds.push((r) => typeof r[col] === "string" && (r[col] as string).startsWith(prefix));
     return this;
   }
@@ -201,6 +283,7 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
   // `.ilike("fp_username", "<base>%")` to build its taken-set.
   ilike(col: string, pattern: string): this {
     const prefix = (pattern.endsWith("%") ? pattern.slice(0, -1) : pattern).toLowerCase();
+    this.note("ilike", col, pattern);
     this.preds.push(
       (r) => typeof r[col] === "string" && (r[col] as string).toLowerCase().startsWith(prefix)
     );
@@ -294,15 +377,54 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
             if (av === bv) return 0;
             return (av > bv ? 1 : -1) * (asc ? 1 : -1);
           });
+        } else if (this.options.perturbUnordered) {
+          // NO `order by` was asked for, so Postgres owes the caller nothing —
+          // and a harness that hands back insertion order is quietly promising
+          // something the database does not. Reversal is a deterministic
+          // perturbation: reproducible in a failure, and different enough from
+          // insertion order that anything depending on the latter breaks loudly.
+          hit = [...hit].reverse();
         }
         if (this.limitN != null) hit = hit.slice(0, this.limitN);
+        // …and THEN the server's own `max-rows`, which the client cannot opt
+        // out of: a caller that asks for more than the cap gets the cap back
+        // with `error: null` and no truncation signal whatsoever. That silence
+        // is the whole bug class (docs/solutions/integration-issues/
+        // postgrest-max-rows-1000-silently-truncates-unranged-select-*.md), so
+        // the harness reproduces the silence rather than a helpful error.
+        const maxRows = this.options.maxRows ?? Number.POSITIVE_INFINITY;
+        if (hit.length > maxRows) hit = hit.slice(0, maxRows);
         return { rows: hit, error: null };
       }
     }
   }
 
   /* -------- terminals -------- */
+  /** A `hang` fault never settles — the ONE thing an `error` fault cannot model,
+   *  and the only way to exercise a caller's timeout. */
+  private hangs(): boolean {
+    return this.faults?.[`${this.op}:${this.table}`]?.kind === "hang";
+  }
+  /** Record the query as ISSUED — before the fault check, so a stalled or failed
+   *  round trip is still observable. Inert unless a sink was supplied. */
+  private record(terminal: RecordedCall["terminal"]): void {
+    const sink = this.options.recordCalls;
+    if (!sink) return;
+    sink.push({
+      table: this.table,
+      op: this.op,
+      columns: this.selectCols,
+      filters: [...this.filterLog],
+      order: this.orderKey
+        ? { col: this.orderKey.col, ascending: this.orderKey.asc }
+        : null,
+      limit: this.limitN,
+      terminal,
+    });
+  }
   maybeSingle(): Promise<{ data: Row | null; error: PgError }> {
+    this.record("maybeSingle");
+    if (this.hangs()) return new Promise(() => {});
     const { rows, error } = this.execute();
     if (error) return Promise.resolve({ data: null, error });
     if (rows.length > 1) {
@@ -314,6 +436,8 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
     return Promise.resolve({ data: rows[0] ?? null, error: null });
   }
   single(): Promise<{ data: Row | null; error: PgError }> {
+    this.record("single");
+    if (this.hangs()) return new Promise(() => {});
     const { rows, error } = this.execute();
     if (error) return Promise.resolve({ data: null, error });
     if (rows.length !== 1) {
@@ -328,23 +452,54 @@ class Builder implements PromiseLike<{ data: unknown; error: PgError }> {
     resolve?: ((v: { data: unknown; error: PgError }) => R1 | PromiseLike<R1>) | null,
     reject?: ((e: unknown) => R2 | PromiseLike<R2>) | null
   ): Promise<R1 | R2> {
+    this.record("then");
+    if (this.hangs()) return new Promise(() => {});
     const { rows, error } = this.execute();
     const data = this.returning || this.op === "select" ? rows : null;
     return Promise.resolve({ data, error }).then(resolve, reject);
   }
 }
 
+/** Optional client-wide knobs. */
+export type FakeClientOptions = {
+  /**
+   * The server-side `max-rows` cap every SELECT is silently truncated to,
+   * mirroring PostgREST's project setting (1000 in production). Defaults to
+   * Infinity so existing fixtures are unaffected; a route whose paging you want
+   * to actually exercise must opt in with the SAME number its page size uses —
+   * a smaller cap makes every page look "short" and the truncation
+   * undetectable, which is the real-world failure this models.
+   */
+  maxRows?: number;
+  /**
+   * Return a deliberately perturbed row order for a select with NO `.order()`.
+   * Off by default so the hundreds of pre-existing fixtures written against
+   * insertion order are unaffected; ON is the honest setting for any test whose
+   * subject actually depends on ordering (see the module header).
+   */
+  perturbUnordered?: boolean;
+  /**
+   * A sink every terminated call is appended to, so the QUERY (columns, filters,
+   * order key, client `.limit()`) can be asserted and not merely its rows.
+   * Absent by default: nothing is recorded and nothing is allocated per call
+   * beyond what the harness already tracks, so the ~10 suites that build a
+   * `fakeClient` without options are byte-for-byte unaffected.
+   */
+  recordCalls?: RecordedCall[];
+};
+
 /** A fake SupabaseClient exposing only `.from(table)` over the shared store.
  *  `faults` (optional) injects per-`"<op>:<table>"` failures — module header. */
 export function fakeClient(
   store: Store,
-  faults?: FaultPlan
+  faults?: FaultPlan,
+  options?: FakeClientOptions
 ): {
   from: (t: string) => Builder;
   rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: PgError }>;
 } {
   return {
-    from: (table: string) => new Builder(store, table, faults),
+    from: (table: string) => new Builder(store, table, faults, options ?? {}),
     // The one RPC the FP site routes call. Implemented via the EXECUTABLE TS
     // SPEC of the SQL function (fp-public-site-rules extractSiteContent —
     // "THE SPEC LIVES HERE"), so route-level tests exercise the real deps

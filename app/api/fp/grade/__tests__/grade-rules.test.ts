@@ -179,6 +179,17 @@ describe("deriveGradeRateLimitKeys — encoded composite keys in their own names
     expect(a.userKey).not.toBe(b.userKey);
     expect(a.userKey).toContain("%3A");
   });
+  it("is TOTAL: a lone-surrogate sub does not throw before the strikes are recorded", () => {
+    // encodeURIComponent("\ud800") throws URIError, and unverifiedJwtSub hands
+    // the claim back unvalidated. This route derives the keys BEFORE any DB
+    // I/O, so the throw would land before either bucket is written — bypassing
+    // throttling entirely and 500ing instead of refusing.
+    const loneSurrogate = JSON.parse('"\\ud800"') as string;
+    expect(() => deriveGradeRateLimitKeys("1.2.3.4", loneSurrogate)).not.toThrow();
+    expect(() => deriveGradeRateLimitKeys(loneSurrogate, "user-1")).not.toThrow();
+    // Well-formed input is byte-identical to the shipped format (above).
+    expect(deriveGradeRateLimitKeys("2001:db8", "x").userKey).toBe("fp-grade:2001%3Adb8:x");
+  });
   it("budgets: modest per-(ip,user), generous per-ip aggregate, 15-minute windows", () => {
     expect(GRADE_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 5 });
     expect(GRADE_IP_RATE_LIMIT).toEqual({ windowMs: 15 * 60_000, limit: 40 });

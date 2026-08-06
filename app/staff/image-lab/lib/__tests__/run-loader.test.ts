@@ -248,6 +248,7 @@ describe("insertRun maps the unique violation, and only that", () => {
     sourceChildId: null,
     sourceIdeaId: null,
     sourceTaskId: null,
+    noChildContentAttested: false,
     createdAtMs: 0,
     cellCount: 1,
   };

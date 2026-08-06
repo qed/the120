@@ -1488,20 +1488,33 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
         "The query failed, so this page is showing nothing rather than showing a partial answer as if it were complete. Reload; if it persists the bench's database handle is the place to look.",
     },
     template: "Template",
-    resolvedPrompt: "What this run sent",
+    /** ⚠ NOT "what this run sent". This is the run's AUTHORED resolution, present
+     *  even on a run whose every OpenAI cell dispatched the derived vocabulary
+     *  instead. `resolvedPromptIsDefault` below says so; the heading must not
+     *  contradict it. */
+    resolvedPrompt: "The run's authored prompt",
     slotValues: "Slot values",
     references: "References",
     drillTags: "Drill tags",
     compare: "Compare run",
     iteratedOn: (model: string) => `Prompt iterated on ${model}`,
     sourceChild: "Built from a child's business content",
-    /** ⚠ PER ATTEMPT, because the prompt is a per-model choice. The run-level
-     *  line above is the run's DEFAULT, not necessarily what any image sent. */
-    imagePrompt: "Prompt sent",
+    /**
+     * ⚠ PER ATTEMPT, because the prompt is a per-model choice. The run-level
+     * line above is the run's DEFAULT, not necessarily what any image sent.
+     *
+     * ⚠ AND IT IS READ FROM THE LIFECYCLE. `resolved_prompt` is written at
+     * COMPOSE time, before dispatch — a gate-refused cell returns before the CAS
+     * and sits at `state='requested'`, `attempted_at` null, holding the text. As
+     * a constant "Prompt sent" this label asserted a vendor call that was never
+     * dialled and never billed, over the child's own pitch. `attempted_at` is the
+     * only fact that separates the two, so the label reads it.
+     */
+    imagePrompt: (attempted: boolean) => (attempted ? "Prompt sent" : "Prompt to send"),
     imagePromptDerived: "Category-derived",
     imagePromptAuthored: "As written",
     imagePromptMissing:
-      "Not recorded — this attempt predates per-cell prompt recording.",
+      "Not recorded. Nothing this bench writes can produce that — report it.",
     resolvedPromptIsDefault:
       "The run's default. Each result below shows the text it was actually sent, which may differ per model.",
     noSlotValues: "No slot values — the template was sent as written.",

@@ -120,8 +120,16 @@ function statusFor(outcome: GenerateCellOutcome): number {
     // a run built from a child's business content, and a prompt that is not the
     // category-derived one. That is a forbidden action, and a caller that retries
     // it unchanged will be refused identically forever.
+    // The same posture for the reference leg: a forbidden COMBINATION, not a bad
+    // request and not a bad row state.
     case "child_text_gate":
+    case "child_reference_gate":
+    case "unknown_model_gate":
       return 403;
+    // The row cannot say what it would send. Nothing a caller can fix by
+    // retrying, and nothing about the request is malformed.
+    case "prompt_missing":
+      return 409;
     // A reference this run names could not be read: infrastructure, not a model
     // result, and nothing was dialled or written.
     case "reference_unavailable":

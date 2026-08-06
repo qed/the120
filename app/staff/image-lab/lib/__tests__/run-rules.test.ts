@@ -732,9 +732,36 @@ describe("outcome copy", () => {
  * because it would block the per-model prompt experimentation the Lab exists for.
  */
 describe("defaultPromptMode / promptModeFor", () => {
-  it("derives for an OpenAI model ONLY when the run carries child provenance", () => {
+  /**
+   * ⚠ THE THIRD ARGUMENT IS THE STAFF ATTESTATION, AND ABSENT MEANS FALSE.
+   *
+   * `defaultPromptMode("gpt-image-2", false)` used to be `authored`: a run with
+   * no verified provenance sent whatever was typed, to OpenAI. But provenance is
+   * a property of the FETCH PATH, not of the CONTENT — a child's pitch typed
+   * straight into the template produces exactly that run — so "no provenance"
+   * never meant "no child content". It now takes an explicit assertion, and the
+   * assertion defaults off.
+   */
+  it("derives for an OpenAI model unless the run is BOTH unprovenanced AND attested", () => {
     expect(defaultPromptMode("gpt-image-2", true)).toBe("derived");
-    expect(defaultPromptMode("gpt-image-2", false)).toBe("authored");
+    // No provenance, no attestation — still derived. This is the P0 fix.
+    expect(defaultPromptMode("gpt-image-2", false)).toBe("derived");
+    expect(defaultPromptMode("gpt-image-2", false, false)).toBe("derived");
+    // Attested: full experimentation is back.
+    expect(defaultPromptMode("gpt-image-2", false, true)).toBe("authored");
+    // …and the attestation cannot buy off verified provenance.
+    expect(defaultPromptMode("gpt-image-2", true, true)).toBe("derived");
+  });
+
+  /** ⚠ GOOGLE IS UNTOUCHED BY THE ATTESTATION IN EVERY COMBINATION. */
+  it("never constrains a Google model, attested or not", () => {
+    for (const modelId of ["gemini-3-pro-image", "gemini-3.1-flash-lite-image"]) {
+      for (const provenance of [true, false]) {
+        for (const attested of [true, false]) {
+          expect(defaultPromptMode(modelId, provenance, attested)).toBe("authored");
+        }
+      }
+    }
   });
 
   it("leaves Google models on the authored prompt, provenance or not", () => {
@@ -742,17 +769,55 @@ describe("defaultPromptMode / promptModeFor", () => {
     expect(defaultPromptMode("gemini-3.1-flash-lite-image", true)).toBe("authored");
   });
 
-  it("an explicit staff choice wins over the default, in both directions", () => {
+  it("an explicit staff choice wins over the default where there IS a choice", () => {
     expect(
       promptModeFor("gemini-3-pro-image", true, { "gemini-3-pro-image": "derived" })
     ).toBe("derived");
-    // ⚠ AND THE UNSAFE DIRECTION IS *ALLOWED HERE*. This function is a default
-    // resolver, not the gate: `decideChildTextGate` refuses this cell at dispatch.
-    // Making it silently clamp would put a second, weaker copy of the rule in the
-    // one place a caller can bypass.
+    // An attested, unprovenanced OpenAI cell has a real choice, both ways.
+    expect(
+      promptModeFor("gpt-image-2", false, { "gpt-image-2": "derived" }, true)
+    ).toBe("derived");
+    expect(
+      promptModeFor("gpt-image-2", false, { "gpt-image-2": "authored" }, true)
+    ).toBe("authored");
+  });
+
+  /**
+   * ⚠ THIS REPLACES THE ASSERTION THAT PINNED THE COMPOSER LOCK TRAP.
+   *
+   * It used to read: `promptModeFor("gpt-image-2", true, {"gpt-image-2":
+   * "authored"})` is `"authored"`, defended as "this is a default resolver, not
+   * the gate". That defence ignored what the composer does with the answer.
+   * `promptModes` is written only by the select's `onChange` and is never cleared
+   * when a token arrives or a chip is deselected, so: set gpt-image-2 to "As
+   * written", THEN fill the slots from a child, and the stale entry survived.
+   *
+   * The result was a UI that contradicted itself and a run that could not be
+   * saved: the disabled select displayed "As written" directly above a note
+   * saying the model was locked to derived; the preview — documented as the last
+   * human check on child-authored text leaving for a vendor — showed the child's
+   * pitch as what would be sent; all N cells were composed with it and priced in
+   * the estimate; every one 403'd at dispatch; and the refusal copy told staff to
+   * switch the model to derived using a control the UI had disabled. The only
+   * escape was a reload that discarded the composition.
+   *
+   * So the FORCED mode wins here, at the rules layer, where it is testable —
+   * this suite has no jsdom, and the composer is where the trap was but not where
+   * it can be caught.
+   */
+  it("the FORCED mode beats a stale explicit choice — the composer lock is authoritative", () => {
+    // Provenance arrived after the staff member had already picked "authored".
     expect(promptModeFor("gpt-image-2", true, { "gpt-image-2": "authored" })).toBe(
-      "authored"
+      "derived"
     );
+    // The same, via the attestation rather than provenance.
+    expect(
+      promptModeFor("gpt-image-2", false, { "gpt-image-2": "authored" }, false)
+    ).toBe("derived");
+    // And Google keeps its explicit choice — the lock is OpenAI-only.
+    expect(
+      promptModeFor("gemini-3-pro-image", true, { "gemini-3-pro-image": "authored" })
+    ).toBe("authored");
   });
 
   it("a junk mode falls back to the default rather than throwing", () => {
@@ -762,6 +827,15 @@ describe("defaultPromptMode / promptModeFor", () => {
       })
     ).toBe("derived");
     expect(promptModeFor("gpt-image-2", true, undefined)).toBe("derived");
+    // On the leg where there IS a choice, junk still degrades to the default.
+    expect(
+      promptModeFor(
+        "gpt-image-2",
+        false,
+        { "gpt-image-2": "verbatim" as unknown as "authored" },
+        true
+      )
+    ).toBe("authored");
   });
 });
 
@@ -805,12 +879,116 @@ describe("decideChildTextGate — the one non-overridable rule", () => {
     }
   });
 
-  it("does not constrain anything at all without child provenance", () => {
+  /**
+   * ⚠ REPLACES "does not constrain anything at all without child provenance".
+   *
+   * That was the gate's first line — `if (!input.childProvenance) return { ok:
+   * true }` — and it is the P0 hole in one assertion. `sourceChildId` is set only
+   * when a picker token verifies, so a staff member who pastes a child's pitch
+   * into the TEMPLATE (no token, empty slots) reached this early return with the
+   * child's verbatim prose in hand.
+   */
+  it("constrains an UNPROVENANCED OpenAI cell unless the compose is attested", () => {
+    const childsOwnWords = "Hi, I am Maya and I make collectible cards on my street";
     expect(
       decideChildTextGate({
         modelId: "gpt-image-2",
         childProvenance: false,
+        promptText: childsOwnWords,
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+    // Explicitly false is the same answer as absent.
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: false,
+        noChildContentAttested: false,
+        promptText: childsOwnWords,
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+    // Attested: the staff member's own wording goes through untouched.
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: false,
+        noChildContentAttested: true,
         promptText: "Draw a comic panel of a lemonade stand",
+      })
+    ).toEqual({ ok: true });
+  });
+
+  /** An attestation is a claim about typed text. Once the server has VERIFIED
+   *  the run was built from a child's saved work, a staff opinion about it is
+   *  not admissible — otherwise the attestation is a bypass, not a default. */
+  it("the attestation cannot lift the gate on a PROVENANCE-bearing run", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        noChildContentAttested: true,
+        promptText: "Draw Maya's dog treat stand",
+      })
+    ).toEqual({ ok: false, reason: "child_text_to_openai" });
+  });
+
+  /**
+   * ⚠ FAIL CLOSED. This read `const provider = entry?.provider ?? null; if
+   * (provider !== "openai") return { ok: true }` — so an unregistered id took the
+   * GOOGLE exit and PASSED. Nothing escaped only because `image-model.ts` does
+   * its own exact-match lookup and answers `unconfigured`, which means this
+   * gate's safety was entirely borrowed from a different module's unrelated
+   * behaviour. An unknown model cannot generate, so refusing costs nothing.
+   */
+  it("REFUSES an unknown model id rather than taking the Google exit", () => {
+    for (const provenance of [true, false]) {
+      expect(
+        decideChildTextGate({
+          modelId: "gpt-image-9-turbo",
+          childProvenance: provenance,
+          noChildContentAttested: true,
+          promptText: "Draw a comic panel of a lemonade stand",
+        })
+      ).toEqual({ ok: false, reason: "unknown_model" });
+    }
+  });
+
+  /**
+   * ⚠ THE GATE IS NOT ONLY A TEXT GATE. Its input was `{ modelId,
+   * childProvenance, promptText }` while `generateCell` handed gpt-image-2 up to
+   * 16 reference objects on the same call, on the very run whose text had just
+   * been forced down to a 200-string vocabulary. The only control was copy in an
+   * upload dialog, and references are append-only and undeletable.
+   */
+  it("REFUSES reference images on an OpenAI cell of a provenance run, with its OWN reason", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: derived,
+        hasReferences: true,
+      })
+    ).toEqual({ ok: false, reason: "child_reference_to_openai" });
+  });
+
+  /** ⚠ AND NEVER ON GOOGLE, AND NEVER WITHOUT PROVENANCE. Over-restriction is a
+   *  real defect: the reference library is how a character sheet is carried, and
+   *  the attestation is a claim about typed text, not about an uploaded PNG. */
+  it("leaves references alone on Google, and on any run with no provenance", () => {
+    expect(
+      decideChildTextGate({
+        modelId: "gemini-3-pro-image",
+        childProvenance: true,
+        promptText: "Draw Maya's dog treat stand",
+        hasReferences: true,
+      })
+    ).toEqual({ ok: true });
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: false,
+        noChildContentAttested: true,
+        promptText: "Draw a comic panel of a lemonade stand",
+        hasReferences: true,
       })
     ).toEqual({ ok: true });
   });
@@ -861,10 +1039,24 @@ describe("decideRunComposition — the per-cell prompt", () => {
     expect(decision.resolved.text).toBe("Draw dog treats");
   });
 
-  it("without provenance every cell carries the authored text", () => {
+  it("without provenance AND without an attestation, the OpenAI cell still derives", () => {
     const decision = decideRunComposition({
       ...base,
       modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    if (!decision.ok) return;
+    const openai = decision.cells.find((c) => c.modelId === "gpt-image-2")!;
+    const google = decision.cells.find((c) => c.modelId === "gemini-3-pro-image")!;
+    expect(openai.promptDerived).toBe(true);
+    expect(google.promptDerived).toBe(false);
+    expect(google.promptText).toBe("Draw dog treats");
+  });
+
+  it("with the attestation, every cell carries the authored text", () => {
+    const decision = decideRunComposition({
+      ...base,
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+      noChildContentAttested: true,
     });
     if (!decision.ok) return;
     expect(decision.cells.every((c) => c.promptText === "Draw dog treats")).toBe(true);

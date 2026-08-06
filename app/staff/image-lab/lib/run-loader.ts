@@ -56,7 +56,12 @@ const REFERENCES = "fp_image_lab_references";
 const RUN_COLUMNS =
   "id, staff_id, idempotency_key, template, slot_values, resolved_prompt, " +
   "reference_ids, drill_tags, note, compare, iterated_on_model, " +
-  "iterated_from_run_id, source_child_id, source_idea_id, source_task_id, created_at";
+  "iterated_from_run_id, source_child_id, source_idea_id, source_task_id, " +
+  // The staff attestation (20260920120000). Read on the PAID path — the dispatch
+  // gate consults it for every run with no verified provenance — so it is named
+  // here for the same reason every other column is, and a missing column fails
+  // loudly at 42703 rather than defaulting a privacy decision to `false` quietly.
+  "no_child_content_attested, created_at";
 
 const IMAGE_COLUMNS =
   "id, run_id, model_id, cell_ordinal, state, attempted_at, billed, " +
@@ -177,6 +182,11 @@ function toRunRow(raw: Record<string, unknown>, cellCount: number): RunRow {
     sourceChildId: typeof raw.source_child_id === "string" ? raw.source_child_id : null,
     sourceIdeaId: typeof raw.source_idea_id === "string" ? raw.source_idea_id : null,
     sourceTaskId: typeof raw.source_task_id === "string" ? raw.source_task_id : null,
+    // ⚠ `=== true` AND NOTHING ELSE. Any other value — absent column, null from a
+    // row written before the column, a string — reads as NOT attested, which is
+    // the constrained answer. The safe reading must be the one that costs nothing
+    // to reach.
+    noChildContentAttested: raw.no_child_content_attested === true,
     createdAtMs: asMs(raw.created_at),
     cellCount,
   };
@@ -221,12 +231,13 @@ function toCellRow(raw: Record<string, unknown>): CellRow {
     billed: raw.billed === true,
     costEstimatedUsd: asNumberOrNull(raw.cost_estimated),
     costReportedUsd: asNumberOrNull(raw.cost_reported),
-    // ⚠ NULL IS A REAL ANSWER — "this attempt predates per-cell recording" — and
-    // is NOT coerced to the run's prompt here. The core does that fallback at
-    // dispatch, where it is one visible line; doing it in the mapper would make
-    // every reader unable to tell a recorded prompt from a reconstructed one.
-    resolvedPrompt:
-      typeof raw.resolved_prompt === "string" ? raw.resolved_prompt : null,
+    // ⚠ NEVER COERCED TO THE RUN'S PROMPT. A null here used to be covered at
+    // dispatch by `cell.resolvedPrompt ?? run.resolvedPrompt`, which substituted
+    // the run's AUTHORED resolution — the child's own words — for a cell that may
+    // have been composed derived. The empty string is not a prompt this feature
+    // can write (an empty template is refused at compose), so `generateCell`
+    // treats it as "this row cannot say what it would send" and refuses.
+    resolvedPrompt: typeof raw.resolved_prompt === "string" ? raw.resolved_prompt : "",
     promptDerived: raw.prompt_derived === true,
   };
 }
@@ -257,8 +268,10 @@ export function runDeps(db: ImageLabDb): RunDeps {
     // plain-module boundary on purpose: the verifier reaches `node:crypto` and
     // the deployment secret, and the flag is read at CALL TIME so a warm
     // instance can never hold a stale answer.
-    verifySourceToken: (token) => {
-      const verdict = verifySourceToken(token);
+    verifySourceToken: (token, staffId) => {
+      // ⚠ THE CALLER'S OWN STAFF ID, FROM THE GATE'S SESSION. A token minted for
+      // one staff member must not verify for another — see the dep's docblock.
+      const verdict = verifySourceToken(token, staffId);
       return verdict.ok
         ? { ok: true, provenance: verdict.provenance }
         : { ok: false };
@@ -282,6 +295,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
           iterated_on_model: row.iteratedOnModel,
           iterated_from_run_id: row.iteratedFromRunId,
           source_child_id: row.sourceChildId,
+          no_child_content_attested: row.noChildContentAttested,
           source_idea_id: row.sourceIdeaId,
           source_task_id: row.sourceTaskId,
         })

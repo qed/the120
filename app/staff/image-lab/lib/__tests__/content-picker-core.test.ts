@@ -26,6 +26,10 @@ import {
  * one of them reddens here.
  */
 
+/** The staff member every fill in this suite is minted for. The real token binds
+ *  it, so the fake carries it too. */
+const STAFF = "staff-1";
+
 const MAYA: PickerChildRow = {
   childId: "child-1",
   profileId: "profile-1",
@@ -62,7 +66,12 @@ function makeDeps(over: Partial<ContentPickerDeps> = {}): ContentPickerDeps {
     loadSales: async () => [],
     // A deterministic stand-in for the HMAC. The real minting is asserted in
     // `source-token.test.ts`; here it only has to be a value the fill carries.
-    mintSourceToken: (p) => `tok:${p.childId}:${p.ideaId ?? ""}:${p.taskId ?? ""}`,
+    // ⚠ THE STAFF ID IS IN THE TOKEN. The real minter binds it so a token cannot
+    // be replayed by another staff session onto another compose — which would
+    // attach source_child_id, the column the revocation purge keys on, to a run
+    // holding none of that child's content.
+    mintSourceToken: (p, staffId) =>
+      `tok:${p.childId}:${p.ideaId ?? ""}:${p.taskId ?? ""}:${staffId}`,
     ...over,
   };
 }
@@ -89,7 +98,7 @@ describe("IMAGE_LAB_REAL_CONTENT_LIVE gates the whole picker", () => {
       ok: false,
       reason: "disabled",
     });
-    expect(await pickSlotValues(offDeps, { childId: MAYA.childId })).toEqual({
+    expect(await pickSlotValues(offDeps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
       ok: false,
       reason: "disabled",
     });
@@ -117,7 +126,7 @@ describe("the save doc is read ONLY at a known docVersion", () => {
     // them to type the content in by hand, which bypasses the scrub entirely.
     expect(ideas).toEqual({ ok: true, ideas: [], docReadable: false });
 
-    const filled = await pickSlotValues(deps, { childId: MAYA.childId });
+    const filled = await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
     expect(filled.docReadable).toBe(false);
@@ -132,7 +141,7 @@ describe("the save doc is read ONLY at a known docVersion", () => {
 
   it("a child with ZERO ideas yields explicit empties", async () => {
     const deps = makeDeps({ loadSaveDoc: async () => ({ docVersion: 1, ideas: [] }) });
-    const filled = await pickSlotValues(deps, { childId: MAYA.childId });
+    const filled = await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
     expect(Object.keys(filled.slots).sort()).toEqual([
@@ -172,7 +181,7 @@ describe("the child's own name and username are scrubbed", () => {
   it("removes the first name from a first-person pitch, possessive intact", async () => {
     // A first-person pitch conventionally OPENS with the child's name. This is
     // the hard requirement from the Unit 1 security review.
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
 
@@ -397,7 +406,7 @@ describe("the child's own name and username are scrubbed", () => {
         ideas: [{ fields: { productName: "Street Cards" } }],
       }),
     });
-    const filled = await pickSlotValues(deps, { childId: anon.childId });
+    const filled = await pickSlotValues(deps, { childId: anon.childId, staffId: STAFF });
     if (!filled.ok) return;
     expect(filled.slots.product).toBe("Street Cards");
     expect(filled.scrubbed).toBe(false);
@@ -424,7 +433,7 @@ describe("test families are excluded, NULL-safely", () => {
     const deps = makeDeps({
       findChild: async () => ({ ...MAYA, isTest: true }),
     });
-    expect(await pickSlotValues(deps, { childId: MAYA.childId })).toEqual({
+    expect(await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
       ok: false,
       reason: "unknown_child",
     });
@@ -436,7 +445,7 @@ describe("test families are excluded, NULL-safely", () => {
 
   it("refuses an unknown child id", async () => {
     const deps = makeDeps({ findChild: async () => null });
-    expect(await pickSlotValues(deps, { childId: "nope" })).toEqual({
+    expect(await pickSlotValues(deps, { childId: "nope", staffId: STAFF })).toEqual({
       ok: false,
       reason: "unknown_child",
     });
@@ -472,7 +481,7 @@ describe("the sale slot carries money and timing, never a buyer", () => {
 
     const filled = await pickSlotValues(
       makeDeps({ loadSales: async () => withPayer }),
-      { childId: MAYA.childId }
+      { childId: MAYA.childId, staffId: STAFF }
     );
     if (!filled.ok) return;
     expect(filled.slots.sale).not.toContain("Alvarez");
@@ -481,7 +490,7 @@ describe("the sale slot carries money and timing, never a buyer", () => {
   it("reports the exclusion as a CHIP, never as a silent blank", async () => {
     // A blank field reads as a missing value and a staff member types it back in
     // — reintroducing exactly what the exclusion removed.
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
     if (!filled.ok) return;
     expect(filled.excluded).toHaveLength(1);
     expect(filled.excluded[0]!.slot).toBe("sale");
@@ -498,6 +507,7 @@ describe("provenance is ids only (origin R17)", () => {
       childId: MAYA.childId,
       ideaId: "idea-a",
       taskId: "1.1.2",
+      staffId: STAFF,
     });
     expect(filled.ok).toBe(true);
     if (!filled.ok) return;
@@ -519,12 +529,13 @@ describe("provenance is ids only (origin R17)", () => {
       await pickSlotValues(makeDeps(), {
         childId: MAYA.childId,
         ideaId: "idea-that-was-deleted",
+        staffId: STAFF,
       })
     ).toEqual({ ok: false, reason: "unknown_idea" });
   });
 
   it("flags a DEFAULTED idea so the composer can re-sync its select", async () => {
-    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId });
+    const filled = await pickSlotValues(makeDeps(), { childId: MAYA.childId, staffId: STAFF });
     if (!filled.ok) return;
     expect(filled.ideaId).toBe("idea-a");
     expect(filled.substituted).toBe(true);
@@ -532,6 +543,7 @@ describe("provenance is ids only (origin R17)", () => {
     const chosen = await pickSlotValues(makeDeps(), {
       childId: MAYA.childId,
       ideaId: "idea-a",
+      staffId: STAFF,
     });
     if (!chosen.ok) return;
     expect(chosen.substituted).toBe(false);
@@ -543,7 +555,7 @@ describe("provenance is ids only (origin R17)", () => {
         throw new Error("boom");
       },
     });
-    expect(await pickSlotValues(deps, { childId: MAYA.childId })).toEqual({
+    expect(await pickSlotValues(deps, { childId: MAYA.childId, staffId: STAFF })).toEqual({
       ok: false,
       reason: "unavailable",
     });

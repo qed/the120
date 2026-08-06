@@ -351,11 +351,66 @@ export function isImageLabPromptMode(value: unknown): value is ImageLabPromptMod
 export type PromptModes = Readonly<Record<string, ImageLabPromptMode>>;
 
 /**
+ * THE STAFF ATTESTATION — the thing that makes the safe path the DEFAULT.
+ *
+ * ⚠ PROVENANCE IS A PROPERTY OF THE FETCH PATH, NOT OF THE CONTENT. `childProvenance`
+ * is true only when the picker's signed token verified. It says "this text came out
+ * of a child's saved work through OUR endpoint" — it does not, and cannot, say "this
+ * text is not a child's". So a staff member who reads a child's pitch off a support
+ * ticket and types it into the TEMPLATE produces a compose with no token, no slot
+ * values, `sourceChildId` null — and every provenance-keyed defence in this feature
+ * (the re-scrub, the derived default, the dispatch gate) sees nothing to act on. That
+ * is the same class of hole `./source-token.ts` closed once already: a guard keyed on
+ * an optional client-supplied field, defeated by DELETING the field rather than by
+ * forging it.
+ *
+ * The fix is not to force `derived` everywhere. Unimpeded per-model prompt
+ * experimentation on OpenAI is what the bench is FOR, and a bench that can only send
+ * one of 200 fixed strings to gpt-image-2 is not a prompt bench. The fix is an
+ * explicit, server-recorded assertion by a named staff member:
+ *
+ *   * ABSENT / FALSE ⇒ OpenAI cells derive, exactly as if provenance were present.
+ *     Nothing is refused; the run composes and generates, on the vocabulary.
+ *   * TRUE ⇒ authored text is allowed to OpenAI, and the boolean is persisted on
+ *     the run row beside `staff_id`, so the choice has an owner and a timestamp.
+ *
+ * The safe path is therefore the DEFAULT and the LAZY path is safe. Staff running
+ * synthetic prompt experiments tick one box and lose nothing. Staff who paste a
+ * child's sentence and never think about it are protected by having done nothing.
+ *
+ * ⚠ IT BINDS OPENAI ONLY, like everything else here. A Google cell is never
+ * constrained by the attestation, present or absent.
+ */
+export type PromptGateContext = {
+  /** Did a picker-minted provenance token VERIFY for this run? */
+  readonly childProvenance: boolean;
+  /** Did the caller explicitly assert the template and slot values are free of
+   *  child-authored content? Absent is false, and false is the safe answer. */
+  readonly noChildContentAttested: boolean;
+};
+
+/**
+ * The mode this model has NO CHOICE about, or `null` when the staff choice stands.
+ *
+ * ⚠ AN UNKNOWN MODEL IS NOT FORCED HERE, and that is not a hole: `decideRunComposition`
+ * refuses an unknown model id outright, and {@link decideChildTextGate} fails CLOSED on
+ * one at dispatch. This function answers a composer question ("is the select locked?"),
+ * and a model that cannot be composed has no select.
+ */
+export function forcedPromptMode(
+  modelId: string,
+  ctx: PromptGateContext
+): ImageLabPromptMode | null {
+  if (findModelEntry(modelId)?.provider !== "openai") return null;
+  return ctx.childProvenance || ctx.noChildContentAttested !== true ? "derived" : null;
+}
+
+/**
  * What a model sends when the staff member has not said.
  *
  * ⚠ THE DEFAULT IS A CONVENIENCE, NOT THE ENFORCEMENT. It picks `derived` for an
- * OpenAI model on a provenance-bearing run so the composer does the lawful thing
- * without anyone having to remember — but the enforcement is
+ * OpenAI model on a provenance-bearing or un-attested run so the composer does the
+ * lawful thing without anyone having to remember — but the enforcement is
  * {@link decideChildTextGate}, server-side, at dispatch. A default is a thing a
  * client can disagree with; a gate is not.
  *
@@ -365,21 +420,44 @@ export type PromptModes = Readonly<Record<string, ImageLabPromptMode>>;
  */
 export function defaultPromptMode(
   modelId: string,
-  childProvenance: boolean
+  childProvenance: boolean,
+  noChildContentAttested = false
 ): ImageLabPromptMode {
-  if (!childProvenance) return "authored";
-  return findModelEntry(modelId)?.provider === "openai" ? "derived" : "authored";
+  return forcedPromptMode(modelId, { childProvenance, noChildContentAttested }) ?? "authored";
 }
 
+/**
+ * The mode this model will ACTUALLY be composed with.
+ *
+ * ⚠ THE FORCED MODE WINS OVER AN EXPLICIT ENTRY, and that ordering is a bug fix.
+ * This used to return `modes[modelId]` whenever it was a valid mode, falling back to
+ * the default only when absent — while the composer's `promptModes` state is written
+ * only by the select's `onChange` and is never cleared when a token arrives or a chip
+ * is deselected. So: set gpt-image-2 to "As written", THEN fill the slots from a
+ * child, and the stale explicit entry survived. The select rendered `disabled` while
+ * still SHOWING "As written"; the preview — the surface this feature's own docs call
+ * the last human check on child-authored text leaving for a vendor — showed the
+ * child's pitch as what would be sent; every cell was composed with it and priced in
+ * the estimate; all of them 403'd at dispatch; and the refusal copy told staff to
+ * switch the model to derived using a control the UI had just disabled. The only
+ * escape was a reload that discarded the composition.
+ *
+ * Fixing it HERE rather than in the composer is deliberate: this is the one layer
+ * both the preview and `decideRunComposition` read, and it is the only one this
+ * suite (node, no jsdom) can test.
+ */
 export function promptModeFor(
   modelId: string,
   childProvenance: boolean,
-  modes: PromptModes | undefined
+  modes: PromptModes | undefined,
+  noChildContentAttested = false
 ): ImageLabPromptMode {
+  const forced = forcedPromptMode(modelId, { childProvenance, noChildContentAttested });
+  if (forced !== null) return forced;
   const chosen = modes?.[modelId];
   return isImageLabPromptMode(chosen)
     ? chosen
-    : defaultPromptMode(modelId, childProvenance);
+    : defaultPromptMode(modelId, childProvenance, noChildContentAttested);
 }
 
 /** The exact text one model's cells will carry, and whether it is derived. */
@@ -393,9 +471,15 @@ export function promptForModel(input: {
   authoredText: string;
   slotValues: SlotValues;
   childProvenance: boolean;
+  noChildContentAttested?: boolean;
   promptModes?: PromptModes;
 }): CellPrompt {
-  const mode = promptModeFor(input.modelId, input.childProvenance, input.promptModes);
+  const mode = promptModeFor(
+    input.modelId,
+    input.childProvenance,
+    input.promptModes,
+    input.noChildContentAttested === true
+  );
   if (mode === "authored") return { text: input.authoredText, derived: false };
   return { text: deriveCategoryPrompt(input.slotValues).text, derived: true };
 }
@@ -404,9 +488,17 @@ export function promptForModel(input: {
 
 export type ChildTextGateVerdict =
   | { ok: true }
-  /** An OpenAI cell on a provenance-bearing run is carrying text that is not
-   *  from the closed derived vocabulary. */
-  | { ok: false; reason: "child_text_to_openai" };
+  /** An OpenAI cell on a constrained run (provenance-bearing, or not attested as
+   *  child-content-free) is carrying text that is not from the closed derived
+   *  vocabulary. */
+  | { ok: false; reason: "child_text_to_openai" }
+  /** An OpenAI cell on a provenance-bearing run is carrying REFERENCE IMAGES.
+   *  Named separately from the text refusal on purpose — the two have different
+   *  causes and different fixes, and History must be able to tell them apart. */
+  | { ok: false; reason: "child_reference_to_openai" }
+  /** The model id is not in the registry, so no vendor posture can be proven for
+   *  it. Refused rather than waved through — see the fail-CLOSED note below. */
+  | { ok: false; reason: "unknown_model" };
 
 /**
  * MAY THIS EXACT STRING BE DISPATCHED TO THIS MODEL?
@@ -430,19 +522,52 @@ export type ChildTextGateVerdict =
  * processing bar, `IMAGE_LAB_REAL_CONTENT_LIVE` is the switch that governs child
  * content reaching it, and gating it here would block the experimentation the Lab
  * exists for. `run-rules.test.ts` has a named test that a Google cell with
- * authored child text passes.
+ * authored child text passes, and one that a Google cell keeps its references.
+ *
+ * ⚠ IT FAILS CLOSED ON AN UNKNOWN MODEL ID. This used to read
+ * `const provider = entry?.provider ?? null; if (provider !== "openai") return { ok: true }`
+ * — so an id the registry has never heard of took the GOOGLE exit and PASSED. Nothing
+ * escaped only because `image-model.ts` does its own exact-match lookup and answers
+ * `unconfigured`, which means this gate's safety was entirely borrowed from a
+ * different module's unrelated behaviour. An unknown model cannot generate anyway, so
+ * refusing costs nothing and stops the borrowing.
+ *
+ * ⚠ AND IT GATES REFERENCE IMAGES, NOT ONLY TEXT. The gate's input used to be
+ * `{ modelId, childProvenance, promptText }` — purely a text gate — while
+ * `generateCell` loaded up to 16 reference objects and handed them to gpt-image-2 on
+ * the very run whose TEXT had just been forced down to a 200-string vocabulary. The
+ * only control was copy in an upload dialog. A photo of a child's hand-lettered stand
+ * sign, uploaded as a "style reference", carries their handwriting, their business
+ * name and possibly their likeness to OpenAI — while the derived prompt in the SAME
+ * request instructs "No lettering, no logos, no brand names" precisely because those
+ * are the privacy problem. References are append-only and undeletable, so the mistake
+ * is permanent. Refused on the OpenAI leg of a provenance-bearing run; NEVER on a
+ * Google cell.
  */
 export function decideChildTextGate(input: {
   modelId: string;
   childProvenance: boolean;
+  /** See {@link PromptGateContext}. Absent is false, and false is the safe answer. */
+  noChildContentAttested?: boolean;
   promptText: string;
+  /** Is this dispatch carrying reference-image bytes? */
+  hasReferences?: boolean;
 }): ChildTextGateVerdict {
-  if (!input.childProvenance) return { ok: true };
   const entry = findModelEntry(input.modelId);
-  // An unknown model cannot be proven safe; `decideRunComposition` refuses it
-  // long before this, so reaching here with one is already a fault.
-  const provider = entry?.provider ?? null;
-  if (provider !== "openai") return { ok: true };
+  // FAIL CLOSED. Not "unknown ⇒ probably fine": unknown ⇒ we cannot name the
+  // vendor, cannot name its terms, and cannot generate on it either.
+  if (!entry) return { ok: false, reason: "unknown_model" };
+  if (entry.provider !== "openai") return { ok: true };
+
+  // References answer to VERIFIED PROVENANCE only. The attestation below is an
+  // assertion about the template and the slot values — the two things a staff
+  // member types — and says nothing about what is inside an uploaded PNG.
+  if (input.childProvenance && input.hasReferences === true) {
+    return { ok: false, reason: "child_reference_to_openai" };
+  }
+
+  const constrained = input.childProvenance || input.noChildContentAttested !== true;
+  if (!constrained) return { ok: true };
   return isCategoryDerivedPrompt(input.promptText)
     ? { ok: true }
     : { ok: false, reason: "child_text_to_openai" };
@@ -551,6 +676,12 @@ export function decideRunComposition(input: {
    * a refusal, which is what makes the preview honest.
    */
   childProvenance?: boolean;
+  /**
+   * The staff assertion that the template and slot values carry no child-authored
+   * content — see {@link PromptGateContext}. ABSENT IS FALSE, which forces every
+   * OpenAI cell onto the derived vocabulary exactly as provenance does.
+   */
+  noChildContentAttested?: boolean;
   promptModes?: PromptModes;
 }): RunCompositionDecision {
   const template = input.template ?? "";
@@ -591,6 +722,7 @@ export function decideRunComposition(input: {
   }
 
   const childProvenance = input.childProvenance === true;
+  const noChildContentAttested = input.noChildContentAttested === true;
   const slotValues = input.slotValues ?? {};
   const promptByModel: Record<string, CellPrompt> = {};
   for (const modelId of modelIds) {
@@ -599,6 +731,7 @@ export function decideRunComposition(input: {
       authoredText: resolved.text,
       slotValues,
       childProvenance,
+      noChildContentAttested,
       promptModes: input.promptModes,
     });
   }
@@ -711,14 +844,24 @@ export type CellRow = {
   readonly costEstimatedUsd: number | null;
   readonly costReportedUsd: number | null;
   /**
-   * ⚠ THE EXACT TEXT THIS ATTEMPT WAS SENT. Null only for rows written before
-   * per-cell prompts existed; nothing this branch writes leaves it null.
+   * ⚠ THE EXACT TEXT THIS ATTEMPT WAS SENT — NON-NULLABLE, because every insert
+   * path in this feature writes it (`createRun` from the composition, `retryCell`
+   * carried forward from the attempt it replaces) and the table is empty in
+   * production, so the "row that predates per-cell prompts" population does not
+   * exist and never will. `fp_image_lab_images_done_needs_prompt` enforces the
+   * same thing in the database for any row that reaches `done`.
+   *
+   * It used to be `string | null` and `generateCell` covered the null with
+   * `cell.resolvedPrompt ?? run.resolvedPrompt` — a fallback to the run's AUTHORED
+   * resolution, i.e. silently dispatching the child's own words for a cell that
+   * had been composed derived. The fallback is gone; the loader reports a null as
+   * an empty string and `generateCell` refuses to dispatch one.
    *
    * It is READ BACK AND DISPATCHED rather than recomputed, and it is what
    * {@link decideChildTextGate} is applied to at dispatch — the string in hand,
    * not a template it was once derived from.
    */
-  readonly resolvedPrompt: string | null;
+  readonly resolvedPrompt: string;
   readonly promptDerived: boolean;
 };
 
@@ -1427,6 +1570,18 @@ export type GenerateCellOutcome =
    *  was billed, and the cell is UNTOUCHED — deliberately not rewritten, because
    *  a row that reports a prompt it did not send is worse than a refused cell. */
   | { kind: "child_text_gate" }
+  /** ⚠ THE SAME GATE, THE OTHER PAYLOAD. An OpenAI cell on a provenance-bearing
+   *  run was carrying REFERENCE IMAGES. Named apart from `child_text_gate` so the
+   *  two are separable in History: they have different causes (a prompt choice vs
+   *  an attached asset) and different fixes, and a single reason would make the
+   *  reference case invisible inside the text case's count. */
+  | { kind: "child_reference_gate" }
+  /** The cell names a model id the registry does not know, so no vendor posture
+   *  can be proven for it. It could not have generated anyway. */
+  | { kind: "unknown_model_gate" }
+  /** The row carries no prompt at all, so it cannot say what it would send.
+   *  Unreachable through this feature's insert paths — see {@link CellRow}. */
+  | { kind: "prompt_missing" }
   | { kind: "cooldown"; retryAfterMs: number }
   | { kind: "invalid_input" }
   | { kind: "unavailable" };
@@ -1456,6 +1611,12 @@ export function describeGenerateOutcome(outcome: GenerateCellOutcome): string {
       return copy.runPurged;
     case "child_text_gate":
       return copy.childTextGate;
+    case "child_reference_gate":
+      return copy.childReferenceGate;
+    case "unknown_model_gate":
+      return copy.unknownModelGate;
+    case "prompt_missing":
+      return copy.promptMissing;
     case "cooldown":
       return copy.cooldown(outcome.retryAfterMs);
     case "invalid_input":
@@ -1538,8 +1699,17 @@ export const IMAGE_LAB_RUN_COPY = {
       heading: "Slot values",
       show: "Show slot values",
       hide: "Hide slot values",
+      /**
+       * ⚠ IT TEACHES THE RULE, NOT JUST THE PERMISSION. Hand-typed slot values
+       * are allowed — composing a synthetic test case is core bench work — but
+       * only under the attestation, because a hand-typed slot value and a
+       * replayed child's are the same POST and nothing on the server can tell
+       * them apart. Without the attestation `unverified_slot_source` refuses
+       * them, on every deployment (the picker flag is deliberately NOT in that
+       * condition; turning it off must never widen what is allowed).
+       */
       manualHint:
-        "Type values by hand, or fill them from a child's real business content.",
+        "Type values by hand, or fill them from a child's real business content. Hand-typed values need the no-child-content box ticked below — without it this bench cannot tell your wording from a replay of a child's, so it refuses them.",
       /** ⚠ NEVER a blank. A privacy exclusion that renders as an empty field is
        *  indistinguishable from a missing value, and a staff member fills it in
        *  by hand — reintroducing exactly what the exclusion removed. */
@@ -1560,9 +1730,22 @@ export const IMAGE_LAB_RUN_COPY = {
       nextRunHeading: "Resolved prompt — the NEXT run",
       nextRunHint:
         "A run already exists below. This is what pressing Generate would send now; the run's own prompt is shown with its results.",
-      sentHeading: "What this run sent",
+      sentHeading: "The run's authored prompt",
+      /**
+       * ⚠ IT USED TO SAY "Retry re-sends exactly this", AND THAT IS FALSE IN THE
+       * DIRECTION THAT CAUSES A WRONG ESCALATION.
+       *
+       * The string rendered beneath this heading is `run.resolvedPrompt` — the
+       * AUTHORED resolution, template × slot values, i.e. the child's own words.
+       * It is present on EVERY run, including a run composed precisely so that
+       * every OpenAI cell sent the derived vocabulary instead. Meanwhile
+       * `retryCell` carries forward the CELL's own prompt, not this one. So the
+       * surface a human uses to verify the gate worked was displaying the child's
+       * prose labelled as what would be re-sent, on a run where it had never been
+       * sent and never would be.
+       */
       sentHint:
-        "Stored on the run. Retry re-sends exactly this, not the template above.",
+        "Stored evidence of what this run resolved to, not a record of what was dispatched. The prompt is chosen per model, so each attempt's own text is on its card below — and a retry re-sends that card's text, not this.",
 
       /** The per-model preview — one block per selected model, because the text
        *  is a per-model choice and a single box could only ever show one of
@@ -1582,6 +1765,18 @@ export const IMAGE_LAB_RUN_COPY = {
         "Chosen for this model. Nothing requires it here — the Gemini paid tier does not train on prompts and has no under-18 processing bar — so this is an experiment, not a restriction.",
       lockedNote:
         "This model cannot send the child's wording while the run carries child provenance, so the choice is fixed.",
+      /** The same lock, the OTHER cause — and it names the box that lifts it,
+       *  because a lock with no stated escape is the trap this replaced. */
+      lockedUnattestedNote:
+        "This run has not been attested free of child-authored content, so this model is fixed to the category-derived prompt. Tick the box above to send your own wording here.",
+    },
+
+    /** ⚠ THE ATTESTATION. See {@link PromptGateContext} for why it defaults off. */
+    attestation: {
+      label: "The template and slot values below are my own wording — no child wrote any of it.",
+      hint: "Leave this unticked if you are unsure. Unticked, OpenAI models send the category-derived prompt instead of your text, and hand-typed slot values are refused; Google models are unaffected either way. What you tick is recorded on the run against your staff id.",
+      lockedByProvenance:
+        "This run was filled from a child's business content, so OpenAI models derive regardless of what is ticked here.",
     },
 
     models: {
@@ -1689,13 +1884,23 @@ export const IMAGE_LAB_RUN_COPY = {
     /** The run's stored AUTHORED resolution, shown beside the results — see
      *  `preview`. The per-cell text is on each card. */
     sentPromptHeading: "The run's authored prompt",
-    /** ⚠ PER ATTEMPT, because the prompt is per model. A run-level line was the
-     *  right shape only while every cell shared one string. */
-    cellPromptHeading: "Prompt sent",
+    /**
+     * ⚠ PER ATTEMPT, because the prompt is per model. A run-level line was the
+     * right shape only while every cell shared one string.
+     *
+     * ⚠ AND IT IS A FUNCTION OF THE LIFECYCLE, NOT A CONSTANT. It read "Prompt
+     * sent" unconditionally over `resolved_prompt` — which is written at COMPOSE
+     * time, before dispatch. A gate-refused cell returns BEFORE the CAS, so it
+     * sits at `state='requested'` with `attempted_at` null, holding the text, and
+     * rendered as "Prompt sent" with the child's pitch beneath it for a call that
+     * was never dialled and never billed. Every freshly composed cell said the
+     * same. `attempted_at` is the only fact that distinguishes them.
+     */
+    cellPromptHeading: (attempted: boolean) => (attempted ? "Prompt sent" : "Prompt to send"),
     cellPromptDerived: "Category-derived",
     cellPromptAuthored: "As written",
     cellPromptMissing:
-      "This attempt predates per-cell prompt recording, so the run's prompt above is the best available answer.",
+      "This attempt has no recorded prompt. Nothing this bench writes can produce that — report it.",
     /** ⚠ THE HONEST WARNING. `failed → done` is a real transition: a function we
      *  killed can have its vendor call complete afterwards and finalize over the
      *  failure. Staff must know a retry can end up beside a late success. */
@@ -1731,8 +1936,14 @@ export const IMAGE_LAB_RUN_COPY = {
      *  path — is the exact bypass the token replaces. */
     badSourceToken:
       "The provenance on this submission could not be verified, or it has expired, so nothing was written and nothing was sent. Fill the slots from the picker again — the token is minted server-side and cannot be edited or reused across a long gap.",
+    /** ⚠ IT MUST NOT NAME THE TEMPLATE AS THE WAY ROUND THIS. This copy used to
+     *  end "…or put the wording straight into the template instead", which is a
+     *  printed instruction for the exact bypass the attestation now closes: the
+     *  template was never examined by this refusal, was not scrubbed without
+     *  tokens, and left `source_child_id` null so no provenance-keyed defence
+     *  fired. The product must not point at its own door. */
     unverifiedSlotSource:
-      "Slot values were submitted without the server-signed provenance the picker mints, and the content picker is live — so this bench cannot tell them from a replay of a child's text. Fill the slots from the picker, or put the wording straight into the template instead.",
+      "Slot values were submitted without the server-signed provenance the picker mints, so this bench cannot tell them from a replay of a child's text. Fill the slots from the picker instead — and if the wording is your own, say so with the no-child-content box rather than routing it around this check.",
     contentPickerOff:
       "This submission claims it was built from a child's business content, but IMAGE_LAB_REAL_CONTENT_LIVE is not set — so no child content may be read or recorded on this deployment. Nothing was written and nothing was sent.",
   },
@@ -1764,7 +1975,15 @@ export const IMAGE_LAB_RUN_COPY = {
      *  who believed we had quietly fixed it for them would go on composing runs
      *  that silently sent something other than what the bench displayed. */
     childTextGate:
-      "This cell targets an OpenAI model on a run built from a child's business content, and the prompt it carries is not the category-derived one. Nothing was sent and nothing was billed — the cell was refused rather than rewritten, so the row cannot end up reporting a prompt it did not use. Switch this model to the category-derived prompt and compose again. (OpenAI's under-18 API guidance bars processing an under-13's personal data without zero data retention, which is approval-gated and which we do not have. Google models are unaffected.)",
+      "This cell targets an OpenAI model on a run that either was built from a child's business content or was not attested as free of it, and the prompt it carries is not the category-derived one. Nothing was sent and nothing was billed — the cell was refused rather than rewritten, so the row cannot end up reporting a prompt it did not use. Compose again: either tick the no-child-content box, or leave this model on the category-derived prompt. (OpenAI's under-18 API guidance bars processing an under-13's personal data without zero data retention, which is approval-gated and which we do not have. Google models are unaffected.)",
+    /** ⚠ NAMES THE REFERENCE, NOT THE PROMPT. A staff member told "the prompt was
+     *  refused" about an attached PNG would go and change the prompt. */
+    childReferenceGate:
+      "This cell targets an OpenAI model on a run built from a child's business content, and it carries reference images. Reference images are staff uploads this bench cannot inspect — a photo of a hand-lettered stand sign carries handwriting, a business name and possibly a likeness, which is exactly what the category-derived prompt beside it is stripping out. Nothing was sent and nothing was billed. Remove the references from this run, or send this cell to a Google model instead — Google is unaffected.",
+    unknownModelGate:
+      "This cell names a model this bench no longer knows, so nothing can be proven about where its data would go. Nothing was sent and nothing was billed. Compose again with a model from the list.",
+    promptMissing:
+      "This cell has no recorded prompt, so it cannot say what it would send. Nothing was sent and nothing was billed. This should be impossible — report it rather than retrying.",
     cooldown: (retryAfterMs: number) =>
       `Too many generations in a short window. Try again in about ${minutesFromMs(retryAfterMs)} minute${minutesFromMs(retryAfterMs) === 1 ? "" : "s"}.`,
     invalidInput: "That request was not understood, so nothing was sent.",

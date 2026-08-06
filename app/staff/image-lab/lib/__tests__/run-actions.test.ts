@@ -319,6 +319,10 @@ describe("the three picker actions", () => {
       childId: UUID,
       ideaId: "idea:2",
       taskId: "1.1.2",
+      // ⚠ FROM THE GATE, NOT THE BODY. The provenance token this fill mints is
+      // bound to the staff member who minted it, and this action's
+      // `requireStaff()` is the only honest source of that id.
+      staffId: "staff-from-the-gate",
     });
 
     // A value this action accepted but `createRun` then refused would be a dead
@@ -336,6 +340,7 @@ describe("the three picker actions", () => {
       childId: OTHER_UUID,
       ideaId: null,
       taskId: null,
+      staffId: "staff-from-the-gate",
     });
   });
 });

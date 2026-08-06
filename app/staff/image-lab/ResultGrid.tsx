@@ -175,13 +175,13 @@ export function ResultGrid({
                         by the text looking generic. */}
                     <details className="text-xs text-hq-ink-soft">
                       <summary className="min-h-11 cursor-pointer py-3">
-                        {copy.cellPromptHeading} ·{" "}
+                        {copy.cellPromptHeading(attempt.attemptedAtMs !== null)} ·{" "}
                         {attempt.promptDerived
                           ? copy.cellPromptDerived
                           : copy.cellPromptAuthored}
                       </summary>
                       <pre className="mt-1 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border p-2 text-xs text-hq-ink">
-                        {attempt.resolvedPrompt ?? copy.cellPromptMissing}
+                        {attempt.resolvedPrompt === "" ? copy.cellPromptMissing : attempt.resolvedPrompt}
                       </pre>
                     </details>
                   </li>

@@ -627,6 +627,57 @@ describe("migration parity: fp_image_lab_cell_prompts.sql", () => {
     ).toBe(true);
   });
 
+  /**
+   * ⚠ THE OTHER CONSTRAINT, WHICH THIS TEST DID NOT ASSERT AT ALL.
+   *
+   * `done_needs_prompt` is what makes `CellRow.resolvedPrompt` non-nullable
+   * honest: a cell that dispatched and finalized without a recorded prompt now
+   * fails the WRITE instead of quietly storing an image that cannot say what
+   * produced it. It is free right now (the table is empty in production) and
+   * impossible later, so an unasserted constraint is one a future edit deletes
+   * without anything going red.
+   */
+  it("requires a prompt on any row that reaches `done`", () => {
+    expect(
+      /add\s+constraint\s+fp_image_lab_images_done_needs_prompt/i.test(sql),
+      "constraint fp_image_lab_images_done_needs_prompt"
+    ).toBe(true);
+    // The SHAPE, not the name — `drop constraint if exists` immediately precedes
+    // the add, so a re-apply from a different revision silently REPLACES the
+    // check and a name-only assertion reports success either way.
+    expect(
+      /check\s*\(\s*state\s*<>\s*'done'\s+or\s+resolved_prompt\s+is\s+not\s+null\s*\)/i.test(
+        sql
+      ),
+      "check (state <> 'done' or resolved_prompt is not null)"
+    ).toBe(true);
+    expect(
+      /drop\s+constraint\s+if\s+exists\s+fp_image_lab_images_done_needs_prompt/i.test(sql)
+    ).toBe(true);
+  });
+
+  /**
+   * ⚠ THE ATTESTATION COLUMN, AND ITS DEFAULT IS THE SAFETY PROPERTY.
+   *
+   * `not null default false` is what makes absent, null and false the same
+   * answer — and makes that answer the restrictive one. A nullable column, or one
+   * defaulting true, reopens the exact bypass it was added to close: a run
+   * composed by any client that has never heard of the field would be treated as
+   * attested and would dispatch a staff member's unexamined template text to
+   * gpt-image-2.
+   */
+  it("adds the staff attestation to the RUN table, not null and defaulting FALSE", () => {
+    expect(
+      /alter\s+table\s+public\.fp_image_lab_runs\s+add\s+column\s+if\s+not\s+exists\s+no_child_content_attested\s+boolean\s+not\s+null\s+default\s+false/i.test(
+        sql
+      ),
+      "add column if not exists no_child_content_attested boolean not null default false"
+    ).toBe(true);
+    expect(/no_child_content_attested\s+boolean\s+not\s+null\s+default\s+true/i.test(sql)).toBe(
+      false
+    );
+  });
+
   it("adds NO policy and NO grant — the tables stay service-role only", () => {
     // The whole Lab is RLS-on with zero policies and no anon/authenticated grant.
     // An additive migration is the easiest place to lose that by accident.
@@ -635,11 +686,13 @@ describe("migration parity: fp_image_lab_cell_prompts.sql", () => {
     expect(/alter\s+table[^;]*disable\s+row\s+level\s+security/i.test(sql)).toBe(false);
   });
 
-  it("touches ONLY fp_image_lab_images, and drops no column", () => {
+  it("touches ONLY the two Lab tables it names, and drops no column", () => {
     const tables = [...sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?([a-z_.]+)/gi)].map(
       (m) => m[1]!.toLowerCase()
     );
-    expect(new Set(tables)).toEqual(new Set(["public.fp_image_lab_images"]));
+    expect(new Set(tables)).toEqual(
+      new Set(["public.fp_image_lab_images", "public.fp_image_lab_runs"])
+    );
     expect(/drop\s+column/i.test(sql)).toBe(false);
     expect(/drop\s+table/i.test(sql)).toBe(false);
   });

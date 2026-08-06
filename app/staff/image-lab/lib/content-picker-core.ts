@@ -197,11 +197,19 @@ export type ContentPickerDeps = {
    * had to load it could not run in this feature's node/no-jsdom environment
    * without the deployment's secret.
    */
-  mintSourceToken(provenance: {
-    childId: string;
-    ideaId: string | null;
-    taskId: string | null;
-  }): string;
+  mintSourceToken(
+    provenance: {
+      childId: string;
+      ideaId: string | null;
+      taskId: string | null;
+    },
+    /** ⚠ THE STAFF MEMBER THE TOKEN IS MINTED FOR. It is signed into the payload
+     *  and `createRun` requires the presenting session to match it — one token
+     *  used to be replayable by any staff session onto any compose, which made
+     *  `source_child_id` (the column the revocation purge keys on) attachable to
+     *  runs holding none of that child's content. */
+    staffId: string
+  ): string;
   /** Overridable so tests never touch process.env. */
   isLive?: () => boolean;
 };
@@ -691,7 +699,13 @@ export async function listPickerIdeas(
  */
 export async function pickSlotValues(
   deps: ContentPickerDeps,
-  input: { childId: string; ideaId?: string | null; taskId?: string | null }
+  input: {
+    childId: string;
+    ideaId?: string | null;
+    taskId?: string | null;
+    /** From the ACTION'S GATE, never from the request body. See the dep above. */
+    staffId: string;
+  }
 ): Promise<PickerContent | PickerRefusal> {
   const isLive = deps.isLive ?? isImageLabRealContentLive;
   if (!isLive()) return { ok: false, reason: "disabled" };
@@ -772,7 +786,10 @@ export async function pickSlotValues(
     // The requested idea may have been substituted (`substituted`), and the token
     // must name the idea the run will actually record — the same rule that makes
     // the composer re-sync its select from `ideaId`.
-    provenance: deps.mintSourceToken({ childId: child.childId, ideaId, taskId }),
+    provenance: deps.mintSourceToken(
+      { childId: child.childId, ideaId, taskId },
+      input.staffId
+    ),
     slots,
     emptySlots,
     scrubbed,

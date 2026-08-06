@@ -155,6 +155,18 @@ export function RunComposer({
    * has never heard of still gets the lawful answer.
    */
   const [promptModes, setPromptModes] = useState<PromptModes>({});
+  /**
+   * ⚠ THE STAFF ATTESTATION, AND IT STARTS FALSE ON EVERY MOUNT.
+   *
+   * It is deliberately NOT persisted to sessionStorage the way the run id is. A
+   * remembered "yes, this is my own wording" would carry a previous compose's
+   * assertion onto the next one, which is precisely the state this control
+   * exists to make impossible. One compose, one deliberate tick.
+   *
+   * Unticked, `promptModeFor` forces every OpenAI cell to the derived
+   * vocabulary and the preview shows that — no refusal, no dead end.
+   */
+  const [noChildContentAttested, setNoChildContentAttested] = useState(false);
 
   /**
    * ⚠ RESTORED AT FIRST RENDER, not in an effect.
@@ -241,6 +253,7 @@ export function RunComposer({
         imageCount,
         referenceIds,
         childProvenance,
+        noChildContentAttested,
         promptModes,
       }),
     [
@@ -250,6 +263,7 @@ export function RunComposer({
       imageCount,
       referenceIds,
       childProvenance,
+      noChildContentAttested,
       promptModes,
     ]
   );
@@ -282,8 +296,19 @@ export function RunComposer({
     // the held idempotency key, collide with the earlier run, and return it — so
     // the bench would answer the prompt experiment with the OTHER prompt's
     // results, which is the exact comparison this unit exists to enable.
-    promptModes,
+    //
+    // ⚠ THE *EFFECTIVE* MODE PER *SELECTED* MODEL, NOT THE RAW STATE MAP. This
+    // serialised `promptModes` whole, while composition reads modes only for
+    // SELECTED models and the map is never pruned on deselect — so a mode entry
+    // for a model that is not in the run changed the signature without changing
+    // the run. That is a DOUBLE SPEND in exactly the window the key covers:
+    // Generate with [gpt-image-2]; the request stalls so the key is never
+    // released; while waiting, select gemini-3-pro-image, set its mode, deselect
+    // it again; press Generate → different signature → fresh key → the server
+    // sees no collision → a SECOND run with a full second fan.
+    modelIds.map((id) => [id, promptModeFor(id, childProvenance, promptModes, noChildContentAttested)]),
     childProvenance,
+    noChildContentAttested,
   ]);
 
   // ── The picker ─────────────────────────────────────────────────────────────
@@ -500,6 +525,7 @@ export function RunComposer({
         referenceIds,
         sourceToken,
         promptModes,
+        noChildContentAttested,
       });
       // ⚠ THE KEY IS RELEASED THE MOMENT THE SERVER HAS ANSWERED, AND BEFORE THE
       // mounted check, so a staff member who navigated away is not left holding a
@@ -641,6 +667,30 @@ export function RunComposer({
             className="min-h-11 w-full rounded-lg border border-hq-border bg-hq-surface p-3 text-sm text-hq-ink"
           />
           <span className="text-xs text-hq-ink-soft">{COPY.composer.template.hint}</span>
+        </label>
+
+        {/* ⚠ THE ATTESTATION, ON THE TEMPLATE, because the template is what it is
+            about. `sourceChildId` is a fact about the FETCH PATH — a child's pitch
+            typed in above with no picker token armed nothing at all, and the
+            refusal copy used to recommend doing exactly that. Unticked is the
+            safe answer and costs nothing: OpenAI cells derive, Google cells are
+            untouched, and nothing is refused. See run-rules `PromptGateContext`. */}
+        <label className="mt-3 flex items-start gap-2 text-sm text-hq-ink">
+          <input
+            type="checkbox"
+            checked={noChildContentAttested}
+            disabled={childProvenance}
+            onChange={(e) => setNoChildContentAttested(e.target.checked)}
+            className="mt-1 size-5 shrink-0"
+          />
+          <span className="flex flex-col gap-1">
+            <span className="text-pretty">{COPY.composer.attestation.label}</span>
+            <span className="text-pretty text-xs text-hq-ink-soft">
+              {childProvenance
+                ? COPY.composer.attestation.lockedByProvenance
+                : COPY.composer.attestation.hint}
+            </span>
+          </span>
         </label>
       </section>
     ),
@@ -857,8 +907,12 @@ export function RunComposer({
             // ⚠ THE CONTROL IS DISABLED, AND THE SERVER STILL REFUSES. Disabling
             // is courtesy — `decideChildTextGate` runs on the paid path against a
             // crafted request, which is where the rule actually lives.
+            // ⚠ TWO CAUSES, ONE LOCK, AND THE NOTE SAYS WHICH. Provenance is not
+            // liftable; a missing attestation is, by ticking the box above — and
+            // a lock with no stated escape is exactly the trap this replaced.
+            const lockedByProvenance = childProvenance && entry.provider === "openai";
             const lockedToDerived =
-              childProvenance && entry.provider === "openai";
+              entry.provider === "openai" && (childProvenance || !noChildContentAttested);
             return (
               <li key={entry.id}>
                 <button
@@ -901,7 +955,17 @@ export function RunComposer({
                   <label className="mt-2 flex flex-col gap-1 pl-1 text-xs text-hq-ink">
                     {COPY.composer.preview.modeLabel}
                     <select
-                      value={promptModeFor(entry.id, childProvenance, promptModes)}
+                      // ⚠ THE EFFECTIVE MODE, WHICH THE LOCK NOW WINS. This
+                      // rendered the stale explicit `promptModes` entry while
+                      // `disabled`, so the select read "As written" directly above
+                      // a note saying the model was locked to derived. The fix is
+                      // in `promptModeFor` itself, where it is testable.
+                      value={promptModeFor(
+                        entry.id,
+                        childProvenance,
+                        promptModes,
+                        noChildContentAttested
+                      )}
                       disabled={lockedToDerived}
                       onChange={(e) =>
                         setPromptModes((prev) => ({
@@ -920,7 +984,9 @@ export function RunComposer({
                     </select>
                     {lockedToDerived && (
                       <span className="text-pretty text-hq-ink-soft">
-                        {COPY.composer.preview.lockedNote}
+                        {lockedByProvenance
+                          ? COPY.composer.preview.lockedNote
+                          : COPY.composer.preview.lockedUnattestedNote}
                       </span>
                     )}
                   </label>

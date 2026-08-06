@@ -47,6 +47,22 @@ import "server-only";
  * separated by a fixed label so the derived key is not the secret itself and
  * cannot be replayed against anything else that signs with it.
  *
+ * ── AND IT IS BOUND TO THE MINTING STAFF MEMBER ────────────────────────────
+ * The payload was `{c,i,t,at}` — three ids and a timestamp, no staff id and no
+ * nonce — so ONE token was replayable for its whole two-hour life by ANY staff
+ * session onto ANY compose. That is not a route for child text to reach OpenAI:
+ * presenting a token makes the gate STRICTER, never looser, and forging or
+ * stripping one already fails. What it corrupts is the CONSENT RECORD.
+ * `source_child_id` is the column the revocation purge keys on, and a floating
+ * token makes it attachable to runs that contain none of that child's content —
+ * so a purge deletes rows that were never about the child and leaves rows that
+ * were. The token now carries `s`, and `verifySourceToken` requires the caller's
+ * own staff id to match it.
+ *
+ * A staff id is an internal uuid and belongs to the same "internal ids ONLY"
+ * class as the three already here, so this adds no new class of data to a string
+ * a staff member can read.
+ *
  * ⚠ NO CHILD NAME, NO PROSE, NO SLOT VALUE IS IN THE PAYLOAD. The token carries
  * the three ids the run row records and a timestamp — the same "internal ids
  * ONLY" rule the migration header states for those columns. It is signed, not
@@ -110,12 +126,16 @@ const sign = (body: string): string =>
  */
 export function mintSourceToken(
   provenance: SourceProvenance,
+  staffId: string,
   nowMs: number = Date.now()
 ): string {
   const payload = JSON.stringify({
     c: provenance.childId,
     i: provenance.ideaId,
     t: provenance.taskId,
+    // The staff member this token is FOR. Signed like everything else here, so it
+    // cannot be swapped without invalidating the whole token.
+    s: staffId,
     at: nowMs,
   });
   const body = `${VERSION}.${b64url(Buffer.from(payload, "utf8"))}`;
@@ -126,7 +146,11 @@ export type SourceTokenVerdict =
   | { ok: true; provenance: SourceProvenance; issuedAtMs: number }
   /** Malformed, wrong version, or the signature does not match this deployment. */
   | { ok: false; reason: "invalid" }
-  | { ok: false; reason: "expired" };
+  | { ok: false; reason: "expired" }
+  /** Verified, unexpired, and minted for a DIFFERENT staff member. Named apart
+   *  from `invalid` because it is the only refusal here that means "this is a
+   *  real token and you are not its holder" — the replay case. */
+  | { ok: false; reason: "wrong_staff" };
 
 /**
  * Verify a token and read the provenance back out.
@@ -143,6 +167,7 @@ export type SourceTokenVerdict =
  */
 export function verifySourceToken(
   token: string,
+  staffId: string,
   nowMs: number = Date.now(),
   ttlMs: number = IMAGE_LAB_SOURCE_TOKEN_TTL_MS
 ): SourceTokenVerdict {
@@ -172,6 +197,7 @@ export function verifySourceToken(
   const raw = decoded as Record<string, unknown>;
 
   const childId = typeof raw.c === "string" ? raw.c : null;
+  const mintedFor = typeof raw.s === "string" && raw.s !== "" ? raw.s : null;
   const issuedAtMs = typeof raw.at === "number" ? raw.at : null;
   if (childId === null || childId === "" || issuedAtMs === null) {
     return { ok: false, reason: "invalid" };
@@ -182,6 +208,14 @@ export function verifySourceToken(
     if (id !== null && !IMAGE_LAB_SOURCE_ID_PATTERN.test(id)) {
       return { ok: false, reason: "invalid" };
     }
+  }
+
+  // ⚠ BOUND TO THE MINTER. A token with no `s` at all is refused rather than
+  // waved through: "the field is absent so the check does not apply" is how the
+  // client-asserted `source` object was defeated, and this file exists because of
+  // that. There is no legacy population — tokens live two hours.
+  if (mintedFor === null || mintedFor !== staffId) {
+    return { ok: false, reason: "wrong_staff" };
   }
 
   if (nowMs - issuedAtMs > ttlMs || issuedAtMs - nowMs > 60_000) {

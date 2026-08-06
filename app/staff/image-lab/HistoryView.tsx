@@ -789,7 +789,7 @@ function ImageCard({
           reads perfectly plausible and would otherwise be indistinguishable. */}
       <details className="text-xs text-hq-ink-soft">
         <summary className="min-h-11 cursor-pointer py-3">
-          {COPY.runs.imagePrompt} ·{" "}
+          {COPY.runs.imagePrompt(image.attemptedAtMs !== null)} ·{" "}
           {image.promptDerived
             ? COPY.runs.imagePromptDerived
             : COPY.runs.imagePromptAuthored}

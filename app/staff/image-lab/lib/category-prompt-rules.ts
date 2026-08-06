@@ -54,10 +54,45 @@
  *      That is a STRONGER guarantee than "we stripped the names": no substring of
  *      a child's input can appear in the output because the output was never
  *      built from the input at all, only SELECTED by it.
- *   3. NON-INVERTIBLE. Two children with different wording and the same kind of
- *      business land on the same category, and 24 categories × 8 settings is 192
- *      possible outputs for the whole cohort. Nothing in an output reconstructs an
- *      input.
+ *   3. NON-RECONSTRUCTING — WHICH IS NOT THE SAME AS "REVEALS NOTHING". This
+ *      property was previously stated as "nothing in an output reconstructs an
+ *      input", over an arithmetic that was also wrong (24 × 8 = 192; the fallback
+ *      is a MEMBER of the vocabulary, so it is 25 × 8 = 200, as
+ *      {@link allCategoryPrompts} and its docblock correctly say). Both halves
+ *      are corrected here, because this file is explicitly the artifact whoever
+ *      has to defend this design reads.
+ *
+ *      WHAT IS ACTUALLY PROVEN, and it is proven mechanically: NO SUBSTRING OF
+ *      THE INPUT IS TRANSMITTED. The output is not built from the input, only
+ *      SELECTED by it, and the suite asserts membership of a set fixed in source
+ *      over a table of hostile inputs. That is the strong, durable claim.
+ *
+ *      WHAT IS NOT PROVEN, stated as the residual it is: the dispatched string
+ *      carries BOTH a category and a setting, so it is a classifier of the
+ *      child's text with log2(200) ≈ 7.6 bits of resolution. Against a 17-child
+ *      beta cohort, a (category, setting) pair approaches a PER-CHILD
+ *      FINGERPRINT — 200 bins over 17 children means most children are alone in
+ *      theirs. A vendor holding several runs can group them by child without ever
+ *      seeing a word the child wrote. "Non-invertible" was the wrong word for
+ *      that; "carries no wording, carries a coarse label" is the right one.
+ *
+ *      ⚠ AND THE SETTING IS A DIFFERENT CLASS OF FACT FROM THE PRODUCT. The
+ *      setting keywords include `school`, `classroom`, `recess`, `garage`,
+ *      `basement`, `driveway`, `porch` and `beach`. Those transmit roughly WHERE
+ *      A MINOR OPERATES — inside a school, at home, on a residential street —
+ *      which is a category of information about a child that "what they sell" is
+ *      not. It is accepted deliberately (a scene is what makes the panel
+ *      drawable) and it is recorded here so the acceptance is visible rather than
+ *      implicit.
+ *
+ *      ⚠ AND "UNCLASSIFIABLE" IS ITSELF A SIGNAL. `general_goods` +
+ *      `market_stall` is the MODAL bin: it is where the fallback lands, so it
+ *      collects both genuine general-goods businesses and everything the
+ *      classifier could not read. A vendor seeing it learns "this one did not
+ *      match" — the one bin whose meaning is about our classifier rather than
+ *      about the child. That it is modal is what limits the fingerprinting above,
+ *      and it is the reason not to grow this vocabulary: a hundred fine-grained
+ *      categories would raise the resolution and shrink the crowd to hide in.
  *   4. AN EXPLICIT FALLBACK, NEVER PASSTHROUGH. Unmatched input yields
  *      {@link CATEGORY_FALLBACK_ID}. "We could not classify it, so we sent the
  *      child's text" is the one behaviour this module exists to make impossible,
@@ -68,6 +103,28 @@
  * defence in depth ON TOP of it: the scrub still protects the STORED template,
  * slot values and note (which are stored and are sent nowhere), while this
  * protects what leaves for a vendor.
+ *
+ * ── A KNOWN, ACCEPTED INTERACTION: THE SCRUB RUNS FIRST ────────────────────
+ * `pickSlotValues` scrubs the child's name out of every slot BEFORE those slots
+ * are ever handed to {@link deriveCategoryPrompt}. The scrub is token-based and
+ * does not know what a word is doing in a sentence, so a child named Candy, Rose,
+ * Basil, Olive, Jasmine or Clay has that token replaced with `[name]` in the
+ * PRODUCT NOUN too — "Candy's candy bags" arrives here as "[name]'s [name] bags",
+ * and the `candy_treats` keyword that would have matched is gone.
+ *
+ * The effect is that those children's prompts classify less well and are pushed
+ * toward {@link CATEGORY_FALLBACK_ID}. That is HARMLESS FOR PRIVACY — it fails
+ * toward the least specific output, which is the safe direction, and the fallback
+ * is a full member of the closed vocabulary — but it is not neutral for the
+ * BENCH: it makes those children's derived prompts systematically vaguer, so a
+ * model scored on them is being scored on a weaker input for a reason that has
+ * nothing to do with the model.
+ *
+ * Deliberately NOT "fixed" by reordering. Classifying before scrubbing would mean
+ * this module reads unscrubbed child text, which is precisely the property that
+ * makes it auditable — the scrub-first order is the reason no substring of the
+ * input can reach a vendor. Recorded here so that a surprising fallback rate on a
+ * particular child is diagnosed rather than rediscovered.
  */
 
 import { IMAGE_LAB_SLOTS, type ImageLabSlot } from "./image-lab-rules";
@@ -335,8 +392,14 @@ const FALLBACK_CATEGORY = {
  *
  * Kept separate from the category rather than folded into its phrase so that two
  * children selling the same thing in different places still land on the same
- * CATEGORY (the non-invertibility property is stated on the category), while the
- * panel still gets a scene worth drawing.
+ * CATEGORY, while the panel still gets a scene worth drawing.
+ *
+ * ⚠ THE SETTING IS THE MORE SENSITIVE HALF, AND THE MODULE HEADER SAYS SO. Its
+ * keywords include `school`, `classroom`, `recess`, `garage`, `basement`,
+ * `driveway`, `porch` and `beach` — so the dispatched string carries a coarse
+ * statement of WHERE A MINOR OPERATES, which is a different class of fact from
+ * what they sell. Accepted, not overlooked: read property 3 in the header before
+ * adding a setting.
  */
 export const IMAGE_LAB_SCENE_SETTINGS = [
   {

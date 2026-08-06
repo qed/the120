@@ -145,6 +145,15 @@ const createRunSchema = z.object({
   promptModes: z
     .record(z.string().max(120), z.enum(IMAGE_LAB_PROMPT_MODES))
     .optional(),
+  /**
+   * ⚠ THE STAFF ATTESTATION, AND `.optional()` IS SAFE HERE ONLY BECAUSE ABSENT
+   * MEANS "NO". Every other optional field in this schema degrades to a harmless
+   * default; this one degrades to the RESTRICTIVE answer, which is what makes a
+   * stale client, a replay, or a hand-rolled POST land on the derived vocabulary
+   * for OpenAI rather than on the child's words. `run-core` reads it with
+   * `=== true`. See `run-rules.PromptGateContext`.
+   */
+  noChildContentAttested: z.boolean().optional(),
 });
 
 /**
@@ -241,6 +250,7 @@ export async function createImageLabRun(input?: unknown): Promise<CreateRunResul
     iteratedFromRunId: parsed.data.iteratedFromRunId ?? null,
     sourceToken: parsed.data.sourceToken ?? null,
     promptModes: parsed.data.promptModes,
+    noChildContentAttested: parsed.data.noChildContentAttested === true,
   });
 }
 
@@ -282,8 +292,18 @@ export type RunCellsResult =
       ok: true;
       cells: RunCellView[];
       serverNowMs: number;
-      /** The prompt THIS run sent. The composer shows it beside the grid, so the
-       *  live preview can never be mistaken for what Retry would re-send. */
+      /**
+       * ⚠ THE RUN'S AUTHORED RESOLUTION — template × slot values — AND NOT
+       * NECESSARILY WHAT ANY CELL SENT.
+       *
+       * It said "the prompt THIS run sent … what Retry would re-send", and both
+       * halves were wrong once the prompt became a per-model choice: a run whose
+       * every OpenAI cell dispatched the derived vocabulary still carries the
+       * child's own words in this field, and `retryCell` carries forward the
+       * CELL's text, not this one. The composer shows it as STORED EVIDENCE of
+       * what the compose resolved to; each attempt's dispatched string is on its
+       * own card (`fp_image_lab_images.resolved_prompt`).
+       */
       resolvedPrompt: string;
       modelIds: string[];
     }
@@ -364,7 +384,10 @@ const fillSchema = z.object({
 export async function fillImageLabSlots(
   input?: unknown
 ): Promise<PickerContent | PickerRefusal> {
-  await requireStaff();
+  // ⚠ THE ID IS KEPT NOW, NOT DISCARDED. The provenance token this fill mints is
+  // bound to the staff member who minted it, and this gate is the only honest
+  // source of that id — a caller does not get to say who it is minting for.
+  const { staffId } = await requireStaff();
 
   const parsed = fillSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "unknown_child" };
@@ -373,5 +396,6 @@ export async function fillImageLabSlots(
     childId: parsed.data.childId,
     ideaId: parsed.data.ideaId ?? null,
     taskId: parsed.data.taskId ?? null,
+    staffId,
   });
 }

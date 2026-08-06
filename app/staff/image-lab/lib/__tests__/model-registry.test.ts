@@ -33,6 +33,15 @@ describe("model-registry: shape invariants", () => {
     // must be the DECLARED provider: the adapter's safety wording branches on
     // `entry.provider`, so a Google model labelled "openai" would tell staff to
     // ignore the allowlist that is actually blocking every hero prompt.
+    //
+    // ⚠ AND IT IS NOW A PRIVACY INVARIANT, NOT ONLY A ROUTING ONE.
+    // `decideChildTextGate` decides whether a cell may carry a child's wording by
+    // reading `entry.provider`, while `image-model.ts` DIALS `entry.gatewayModel`.
+    // Two fields, one assumption. If they ever disagreed — an entry whose provider
+    // said "google" while its gateway string routed to `openai/…` — the gate would
+    // wave the cell through and the adapter would send it to the vendor whose
+    // terms forbid it. This assertion is what makes the two impossible to
+    // disagree.
     expect(entry.gatewayModel).toMatch(/^[a-z0-9.-]+\/[a-z0-9._-]+$/);
     expect(entry.gatewayModel.split("/")[0]).toBe(entry.provider);
     expect(entry.gatewayModel.endsWith(entry.id)).toBe(true);

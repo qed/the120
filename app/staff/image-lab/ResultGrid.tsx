@@ -165,6 +165,25 @@ export function ResultGrid({
                           numbering `cellAttemptName` already encodes. */}
                       {attemptLine === "" ? "" : ` · ${attemptLine}`}
                     </span>
+                    {/* ⚠ THE PROMPT THIS ATTEMPT ACTUALLY SENT, ON THE ATTEMPT.
+                        The prompt is a per-model choice now, so a single
+                        run-level line could only ever be right for one column —
+                        and "this phrasing beat that one on this model" is the
+                        question the whole bench exists to answer, which means the
+                        phrasing has to be readable beside the picture it
+                        produced. Derived vs as-written is stated, never implied
+                        by the text looking generic. */}
+                    <details className="text-xs text-hq-ink-soft">
+                      <summary className="min-h-11 cursor-pointer py-3">
+                        {copy.cellPromptHeading(attempt.attemptedAtMs !== null)} ·{" "}
+                        {attempt.promptDerived
+                          ? copy.cellPromptDerived
+                          : copy.cellPromptAuthored}
+                      </summary>
+                      <pre className="mt-1 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border p-2 text-xs text-hq-ink">
+                        {attempt.resolvedPrompt === "" ? copy.cellPromptMissing : attempt.resolvedPrompt}
+                      </pre>
+                    </details>
                   </li>
                 );
               })}

@@ -147,7 +147,7 @@ async function loadChildRows(
 export function contentPickerDeps(db: ImageLabDb): ContentPickerDeps {
   return {
     // The one mint site in the feature. See `./source-token.ts`.
-    mintSourceToken: (provenance) => mintSourceToken(provenance),
+    mintSourceToken: (provenance, staffId) => mintSourceToken(provenance, staffId),
 
     listChildren: () => loadChildRows(db, {}),
 

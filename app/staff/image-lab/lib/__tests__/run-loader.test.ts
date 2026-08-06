@@ -248,6 +248,7 @@ describe("insertRun maps the unique violation, and only that", () => {
     sourceChildId: null,
     sourceIdeaId: null,
     sourceTaskId: null,
+    noChildContentAttested: false,
     createdAtMs: 0,
     cellCount: 1,
   };
@@ -331,6 +332,94 @@ describe("insertRun maps the unique violation, and only that", () => {
         expect(message).toMatch(/cause=ECONNRESET/);
       });
     expect.hasAssertions();
+  });
+});
+
+// ── The row mapper's ONE restrictive default ─────────────────────────────────
+
+/**
+ * ⚠ `no_child_content_attested` IS THE ONLY COLUMN WHOSE WRONG READING IS A
+ * PRIVACY INCIDENT, AND THE MAPPER IS WHERE IT IS READ.
+ *
+ * `raw.no_child_content_attested === true` → `!== false` survived the entire
+ * suite. The column is `NOT NULL DEFAULT FALSE`, so a row written by today's
+ * schema always carries a real boolean and the flip is invisible to every test
+ * that goes through the writer — but this mapper is the ONE place where a
+ * missing column, a renamed column, a `select` that forgot to list it, or a
+ * partially applied migration turns into "attested". `undefined !== false`.
+ *
+ * The gate downstream reads `run.noChildContentAttested` and treats `true` as
+ * "the staff member vouched for this text", so ABSENT, NULL AND GARBAGE MUST ALL
+ * MAP TO `false`. `insertRun` is the cheapest door onto the mapper: it maps
+ * whatever the row-shaped answer contains and hands it back.
+ */
+describe("toRunRow reads the attestation RESTRICTIVELY", () => {
+  const runRow = {
+    id: "run-1",
+    staffId: "staff-1",
+    idempotencyKey: "key-1",
+    template: "t",
+    slotValues: {},
+    resolvedPrompt: "t",
+    referenceIds: [],
+    drillTags: [],
+    note: "",
+    compare: false,
+    iteratedOnModel: null,
+    iteratedFromRunId: null,
+    sourceChildId: null,
+    sourceIdeaId: null,
+    sourceTaskId: null,
+    noChildContentAttested: false,
+    createdAtMs: 0,
+    cellCount: 1,
+  };
+
+  /** The columns `RUN_COLUMNS` selects, as postgrest hands them back. */
+  const rawRow = (over: Record<string, unknown>) => ({
+    id: "run-1",
+    staff_id: "staff-1",
+    idempotency_key: "key-1",
+    template: "t",
+    slot_values: {},
+    resolved_prompt: "t",
+    reference_ids: [],
+    drill_tags: [],
+    note: "",
+    compare: false,
+    iterated_on_model: null,
+    iterated_from_run_id: null,
+    source_child_id: null,
+    source_idea_id: null,
+    source_task_id: null,
+    created_at: "2026-08-05T00:00:00.000Z",
+    ...over,
+  });
+
+  const mapped = async (over: Record<string, unknown>) => {
+    const { db } = fakeDb({ data: rawRow(over), error: null });
+    const result = await runDeps(db).insertRun(runRow);
+    if (!result.ok) throw new Error("fixture: insertRun should have succeeded");
+    return result.run;
+  };
+
+  it.each([
+    ["the column is ABSENT — a stale select, a renamed column", {}],
+    ["the column is NULL — a row that predates the NOT NULL default", { no_child_content_attested: null }],
+    ["the value is the STRING \"false\"", { no_child_content_attested: "false" }],
+    ["the value is the STRING \"true\"", { no_child_content_attested: "true" }],
+    ["the value is the NUMBER 1", { no_child_content_attested: 1 }],
+    ["the value is an OBJECT", { no_child_content_attested: {} }],
+  ])("maps to `false` when %s", async (_label, over) => {
+    const run = await mapped(over);
+    // Not `toBeFalsy()`: `undefined` is falsy, and `undefined` is precisely what
+    // the permissive mutation lets through to a gate that reads `!== true`.
+    expect(run.noChildContentAttested).toBe(false);
+  });
+
+  it("maps a real `true` to `true`, so the attestation is not inert", async () => {
+    const run = await mapped({ no_child_content_attested: true });
+    expect(run.noChildContentAttested).toBe(true);
   });
 });
 

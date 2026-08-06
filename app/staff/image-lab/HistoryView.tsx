@@ -616,6 +616,13 @@ function RunCard({
         <dd className="whitespace-pre-wrap break-words rounded-lg border border-hq-border p-2 text-xs text-hq-ink-soft">
           {run.resolvedPrompt}
         </dd>
+        {/* ⚠ SAYS THAT THE RUN-LEVEL PROMPT IS A DEFAULT. Since the prompt became
+            a per-model choice, an unlabelled run-level block reads as "this is
+            what every cell sent" — which is exactly the claim a compare run with
+            one derived column and one authored column must not make. */}
+        <dd className="text-pretty text-xs text-hq-ink-soft">
+          {COPY.runs.resolvedPromptIsDefault}
+        </dd>
         <dt className="text-xs uppercase tracking-wide text-hq-ink-soft">
           {COPY.runs.slotValues}
         </dt>
@@ -774,6 +781,23 @@ function ImageCard({
           image.costReportedUsd === null ? null : formatUsd(image.costReportedUsd)
         )}
       </p>
+
+      {/* ⚠ THE PROMPT THAT PRODUCED *THIS* IMAGE, beside the verdict buttons that
+          judge it. The reviewer is deciding whether a phrasing worked, so the
+          phrasing has to be one click from the picture — and whether it was
+          derived or the child's own wording is stated, because a derived prompt
+          reads perfectly plausible and would otherwise be indistinguishable. */}
+      <details className="text-xs text-hq-ink-soft">
+        <summary className="min-h-11 cursor-pointer py-3">
+          {COPY.runs.imagePrompt(image.attemptedAtMs !== null)} ·{" "}
+          {image.promptDerived
+            ? COPY.runs.imagePromptDerived
+            : COPY.runs.imagePromptAuthored}
+        </summary>
+        <pre className="mt-1 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-hq-border p-2 text-xs text-hq-ink">
+          {image.resolvedPrompt ?? COPY.runs.imagePromptMissing}
+        </pre>
+      </details>
 
       {/* ⚠ ALWAYS VISIBLE. Not on hover, not behind a menu, not revealed on focus.
           This is the explicit design finding of the unit: the review loop is the

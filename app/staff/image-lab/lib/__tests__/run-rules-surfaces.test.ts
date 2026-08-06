@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { IMAGE_LAB_EVIDENCE_COPY } from "../history-rules";
 import {
   buildGrid,
   canRetryCell,
@@ -57,6 +58,8 @@ const cell = (over: Partial<CellRow> = {}): CellRow => ({
   state: "requested",
   attemptedAtMs: null,
   createdAtMs: 1_000,
+  resolvedPrompt: "A bright panel.",
+  promptDerived: false,
   failureReason: null,
   failureDetail: null,
   storageKey: null,
@@ -467,5 +470,101 @@ describe("the pre-adapter budget is part of the route's arithmetic", () => {
     const slowest = Math.max(...IMAGE_LAB_MODELS.map((entry) => entry.timeoutMs));
     expect(IMAGE_LAB_PRE_ADAPTER_BUDGET_MS).toBeGreaterThan(0);
     expect(slowest + IMAGE_LAB_PRE_ADAPTER_BUDGET_MS).toBeLessThan(IMAGE_LAB_ROUTE_BUDGET_MS);
+  });
+});
+
+/**
+ * ⚠ A SURFACE THAT ASSERTS A VENDOR CALL HAPPENED IS AN EVIDENCE CLAIM.
+ *
+ * `resolved_prompt` is written at COMPOSE time, before dispatch. A gate-refused
+ * cell returns BEFORE the CAS, so it sits at `state='requested'` with
+ * `attempted_at` null, holding the text — and both surfaces labelled it "Prompt
+ * sent", with the child's pitch beneath it, for a call that was never dialled and
+ * never billed. Every freshly composed cell said the same. `attempted_at` is the
+ * only fact that separates the two, so the label reads it.
+ */
+describe("the prompt heading is read from the LIFECYCLE, not asserted", () => {
+  it("says `Prompt to send` until an attempt has actually been made", () => {
+    expect(IMAGE_LAB_RUN_COPY.grid.cellPromptHeading(false)).toBe("Prompt to send");
+    expect(IMAGE_LAB_RUN_COPY.grid.cellPromptHeading(true)).toBe("Prompt sent");
+    // The two must differ — a heading that ignores its argument is the bug.
+    expect(IMAGE_LAB_RUN_COPY.grid.cellPromptHeading(false)).not.toBe(
+      IMAGE_LAB_RUN_COPY.grid.cellPromptHeading(true)
+    );
+  });
+
+  it("History's per-image heading follows the same rule", () => {
+    expect(IMAGE_LAB_EVIDENCE_COPY.runs.imagePrompt(false)).toBe("Prompt to send");
+    expect(IMAGE_LAB_EVIDENCE_COPY.runs.imagePrompt(true)).toBe("Prompt sent");
+  });
+});
+
+/**
+ * ⚠ THE RETRY HINT STATED THE OPPOSITE OF WHAT RETRY DOES.
+ *
+ * `sentHint` read "Stored on the run. Retry re-sends exactly this, not the
+ * template above", rendered beneath the run-level `resolvedPrompt` — which is the
+ * AUTHORED resolution, i.e. the child's own words, present even on a run whose
+ * every OpenAI cell sent derived text. But `retryCell` carries forward the CELL's
+ * prompt. So the surface a human uses to VERIFY THE GATE WORKED displayed the
+ * child's prose labelled as what would be re-sent, on a run composed precisely so
+ * that text would never be dispatched — a false alarm in the direction most
+ * likely to cause a wrong escalation.
+ */
+describe("the run-level prompt is labelled as evidence, not as what retry sends", () => {
+  it("does not claim retry re-sends the run-level text", () => {
+    const hint = IMAGE_LAB_RUN_COPY.composer.preview.sentHint;
+    expect(hint).not.toMatch(/re-sends exactly this/i);
+    // It must point the reader at the per-attempt text instead.
+    expect(hint).toMatch(/each attempt|its card|card below/i);
+  });
+
+  it("the heading no longer asserts the whole run sent it", () => {
+    expect(IMAGE_LAB_RUN_COPY.composer.preview.sentHeading).not.toMatch(/what this run sent/i);
+    expect(IMAGE_LAB_EVIDENCE_COPY.runs.resolvedPrompt).not.toMatch(/what this run sent/i);
+  });
+});
+
+/**
+ * ⚠ THE REFUSAL COPY MUST NOT PRINT THE BYPASS.
+ *
+ * `unverified_slot_source` used to end "…or put the wording straight into the
+ * template instead" — an instruction for the exact door the attestation now
+ * closes: the template was never examined by that refusal, was not scrubbed
+ * without tokens, and left `source_child_id` null so nothing armed. A product
+ * must not point at its own hole.
+ */
+describe("no refusal recommends routing around itself", () => {
+  it("the unverified-slot refusal does not name the template as an escape hatch", () => {
+    const copy = IMAGE_LAB_RUN_COPY.refusals.unverifiedSlotSource;
+    expect(copy).not.toMatch(/straight into the template/i);
+    expect(copy).not.toMatch(/into the template instead/i);
+    // It still has to say what TO do.
+    expect(copy).toMatch(/picker/i);
+  });
+
+  /**
+   * ⚠ THE SLOT HINT MUST TEACH THE RULE, NOT JUST THE PERMISSION. Hand-typed slot
+   * values are allowed again — composing a synthetic test case is core bench work
+   * — but only under the attestation, because a hand-typed slot value and a
+   * replayed child's are the same POST. A hint that offered hand-typing without
+   * naming the requirement would send staff straight into a refusal they could
+   * not explain; one that denied hand-typing altogether would be describing a
+   * capability the bench has.
+   */
+  it("the slot hint offers hand-typing AND names the attestation it needs", () => {
+    const hint = IMAGE_LAB_RUN_COPY.composer.slots.manualHint;
+    expect(hint).toMatch(/by hand/i);
+    expect(hint).toMatch(/no-child-content|box/i);
+  });
+
+  it("the two gate refusals read differently, so History can tell them apart", () => {
+    const text = IMAGE_LAB_RUN_COPY.outcomes.childTextGate;
+    const refs = IMAGE_LAB_RUN_COPY.outcomes.childReferenceGate;
+    expect(refs).not.toBe(text);
+    // The reference copy must talk about references, or staff will go and change
+    // the prompt in response to a refusal about an attached PNG.
+    expect(refs).toMatch(/reference/i);
+    expect(refs).toMatch(/google/i);
   });
 });

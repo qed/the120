@@ -67,6 +67,9 @@ const RUN_COLUMNS =
 const IMAGE_COLUMNS =
   "id, run_id, model_id, cell_ordinal, state, attempted_at, billed, " +
   "failure_reason, failure_detail, storage_key, cost_estimated, cost_reported, " +
+  // Per-cell prompt recording (20260920120000). The prompt is a per-model
+  // choice, so the evidence surfaces read it off the IMAGE, not off the run.
+  "resolved_prompt, prompt_derived, " +
   "verdict, verdict_note, verdict_at, created_at";
 
 const REFERENCE_COLUMNS = "id, label";
@@ -173,6 +176,9 @@ function toImageRow(raw: Record<string, unknown>): HistoryImageRow {
     verdict,
     verdictNote: typeof raw.verdict_note === "string" ? raw.verdict_note : "",
     verdictAtMs: asMsOrNull(raw.verdict_at, "verdict_at", raw.id),
+    resolvedPrompt:
+      typeof raw.resolved_prompt === "string" ? raw.resolved_prompt : null,
+    promptDerived: raw.prompt_derived === true,
   };
 }
 

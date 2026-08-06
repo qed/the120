@@ -209,6 +209,85 @@ describe("createImageLabRun", () => {
     expect(coreSpies.createRun).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⚠ THE PERMISSIVE DEFAULT, PINNED AT THE WIRE BOUNDARY ITSELF.
+   *
+   * `run-core` reads the field with `=== true` and the gate reads the ROW with
+   * `!== false`, and both of those are covered. THIS coercion — the one that
+   * turns a parsed request body into the boolean everything downstream trusts —
+   * was not: flipping `=== true` to `!== false` here left the whole suite green
+   * while a POST that simply OMITS the field became ATTESTED. That is the exact
+   * P0 hole (absent must mean "not attested"), reintroduced one layer above the
+   * place it was closed.
+   *
+   * The field is `.optional()`, so ABSENCE is the ordinary case for any client
+   * that has never heard of the attestation — a stale tab, a replay, a
+   * hand-rolled POST. Absence must be the RESTRICTIVE answer, and the only way
+   * to say so is to assert on the value that actually reaches `createRun`.
+   */
+  it("a compose that OMITS the attestation reaches the core as `false`", async () => {
+    const body = compose();
+    expect(body).not.toHaveProperty("noChildContentAttested");
+
+    await createImageLabRun(body);
+    const passed = coreSpies.createRun.mock.calls[0]![1] as {
+      noChildContentAttested: unknown;
+    };
+    // Not `toBeFalsy()`: `undefined` is falsy and would sail through, and it is
+    // `undefined` reaching the core that the mutation actually produces.
+    expect(passed.noChildContentAttested).toBe(false);
+  });
+
+  it("only a literal `true` is ever forwarded as attested", async () => {
+    // ⚠ A COERCION BUG HERE IS THE DIFFERENCE BETWEEN A GATE AND A DECORATION.
+    // Every value below is something a hand-rolled or stale POST can put on the
+    // wire. `null` and the truthy non-booleans are refused outright by the
+    // schema (`z.boolean().optional()` admits neither), which is stricter still
+    // — so the property is stated as the thing that matters: NOTHING but `true`
+    // can produce an attested run.
+    const hostile: unknown[] = [
+      undefined,
+      null,
+      "false",
+      "true",
+      1,
+      0,
+      {},
+      [],
+      "yes",
+    ];
+
+    for (const value of hostile) {
+      vi.clearAllMocks();
+      requireStaffSpy.mockResolvedValue({ staffId: "staff-from-the-gate" });
+      rateLimitSpy.mockReturnValue({ allowed: true, retryAfterMs: 0 });
+      coreSpies.createRun.mockResolvedValue({
+        ok: true,
+        run: { id: UUID },
+        cells: [],
+        duplicate: false,
+      });
+
+      await createImageLabRun(compose({ noChildContentAttested: value }));
+      const call = coreSpies.createRun.mock.calls[0];
+      const label = `noChildContentAttested=${JSON.stringify(value) ?? "undefined"}`;
+      if (!call) continue; // Refused at the schema — stricter than `false`.
+      expect((call[1] as { noChildContentAttested: unknown }).noChildContentAttested, label).toBe(
+        false
+      );
+    }
+  });
+
+  it("forwards an explicit `true` unchanged — the attestation still works", async () => {
+    // The other half of the property: the restrictive default must not have been
+    // achieved by making the field inert.
+    await createImageLabRun(compose({ noChildContentAttested: true }));
+    const passed = coreSpies.createRun.mock.calls[0]![1] as {
+      noChildContentAttested: unknown;
+    };
+    expect(passed.noChildContentAttested).toBe(true);
+  });
+
   it("has its OWN cooldown, because minting cells is the supply side of the spend", async () => {
     // ⚠ ONLY REDEMPTION WAS THROTTLED. A loop could mint unlimited generatable
     // rows for free and then spend them at whatever rate the other bucket allowed.
@@ -319,6 +398,10 @@ describe("the three picker actions", () => {
       childId: UUID,
       ideaId: "idea:2",
       taskId: "1.1.2",
+      // ⚠ FROM THE GATE, NOT THE BODY. The provenance token this fill mints is
+      // bound to the staff member who minted it, and this action's
+      // `requireStaff()` is the only honest source of that id.
+      staffId: "staff-from-the-gate",
     });
 
     // A value this action accepted but `createRun` then refused would be a dead
@@ -336,6 +419,7 @@ describe("the three picker actions", () => {
       childId: OTHER_UUID,
       ideaId: null,
       taskId: null,
+      staffId: "staff-from-the-gate",
     });
   });
 });

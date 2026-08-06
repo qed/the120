@@ -7,10 +7,17 @@ below (2026-07-29) is out of date and is kept only as history:
 |------|-------------------|---------------------|
 | v3 new-user flow | `120-The120` on `feat/new-user-flow-v3` | through `20260916120000_fp_reserved_handle_auth` |
 | Watchtower | `120-The120-watchtower` on `feat/watchtower` | none yet |
-| Image Lab | `120-The120-image-lab` on `feat/image-lab` | `20260917120000_fp_image_lab` (authored, **not yet applied**) |
+| Image Lab | `120-The120-image-lab` on `feat/image-lab-category-prompts` | `20260919120000_fp_image_lab` (**applied**), `20260920120000_fp_image_lab_cell_prompts` (authored, **not yet applied**) |
 
-**Holder: Image Lab**, for `20260917120000_fp_image_lab.sql` only. Ask Peter
-before a second lane authors while that is outstanding.
+**Holder: Image Lab**, for `20260920120000_fp_image_lab_cell_prompts.sql` only.
+Ask Peter before a second lane authors while that is outstanding.
+
+⚠ `20260920120000` is a PROVISIONAL slot. It was authored from a worktree with
+no database credentials, so **the ledger query below has not been run for it**.
+Whoever applies it must run the query first and rename the file to the real
+next-free `12:00:00` slot if `20260919120000` is not still the top. The
+migration's own header repeats this, and the parity test resolves the file by
+glob so the rename is free.
 
 This section is being restored because the file said the opposite of the
 truth while three lanes ran, and that is exactly the precondition for

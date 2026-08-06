@@ -23,7 +23,7 @@ import { provisionOrRecognizeAccount } from "@/app/lib/funnel/account";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import {
   buildAllowedOrigins,
   checkOrigin,

@@ -42,8 +42,8 @@ import {
   SITE_DOC_VERSION_GATE,
   type SiteContent,
   type SiteProduct,
-} from "@/app/fp/lib/fp-public-site-rules";
-import { buildFpSiteLiveNotice } from "@/app/fp/lib/parent-email/rules";
+} from "@/app/lib/fp/fp-public-site-rules";
+import { buildFpSiteLiveNotice } from "@/app/lib/fp/parent-email/rules";
 import {
   classifyClaimConflict,
   deriveSiteStatus,

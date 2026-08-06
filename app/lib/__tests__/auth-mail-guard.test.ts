@@ -6,7 +6,7 @@ import {
   authMailVerdict,
   unallowlistedStaffAddresses,
 } from "@/app/lib/auth-mail-guard";
-import { isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
+import { isFwStudentAddress } from "@/app/lib/fp/fw-provision-rules";
 import { requestPasswordReset, type ResetDeps } from "@/app/lib/auth/reset-core";
 
 /**

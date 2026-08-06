@@ -51,7 +51,7 @@ const NOW = 1_700_000_000_000;
  *  provisioning carried onto the child. Nothing in this file renders a cover —
  *  that is the point of the Unit 7 rework. The end-to-end tie between what
  *  signup rendered and what this door serves is
- *  app/fp/lib/__tests__/cover-one-render.test.ts. */
+ *  app/lib/fp/__tests__/cover-one-render.test.ts. */
 const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
 
 type Kid = { childId: string; userId: string; firstName: string };
@@ -308,7 +308,7 @@ describe("exchange — the code is the only thing that authorizes", () => {
     // column through the same pure function, so "the same kid sees the same
     // cover whichever way they signed in" is a fact about the shape of the
     // code. app/api/fp/login/__tests__/route.test.ts asserts its 200 against
-    // this identical constant, and app/fp/lib/__tests__/cover-one-render.test.ts
+    // this identical constant, and app/lib/fp/__tests__/cover-one-render.test.ts
     // ties the constant back to what signup actually rendered.
     expect(res.body.coverUrl).toBe(STORED_COVER);
     expect(res.body).toMatchObject(

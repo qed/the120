@@ -21,7 +21,7 @@ import {
   type FaultPlan,
   type Store,
 } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
-import { extractSiteContent } from "@/app/fp/lib/fp-public-site-rules";
+import { extractSiteContent } from "@/app/lib/fp/fp-public-site-rules";
 import {
   CHILD_LEAF_DELETE_ORDER,
 } from "@/app/lib/funnel/erase-family-rules";
@@ -83,7 +83,7 @@ function makeDeps(
       sent.push(input);
       return { ok: true };
     },
-    manageUrl: "https://the120.school/fp/family",
+    manageUrl: "https://the120.school/dashboard",
   };
   return { deps, sent };
 }

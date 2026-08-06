@@ -47,7 +47,7 @@ import {
   deriveCategoryPrompt,
   isCategoryDerivedPrompt,
 } from "./category-prompt-rules";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import type { RateLimitConfig } from "@/app/lib/fp/rate-limit-rules";
 
 // ── Bounds ───────────────────────────────────────────────────────────────────
 

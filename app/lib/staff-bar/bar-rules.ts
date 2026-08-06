@@ -12,7 +12,7 @@
  * TAILWIND V4 IS NOT SCOPABLE. The CRM's `crm-*` tokens and First Profit's `hq-*`
  * tokens share one utility namespace, so a component serving both does a class-name
  * swap keyed on a narrowed literal — see `staffBarSkin`. `skinClass()` in
- * `app/fp/lib/skin-tokens.ts` is the pattern; it has no `crm` namespace, so this is a
+ * `app/lib/fp/skin-tokens.ts` is the pattern; it has no `crm` namespace, so this is a
  * sibling literal table rather than a call into it.
  *
  * NOTHING HERE IS ROLE-DERIVED SERVER-SIDE. `/fp/fw` navigations are cached into
@@ -23,7 +23,7 @@
  * through the functions below.
  */
 
-import type { FwDeviceQueueState } from "@/app/fp/lib/fw-sync-rules";
+import type { FwDeviceQueueState } from "@/app/lib/fp/fw-sync-rules";
 
 /** The guarded staff applications the bar serves. `/fp` (the family app) and the
  *  projected board are deliberately absent — R18's three exclusions. */

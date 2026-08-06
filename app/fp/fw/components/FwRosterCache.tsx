@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { cacheFwRoster } from "@/app/fp/lib/fw-sync-client";
-import type { FwCachedRosterStudent } from "@/app/fp/lib/fw-sync-rules";
+import { cacheFwRoster } from "@/app/lib/fp/fw-sync-client";
+import type { FwCachedRosterStudent } from "@/app/lib/fp/fw-sync-rules";
 
 /**
  * Seeds the offline roster cache (FW Unit 8; Decision 15) from the server-rendered

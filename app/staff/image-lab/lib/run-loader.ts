@@ -43,7 +43,7 @@ import {
   type CellRow,
   type SlotValues,
 } from "./run-rules";
-import { withFwTimeout } from "@/app/fp/lib/fw-call";
+import { withFwTimeout } from "@/app/lib/fp/fw-call";
 import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
 import { CHILD_SCRUB_COLUMNS } from "./content-picker-loader";
 import { errorName } from "./run-core";

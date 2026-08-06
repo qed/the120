@@ -1,7 +1,7 @@
 "use client";
 
-import { Icon } from "@/app/fp/components/system/Icon";
-import type { FwQueueSummary } from "@/app/fp/lib/fw-sync-rules";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import type { FwQueueSummary } from "@/app/lib/fp/fw-sync-rules";
 
 /**
  * The offline capture indicator (FW Unit 8; Decision 14) — a fixed corner chip that

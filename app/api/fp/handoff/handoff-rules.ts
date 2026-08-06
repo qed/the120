@@ -36,7 +36,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { FP_SIGN_IN_REFUSAL_BODY } from "@/app/api/fp/login/login-rules";
-import { V3_HANDOFF_NAMESPACE } from "@/app/fp/lib/rate-limit-rules";
+import { V3_HANDOFF_NAMESPACE } from "@/app/lib/fp/rate-limit-rules";
 
 /* ------------------------------------------------------- the code + its TTL */
 

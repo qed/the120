@@ -26,7 +26,7 @@
  * what had been done so far surfaced by the caller.
  */
 
-import { mintUsername } from "@/app/fp/lib/fp-username-rules";
+import { mintUsername } from "@/app/lib/fp/fp-username-rules";
 
 /** One child that still needs a username. */
 export type MissingChild = { id: string; firstName: string };

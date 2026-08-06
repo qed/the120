@@ -34,7 +34,7 @@ import { notifyOps } from "@/app/lib/ops-alert";
 
 import { headers, cookies } from "next/headers";
 import { z } from "zod";
-import { clientIp } from "@/app/fp/lib/client-ip";
+import { clientIp } from "@/app/lib/fp/client-ip";
 import { matchOrCreateLead } from "@/app/crm/lib/lead-ingest";
 import type { MatchOrCreateInput } from "@/app/crm/lib/families-rules";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";

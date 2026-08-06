@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
+import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
 import {
   buildChildPassword,
   candidateWords,

@@ -24,7 +24,7 @@ import { startSignup, verifyCompletion } from "../signup-core";
 import { recordConsent } from "../consent-core";
 import { createChild } from "../child-core";
 import { FP_CONSENT_POLICY, currentPolicyHash } from "../consent-rules";
-import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
+import { deriveStudentEmail } from "@/app/lib/fp/provision-rules";
 import { makeHarness } from "./helpers/signup-harness";
 
 const start = {

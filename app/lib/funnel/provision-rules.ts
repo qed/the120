@@ -17,7 +17,7 @@ import {
   buildFwLocalBase,
   buildFwLocalBaseFromFirstName,
   isFwStudentAddress,
-} from "@/app/fp/lib/fw-provision-rules";
+} from "@/app/lib/fp/fw-provision-rules";
 import { STAFF_AUTH_MAIL_ALLOWLIST, STUDENT_MAIL_DOMAIN } from "@/app/lib/auth-mail-guard";
 import {
   CONSENT_MIN_POLICY_VERSION,

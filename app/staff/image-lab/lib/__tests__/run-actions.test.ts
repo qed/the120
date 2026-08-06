@@ -41,7 +41,7 @@ const { requireStaffSpy, rateLimitSpy, runDeps, coreSpies, loaderSpies, pickerSp
   }));
 
 vi.mock("@/app/crm/lib/auth", () => ({ requireStaff: requireStaffSpy }));
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: rateLimitSpy,
 }));
 vi.mock("../image-lab-db", () => ({ imageLabDb: () => ({ marker: "service-role-handle" }) }));

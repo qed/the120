@@ -1,4 +1,4 @@
-import { fwEventLocalParts, fwEventTimeZoneShort } from "@/app/fp/lib/fw-ops-rules";
+import { fwEventLocalParts, fwEventTimeZoneShort } from "@/app/lib/fp/fw-ops-rules";
 
 /**
  * A cohort's event window, rendered on the EVENT'S OWN CLOCK (FW Unit 5,

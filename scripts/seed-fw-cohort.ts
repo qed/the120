@@ -44,10 +44,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { loadSupabaseEnv } from "./load-env";
-import type { Band } from "../app/fp/content/types";
-import { loadFwMatchCandidates } from "../app/fp/lib/fw-loader";
-import { fwMatchKey, matchFwStudent } from "../app/fp/lib/fw-match-rules";
-import { runFwQuickCreate } from "../app/fp/lib/fw-student-core";
+import type { Band } from "../app/lib/fp/content/types";
+import { loadFwMatchCandidates } from "../app/lib/fp/fw-loader";
+import { fwMatchKey, matchFwStudent } from "../app/lib/fp/fw-match-rules";
+import { runFwQuickCreate } from "../app/lib/fp/fw-student-core";
 
 type SeedStudent = { firstName: string; lastName: string; band: Band };
 

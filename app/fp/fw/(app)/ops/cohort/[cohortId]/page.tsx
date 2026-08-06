@@ -12,23 +12,23 @@ import FwStudentRoster from "@/app/fp/fw/components/FwStudentRoster";
 import FwArchiveControl from "@/app/fp/fw/components/FwArchiveControl";
 import FwWindowEdit from "@/app/fp/fw/components/FwWindowEdit";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
-import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
-import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { listFwImportExceptions } from "@/app/fp/lib/fw-import-core";
-import { withFwTimeout } from "@/app/fp/lib/fw-call";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
+import { isFwStaffActor } from "@/app/lib/fp/fw-access-rules";
+import { resolveFwActorForCohort } from "@/app/lib/fp/fw-auth";
+import { listFwImportExceptions } from "@/app/lib/fp/fw-import-core";
+import { withFwTimeout } from "@/app/lib/fp/fw-call";
+import { FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
 import {
   fwArchivedBanner,
   fwOpsCohortAffordances,
   fwOpsSectionChips,
-} from "@/app/fp/lib/fw-ops-rules";
+} from "@/app/lib/fp/fw-ops-rules";
 import {
   listFwCohortGuides,
   listFwOpsStudents,
   listFwReplayRejects,
   loadFwOpsBoardToken,
   loadFwOpsCohort,
-} from "@/app/fp/lib/fw-ops-core";
+} from "@/app/lib/fp/fw-ops-core";
 
 /**
  * /fp/fw/ops/cohort/[cohortId] — one weekend's ops (FW Unit 5).

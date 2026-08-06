@@ -19,7 +19,7 @@
  *     the R20 record). The routes run that gate; this module shapes verdicts.
  *   - Handle validity / reserved / blocklist decisions live SERVER-SIDE here
  *     (the echo-the-server learning); the canonical primitives come from
- *     app/fp/lib/fp-public-site-rules.ts so the migration parity suite pins
+ *     app/lib/fp/fp-public-site-rules.ts so the migration parity suite pins
  *     them once.
  *   - FEATURE GATE mirrors the signup launch gate (signup-rules.ts
  *     launchGateVerdict): fail-closed test-only default (unset = gated), with
@@ -30,17 +30,17 @@
  */
 
 import { z } from "zod";
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
 import {
   encodeRateLimitSegment,
   type RateLimitConfig,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 import {
   containsBlockedTerm,
   isReservedHandle,
   isValidHandle,
   normalizeHandle,
-} from "@/app/fp/lib/fp-public-site-rules";
+} from "@/app/lib/fp/fp-public-site-rules";
 
 /* ----------------------------------------------------------- request parse */
 
@@ -119,7 +119,7 @@ export {
   deriveSiteStatus,
   type SiteRowFlags,
   type SiteStatus,
-} from "@/app/fp/lib/fp-public-site-rules";
+} from "@/app/lib/fp/fp-public-site-rules";
 
 /* ---------------------------------------------------------- handle verdict */
 

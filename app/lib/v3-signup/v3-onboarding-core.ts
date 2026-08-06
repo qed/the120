@@ -56,7 +56,7 @@ import {
   planRedrawCarry,
   type CoverStatus,
   isCoverStatus,
-} from "@/app/fp/lib/cover-store-rules";
+} from "@/app/lib/fp/cover-store-rules";
 import { buildChildPassword } from "./credentials-rules";
 import {
   ageBandForAge,

@@ -13,6 +13,7 @@ import {
   currentPolicyHash,
   FP_CONSENT_POLICY,
 } from "@/app/api/fp/signup/consent-rules";
+import { loadParentSitesForRequest } from "@/app/lib/fp/fp-site-parent-core";
 
 export const metadata: Metadata = {
   title: "Your dashboard — The 120",
@@ -47,10 +48,17 @@ export default async function DashboardPage({
   const register = dashboardRegister(facts.children);
 
   const seatsRemaining = await getSeatsRemaining();
+  // The children's PUBLIC PAGES (R21/R22): loaded server-side, scoped entirely
+  // by the session's parent id — the loader takes no child id at all. `null`
+  // means "we could not load them", and the dashboard then offers no
+  // take-offline control this page load rather than guessing a state (the same
+  // honest degrade as `photoConsentChildIds`).
+  const fpSites = await loadParentSitesForRequest();
   return (
     <DashboardProvider>
       <DashboardApp
         seatsRemaining={seatsRemaining}
+        fpSites={fpSites}
         register={register}
         verifiedTaskCounts={facts.verifiedTaskCounts}
         photoConsentChildIds={facts.photoConsentChildIds}

@@ -47,7 +47,7 @@ vi.mock("@/app/lib/supabase/admin", () => ({
   }),
 }));
 
-vi.mock("@/app/fp/lib/fw-guide-core", () => ({
+vi.mock("@/app/lib/fp/fw-guide-core", () => ({
   loadStaffRowActive: () => staffRowActive(),
 }));
 

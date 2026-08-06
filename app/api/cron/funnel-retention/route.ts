@@ -7,7 +7,7 @@ import {
   type RetentionCandidate,
 } from "@/app/lib/funnel/retention-rules";
 import { unallowlistedStaffAddresses } from "@/app/lib/auth-mail-guard";
-import { isFwStudentAddress } from "@/app/fp/lib/fw-provision-rules";
+import { isFwStudentAddress } from "@/app/lib/fp/fw-provision-rules";
 import {
   sweepOverdueForwarding,
   sweepStaleProvisioningClaims,

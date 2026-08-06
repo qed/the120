@@ -17,7 +17,7 @@
  * enforcement layer that only agrees with a single TS source of truth.
  *
  * The plain-vs-TUS boundary, and the already-exists→success interpretation of
- * an upload response, come from `@/app/fp/lib/upload-rules` — the shipped,
+ * an upload response, come from `@/app/lib/fp/upload-rules` — the shipped,
  * production-confirmed direct-to-storage rules. Reference uploads take exactly
  * the same two legs against exactly the same Storage API, so a Lab-local copy
  * would be a fork of a rule this repo has already paid to get right twice (the
@@ -46,7 +46,7 @@ import {
   type ImageLabMimeType,
 } from "./image-lab-rules";
 import { IMAGE_LAB_MODELS } from "./model-registry";
-import { chooseUploadStrategy, type UploadStrategy } from "@/app/fp/lib/upload-rules";
+import { chooseUploadStrategy, type UploadStrategy } from "@/app/lib/fp/upload-rules";
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
 

@@ -54,8 +54,8 @@ import { fileURLToPath } from "node:url";
 
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
-import { deriveStudentEmail, validateStudentPassword } from "@/app/fp/lib/provision-rules";
-import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
+import { deriveStudentEmail, validateStudentPassword } from "@/app/lib/fp/provision-rules";
+import { ensurePathFamilyForParent } from "@/app/lib/fp/provision-core";
 import { ensurePlayerProfile } from "@/app/api/fp/login/profile-core";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 import { loadSupabaseEnv } from "./load-env";

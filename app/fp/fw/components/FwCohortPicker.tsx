@@ -2,14 +2,14 @@
 
 import { useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import {
   parseFwActiveCohort,
   readFwPref,
   serverFwPref,
   subscribeFwPrefs,
   FW_ACTIVE_COHORT_KEY,
-} from "@/app/fp/lib/fw-device";
+} from "@/app/lib/fp/fw-device";
 
 /**
  * The cohort switcher's pick screen (FW Unit 4, Decision 3).

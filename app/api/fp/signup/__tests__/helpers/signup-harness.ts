@@ -19,7 +19,7 @@
  *     (createUser/deleteUser/getUser/signIn) and the Resend mailer.
  */
 
-import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
+import { deriveStudentEmail } from "@/app/lib/fp/provision-rules";
 import type { SignupCoreDeps } from "../../signup-core";
 import type { CreateChildDeps } from "../../child-core";
 import type { V3SignupDeps } from "@/app/lib/v3-signup/v3-signup-core";

@@ -23,8 +23,8 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { archiveCohortAction, unarchiveCohortAction } from "@/app/fp/lib/actions/fw-ops";
-import { fwArchiveConfirmMatches } from "@/app/fp/lib/fw-ops-rules";
+import { archiveCohortAction, unarchiveCohortAction } from "@/app/lib/fp/actions/fw-ops";
+import { fwArchiveConfirmMatches } from "@/app/lib/fp/fw-ops-rules";
 
 export default function FwArchiveControl({
   cohortId,

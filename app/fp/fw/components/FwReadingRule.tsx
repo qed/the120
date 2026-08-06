@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import {
   readFwPref,
   serverFwPref,
@@ -10,7 +10,7 @@ import {
   FW_PREF_UNKNOWN,
   FW_READING_RULE,
   FW_READING_RULE_DISMISSED_KEY,
-} from "@/app/fp/lib/fw-device";
+} from "@/app/lib/fp/fw-device";
 
 /**
  * The FW reading rule banner (FW-R15, Decision 14).

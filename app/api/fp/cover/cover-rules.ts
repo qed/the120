@@ -7,7 +7,7 @@
  *
  * ── WHAT THIS UNIT ACTUALLY SHIPS (owner-approved scope) ──
  * TEMPLATE PATH ONLY, no new dependencies. The name-personalized cover is the
- * DETERMINISTIC server-rendered SVG in app/fp/lib/cover-template.ts, derived
+ * DETERMINISTIC server-rendered SVG in app/lib/fp/cover-template.ts, derived
  * from data we already store. Consequences, stated here because they are
  * decisions and not accidents:
  *
@@ -24,7 +24,7 @@
  */
 
 import { z } from "zod";
-import { V3_COVER_NAMESPACE } from "@/app/fp/lib/rate-limit-rules";
+import { V3_COVER_NAMESPACE } from "@/app/lib/fp/rate-limit-rules";
 
 /* ------------------------------------------------------------ the cap */
 

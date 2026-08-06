@@ -7,7 +7,7 @@ import {
   FP_SIGN_IN_REFUSAL_BODY,
   shapeRefusal as shapeLoginRefusal,
 } from "@/app/api/fp/login/login-rules";
-import { V3_HANDOFF_NAMESPACE } from "@/app/fp/lib/rate-limit-rules";
+import { V3_HANDOFF_NAMESPACE } from "@/app/lib/fp/rate-limit-rules";
 import {
   buildHandoffDestination,
   classifyReplay,

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { importFwStudentsChunk } from "@/app/fp/lib/actions/fw-import";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { importFwStudentsChunk } from "@/app/lib/fp/actions/fw-import";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
   FW_IMPORT_PARSE_ERROR_COPY,
@@ -12,9 +12,9 @@ import {
   planFwImportChunks,
   type FwImportParseResult,
   type FwImportRejectReason,
-} from "@/app/fp/lib/fw-import-rules";
-import type { FwImportOutcome, FwImportOutcomeKind } from "@/app/fp/lib/fw-import-core";
-import { FW_BAND_LABEL } from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-import-rules";
+import type { FwImportOutcome, FwImportOutcomeKind } from "@/app/lib/fp/fw-import-core";
+import { FW_BAND_LABEL } from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The staff CSV importer (FW Unit 7; FW-R12, Decision 11, gaps G7/G19) — Boston's

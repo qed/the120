@@ -19,7 +19,7 @@ import {
   type StaffBarQueueState,
 } from "../bar-rules";
 import * as barRules from "../bar-rules";
-import { fwSignOutRefusalCopy } from "@/app/fp/lib/fw-sync-rules";
+import { fwSignOutRefusalCopy } from "@/app/lib/fp/fw-sync-rules";
 
 /**
  * Every decision the persistent staff bar takes (Staff Front Door Unit 3; R5, R15,

@@ -12,6 +12,7 @@ import { canReserveSeat, hasPaidDeposit, statusIndex, type SeatStatus } from "@/
 import type { ReviewStatus } from "@/app/crm/lib/constants";
 import { escapeHtml } from "@/app/crm/lib/library-rules";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SITE_URL } from "@/app/lib/site";
+import { V2_DEEP_ROUTE_TARGET } from "@/app/lib/v3-signup/v2-deep-routes";
 
 /* ---------------------------------------------------------------- template */
 
@@ -41,9 +42,14 @@ export function offerEmailTemplate(opts: {
 }): OfferEmailContent {
   const child = opts.childFirstName.trim() || "your child";
   const parent = opts.parentName.trim() || "there";
-  // R50 (funnel U14): the offer email is Next Steps' front door — the
-  // three swipes end at the dashboard's deposit CTA.
-  const link = `${SITE_URL}/start/next-steps`;
+  // R50 (funnel U14) put the offer email at `/start/next-steps` — the three
+  // Next Steps swipes ending at the dashboard's deposit CTA. v3 plan Unit 9
+  // archived that flow and left `/start/next-steps` a bare redirect to the
+  // dashboard, so this mail was naming a URL that only bounces. It now names
+  // the destination directly: same landing, one hop fewer, and the sentence a
+  // parent reads is true. Read FROM the retirement table so a future dashboard
+  // move takes this with it rather than leaving a second stale literal.
+  const link = `${SITE_URL}${V2_DEEP_ROUTE_TARGET}`;
 
   const subject = `${headerSafe(child)} has been offered a seat at The 120`;
 
@@ -63,7 +69,7 @@ export function offerEmailTemplate(opts: {
     `<p style="${P_STYLE}">Great news: <strong>${c}</strong> has been offered a seat in The 120&#39;s founding cohort.</p>` +
     `<p style="${P_STYLE}">The next step is yours. Sign in to your dashboard and reserve ${c}&#39;s seat ` +
     `with the $250 deposit — fully refundable until ${DEPOSIT_REFUND_DEADLINE_LABEL}.</p>` +
-    `<p style="${P_STYLE}"><a href="${link}" style="color:#0300ED">See the next steps at ${SITE_URL.replace("https://", "")}/start/next-steps</a></p>` +
+    `<p style="${P_STYLE}"><a href="${link}" style="color:#0300ED">See the next steps at ${SITE_URL.replace("https://", "")}${V2_DEEP_ROUTE_TARGET}</a></p>` +
     `<p style="${P_STYLE}">Questions? Just reply to this email.</p>` +
     `<p style="${P_STYLE}">— The 120 Admissions</p>`;
 

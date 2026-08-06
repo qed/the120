@@ -38,7 +38,7 @@ vi.mock("@/app/lib/supabase/parent-token", () => ({
   supabaseParentToken: () => ({ auth: { getUser: () => tokenRef.getUser() } }),
 }));
 
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: () => ({ allowed: rateRef.allowed }),
   releaseRateLimitEvent: (key: string) => rateRef.released.push(key),
 }));

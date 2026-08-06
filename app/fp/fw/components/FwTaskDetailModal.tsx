@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef } from "react";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { useFocusTrap } from "@/app/fp/components/useFocusTrap";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { useFocusTrap } from "@/app/fp/fw/components/useFocusTrap";
 
 /**
  * What an (i) button reveals about a task — exactly the detail the retired task

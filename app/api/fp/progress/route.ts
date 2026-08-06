@@ -107,8 +107,8 @@ import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
-import { withFwTimeout } from "@/app/fp/lib/fw-call";
+} from "@/app/lib/fp/rate-limit-store";
+import { withFwTimeout } from "@/app/lib/fp/fw-call";
 import {
   buildAllowedOrigins,
   checkOrigin,

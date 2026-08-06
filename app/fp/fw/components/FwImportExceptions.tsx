@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { resolveImportExceptionAction } from "@/app/fp/lib/actions/fw-import";
-import type { FwOpsImportException } from "@/app/fp/lib/fw-import-core";
-import { FW_BAND_LABEL } from "@/app/fp/lib/fw-nav-rules";
-import { narrowFwBand } from "@/app/fp/lib/fw-provision-rules";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { resolveImportExceptionAction } from "@/app/lib/fp/actions/fw-import";
+import type { FwOpsImportException } from "@/app/lib/fp/fw-import-core";
+import { FW_BAND_LABEL } from "@/app/lib/fp/fw-nav-rules";
+import { narrowFwBand } from "@/app/lib/fp/fw-provision-rules";
 
 /** Copy per machine reason (the migration's own comment: "the ops surface renders
  *  copy"). One reason today; the fallback keeps an unmapped future reason visible

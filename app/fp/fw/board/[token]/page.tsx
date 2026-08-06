@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { loadFwBoardShell, resolveFwBoardToken } from "@/app/fp/lib/fw-board-loader";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
+import { loadFwBoardShell, resolveFwBoardToken } from "@/app/lib/fp/fw-board-loader";
+import { FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
 import FwBoard from "@/app/fp/fw/components/board/FwBoard";
 
 /**

@@ -84,7 +84,7 @@ import {
   V3_START_IP_NAMESPACE,
   V3_VERIFY_NAMESPACE,
   V3_VERIFY_IP_NAMESPACE,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 
 /* ------------------------------------------- no go-live lever (owner decision)
  *
@@ -248,7 +248,7 @@ export function deriveV3StartRateLimitKeys(
  *
  * VOLUMETRIC ONLY — the guess cap that actually stops a brute force is
  * `code_guess_count` on the attempt row, because this store is per-instance and
- * empty on cold start (app/fp/lib/rate-limit-store.ts' own header).
+ * empty on cold start (app/lib/fp/rate-limit-store.ts' own header).
  */
 export function deriveV3VerifyRateLimitKeys(
   ip: string,

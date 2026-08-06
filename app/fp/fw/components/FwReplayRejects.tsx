@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { resolveReplayRejectAction } from "@/app/fp/lib/actions/fw-ops";
-import type { FwOpsReplayReject } from "@/app/fp/lib/fw-ops-core";
-import { fwReplayRejectReasonCopy } from "@/app/fp/lib/fw-ops-rules";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { resolveReplayRejectAction } from "@/app/lib/fp/actions/fw-ops";
+import type { FwOpsReplayReject } from "@/app/lib/fp/fw-ops-core";
+import { fwReplayRejectReasonCopy } from "@/app/lib/fp/fw-ops-rules";
 
 /**
  * The offline-replay reject list (FW Unit 5b; Decision 9, gap G11).

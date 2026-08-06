@@ -11,7 +11,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { loadSupabaseEnv } from "./load-env";
 import { loadRoster } from "./fp-cohort-roster";
-import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
+import { deriveStudentEmail } from "@/app/lib/fp/provision-rules";
 
 /**
  * Parent address -> expected child usernames, derived from the LOCAL roster

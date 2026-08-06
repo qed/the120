@@ -3,14 +3,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwCohortPicker from "@/app/fp/fw/components/FwCohortPicker";
-import { grantedCohortIds, requireFwSession } from "@/app/fp/lib/fw-auth";
-import { listFwCohortsForActor, loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
+import { grantedCohortIds, requireFwSession } from "@/app/lib/fp/fw-auth";
+import { listFwCohortsForActor, loadStaffRowActive } from "@/app/lib/fp/fw-guide-core";
 import {
   FW_BRAND_SUFFIX,
   fwPickerHeadline,
   fwPickerRedirectsToSingleCohort,
   fwPickerZeroState,
-} from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * /fp/fw — the cohort switcher (FW Unit 4, Decision 3).

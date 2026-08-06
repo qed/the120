@@ -57,7 +57,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Upload } from "tus-js-client";
-import { uploadWithSlot } from "@/app/fp/lib/upload-client";
+import { uploadWithSlot } from "@/app/lib/fp/upload-client";
 import {
   listReferenceLibrary,
   mintReferenceUploadSlot,

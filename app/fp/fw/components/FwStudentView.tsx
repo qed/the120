@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import FwInlineDecision from "./FwInlineDecision";
 import FwPhaseNav from "./FwPhaseNav";
 import FwQuickCreate from "./FwQuickCreate";
@@ -12,14 +12,14 @@ import FwStudentSidebar from "./FwStudentSidebar";
 import FwTaskTree from "./FwTaskTree";
 import { FwOfflineRoster } from "./FwOfflineRoster";
 import type { FwTaskDetail } from "./FwTaskDetailModal";
-import type { PhaseKey } from "@/app/fp/content/types";
-import type { FwRosterEntry } from "@/app/fp/lib/fw-loader";
+import type { PhaseKey } from "@/app/lib/fp/content/types";
+import type { FwRosterEntry } from "@/app/lib/fp/fw-loader";
 import {
   fwPhaseSlug,
   FW_BAND_LABEL,
   type FwResume,
   type FwTreePhase,
-} from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-nav-rules";
 import {
   createFwClientIdLedger,
   foldFwSurfaceOutcome,
@@ -27,10 +27,10 @@ import {
   type FwClientIdLedger,
   type FwStudentResult,
   type FwSurfaceOutcome,
-} from "@/app/fp/lib/fw-rules";
-import { readPendingFwOpsForStudent, subscribeFwQueue } from "@/app/fp/lib/fw-sync-client";
-import type { FwQueueEntry } from "@/app/fp/lib/fw-sync-rules";
-import type { Band } from "@/app/fp/content/types";
+} from "@/app/lib/fp/fw-rules";
+import { readPendingFwOpsForStudent, subscribeFwQueue } from "@/app/lib/fp/fw-sync-client";
+import type { FwQueueEntry } from "@/app/lib/fp/fw-sync-rules";
+import type { Band } from "@/app/lib/fp/content/types";
 
 /** Stable empty list so an untouched row's `pendingOps` prop is referentially
  *  constant across re-renders. */

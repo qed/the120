@@ -1,7 +1,7 @@
 "use client";
 
-import type { PhaseKey } from "@/app/fp/content/types";
-import { fwPhaseLabel, fwPhaseSlug } from "@/app/fp/lib/fw-nav-rules";
+import type { PhaseKey } from "@/app/lib/fp/content/types";
+import { fwPhaseLabel, fwPhaseSlug } from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The phase nav (ops-guide redesign Unit 8; R19, R23) — the SECOND left nav of

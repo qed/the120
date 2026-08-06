@@ -5,9 +5,9 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwOpsCreatePanel from "@/app/fp/fw/components/FwOpsCreatePanel";
 import FwOpsRowMenu from "@/app/fp/fw/components/FwOpsRowMenu";
 import FwWindowLabel from "@/app/fp/fw/components/FwWindowLabel";
-import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
-import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/fp/lib/fw-ops-core";
+import { resolveFwStaffGate } from "@/app/lib/fp/fw-auth";
+import { FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
+import { listFwOpsCohorts, type FwBoardTokenStatus } from "@/app/lib/fp/fw-ops-core";
 
 /**
  * /fp/fw/ops — every Founders Weekend, and the way a new one is made

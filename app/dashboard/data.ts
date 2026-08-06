@@ -11,7 +11,7 @@ import {
 import { childNextRoute, childNextScreen, isFpChild } from "@/app/lib/funnel/session-rules";
 import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
 import { v3RemapRoute, type RemapContext } from "@/app/lib/v3-signup/remap-rules";
-import { MANIFEST_2026_27 } from "@/app/fp/content/manifest";
+import { MANIFEST_2026_27 } from "@/app/lib/fp/content/manifest";
 
 /**
  * Every value `children.status` can actually hold — which since W7

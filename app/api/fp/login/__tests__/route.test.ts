@@ -54,7 +54,7 @@ vi.mock("@/app/api/fp/login/profile-core", () => ({
   ensurePlayerProfile: (...args: unknown[]) => ensureRef.fn(...args),
 }));
 
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: () => ({ allowed: rateRef.allowed }),
   clearRateLimitBucket: (key: string) => rateRef.cleared.push(key),
   releaseRateLimitEvent: (key: string) => rateRef.released.push(key),
@@ -67,7 +67,7 @@ const INTERNAL_EMAIL = `s-${CHILD_ID.toLowerCase()}@students.the120.invalid`;
 
 /** Stands in for the ONE artifact `POST /api/fp/cover` rendered at signup and
  *  provisioning carried onto the child. This file renders nothing; the tie back
- *  to the real render is app/fp/lib/__tests__/cover-one-render.test.ts. */
+ *  to the real render is app/lib/fp/__tests__/cover-one-render.test.ts. */
 const STORED_COVER = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
 
 /** Seed one provisioned FP student whose child row carries a lowercase username

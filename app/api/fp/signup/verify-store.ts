@@ -234,7 +234,7 @@ export const VERIFICATION_CODE_TTL_MS = 10 * 60_000;
  * number of guesses to hit one is ~500,000 and a cap of 6 leaves an attacker a
  * 6-in-a-million chance per attempt row — while a family who mistypes has five
  * corrections. The cap lives on the ROW rather than in the in-memory rate
- * limiter (app/fp/lib/rate-limit-store.ts) because that store is per-instance
+ * limiter (app/lib/fp/rate-limit-store.ts) because that store is per-instance
  * and empty on cold start: it is a volumetric backstop and CANNOT be the
  * security control here.
  *

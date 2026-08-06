@@ -30,12 +30,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { FW_CALL_TIMEOUT_MS, fwWrite, withFwTimeout } from "@/app/fp/lib/fw-call";
-import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/fp/lib/fw-auth";
-import { loadStaffRowActive } from "@/app/fp/lib/fw-guide-core";
-import type { FwResidueBeacon } from "@/app/fp/lib/fw-sync-rules";
-import { FW_RESIDUE_REPORT_RATE_LIMIT } from "@/app/fp/lib/rate-limit-rules";
-import { checkAndRecordRateLimit } from "@/app/fp/lib/rate-limit-store";
+import { FW_CALL_TIMEOUT_MS, fwWrite, withFwTimeout } from "@/app/lib/fp/fw-call";
+import { grantedCohortIds, loadFwSessionRead, type FwSession } from "@/app/lib/fp/fw-auth";
+import { loadStaffRowActive } from "@/app/lib/fp/fw-guide-core";
+import type { FwResidueBeacon } from "@/app/lib/fp/fw-sync-rules";
+import { FW_RESIDUE_REPORT_RATE_LIMIT } from "@/app/lib/fp/rate-limit-rules";
+import { checkAndRecordRateLimit } from "@/app/lib/fp/rate-limit-store";
 import {
   narrowStaffBarApplication,
   staffBarSignOutDestination,

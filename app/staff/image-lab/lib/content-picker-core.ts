@@ -44,7 +44,7 @@
  * R12a). It is not fetched, so it cannot leak.
  */
 
-import { SITE_DOC_VERSION_GATE } from "@/app/fp/lib/fp-public-site-rules";
+import { SITE_DOC_VERSION_GATE } from "@/app/lib/fp/fp-public-site-rules";
 import { isRealFamily } from "@/app/crm/lib/test-family-filter";
 import {
   IMAGE_LAB_SLOTS,

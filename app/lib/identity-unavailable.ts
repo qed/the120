@@ -2,7 +2,7 @@
  * The THIRD answer an identity gate can give (Staff Front Door Unit 5, B4+B5).
  *
  * PLAIN module — no next/supabase/react imports — so both server gates
- * (`loadFwSessionRead` in `app/fp/lib/fw-auth.ts`, `requireStaff` in
+ * (`loadFwSessionRead` in `app/lib/fp/fw-auth.ts`, `requireStaff` in
  * `app/crm/lib/auth.ts`) and the node-only tests can share one definition.
  *
  * ── Why a third answer exists at all

@@ -2,7 +2,7 @@
  * First Profit player-profile ensure (Slice A Unit 2) — the shared core the
  * login route calls on every successful child auth, and the module Slice B's
  * signup route will import as a second caller. House core-module pattern
- * (documented atop app/fp/lib/actions/provision.ts): plain module, NO
+ * (documented atop app/lib/fp/actions/provision.ts): plain module, NO
  * "use server" (its exports would become public Server Actions), NO
  * `server-only` (the shape stays testable); callers hand in the service-role
  * client.

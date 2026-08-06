@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { linkStudentAction, lookupMatchAction } from "@/app/fp/lib/actions/fw-ops";
-import type { FwMatchResolutionEntry } from "@/app/fp/lib/fw-ops-core";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { linkStudentAction, lookupMatchAction } from "@/app/lib/fp/actions/fw-ops";
+import type { FwMatchResolutionEntry } from "@/app/lib/fp/fw-ops-core";
 
 /**
  * Staff cross-cohort match resolution (FW Unit 5b; PROPOSED-1, accepted).

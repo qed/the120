@@ -16,6 +16,7 @@ import {
 import { offerEmailTemplate, offerButtonState } from "@/app/crm/lib/offer-rules";
 import { canReserveSeatForChild } from "@/app/dashboard/data";
 import { SITE_URL } from "@/app/lib/site";
+import { V2_DEEP_ROUTE_TARGET } from "@/app/lib/v3-signup/v2-deep-routes";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (p: string) => readFileSync(path.resolve(REPO_ROOT, p), "utf8");
@@ -307,10 +308,16 @@ describe("the deposit gate (direct reserve 2026-08-02) vs the STAFF offer gate (
 });
 
 describe("the three renderings carry the same deposit target", () => {
-  it("text and html both point at ${SITE_URL}/start/next-steps (R50: the offer email is Next Steps' front door)", () => {
+  it("text and html both point at the LIVE destination, never the retired /start/next-steps", () => {
+    // R50 put this mail at `/start/next-steps`. v3 Unit 9 archived that flow
+    // and left the URL a bare redirect; Unit 10 did the copy pass, so the mail
+    // now names where the family actually lands — read from the same retirement
+    // table the redirect stubs read, so the two can never disagree.
     const t = offerEmailTemplate({ childFirstName: "Maya", parentName: "Sam" });
-    expect(t.text).toContain(`${SITE_URL}/start/next-steps`);
-    expect(t.html).toContain(`${SITE_URL}/start/next-steps`);
+    expect(t.text).toContain(`${SITE_URL}${V2_DEEP_ROUTE_TARGET}`);
+    expect(t.html).toContain(`${SITE_URL}${V2_DEEP_ROUTE_TARGET}`);
+    expect(t.text).not.toContain("/start/next-steps");
+    expect(t.html).not.toContain("/start/next-steps");
   });
 
   it("the confirm-dialog preview renders the SAME template function (wiring scan)", () => {

@@ -4,7 +4,7 @@ import {
   newStore,
   type FaultPlan,
 } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
-import { blobKey } from "@/app/fp/lib/cover-store-rules";
+import { blobKey } from "@/app/lib/fp/cover-store-rules";
 import { reapOnboardingDrafts, type DraftReaperDeps } from "../draft-reaper-core";
 import {
   DRAFT_RETENTION_MS,

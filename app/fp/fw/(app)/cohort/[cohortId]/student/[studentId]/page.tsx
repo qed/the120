@@ -3,19 +3,19 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 // Side-effect: registers every generated program module so getProgram resolves
 // this student's PINNED version in THIS module graph.
-import "@/app/fp/content/registry";
-import { getProgram } from "@/app/fp/content/manifest";
-import { resolveVariant } from "@/app/fp/content/parse-curriculum";
+import "@/app/lib/fp/content/registry";
+import { getProgram } from "@/app/lib/fp/content/manifest";
+import { resolveVariant } from "@/app/lib/fp/content/parse-curriculum";
 import FwStudentView from "@/app/fp/fw/components/FwStudentView";
 import type { FwTaskDetail } from "@/app/fp/fw/components/FwTaskDetailModal";
-import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { loadFwCohortRoster, loadFwStudentDrilldown } from "@/app/fp/lib/fw-loader";
+import { resolveFwActorForCohort } from "@/app/lib/fp/fw-auth";
+import { loadFwCohortRoster, loadFwStudentDrilldown } from "@/app/lib/fp/fw-loader";
 import {
   buildFwTaskTree,
   fwSelectedPhaseKey,
   summarizeFwResume,
   FW_BRAND_SUFFIX,
-} from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * /fp/fw/cohort/[cohortId]/student/[studentId] — the student view (FW Unit 4,

@@ -52,11 +52,11 @@ import { headers } from "next/headers";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { extractClientIp } from "@/app/api/fp/signup/signup-rules";
-import { V3_KID_RESET_RATE_LIMIT } from "@/app/fp/lib/rate-limit-rules";
+import { V3_KID_RESET_RATE_LIMIT } from "@/app/lib/fp/rate-limit-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import { deriveV3KidResetRateLimitKey } from "@/app/lib/v3-signup/v3-signup-rules";
 import {
   captureLegacyChildConsent,
@@ -66,7 +66,7 @@ import {
   revokeChildPhotoConsent,
   type KidCredentialsDeps,
 } from "@/app/lib/v3-signup/kid-credentials-core";
-import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
+import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
 
 function buildDeps(): KidCredentialsDeps {
   return {

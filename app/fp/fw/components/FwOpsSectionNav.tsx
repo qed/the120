@@ -1,7 +1,7 @@
 "use client";
 
 import type { MouseEvent } from "react";
-import type { FwOpsSectionChipTone, FwOpsSectionNavEntry } from "@/app/fp/lib/fw-ops-rules";
+import type { FwOpsSectionChipTone, FwOpsSectionNavEntry } from "@/app/lib/fp/fw-ops-rules";
 
 /**
  * The ops cohort page's sticky section nav (ops redesign Unit 6; R16) — one

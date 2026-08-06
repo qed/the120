@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { writeFwPref, FW_ACTIVE_COHORT_KEY } from "@/app/fp/lib/fw-device";
+import { writeFwPref, FW_ACTIVE_COHORT_KEY } from "@/app/lib/fp/fw-device";
 
 /**
  * Records which cohort this device is working (Decision 3, "persists per

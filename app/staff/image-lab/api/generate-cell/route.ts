@@ -48,7 +48,7 @@ import { requireStaff } from "@/app/crm/lib/auth";
 import {
   checkAndRecordRateLimit,
   isFirstRefusalInWindow,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import { assertRouteBudget } from "../../lib/model-registry";
 import { imageLabDb } from "../../lib/image-lab-db";
 import { generateCell } from "../../lib/run-core";

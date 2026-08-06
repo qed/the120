@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { mintBoardTokenAction, revokeBoardTokenAction } from "@/app/fp/lib/actions/fw-ops";
-import type { FwOpsBoardToken } from "@/app/fp/lib/fw-ops-core";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { mintBoardTokenAction, revokeBoardTokenAction } from "@/app/lib/fp/actions/fw-ops";
+import type { FwOpsBoardToken } from "@/app/lib/fp/fw-ops-core";
 
 /**
  * The projected board's door (FW Unit 5; FW-R25, Decision 4).

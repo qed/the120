@@ -12,9 +12,9 @@ import vitestConfig from "@/vitest.config";
  * Two design constraints, both learned the hard way:
  *
  *  1. This file lives under `app/lib/**`, granted by a different entry, so it
- *     keeps running if the `app/fp` glob is dropped. A guard inside
- *     `app/fp/**` could not catch its own removal — it would go silent
- *     alongside the tests it was meant to protect.
+ *     keeps running if another directory's glob is dropped. A guard inside the
+ *     directory it protects could not catch its own removal — it would go
+ *     silent alongside the tests it was meant to protect.
  *
  *  2. It asserts against the RESOLVED `test.include` array, not the raw file
  *     text. A substring check would pass on a glob that had been commented out
@@ -32,7 +32,6 @@ const REQUIRED_GLOBS = [
   "app/lib/**/__tests__/**/*.test.{ts,tsx}",
   "app/gauntlet/**/__tests__/**/*.test.{ts,tsx}",
   "app/api/**/__tests__/**/*.test.{ts,tsx}",
-  "app/fp/**/__tests__/**/*.test.{ts,tsx}",
 ];
 
 describe("vitest include allowlist", () => {
@@ -46,10 +45,18 @@ describe("vitest include allowlist", () => {
     expect(include).toContain(glob);
   });
 
-  it("grants the Path tree — removing it would silence the engine's whole suite", () => {
+  it("grants the First Profit tree — removing it would silence the engine's whole suite", () => {
     // Called out separately because First Profit's pure rule modules (the state
     // machine, access verdicts, sync reconciliation) are the only parts of that
     // feature this repo can defend at all — no jsdom, no component tests.
-    expect(include).toContain("app/fp/**/__tests__/**/*.test.{ts,tsx}");
+    //
+    // The glob it names CHANGED in v3 plan Unit 10: those modules moved from
+    // `app/fp/lib` to `app/lib/fp`, so the entry that grants them is now the
+    // `app/lib/**` one, and `app/fp/**` was dropped because nothing under it
+    // holds a test any more. The guarantee is unchanged and still stated as a
+    // guarantee about the MODULES rather than about a path — if they move
+    // again, this is the assertion that has to be re-aimed.
+    expect(include).toContain("app/lib/**/__tests__/**/*.test.{ts,tsx}");
+    expect(include).not.toContain("app/fp/**/__tests__/**/*.test.{ts,tsx}");
   });
 });

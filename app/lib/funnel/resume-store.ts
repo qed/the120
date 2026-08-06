@@ -19,7 +19,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { assertNoAuthMailToFwStudent } from "@/app/fp/lib/fw-provision-rules";
+import { assertNoAuthMailToFwStudent } from "@/app/lib/fp/fw-provision-rules";
 import { rateCountVerdict, type FunnelRateLimit } from "@/app/lib/funnel/resume-rules";
 
 export const sha256Hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");

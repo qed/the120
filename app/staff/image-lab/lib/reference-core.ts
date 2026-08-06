@@ -56,7 +56,7 @@ import {
   type ReferenceRefusal,
 } from "./reference-rules";
 import { IMAGE_LAB_BUCKET, type ImageLabMimeType } from "./image-lab-rules";
-import { TUS_CHUNK_SIZE_BYTES } from "@/app/fp/lib/upload-rules";
+import { TUS_CHUNK_SIZE_BYTES } from "@/app/lib/fp/upload-rules";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 

@@ -47,13 +47,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import {
   archiveCohortAction,
   deleteCohortAction,
   unarchiveCohortAction,
-} from "@/app/fp/lib/actions/fw-ops";
-import { fwArchiveConfirmMatches } from "@/app/fp/lib/fw-ops-rules";
+} from "@/app/lib/fp/actions/fw-ops";
+import { fwArchiveConfirmMatches } from "@/app/lib/fp/fw-ops-rules";
 
 type ConfirmMode = "archive" | "delete";
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
+import { FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
 import FwSignInForm from "./FwSignInForm";
 
 /**

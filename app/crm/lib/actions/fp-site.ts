@@ -16,7 +16,7 @@ import { z } from "zod";
 import {
   recordFpSiteLockAudit,
   setFpSiteOperatorLock,
-} from "@/app/fp/lib/fp-site-ops-core";
+} from "@/app/lib/fp/fp-site-ops-core";
 
 const lockSchema = z.object({ handle: z.string().min(1).max(80), locked: z.boolean() }).strip();
 

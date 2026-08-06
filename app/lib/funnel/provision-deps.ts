@@ -969,7 +969,7 @@ export function realEraseFamilyDeps(): EraseFamilyDeps {
     // as a data URL and `cover_blob_key` / `fp_cover_blob_key` are written NULL,
     // so no object is ever created (verified 2026-08-06 against production: zero
     // non-null blob keys). The Vercel Blob adapter is still the documented seam
-    // at the bottom of app/fp/lib/cover-store.ts, and until it lands there is
+    // at the bottom of app/lib/fp/cover-store.ts, and until it lands there is
     // nothing honest to inject here.
     //
     // `blobConfigured: false` therefore means "no way to delete an object", and

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { FwPwa } from "@/app/fp/fw/components/FwPwa";
-import { requireFwSession } from "@/app/fp/lib/fw-auth";
+import { requireFwSession } from "@/app/lib/fp/fw-auth";
 import { StaffBar } from "@/app/lib/staff-bar/StaffBar";
 
 /**

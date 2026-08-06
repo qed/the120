@@ -2,16 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Band } from "@/app/fp/content/types";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { readUsableFwRoster } from "@/app/fp/lib/fw-sync-client";
-import type { FwCachedRosterStudent } from "@/app/fp/lib/fw-sync-rules";
+import type { Band } from "@/app/lib/fp/content/types";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { readUsableFwRoster } from "@/app/lib/fp/fw-sync-client";
+import type { FwCachedRosterStudent } from "@/app/lib/fp/fw-sync-rules";
 import {
   fwDuplicateNameStudentIds,
   searchFwRoster,
   FW_BAND_LABEL,
   type FwRosterStudent,
-} from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The OFFLINE roster fallback (FW Unit 9 — the Decision-15 consumer wiring).

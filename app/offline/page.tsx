@@ -2,18 +2,23 @@ import type { Metadata } from "next";
 
 /**
  * The offline fallback page (T1 Unit 11) — the ONE route the service worker
- * precaches and serves when a /fp navigation fails without a network.
+ * precaches and serves when a navigation fails without a network.
  *
- * Lives OUTSIDE /fp deliberately: the proxy gates /fp/*, and a gated
+ * Its audience is now the Founders Weekend guide iPads ALONE. v3 plan Unit 10
+ * deleted the First Profit UI and with it `PathPwa`, so `FwPwa` is the only
+ * thing that registers a worker and `/fp/fw` is the only shell being cached —
+ * which is why "Try again" points there rather than at the retired `/fp`.
+ *
+ * Lives OUTSIDE the guide subtree deliberately: /fp/fw/* is gated, and a gated
  * fallback would cache a sign-in redirect at SW install time instead of this
  * page. Static, no auth, no Supabase, no client JS — it must render from the
  * SW cache on a cold offline start, and it must never break the env-less
  * build.
  *
  * The reassurance line is load-bearing product copy, not decoration: the
- * capture queue (offline-queue.ts) really does hold evidence on-device, and
- * the drain really does send it on the next signal. Say exactly that — no
- * promise beyond what the code does.
+ * check-in queue (fw-queue.ts) really does hold work on-device, and the drain
+ * really does send it on the next signal. Say exactly that — no promise beyond
+ * what the code does.
  */
 
 export const metadata: Metadata = {
@@ -34,11 +39,11 @@ export default function OfflinePage() {
         You&rsquo;re offline
       </h1>
       <p className="mt-3 max-w-sm font-path-body text-[14px] leading-relaxed text-trail-ink/75">
-        No signal out here — that&rsquo;s fine. Anything you captured is saved on
+        No signal out here — that&rsquo;s fine. Anything you recorded is saved on
         this device, and it will send itself the moment you&rsquo;re back online.
       </p>
       <a
-        href="/fp"
+        href="/fp/fw"
         className="mt-6 rounded-xl bg-phase-sell px-5 py-2.5 font-path-body text-sm font-semibold text-white"
       >
         Try again

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Same mailer mock shape as app/fp/lib/parent-email/__tests__/send.test.ts, so
+// Same mailer mock shape as app/lib/fp/parent-email/__tests__/send.test.ts, so
 // the payload handed to the transactional sender can be inspected directly.
 type SentEmail = {
   to: string;

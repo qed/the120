@@ -33,7 +33,7 @@ import {
   childUsernameMatches,
   deriveStudentEmail,
   parseCandidateRow,
-} from "@/app/fp/lib/provision-rules";
+} from "@/app/lib/fp/provision-rules";
 import { makeHarness } from "./helpers/signup-harness";
 import type { Store } from "./helpers/fake-supabase";
 

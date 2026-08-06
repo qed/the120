@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import FwOpsChrome from "@/app/fp/fw/components/FwOpsChrome";
-import { resolveFwStaffGate } from "@/app/fp/lib/fw-auth";
+import { resolveFwStaffGate } from "@/app/lib/fp/fw-auth";
 
 /**
  * The staff ops shell — chrome for the surfaces guides never see. The chrome

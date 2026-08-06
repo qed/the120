@@ -16,7 +16,7 @@ import "server-only";
  * `admin.createUser` with a server-generated 256-bit password that is never
  * disclosed, never stored, and discarded after one server-side
  * `signInWithPassword` mints the cookie — the shape
- * `app/fp/lib/actions/invite.ts` already ships. NOT `admin.generateLink`:
+ * `app/lib/fp/actions/invite.ts` already ships. NOT `admin.generateLink`:
  * that call sits in `no-auth-mail-guard.test.ts`'s MAIL_CAPABLE set, and
  * redeeming the link server-side would stamp `email_confirmed_at` as a side
  * effect — manufacturing "verified" out of a form submission.

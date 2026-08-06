@@ -3,7 +3,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/app/lib/supabase/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { FW_CALL_TIMEOUT_MS, fwRead, withFwTimeout } from "@/app/fp/lib/fw-call";
+import { FW_CALL_TIMEOUT_MS, fwRead, withFwTimeout } from "@/app/lib/fp/fw-call";
 import { IdentityUnavailableError } from "@/app/lib/identity-unavailable";
 import { resolveStaffAccess, type SessionRead } from "./access";
 

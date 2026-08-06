@@ -47,11 +47,11 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { V3_KID_RESET_RATE_LIMIT } from "@/app/fp/lib/rate-limit-rules";
+import { V3_KID_RESET_RATE_LIMIT } from "@/app/lib/fp/rate-limit-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import { deriveV3KidResetRateLimitKey } from "@/app/lib/v3-signup/v3-signup-rules";
 import {
   MIN_PARENT_PASSWORD,

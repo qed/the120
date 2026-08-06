@@ -32,13 +32,13 @@ import {
   runFwClientDrain,
   startFwSyncEngine,
   subscribeFwQueue,
-} from "@/app/fp/lib/fw-sync-client";
+} from "@/app/lib/fp/fw-sync-client";
 import {
   FW_SW_SCOPE,
   FW_SW_URL,
   type FwQueueSummary,
-} from "@/app/fp/lib/fw-sync-rules";
-import { shouldRegisterServiceWorker } from "@/app/fp/lib/sync-rules";
+} from "@/app/lib/fp/fw-sync-rules";
+import { shouldRegisterServiceWorker } from "@/app/lib/fp/sync-rules";
 
 /** A registration surface that may carry Chromium's Background Sync. */
 type SyncCapableRegistration = ServiceWorkerRegistration & {

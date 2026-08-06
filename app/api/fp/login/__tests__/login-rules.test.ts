@@ -18,7 +18,7 @@ import {
   COVER_DATA_URL_MAX,
   COVER_DATA_URL_PREFIX,
   STATUSES_IMPLYING_COVER_BLOB,
-} from "@/app/fp/lib/cover-store-rules";
+} from "@/app/lib/fp/cover-store-rules";
 // `cover-core` is `server-only`; a TEST may import across that boundary, and
 // this one must — see "the write word and the read rule" below.
 import { TEMPLATE_COVER_STATUS } from "@/app/api/fp/cover/cover-core";

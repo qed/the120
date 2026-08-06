@@ -79,7 +79,7 @@ export type EraseFamilyDeps = {
   /**
    * False when no blob adapter is wired (today: always — the cover path is
    * template-only and no `@vercel/blob` adapter exists yet; see the seam at the
-   * bottom of app/fp/lib/cover-store.ts). UNLIKE `workspaceConfigured`, this is
+   * bottom of app/lib/fp/cover-store.ts). UNLIKE `workspaceConfigured`, this is
    * NOT a benign skip: if a row actually names an object and there is no way to
    * delete it, the core STRANDS the key rather than proceeding, because an
    * undeleted object is the data-rights failure itself. With no keys present

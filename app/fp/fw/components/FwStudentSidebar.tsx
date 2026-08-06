@@ -3,14 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
-import type { FwRosterEntry } from "@/app/fp/lib/fw-loader";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import type { FwRosterEntry } from "@/app/lib/fp/fw-loader";
 import {
   fwDuplicateNameStudentIds,
   fwSidebarNames,
   searchFwRoster,
   FW_BAND_LABEL,
-} from "@/app/fp/lib/fw-nav-rules";
+} from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The student sidebar (ops-guide redesign Unit 7; R18, R23) — the left pane of

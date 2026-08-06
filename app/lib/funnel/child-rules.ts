@@ -2,12 +2,12 @@
  * Add a Child (funnel U7; R31, R32) — grade → band and skin, the grade guard,
  * and the active-child rules the funnel has never had.
  *
- * PURE. Reuses `Skin` from `app/fp/lib/skin-tokens.ts` rather than declaring a
+ * PURE. Reuses `Skin` from `app/lib/fp/skin-tokens.ts` rather than declaring a
  * parallel `"hq" | "trail"`: the two-register seam is one concept, and a
  * second copy of the union is how the funnel's skin and First Profit's drift.
  */
 
-import type { Skin } from "@/app/fp/lib/skin-tokens";
+import type { Skin } from "@/app/lib/fp/skin-tokens";
 import { GRADES } from "@/app/dashboard/data";
 import { APPLICANT_STATES, isApplicantState } from "@/app/lib/funnel/applicant-rules";
 

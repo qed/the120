@@ -5,9 +5,9 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import FwCohortView from "@/app/fp/fw/components/FwCohortView";
 import { FwRosterCache } from "@/app/fp/fw/components/FwRosterCache";
 import { FwOfflineRoster } from "@/app/fp/fw/components/FwOfflineRoster";
-import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { loadFwCohortRoster, loadFwUnfinishedStudents } from "@/app/fp/lib/fw-loader";
-import { FW_BAND_LABEL, FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
+import { resolveFwActorForCohort } from "@/app/lib/fp/fw-auth";
+import { loadFwCohortRoster, loadFwUnfinishedStudents } from "@/app/lib/fp/fw-loader";
+import { FW_BAND_LABEL, FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
 
 /** Informational stamp on the offline roster cache — a deploy changes it, but only
  *  a schema-version bump invalidates the cache (Decision 15). */

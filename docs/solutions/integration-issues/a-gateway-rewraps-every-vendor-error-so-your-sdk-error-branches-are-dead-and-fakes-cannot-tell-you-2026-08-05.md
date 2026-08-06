@@ -8,7 +8,7 @@ symptoms:
   - "Every production failure normalizes to the same opaque fallback code while the unit tests prove five distinct codes work"
   - "A fired AbortSignal.timeout is not classified as a timeout — the abort arrives as a generic 500-shaped error"
   - "rate_limited and the preserved HTTP status are unreachable in production, so operator triage collapses to 'the model is broken'"
-root_cause: wrong_error_class_at_the_edge
+root_cause: logic_error
 resolution_type: code_fix
 tags:
   - vercel-ai-gateway

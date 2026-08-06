@@ -158,6 +158,51 @@ describe("the server-side cooldown", () => {
     expect(generateCellSpy).not.toHaveBeenCalled();
   });
 
+  it("LEAVES A LOG LINE — a throttle used to be invisible after the fact", async () => {
+    // The generation breadcrumb is emitted post-CAS only and `rate-limit-store`
+    // logs nothing, so a runaway fan that tripped the guardrail left no trace at
+    // all. Ids and a duration; there is no run, prompt or child in scope here.
+    for (let i = 0; i < IMAGE_LAB_GENERATE_RATE_LIMIT.limit; i++) {
+      await post({ imageId: IMAGE_ID });
+    }
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await post({ imageId: IMAGE_ID })).status).toBe(429);
+      const logged = spy.mock.calls.flat().join(" ");
+      expect(logged).toContain("cooldown refused");
+      expect(logged).toContain(STAFF.staffId);
+      // ⚠ A DIGIT, NOT A PREFIX. `toContain("retryAfterMs=")` passes on
+      // `retryAfterMs=undefined`, which is exactly the line an operator cannot
+      // act on and exactly what a broken decision would print.
+      expect(logged).toMatch(/retryAfterMs=\d+/);
+      expect(logged).not.toContain(IMAGE_ID);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("logs the TRIP ONCE per window, not once per refused request", async () => {
+    // ⚠ THE FLOOD IS ON THE BRANCH THE FLOOD COMES FROM. This is the branch a
+    // runaway tab hits at full rate for the rest of the window — the very
+    // scenario the line exists to make visible — so a line per refusal buries
+    // the trip in thousands of copies of itself.
+    for (let i = 0; i < IMAGE_LAB_GENERATE_RATE_LIMIT.limit; i++) {
+      await post({ imageId: IMAGE_ID });
+    }
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (let i = 0; i < 25; i++) {
+        expect((await post({ imageId: IMAGE_ID })).status).toBe(429);
+      }
+      const trips = spy.mock.calls
+        .flat()
+        .filter((arg) => String(arg).includes("cooldown refused"));
+      expect(trips).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("is keyed per staff member — one runaway tab cannot lock a colleague out", async () => {
     for (let i = 0; i < IMAGE_LAB_GENERATE_RATE_LIMIT.limit; i++) {
       await post({ imageId: IMAGE_ID });

@@ -52,6 +52,34 @@ export function isImageLabLive(): boolean {
   return raw === "1" || raw === "true";
 }
 
+/**
+ * The SECOND switch: may a real child's authored text be read at all?
+ *
+ * ⚠ A DIFFERENT QUESTION FROM {@link isImageLabLive}, and they authorize
+ * different things. Generation being on says the bench may spend money; this
+ * being on says a real child's authored text may be sent to a third-party model,
+ * which is the consent-and-provider-terms question. Unset means the picker is
+ * absent, `createRun` refuses any provenance-bearing compose, and manual prompts
+ * still generate normally.
+ *
+ * ⚠ IT LIVES BESIDE ITS SIBLING, IN THIS PLAIN MODULE. It used to live in
+ * `content-picker-core.ts`, which made the two flag readers asymmetric for no
+ * reason — and undid the reason `isImageLabLive` was moved here in Unit 3 (so a
+ * shell surface reading one boolean does not drag a `*-core` module's whole
+ * import graph in). `createRun` is now a reader too, which made a core-layer home
+ * actively awkward.
+ *
+ * Read at CALL TIME and allowlisted, for the same two reasons stated above.
+ *
+ * ⚠ SERVER-SIDE ONLY. There is deliberately no `NEXT_PUBLIC_` twin — a
+ * build-time public copy would be a second reader of the same switch that could
+ * disagree with the server on a warm deploy (a repo-wide test pins its absence).
+ */
+export function isImageLabRealContentLive(): boolean {
+  const raw = process.env.IMAGE_LAB_REAL_CONTENT_LIVE?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 /** The private bucket the migration creates. Never public; reads are signed. */
@@ -117,7 +145,19 @@ export function normalizeMimeType(
     : null;
 }
 
-/** Convenience predicate over {@link normalizeMimeType}. */
+/**
+ * Convenience predicate over {@link normalizeMimeType}.
+ *
+ * ⚠ TEST-ONLY BY DESIGN, and noted rather than folded away. Production code
+ * always wants the NORMALIZED VALUE (it goes on the row), never just a yes/no —
+ * so every real caller uses `normalizeMimeType` and a `!== null` check, and a
+ * production caller of this predicate would be one that threw the answer away and
+ * then had to re-derive it. What it earns its keep for is the migration parity
+ * test, which asserts the bucket's `allowed_mime_types` against this module as a
+ * SET-MEMBERSHIP question and has no use for the normalized form.
+ *
+ * Same honesty as {@link pricedQualityTiers} in the registry, which says so too.
+ */
 export function isAcceptedMimeType(value: string | null | undefined): boolean {
   return normalizeMimeType(value) !== null;
 }

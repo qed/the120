@@ -28,7 +28,12 @@ import {
   normalizeMimeType,
   type ImageLabMimeType,
 } from "./image-lab-rules";
-import { isImageLabFailureReason, isImageLabImageState } from "./image-lab-rules";
+import {
+  isImageLabFailureReason,
+  isImageLabImageState,
+  isImageLabRealContentLive,
+} from "./image-lab-rules";
+import { verifySourceToken } from "./source-token";
 import { generateLabImage } from "./image-model";
 import { type ImageLabDb } from "./image-lab-db";
 import {
@@ -40,6 +45,8 @@ import {
 } from "./run-rules";
 import { withFwTimeout } from "@/app/fp/lib/fw-call";
 import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
+import { CHILD_SCRUB_COLUMNS } from "./content-picker-loader";
+import { errorName } from "./run-core";
 import type { FinalizePatch, NewCellRow, RunDeps, RunRow } from "./run-core";
 
 const RUNS = "fp_image_lab_runs";
@@ -81,16 +88,58 @@ async function bounded<R extends { data: unknown; error: { message: string } | n
   call: () => PromiseLike<R>,
   label: string,
   budgetMs: number = IMAGE_LAB_DB_CALL_TIMEOUT_MS
-): Promise<R | { data: null; error: { message: string } }> {
+): Promise<R | { data: null; error: { message: string; code: string } }> {
   let raced;
   try {
     raced = await withFwTimeout(call(), `image-lab/${label}`, budgetMs);
   } catch (e) {
-    return { data: null, error: { message: `${label} threw: ${String(e)}` } };
+    // ⚠ THE THROWN VALUE'S CLASSIFICATION, NEVER `String(e)`. This message is
+    // interpolated into `insertRun(…) failed: …` and logged — and the insert body
+    // for that one query holds `template`, `slot_values` and `resolved_prompt`.
+    // `String(e)` stringifies an UNCONTROLLED throw from postgrest-js/undici, and
+    // several of those quote the request body, which would put a resolved prompt
+    // (with a child's authored text in it) into the operator log.
+    // ⚠ THE SANITIZED TEXT GOES IN `code`, NOT ONLY IN `message`. Every caller
+    // below reports `errorCode(error)` rather than the message — that is what
+    // keeps a postgrest message out of the log — so a synthesized error whose
+    // classification lived only in `message` would be reported as `no_code` and
+    // the whole diagnostic would be lost.
+    return {
+      data: null,
+      error: { message: `${label} threw: ${errorName(e)}`, code: `threw ${errorName(e)}` },
+    };
   }
   return raced.timedOut
-    ? { data: null, error: { message: `${label} did not answer within ${budgetMs}ms` } }
+    ? {
+        data: null,
+        error: {
+          message: `${label} did not answer within ${budgetMs}ms`,
+          code: `timeout ${budgetMs}ms`,
+        },
+      }
     : raced.value;
+}
+
+/**
+ * What an IN-BAND postgrest error is allowed to contribute to a thrown message.
+ *
+ * ⚠ THE THROW BRANCH ABOVE WAS ONLY HALF THE FIX, AND THE HALF THAT WAS LEFT IS
+ * THE ONE THAT MATTERS. Postgrest reports IN BAND — `{ data, error }` — so the
+ * ordinary failure path never goes through that `catch` at all, and every caller
+ * below then interpolated the postgrest error's own MESSAGE into the throw. That
+ * message is a vendor string, and for `insertRun` — THE ONE QUERY WHOSE BODY
+ * HOLDS `template`, `slot_values` AND `resolved_prompt` — postgrest quotes
+ * offending values back. `run-core` then logged that Error object, stack and all.
+ *
+ * So the in-band branch gets the same treatment as the throw branch: a CODE, not
+ * a message. `code`/`hint`-shaped fields are Postgres's own closed vocabulary
+ * (`23505`, `42501`, `PGRST116`) and are the field anyone actually triages on;
+ * `details` and `message` are free text derived from the request and never
+ * travel.
+ */
+export function errorCode(error: { message?: unknown } | null | undefined): string {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" && code !== "" ? code : "no_code";
 }
 
 const asMs = (value: unknown): number => {
@@ -186,13 +235,25 @@ export function runDeps(db: ImageLabDb): RunDeps {
         db.from(IMAGES).select("id", { count: "exact", head: true }).eq("run_id", runId),
       `countCells(${runId})`
     );
-    if (result.error) throw new Error(`countCells(${runId}) failed: ${result.error.message}`);
+    if (result.error) throw new Error(`countCells(${runId}) failed: ${errorCode(result.error)}`);
     return (result as { count?: number | null }).count ?? 0;
   };
 
   return {
     newId: () => randomUUID(),
     now: () => Date.now(),
+
+    // The provenance chokepoint's two injected facts. Both live outside this
+    // plain-module boundary on purpose: the verifier reaches `node:crypto` and
+    // the deployment secret, and the flag is read at CALL TIME so a warm
+    // instance can never hold a stale answer.
+    verifySourceToken: (token) => {
+      const verdict = verifySourceToken(token);
+      return verdict.ok
+        ? { ok: true, provenance: verdict.provenance }
+        : { ok: false };
+    },
+    isRealContentLive: () => isImageLabRealContentLive(),
 
     async insertRun(row) {
       const { data, error } = await bounded(() => db
@@ -221,7 +282,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         if ((error as { code?: string }).code === UNIQUE_VIOLATION) {
           return { ok: false, reason: "duplicate_key" };
         }
-        throw new Error(`insertRun(${row.id}) failed: ${error.message}`);
+        throw new Error(`insertRun(${row.id}) failed: ${errorCode(error)}`);
       }
       if (!data) throw new Error(`insertRun(${row.id}): no row returned`);
       // Cells are written next; a run that has just been inserted has none yet,
@@ -236,7 +297,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .eq("staff_id", staffId)
         .eq("idempotency_key", key)
         .maybeSingle(), "findRunByIdempotency");
-      if (error) throw new Error(`findRunByIdempotency failed: ${error.message}`);
+      if (error) throw new Error(`findRunByIdempotency failed: ${errorCode(error)}`);
       if (!data) return null;
       const raw = data as unknown as Record<string, unknown>;
       return toRunRow(raw, await countCells(String(raw.id)));
@@ -248,7 +309,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .select(RUN_COLUMNS)
         .eq("id", runId)
         .maybeSingle(), `loadRun(${runId})`);
-      if (error) throw new Error(`loadRun(${runId}) failed: ${error.message}`);
+      if (error) throw new Error(`loadRun(${runId}) failed: ${errorCode(error)}`);
       if (!data) return null;
       return toRunRow(data as unknown as Record<string, unknown>, await countCells(runId));
     },
@@ -270,7 +331,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
           }))
         )
         .select(IMAGE_COLUMNS), "insertCells");
-      if (error) throw new Error(`insertCells failed: ${error.message}`);
+      if (error) throw new Error(`insertCells failed: ${errorCode(error)}`);
       return ((data ?? []) as unknown[]).map((r) =>
         toCellRow(r as Record<string, unknown>)
       );
@@ -282,7 +343,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .select(IMAGE_COLUMNS)
         .eq("run_id", runId)
         .order("cell_ordinal", { ascending: true }), `listCells(${runId})`);
-      if (error) throw new Error(`listCells(${runId}) failed: ${error.message}`);
+      if (error) throw new Error(`listCells(${runId}) failed: ${errorCode(error)}`);
       return ((data ?? []) as unknown[]).map((r) =>
         toCellRow(r as Record<string, unknown>)
       );
@@ -294,7 +355,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .select(IMAGE_COLUMNS)
         .eq("id", imageId)
         .maybeSingle(), `loadCell(${imageId})`);
-      if (error) throw new Error(`loadCell(${imageId}) failed: ${error.message}`);
+      if (error) throw new Error(`loadCell(${imageId}) failed: ${errorCode(error)}`);
       return data ? toCellRow(data as unknown as Record<string, unknown>) : null;
     },
 
@@ -309,13 +370,13 @@ export function runDeps(db: ImageLabDb): RunDeps {
         () =>
           db
             .from("children")
-            .select("id, parent_id, first_name, last_name, fp_username")
+            .select(CHILD_SCRUB_COLUMNS)
             .eq("id", childId)
             .maybeSingle(),
         "loadChildIdentity"
       );
       if (child.error) {
-        throw new Error(`loadChildIdentity failed: ${child.error.message}`);
+        throw new Error(`loadChildIdentity failed: ${errorCode(child.error)}`);
       }
       const row = child.data as {
         parent_id?: unknown;
@@ -338,7 +399,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
           )
         : { data: null, error: null };
       if (family.error) {
-        throw new Error(`loadChildIdentity family read failed: ${family.error.message}`);
+        throw new Error(`loadChildIdentity family read failed: ${errorCode(family.error)}`);
       }
       const families = (family.data ?? []) as { is_test: boolean | null }[];
 
@@ -377,7 +438,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .is("attempted_at", null)
         .select(IMAGE_COLUMNS)
         .maybeSingle(), `markAttempt(${imageId})`);
-      if (error) throw new Error(`markAttempt(${imageId}) failed: ${error.message}`);
+      if (error) throw new Error(`markAttempt(${imageId}) failed: ${errorCode(error)}`);
       return data ? toCellRow(data as unknown as Record<string, unknown>) : null;
     },
 
@@ -404,7 +465,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         () => db.from(REFERENCES).select("id, storage_key, content_type").in("id", ids as string[]),
         "loadReferenceBytes"
       );
-      if (error) throw new Error(`loadReferenceBytes failed: ${error.message}`);
+      if (error) throw new Error(`loadReferenceBytes failed: ${errorCode(error)}`);
 
       const byId = new Map<string, { storageKey: string; contentType: ImageLabMimeType }>();
       for (const raw of (data ?? []) as unknown as Record<string, unknown>[]) {
@@ -429,7 +490,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
               .download(meta.storageKey);
             if (downloadError || !blob) {
               throw new Error(
-                `reference download failed for ${id}: ${downloadError?.message ?? "no body"}`
+                `reference download failed for ${id}: ${errorCode(downloadError)}`
               );
             }
             return {
@@ -471,7 +532,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
             .upload(key, bytes, { contentType, upsert: false }),
         `putObject(${key})`
       );
-      if (error) throw new Error(`putObject(${key}) failed: ${error.message}`);
+      if (error) throw new Error(`putObject(${key}) failed: ${errorCode(error)}`);
     },
 
     async removeObject(key) {
@@ -479,7 +540,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         () => db.storage.from(IMAGE_LAB_BUCKET).remove([key]),
         `removeObject(${key})`
       );
-      if (error) throw new Error(`removeObject(${key}) failed: ${error.message}`);
+      if (error) throw new Error(`removeObject(${key}) failed: ${errorCode(error)}`);
     },
 
     /**
@@ -505,7 +566,7 @@ export function runDeps(db: ImageLabDb): RunDeps {
         .eq("id", patch.imageId)
         .eq("state", "requested")
         .select("id"), `finalize(${patch.imageId})`);
-      if (error) throw new Error(`finalize(${patch.imageId}) failed: ${error.message}`);
+      if (error) throw new Error(`finalize(${patch.imageId}) failed: ${errorCode(error)}`);
       return { rowsMatched: ((data ?? []) as unknown[]).length };
     },
 

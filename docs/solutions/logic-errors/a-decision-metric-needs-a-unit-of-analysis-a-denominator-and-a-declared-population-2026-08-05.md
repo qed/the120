@@ -8,7 +8,7 @@ symptoms:
   - "A filtered page renders 100% keep rate on every card, screenshot-able and indistinguishable from an unfiltered one"
   - "The more a model is iterated on, the worse it scores — retries inflate its denominator"
   - "A half-reviewed model scores lower than a fully-reviewed one purely for being unfinished"
-root_cause: metric_defined_without_unit_denominator_or_population
+root_cause: design_gap
 resolution_type: code_fix
 tags:
   - metrics

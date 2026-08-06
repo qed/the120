@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { glob } from "tinyglobby";
+import ts from "typescript";
+import { LAB_ROUTABLE_GLOB, LAB_SOURCE_GLOB } from "./lab-globs";
 
 /**
  * The Image Lab's GATE WIRING (first-profit repo:
@@ -83,13 +85,21 @@ const REPO_ROOT = fileURLToPath(new URL("../../../../", `file://${dir}`));
 const LAB = "app/staff/image-lab/";
 
 /**
- * EVERY Next routable convention under the Lab.
+ * EVERY Next routable convention under the Lab, IN EVERY EXTENSION.
  *
  * `page`/`layout`/`template`/`default` render; `route` does not render at all
  * and is reached directly. Missing `route` is what let an ungated
  * `api/generate/route.ts` sit invisible under the old `{page,layout}` glob.
+ *
+ * ⚠ AND MISSING `.js` LET THE SAME THING HAPPEN AGAIN. The glob was
+ * `.{ts,tsx}`, so `app/staff/image-lab/api/probe/route.js` — an ungated,
+ * network-reachable POST — passed this file 20/20 and the Lab suite 899/899.
+ * `next.config.ts` sets no `pageExtensions`, so Next routes it in full. The
+ * SIBLING guard (`service-role-only`) had already learned this in Unit 4 and
+ * enumerated eight extensions; the fix was never carried across. The list is now
+ * shared (`./lab-globs`) so the two cannot drift again.
  */
-const ROUTABLE_GLOB = `${LAB}**/{page,layout,template,default,route}.{ts,tsx}`;
+const ROUTABLE_GLOB = LAB_ROUTABLE_GLOB;
 
 const routableFiles = async (): Promise<string[]> => {
   const files = await glob([ROUTABLE_GLOB], {
@@ -116,16 +126,64 @@ const routableFiles = async (): Promise<string[]> => {
  *
  * So the four source fences below run over THESE files as well.
  */
-const actionFiles = async (): Promise<string[]> => {
-  const sources = await glob([`${LAB}**/*.{ts,tsx}`], {
+/**
+ * ⚠ AND THIS GLOB WAS `.{ts,tsx}` TOO, so the `.js` hole was DOUBLE. Verified:
+ * `app/staff/image-lab/lib/probe-actions.js` — `"use server"`, one ungated
+ * exported action — was invisible to this scan as well as to the routable one,
+ * and passed 20/20.
+ */
+const labSourceFiles = async (): Promise<string[]> => {
+  const sources = await glob([LAB_SOURCE_GLOB], {
     cwd: REPO_ROOT,
     absolute: false,
     ignore: ["**/__tests__/**"],
   });
-  return sources
-    .map((f) => f.replace(/\\/g, "/"))
-    .filter((f) => /^\s*["']use server["']/m.test(readFileSync(`${REPO_ROOT}${f}`, "utf8")))
-    .sort();
+  return sources.map((f) => f.replace(/\\/g, "/")).sort();
+};
+
+/** A module-scope `"use server"` directive: the first statement of the file. */
+const MODULE_DIRECTIVE = /^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use server["']/;
+
+const actionFiles = async (): Promise<string[]> => {
+  const sources = await labSourceFiles();
+  return sources.filter((f) =>
+    MODULE_DIRECTIVE.test(readFileSync(`${REPO_ROOT}${f}`, "utf8"))
+  );
+};
+
+/**
+ * Every `"use server"` directive that is NOT at module scope.
+ *
+ * ⚠ A FUNCTION-SCOPE `"use server"` IS A NETWORK-REACHABLE ENDPOINT WITH ITS OWN
+ * ACTION ID, and every check in this file — the four source fences and the
+ * behavioural invoke — iterates EXPORTED FUNCTIONS. An inline action declared
+ * inside a page body or a form handler is exported by nothing, so all five skip
+ * it silently while Next still serves it.
+ *
+ * The answer is a BAN rather than half a mechanism: covering inline actions
+ * properly means slicing arbitrary nested closures out of a page component, which
+ * is the sort of extractor this file's own history shows always has one more
+ * shape it does not know. The Lab declares its actions at module scope; a
+ * function-scope directive fails loudly and the author moves it into a
+ * `"use server"` module, where all five checks reach it.
+ */
+const inlineServerDirectives = (source: string): string[] => {
+  const sf = ts.createSourceFile("x.tsx", source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isExpressionStatement(node) &&
+      ts.isStringLiteral(node.expression) &&
+      node.expression.text === "use server" &&
+      node.parent !== sf
+    ) {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      found.push(`line ${line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
 };
 
 /** Everything the source fences apply to: what Next can render, plus what a
@@ -511,6 +569,106 @@ describe("supplementary source fence — properties a spy cannot see", () => {
       }
     }
   }, IMPORT_TIMEOUT_MS);
+});
+
+// ── The three DISCOVERY holes ────────────────────────────────────────────────
+
+describe("gate discovery covers every shape a Lab endpoint can take", () => {
+  it("the globs cover EVERY module extension, not just .ts/.tsx", () => {
+    // The `.js` route handler and the `.js` server action both shipped ungated
+    // past the old `{ts,tsx}` globs. Asserted on the glob STRINGS, because the
+    // expansion cannot prove the absence of a file nobody wrote.
+    for (const ext of ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"]) {
+      expect(LAB_ROUTABLE_GLOB, `routable glob misses .${ext}`).toContain(ext);
+      expect(LAB_SOURCE_GLOB, `source glob misses .${ext}`).toContain(ext);
+    }
+    // …and the routable glob still names every routable convention.
+    for (const convention of ["page", "layout", "template", "default", "route"]) {
+      expect(LAB_ROUTABLE_GLOB).toContain(convention);
+    }
+  });
+
+  it("NO `use server` directive sits below module scope anywhere in the Lab", async () => {
+    for (const file of await labSourceFiles()) {
+      const inline = inlineServerDirectives(readFileSync(`${REPO_ROOT}${file}`, "utf8"));
+      expect(
+        inline,
+        `${file}: a function-scope "use server" is a network-reachable action with its own id, and every check in this file iterates EXPORTED functions — so all five skip it. Declare it in a "use server" module instead.`
+      ).toEqual([]);
+    }
+  });
+
+  it("SEES a function-scope `use server` — the negative fixture", () => {
+    // A page with an inline action: exported by nothing, gated by nothing, and
+    // invisible to all five checks above.
+    expect(
+      inlineServerDirectives(
+        [
+          "export default async function Page() {",
+          "  async function purge(id) {",
+          '    "use server";',
+          "    await danger(id);",
+          "  }",
+          "  return <form action={purge} />;",
+          "}",
+        ].join("\n")
+      )
+    ).toHaveLength(1);
+    // …and a genuine module-scope directive is NOT reported.
+    expect(
+      inlineServerDirectives('"use server";\nexport async function a() { return 1; }')
+    ).toEqual([]);
+    // Nor is one behind a leading docblock, which every action file here has.
+    expect(
+      inlineServerDirectives('/** header */\n"use server";\nexport async function a() {}')
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ LOCATION IS A HOLE TOO. Everything above is anchored to
+   * `app/staff/image-lab/`, so a Lab endpoint written at
+   * `app/api/image-lab/generate/route.ts` — where EVERY other API route in this
+   * repo lives, which is exactly where an author would put it — inherits none of
+   * the Lab's guarantees: not the gate fences, not the service-role walk, not the
+   * table allowlist.
+   *
+   * The cores are the tell. Nothing outside the Lab has any business importing
+   * them, so a relocated endpoint reddens here the moment it wires itself up.
+   */
+  it("NOTHING outside the Lab imports run-core, history-core, reference-core or image-lab-db", async () => {
+    const LAB_ONLY = [
+      "app/staff/image-lab/lib/run-core",
+      "app/staff/image-lab/lib/history-core",
+      "app/staff/image-lab/lib/reference-core",
+      "app/staff/image-lab/lib/image-lab-db",
+    ];
+    const sources = await glob(["app/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}", "scripts/**/*.ts"], {
+      cwd: REPO_ROOT,
+      absolute: false,
+    });
+    expect(sources.length).toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const raw of sources) {
+      const file = raw.replace(/\\/g, "/");
+      if (file.startsWith(LAB)) continue;
+      const specifiers = ts
+        .preProcessFile(readFileSync(`${REPO_ROOT}${file}`, "utf8"), true, true)
+        .importedFiles.map((f) => f.fileName);
+      for (const specifier of specifiers) {
+        // Aliased or relative — normalize both onto a repo-relative suffix.
+        const normalized = specifier.replace(/^@\//, "app/").replace(/\\/g, "/");
+        if (LAB_ONLY.some((core) => normalized.endsWith(core.slice("app/".length)) &&
+            normalized.includes("image-lab"))) {
+          offenders.push(`${file} → ${specifier}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "a module outside app/staff/image-lab/ imports a Lab core — it inherits NONE of the Lab's gate, service-role or allowlist guarantees"
+    ).toEqual([]);
+  });
 });
 
 // ── Route segment config ─────────────────────────────────────────────────────

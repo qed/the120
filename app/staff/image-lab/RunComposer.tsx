@@ -59,13 +59,17 @@ import {
   clockOffsetFor,
   decideGenerateAffordance,
   decideRunComposition,
+  describeCellProgress,
   describeCompositionRefusal,
   describeGenerateOutcome,
+  describeUnverified,
   estimateRunCostUsd,
   formatUsd,
   modelIdsFromCells,
+  releaseIdempotencyKey,
   resolveIdempotencyKey,
   runWithConcurrency,
+  cellsFingerprint,
   serverNowFrom,
   shouldPollCells,
   IMAGE_LAB_CELL_POLL_MS,
@@ -111,6 +115,13 @@ function browserIdempotencyStore(): IdempotencyStore {
         window.sessionStorage.setItem(key, value);
       } catch {
         /* Private mode / quota. The key degrades to per-render, as before. */
+      }
+    },
+    clear(key) {
+      try {
+        window.sessionStorage.removeItem(key);
+      } catch {
+        /* Same tolerance as `set`. */
       }
     },
   };
@@ -164,11 +175,16 @@ export function RunComposer({
   const [childId, setChildId] = useState("");
   const [ideas, setIdeas] = useState<PickerIdea[]>([]);
   const [ideaId, setIdeaId] = useState("");
-  const [source, setSource] = useState<{
-    childId: string;
-    ideaId: string | null;
-    taskId: string | null;
-  } | null>(null);
+  /**
+   * ⚠ THE SERVER-SIGNED PROVENANCE TOKEN, CARRIED VERBATIM.
+   *
+   * This used to be a `{ childId, ideaId, taskId }` object the composer ASSERTED
+   * back to `createImageLabRun`, which made the server's whole re-scrub and
+   * consent-audit block opt-in on a field a caller could simply omit. The client
+   * now states nothing about provenance: it holds an opaque token the fill
+   * minted and hands it back, and the server derives the three ids from it.
+   */
+  const [sourceToken, setSourceToken] = useState<string | null>(null);
   const [excluded, setExcluded] = useState<
     readonly { slot: string; field: string; why: string }[]
   >([]);
@@ -290,11 +306,7 @@ export function RunComposer({
       // by this call, which is the whole R16 arrangement.
       setSlotValues(result.slots);
       setExcluded(result.excluded);
-      setSource({
-        childId: result.childId,
-        ideaId: result.ideaId,
-        taskId: result.taskId,
-      });
+      setSourceToken(result.provenance);
       // Re-sync the select to the idea the run will actually record.
       setIdeaId(result.ideaId ?? "");
       setDocGated(!result.docReadable);
@@ -366,13 +378,31 @@ export function RunComposer({
    * fan looked hung for four or five minutes. That is what drove the reload that
    * lost the run and re-minted the idempotency key.
    */
+  /**
+   * ⚠ AND THE LOOP IS BOUNDED. A run naming a reference whose object has gone can
+   * never finalize any cell (see {@link IMAGE_LAB_MAX_IDLE_POLLS}), and this used
+   * to poll it — run read, cell read, a signed-URL mint per stored image — every
+   * five seconds forever, surviving reloads via the stored run id. The counter is
+   * reset by any change to what the grid actually shows.
+   */
+  const fingerprint = useMemo(() => cellsFingerprint(cells), [cells]);
+  const idlePolls = useRef(0);
+  const lastFingerprint = useRef(fingerprint);
   useEffect(() => {
-    if (runId === null || !shouldPollCells(cells)) return;
+    if (lastFingerprint.current === fingerprint) idlePolls.current += 1;
+    else {
+      idlePolls.current = 0;
+      lastFingerprint.current = fingerprint;
+    }
+  }, [fingerprint]);
+
+  useEffect(() => {
+    if (runId === null || !shouldPollCells(cells, idlePolls.current)) return;
     const timer = setInterval(() => {
       void refreshCells(runId);
     }, IMAGE_LAB_CELL_POLL_MS);
     return () => clearInterval(timer);
-  }, [runId, cells, refreshCells]);
+  }, [runId, cells, fingerprint, refreshCells]);
 
   /**
    * One request per cell.
@@ -434,8 +464,14 @@ export function RunComposer({
         modelIds,
         imageCount,
         referenceIds,
-        source,
+        sourceToken,
       });
+      // ⚠ THE KEY IS RELEASED THE MOMENT THE SERVER HAS ANSWERED, AND BEFORE THE
+      // mounted check, so a staff member who navigated away is not left holding a
+      // key that makes their next identical compose a no-op. See
+      // {@link releaseIdempotencyKey}: without this, the same prompt could never
+      // be run twice in a session — which IS the consistency drill.
+      releaseIdempotencyKey(browserIdempotencyStore(), compositionSignature);
       if (!mounted.current) return;
       if (!created.ok) {
         // ⚠ SAY WHICH REFUSAL IT ACTUALLY WAS. Every server refusal used to
@@ -764,6 +800,18 @@ export function RunComposer({
                   }`}
                 >
                   <span className="block">{modelSummaryLine(entry)}</span>
+                  {/* ⚠ THE UNVERIFIED BADGE, ACTUALLY MOUNTED. `unverifiedItems`
+                      claimed in its own docblock to drive "an honest badge on the
+                      bench" and had no caller at all — while `personGeneration`
+                      (two of three models) and gpt-image-2's reference carriage
+                      are both still open, and either can make a model look worse
+                      than it is in the head-to-head this bench exists to run.
+                      The rule is pure and tested in `run-rules.test.ts`. */}
+                  {describeUnverified(entry) !== "" && (
+                    <span className="mt-1 block text-pretty text-xs text-hq-ink">
+                      {describeUnverified(entry)}
+                    </span>
+                  )}
                   {entry.restrictions?.map((restriction) => (
                     <span
                       key={restriction}
@@ -854,9 +902,19 @@ export function RunComposer({
             </pre>
           </>
         )}
-        {/* Announced so a staff member using a screen reader learns that cells
-            moved from pending to done or failed without polling the DOM. */}
-        <div aria-live="polite">
+        {/* ⚠ THE LIVE REGION IS THIS SENTENCE, NOT THE GRID.
+            It used to be a `<div aria-live="polite">` wrapped around
+            `<ResultGrid>` itself, which made every mutation inside the grid an
+            announcement: twelve cards of headings, cost lines and failure prose
+            re-read on each poll tick, and again whenever a Retry button's
+            `disabled` flipped. The one fact a reviewer is waiting for — a cell
+            finished — was unhearable through that. `describeCellProgress` is a
+            tested pure rule in `run-rules`; React only touches this text node
+            when the sentence actually changes, so an unchanged poll is silent. */}
+        <p aria-live="polite" className="sr-only">
+          {describeCellProgress(cells, serverNowMs)}
+        </p>
+        <div>
           <ResultGrid
             cells={cells}
             // ⚠ THE RUN'S list, not the live chips — see ResultGrid's docblock.

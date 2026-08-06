@@ -2,13 +2,13 @@
 module: fp-image-lab
 date: "2026-08-05"
 problem_type: test_failure
-component: tests
+component: testing_framework
 severity: medium
 symptoms:
   - "ENOENT at collection time takes down an entire test file — every assertion vanishes, including unrelated describes"
   - "The failure appears the moment an operator follows the migration header's own mandatory instruction"
   - "The error names a missing file, so the first hypothesis is a broken harness rather than a rename"
-root_cause: brittle_path_resolution
+root_cause: config_error
 resolution_type: test_fix
 tags:
   - migration-parity

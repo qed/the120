@@ -204,6 +204,40 @@ export function historyImageCap(limit: number): number {
   const runs = Math.max(1, Math.min(limit, IMAGE_LAB_HISTORY_MAX_LIMIT));
   return runs * IMAGE_LAB_MAX_CELLS_PER_RUN * IMAGE_LAB_RETRY_HEADROOM;
 }
+
+/**
+ * When the image read hit its cap, drop the OLDEST run it touched — WHOLE.
+ *
+ * ⚠ RETRY IS UNBOUNDED, SO THE HEADROOM IS A BUDGET AND NOT A GUARANTEE.
+ * `IMAGE_LAB_RETRY_HEADROOM = 2` assumes at most two attempts per cell; nothing
+ * enforces that, and a cell retried five times spends another run's budget. The
+ * read is now ordered by recency (see `history-loader`), so the row the cap cuts
+ * is always in the OLDEST run it reached — which means that run, and only that
+ * run, can come back with SOME of its attempts.
+ *
+ * A partially-read run is the worst of the three outcomes: its keep rate, its
+ * attempts-per-cell and its cost are all computed over a fragment, and nothing on
+ * the page says so. A run that is absent is at least countable, and the truncation
+ * banner counts it. So the partial run goes, whole, and its id is reported.
+ *
+ * Returns the images unchanged when the read did NOT hit the cap — the ordinary
+ * case, where every run is complete.
+ */
+export function dropPartialOldestRun(
+  images: readonly HistoryImageRow[],
+  truncated: boolean
+): { images: HistoryImageRow[]; droppedRunIds: string[] } {
+  if (!truncated || images.length === 0) return { images: [...images], droppedRunIds: [] };
+
+  // Recency order is the read's order, so the LAST row belongs to the oldest run
+  // the read reached — the only one the cap can have cut mid-run.
+  const oldestRunId = images[images.length - 1]!.runId;
+  const kept = images.filter((image) => image.runId !== oldestRunId);
+  // …unless that run is the ONLY one, in which case dropping it would empty the
+  // page. A partial single run with a banner beats a blank screen.
+  if (kept.length === 0) return { images: [...images], droppedRunIds: [] };
+  return { images: kept, droppedRunIds: [oldestRunId] };
+}
 /** Mirrors `fp_image_lab_images_verdict_note_bounded` in the migration. */
 export const IMAGE_LAB_VERDICT_NOTE_MAX_CHARS = 2000;
 
@@ -1399,6 +1433,14 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
 
   cost: {
     heading: "Cost",
+    /** ⚠ RELABELLED, NOT SUPPRESSED. `aggregateCost` runs over the FILTERED
+     *  rows, so a verdict filter turned a fraction of the spend into something
+     *  that read as a total. Unlike the keep rate — which under a verdict filter
+     *  only restates the filter and is therefore hidden — a filtered cost is a
+     *  real, useful number as long as it says what it counted. */
+    filteredHeading: "Cost of the filtered rows",
+    filteredNote:
+      "A filter is applied, so this is the spend on the attempts shown — not the run total. Drop the filters to see everything.",
     noneReported: "nothing reported by the gateway",
     /** ⚠ THE UNDERCOUNT, STATED. A cost line that looks complete and is not is
      *  worse than one that admits its floor. */
@@ -1452,6 +1494,19 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
     tagsLabel: "Drill tags for this run",
     saveTags: "Save tags",
     failed: "That change did not save, so it has been rolled back.",
+    /**
+     * ⚠ SUCCESS IS ANNOUNCED TOO (Unit 7's AT pass). A confirmed verdict used to
+     * CLEAR the live region, so a screen-reader user heard something only when a
+     * write FAILED — and silence is exactly what a dropped click sounds like.
+     * `aria-pressed` on the button covers the reader who is still focused on it;
+     * this covers the one who has already tabbed on, which in a judging loop is
+     * most of them.
+     */
+    saved: (cell: string, verdict: ImageLabVerdict | null) =>
+      verdict === null ? `Verdict cleared on ${cell}.` : `${cell} marked ${verdict}.`,
+    /** EVERY success path announces. Tag saves used to clear the region instead,
+     *  which sounds exactly like a dropped click. */
+    tagsSaved: "Drill tags saved.",
     refusal: {
       not_found: "That image no longer exists, so nothing was written.",
       not_done:

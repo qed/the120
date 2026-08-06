@@ -46,28 +46,21 @@
 
 import { SITE_DOC_VERSION_GATE } from "@/app/fp/lib/fp-public-site-rules";
 import { isRealFamily } from "@/app/crm/lib/test-family-filter";
-import { IMAGE_LAB_SLOTS, type ImageLabSlot } from "./image-lab-rules";
+import {
+  IMAGE_LAB_SLOTS,
+  isImageLabRealContentLive,
+  type ImageLabSlot,
+} from "./image-lab-rules";
 import type { SlotValues } from "./run-rules";
 
-// ── The go-live flag ─────────────────────────────────────────────────────────
-
 /**
- * The picker is off unless `IMAGE_LAB_REAL_CONTENT_LIVE` is explicitly on.
- *
- * Read at CALL TIME, never captured at module load (a module-level constant
- * freezes into a warm serverless instance, so flipping the flag would take effect
- * only for containers that happened to cold-start after it). Allowlisted values
- * only, for the same reason `isImageLabLive` uses one: `=false` and `=0` are how
- * an operator says "off" in a dashboard, and a truthiness check reads both as on.
- *
- * ⚠ SERVER-SIDE ONLY. There is deliberately no `NEXT_PUBLIC_` twin — a
- * build-time public copy would be a second reader of the same switch that could
- * disagree with the server on a warm deploy (a repo-wide test pins its absence).
+ * ⚠ THE CONSENT FLAG NOW LIVES IN `./image-lab-rules`, BESIDE `isImageLabLive`.
+ * Re-exported here so the picker's existing importers are unchanged and so this
+ * module still reads as the place the gate is applied — but there is exactly one
+ * definition, and `createRun` (which must consult it too, on a path that must not
+ * import a `*-core`) reads it from the plain module.
  */
-export function isImageLabRealContentLive(): boolean {
-  const raw = process.env.IMAGE_LAB_REAL_CONTENT_LIVE?.trim().toLowerCase();
-  return raw === "1" || raw === "true";
-}
+export { isImageLabRealContentLive };
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -166,6 +159,16 @@ export type PickerContent = {
    *  "this child has no ideas", and it needs its own copy. */
   readonly docReadable: boolean;
   readonly excluded: readonly ExcludedField[];
+  /**
+   * ⚠ THE SERVER-SIGNED PROVENANCE TOKEN — the ONLY way a compose can claim these
+   * slot values came from a child (see `./source-token.ts`).
+   *
+   * The composer carries it back verbatim to `createImageLabRun`, which VERIFIES
+   * it and derives `source_child_id` from it. `source` used to be a client-
+   * asserted, optional object, which made the whole chokepoint — the re-scrub AND
+   * the consent breadcrumb — opt-in on a field a caller could simply omit.
+   */
+  readonly provenance: string;
 };
 
 export type PickerRefusal =
@@ -186,6 +189,19 @@ export type ContentPickerDeps = {
   loadSaveDoc(profileId: string): Promise<unknown>;
   /** Sale ledger rows. The loader NEVER selects `payer`. */
   loadSales(profileId: string): Promise<SaleRow[]>;
+  /**
+   * Sign the provenance this fill just resolved (`./source-token.ts`).
+   *
+   * ⚠ INJECTED RATHER THAN IMPORTED, so this stays a PLAIN module: the real
+   * implementation is `server-only` and reaches `node:crypto`, and a suite that
+   * had to load it could not run in this feature's node/no-jsdom environment
+   * without the deployment's secret.
+   */
+  mintSourceToken(provenance: {
+    childId: string;
+    ideaId: string | null;
+    taskId: string | null;
+  }): string;
   /** Overridable so tests never touch process.env. */
   isLive?: () => boolean;
 };
@@ -341,19 +357,75 @@ export function firstNameIsScrubbable(firstName: string | null | undefined): boo
   return nameTokensFor({ firstName }).length > 0;
 }
 
-/** May a match that starts here begin a word? */
-function leadingBoundaryOk(folded: string, at: number): boolean {
-  return at === 0 || !FOLDED_ALNUM.test(folded[at - 1]!);
+/**
+ * May a match that starts here begin a name?
+ *
+ * ⚠ THIS *IS* THE MIRROR OF THE TRAILING RULE, AND ITS ABSENCE WAS THE FOURTH
+ * LEAK. The compound/inflection thinking was only ever applied to the trailing
+ * side, so this was a plain "the preceding character is not alphanumeric" test
+ * with no case and no digit awareness. Verified against the shipped functions,
+ * with the whole suite green:
+ *
+ *     MayaCorp     → [name]Corp    (caught — the match starts at 0)
+ *     Maya123      → [name]123     (caught — same reason)
+ *     CardsByMaya  → LEAKED
+ *     SuperMaya    → LEAKED
+ *     TeamMaya     → LEAKED
+ *     xoxoMaya     → LEAKED
+ *     shopmaya.com → LEAKED
+ *     2Maya        → LEAKED
+ *
+ * `{{product}}` and `{{oneLiner}}` are exactly where a run-together brand name
+ * lives — `CardsByMaya`, `shopmaya.com` — which is the writing style the trailing
+ * fix was introduced for in the first place. Worse, the composer rendered its
+ * reassuring "the child's first name is removed from every slot value" note over
+ * such a prompt.
+ *
+ * So three shapes may begin a name, mirroring the three that may end one:
+ *
+ *   * a genuine boundary (` Maya`, `.Maya`, start of string);
+ *   * a COMPOUND — the ORIGINAL text starts a new capital here, after a lower-case
+ *     letter or a digit (`CardsByMaya`, `SuperMaya`, `2Maya`);
+ *   * a RUN-TOGETHER HOST OR HANDLE — the match is all lower case in the original
+ *     and so is the character before it (`shopmaya.com`, `xoxomaya`). There is no
+ *     capital to key on here, so the TRAILING rule is what keeps this from
+ *     matching the middle of an ordinary word: `banjo` survives a child called Jo
+ *     only because `banjo` is followed by nothing that ends a name… and when it is
+ *     (`banjo.`), the redaction happens. That is the module's stated trade, not an
+ *     accident — over-scrub beats under-scrub, and the preview above the Generate
+ *     button is where a staff member sees it and rewords.
+ *
+ * Like the trailing rule, the case tests read the ORIGINAL rather than the fold,
+ * because they are rules about CASE and the fold has none.
+ */
+function leadingBoundaryOk(
+  folded: FoldedText,
+  at: number,
+  original: string,
+  matchOriginal: string
+): boolean {
+  if (at === 0) return true;
+  if (!FOLDED_ALNUM.test(folded.text[at - 1]!)) return true;
+
+  const start = folded.map[at] ?? original.length;
+  const prev = original[folded.map[at - 1] ?? Math.max(0, start - 1)];
+  const first = matchOriginal[0];
+  if (prev === undefined || first === undefined) return false;
+
+  // `CardsByMaya`, `SuperMaya`, `TeamMaya`, `2Maya`.
+  if (/[a-z0-9]/.test(prev) && /[A-Z]/.test(first)) return true;
+
+  // `shopmaya.com`, `xoxomaya` — no capital anywhere to key on.
+  return /[a-z]/.test(prev) && /^[a-z]+$/.test(matchOriginal);
 }
 
 /**
  * May a match that ends here end a name?
  *
- * ⚠ THIS IS NOT THE MIRROR OF THE LEADING RULE, and the asymmetry is the fix for
- * the widest hole this scrub ever had. A plain "not followed by an alphanumeric"
- * guard left `Mayas Cards`, `MayaCorp` and `MAYA123` completely untouched — and a
- * dropped apostrophe or a camel-cased brand name is exactly how a nine-year-old
- * writes their own business name. So three shapes end a name:
+ * A plain "not followed by an alphanumeric" guard left `Mayas Cards`, `MayaCorp`
+ * and `MAYA123` completely untouched — and a dropped apostrophe or a camel-cased
+ * brand name is exactly how a nine-year-old writes their own business name. So
+ * three shapes end a name:
  *
  *   * a genuine boundary (`Maya's`, `Maya.`, `Maya `);
  *   * an INFLECTION — a trailing `s` that itself ends the word (`Mayas`);
@@ -412,10 +484,10 @@ export function scrubNames(text: string, tokens: readonly string[]): string {
       if (at === -1) break;
       from = at + 1;
       const after = at + needle.length;
-      if (!leadingBoundaryOk(folded.text, at)) continue;
-      if (!trailingBoundaryOk(folded, after, text)) continue;
       const start = folded.map[at] ?? text.length;
       const end = folded.map[after] ?? text.length;
+      if (!leadingBoundaryOk(folded, at, text, text.slice(start, end))) continue;
+      if (!trailingBoundaryOk(folded, after, text)) continue;
       if (spans.some((span) => start < span.end && end > span.start)) continue;
       spans.push({ start, end });
     }
@@ -687,11 +759,20 @@ export async function pickSlotValues(
     if (after.trim() === "") emptySlots.push(slot);
   }
 
+  const ideaId = idea?.ideaId ?? null;
+  const taskId =
+    typeof input.taskId === "string" && input.taskId !== "" ? input.taskId : null;
+
   return {
     ok: true,
     childId: child.childId,
-    ideaId: idea?.ideaId ?? null,
-    taskId: typeof input.taskId === "string" && input.taskId !== "" ? input.taskId : null,
+    ideaId,
+    taskId,
+    // ⚠ MINTED FROM WHAT THIS FUNCTION RESOLVED, never from what was asked for.
+    // The requested idea may have been substituted (`substituted`), and the token
+    // must name the idea the run will actually record — the same rule that makes
+    // the composer re-sync its select from `ideaId`.
+    provenance: deps.mintSourceToken({ childId: child.childId, ideaId, taskId }),
     slots,
     emptySlots,
     scrubbed,

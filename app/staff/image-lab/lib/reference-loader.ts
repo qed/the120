@@ -35,6 +35,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { buildResumableEndpoint } from "@/app/fp/lib/upload-rules";
 import { IMAGE_LAB_BUCKET, normalizeMimeType } from "./image-lab-rules";
+import { sniffImageType } from "./image-model-rules";
 import { type ImageLabDb } from "./image-lab-db";
 import { IMAGE_LAB_REFERENCE_PREFIX } from "./reference-rules";
 import type { ReferenceDeps, ReferenceRow } from "./reference-core";
@@ -147,10 +148,42 @@ export function referenceDeps(db: ImageLabDb): ReferenceDeps {
       const file = (data ?? []).find((f) => f.name === name);
       if (!file) return { exists: false, sizeBytes: null, contentType: null };
       const meta = (file.metadata ?? {}) as { size?: unknown; mimetype?: unknown };
+
+      // ⚠ THE BYTES ARE SNIFFED, NOT JUST THE RECORDED TYPE.
+      //
+      // The feature claims it "pins sniffed content types", and that was true of
+      // ONE of the two populations in this bucket: a generated image's type comes
+      // from `sniffImageType` over the magic bytes (Unit 2), while a REFERENCE's
+      // came from `metadata.mimetype` — which is the type THE BROWSER DECLARED at
+      // PUT and Storage recorded verbatim. A declaration is not an observation.
+      // Nothing exploitable follows today (svg is off the bucket allowlist), but
+      // the honest fix is cheap and `sniffImageType` is already in this feature:
+      // read the object's own first bytes and prefer what they say.
+      //
+      // A sniff that comes back NULL does not overrule the recorded type — a
+      // format we cannot recognize is not the same claim as a format that is
+      // wrong, and `decideReferenceRegistration` still applies the mime allowlist
+      // to whatever survives. A DISAGREEMENT is resolved in favour of the bytes.
+      let sniffed: string | null = null;
+      try {
+        const head = await db.storage.from(IMAGE_LAB_BUCKET).download(storageKey);
+        if (!head.error && head.data) {
+          sniffed = sniffImageType(new Uint8Array(await head.data.arrayBuffer()));
+        }
+      } catch (e) {
+        // A failed read here is not a failed registration: the recorded type is
+        // still vetted by the bucket's own allowed_mime_types and by the rules.
+        console.error(
+          `[image-lab/reference] byte sniff failed for ${storageKey}:`,
+          e instanceof Error ? e.name : typeof e
+        );
+      }
+
       return {
         exists: true,
         sizeBytes: typeof meta.size === "number" ? meta.size : null,
-        contentType: typeof meta.mimetype === "string" ? meta.mimetype : null,
+        contentType:
+          sniffed ?? (typeof meta.mimetype === "string" ? meta.mimetype : null),
       };
     },
 

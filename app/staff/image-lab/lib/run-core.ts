@@ -183,6 +183,24 @@ export type RunDeps = {
     isTest: boolean | null;
   } | null>;
 
+  /**
+   * Verify the picker's server-signed provenance token (`./source-token.ts`).
+   *
+   * ⚠ THIS IS WHAT REPLACED A CLIENT-ASSERTED `source` OBJECT. The chokepoint
+   * below used to be guarded by `if (input.source && input.source.childId !==
+   * null)` over an OPTIONAL field, so the re-scrub and the consent breadcrumb
+   * were both defeated by DELETING a field rather than by forging one. A caller
+   * cannot obtain filled slots without also carrying this token, and it cannot
+   * mint one.
+   */
+  verifySourceToken(token: string): {
+    ok: boolean;
+    provenance?: { childId: string; ideaId: string | null; taskId: string | null };
+  };
+
+  /** Is the consent flag on? Injected so the sequence is testable without env. */
+  isRealContentLive(): boolean;
+
   generate(request: {
     modelId: string;
     prompt: string;
@@ -204,6 +222,68 @@ export type RunDeps = {
   audit(line: string): void;
 };
 
+// ── Log discipline ───────────────────────────────────────────────────────────
+
+/**
+ * What an unknown thrown value is allowed to contribute to a log line.
+ *
+ * ⚠ NEVER THE ERROR OBJECT, AND NEVER `String(e)`. Two of the errors that reach
+ * these catches were not minted by this repo: the AI SDK's `AI_APICallError`
+ * carries `requestBodyValues` — THE PROMPT — as an own enumerable property that
+ * `console.error` inspects and prints, and postgrest-js/undici throws quote the
+ * REQUEST BODY, which for `insertRun` is `template` + `slot_values` +
+ * `resolved_prompt`. Either one puts a child's authored text into the operator
+ * log, contradicting the discipline `image-model.ts` states explicitly.
+ *
+ * ⚠ AND A BARE `e.name` IS A POOR DIAGNOSTIC. The realistic faults here are a
+ * `TypeError` ("fetch failed", with the real cause on `e.cause`) and a plain
+ * `Error`, so a name-only line degrades to the literal string "Error" — which
+ * tells an operator nothing at all. The name is therefore paired with a
+ * CLOSED-SET classification and, where present, the cause's `code` (`ECONNRESET`,
+ * `ETIMEDOUT`, `ENOTFOUND`), which is the field that actually triages.
+ */
+export type ErrorClass = "timeout" | "network" | "abort" | "unknown";
+
+const NETWORK_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EPIPE",
+  "EAI_AGAIN",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+export function classifyError(e: unknown): ErrorClass {
+  const name = e instanceof Error ? e.name : "";
+  const cause = e instanceof Error ? (e.cause as { code?: unknown } | undefined) : undefined;
+  const code = typeof cause?.code === "string" ? cause.code : "";
+  const text = `${name} ${code} ${e instanceof Error ? e.message : ""}`.toLowerCase();
+
+  if (name === "AbortError" || text.includes("abort")) return "abort";
+  if (name === "TimeoutError" || code === "UND_ERR_CONNECT_TIMEOUT" || text.includes("timeout")) {
+    return "timeout";
+  }
+  if (NETWORK_CODES.has(code) || text.includes("fetch failed") || name === "TypeError") {
+    return "network";
+  }
+  return "unknown";
+}
+
+/** The one string any catch in this module may log about a thrown value. */
+export function errorName(e: unknown): string {
+  const name = e instanceof Error ? e.name : typeof e;
+  const cause = e instanceof Error ? (e.cause as { code?: unknown } | undefined) : undefined;
+  const code = typeof cause?.code === "string" ? cause.code : null;
+  return `${name} class=${classifyError(e)}${code === null ? "" : ` cause=${code}`}`;
+}
+
+/** Does this compose carry any slot content at all? See `createRun`'s chokepoint. */
+function hasSlotContent(values: SlotValues | undefined): boolean {
+  if (!values) return false;
+  return IMAGE_LAB_SLOTS.some((slot) => (values[slot] ?? "").trim() !== "");
+}
+
 // ── 1. Create a run ──────────────────────────────────────────────────────────
 
 export type CreateRunInput = {
@@ -219,12 +299,14 @@ export type CreateRunInput = {
   note?: string;
   iteratedOnModel?: string | null;
   iteratedFromRunId?: string | null;
-  /** Provenance for a run built from a child's real content (origin R17). */
-  source?: {
-    childId: string | null;
-    ideaId: string | null;
-    taskId: string | null;
-  } | null;
+  /**
+   * The picker's SERVER-SIGNED provenance token (origin R17), verbatim.
+   *
+   * ⚠ NOT A `source` OBJECT ANY MORE. The three ids are DERIVED from this token,
+   * so a caller states nothing about which child a run was built from — see
+   * `./source-token.ts` for what that closed.
+   */
+  sourceToken?: string | null;
 };
 
 export type CreateRunResult =
@@ -250,23 +332,55 @@ export async function createRun(
   deps: RunDeps,
   input: CreateRunInput
 ): Promise<CreateRunResult> {
-  // ── THE CHOKEPOINT. Provenance is verified and the scrub is RE-RUN here,
-  //    because this — not the picker — is the last code that touches the text
-  //    before it becomes `resolved_prompt` and is sent. ────────────────────────
+  // ── THE CHOKEPOINT. Provenance is VERIFIED (not asserted) and the scrub is
+  //    RE-RUN here, because this — not the picker — is the last code that
+  //    touches the text before it becomes `resolved_prompt` and is sent. ───────
   let tokens: readonly string[] = [];
-  let source: CreateRunInput["source"] = null;
-  if (input.source && input.source.childId !== null && input.source.childId !== "") {
+  let source: {
+    childId: string;
+    ideaId: string | null;
+    taskId: string | null;
+  } | null = null;
+  const presented =
+    typeof input.sourceToken === "string" && input.sourceToken !== ""
+      ? input.sourceToken
+      : null;
+
+  if (presented !== null) {
+    // ⚠ THE CONSENT FLAG GATES THIS LEG TOO, and it did not used to.
+    // `IMAGE_LAB_REAL_CONTENT_LIVE` was read ONLY by the picker's entry points
+    // and by the composer's render — so with generation on and consent off, a
+    // stale tab or a replayed action still drove the service-role `children` /
+    // `families` lookup, stamped `source_child_id`, and logged `dbContent=true`
+    // on a deployment whose operator believed the switch was off. Both this
+    // module's and the picker's docblocks call the flag "the technical
+    // enforcement" of the consent check; this is what makes that true.
+    if (!deps.isRealContentLive()) {
+      return { ok: false, refusal: { ok: false, reason: "content_picker_off" } };
+    }
+
+    // ⚠ A TOKEN THAT DOES NOT VERIFY IS A REFUSAL, NEVER A SILENT DOWNGRADE to
+    // the unprovenanced path. Falling through would restore the exact bypass the
+    // token replaces, reachable by flipping one character.
+    const verdict = deps.verifySourceToken(presented);
+    if (!verdict.ok || !verdict.provenance) {
+      return { ok: false, refusal: { ok: false, reason: "bad_source_token" } };
+    }
+    const provenance = verdict.provenance;
+    // Belt and braces: the signature proves WE minted these ids, the pattern
+    // proves they still satisfy today's rule for the columns they land on.
     if (
-      !isRecordableSourceId(input.source.ideaId) ||
-      !isRecordableSourceId(input.source.taskId)
+      !isRecordableSourceId(provenance.ideaId) ||
+      !isRecordableSourceId(provenance.taskId)
     ) {
       return { ok: false, refusal: { ok: false, reason: "bad_source_id" } };
     }
+
     let child: Awaited<ReturnType<RunDeps["loadChildIdentity"]>>;
     try {
-      child = await deps.loadChildIdentity(input.source.childId);
+      child = await deps.loadChildIdentity(provenance.childId);
     } catch (e) {
-      console.error("[image-lab/run] source child lookup failed:", e);
+      console.error(`[image-lab/run] source child lookup failed: ${errorName(e)}`);
       return { ok: false, reason: "unavailable" };
     }
     // The SAME predicate the picker applies, on the same fail-closed posture: an
@@ -276,7 +390,22 @@ export async function createRun(
       return { ok: false, refusal: { ok: false, reason: "unknown_source_child" } };
     }
     tokens = nameTokensFor(child);
-    source = input.source;
+    source = provenance;
+  } else if (deps.isRealContentLive() && hasSlotContent(input.slotValues)) {
+    // ⚠ NO TOKEN + NON-EMPTY SLOTS + THE PICKER LIVE ⇒ REFUSED.
+    //
+    // This is the other half of "`source` must stop being optional in practice".
+    // With the picker ON, every slot value this bench serves carries a token, so
+    // a compose that presents slot content WITHOUT one is either a replay that
+    // stripped the field or a hand-typed value we cannot distinguish from a
+    // replay — and the first of those is precisely the "POST unscrubbed child
+    // prose and it is stored, sent, and invisible to the purge" case.
+    //
+    // With the picker OFF the same compose is unambiguous (no child content is in
+    // circulation at all) and is allowed, which is why the flag is in this
+    // condition. The refusal copy says all of it, because "type it into the
+    // template instead" is a real and immediate answer.
+    return { ok: false, refusal: { ok: false, reason: "unverified_slot_source" } };
   }
 
   // Belt AND braces: the picker already scrubbed what it returned, and a client
@@ -285,6 +414,14 @@ export async function createRun(
   // by a different door.
   const template = tokens.length > 0 ? scrubNames(input.template, tokens) : input.template;
   const slotValues: SlotValues = scrubSlotValues(input.slotValues, tokens);
+  // ⚠ AND THE NOTE. `note` is 2000 characters of free text written straight to a
+  // row the migration header describes as recording internal ids only, and it was
+  // the one prose field the scrub skipped EVEN WHEN THE TOKENS WERE AVAILABLE —
+  // "Maya's second attempt at the soap panel" is exactly what a staff member
+  // types there. Unit 5 closed this class for `source_idea_id`/`source_task_id`
+  // with a closed character class; free prose cannot take that treatment, so it
+  // takes the scrub instead.
+  const note = tokens.length > 0 ? scrubNames(input.note ?? "", tokens) : input.note ?? "";
 
   const decision = decideRunComposition({
     template,
@@ -305,12 +442,22 @@ export async function createRun(
     resolvedPrompt: decision.resolved.text,
     referenceIds: input.referenceIds ?? [],
     drillTags: input.drillTags ?? [],
-    note: input.note ?? "",
+    note,
     compare: decision.compare,
-    iteratedOnModel: input.iteratedOnModel ?? null,
+    // ⚠ A REGISTRY MODEL ID OR NOTHING. This was 120 free characters landing on
+    // the same row as the note — a second prose column wearing an id's name, on a
+    // table documented as holding internal ids only. `findModelEntry` is the same
+    // closed set every other model decision reads, so an unrecognized value is
+    // dropped rather than recorded (the field is a cross-reference for History,
+    // and a cross-reference to nothing is worth less than a null).
+    iteratedOnModel:
+      typeof input.iteratedOnModel === "string" && findModelEntry(input.iteratedOnModel)
+        ? input.iteratedOnModel
+        : null,
     iteratedFromRunId: input.iteratedFromRunId ?? null,
-    // ⚠ FROM THE VERIFIED `source`, never straight off the input. This is the
-    // field `usedDbContent` on the audit line is derived from.
+    // ⚠ FROM THE VERIFIED TOKEN, never off the input. This is the field
+    // `usedDbContent` on the audit line is derived from, and the field the
+    // consent-revocation purge keys on.
     sourceChildId: source?.childId ?? null,
     sourceIdeaId: source?.ideaId ?? null,
     sourceTaskId: source?.taskId ?? null,
@@ -322,7 +469,7 @@ export async function createRun(
   try {
     inserted = await deps.insertRun(run);
   } catch (e) {
-    console.error("[image-lab/run] run insert failed:", e);
+    console.error(`[image-lab/run] run insert failed: ${errorName(e)}`);
     return { ok: false, reason: "unavailable" };
   }
 
@@ -350,7 +497,7 @@ export async function createRun(
     // the client carries the SAME idempotency key, lands on the duplicate arm
     // above, and `resolveExistingRun` completes the missing cells. Doing it here
     // as well would be a second implementation of the same repair.
-    console.error("[image-lab/run] cell insert failed:", e);
+    console.error(`[image-lab/run] cell insert failed: ${errorName(e)}`);
     return { ok: false, reason: "unavailable" };
   }
 }
@@ -418,7 +565,7 @@ async function resolveExistingRun(
   try {
     existing = await deps.findRunByIdempotency(staffId, idempotencyKey);
   } catch (e) {
-    console.error("[image-lab/run] idempotency re-read failed:", e);
+    console.error(`[image-lab/run] idempotency re-read failed: ${errorName(e)}`);
     return { ok: false, reason: "unavailable" };
   }
   // A unique violation with no row behind it means the index and the table
@@ -440,7 +587,7 @@ async function resolveExistingRun(
   try {
     existingCells = await deps.listCells(existing.id);
   } catch (e) {
-    console.error("[image-lab/run] cell re-read failed:", e);
+    console.error(`[image-lab/run] cell re-read failed: ${errorName(e)}`);
     return { ok: false, reason: "unavailable" };
   }
 
@@ -451,7 +598,7 @@ async function resolveExistingRun(
     try {
       existingCells = await deps.insertCells(cellRowsFor(deps, existing.id, cells));
     } catch (e) {
-      console.error("[image-lab/run] cell repair failed:", e);
+      console.error(`[image-lab/run] cell repair failed: ${errorName(e)}`);
       return { ok: false, reason: "unavailable" };
     }
   }
@@ -487,7 +634,7 @@ export async function generateCell(
   try {
     cell = await deps.loadCell(input.imageId);
   } catch (e) {
-    console.error("[image-lab/run] cell read failed:", e);
+    console.error(`[image-lab/run] cell read failed: ${errorName(e)}`);
     return { kind: "unavailable" };
   }
   if (!cell) return { kind: "not_found" };
@@ -521,7 +668,7 @@ export async function generateCell(
   try {
     run = await deps.loadRun(cell.runId);
   } catch (e) {
-    console.error("[image-lab/run] run read failed:", e);
+    console.error(`[image-lab/run] run read failed: ${errorName(e)}`);
     return { kind: "unavailable" };
   }
   if (!run) return { kind: "not_found" };
@@ -530,7 +677,16 @@ export async function generateCell(
   // audit line would name the caller while the run names someone else.
   // `not_found` rather than a distinct refusal: there is nothing useful a caller
   // learns from being told the id exists.
-  if (run.staffId !== input.staffId) return { kind: "not_found" };
+  if (run.staffId !== input.staffId) {
+    // ⚠ REFUSED *AND LOGGED*. The refusal was silent: one staff session driving
+    // spend on another's run by id produced no line anywhere, because the
+    // generation breadcrumb is emitted post-CAS only and this branch is
+    // pre-CAS. Two staff ids and an image id — no run content, no prompt.
+    console.warn(
+      `[image-lab/run] cross-staff cell refused: caller=${input.staffId} owner=${run.staffId} image=${input.imageId}`
+    );
+    return { kind: "not_found" };
+  }
 
   // ── REFERENCES BEFORE THE CAS, and that ordering is two fixes at once ─────
   //   * a storage fault no longer CONSUMES the cell. The old order claimed the
@@ -547,7 +703,7 @@ export async function generateCell(
     } catch (e) {
       // A reference we cannot read would silently change the drill: the cell
       // would generate without the hero sheet and be scored as if it had one.
-      console.error("[image-lab/run] reference read failed:", e);
+      console.error(`[image-lab/run] reference read failed: ${errorName(e)}`);
       return { kind: "reference_unavailable" };
     }
   }
@@ -557,7 +713,7 @@ export async function generateCell(
   try {
     claimed = await deps.markAttempt(input.imageId);
   } catch (e) {
-    console.error("[image-lab/run] mark-attempt failed:", e);
+    console.error(`[image-lab/run] mark-attempt failed: ${errorName(e)}`);
     return { kind: "unavailable" };
   }
   if (claimed === null) {
@@ -596,7 +752,24 @@ export async function generateCell(
         abortSignal: input.abortSignal,
       });
     } catch (e) {
-      console.error("[image-lab/run] adapter threw across the run boundary:", e);
+      // ⚠ THE ERROR'S *NAME*, NEVER THE ERROR OBJECT. This used to be
+      // `console.error("…:", e)`, and `e` here is the ONE error in this feature
+      // this repo did not mint: the AI SDK's `AI_APICallError` carries
+      // `requestBodyValues` — THE PROMPT — as an own enumerable property, and
+      // `console.error` inspects the whole object. That put a resolved prompt,
+      // its slot values and any child-authored text inside them into the
+      // operator log, contradicting the discipline `image-model.ts` states
+      // explicitly (it logs a closed-set code and never a vendor message).
+      // ⚠ AND A BARE NAME IS NOT ENOUGH EITHER. The realistic faults on this
+      // await are a `TypeError` ("fetch failed", real cause on `e.cause`) and a
+      // plain `Error` — so a name-only line degrades to the literal string
+      // "Error" and tells an operator nothing. {@link errorName} pairs the name
+      // with a closed-set classification and the cause's `code`, which is the
+      // field that actually triages. The structured `failure_reason` on the row
+      // remains the real diagnostic.
+      console.error(
+        `[image-lab/run] adapter threw across the run boundary: ${errorName(e)}`
+      );
       result = { kind: "provider_error", detail: "unknown_error" };
     }
 
@@ -634,7 +807,7 @@ export async function generateCell(
       // origin, where a mislabelled document is an executable one.
       await deps.putObject(storageKey, result.bytes, result.contentType);
     } catch (e) {
-      console.error("[image-lab/run] storage put failed:", e);
+      console.error(`[image-lab/run] storage put failed: ${errorName(e)}`);
       return await finalizeFailure(deps, {
         run: loadedRun,
         cell: claimedCell,
@@ -673,15 +846,44 @@ export async function generateCell(
       // key. Same reasoning as the purge branch below: the key is deterministic,
       // so the object is provably this call's own. Remove it rather than
       // orphaning it, and let the `finally` write the breadcrumb.
-      console.error("[image-lab/run] finalize failed:", e);
+      //
+      // ⚠⚠ BUT "REPORTED FAILED" IS NOT "DID NOT LAND", AND DELETING ON THAT
+      // ASSUMPTION DESTROYS A LIVE IMAGE. `bounded()` in run-loader says so in
+      // its own docblock: it races a 5s wall against the query and giving up on
+      // the WAIT does not cancel the request. So the sequence that matters is —
+      // the wall elapses, we land here, and Postgres then COMMITS
+      // `state='done', storage_key=…, billed=true`. Removing the object there
+      // leaves a `done` row pointing at nothing: Unit 6 counts it as a
+      // completion, a reviewer can Keep it, `listKeptImages` serves it into the
+      // Kit as a harvestable result with no bytes behind it, and the cost is
+      // counted for an image that does not exist.
+      //
+      // A timed-out write is UNKNOWN, not failed. So we RE-READ and remove only
+      // if the row is still `requested` — the one state in which nothing will
+      // ever name this object. A re-read that itself fails leaves the object,
+      // which is the safe direction: an orphan is recoverable (the key is
+      // deterministic and names itself), a deleted live image is not.
+      console.error(`[image-lab/run] finalize failed: ${errorName(e)}`);
       trace.outcome = "finalize_failed";
+      let stillUnclaimed = false;
       try {
-        await deps.removeObject(storageKey);
-      } catch (removeError) {
+        const reread = await deps.loadCell(claimedCell.id);
+        stillUnclaimed = reread !== null && reread.state === "requested";
+      } catch (rereadError) {
         console.error(
-          `[image-lab/run] orphan cleanup failed for ${storageKey}:`,
-          removeError
+          `[image-lab/run] post-finalize re-read failed for ${storageKey}: ${errorName(rereadError)}`
         );
+      }
+      if (stillUnclaimed) {
+        try {
+          await deps.removeObject(storageKey);
+        } catch (removeError) {
+          console.error(
+            `[image-lab/run] orphan cleanup failed for ${storageKey}: ${errorName(removeError)}`
+          );
+        }
+      } else {
+        trace.outcome = "finalize_unknown";
       }
       return { kind: "unavailable" };
     }
@@ -696,7 +898,7 @@ export async function generateCell(
       try {
         await deps.removeObject(storageKey);
       } catch (e) {
-        console.error(`[image-lab/run] orphan cleanup failed for ${storageKey}:`, e);
+        console.error(`[image-lab/run] orphan cleanup failed for ${storageKey}: ${errorName(e)}`);
       }
       return { kind: "run_purged" };
     }
@@ -736,7 +938,17 @@ async function finalizeFailure(
   const reason = failureReasonForResult(input.result);
   // `generated` cannot reach here (the caller branches on it first); the guard
   // keeps that a compiler-visible fact rather than a comment.
-  if (reason === null) return { kind: "unavailable" };
+  //
+  // ⚠ THE TRACE IS STAMPED BEFORE THE EARLY RETURN. The `finally` in
+  // `generateCell` still fires on this path and would otherwise emit the DEFAULT
+  // trace — `outcome=unavailable billed=false` — on a cell whose CAS has already
+  // been claimed and whose vendor call may well have been paid for. An audit line
+  // that says "not billed" about a billed call is worse than no audit line.
+  if (reason === null) {
+    input.trace.outcome = "unexpected_generated";
+    input.trace.billed = input.forceBilled === true || isBilledOutcome(input.result);
+    return { kind: "unavailable" };
+  }
 
   // ⚠ ONE definition of "did this cost money", imported from Unit 2's pure rules.
   // A second copy here is the one duplicate this feature cannot afford: an
@@ -779,7 +991,7 @@ async function finalizeFailure(
       gatewayGenerationId: null,
     });
   } catch (e) {
-    console.error("[image-lab/run] failure finalize failed:", e);
+    console.error(`[image-lab/run] failure finalize failed: ${errorName(e)}`);
     return { kind: "unavailable" };
   }
 
@@ -845,7 +1057,7 @@ export async function retryCell(
   try {
     cell = await deps.loadCell(input.imageId);
   } catch (e) {
-    console.error("[image-lab/run] retry read failed:", e);
+    console.error(`[image-lab/run] retry read failed: ${errorName(e)}`);
     return { ok: false, outcome: { kind: "unavailable" } };
   }
   if (!cell) return { ok: false, outcome: { kind: "not_found" } };
@@ -855,10 +1067,26 @@ export async function retryCell(
   try {
     run = await deps.loadRun(cell.runId);
   } catch (e) {
-    console.error("[image-lab/run] retry run read failed:", e);
+    console.error(`[image-lab/run] retry run read failed: ${errorName(e)}`);
     return { ok: false, outcome: { kind: "unavailable" } };
   }
-  if (!run || run.staffId !== input.staffId) {
+  // ⚠ REFUSED *AND LOGGED*, AND THE TWO CAUSES ARE DISTINGUISHED. The README
+  // claimed that generate AND retry both log the cross-staff refusal; only
+  // `generateCell` did. Retry is the path that MINTS A NEW BILLABLE ROW, so if
+  // either of the two had to be the silent one it was the wrong choice — and the
+  // two causes need telling apart, because "the run vanished" is a data fault
+  // worth chasing and "someone else's run" is a refusal worth counting.
+  // Ids only: no run content, no prompt.
+  if (!run) {
+    console.warn(
+      `[image-lab/run] retry refused, no run: caller=${input.staffId} run=${cell.runId} image=${input.imageId}`
+    );
+    return { ok: false, outcome: { kind: "not_found" } };
+  }
+  if (run.staffId !== input.staffId) {
+    console.warn(
+      `[image-lab/run] cross-staff retry refused: caller=${input.staffId} owner=${run.staffId} image=${input.imageId}`
+    );
     return { ok: false, outcome: { kind: "not_found" } };
   }
 
@@ -895,7 +1123,7 @@ export async function retryCell(
     if (!appended) return { ok: false, outcome: { kind: "unavailable" } };
     return { ok: true, imageId: appended.id };
   } catch (e) {
-    console.error("[image-lab/run] retry insert failed:", e);
+    console.error(`[image-lab/run] retry insert failed: ${errorName(e)}`);
     return { ok: false, outcome: { kind: "unavailable" } };
   }
 }

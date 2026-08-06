@@ -12,6 +12,7 @@ import {
   formatCostLine,
   formatKeepRate,
   groupCells,
+  dropPartialOldestRun,
   heldOverride,
   historyFilterChips,
   historyFilterToQuery,
@@ -1114,6 +1115,68 @@ describe("the rate counts CELLS, and the iteration is reported beside it", () =>
  * complete by design — nothing is ever pruned". Asking for MORE runs showed
  * FEWER.
  */
+/**
+ * ⚠ THE CAP CUTS THE OLDEST RUN MID-RUN, AND A PARTIAL RUN IS THE WORST OUTCOME.
+ *
+ * `IMAGE_LAB_RETRY_HEADROOM = 2` is a BUDGET, not a guarantee — retry is
+ * unbounded, so a cell retried five times spends another run's allowance. With
+ * the read ordered by recency, the row the cap cuts is always in the oldest run
+ * it reached, and that run's keep rate, attempts-per-cell and cost would all be
+ * computed over a fragment with nothing on the page saying so.
+ */
+describe("dropPartialOldestRun", () => {
+  const img = (id: string, runId: string): HistoryImageRow => ({
+    id,
+    runId,
+    modelId: "gpt-image-2",
+    cellOrdinal: 0,
+    state: "done",
+    attemptedAtMs: 1,
+    createdAtMs: 1,
+    failureReason: null,
+    failureDetail: null,
+    storageKey: `k/${id}`,
+    billed: true,
+    costEstimatedUsd: 0.05,
+    costReportedUsd: null,
+    verdict: "keep",
+    verdictAtMs: 2,
+    verdictNote: "",
+  });
+
+  it("changes NOTHING when the read did not hit the cap", () => {
+    const images = [img("a", "r1"), img("b", "r2")];
+    const out = dropPartialOldestRun(images, false);
+    expect(out.images).toEqual(images);
+    expect(out.droppedRunIds).toEqual([]);
+  });
+
+  it("drops the OLDEST run WHOLE when truncated — recency order puts it last", () => {
+    const images = [img("a", "r1"), img("b", "r1"), img("c", "r2")];
+    const out = dropPartialOldestRun(images, true);
+    expect(out.droppedRunIds).toEqual(["r2"]);
+    expect(out.images.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("drops EVERY row of that run, not just the ones past the cut", () => {
+    const images = [img("a", "r1"), img("b", "r2"), img("c", "r2"), img("d", "r2")];
+    const out = dropPartialOldestRun(images, true);
+    expect(out.images.map((i) => i.runId)).toEqual(["r1"]);
+  });
+
+  it("KEEPS a lone partial run rather than emptying the page", () => {
+    // A partial single run behind a truncation banner beats a blank screen.
+    const images = [img("a", "r1"), img("b", "r1")];
+    const out = dropPartialOldestRun(images, true);
+    expect(out.images).toEqual(images);
+    expect(out.droppedRunIds).toEqual([]);
+  });
+
+  it("tolerates an empty read", () => {
+    expect(dropPartialOldestRun([], true)).toEqual({ images: [], droppedRunIds: [] });
+  });
+});
+
 describe("the image cap is DERIVED from the run limit", () => {
   it("covers every cell of every run asked for, with retry headroom", () => {
     expect(historyImageCap(IMAGE_LAB_HISTORY_RUN_LIMIT)).toBe(

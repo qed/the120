@@ -69,6 +69,13 @@ type Harness = {
   /** Hooks the tests reach into. */
   hooks: {
     generate: (request: { modelId: string }) => Promise<NormalizedImageResult>;
+    /** `IMAGE_LAB_REAL_CONTENT_LIVE`, as the core sees it. */
+    realContentLive: boolean;
+    /** The provenance verifier. */
+    verifyToken: (token: string) => {
+      ok: boolean;
+      provenance?: { childId: string; ideaId: string | null; taskId: string | null };
+    };
     beforeFinalize?: (patch: FinalizePatch) => void;
     /** The roster row `createRun` verifies `source.childId` against. */
     childIdentity?: (childId: string) => Promise<{
@@ -79,6 +86,19 @@ type Harness = {
     } | null>;
   };
 };
+
+/**
+ * A stand-in for the real HMAC token, decodable by the harness verifier.
+ *
+ * The REAL minting and verification are asserted in `source-token.test.ts`; what
+ * matters to these sequences is only that provenance ARRIVES SIGNED and is
+ * DERIVED rather than asserted, so a transparent format keeps the fixtures
+ * readable. `INVALID_SOURCE_TOKEN` is anything this cannot parse.
+ */
+const token = (childId: string, ideaId: string | null = null, taskId: string | null = null) =>
+  `tok:${childId}:${ideaId ?? ""}:${taskId ?? ""}`;
+const VALID_SOURCE_TOKEN = token("child-1", "idea-a", "1.1.2");
+const INVALID_SOURCE_TOKEN = "v1.forged.signature";
 
 const MAYA_IDENTITY = {
   firstName: "Maya",
@@ -98,11 +118,31 @@ function makeHarness(): Harness {
 
   const hooks: Harness["hooks"] = {
     generate: async () => generated(),
+    // OFF by default, exactly as production is: an ordinary manual compose must
+    // work with no token and no flag. The provenance tests turn it on.
+    realContentLive: false,
+    verifyToken: (presented) => {
+      const parts = presented.split(":");
+      if (parts[0] !== "tok" || parts.length !== 4) return { ok: false };
+      return {
+        ok: true,
+        provenance: {
+          childId: parts[1]!,
+          ideaId: parts[2] === "" ? null : parts[2]!,
+          taskId: parts[3] === "" ? null : parts[3]!,
+        },
+      };
+    },
   };
 
   const deps: RunDeps = {
     newId: () => `id-${++seq}`,
     now: () => nowMs,
+
+    // The provenance chokepoint, faked. `hooks.verifyToken` lets a test present
+    // a token that does not verify without reproducing the HMAC.
+    verifySourceToken: (token) => hooks.verifyToken(token),
+    isRealContentLive: () => hooks.realContentLive,
 
     async insertRun(row) {
       journal.push("insertRun");
@@ -346,10 +386,11 @@ describe("createRun — intent is stamped before the effect", () => {
 
   it("records source ids for a run built from a child's real content (R17)", async () => {
     const h = makeHarness();
+    h.hooks.realContentLive = true;
     const created = await createRun(
       h.deps,
       composeInput({
-        source: { childId: "child-1", ideaId: "idea-2", taskId: "1.1.2" },
+        sourceToken: token("child-1", "idea-2", "1.1.2"),
       })
     );
     if (!created.ok) return;
@@ -681,6 +722,60 @@ describe("generateCell — a purge underneath a running call", () => {
   });
 });
 
+/**
+ * ⚠ "REPORTED FAILED" IS NOT "DID NOT LAND" (C3).
+ *
+ * `bounded()` in run-loader races a 5s wall against every query and says in its
+ * own docblock that giving up on the WAIT does not cancel the request — so the
+ * caller must be safe under "reported failed, actually landed". The finalize
+ * catch was not: it deleted the object on the reasoning "the row still says
+ * requested, so no reader resolves this key", which is exactly the assumption
+ * `bounded()` forbids. A `done` row pointing at a deleted object is counted by
+ * Unit 6 as a completion, is Keep-able, and is served into the Kit as a
+ * harvestable result with nothing behind it.
+ */
+describe("a finalize that TIMES OUT but LANDS must not lose its image", () => {
+  it("KEEPS the object when the row finalized despite the throw", async () => {
+    const h = makeHarness();
+    const created = await seedOneCell(h);
+    const imageId = created.cells[0]!.id;
+    const key = `runs/${created.run.id}/${imageId}`;
+
+    // The wall elapses and the caller throws — and then Postgres commits.
+    h.hooks.beforeFinalize = () => {
+      const row = h.cells.get(imageId)!;
+      h.cells.set(imageId, { ...row, state: "done", storageKey: key, billed: true });
+      throw new Error("finalize did not answer within 5000ms");
+    };
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId });
+    expect(outcome).toEqual({ kind: "unavailable" });
+    expect(h.journal).toContain("putObject");
+    // ⚠ THE ASSERTION. The row is `done` and names this key, so the bytes stay.
+    expect(h.journal).not.toContain("removeObject");
+    expect(h.objects.has(key)).toBe(true);
+    expect(h.cells.get(imageId)!.state).toBe("done");
+  });
+
+  it("STILL removes the object when the row is genuinely untouched", async () => {
+    // The other half: a finalize that threw and did NOT land leaves a row still
+    // `requested`, which nothing will ever resolve — so the orphan goes.
+    const h = makeHarness();
+    const created = await seedOneCell(h);
+    const imageId = created.cells[0]!.id;
+    const key = `runs/${created.run.id}/${imageId}`;
+
+    h.hooks.beforeFinalize = () => {
+      throw new Error("connection reset");
+    };
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId });
+    expect(outcome).toEqual({ kind: "unavailable" });
+    expect(h.journal).toContain("removeObject");
+    expect(h.objects.has(key)).toBe(false);
+  });
+});
+
 describe("generateCell — the go-live flag", () => {
   it("with IMAGE_LAB_LIVE unset, NOTHING reaches a vendor and the row records unconfigured", async () => {
     const h = makeHarness();
@@ -719,9 +814,10 @@ describe("generateCell — the go-live flag", () => {
 describe("generateCell — the audit breadcrumb", () => {
   it("notes DB-content use and carries no prompt body, slot value or child field", async () => {
     const h = makeHarness();
+    h.hooks.realContentLive = true;
     const created = await seedOneCell(h, {
       slotValues: { product: "secret sticker packs" },
-      source: { childId: "child-1", ideaId: "idea-1", taskId: "1.1.2" },
+      sourceToken: token("child-1", "idea-1", "1.1.2"),
     });
 
     await generateCell(h.deps, { staffId: "staff-1", imageId: created.cells[0]!.id });
@@ -752,18 +848,25 @@ describe("generateCell — the audit breadcrumb", () => {
 // ── The chokepoint: provenance and the scrub on the PAID path ────────────────
 
 describe("createRun verifies provenance and RE-SCRUBS server-side", () => {
+  // Every test in this block presents provenance, which the consent flag gates.
+  const liveHarness = () => {
+    const h = makeHarness();
+    h.hooks.realContentLive = true;
+    return h;
+  };
+
   it("removes the child's name from CLIENT-SUPPLIED slot values before resolving", async () => {
     // ⚠ THE SCRUB USED TO BE ADVISORY UI BEHAVIOUR. The prompt that reaches a
     // vendor is assembled HERE, from whatever slot values the client posted — so
     // a stale tab, a replayed action or a compromised session could send
     // unscrubbed child prose and still stamp `source.childId` on it.
-    const h = makeHarness();
+    const h = liveHarness();
     const created = await createRun(
       h.deps,
       composeInput({
         template: "Draw {{product}} for Maya",
         slotValues: { product: "Maya's Street Cards" },
-        source: { childId: "child-1", ideaId: "idea-a", taskId: null },
+        sourceToken: token("child-1", "idea-a"),
       })
     );
     expect(created.ok).toBe(true);
@@ -777,10 +880,10 @@ describe("createRun verifies provenance and RE-SCRUBS server-side", () => {
   });
 
   it("REFUSES an unknown source child, and writes nothing", async () => {
-    const h = makeHarness();
+    const h = liveHarness();
     const created = await createRun(
       h.deps,
-      composeInput({ source: { childId: "child-nope", ideaId: null, taskId: null } })
+      composeInput({ sourceToken: token("child-nope") })
     );
     expect(created.ok).toBe(false);
     if (created.ok || !("refusal" in created)) return;
@@ -790,11 +893,11 @@ describe("createRun verifies provenance and RE-SCRUBS server-side", () => {
   });
 
   it("REFUSES a test family's child, on the same predicate the picker uses", async () => {
-    const h = makeHarness();
+    const h = liveHarness();
     h.hooks.childIdentity = async () => ({ ...MAYA_IDENTITY, isTest: true });
     const created = await createRun(
       h.deps,
-      composeInput({ source: { childId: "child-1", ideaId: null, taskId: null } })
+      composeInput({ sourceToken: token("child-1") })
     );
     expect(created.ok).toBe(false);
     if (created.ok || !("refusal" in created)) return;
@@ -804,11 +907,11 @@ describe("createRun verifies provenance and RE-SCRUBS server-side", () => {
   it("REFUSES a source id that is not an id", async () => {
     // `source_idea_id`/`source_task_id` are documented "internal ids ONLY —
     // never a name", and arrived as free 200-character client strings.
-    const h = makeHarness();
+    const h = liveHarness();
     const created = await createRun(
       h.deps,
       composeInput({
-        source: { childId: "child-1", ideaId: "Maya Chen's second idea", taskId: null },
+        sourceToken: token("child-1", "Maya Chen's second idea"),
       })
     );
     expect(created.ok).toBe(false);
@@ -817,11 +920,123 @@ describe("createRun verifies provenance and RE-SCRUBS server-side", () => {
     expect(h.runs.size).toBe(0);
   });
 
-  it("records source ids ONLY from the verified lookup", async () => {
+  /**
+   * ⚠ THE BYPASS THAT REPLACED THE FORGERY: DELETE THE FIELD.
+   *
+   * The whole chokepoint used to be `if (input.source && input.source.childId !==
+   * null)`, over a `.nullable().optional()` schema field. So the threat model the
+   * docblock names — "a stale tab, a replayed action or a compromised session
+   * could POST unscrubbed child prose" — was defeated by OMITTING a field rather
+   * than forging one, which is strictly easier. The run was then written with the
+   * prose intact, `source_child_id` null, `dbContent=false` in the audit line
+   * over a real child's pitch, and the row INVISIBLE to the consent-revocation
+   * purge, which keys on `source_child_id`.
+   */
+  it("REFUSES picker-shaped child prose posted with NO token, and stores nothing", async () => {
+    const h = liveHarness();
+    const created = await createRun(
+      h.deps,
+      composeInput({
+        template: "Draw {{product}}. Pitch: {{pitch}}",
+        slotValues: {
+          product: "Maya's Street Cards",
+          pitch: "Hi, I'm Maya, and I make collectible cards.",
+        },
+        sourceToken: null,
+      })
+    );
+
+    expect(created.ok).toBe(false);
+    if (created.ok || !("refusal" in created)) return;
+    expect(created.refusal.reason).toBe("unverified_slot_source");
+    // ⚠ THE ASSERTION THAT MATTERS IS ON THE STORE. Nothing was written, so there
+    // is no `resolved_prompt` carrying a child's name and no row for the purge to
+    // miss.
+    expect(h.runs.size).toBe(0);
+    expect(h.cells.size).toBe(0);
+    expect([...h.runs.values()].map((r) => r.resolvedPrompt)).toEqual([]);
+    // …and the roster was never touched either.
+    expect(h.journal).not.toContain("loadChildIdentity");
+  });
+
+  it("REFUSES a token that does not verify — NEVER a silent downgrade", async () => {
+    // Falling through to the unprovenanced path here would restore the exact
+    // bypass the token replaces, reachable by flipping one character.
+    const h = liveHarness();
+    const created = await createRun(
+      h.deps,
+      composeInput({ sourceToken: INVALID_SOURCE_TOKEN })
+    );
+    expect(created.ok).toBe(false);
+    if (created.ok || !("refusal" in created)) return;
+    expect(created.refusal.reason).toBe("bad_source_token");
+    expect(h.runs.size).toBe(0);
+  });
+
+  it("REFUSES provenance while the CONSENT FLAG is off (C6)", async () => {
+    // `IMAGE_LAB_REAL_CONTENT_LIVE` gated only the picker's entry points and the
+    // composer's render — so with generation on and consent OFF, a stale tab still
+    // drove the service-role roster lookup, stamped `source_child_id` and logged
+    // `dbContent=true` on a deployment whose operator believed the switch was off.
+    const h = makeHarness(); // flag off, as production is by default
+    const created = await createRun(h.deps, composeInput({ sourceToken: VALID_SOURCE_TOKEN }));
+    expect(created.ok).toBe(false);
+    if (created.ok || !("refusal" in created)) return;
+    expect(created.refusal.reason).toBe("content_picker_off");
+    expect(h.runs.size).toBe(0);
+    expect(h.journal).not.toContain("loadChildIdentity");
+  });
+
+  it("still allows a HAND-TYPED slot compose while the picker is off", async () => {
+    // The refusal above must not break the manual path on a deployment where no
+    // child content is in circulation at all — which is what the flag tells us.
     const h = makeHarness();
     const created = await createRun(
       h.deps,
-      composeInput({ source: { childId: "child-1", ideaId: "idea-a", taskId: "1.1.2" } })
+      composeInput({ slotValues: { product: "kites" } })
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.run.resolvedPrompt).toBe("Draw kites");
+    expect(created.run.sourceChildId).toBeNull();
+  });
+
+  it("SCRUBS the note as well — it is prose on the same row (P2 #12)", async () => {
+    const h = liveHarness();
+    const created = await createRun(
+      h.deps,
+      composeInput({
+        note: "Maya's second attempt at the soap panel",
+        sourceToken: VALID_SOURCE_TOKEN,
+      })
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.run.note).not.toMatch(/maya/i);
+  });
+
+  it("records `iteratedOnModel` ONLY when it is a registry model id (P2 #12)", async () => {
+    const h = makeHarness();
+    const bad = await createRun(
+      h.deps,
+      composeInput({ iteratedOnModel: "Maya said this one looked best" })
+    );
+    if (!bad.ok) return;
+    expect(bad.run.iteratedOnModel).toBeNull();
+
+    const good = await createRun(
+      h.deps,
+      composeInput({ idempotencyKey: "k-good", iteratedOnModel: "gpt-image-2" })
+    );
+    if (!good.ok) return;
+    expect(good.run.iteratedOnModel).toBe("gpt-image-2");
+  });
+
+  it("records source ids ONLY from the verified lookup", async () => {
+    const h = liveHarness();
+    const created = await createRun(
+      h.deps,
+      composeInput({ sourceToken: token("child-1", "idea-a", "1.1.2") })
     );
     if (!created.ok) return;
     expect(created.run.sourceChildId).toBe("child-1");
@@ -1141,6 +1356,74 @@ describe("a run belongs to the staff member who composed it", () => {
     if (result.ok) return;
     expect(result.outcome.kind).toBe("not_found");
     expect(h.cells.size).toBe(1);
+  });
+});
+
+/**
+ * LOG DISCIPLINE (origin R12; Unit 7's sweep, fixed in Unit 5's home).
+ *
+ * Two holes the sweep found and these assertions hold shut:
+ *   * the adapter's own throw was logged as an OBJECT, and the AI SDK's
+ *     `AI_APICallError` carries `requestBodyValues` — the prompt — as an own
+ *     enumerable property that `console.error` inspects and prints;
+ *   * the cross-staff refusal was completely silent.
+ */
+describe("log discipline on the paid path", () => {
+  const SECRET_PROMPT = "Luna's Lavender Soap, a twelve-year-old founder at the market";
+
+  it("NEVER logs the adapter's error object — a thrown APICallError carries the prompt", async () => {
+    const h = makeHarness();
+    const created = await seedOneCell(h);
+    // Exactly the shape the AI SDK throws: the prompt hangs off the error as an
+    // own enumerable property, so `console.error("…", e)` prints it.
+    h.hooks.generate = async () => {
+      const e = new Error("Bad Request") as Error & { requestBodyValues?: unknown };
+      e.name = "AI_APICallError";
+      e.requestBodyValues = { prompt: SECRET_PROMPT };
+      throw e;
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const outcome = await generateCell(h.deps, {
+        staffId: "staff-1",
+        imageId: created.cells[0]!.id,
+      });
+      expect(outcome.kind).toBe("failed");
+      const logged = spy.mock.calls.flat().map((arg) => JSON.stringify(arg)).join(" ");
+      expect(logged).not.toContain("Luna");
+      expect(logged).not.toContain("requestBodyValues");
+      // Only ONE argument, and it is a string — an object argument is the bug.
+      for (const call of spy.mock.calls) {
+        expect(call).toHaveLength(1);
+        expect(typeof call[0]).toBe("string");
+      }
+      // The name still reaches the operator, which is the whole diagnostic value.
+      expect(logged).toContain("AI_APICallError");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("LOGS the cross-staff refusal — it used to be silent", async () => {
+    const h = makeHarness();
+    const created = await seedOneCell(h);
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const outcome = await generateCell(h.deps, {
+        staffId: "staff-2",
+        imageId: created.cells[0]!.id,
+      });
+      expect(outcome.kind).toBe("not_found");
+      const logged = spy.mock.calls.flat().join(" ");
+      expect(logged).toContain("cross-staff");
+      expect(logged).toContain("staff-2");
+      expect(logged).toContain("staff-1");
+      // Ids only — the run's template and resolved prompt are in scope here and
+      // must not ride along.
+      expect(logged).not.toContain(created.run.resolvedPrompt);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

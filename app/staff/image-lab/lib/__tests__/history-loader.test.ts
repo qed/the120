@@ -404,15 +404,30 @@ describe("the count describes the SAME population as the list", () => {
  * and reordered itself between reloads with no data change.
  */
 describe("reads are ordered, bounded, and pointed at the right table", () => {
-  it("orders images by (run_id, cell_ordinal, created_at) with an id tiebreak", async () => {
+  it("orders images by RECENCY FIRST, then (run_id, cell_ordinal, id)", async () => {
+    // ⚠ THE PRIMARY KEY IS `created_at DESC`, AND THE CAP IS WHY. This read used
+    // to order by `run_id ASC` and then limit — and `run_id` is a v4 uuid, RANDOM
+    // WITH RESPECT TO TIME. So "the newest N attempts" in the truncation banner
+    // described the newest of nothing: whichever runs sorted at the high-uuid end
+    // came back with ZERO images and were then pruned by `withImages`, off a page
+    // whose own copy says nothing is ever pruned.
+    //
+    // Cells of one run share `created_at` byte-for-byte, so this orders RUNS by
+    // recency and leaves the within-run order to the migration's own index keys.
     const { db, calls } = fakeDb();
     await historyDeps(db).listImagesForRuns(["run-1"], 500);
-    expect(called(calls, "order").map((c) => c.args[0])).toEqual([
+    const orders = called(calls, "order");
+    expect(orders.map((c) => c.args[0])).toEqual([
+      "created_at",
       "run_id",
       "cell_ordinal",
-      "created_at",
       "id",
     ]);
+    // DESC on the recency key, ASC on the three that resolve ties within a run.
+    expect(orders[0]!.args[1]).toEqual({ ascending: false });
+    for (const order of orders.slice(1)) {
+      expect(order.args[1]).toEqual({ ascending: true });
+    }
     expect(called(calls, "from")[0]!.args).toEqual(["fp_image_lab_images"]);
     expect(called(calls, "in")[0]!.args).toEqual(["run_id", ["run-1"]]);
   });

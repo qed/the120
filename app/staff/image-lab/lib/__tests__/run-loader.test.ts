@@ -266,6 +266,72 @@ describe("insertRun maps the unique violation, and only that", () => {
     const { db } = fakeDb({ data: null, error: { code: "42501", message: "denied" } });
     await expect(runDeps(db).insertRun(row)).rejects.toThrow(/insertRun/);
   });
+
+  /**
+   * ⚠ THE LOG-LEAK FIX WAS HALF DONE, AND THE HALF THAT SHIPPED WAS UNTESTED.
+   *
+   * Two branches produce the message that `run-core` then logs:
+   *
+   *   * THE THROW branch inside `bounded()` — sanitized in Unit 7, but reverting
+   *     that sanitization left the WHOLE SUITE GREEN, because nothing made the
+   *     underlying call reject. The second test below is that missing test.
+   *   * THE IN-BAND branch — and postgrest reports in band, so this is the
+   *     ORDINARY failure path. `insertRun(id) failed: ${error.message}`
+   *     interpolated the vendor's own string for the ONE query whose body holds
+   *     `template`, `slot_values` and `resolved_prompt`, and postgrest quotes
+   *     offending values back.
+   */
+  const CHILD_PROSE = "Hi, I'm Maya, and I make collectible cards.";
+
+  it("NEVER interpolates the postgrest MESSAGE — the in-band leak", async () => {
+    const { db } = fakeDb({
+      data: null,
+      error: {
+        code: "22001",
+        // Exactly what postgrest does: it quotes the offending value back.
+        message: `value too long for type character varying(8000): "${CHILD_PROSE}"`,
+        details: CHILD_PROSE,
+      },
+    });
+    await expect(
+      runDeps(db).insertRun({ ...row, template: CHILD_PROSE, resolvedPrompt: CHILD_PROSE })
+    ).rejects.toThrow(
+      // The CODE reaches the operator — it is the field anyone triages on.
+      /insertRun\(run-1\) failed: 22001/
+    );
+    // …and the child's words do not.
+    await runDeps(db)
+      .insertRun(row)
+      .catch((e: unknown) => {
+        expect(String((e as Error).message)).not.toContain("Maya");
+        expect(String((e as Error).message)).not.toContain("collectible");
+      });
+  });
+
+  it("NEVER stringifies a THROWN value either — the branch that had no test", async () => {
+    // The uncontrolled throw from postgrest-js/undici. `String(e)` here put the
+    // whole request body — the resolved prompt — into the message.
+    const thrower = {
+      from() {
+        throw Object.assign(new Error(`fetch failed sending {"template":"${CHILD_PROSE}"}`), {
+          cause: { code: "ECONNRESET" },
+        });
+      },
+    } as unknown as ImageLabDb;
+
+    await runDeps(thrower)
+      .insertRun(row)
+      .catch((e: unknown) => {
+        const message = String((e as Error).message);
+        expect(message).not.toContain("Maya");
+        expect(message).not.toContain("template");
+        // A NAME alone degrades to the literal "Error"; the classification and
+        // the cause code are what an operator can actually act on.
+        expect(message).toMatch(/class=network/);
+        expect(message).toMatch(/cause=ECONNRESET/);
+      });
+    expect.hasAssertions();
+  });
 });
 
 // ── Storage ──────────────────────────────────────────────────────────────────

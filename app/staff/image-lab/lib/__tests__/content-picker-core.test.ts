@@ -60,6 +60,9 @@ function makeDeps(over: Partial<ContentPickerDeps> = {}): ContentPickerDeps {
     findChild: async (id) => (id === MAYA.childId ? MAYA : null),
     loadSaveDoc: async () => doc(),
     loadSales: async () => [],
+    // A deterministic stand-in for the HMAC. The real minting is asserted in
+    // `source-token.test.ts`; here it only has to be a value the fill carries.
+    mintSourceToken: (p) => `tok:${p.childId}:${p.ideaId ?? ""}:${p.taskId ?? ""}`,
     ...over,
   };
 }
@@ -295,6 +298,44 @@ describe("the child's own name and username are scrubbed", () => {
     expect(
       scrubNames("Sofia’s Bakery and Sofias Bakery and SofiaRossi", sofia)
     ).not.toMatch(/sofia/i);
+  });
+
+  /**
+   * ⚠ THE FOURTH LEAK, AND THE SUITE'S OWN BLIND SPOT IS WHY IT SURVIVED.
+   *
+   * The compound/inflection rule was only ever added to the TRAILING side, and
+   * every fixture above is a trailing-side fixture — so `leadingBoundaryOk` stayed
+   * a plain "the preceding character is not alphanumeric" test with no case and no
+   * digit awareness, and a token preceded by an alphanumeric was rejected
+   * outright. Verified against the shipped functions with the whole suite green:
+   * `MayaCorp` and `Maya123` were caught (they start at index 0) while
+   * `CardsByMaya`, `SuperMaya`, `TeamMaya`, `xoxoMaya`, `shopmaya.com` and
+   * `2Maya` ALL LEAKED — and `{{product}}` / `{{oneLiner}}` are exactly where a
+   * run-together brand name lives.
+   */
+  it.each([
+    ["CardsByMaya", "a capital after a lower-case letter"],
+    ["SuperMaya", "a compound with a prefix"],
+    ["TeamMaya", "the same, one word"],
+    ["xoxoMaya", "a handle-shaped prefix"],
+    ["shopmaya.com", "an all-lower-case run-together host"],
+    ["2Maya", "a capital after a DIGIT"],
+  ])("removes the name from %s (%s) — the leading-side leaks", (text) => {
+    const maya = nameTokensFor({ firstName: "Maya" });
+    expect(scrubNames(text, maya), text).not.toMatch(/maya/i);
+    expect(scrubNames(text, maya), text).toContain(IMAGE_LAB_NAME_REDACTION);
+  });
+
+  it("still leaves ordinary words alone — over-scrub is the trade, not the goal", () => {
+    // The TRAILING rule is what keeps the new leading clauses from eating the
+    // middle of a word: `sample` survives a child called Sam because `p` is
+    // neither a boundary, an inflecting `s`, a capital nor a digit.
+    expect(scrubNames("a free sample", nameTokensFor({ firstName: "Sam" }))).toBe(
+      "a free sample"
+    );
+    expect(scrubNames("Chenille cushions", nameTokensFor({ lastName: "Chen" }))).toBe(
+      "Chenille cushions"
+    );
   });
 
   it("scrubs a NON-LATIN given name, where the two-character floor is meaningless", () => {

@@ -8,7 +8,7 @@ symptoms:
   - "A child's own name survives redaction inside their business name — 'Mayas Cards' and 'MayaCorp' both pass"
   - "A non-Latin given name produces zero redaction tokens, so the scrub is a complete no-op while the UI says it ran"
   - "An accented name in the prose and an unaccented one on the roster never match"
-root_cause: boundary_rule_too_strict_and_ascii_only
+root_cause: incorrect_assumption
 resolution_type: code_fix
 tags:
   - pii-redaction

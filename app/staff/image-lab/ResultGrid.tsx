@@ -23,7 +23,9 @@
 import {
   buildGrid,
   canRetryCell,
+  cellAttemptName,
   cellRenderState,
+  describeAttemptLine,
   formatUsd,
   newestAttempt,
   IMAGE_LAB_RUN_COPY,
@@ -109,8 +111,24 @@ export function ResultGrid({
             <ul className="mt-3 flex flex-col gap-3">
               {cell.attempts.map((attempt, index) => {
                 const attemptState = cellRenderState(attempt, serverNowMs);
+                // ⚠ NAMED BY ATTEMPT, not just by cell. `cell.attempts` is
+                // NEWEST FIRST, so the newest is attempt N of N — every stacked
+                // picture here used to carry the byte-identical `alt`, which is
+                // the same bug Unit 6 fixed on History. One rule, both surfaces.
+                const ordinal = {
+                  index: cell.attempts.length - index,
+                  of: cell.attempts.length,
+                };
+                const attemptName = cellAttemptName(
+                  cell.modelId,
+                  cell.cellOrdinal,
+                  ordinal
+                );
+                const attemptLine = describeAttemptLine(ordinal);
                 return (
-                  <li key={attempt.id} className="flex flex-col gap-1">
+                  // Named on the LIST ITEM too, so the placeholder branch below
+                  // (which has no `alt` to carry it) is distinguishable as well.
+                  <li key={attempt.id} aria-label={attemptName} className="flex flex-col gap-1">
                     {attempt.signedUrl ? (
                       // Plain <img>: a short-lived SIGNED URL on a private bucket
                       // cannot be a stable `next/image` remote pattern, and the
@@ -118,7 +136,7 @@ export function ResultGrid({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={attempt.signedUrl}
-                        alt={`${cell.modelId} candidate ${cell.cellOrdinal + 1}`}
+                        alt={attemptName}
                         className="aspect-square w-full rounded-lg object-cover"
                       />
                     ) : (
@@ -143,7 +161,9 @@ export function ResultGrid({
                           ? null
                           : formatUsd(attempt.costReportedUsd)
                       )}
-                      {index > 0 ? " · earlier attempt" : ""}
+                      {/* ⚠ ONE RULE, not a second hand-built copy of the
+                          numbering `cellAttemptName` already encodes. */}
+                      {attemptLine === "" ? "" : ` · ${attemptLine}`}
                     </span>
                   </li>
                 );

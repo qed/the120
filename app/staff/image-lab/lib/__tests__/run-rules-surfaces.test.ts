@@ -3,18 +3,22 @@ import {
   buildGrid,
   canRetryCell,
   cellRenderState,
+  cellsFingerprint,
   clockOffsetFor,
   hashSignature,
   idempotencyStorageKey,
   isRecordableSourceId,
   modelIdsFromCells,
   newestAttempt,
+  releaseIdempotencyKey,
   resolveIdempotencyKey,
   runWithConcurrency,
   serverNowFrom,
   shouldPollCells,
+  IMAGE_LAB_CELL_POLL_MS,
   IMAGE_LAB_CLIENT_FAN_CONCURRENCY,
   IMAGE_LAB_MAX_CELLS_PER_RUN,
+  IMAGE_LAB_MAX_IDLE_POLLS,
   IMAGE_LAB_PRE_ADAPTER_BUDGET_MS,
   IMAGE_LAB_RUN_COPY,
   type CellRow,
@@ -177,12 +181,126 @@ describe("a billed-unknown caller abort is gated like an in-flight cell", () => 
   });
 });
 
+/**
+ * ⚠ THE RETRY GUARD WAS ON THE WRONG CAUSE (C4).
+ *
+ * It keyed on `failureDetail === "caller_aborted" && billed === true` — but the
+ * Unit 2 taxonomy classifies `caller_aborted` as NOT billed and `adapter_timeout`
+ * as billed BY DEFINITION ("our AbortSignal fired: the vendor was still
+ * working"). So the billed, provably-still-running case was instantly retryable
+ * and the unbilled one was held for ten minutes. The reasoning quoted for the
+ * guarded case is strictly MORE true of the unguarded one.
+ */
+describe("retry is held for a BILLED TIMEOUT, whatever its detail", () => {
+  const now = 10_000_000;
+  const failedTimeout = (over: Record<string, unknown> = {}) => ({
+    state: "failed" as const,
+    createdAtMs: now - 1000,
+    attemptedAtMs: now - 1000,
+    failureReason: "timeout" as const,
+    failureDetail: "adapter_timeout",
+    billed: true,
+    ...over,
+  });
+
+  it("HOLDS an adapter_timeout that billed — the gpt-image-2 240s abort", () => {
+    // The reproduction: the row lands failed/timeout/adapter_timeout/billed/$0.21,
+    // Retry lit up at once, the staff member clicked, and the original call
+    // completed and billed. Two charges, one intent.
+    expect(canRetryCell(failedTimeout(), now)).toBe(false);
+  });
+
+  it("HOLDS a billed caller_aborted too — the case that WAS guarded", () => {
+    expect(canRetryCell(failedTimeout({ failureDetail: "caller_aborted" }), now)).toBe(false);
+  });
+
+  it("OPENS once the staleness window has passed", () => {
+    expect(canRetryCell(failedTimeout(), now + IMAGE_LAB_STALE_AFTER_MS + 1)).toBe(true);
+  });
+
+  it("does NOT hold an UNBILLED timeout — nothing was paid for", () => {
+    expect(canRetryCell(failedTimeout({ billed: false }), now)).toBe(true);
+  });
+
+  it("does NOT hold a settled vendor answer, however it failed", () => {
+    // A provider_error or a safety_blocked is a finished conversation: there is
+    // no call still running for a retry to double.
+    for (const reason of ["provider_error", "safety_blocked", "unconfigured"] as const) {
+      expect(
+        canRetryCell(failedTimeout({ failureReason: reason, failureDetail: null }), now),
+        reason
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * ⚠ THE POLL WAS UNBOUNDED, AND A RUN CAN BE PERMANENTLY WEDGED (C8).
+ *
+ * A run naming a reference whose OBJECT has gone fails loud before the CAS, so
+ * every attempt returns `reference_unavailable` with the cell untouched —
+ * `requested`, `attempted_at` NULL, forever. Nothing can repair it: the reference
+ * row is append-only and `reference_ids` is snapshotted with no edit path.
+ */
+describe("the cell poll is BOUNDED", () => {
+  const wedged = [
+    { state: "requested" as const, attemptedAtMs: null, createdAtMs: 0, id: "a" },
+  ];
+
+  it("polls while something is non-final and the picture keeps changing", () => {
+    expect(shouldPollCells(wedged, 0)).toBe(true);
+    expect(shouldPollCells(wedged, IMAGE_LAB_MAX_IDLE_POLLS - 1)).toBe(true);
+  });
+
+  it("STOPS after enough consecutive unchanged reads", () => {
+    expect(shouldPollCells(wedged, IMAGE_LAB_MAX_IDLE_POLLS)).toBe(false);
+  });
+
+  it("still stops immediately when everything is final", () => {
+    expect(
+      shouldPollCells([{ state: "done", attemptedAtMs: 1, createdAtMs: 0 }], 0)
+    ).toBe(false);
+  });
+
+  it("the bound outlasts the whole staleness window", () => {
+    // A genuinely pending cell DOES change at the end of it — the derived `stale`
+    // label flips and Retry appears — so the bound must not fire first.
+    expect(IMAGE_LAB_MAX_IDLE_POLLS * IMAGE_LAB_CELL_POLL_MS).toBeGreaterThan(
+      IMAGE_LAB_STALE_AFTER_MS
+    );
+  });
+
+  it("the fingerprint ignores a re-minted signed URL, and sees a state change", () => {
+    // Comparing whole rows would count every poll as a change and make the bound
+    // unreachable, which is the failure this exists to avoid.
+    const a = [{ id: "x", state: "requested", attemptedAtMs: null }];
+    const b = [{ id: "x", state: "requested", attemptedAtMs: null }];
+    expect(cellsFingerprint(a)).toBe(cellsFingerprint(b));
+    expect(cellsFingerprint(a)).not.toBe(
+      cellsFingerprint([{ id: "x", state: "done", attemptedAtMs: 5 }])
+    );
+    // Order-independent: the loader's ordering is not a change.
+    expect(
+      cellsFingerprint([
+        { id: "a", state: "done", attemptedAtMs: 1 },
+        { id: "b", state: "failed", attemptedAtMs: 2 },
+      ])
+    ).toBe(
+      cellsFingerprint([
+        { id: "b", state: "failed", attemptedAtMs: 2 },
+        { id: "a", state: "done", attemptedAtMs: 1 },
+      ])
+    );
+  });
+});
+
 describe("the idempotency key survives a remount", () => {
   const makeStore = (): IdempotencyStore => {
     const data = new Map<string, string>();
     return {
       get: (key) => data.get(key) ?? null,
       set: (key, value) => void data.set(key, value),
+      clear: (key) => void data.delete(key),
     };
   };
 
@@ -223,8 +341,57 @@ describe("the idempotency key survives a remount", () => {
     expect(hashSignature("a")).not.toBe(hashSignature("b"));
   });
 
+  /**
+   * ⚠ AND NOTHING EVER CLEARED IT, SO THE SAME PROMPT COULD NEVER BE RUN TWICE
+   * IN A SESSION — WHICH IS THE CONSISTENCY DRILL (C5).
+   *
+   * The signature carries no nonce, so pressing Generate again on an UNCHANGED
+   * composition — the standard variance check, and the whole basis of R11's "this
+   * hero sheet across N runs" — resent the same key, collided with the unique
+   * index, returned the existing run as a duplicate, and fanned ZERO cells. The
+   * only escape a user finds by experiment is editing the template, which changes
+   * the one thing the drill holds constant.
+   */
+  it("a SECOND compose of an unchanged composition mints a NEW key once released", () => {
+    const store = makeStore();
+    const signature = JSON.stringify(["Draw {{product}}", { product: "kites" }, ["a"], 4]);
+    let minted = 0;
+    const mint = () => `key-${++minted}`;
+
+    const first = resolveIdempotencyKey(store, signature, mint);
+    // …the server answers, so the resubmit window this key covers is over.
+    releaseIdempotencyKey(store, signature);
+    const second = resolveIdempotencyKey(store, signature, mint);
+
+    expect(second).not.toBe(first);
+    expect(minted).toBe(2);
+  });
+
+  it("the key STILL covers the resubmit window before the answer arrives", () => {
+    // The release happens only once `createImageLabRun` has answered. Until then
+    // a reload or a second tab must land on the same key, or the bench pays twice.
+    const store = makeStore();
+    const signature = "sig";
+    let minted = 0;
+    const mint = () => `key-${++minted}`;
+    expect(resolveIdempotencyKey(store, signature, mint)).toBe(
+      resolveIdempotencyKey(store, signature, mint)
+    );
+    expect(minted).toBe(1);
+  });
+
+  it("releasing one signature leaves another alone", () => {
+    const store = makeStore();
+    let minted = 0;
+    const mint = () => `key-${++minted}`;
+    const a = resolveIdempotencyKey(store, "A", mint);
+    resolveIdempotencyKey(store, "B", mint);
+    releaseIdempotencyKey(store, "B");
+    expect(resolveIdempotencyKey(store, "A", mint)).toBe(a);
+  });
+
   it("degrades to a fresh key when the store cannot hold anything", () => {
-    const dead: IdempotencyStore = { get: () => null, set: () => {} };
+    const dead: IdempotencyStore = { get: () => null, set: () => {}, clear: () => {} };
     let minted = 0;
     const mint = () => `key-${++minted}`;
     expect(resolveIdempotencyKey(dead, "sig", mint)).toBe("key-1");

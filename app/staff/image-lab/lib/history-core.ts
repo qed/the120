@@ -51,6 +51,7 @@ import {
   decideNoteWrite,
   decideTagWrite,
   decideVerdictWrite,
+  dropPartialOldestRun,
   filterHistory,
   perModelStats,
   projectImageView,
@@ -142,6 +143,7 @@ export type HistoryView = {
    * listed. Surfaced as a banner; never silently pruned.
    */
   readonly imagesTruncated: boolean;
+  readonly droppedRunIds: readonly string[];
   readonly imageCap: number;
 };
 
@@ -193,10 +195,17 @@ export async function loadHistoryView(
     return { ok: false, reason: "unavailable" };
   }
 
+  // ⚠ A TRUNCATED READ CUTS THE OLDEST RUN MID-RUN, and a run whose attempts are
+  // half-present reports a keep rate, an attempts-per-cell and a cost over a
+  // fragment with nothing on the page saying so. It goes whole; see
+  // `dropPartialOldestRun`.
+  const truncated = images.length >= imageCap;
+  const trimmed = dropPartialOldestRun(images, truncated);
+
   // The run-level half already ran in SQL; running it again here is not
   // belt-and-braces theatre — it is what keeps the pure rule and the query
   // honest about being the same rule, and it is free at this cardinality.
-  const matched = filterHistory(runs, images, filter);
+  const matched = filterHistory(runs, trimmed.images, filter);
   const views = await signViews(deps, matched.images);
 
   return {
@@ -209,7 +218,10 @@ export async function loadHistoryView(
     serverNowMs: deps.now(),
     filter,
     totalRuns,
-    imagesTruncated: images.length >= imageCap,
+    imagesTruncated: truncated,
+    /** Runs dropped WHOLE because the cap cut them mid-run. The banner names
+     *  the count, so a vanished run is countable rather than invisible. */
+    droppedRunIds: trimmed.droppedRunIds,
     imageCap,
   };
 }

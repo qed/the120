@@ -287,9 +287,30 @@ export function historyDeps(db: ImageLabDb): HistoryDeps {
         .from(IMAGES)
         .select(IMAGE_COLUMNS)
         .in("run_id", runIds as string[])
+        // ⚠ RECENCY IS THE *PRIMARY* KEY NOW, AND THE CAP IS WHY.
+        //
+        // This read used to order by `run_id ASC` first and then limit — and
+        // `run_id` is a v4 uuid, i.e. RANDOM WITH RESPECT TO TIME. So the banner
+        // saying "the newest N attempts" described the newest of nothing: the
+        // runs that lost their images were whichever ones happened to sort at the
+        // high-uuid end, they came back with ZERO rows, and `filterHistory`'s
+        // `withImages` rule then pruned them off a page whose own copy says
+        // nothing is ever pruned. The Unit 6 fix only changed WHICH runs vanished.
+        //
+        // Cells of one run share `created_at` byte-for-byte (one transaction), so
+        // this orders RUNS by recency and leaves the within-run order to the three
+        // keys below — which are the migration's own index
+        // `(run_id, cell_ordinal, created_at)` plus an `id` tie-break, because
+        // ordering by the shared timestamp alone hands Postgres a free choice
+        // among equal keys and the grid renders `#3, #1, #4, #2`.
+        //
+        // A retry row is NEWER than its run, so it sorts even earlier — a retried
+        // run can never be the one truncation drops. The core prunes the oldest
+        // PARTIALLY-read run whole (`dropPartialOldestRun`) rather than showing a
+        // run with some of its attempts missing.
+        .order("created_at", { ascending: false })
         .order("run_id", { ascending: true })
         .order("cell_ordinal", { ascending: true })
-        .order("created_at", { ascending: true })
         .order("id", { ascending: true })
         .limit(limit);
       if (error) throw new Error(`listImagesForRuns failed: ${error.message}`);

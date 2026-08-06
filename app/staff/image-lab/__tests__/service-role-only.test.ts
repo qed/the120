@@ -6,6 +6,12 @@ import { glob } from "tinyglobby";
 import ts from "typescript";
 import { Linter } from "eslint";
 import { IMAGE_LAB_IMPORT_RULES } from "../../../../eslint.config.mjs";
+import { LAB_SOURCE_EXTENSIONS, LAB_SOURCE_GLOB, isLabTestFile } from "./lab-globs";
+import { IMAGE_LAB_BUCKET } from "../lib/image-lab-rules";
+import {
+  CHILD_SCRUB_COLUMNS,
+  LEDGER_SALE_COLUMNS,
+} from "../lib/content-picker-loader";
 
 /**
  * The Image Lab's SERVICE-ROLE-ONLY posture, asserted STRUCTURALLY
@@ -84,22 +90,20 @@ const LAB = "app/staff/image-lab/";
 /** THE one module allowed to hold a Supabase client for this feature. */
 const DB_ACCESSOR = `${LAB}lib/image-lab-db.ts`;
 
-/** Every extension a module can be written in — not just the two the old scan
- *  looked at. A `.js` file under the Lab is still a Lab module. */
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
-
 /**
- * ⚠ ONLY `*.test.*` IS IGNORED, not all of `__tests__/`.
+ * ⚠ THE EXTENSION LIST IS SHARED WITH `gate-enforcement.test.ts` NOW.
  *
- * `lib/__tests__/anon-helper.ts` is a PRODUCTION module by any measure that
- * matters — it can be imported from anywhere — and it was invisible to both the
- * old scan and to vitest. A directory name is not a guarantee; a filename
- * suffix at least matches what the runner actually executes.
+ * This file learned in Unit 4 that a `.js` module walks past a `{ts,tsx}` glob,
+ * and enumerated eight extensions. The sibling guard never got the fix and kept
+ * globbing `{ts,tsx}` — so a `.js` route handler AND a `.js` `"use server"`
+ * action both shipped ungated past it with the whole suite green. A lesson
+ * learned by one guard and not the other is a lesson not learned.
  */
-const isTestFile = (file: string) => /(^|[\\/])[^\\/]*\.test\.[^\\/]+$/.test(file);
+const SOURCE_EXTENSIONS = [...LAB_SOURCE_EXTENSIONS];
+const isTestFile = isLabTestFile;
 
 const labSources = async (): Promise<string[]> => {
-  const files = await glob([`${LAB}**/*{${SOURCE_EXTENSIONS.join(",")}}`], {
+  const files = await glob([LAB_SOURCE_GLOB], {
     cwd: REPO_ROOT,
     absolute: false,
   });
@@ -264,113 +268,155 @@ const scanCode = (code: string, asFile = `${LAB}lib/fixture.ts`): Violation[] =>
     .filter((v): v is Violation => v !== undefined);
 };
 
-// ── Resolving what a `.from()` / `.select()` argument actually IS ───────────
+// ── Resolving what a `.from()` / `.rpc()` / `.select()` argument actually IS ─
 
 /**
- * ⚠ THE ARGUMENT IS RESOLVED, NOT MATCHED.
+ * ⚠ THE CALL SITE IS PARSED, NOT MATCHED — AND THAT IS THE THIRD LESSON.
  *
- * Every version of this guard that read the ARGUMENT'S SPELLING lost. A literal
- * scan misses `db.from(RUNS)`; exempting SCREAMING_CASE misses
- * `const T = "staff"`; a `\bpayer\b` scan misses `"pay" + "er"`. What follows
- * computes the VALUE — from a literal, from a `const` binding in the same file,
- * or from any `+`-concatenation of those — and everything downstream compares
- * values. An expression this cannot resolve is a FAILURE, never an exemption.
+ * This guard has now been strengthened three times, and every previous cycle made
+ * the ARGUMENT harder to hide while leaving the CALL SITE matched lexically:
+ * `callSites` looked for the literal text `.from(` with
+ * `new RegExp('\\.' + name + '\\(')`. BRACKET MEMBER ACCESS NEVER SPELLS THAT.
+ * Verified on this branch, with the whole Lab suite green at 899/899 and this
+ * file at 31/31:
+ *
+ *   const t = "staff";
+ *   await db["from"](t).select("id, email, is_active");
+ *   await db["from"]("fp_ledger").select("id, " + "pay" + "er" + ", amount_cents");
+ *
+ * Neither call was ENUMERATED at all, so none of the argument-resolution
+ * hardening ran — the sites could not even be reported as unresolvable. A guard
+ * whose enumerator can be stepped around is a guard with no floor.
+ *
+ * So enumeration now goes through the TypeScript AST (already a dependency —
+ * `ts.preProcessFile` is used above). Every `CallExpression` whose callee is a
+ * PropertyAccessExpression OR an ElementAccessExpression is inspected, the callee
+ * NAME is resolved the same way arguments are, and a callee name that cannot be
+ * resolved is a violation outright rather than a skip.
  */
-const LITERAL_SOURCE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|` + "`[^`$\\n]*`" + `)`;
 
-/** `const NAME = "a" + "b";` → `NAME → "ab"`, for one file. */
-const stringConstants = (source: string): Map<string, string> => {
-  const bindings = new Map<string, string>();
-  const re = new RegExp(
-    String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(` +
-      LITERAL_SOURCE +
-      String.raw`(?:\s*\+\s*` +
-      LITERAL_SOURCE +
-      String.raw`)*)\s*;`,
-    "g"
-  );
-  for (const match of source.matchAll(re)) {
-    const value = [...match[2]!.matchAll(new RegExp(LITERAL_SOURCE, "g"))]
-      .map((literal) => literal[0].slice(1, -1))
-      .join("");
-    bindings.set(match[1]!, value);
-  }
+/**
+ * ⚠ CROSS-MODULE CONSTANTS, SEEDED FROM THE REAL MODULES.
+ *
+ * The resolver reads `const` bindings in the SAME file, which is not enough:
+ * `db.storage.from(IMAGE_LAB_BUCKET)` and `db.from("children").select(
+ * CHILD_SCRUB_COLUMNS)` both name IMPORTED constants, and an unresolvable
+ * argument is a violation. Seeding them by hand would be a place for the guard's
+ * belief and the code's value to drift, so the values are IMPORTED — if
+ * `IMAGE_LAB_BUCKET` changes, this map changes with it and the allowlist below
+ * is what reddens.
+ */
+const IMPORTED_CONSTANTS = new Map<string, string>([
+  ["IMAGE_LAB_BUCKET", IMAGE_LAB_BUCKET],
+  ["LEDGER_SALE_COLUMNS", LEDGER_SALE_COLUMNS],
+  ["CHILD_SCRUB_COLUMNS", CHILD_SCRUB_COLUMNS],
+]);
+
+/** A `const NAME = "a" + "b";` table, per file, resolved through the AST. */
+const stringConstants = (sf: ts.SourceFile): Map<string, string> => {
+  const bindings = new Map<string, string>(IMPORTED_CONSTANTS);
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer !== undefined
+    ) {
+      const value = literalValue(node.initializer, bindings);
+      if (value !== null) bindings.set(node.name.text, value);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
   return bindings;
 };
 
-/** An expression's string VALUE, or null when it cannot be computed statically. */
-const resolveExpr = (expr: string, bindings: Map<string, string>): string | null => {
-  const token = new RegExp(`^\\s*(?:${LITERAL_SOURCE}|[A-Za-z_$][\\w$]*)`);
-  let rest = expr.trim();
-  if (rest === "") return null;
-  let out = "";
-  for (;;) {
-    const match = token.exec(rest);
-    if (match === null) return null;
-    const piece = match[0].trim();
-    if (/^["'`]/.test(piece)) out += piece.slice(1, -1);
-    else {
-      const bound = bindings.get(piece);
-      if (bound === undefined) return null;
-      out += bound;
-    }
-    rest = rest.slice(match[0].length);
-    const plus = /^\s*\+\s*/.exec(rest);
-    if (plus === null) break;
-    rest = rest.slice(plus[0].length);
+/**
+ * An expression's string VALUE, or null when it cannot be computed statically.
+ *
+ * Literals, `const` bindings in the same file, and `+`-concatenations of those.
+ * A template literal is accepted ONLY when it has no substitutions — `` `fp_${x}` ``
+ * is exactly the shape that must stay unresolvable.
+ */
+const literalValue = (
+  node: ts.Expression,
+  bindings: Map<string, string>
+): string | null => {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isIdentifier(node)) return bindings.get(node.text) ?? null;
+  if (ts.isParenthesizedExpression(node)) return literalValue(node.expression, bindings);
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = literalValue(node.left, bindings);
+    const right = literalValue(node.right, bindings);
+    return left === null || right === null ? null : left + right;
   }
-  return rest.trim() === "" ? out : null;
+  return null;
 };
 
-/** The first argument of an argument list, splitting on the TOP-LEVEL comma. */
-const firstArg = (args: string): string => {
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = 0; i < args.length; i++) {
-    const c = args[i]!;
-    if (quote !== null) {
-      if (c === quote && args[i - 1] !== "\\") quote = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") quote = c;
-    else if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") depth--;
-    else if (c === "," && depth === 0) return args.slice(0, i);
+/**
+ * The METHOD NAME a callee refers to.
+ *
+ * `x.from` and `x["from"]` are the same call. A computed name this cannot resolve
+ * comes back `null`, which the caller treats as a violation — an unresolvable
+ * `db[pick()](t)` is exactly as unreviewable as an unresolvable table name.
+ */
+const calleeName = (
+  callee: ts.Expression,
+  bindings: Map<string, string>
+): { name: string | null; target: ts.Expression } | null => {
+  if (ts.isPropertyAccessExpression(callee)) {
+    return { name: callee.name.text, target: callee.expression };
   }
-  return args;
+  if (ts.isElementAccessExpression(callee)) {
+    return {
+      name: literalValue(callee.argumentExpression, bindings),
+      target: callee.expression,
+    };
+  }
+  return null;
 };
 
-/** Every `.name(…)` call site, with its argument text and where it ends. */
-const callSites = (source: string, name: string): { args: string; end: number }[] => {
-  const sites: { args: string; end: number }[] = [];
-  for (const match of source.matchAll(new RegExp(String.raw`\.${name}\(`, "g"))) {
-    const before = source.slice(0, match.index);
-    // `Array.from(...)` is not a table read, and `db.storage.from(bucket)` is a
-    // BUCKET — the object store, not a table, and not what the allowlist is about.
-    // `\s*$` because the chain is wrapped: `db.storage\n  .from(BUCKET)`.
-    if (name === "from" && /\b(?:Array|storage)\s*$/.test(before)) continue;
-    const open = match.index + match[0].length - 1;
-    let depth = 0;
-    let quote: string | null = null;
-    let i = open;
-    for (; i < source.length; i++) {
-      const c = source[i]!;
-      if (quote !== null) {
-        if (c === quote && source[i - 1] !== "\\") quote = null;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === "`") quote = c;
-      else if (c === "(") depth++;
-      else if (c === ")" && --depth === 0) break;
-    }
-    sites.push({ args: source.slice(open + 1, i), end: i + 1 });
-  }
-  return sites;
+/**
+ * JavaScript's own `X.from(...)` statics. Not table reads, and enumerated rather
+ * than heuristically skipped: "the target starts with a capital" would exempt a
+ * Lab module that happened to name its handle `DB`.
+ */
+const BUILTIN_FROM_NAMESPACES = new Set([
+  "Array",
+  "Buffer",
+  "Object",
+  "Set",
+  "Map",
+  "String",
+  "Number",
+  "BigInt",
+  "Date",
+  "Promise",
+  "Uint8Array",
+  "Int8Array",
+  "Uint16Array",
+  "Uint32Array",
+  "Float32Array",
+  "Float64Array",
+  "ArrayBuffer",
+]);
+
+const isBuiltinNamespace = (target: ts.Expression): boolean =>
+  ts.isIdentifier(target) && BUILTIN_FROM_NAMESPACES.has(target.text);
+
+/** Is this the `db.storage` of `db.storage.from(bucket)`? A BUCKET, not a table. */
+const isStorageNamespace = (target: ts.Expression, bindings: Map<string, string>): boolean => {
+  const inner = calleeName(target, bindings);
+  return (
+    (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) &&
+    inner?.name === "storage"
+  );
 };
 
-type TableCall = {
+type LabCall = {
   file: string;
-  /** The resolved table/bucket name, or null when it could not be computed. */
+  /** `from` (table), `bucket` (storage), or `rpc`. */
+  kind: "table" | "bucket" | "rpc";
+  /** The resolved name, or null when it could not be computed. */
   table: string | null;
   /** The source text of the argument, for the failure message. */
   expr: string;
@@ -378,40 +424,98 @@ type TableCall = {
   select: string | null;
 };
 
+/** Callee names that cannot be resolved at all — reported, never skipped. */
+type UnresolvableCallee = { file: string; expr: string };
+
 /**
- * Every `.from()` in one file, resolved.
+ * Every table, bucket and rpc call in one file, resolved.
  *
- * ⚠ COMMENTS ARE STRIPPED FIRST. These files are heavily commented by design and
- * the comments QUOTE the very calls being scanned — the docblock explaining this
- * guard names `.from("fp_ledger")` in prose, which the scanner would otherwise
- * report as a real read with no select list. Fix the scan, never the comment.
+ * ⚠ COMMENTS ARE NOT AN ISSUE HERE ANY MORE, and that is a second dividend of
+ * the AST. The old scanner stripped comments first because these files QUOTE the
+ * very calls being scanned in prose — the docblock above names
+ * `.from("fp_ledger")` — and a text scan cannot tell an explanation from a call.
+ * The parser only ever sees real syntax.
  */
-const tableCallsIn = (file: string, rawSource: string): TableCall[] => {
-  const source = rawSource
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const bindings = stringConstants(source);
-  return callSites(source, "from").map((site) => {
-    const expr = firstArg(site.args).trim();
-    const following = /^\s*\.select\(/.exec(source.slice(site.end));
-    let select: string | null = null;
-    if (following !== null) {
-      const selectSite = callSites(source.slice(site.end), "select")[0];
-      if (selectSite !== undefined) {
-        select = resolveExpr(firstArg(selectSite.args).trim(), bindings);
+const labCallsIn = (
+  file: string,
+  source: string
+): { calls: LabCall[]; unresolvableCallees: UnresolvableCallee[] } => {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const bindings = stringConstants(sf);
+  const calls: LabCall[] = [];
+  const unresolvableCallees: UnresolvableCallee[] = [];
+
+  /** The `.select(…)` argument of the call CHAINED DIRECTLY onto this one. */
+  const followingSelect = (call: ts.CallExpression): string | null => {
+    const parent = call.parent;
+    if (
+      parent === undefined ||
+      !(ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent))
+    ) {
+      return null;
+    }
+    const named = calleeName(parent, bindings);
+    if (named?.name !== "select") return null;
+    const outer = parent.parent;
+    if (outer === undefined || !ts.isCallExpression(outer)) return null;
+    const arg = outer.arguments[0];
+    return arg === undefined ? null : literalValue(arg, bindings);
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const named = calleeName(node.expression, bindings);
+      if (named !== null) {
+        if (named.name === null) {
+          // `db[pick()](t)` — a computed method name. Unreviewable, so it fails.
+          unresolvableCallees.push({ file, expr: node.expression.getText(sf) });
+        } else if (named.name === "from" || named.name === "rpc") {
+          const isBuiltin = named.name === "from" && isBuiltinNamespace(named.target);
+          if (!isBuiltin) {
+            const arg = node.arguments[0];
+            const kind: LabCall["kind"] =
+              named.name === "rpc"
+                ? "rpc"
+                : isStorageNamespace(named.target, bindings)
+                  ? "bucket"
+                  : "table";
+            calls.push({
+              file,
+              kind,
+              table: arg === undefined ? null : literalValue(arg, bindings),
+              expr: arg === undefined ? "" : arg.getText(sf),
+              select: kind === "table" ? followingSelect(node) : null,
+            });
+          }
+        }
       }
     }
-    return { file, table: resolveExpr(expr, bindings), expr, select };
-  });
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return { calls, unresolvableCallees };
 };
 
-const tableCalls = async (): Promise<TableCall[]> => {
-  const out: TableCall[] = [];
+/** Back-compatible view for the fixtures below: the TABLE calls only. */
+const tableCallsIn = (file: string, source: string): LabCall[] =>
+  labCallsIn(file, source).calls.filter((c) => c.kind === "table");
+
+const labCalls = async (): Promise<{
+  calls: LabCall[];
+  unresolvableCallees: UnresolvableCallee[];
+}> => {
+  const calls: LabCall[] = [];
+  const unresolvableCallees: UnresolvableCallee[] = [];
   for (const file of await labSources()) {
-    out.push(...tableCallsIn(file, readFileSync(path.join(REPO_ROOT, file), "utf8")));
+    const found = labCallsIn(file, readFileSync(path.join(REPO_ROOT, file), "utf8"));
+    calls.push(...found.calls);
+    unresolvableCallees.push(...found.unresolvableCallees);
   }
-  return out;
+  return { calls, unresolvableCallees };
 };
+
+const tableCalls = async (): Promise<LabCall[]> =>
+  (await labCalls()).calls.filter((c) => c.kind === "table");
 
 // ── The graph assertions ─────────────────────────────────────────────────────
 
@@ -485,20 +589,96 @@ describe("every Image Lab DB touch goes through the service role", () => {
    */
   const LEDGER_SELECT_ALLOWLIST = new Set(["amount_cents, source, created_at"]);
 
+  /**
+   * ⚠ AND `children` NEEDED ONE TOO. It sat on the table allowlist with NO
+   * select-list allowlist — alone among the child-data tables, and unlike
+   * `fp_ledger`, which has had one since Unit 5. Only a literal `select("*")` was
+   * blocked, so a Lab module could read ANY column on the roster (a parent's
+   * email, an address, a free-text note) and nothing would redden. These five
+   * columns are the scrub inputs plus the family join key, and nothing else.
+   */
+  const CHILDREN_SELECT_ALLOWLIST = new Set([
+    "id, parent_id, first_name, last_name, fp_username",
+  ]);
+
+  /**
+   * ⚠ THE `.rpc()` NAMES THE LAB MAY CALL — DELIBERATELY EMPTY.
+   *
+   * `imageLabDb()` is full-project admin, and `.rpc()` was NOT SCANNED AT ALL:
+   * `imageLabDb().rpc("anything", …)` reaches every SECURITY DEFINER function on
+   * the shared project — and therefore every table one of them touches — with
+   * zero test failure. There is no `.rpc()` in the Lab today, which is exactly
+   * why the gap was silent: nothing exercised it, and the first History aggregate
+   * will add one. An empty set means ANY addition is a reviewed diff here.
+   */
+  const LAB_RPC_ALLOWLIST = new Set<string>();
+
+  /**
+   * ⚠ AND THE BUCKET ARGUMENT IS RESOLVED NOW TOO.
+   *
+   * `db.storage.from(...)` was SKIPPED outright and anything starting `image-lab`
+   * was exempt — so a Lab module could read, sign or DELETE objects in ANY bucket
+   * on the shared project, including the children's `path-evidence` bucket, and
+   * the guard would say nothing. The Lab has exactly one bucket.
+   */
+  const LAB_BUCKET_ALLOWLIST = new Set(["fp-image-lab"]);
+
   it("names ONLY the tables on the reviewed allowlist", async () => {
     const calls = await tableCalls();
     expect(calls.length).toBeGreaterThan(0);
     const offenders = calls.filter(
-      ({ table }) =>
-        table !== null &&
-        !LAB_TABLE_ALLOWLIST.has(table) &&
-        // `storage.from(bucket)` is a bucket, not a table.
-        table !== "image-lab" &&
-        !table.startsWith("image-lab")
+      ({ table }) => table !== null && !LAB_TABLE_ALLOWLIST.has(table)
     );
     expect(
       offenders.map((o) => `${o.file}: ${o.table}`),
       "a Lab module names a table outside the reviewed allowlist"
+    ).toEqual([]);
+  });
+
+  it("calls NO `.rpc()` at all — the allowlist is empty and additions are reviewed", async () => {
+    const rpc = (await labCalls()).calls.filter((c) => c.kind === "rpc");
+    expect(
+      rpc.map((c) => `${c.file}: .rpc(${c.expr})`),
+      "a Lab module calls .rpc() — add the function name to LAB_RPC_ALLOWLIST after reviewing what it can reach"
+    ).toEqual(
+      rpc
+        .filter((c) => c.table !== null && LAB_RPC_ALLOWLIST.has(c.table))
+        .map((c) => `${c.file}: .rpc(${c.expr})`)
+    );
+  });
+
+  it("touches ONLY the Lab's own storage bucket", async () => {
+    const buckets = (await labCalls()).calls.filter((c) => c.kind === "bucket");
+    expect(buckets.length, "no storage touch found — has the bucket moved?").toBeGreaterThan(0);
+    const offenders = buckets.filter(
+      (c) => c.table === null || !LAB_BUCKET_ALLOWLIST.has(c.table)
+    );
+    expect(
+      offenders.map((c) => `${c.file}: storage.from(${c.expr})`),
+      "a Lab module reaches a bucket outside the reviewed allowlist"
+    ).toEqual([]);
+  });
+
+  it("reads ONLY the reviewed columns from `children`", async () => {
+    const reads = (await tableCalls()).filter((c) => c.table === "children");
+    expect(reads.length, "no children read found — has the picker moved?").toBeGreaterThan(0);
+    for (const call of reads) {
+      expect(
+        call.select,
+        `${call.file}: the children read's select list does not resolve`
+      ).not.toBeNull();
+      expect(
+        CHILDREN_SELECT_ALLOWLIST.has(call.select ?? ""),
+        `${call.file}: children select list "${call.select}" is not on the reviewed allowlist`
+      ).toBe(true);
+    }
+  });
+
+  it("resolves every METHOD NAME, so bracket access cannot hide a call site", async () => {
+    const { unresolvableCallees } = await labCalls();
+    expect(
+      unresolvableCallees.map((c) => `${c.file}: ${c.expr}`),
+      "a Lab module calls a method through a name the guard cannot resolve"
     ).toEqual([]);
   });
 
@@ -771,20 +951,86 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
     ]);
     const LEDGER_OK = new Set(["amount_cents, source, created_at"]);
 
+    const CHILDREN_OK = new Set(["id, parent_id, first_name, last_name, fp_username"]);
+    const BUCKET_OK = new Set(["fp-image-lab"]);
+
     /** The production judgement, applied to one fixture's text. */
     const judge = (code: string) => {
-      const calls = tableCallsIn("fixture.ts", code);
+      const found = labCallsIn("fixture.ts", code);
+      const calls = found.calls.filter((c) => c.kind === "table");
       return {
         unresolved: calls.filter((c) => c.table === null),
-        offTable: calls.filter(
-          (c) =>
-            c.table !== null && !LAB_TABLES.has(c.table) && !c.table.startsWith("image-lab")
-        ),
+        offTable: calls.filter((c) => c.table !== null && !LAB_TABLES.has(c.table)),
         badLedger: calls.filter(
           (c) => c.table === "fp_ledger" && !LEDGER_OK.has(c.select ?? "")
         ),
+        badChildren: calls.filter(
+          (c) => c.table === "children" && !CHILDREN_OK.has(c.select ?? "")
+        ),
+        rpc: found.calls.filter((c) => c.kind === "rpc"),
+        badBucket: found.calls.filter(
+          (c) => c.kind === "bucket" && (c.table === null || !BUCKET_OK.has(c.table))
+        ),
+        unresolvableCallees: found.unresolvableCallees,
       };
     };
+
+    /**
+     * ⚠ THE BRACKET-ACCESS PROBE, WHICH DEFEATED THE PREVIOUS VERSION ENTIRELY.
+     *
+     * Not "resolved to the wrong value" — NOT ENUMERATED AT ALL, so no argument
+     * check ran and the site could not even be reported as unresolvable. Verified
+     * at 31/31 in this file and 899/899 across the Lab.
+     */
+    it("REPORTS `db[\"from\"](t)` — the bracket probe that passed 31/31", () => {
+      const found = judge(
+        `const t = "staff";\nconst rows = db["from"](t).select("id, email, is_active");`
+      );
+      expect(found.unresolved).toEqual([]);
+      expect(found.offTable.map((c) => c.table)).toEqual(["staff"]);
+    });
+
+    it("REPORTS a bracket-access ledger read whose select never spells payer", () => {
+      const found = judge(
+        `const rows = db["from"]("fp_ledger").select("id, " + "pay" + "er" + ", amount_cents");`
+      );
+      expect(found.badLedger).toHaveLength(1);
+      expect(found.badLedger[0]!.select).toBe("id, payer, amount_cents");
+    });
+
+    it("REPORTS a COMPUTED method name outright — it is unreviewable", () => {
+      expect(judge(`const rows = db[pick()]("staff").select("id");`).unresolvableCallees)
+        .toHaveLength(1);
+    });
+
+    it("REPORTS any `.rpc()`, however it is spelled", () => {
+      expect(judge(`await db.rpc("anything", { a: 1 });`).rpc).toHaveLength(1);
+      expect(judge(`await db["rpc"]("anything", { a: 1 });`).rpc).toHaveLength(1);
+      const named = judge(`const F = "danger";\nawait db.rpc(F);`).rpc;
+      expect(named).toHaveLength(1);
+      expect(named[0]!.table).toBe("danger");
+    });
+
+    it("REPORTS a storage touch on ANOTHER bucket — including the children's", () => {
+      expect(
+        judge(`await db.storage.from("path-evidence").remove([k]);`).badBucket
+      ).toHaveLength(1);
+      // …and the old `startsWith("image-lab")` exemption is gone with it.
+      expect(judge(`await db.storage.from("image-lab-scratch").list();`).badBucket)
+        .toHaveLength(1);
+      expect(judge(`await db.storage.from(pickBucket()).download(k);`).badBucket)
+        .toHaveLength(1);
+    });
+
+    it("REPORTS a `children` read outside its reviewed select list", () => {
+      expect(
+        judge(`const r = db.from("children").select("id, parent_email, address");`)
+          .badChildren
+      ).toHaveLength(1);
+      expect(
+        judge(`const r = db.from("children").select(buildColumns());`).badChildren
+      ).toHaveLength(1);
+    });
 
     it("REPORTS `const T = \"staff\"; db.from(T)` — the probe that passed 23/23", () => {
       const found = judge(
@@ -825,18 +1071,22 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
       const found = judge(
         [
           `const RUNS = "fp_image_lab_runs";`,
+          `const IMAGE_LAB_BUCKET = "fp-image-lab";`,
           `const COLUMNS = "id, staff_id, " + "created_at";`,
           `const a = db.from(RUNS).select(COLUMNS).eq("id", runId);`,
           `const b = db.from("fp_ledger").select("amount_cents, source, created_at");`,
           `const c = db.storage.from(IMAGE_LAB_BUCKET).createSignedUrl(k, 600);`,
           `const d = Array.from({ length: 3 }, (_, i) => i);`,
+          `const e = db.from("children").select("id, parent_id, first_name, last_name, fp_username");`,
         ].join("\n")
       );
       expect(found.offTable).toEqual([]);
       expect(found.badLedger).toEqual([]);
-      // `db.storage.from(bucket)` is skipped outright — it is the object store,
-      // not a table — so nothing here is unresolvable.
+      expect(found.badChildren).toEqual([]);
+      expect(found.badBucket).toEqual([]);
+      expect(found.rpc).toEqual([]);
       expect(found.unresolved).toEqual([]);
+      expect(found.unresolvableCallees).toEqual([]);
     });
 
     it("resolves a MULTI-LINE concatenated constant — the real RUN_COLUMNS shape", () => {

@@ -115,18 +115,21 @@ const createRunSchema = z.object({
   note: z.string().max(IMAGE_LAB_NOTE_MAX_CHARS).optional(),
   iteratedOnModel: z.string().max(120).nullable().optional(),
   iteratedFromRunId: z.uuid().nullable().optional(),
-  source: z
-    .object({
-      childId: z.uuid().nullable(),
-      // ⚠ A CLOSED CHARACTER CLASS, not a length cap. These land on columns the
-      // migration header documents as "internal ids ONLY — never a name", and
-      // 200 free characters is room for a sentence. `run-core` re-checks with
-      // the same exported pattern, because this schema is not the only caller.
-      ideaId: z.string().regex(IMAGE_LAB_SOURCE_ID_PATTERN).nullable(),
-      taskId: z.string().regex(IMAGE_LAB_SOURCE_ID_PATTERN).nullable(),
-    })
-    .nullable()
-    .optional(),
+  /**
+   * ⚠ THE PICKER'S SERVER-SIGNED PROVENANCE TOKEN — and it REPLACED a
+   * client-asserted `{ childId, ideaId, taskId }` object.
+   *
+   * That object was `.nullable().optional()`, and `createRun`'s whole chokepoint
+   * (the re-scrub AND the consent breadcrumb) was guarded by `if (input.source &&
+   * input.source.childId !== null)`. So the protection was defeated by DELETING a
+   * field rather than by forging one — strictly easier than the threat the
+   * docblock named — and the resulting row carried `source_child_id = null`,
+   * which made it invisible to the consent-revocation purge.
+   *
+   * The three ids are now DERIVED from this token inside `run-core`, so there is
+   * nothing here for a caller to assert. See `./source-token.ts`.
+   */
+  sourceToken: z.string().min(16).max(1024).nullable().optional(),
 });
 
 /**
@@ -158,8 +161,8 @@ function refusalForIssues(error: z.ZodError): RunCompositionRefusal {
           reason: "too_many_references",
           max: IMAGE_LAB_MAX_REFERENCES_PER_RUN,
         };
-      case "source":
-        return { ok: false, reason: "bad_source_id" };
+      case "sourceToken":
+        return { ok: false, reason: "bad_source_token" };
       default:
         continue;
     }
@@ -216,7 +219,7 @@ export async function createImageLabRun(input?: unknown): Promise<CreateRunResul
     note: parsed.data.note,
     iteratedOnModel: parsed.data.iteratedOnModel ?? null,
     iteratedFromRunId: parsed.data.iteratedFromRunId ?? null,
-    source: parsed.data.source ?? null,
+    sourceToken: parsed.data.sourceToken ?? null,
   });
 }
 

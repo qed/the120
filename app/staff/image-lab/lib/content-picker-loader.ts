@@ -32,6 +32,7 @@ import "server-only";
 
 import { excludeTestFamilies } from "@/app/crm/lib/test-family-filter";
 import { type ImageLabDb } from "./image-lab-db";
+import { mintSourceToken } from "./source-token";
 import type {
   ContentPickerDeps,
   PickerChildRow,
@@ -59,6 +60,18 @@ export const IMAGE_LAB_PICKER_CHILD_LIMIT = 200;
  */
 export const LEDGER_SALE_COLUMNS = "amount_cents, source, created_at";
 
+/**
+ * ⚠ THE `children` SELECT LIST, ALSO A NAMED CONSTANT, AND FOR THE SAME REASON.
+ *
+ * `children` sat on the guard's table allowlist with NO select-list allowlist —
+ * alone among the child-data tables, and unlike `fp_ledger`, which has one. Only a
+ * literal `select("*")` was blocked, so a Lab module could read any column on the
+ * roster (a parent's email, an address, a note) and nothing would redden. These
+ * five are the scrub inputs and the family join key, and nothing else; widening
+ * this string is a two-file diff with the reviewed allowlist on the other side.
+ */
+export const CHILD_SCRUB_COLUMNS = "id, parent_id, first_name, last_name, fp_username";
+
 async function loadChildRows(
   db: ImageLabDb,
   filter: { childId?: string }
@@ -80,7 +93,7 @@ async function loadChildRows(
   const childIds = [...new Set(profileRows.map((p) => p.child_id))];
   const children = await db
     .from("children")
-    .select("id, parent_id, first_name, last_name, fp_username")
+    .select(CHILD_SCRUB_COLUMNS)
     .in("id", childIds);
   if (children.error) {
     throw new Error(`picker children query failed: ${children.error.message}`);
@@ -133,6 +146,9 @@ async function loadChildRows(
 
 export function contentPickerDeps(db: ImageLabDb): ContentPickerDeps {
   return {
+    // The one mint site in the feature. See `./source-token.ts`.
+    mintSourceToken: (provenance) => mintSourceToken(provenance),
+
     listChildren: () => loadChildRows(db, {}),
 
     async findChild(childId) {

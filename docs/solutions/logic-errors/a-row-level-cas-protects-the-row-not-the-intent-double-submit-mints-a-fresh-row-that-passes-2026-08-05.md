@@ -8,7 +8,7 @@ symptoms:
   - "A paid vendor call is made twice for one user intent, while every concurrency guard reports success"
   - "The comment above the guard names 'a second tab' as the threat it stops; a second tab is precisely what it does not stop"
   - "Both duplicate runs look completely legitimate in the data — same prompt, different ids, no collision anywhere"
-root_cause: wrong_scope_of_guard
+root_cause: scope_issue
 resolution_type: migration
 tags:
   - idempotency

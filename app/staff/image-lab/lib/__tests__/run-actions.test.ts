@@ -186,7 +186,11 @@ describe("createImageLabRun", () => {
         "too_many_references",
       ],
       [{ drillTags: ["kid_appeal"] }, "empty_template"],
-      [{ source: { childId: UUID, ideaId: "a name with spaces", taskId: null } }, "bad_source_id"],
+      // ⚠ `source` IS GONE — provenance is a SERVER-SIGNED TOKEN now, so there is
+      // no client-asserted id shape left for the schema to police. A token too
+      // short to be one is the parse failure that replaced it, and it names
+      // itself rather than reporting "write a template first".
+      [{ sourceToken: "short" }, "bad_source_token"],
     ];
 
     for (const [over, reason] of cases) {

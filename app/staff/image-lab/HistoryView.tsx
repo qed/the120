@@ -57,7 +57,12 @@ import {
   type ModelStats,
   type VerdictRefusalReason,
 } from "./lib/history-rules";
-import { cellRenderState, formatUsd, IMAGE_LAB_RUN_COPY } from "./lib/run-rules";
+import {
+  cellAttemptName,
+  cellRenderState,
+  formatUsd,
+  IMAGE_LAB_RUN_COPY,
+} from "./lib/run-rules";
 import {
   IMAGE_LAB_DRILL_TAGS,
   type ImageLabDrillTag,
@@ -104,7 +109,39 @@ export function HistoryView({
     Record<string, readonly ImageLabDrillTag[]>
   >({});
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
-  const [announcement, setAnnouncement] = useState<string>("");
+  /**
+   * ⚠ TWO REGIONS, AND THEY ARE NOT THE SAME CHANNEL.
+   *
+   * `problem` is the ON-SCREEN sentence this surface was authored with: a refusal
+   * is a thing a sighted reader must also see, because the visual delta of a
+   * rolled-back verdict is one border on a card that may already be off screen.
+   *
+   * `confirmation` is SR-ONLY, and it is separate for two reasons Unit 7's own
+   * change ran straight into by writing successes into the visible one:
+   *   * nothing ever CLEARED it, so a stale "gpt-image-2 candidate 1 marked keep"
+   *     sat above the filter chips permanently — and after `isOverrideSuperseded`
+   *     fired it could contradict the very card it names;
+   *   * it is not a failure, so it does not belong in a region authored for
+   *     failures. The bench does exactly this split already.
+   */
+  const [problem, setProblem] = useState<string>("");
+  /**
+   * ⚠ `{seq, text}`, AND THE COUNTER IS THE WHOLE POINT.
+   *
+   * The announcement is keyed on model + ordinal + attempt, and History renders
+   * images from MANY runs — so judging "gpt-image-2 candidate 1" in run A and then
+   * in run B computes a BYTE-IDENTICAL string, React skips the state update, and
+   * NOTHING is announced. That is precisely the dropped-click silence this change
+   * set out to fix, in the common sweep-a-compare-page loop. A monotonic counter
+   * makes every confirmed write a distinct state, and only `text` is rendered.
+   */
+  const [confirmation, setConfirmation] = useState<{ seq: number; text: string }>({
+    seq: 0,
+    text: "",
+  });
+  const announce = useCallback((text: string) => {
+    setConfirmation((prev) => ({ seq: prev.seq + 1, text }));
+  }, []);
 
   const imagesByRun = useMemo(() => {
     const map = new Map<string, HistoryImageView[]>();
@@ -136,7 +173,10 @@ export function HistoryView({
   }, []);
 
   const refuse = useCallback((reason: VerdictRefusalReason) => {
-    setAnnouncement(`${COPY.verdict.failed} ${COPY.verdict.refusal[reason]}`);
+    // A refusal CLEARS any standing confirmation. The two regions must never be
+    // readable together as "…marked keep" above "that change did not save".
+    setConfirmation((prev) => ({ seq: prev.seq + 1, text: "" }));
+    setProblem(`${COPY.verdict.failed} ${COPY.verdict.refusal[reason]}`);
   }, []);
 
   /**
@@ -169,7 +209,20 @@ export function HistoryView({
           verdict: result.verdict,
           verdictAtMs: result.verdictAtMs,
         });
-        setAnnouncement("");
+        // ⚠ THE SERVER'S CONFIRMED VALUE, not the one that was clicked — an
+        // announcement that echoed the click would be a second optimistic paint
+        // in a channel that has no rollback.
+        setProblem("");
+        announce(
+          COPY.verdict.saved(
+            cellAttemptName(
+              image.modelId,
+              image.cellOrdinal,
+              attempts.get(image.id) ?? { index: 1, of: 1 }
+            ),
+            result.verdict
+          )
+        );
       } catch {
         dispatch({ kind: "rollback", imageId: image.id, previous });
         refuse("unavailable");
@@ -177,7 +230,7 @@ export function HistoryView({
         mark(image.id, false);
       }
     },
-    [mark, overrides, refuse]
+    [announce, attempts, mark, overrides, refuse]
   );
 
   /**
@@ -198,14 +251,15 @@ export function HistoryView({
           refuse(result.reason);
           return;
         }
-        setAnnouncement(COPY.verdict.noteSaved);
+        setProblem("");
+        announce(COPY.verdict.noteSaved);
       } catch {
         refuse("unavailable");
       } finally {
         mark(image.id, false);
       }
     },
-    [mark, refuse]
+    [announce, mark, refuse]
   );
 
   const saveTags = useCallback(
@@ -220,7 +274,10 @@ export function HistoryView({
           refuse(result.reason);
           return;
         }
-        setAnnouncement("");
+        setProblem("");
+        // EVERY success path announces. This one used to CLEAR the region and
+        // say nothing at all, which sounds exactly like a dropped click.
+        announce(COPY.verdict.tagsSaved);
       } catch {
         setTagOverrides((prev) => ({ ...prev, [run.id]: previous }));
         refuse("unavailable");
@@ -228,7 +285,7 @@ export function HistoryView({
         mark(run.id, false);
       }
     },
-    [mark, refuse, tagOverrides]
+    [announce, mark, refuse, tagOverrides]
   );
 
   const referenceLabel = useCallback(
@@ -242,10 +299,18 @@ export function HistoryView({
 
   return (
     <div className="mt-6 flex flex-col gap-8">
-      {/* Announcements, not just repaints: the visual delta of a rolled-back
-          verdict is one border on a card that may already be off screen. */}
+      {/* PROBLEMS, on screen: the visual delta of a rolled-back verdict is one
+          border on a card that may already be off screen, so a refusal has to be
+          visible as well as announced. */}
       <p aria-live="polite" className="text-pretty text-sm text-hq-ink">
-        {announcement}
+        {problem}
+      </p>
+
+      {/* ⚠ CONFIRMATIONS GET THEIR OWN, SR-ONLY REGION — the bench's split, and
+          the fix for a success announcement that landed in a visible region
+          authored for failures and was never cleared. See the state above. */}
+      <p aria-live="polite" className="sr-only">
+        {confirmation.text}
       </p>
 
       {/* ⚠ THE APPLIED FILTER, RENDERED BACK. The parser drops what it does not
@@ -438,9 +503,23 @@ function StatsSection({
       )}
 
       <div className="mt-4 rounded-xl border border-hq-border bg-hq-surface p-4">
-        <h4 className="font-path-display text-sm text-hq-ink">{COPY.cost.heading}</h4>
+        {/* ⚠ THE HEADING SAYS WHICH POPULATION THIS IS. Unit 6 suppressed the
+            keep RATE under a verdict filter and left the COST line alone —
+            `aggregateCost` runs over the FILTERED rows, so `?verdict=keep`
+            rendered a fraction of the real spend under the word "Cost",
+            indistinguishable from an unfiltered total. The rate could be hidden
+            because a filtered rate only restates the filter; a filtered cost is
+            still a real number, so it is RELABELLED rather than suppressed. */}
+        <h4 className="font-path-display text-sm text-hq-ink">
+          {showRate ? COPY.cost.heading : COPY.cost.filteredHeading}
+        </h4>
         {/* ⚠ TWO FIGURES, SIDE BY SIDE, NEVER ADDED. */}
         <p className="mt-1 text-sm text-hq-ink">{formatCostLine(cost)}</p>
+        {!showRate && (
+          <p className="mt-1 text-pretty text-xs leading-relaxed text-hq-ink">
+            {COPY.cost.filteredNote}
+          </p>
+        )}
         <p className="mt-2 text-pretty text-xs leading-relaxed text-hq-ink-soft">
           {COPY.cost.footnote}
         </p>
@@ -646,11 +725,12 @@ function ImageCard({
    * as "gpt-image-2 candidate 3" twice — same heading, same `aria-label`,
    * different picture, independent Keep buttons. A reader could not tell them
    * apart and a screen-reader user could not tell them apart at all.
+   *
+   * Unit 7 lifted the sentence into `cellAttemptName` (run-rules) so the BENCH
+   * grid — which stacks attempts inside a cell and gave every one of them the
+   * identical `alt` — names them the same way, from one tested rule.
    */
-  const cellName =
-    attempt.of > 1
-      ? `${image.modelId} candidate ${image.cellOrdinal + 1}, attempt ${attempt.index} of ${attempt.of}`
-      : `${image.modelId} candidate ${image.cellOrdinal + 1}`;
+  const cellName = cellAttemptName(image.modelId, image.cellOrdinal, attempt);
   // ⚠ THE SCHEMA'S RULE, RENDERED: a verdict is a judgement about an IMAGE, so a
   // cell with no image cannot take one (`fp_image_lab_images_verdict_needs_done`).
   // Clearing stays available — a row judged before a late `failed` finalize must

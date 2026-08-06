@@ -11,6 +11,7 @@ import {
   unverifiedItems,
   type ImageLabModelEntry,
 } from "../model-registry";
+import { maxFanCostUsd } from "../run-rules";
 
 // These assertions pin INVARIANTS that must hold for any FUTURE entry, so adding
 // model #4 fails loudly rather than shipping a nonsense row. Deliberately absent:
@@ -180,19 +181,27 @@ describe("model-registry: cost estimation", () => {
   });
 
   it("the worst 12-cell compare fan stays inside the REAL bound", () => {
-    // ⚠ Quality is a RUN SETTING, not a fixed property, so the worst case is the
-    // most expensive TIER of the most expensive entry — not its default. The
-    // earlier version of this test maxed over defaults only (0.134 → $1.61) and
-    // claimed to protect a $1.75 bound, while the actual worst fan is
-    // gpt-image-2 at `high`: 0.211 × 12 = $2.53, 45% over the bound it "checked".
+    // ⚠ QUALITY IS NOT A RUN SETTING IN v1, so the worst case is NOT "the dearest
+    // tier of the dearest entry, twelve times". `fp_image_lab_runs` has no
+    // `quality` column, every cell dials its model's `qualityDefault`, and
+    // `decideRunComposition` cannot produce twelve cells of ONE model — twelve
+    // cells means 4+4+4 across three DIFFERENT models. So the ceiling is
+    // $0.8824 (4×$0.053 + 4×$0.134 + 4×$0.0336), and the earlier "gpt-image-2 at
+    // high: 0.211 × 12 = $2.53" was arithmetic over a premise this unit had
+    // already dropped.
     //
     // The scope decision "cost controls are social, not technical" is conditioned
     // on this arithmetic. If a price change or a new entry breaks it, that
     // decision needs revisiting — and this fails before the credit card notices.
+    const fan = maxFanCostUsd(IMAGE_LAB_MODELS.map((entry) => entry.id));
+    expect(fan).toBeCloseTo(0.8824, 6);
+    expect(fan).toBeLessThanOrEqual(1);
+
+    // …and the dearest single tier is still worth pinning, because it is what a
+    // quality selector WOULD cost if v1's decision were ever revisited.
     const worstPerImage = Math.max(
       ...IMAGE_LAB_MODELS.flatMap((entry) => Object.values(entry.priceNoteUsd))
     );
     expect(worstPerImage).toBeCloseTo(0.211, 6);
-    expect(worstPerImage * 12).toBeLessThanOrEqual(2.6);
   });
 });

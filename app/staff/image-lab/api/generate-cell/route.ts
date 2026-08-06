@@ -45,7 +45,10 @@
  */
 
 import { requireStaff } from "@/app/crm/lib/auth";
-import { checkAndRecordRateLimit } from "@/app/fp/lib/rate-limit-store";
+import {
+  checkAndRecordRateLimit,
+  isFirstRefusalInWindow,
+} from "@/app/fp/lib/rate-limit-store";
 import { assertRouteBudget } from "../../lib/model-registry";
 import { imageLabDb } from "../../lib/image-lab-db";
 import { generateCell } from "../../lib/run-core";
@@ -145,6 +148,23 @@ export async function POST(req: Request): Promise<Response> {
     IMAGE_LAB_GENERATE_RATE_LIMIT
   );
   if (!cooldown.allowed) {
+    // ⚠ LOGGED, because otherwise a throttle leaves NO trace anywhere. The
+    // generation breadcrumb is emitted post-CAS only, and `rate-limit-store.ts`
+    // logs nothing of its own, so a runaway fan that tripped the guardrail was
+    // invisible after the fact — the one signal that the per-instance,
+    // fails-open cooldown actually did its job. Ids and a duration only; there
+    // is no run, prompt or child in scope here.
+    //
+    // ⚠ ONCE PER KEY PER WINDOW, NOT ONCE PER REFUSED REQUEST. This branch is
+    // the one a runaway tab hits at full rate for the rest of the window, so a
+    // line per request buries the trip in thousands of copies of itself — on
+    // precisely the scenario the line exists to surface. The store knows when a
+    // window opened; see `isFirstRefusalInWindow`.
+    if (isFirstRefusalInWindow(generateCellRateLimitKey(staffId), IMAGE_LAB_GENERATE_RATE_LIMIT)) {
+      console.warn(
+        `[image-lab/generate] cooldown refused staff=${staffId} retryAfterMs=${cooldown.retryAfterMs}`
+      );
+    }
     // NOTHING has been dialled: the refusal happens before the CAS, so no row is
     // latched and no vendor call exists to be billed for.
     return json(

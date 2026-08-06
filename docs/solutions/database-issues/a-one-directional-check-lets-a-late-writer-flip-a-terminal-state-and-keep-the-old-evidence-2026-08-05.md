@@ -8,7 +8,7 @@ symptoms:
   - "A derived keep-rate metric can exceed 100%: more numerator rows than the denominator admits"
   - "A row reads state='done' while still carrying failure_reason='timeout' from an earlier finalize"
   - "The two CHECK constraints written to protect the metric permit the exact row that breaks it"
-root_cause: incomplete_constraint
+root_cause: missing_validation
 resolution_type: migration
 tags:
   - check-constraint

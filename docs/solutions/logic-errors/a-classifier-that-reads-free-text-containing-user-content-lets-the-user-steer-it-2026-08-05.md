@@ -8,7 +8,7 @@ symptoms:
   - "An infrastructure fault is reported to staff as a content-safety refusal, with 'try rewording the prompt' advice"
   - "Whether an error classifies as safety depends on the words in a child's own product description"
   - "A model's measured failure rate improves when its errors are misfiled into a category the metric excludes"
-root_cause: untrusted_input_in_classifier
+root_cause: missing_validation
 resolution_type: code_fix
 tags:
   - error-classification

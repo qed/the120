@@ -2,13 +2,13 @@
 module: fp-image-lab
 date: "2026-08-05"
 problem_type: security_issue
-component: tests
+component: testing_framework
 severity: high
 symptoms:
   - "A page with its auth gate replaced by a local no-op passes the entire gate-enforcement suite"
   - "An ungated route handler under a guarded subtree is invisible to the test that claims to cover 'every routable module'"
   - "A gate wrapped in `if (process.env.NODE_ENV !== 'production')` satisfies a first-await ordering assertion"
-root_cause: test_asserts_source_text_not_behaviour
+root_cause: design_gap
 resolution_type: test_fix
 tags:
   - auth-gate

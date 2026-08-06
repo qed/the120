@@ -39,6 +39,7 @@ import {
 import {
   estimatedCostUsd,
   findModelEntry,
+  unverifiedItems,
   IMAGE_LAB_ROUTE_BUDGET_MS,
   type ImageLabModelEntry,
 } from "./model-registry";
@@ -48,9 +49,19 @@ import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
 
 /**
  * Candidates per model, per run. Four is the origin's number and it is also what
- * keeps the worst case affordable: 3 models × 4 candidates = 12 cells, which at
- * gpt-image-2 HIGH quality is ~$2.53 (the corrected Unit 2 figure — the earlier
- * ~$1.75 measured default tiers only, and quality is a run setting).
+ * keeps the worst case affordable: 3 models × 4 candidates = 12 cells, which is
+ * **$0.8824** — 4×$0.053 + 4×$0.134 + 4×$0.0336.
+ *
+ * ⚠ NOT $2.53, AND THE STALE FIGURE CAME WITH A STALE PREMISE. The earlier number
+ * was 12 × gpt-image-2 at HIGH, "and quality is a run setting". Quality is NOT a
+ * run setting in v1 — `fp_image_lab_runs` has no `quality` column (see
+ * `run-core.ts`'s header and `model-registry.ts`), so every cell dials its
+ * model's `qualityDefault`, and a 12-cell fan is 4+4+4 across three DIFFERENT
+ * models rather than twelve of the dearest one. The premise outlived its unit and
+ * carried the arithmetic with it into two other files.
+ *
+ * The figure is DERIVED rather than restated: {@link maxFanCostUsd} computes it
+ * from `decideRunComposition` over the registry, and `run-rules.test.ts` pins it.
  */
 export const IMAGE_LAB_MAX_IMAGE_COUNT = 4;
 
@@ -112,8 +123,21 @@ export function generateCellRateLimitKey(staffId: string): string {
  * whatever rate the other bucket allowed — across instances, and forever. A run
  * is cheap to write and expensive to redeem; both ends need a wall.
  *
- * Sized for real bench work rather than the fan: a staff member composing a new
- * run every ten seconds for five minutes is already far past deliberate use.
+ * ⚠ THIS NUMBER IS ITS OWN, AND IS DELIBERATELY *NOT* DERIVED — which is worth
+ * saying out loud, because it sits twelve lines below a limit whose docblock
+ * insists on being "DERIVED, never typed twice", and the two happen to be 30
+ * today. That coincidence reads as a link, and a later edit to
+ * `IMAGE_LAB_MAX_CELLS_PER_RUN` would silently change one and not the other while
+ * they still looked paired.
+ *
+ * They answer different questions. The GENERATE limit is derived because it must
+ * admit the feature's own headline workflow: the client fires one request per
+ * cell, so the number has to be a function of the maximum fan or a legitimate
+ * compare is refused partway. A COMPOSE is one request no matter how wide it
+ * fans, so the fan is irrelevant here; what this bounds is HOW OFTEN a human
+ * presses a button. Sized for real bench work: a staff member composing a new run
+ * every ten seconds for five minutes is already far past deliberate use, and that
+ * ceiling does not move when a fourth model lands.
  */
 export const IMAGE_LAB_COMPOSE_RATE_LIMIT: RateLimitConfig = {
   windowMs: 5 * 60_000,
@@ -328,7 +352,15 @@ export type RunCompositionRefusal =
    *  composition. Answering with the existing run would bill for template A
    *  while the composer shows template B. */
   | { ok: false; reason: "idempotency_conflict" }
-  | { ok: false; reason: "bad_source_id" };
+  | { ok: false; reason: "bad_source_id" }
+  /** The provenance token did not verify, or has expired. NEVER downgraded to
+   *  the unprovenanced path — see `run-core`'s chokepoint. */
+  | { ok: false; reason: "bad_source_token" }
+  /** A compose carrying slot content with NO provenance token, while the content
+   *  picker is live. */
+  | { ok: false; reason: "unverified_slot_source" }
+  /** Provenance was presented while `IMAGE_LAB_REAL_CONTENT_LIVE` is off. */
+  | { ok: false; reason: "content_picker_off" };
 
 export type RunComposition = {
   ok: true;
@@ -526,6 +558,7 @@ export type CellLifecycle = {
    *  rules there. A caller holding only the three lifecycle fields still gets a
    *  correct answer for every ordinary cell. */
   readonly failureDetail?: string | null;
+  readonly failureReason?: ImageLabFailureReason | null;
   readonly billed?: boolean;
 };
 
@@ -538,6 +571,120 @@ export function cellRenderState(
   if (isImageStale(row, serverNowMs, staleAfterMs)) return "stale";
   return row.attemptedAtMs === null ? "requested" : "pending";
 }
+
+/**
+ * ONE SENTENCE naming where every attempt in the grid currently stands
+ * (Unit 7, keyboard/AT pass).
+ *
+ * ⚠ THIS EXISTS BECAUSE THE GRID ITSELF USED TO BE THE LIVE REGION. Wrapping
+ * `<ResultGrid>` in `aria-live="polite"` makes EVERY mutation inside it an
+ * announcement: twelve cards' worth of headings, cost lines, failure prose and
+ * button labels re-read on each three-second poll tick, plus again whenever a
+ * Retry button's `disabled` flips. A screen-reader user could not hear the one
+ * fact they were waiting for — that a cell finished — through the noise.
+ *
+ * So the live region is a SEPARATE, visually hidden sentence, and this is the
+ * sentence. It is pure and asserted in `run-rules.test.ts` because the component
+ * cannot be rendered by this (node, no-jsdom) suite.
+ *
+ * Counted over ATTEMPT ROWS, not cells, and it says "attempts" out loud: a
+ * retried cell has two rows, and a census that silently collapsed them would
+ * disagree with the cards the same reader is tabbing through. Empty in → empty
+ * out, so an empty grid announces nothing at all rather than "0 attempts".
+ *
+ * Only non-zero buckets are named: "6 attempts: 4 done, 2 generating" is a
+ * sentence someone can hold, where the seven-bucket version is a chore.
+ */
+export function describeCellProgress(
+  cells: readonly CellLifecycle[],
+  serverNowMs: number,
+  staleAfterMs: number = IMAGE_LAB_STALE_AFTER_MS
+): string {
+  if (cells.length === 0) return "";
+  const counts = new Map<CellRenderState, number>();
+  for (const cell of cells) {
+    const state = cellRenderState(cell, serverNowMs, staleAfterMs);
+    counts.set(state, (counts.get(state) ?? 0) + 1);
+  }
+  const copy = IMAGE_LAB_RUN_COPY.grid;
+  // Fixed order, from the constant rather than from Map insertion order — the
+  // announcement must not re-order itself between two polls and read as a change.
+  const parts = CELL_PROGRESS_ORDER.filter((state) => (counts.get(state) ?? 0) > 0).map(
+    (state) => `${counts.get(state)} ${copy.progressState[state]}`
+  );
+  return copy.progress(cells.length, parts);
+}
+
+/**
+ * WHAT ONE ATTEMPT IS CALLED — the accessible name, and the one on screen
+ * (Unit 7's AT pass; History's Unit 6 rule, lifted so the bench uses it too).
+ *
+ * ⚠ THE ATTEMPT INDEX IS PART OF THE NAME WHEN THERE IS MORE THAN ONE.
+ * History learned this in Unit 6: two attempts at one cell rendered as
+ * "gpt-image-2 candidate 3" twice — same heading, same `aria-label`, different
+ * picture, independent Keep buttons. The BENCH grid still had the older half of
+ * that bug at Unit 7: it stacks attempts inside a cell and gave every one of
+ * them the identical `alt`, so a screen-reader user tabbing a retried cell heard
+ * the same image described twice with nothing to tell them apart.
+ *
+ * `of === 1` deliberately yields the SHORT name. Appending "attempt 1 of 1" to
+ * every card would make the overwhelmingly common case wordier to fix the rare
+ * one.
+ */
+export function cellAttemptName(
+  modelId: string,
+  cellOrdinal: number,
+  attempt: { readonly index: number; readonly of: number }
+): string {
+  const base = `${modelId} candidate ${cellOrdinal + 1}`;
+  const numbering = describeAttemptNumbering(attempt);
+  return numbering === "" ? base : `${base}, ${numbering}`;
+}
+
+/**
+ * WHICH ATTEMPT THIS IS, as one phrase — the ONE numbering rule.
+ *
+ * ⚠ THE VISIBLE LINE USED TO BE A SECOND, HAND-BUILT COPY OF THIS. `ResultGrid`
+ * rendered `attempt ${n} of ${m}${earlier}` inline, so the sentence a sighted
+ * reader sees and the sentence in the accessible name were two independent
+ * spellings of one fact, neither in the COPY constant (contrary to this file's
+ * whole convention) and neither under test. Both are derived from here now, and
+ * the strings live in `IMAGE_LAB_RUN_COPY.grid` with everything else.
+ *
+ * Empty for a single attempt, which is what makes `cellAttemptName` fall back to
+ * the short name and the grid render no line at all.
+ */
+export function describeAttemptNumbering(attempt: {
+  readonly index: number;
+  readonly of: number;
+}): string {
+  return attempt.of > 1 ? IMAGE_LAB_RUN_COPY.grid.attemptOrdinal(attempt.index, attempt.of) : "";
+}
+
+/**
+ * The numbering line the grid PRINTS, which adds one thing the accessible name
+ * deliberately does not: whether this card is an EARLIER attempt than the one on
+ * top. The stack is newest-first, so "earlier" is positional and belongs on the
+ * visible line rather than in a name a reader hears out of context.
+ */
+export function describeAttemptLine(attempt: {
+  readonly index: number;
+  readonly of: number;
+}): string {
+  const numbering = describeAttemptNumbering(attempt);
+  if (numbering === "") return "";
+  return attempt.index === attempt.of
+    ? numbering
+    : `${numbering}${IMAGE_LAB_RUN_COPY.grid.attemptEarlier}`;
+}
+
+const CELL_PROGRESS_ORDER: readonly CellRenderState[] = [
+  "done",
+  "failed",
+  "pending",
+  "requested",
+  "stale",
+];
 
 /**
  * May the grid offer Retry on this attempt?
@@ -567,11 +714,25 @@ export function canRetryCell(
 
   const state = cellRenderState(row, serverNowMs, staleAfterMs);
 
-  // ⚠ A BILLED-UNKNOWN ABORT IS AN IN-FLIGHT CASE WEARING A FAILED ROW'S CLOTHES.
-  // `caller_aborted` at t=200s has almost certainly billed, and the vendor call
-  // may still complete and finalize over this row. Immediate retry there is the
-  // same double spend the staleness window exists to prevent for `pending`.
-  if (state === "failed" && row.failureDetail === "caller_aborted" && row.billed === true) {
+  // ⚠ A BILLED TIMEOUT IS AN IN-FLIGHT CASE WEARING A FAILED ROW'S CLOTHES.
+  //
+  // ⚠⚠ AND THE GUARD USED TO BE ON THE WRONG CAUSE — it keyed on
+  // `failureDetail === "caller_aborted"`, which the Unit 2 taxonomy classifies as
+  // NOT billed, while `adapter_timeout` — billed BY DEFINITION, because our own
+  // AbortSignal fired and the vendor was still working — fell through and was
+  // instantly retryable. The reasoning quoted for the guarded case was strictly
+  // MORE true of the unguarded one. The reproduction: gpt-image-2 aborts at 240s,
+  // the row lands `failed / timeout / adapter_timeout / billed=true / $0.21`,
+  // Retry lights up at once, the staff member clicks, and the original call
+  // completes and bills. Two charges, one intent — which is the whole thing the
+  // staleness window exists to prevent.
+  //
+  // So the rule is the CLASS, not the detail: any `failed` row that we believe
+  // cost money on a call that may still be running is held until staleness.
+  // `billed === true` is the "we may have paid" half and `timeout` is the "it may
+  // still be running" half; a `provider_error` or a `safety_blocked` is a settled
+  // answer from the vendor and stays immediately retryable.
+  if (state === "failed" && row.billed === true && row.failureReason === "timeout") {
     return isImageStale(row, serverNowMs, staleAfterMs);
   }
 
@@ -602,9 +763,56 @@ export function newestAttempt<T extends GridAttempt>(cell: GridCell<T>): T {
   return cell.attempts[0]!;
 }
 
-/** Should the grid keep polling? True while any attempt is non-final. */
-export function shouldPollCells(rows: readonly CellLifecycle[]): boolean {
+/**
+ * How many CONSECUTIVE unchanged polls end the loop.
+ *
+ * ⚠ THE POLL USED TO BE UNBOUNDED, and a run CAN be permanently wedged. A run
+ * naming a reference whose OBJECT has gone fails loud before the CAS, so every
+ * attempt returns `reference_unavailable` with the cell untouched —
+ * `state='requested', attempted_at=NULL`, forever. The reference row cannot be
+ * deleted (append-only trigger) and `reference_ids` is snapshotted with no edit
+ * path, so nothing repairs it. Meanwhile {@link shouldPollCells} stayed true and
+ * the tab re-read the run, its cells and a signed URL per stored image every five
+ * seconds indefinitely — and the run id is restored from sessionStorage after a
+ * reload, so closing the tab does not end it either.
+ *
+ * Sized past the whole staleness window (10 minutes at a 5s tick is 120 ticks),
+ * because a genuinely pending cell DOES change state at the end of it — the
+ * derived `stale` label flips and Retry appears, which counts as a change. What
+ * this bound catches is the case where NOTHING moves at all.
+ */
+export const IMAGE_LAB_MAX_IDLE_POLLS = 150;
+
+/**
+ * Should the grid keep polling?
+ *
+ * True while any attempt is non-final AND the loop has seen something change
+ * recently. `idlePolls` is the number of consecutive reads that returned an
+ * identical picture; the caller resets it to zero whenever the rows differ.
+ */
+export function shouldPollCells(
+  rows: readonly CellLifecycle[],
+  idlePolls: number = 0,
+  maxIdlePolls: number = IMAGE_LAB_MAX_IDLE_POLLS
+): boolean {
+  if (idlePolls >= maxIdlePolls) return false;
   return rows.some((row) => row.state !== "done" && row.state !== "failed");
+}
+
+/**
+ * A stable fingerprint of what the grid currently shows.
+ *
+ * Only the fields a reader can SEE change — comparing whole rows would count a
+ * re-minted signed URL as a change and make the idle bound unreachable, which is
+ * the failure this whole mechanism exists to avoid.
+ */
+export function cellsFingerprint(
+  rows: readonly { id: string; state: string; attemptedAtMs: number | null }[]
+): string {
+  return rows
+    .map((row) => `${row.id}:${row.state}:${row.attemptedAtMs ?? ""}`)
+    .sort()
+    .join("|");
 }
 
 /**
@@ -634,6 +842,8 @@ export function modelIdsFromCells(rows: readonly { modelId: string }[]): string[
 export type IdempotencyStore = {
   get(key: string): string | null;
   set(key: string, value: string): void;
+  /** Forget a key — see {@link releaseIdempotencyKey}. */
+  clear(key: string): void;
 };
 
 export const IMAGE_LAB_IDEMPOTENCY_PREFIX = "image-lab:idempotency:";
@@ -665,6 +875,30 @@ export function resolveIdempotencyKey(
   const minted = mint();
   store.set(storageKey, minted);
   return minted;
+}
+
+/**
+ * Forget a signature's key ONCE THE RUN IT MINTED IS CONFIRMED PERSISTED.
+ *
+ * ⚠ WITHOUT THIS, THE SAME PROMPT COULD NEVER BE RUN TWICE IN A SESSION — WHICH
+ * IS THE CONSISTENCY DRILL. Nothing ever cleared the stored key (only the
+ * run-id key was ever removed), and the signature carries no nonce, so pressing
+ * Generate again on an UNCHANGED composition — the standard variance check, and
+ * the whole basis of the "this hero sheet across N runs" drill — resent the same
+ * key, collided with the unique index, returned the existing run as a duplicate,
+ * and fanned ZERO cells. The only escape a staff member finds by experiment is
+ * editing the template, which changes the one thing the drill holds constant.
+ *
+ * ⚠ AND IT IS RELEASED AFTER CONFIRMATION, NEVER BEFORE. The key exists to cover
+ * the RESUBMIT WINDOW — "no response after thirty seconds, so reload / open a
+ * second tab" — and that window is exactly the span in which we do not yet know
+ * whether the run landed. Clearing it any earlier reopens the double-fan the key
+ * exists to prevent; clearing it once `createImageLabRun` has ANSWERED (either
+ * with a fresh run or with the duplicate it collided onto) is safe, because there
+ * is no longer an unanswered request for a second submit to duplicate.
+ */
+export function releaseIdempotencyKey(store: IdempotencyStore, signature: string): void {
+  store.clear(idempotencyStorageKey(signature));
 }
 
 /**
@@ -904,6 +1138,12 @@ export function describeCompositionRefusal(refusal: RunCompositionRefusal): stri
       return copy.idempotencyConflict;
     case "bad_source_id":
       return copy.badSourceId;
+    case "bad_source_token":
+      return copy.badSourceToken;
+    case "unverified_slot_source":
+      return copy.unverifiedSlotSource;
+    case "content_picker_off":
+      return copy.contentPickerOff;
   }
 }
 
@@ -985,6 +1225,24 @@ export function minutesFromMs(ms: number): number {
  * advertised a high/low choice it does not offer is a bench whose price line
  * cannot be trusted either.
  */
+/**
+ * The open capability questions on one model, as a sentence — or "" when there
+ * are none.
+ *
+ * ⚠ `unverifiedItems` HAD NO CALLER, while its docblock claimed it drove "an
+ * honest badge on the bench". It is worth mounting rather than downgrading: the
+ * `personGeneration` allowlist gates TWO OF THE THREE launch models and the
+ * gpt-image-2 reference-carriage question gates the third, and either one makes a
+ * model look worse in exactly the head-to-head this bench exists to run. A staff
+ * member choosing a model deserves to see that before they spend.
+ *
+ * Pure, and tested here, because the composer cannot be rendered by this suite.
+ */
+export function describeUnverified(entry: ImageLabModelEntry): string {
+  const open = unverifiedItems(entry);
+  return open.length === 0 ? "" : IMAGE_LAB_RUN_COPY.composer.modelUnverified(open);
+}
+
 export function modelSummaryLine(entry: ImageLabModelEntry): string {
   const price = estimatedCostUsd(entry, null);
   return price === null
@@ -1070,6 +1328,10 @@ export const IMAGE_LAB_RUN_COPY = {
     modelPriced: (id: string, price: string, tier: string) =>
       `${id} — about ${price} per image at the fixed ${tier} tier.`,
     modelUnpriced: (id: string) => `${id} — no price for its default tier.`,
+    /** ⚠ NAMES THE OPEN QUESTIONS, because a caveat that lives only in a
+     *  planning doc cannot reach the person choosing the model. */
+    modelUnverified: (items: readonly string[]) =>
+      `Unverified: ${items.join(", ")} — results on this model may reflect our own open questions rather than the model.`,
   },
 
   picker: {
@@ -1120,6 +1382,26 @@ export const IMAGE_LAB_RUN_COPY = {
       failed: "Failed",
     } as Record<CellRenderState, string>,
     attemptBadge: (count: number) => `${count} attempt${count === 1 ? "" : "s"}`,
+    /** The ONE numbering phrase — see {@link describeAttemptNumbering}. Used by
+     *  the accessible name and by the visible line, which used to disagree by
+     *  being written twice. */
+    attemptOrdinal: (index: number, of: number) => `attempt ${index} of ${of}`,
+    attemptEarlier: " (earlier)",
+    /**
+     * The live-region sentence (see {@link describeCellProgress}). Lower case and
+     * verb-shaped, because these are read INSIDE a sentence rather than as the
+     * card labels above — "4 done, 2 generating" rather than "4 Done, 2
+     * Generating…", and no ellipsis for a screen reader to spell out.
+     */
+    progressState: {
+      requested: "queued",
+      pending: "generating",
+      stale: "with no answer yet",
+      done: "done",
+      failed: "failed",
+    } as Record<CellRenderState, string>,
+    progress: (total: number, parts: readonly string[]) =>
+      `${total} attempt${total === 1 ? "" : "s"}: ${parts.join(", ")}.`,
     retry: "Retry",
     /** A never-attempted row's correct action is to GENERATE the row that already
      *  exists, not to append a second live one beside it. */
@@ -1158,6 +1440,15 @@ export const IMAGE_LAB_RUN_COPY = {
       "This submission reuses the key of a run built from a DIFFERENT prompt, so it was refused rather than answered with that run. Change something, or reload the bench to start a fresh compose.",
     badSourceId:
       "The idea or task id on this submission is not a shape this bench records. Fill the slots from the picker again rather than editing the request.",
+    /** ⚠ NEVER "we ignored it and carried on". A token that does not verify is a
+     *  refusal, because the alternative — falling through to the unprovenanced
+     *  path — is the exact bypass the token replaces. */
+    badSourceToken:
+      "The provenance on this submission could not be verified, or it has expired, so nothing was written and nothing was sent. Fill the slots from the picker again — the token is minted server-side and cannot be edited or reused across a long gap.",
+    unverifiedSlotSource:
+      "Slot values were submitted without the server-signed provenance the picker mints, and the content picker is live — so this bench cannot tell them from a replay of a child's text. Fill the slots from the picker, or put the wording straight into the template instead.",
+    contentPickerOff:
+      "This submission claims it was built from a child's business content, but IMAGE_LAB_REAL_CONTENT_LIVE is not set — so no child content may be read or recorded on this deployment. Nothing was written and nothing was sent.",
   },
 
   outcomes: {

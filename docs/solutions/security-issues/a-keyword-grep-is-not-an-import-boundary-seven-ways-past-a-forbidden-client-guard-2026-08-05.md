@@ -2,13 +2,13 @@
 module: fp-image-lab
 date: "2026-08-05"
 problem_type: security_issue
-component: tests
+component: testing_framework
 severity: high
 symptoms:
   - "A guard test claims no module in a subtree can import the anon Supabase client; seven different imports of it pass"
   - "A dynamic `await import()` of a forbidden module is invisible to both the grep and the eslint rule"
   - "A production module parked under __tests__/ is scanned by nothing and run by nothing"
-root_cause: lexical_scan_instead_of_import_graph
+root_cause: design_gap
 resolution_type: test_fix
 tags:
   - import-boundary

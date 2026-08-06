@@ -8,7 +8,7 @@ symptoms:
   - "An application mime allowlist exists, is unit-tested, and has zero callers that can bind the stored object"
   - "A comment claims the content type is 'pinned server-side at registration'; the upload leg it names lets the browser set it"
   - "An image/svg+xml object can land in a private bucket and be served executable from the storage origin by signed URL"
-root_cause: wrong_enforcement_point
+root_cause: scope_issue
 resolution_type: migration
 tags:
   - supabase-storage

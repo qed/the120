@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   buildGrid,
   canRetryCell,
+  cellAttemptName,
   cellRenderState,
   decideGenerateAffordance,
   decideRunComposition,
+  describeAttemptLine,
+  describeAttemptNumbering,
+  describeCellProgress,
   describeCompositionRefusal,
   describeGenerateOutcome,
+  describeUnverified,
   estimateRunCostUsd,
   formatGenerationBreadcrumb,
   formatUsd,
@@ -26,6 +31,7 @@ import {
 import {
   IMAGE_LAB_ROUTE_BUDGET_MS,
   IMAGE_LAB_MODELS,
+  unverifiedItems,
 } from "../model-registry";
 import { IMAGE_LAB_STALE_AFTER_MS } from "../image-lab-rules";
 
@@ -325,6 +331,175 @@ describe("cellRenderState and canRetryCell", () => {
     const row = cell({ createdAtMs: 0, attemptedAtMs: null });
     expect(cellRenderState(row, IMAGE_LAB_STALE_AFTER_MS)).toBe("stale");
     expect(row.state).toBe("requested");
+  });
+});
+
+/**
+ * The grid's LIVE-REGION SENTENCE (Unit 7's keyboard/AT pass, fixed in Unit 5's
+ * home because that is where the rule lives).
+ *
+ * The bench used to wrap `<ResultGrid>` itself in `aria-live="polite"`, so every
+ * poll tick re-announced twelve cards. The announcement is now this one sentence,
+ * and these assertions are what stop it silently regressing to a census nobody
+ * can hold.
+ */
+/**
+ * The ACCESSIBLE NAME of one attempt (Unit 7's AT pass).
+ *
+ * Unit 6 fixed this on History and left the bench grid with the older half of
+ * the same bug: it stacks attempts inside a cell and gave every one of them a
+ * byte-identical `alt`. The sentence is one rule now, and both surfaces call it.
+ */
+describe("cellAttemptName", () => {
+  it("is SHORT when a cell has exactly one attempt", () => {
+    expect(cellAttemptName("gpt-image-2", 2, { index: 1, of: 1 })).toBe(
+      "gpt-image-2 candidate 3"
+    );
+  });
+
+  it("carries the attempt index once a cell has more than one", () => {
+    // Two pictures, two Keep buttons, two different names.
+    expect(cellAttemptName("gpt-image-2", 2, { index: 1, of: 2 })).toBe(
+      "gpt-image-2 candidate 3, attempt 1 of 2"
+    );
+    expect(cellAttemptName("gpt-image-2", 2, { index: 2, of: 2 })).toBe(
+      "gpt-image-2 candidate 3, attempt 2 of 2"
+    );
+  });
+
+  it("gives two attempts of the SAME cell DIFFERENT names", () => {
+    const a = cellAttemptName("gemini-3-pro-image", 0, { index: 1, of: 2 });
+    const b = cellAttemptName("gemini-3-pro-image", 0, { index: 2, of: 2 });
+    expect(a).not.toBe(b);
+  });
+
+  it("counts the cell ordinal from ONE for a reader", () => {
+    expect(cellAttemptName("m", 0, { index: 1, of: 1 })).toContain("candidate 1");
+  });
+});
+
+describe("describeUnverified — the badge that had no caller", () => {
+  it("names every open capability question on an entry", () => {
+    // ⚠ `unverifiedItems` claimed to drive "an honest badge on the bench" and was
+    // called by nothing. Two of the three launch models are gated by the
+    // `personGeneration` allowlist and the third by the reference-carriage
+    // question, and either makes a model look worse than it is.
+    const entry = IMAGE_LAB_MODELS.find((e) => unverifiedItems(e).length > 0);
+    expect(entry, "no model has an open question — has the registry changed?").toBeDefined();
+    const line = describeUnverified(entry!);
+    for (const item of unverifiedItems(entry!)) expect(line).toContain(item);
+    // …and it says why a staff member should care, not just that a flag is set.
+    expect(line).toMatch(/rather than the model/);
+  });
+
+  it("says NOTHING for a fully verified entry", () => {
+    const clean = {
+      ...IMAGE_LAB_MODELS[0]!,
+      verified: {
+        costReporting: { status: "confirmed" as const, note: "" },
+        gatewayRoutable: { status: "confirmed" as const, note: "" },
+        personGeneration: { status: "confirmed" as const, note: "" },
+        referenceImageInput: { status: "confirmed" as const, note: "" },
+      },
+    };
+    expect(describeUnverified(clean)).toBe("");
+  });
+});
+
+describe("describeAttemptLine — ONE numbering rule, two renderings", () => {
+  it("says NOTHING for a single attempt", () => {
+    // Which is what makes `cellAttemptName` fall back to the short name and the
+    // grid render no line at all.
+    expect(describeAttemptLine({ index: 1, of: 1 })).toBe("");
+    expect(cellAttemptName("m", 0, { index: 1, of: 1 })).toBe("m candidate 1");
+  });
+
+  it("agrees with the ACCESSIBLE NAME, because both derive from one rule", () => {
+    // ⚠ THE VISIBLE LINE USED TO BE A SECOND, HAND-BUILT COPY of the numbering,
+    // written inline in `ResultGrid`, absent from the COPY constant (contrary to
+    // that file's convention) and untested.
+    for (const attempt of [
+      { index: 1, of: 2 },
+      { index: 2, of: 2 },
+      { index: 3, of: 5 },
+    ]) {
+      expect(cellAttemptName("m", 0, attempt)).toContain(
+        describeAttemptNumbering(attempt)
+      );
+      expect(describeAttemptLine(attempt)).toContain(describeAttemptNumbering(attempt));
+    }
+  });
+
+  it("marks an EARLIER attempt on the visible line only", () => {
+    // The stack is newest-first, so "earlier" is POSITIONAL — it belongs on the
+    // printed line and not in a name a reader hears out of context.
+    expect(describeAttemptLine({ index: 2, of: 2 })).toBe("attempt 2 of 2");
+    expect(describeAttemptLine({ index: 1, of: 2 })).toBe("attempt 1 of 2 (earlier)");
+    expect(cellAttemptName("m", 0, { index: 1, of: 2 })).not.toContain("earlier");
+  });
+
+  it("takes its strings from the COPY constant, like everything else here", () => {
+    expect(describeAttemptNumbering({ index: 2, of: 3 })).toBe(
+      IMAGE_LAB_RUN_COPY.grid.attemptOrdinal(2, 3)
+    );
+    expect(describeAttemptLine({ index: 1, of: 3 })).toContain(
+      IMAGE_LAB_RUN_COPY.grid.attemptEarlier
+    );
+  });
+});
+
+describe("describeCellProgress", () => {
+  const now = 10_000_000;
+
+  it("says NOTHING for an empty grid", () => {
+    // An empty grid is not "0 attempts" — it is a surface with no news.
+    expect(describeCellProgress([], now)).toBe("");
+  });
+
+  it("names only the buckets that have rows, in a fixed order", () => {
+    const cells = [
+      cell({ id: "a", state: "done" }),
+      cell({ id: "b", state: "done" }),
+      cell({ id: "c", state: "failed" }),
+      cell({ id: "d", createdAtMs: now, attemptedAtMs: now }),
+    ];
+    expect(describeCellProgress(cells, now)).toBe(
+      "4 attempts: 2 done, 1 failed, 1 generating."
+    );
+  });
+
+  it("counts ATTEMPT ROWS, not cells — a retried cell contributes two", () => {
+    // Two rows at the same cell ordinal: the reader tabbing the cards sees two
+    // cards, so the sentence must say two.
+    const cells = [
+      cell({ id: "a", cellOrdinal: 0, state: "failed" }),
+      cell({ id: "b", cellOrdinal: 0, state: "done" }),
+    ];
+    expect(describeCellProgress(cells, now)).toBe("2 attempts: 1 done, 1 failed.");
+  });
+
+  it("uses the DERIVED render state, so a stranded row is announced as stale", () => {
+    const orphan = cell({
+      id: "a",
+      createdAtMs: now - IMAGE_LAB_STALE_AFTER_MS,
+      attemptedAtMs: null,
+    });
+    expect(describeCellProgress([orphan], now)).toBe(
+      "1 attempt: 1 with no answer yet."
+    );
+  });
+
+  it("is STABLE across two reads of an unchanged grid — an unchanged poll is silent", () => {
+    // React only mutates the text node when the string differs, so equality here
+    // is what makes a three-second poll stop announcing.
+    const cells = [cell({ id: "a", state: "done" }), cell({ id: "b", state: "failed" })];
+    expect(describeCellProgress(cells, now)).toBe(describeCellProgress(cells, now + 1));
+  });
+
+  it("singularizes one attempt", () => {
+    expect(describeCellProgress([cell({ id: "a", state: "done" })], now)).toBe(
+      "1 attempt: 1 done."
+    );
   });
 });
 

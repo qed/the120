@@ -38,6 +38,34 @@
  * surface and in `history-core`'s header, and there is no `verdict_by` column to
  * arbitrate with.
  *
+ * ── ⚠ THESE THREE WRITES ARE DELIBERATELY CROSS-STAFF, UNLIKE GENERATE AND ──
+ *    RETRY, AND THIS IS THE DECISION RATHER THAN AN OVERSIGHT.
+ *
+ * `generateCell`, `retryCell` and `loadImageLabRunCells` all scope to
+ * `run.staffId` and argue the point in their own docblocks, so the asymmetry is
+ * worth naming out loud: any active staff session may rewrite any image's verdict
+ * by uuid, and there is no `verdict_by` column to attribute it with.
+ *
+ * It is the same posture History and Kit already ship (README §7, "History and Kit
+ * are cross-staff"), and it is chosen rather than inherited:
+ *
+ *   * THE MODEL DECISION NEEDS ONE BODY OF EVIDENCE. A per-staff verdict space
+ *     would give three reviewers three keep rates over one set of images and no
+ *     way to combine them, which is the opposite of what this bench is for.
+ *   * SPEND IS THE THING THAT IS SINGLE-OWNER, and it is separable: generate and
+ *     retry mint billable rows, so they scope, and they log the refusal. Judging
+ *     is free and reversible — `null` un-judges — so the blast radius of a
+ *     mistaken write is one column a colleague can set back.
+ *   * ATTRIBUTING IT WOULD BE A MIGRATION, not a guard. Scoping WITHOUT a
+ *     `verdict_by` column would mean scoping to the RUN's owner, which is worse
+ *     than either option: the reviewer is frequently not the person who composed
+ *     the run, so the honest evidence gathering would be the thing refused.
+ *
+ * The cost, stated: a mistaken or malicious verdict is untraceable. The bench is
+ * staff-only behind `requireStaff()`, single-reviewer by assumption, and the
+ * carry-forward if that stops being true is a `verdict_by` column — at which
+ * point scoping becomes possible and this docblock is the place to revisit.
+ *
  * ── THROW POSTURE ──────────────────────────────────────────────────────────
  * These bodies never throw from their own logic. `requireStaff()` may redirect (a
  * Next control-flow throw) or raise `IdentityUnavailableError`; everything else

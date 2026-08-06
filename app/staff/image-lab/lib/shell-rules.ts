@@ -170,9 +170,11 @@ export type ImageLabGenerationNotice = {
  *
  * RETURNS A NOTICE IN BOTH STATES, never null. An indicator that appears only in
  * the off state cannot be told apart from an indicator that failed to render, and
- * it teaches nobody what "on" looks like — so a staff member about to spend $2.53
- * on a twelve-cell compare has no confirmation that they are about to spend
- * anything at all. Both states are stated, and the tone carries the difference.
+ * it teaches nobody what "on" looks like — so a staff member about to spend
+ * $0.8824 on a twelve-cell compare (the real ceiling: 4×$0.053 + 4×$0.134 +
+ * 4×$0.0336, derived in `run-rules.test.ts` from `maxFanCostUsd` rather than
+ * asserted here) has no confirmation that they are about to spend anything at
+ * all. Both states are stated, and the tone carries the difference.
  *
  * Takes the resolved boolean rather than reading `process.env` itself: the flag
  * reader (`isImageLabLive`, in `./image-lab-rules`) is the ONE place that decides

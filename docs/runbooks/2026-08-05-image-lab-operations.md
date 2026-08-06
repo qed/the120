@@ -65,6 +65,37 @@ deploy.
 | `IMAGE_LAB_LIVE` | **Generation.** Whether any model may be called at all. | The bench renders in full; the adapter returns `unconfigured` and attempts no network call; the page shows an explicit "generation off" notice and the `/staff` hub card carries a matching badge. |
 | `IMAGE_LAB_REAL_CONTENT_LIVE` | **All child content, on every leg.** Whether a real child's authored text may be loaded into the slot panel, AND whether `createImageLabRun` will accept, scrub or record a compose claiming child provenance. | The picker is absent; a provenance-bearing compose is refused outright (`content_picker_off`) rather than silently recorded; manual prompts still compose and generate normally. |
 
+### ⚠ STATUS 2026-08-06 — BOTH FLAGS ARE ON IN PRODUCTION, WITH TWO CHECKS OUTSTANDING
+
+`IMAGE_LAB_LIVE=1` and `IMAGE_LAB_REAL_CONTENT_LIVE=1` were set on the `the120`
+Vercel project (production) on 2026-08-06. **`IMAGE_LAB_REAL_CONTENT_LIVE` was
+switched on as an accepted risk, with neither prerequisite below completed** —
+an explicit owner decision, recorded here so it is traceable rather than
+folklore, and so whoever closes the items can find what was outstanding.
+
+**Still open, and both should be closed promptly:**
+
+1. **OpenAI's no-training posture is UNCONFIRMED.** Their enterprise-privacy page
+   returned 403 during research on 2026-08-05 and was never re-verified. Gemini's
+   paid-tier no-training posture WAS confirmed. Until OpenAI is re-verified, every
+   `gpt-image-2` call carrying picker-filled slots is sending child-authored text
+   to a provider whose current retention terms we have not read.
+2. **The consent snapshot (2026-08-05.1) has not been checked** against
+   "child-authored text is sent to a third-party model API".
+
+Live blast radius while these are open: the beta cohort is **10 families / 17
+kids in production**. The mitigations that ARE in force are the name scrub
+(server-enforced at `createRun`, four leak classes closed — see the redaction
+solution doc), buyer-name exclusion from the `sale` slot, internal-ids-only
+provenance, and the fact that no prompt body or slot value reaches a log line.
+Those reduce the exposure; they do not close the two items above.
+
+**To reverse:** `vercel env rm IMAGE_LAB_REAL_CONTENT_LIVE production` — the
+picker disappears and a provenance-bearing compose is refused outright rather
+than silently recorded. Existing rows are unaffected; use the §5 purge for those.
+
+---
+
 **`IMAGE_LAB_REAL_CONTENT_LIVE` must not be set until both checks are done:**
 
 1. **Provider terms.** Re-verify that BOTH providers' no-training posture still

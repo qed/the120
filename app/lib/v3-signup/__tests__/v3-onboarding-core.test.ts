@@ -297,17 +297,61 @@ describe("v3AddKid — the unique index is the duplicate arbiter under a race", 
     // Only ONE draft can ever reach provisioning, so only one child can be
     // minted, which is the property that matters.
     //
-    // JUDGMENT CALL, stated rather than hidden: the loser's attempt + consent
-    // rows DO survive (2 attempts, 2 consents). They are inert — the consent is
-    // only ever reachable through its attempt, which now has no draft and can
-    // never mint a child — and both are reaped. The alternative (insert the
-    // draft FIRST, so the loser bails before minting either) would give
-    // exactly-one of all three, but it trades that for a far worse failure: a
+    // ── AND THE LOSER LEAVES NOTHING BEHIND (whole-branch review, finding 3) ──
+    // This assertion used to be `toHaveLength(2)` on both tables, with a
+    // judgment call written above it: the loser's attempt and consent were
+    // "inert litter that reaps itself". They were not reaped by anything — no
+    // sweep for either table existed — and the consent row in particular is
+    // LEGAL EVIDENCE, minted alongside a live affirmation, attached to nothing.
+    // The losing branch now compensates, in the order the FK demands (consent
+    // first: `signup_attempt_id` is ON DELETE SET NULL, so removing the attempt
+    // first would null the only link and leave the evidence unfindable).
+    //
+    // The original judgment call still stands where it was actually about
+    // ordering: the DRAFT is still inserted LAST. Inserting it first would give
+    // exactly-one of all three, but it trades that for a far worse failure — a
     // draft with no attempt is one v3ProvisionKid can NEVER mint from
     // (`!draft.attemptId` → `no_draft`), and the unique index would then keep
-    // refusing the family's retries. Litter that reaps itself beats a wedge.
-    expect(store.fp_signup_attempts).toHaveLength(2);
-    expect(store.fp_parental_consent).toHaveLength(2);
+    // refusing the family's retries. Compensating beats reordering.
+    expect(store.fp_signup_attempts).toHaveLength(1);
+    expect(store.fp_parental_consent).toHaveLength(1);
+    // And it is the WINNER's pair that survived — the loser compensated its own
+    // rows and touched nothing else.
+    expect(store.fp_signup_attempts[0].id).toBe(winner.signup_attempt_id);
+    expect(store.fp_parental_consent[0].signup_attempt_id).toBe(winner.signup_attempt_id);
+  });
+
+  it("the GENERIC draft-insert failure compensates too — not only the 23505 branch", async () => {
+    // The other losing branch. Both were leaking; a fix that only covered the
+    // race would leave the rarer, quieter one intact.
+    const { store, deps } = harness({
+      faults: { "insert:fp_onboarding_drafts": { kind: "error", error: { message: "boom" } } },
+    });
+
+    expect(await v3AddKid(deps, addKidBody(), ctx)).toEqual({ kind: "failed" });
+
+    expect(store.fp_onboarding_drafts).toHaveLength(0);
+    expect(store.fp_signup_attempts).toHaveLength(0);
+    expect(store.fp_parental_consent).toHaveLength(0);
+  });
+
+  it("a compensation that ITSELF fails is loud, and leaves the attempt as the handle for the backstop", async () => {
+    // If the consent delete fails there is nothing to be done in-request. The
+    // attempt is deliberately KEPT: it is the only handle the draft reaper's
+    // orphan sweep (and an operator) has for finding that consent row again.
+    const { store, deps } = harness({
+      faults: {
+        "insert:fp_onboarding_drafts": { kind: "error", error: { message: "boom" } },
+        "delete:fp_parental_consent": { kind: "error", error: { message: "delete down" } },
+      },
+    });
+
+    expect(await v3AddKid(deps, addKidBody(), ctx)).toEqual({ kind: "failed" });
+
+    expect(store.fp_parental_consent).toHaveLength(1);
+    expect(store.fp_signup_attempts).toHaveLength(1);
+    expect(store.fp_signup_attempts[0].id).toBe(store.fp_parental_consent[0].signup_attempt_id);
+    expect(errors.some((e) => e.includes("STRANDED CONSENT"))).toBe(true);
   });
 
   it("`differentChild: true` does NOT get past the index — the DB refuses what the pre-check was told to skip", async () => {

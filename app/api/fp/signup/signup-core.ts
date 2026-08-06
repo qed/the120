@@ -500,17 +500,36 @@ async function resumeReissueFailed(
 }
 
 /**
- * The 6-digit code mail. Wrapped by the auth-mail guard
- * (app/lib/auth-mail-guard.ts) in its VALUE form: the core's contract is a
+ * THE ONE GUARDED SEND SITE FOR EVERY v3 6-DIGIT CODE. Wrapped by the auth-mail
+ * guard (app/lib/auth-mail-guard.ts) in its VALUE form: the core's contract is a
  * typed verdict, never a throw, so a refused recipient is logged and reported
  * as a send failure (which compensates the account) rather than thrown through
  * the Server Action boundary. Parent addresses are outside the student mail
  * domain and pass; the guard is here so a future recipient change cannot put
  * auth mail into a child's inbox without tripping it.
+ *
+ * ── WHY IT IS EXPORTED (whole-branch review, finding 1) ──
+ * A 6-digit code is password-reset-equivalent, and the guard exists to stop one
+ * reaching a dormant, password-less `@the120.school` student inbox — an address
+ * where it would be "neither visible nor recoverable". Every start-path send
+ * already came through here. `v3ResendCode` did NOT: it called
+ * `deps.signup.sendMail(...)` raw, and its only protection was an invariant in a
+ * DIFFERENT module (a guard-refused start aborts to `abandoned`, so no `started`
+ * row exists to resend against). That is exactly how this class of control stops
+ * holding silently, so resend now routes THROUGH here. There is ONE guarded send
+ * site for code mail, not two independently maintained ones.
  */
-async function sendCodeMail(
+export async function sendCodeMail(
   deps: SignupCoreDeps,
-  input: { email: string; parentName: string; code: string }
+  input: {
+    email: string;
+    parentName: string;
+    code: string;
+    /** Resend supplies one (Resend's dedupe window: the same code within it is
+     *  the same mail, a rotated code is a different one). Start does not — its
+     *  send happens once per attempt by construction. */
+    idempotencyKey?: string;
+  }
 ): Promise<boolean> {
   const guard = authMailVerdict(input.email);
   if (!guard.allowed) {
@@ -527,6 +546,7 @@ async function sendCodeMail(
     subject: mail.subject,
     text: mail.text,
     html: mail.html,
+    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
   });
   if (!sent.ok) {
     console.error(`[fp/signup] v3 code send failed: ${sent.error ?? "unknown"}`);

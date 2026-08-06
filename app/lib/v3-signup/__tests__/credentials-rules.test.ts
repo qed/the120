@@ -94,6 +94,80 @@ describe("the happy path — iloveschool<word> from the child's own answers", ()
   });
 });
 
+/* ---------------- the vocabulary itself (whole-branch review, finding 4) --- */
+
+describe("the fallback vocabulary", () => {
+  /**
+   * The list IS the entropy. `iloveschool` is a fixed, public prefix and the
+   * username is deterministic and derivable, so for any child on the fallback
+   * branch the number of candidate passwords is exactly the number of words
+   * here. It shipped at THIRTY. These rows re-derive every rule the constant's
+   * docblock states, so a future addition that breaks one fails the build
+   * instead of a family.
+   */
+
+  it("is several hundred words, not a rounding error", () => {
+    // The floor, not the count: adding words must never require editing this.
+    // 30 (what shipped) must fail it; a few hundred must pass.
+    expect(FALLBACK_PASSWORD_WORDS.length).toBeGreaterThanOrEqual(250);
+  });
+
+  it("has no duplicates — a repeat is silent entropy loss, not a typo", () => {
+    expect(new Set(FALLBACK_PASSWORD_WORDS).size).toBe(FALLBACK_PASSWORD_WORDS.length);
+  });
+
+  it("is lowercase a-z only, 4-12 letters — typeable by an eight-year-old", () => {
+    for (const w of FALLBACK_PASSWORD_WORDS) {
+      expect(w, w).toMatch(/^[a-z]{4,12}$/);
+    }
+  });
+
+  it("EVERY word yields a password the mint accepts — the whole point of the list", () => {
+    for (const w of FALLBACK_PASSWORD_WORDS) {
+      const verdict = validateStudentPassword(`${CHILD_PASSWORD_PREFIX}${w}`, {
+        studentName: "Sam Okafor",
+      });
+      expect(verdict.ok, `${CHILD_PASSWORD_PREFIX}${w}: ${verdict.ok ? "" : verdict.error}`).toBe(
+        true
+      );
+    }
+  });
+
+  it("carries nothing that reads badly against the fixed prefix", () => {
+    // Rule 6 in the constant's docblock. Innocent words are excluded on the
+    // strength of a substring alone (`button`, `classroom`, `poodle`), because
+    // the family reads `iloveschool<word>` as one string.
+    const forbiddenSubstrings = ["ass", "butt", "hell", "poo", "cock", "tit", "damn", "crap"];
+    const grandfathered = new Set(["compass"]); // shipped in the original thirty
+    for (const w of FALLBACK_PASSWORD_WORDS) {
+      if (grandfathered.has(w)) continue;
+      for (const bad of forbiddenSubstrings) {
+        expect(w.includes(bad), `${w} contains "${bad}"`).toBe(false);
+      }
+    }
+  });
+
+  it("carries no known homophone trap — a misspelled password is a lockout", () => {
+    // Rule 5. Not exhaustive English, and it cannot be: this is the standing
+    // list of pairs a child hears and spells the other way, and it is the place
+    // to add one the day a family reports it.
+    const traps = [
+      "bear", "bare", "flour", "flower", "sail", "sale", "steel", "steal",
+      "brake", "break", "week", "weak", "right", "write", "whole", "hole",
+      "meat", "meet", "pear", "pair", "tail", "tale", "deer", "dear", "mail",
+      "male", "peace", "piece", "plane", "plain", "road", "rode", "wait",
+      "weight", "which", "witch", "wood", "would", "board", "bored", "beach",
+      "beech", "cereal", "serial", "currant", "current", "principal",
+      "principle", "root", "route", "scene", "seen", "vain", "vein",
+      "weather", "whether", "stair", "stare", "waist", "waste", "heal",
+      "heel", "knight", "night", "berry", "bury", "colour", "favourite",
+    ];
+    for (const trap of traps) {
+      expect(FALLBACK_PASSWORD_WORDS, trap).not.toContain(trap);
+    }
+  });
+});
+
 describe("the fallback is PER KID, never one shared constant", () => {
   it("all answers skipped → a random word, still valid", () => {
     const built = buildChildPassword({
@@ -115,11 +189,22 @@ describe("the fallback is PER KID, never one shared constant", () => {
   });
 
   it("the draw spans the whole list — not one hot value the offset always lands on", () => {
+    // A deliberately SYNTHETIC control name. Any real name shares letters with
+    // some of the several hundred words, and each such word is (correctly)
+    // refused and replaced by its rotation neighbour — which would show up here
+    // as a collision and hide the property under test. `Zjq Wvx` overlaps
+    // nothing, so a missing word can only mean the DRAW never reached it.
+    const NEUTRAL = "Zjq Wvx";
     const seen = new Set<string>();
     for (let i = 0; i < FALLBACK_PASSWORD_WORDS.length; i += 1) {
-      const draw = i / FALLBACK_PASSWORD_WORDS.length;
+      // Mid-bucket, not the bucket edge: `drawIndex` multiplies the draw back
+      // out by the list length, and at several hundred words the edge value
+      // `i/n` lands one below its own bucket for a handful of `i` purely from
+      // float rounding. `(i+0.5)/n` asks the question the test means to ask —
+      // does every index in the list get drawn — without testing IEEE 754.
+      const draw = (i + 0.5) / FALLBACK_PASSWORD_WORDS.length;
       seen.add(
-        buildChildPassword({ childName: "Ada Lin", answers: {}, random: stream(draw) }).word!
+        buildChildPassword({ childName: NEUTRAL, answers: {}, random: stream(draw) }).word!
       );
     }
     expect(seen.size).toBe(FALLBACK_PASSWORD_WORDS.length);

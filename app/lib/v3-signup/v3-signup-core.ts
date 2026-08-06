@@ -70,7 +70,7 @@ import "server-only";
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { startSignup, type SignupCoreDeps } from "@/app/api/fp/signup/signup-core";
+import { sendCodeMail, startSignup, type SignupCoreDeps } from "@/app/api/fp/signup/signup-core";
 import {
   bumpCodeGuessCount,
   CODE_RESEND_COOLDOWN_MS,
@@ -84,7 +84,6 @@ import {
 } from "@/app/api/fp/signup/verify-store";
 import { isTestSignup, splitParentName, type SignupGateEnv } from "@/app/api/fp/signup/signup-rules";
 import {
-  buildCodeEmail,
   normalizeTypedCode,
   parseV3EditEmail,
   parseV3Resend,
@@ -390,28 +389,37 @@ export async function v3ResendCode(
   if (rotated === "cooldown") return { kind: "cooldown" };
   if (rotated !== "rotated") return { kind: "failed" };
 
-  const mail = buildCodeEmail({
+  // ── THROUGH THE GUARDED CHOKEPOINT, NOT AROUND IT (whole-branch review,
+  //    finding 1) ──
+  // This used to call `deps.signup.sendMail(...)` raw, which made it the ONLY
+  // unguarded auth-mail send in the v3 tree: `authMailVerdict` never ran, so a
+  // 6-digit code — password-reset-equivalent — could in principle reach a
+  // dormant, password-less @the120.school student inbox, where it is "neither
+  // visible nor recoverable". It was not independently reachable, but only
+  // because of an invariant in ANOTHER module (a guard-refused start aborts to
+  // `abandoned`, so no `started` row survives for resend to find). A control
+  // that holds only by a distant module's behaviour is a control that stops
+  // holding without anyone noticing. `sendCodeMail` is now the single guarded
+  // send site for every v3 code mail, start and resend alike.
+  const sent = await sendCodeMail(deps.signup, {
+    // The address the ROW carries, not the one the caller typed — they are the
+    // same by construction (the row was selected by it) and using the row's
+    // makes that non-negotiable.
+    email: pending.attempt.parentEmail,
     // The attempt row does not carry the typed display name, and re-deriving one
     // from the address would guess at a person's name in their own inbox. A
     // resend greets without a name rather than inventing one.
     parentName: "",
     code,
-    ttlMinutes: Math.round(VERIFICATION_CODE_TTL_MS / 60_000),
-  });
-  const sent = await deps.signup.sendMail({
-    // The address the ROW carries, not the one the caller typed — they are the
-    // same by construction (the row was selected by it) and using the row's
-    // makes that non-negotiable.
-    to: pending.attempt.parentEmail,
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
     // Resends of the SAME code within Resend's dedupe window are the same mail;
     // a rotated code is a different one, so the key includes the code hash.
     idempotencyKey: `fp-v3-code:${attemptId}:${sha256Hex(code).slice(0, 32)}`,
   });
-  if (!sent.ok) {
-    console.error(`[fp/v3-signup] resend send failed: ${sent.error ?? "unknown"}`);
+  if (!sent) {
+    // sendCodeMail has already logged the specific cause (a guard refusal or a
+    // provider error). Both are the same answer to the family: no code went out,
+    // try again — never a half-created verified account.
+    console.error(`[fp/v3-signup] resend send failed for attempt ${attemptId}`);
     return { kind: "failed" };
   }
   return { kind: "sent" };

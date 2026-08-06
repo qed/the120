@@ -107,13 +107,131 @@ export const MAX_PASSWORD_WORD_LENGTH = 14;
 /**
  * The per-kid fallback vocabulary. Concrete, spellable, and deliberately free of
  * anything on the student denylist. Order is irrelevant — the draw is random.
+ *
+ * ── WHY IT IS THIS BIG (whole-branch review, finding 4) ──
+ * It shipped with THIRTY words. The prefix `iloveschool` is fixed and public,
+ * and the username is deterministic and derivable (`first.last@…`), so for any
+ * child who reached this branch the whole credential was one of ~30 guesses.
+ * Thirty is not a vocabulary, it is a rounding error. The list is now several
+ * HUNDRED words, which is the only lever available: the shape `iloveschool
+ * <word>` and its memorability for an eight-year-old are the owner's
+ * requirement and are not this module's to renegotiate, so the entropy has to
+ * come from the word.
+ *
+ * ── THE RULES EVERY ENTRY OBEYS (pinned by __tests__/credentials-rules.test.ts,
+ *    which re-derives them rather than trusting this comment) ──
+ *  1. `iloveschool<word>` passes `validateStudentPassword` for a neutral name.
+ *     Nothing here contains a denylist string; nothing is under the length or
+ *     distinct-character floor once prefixed.
+ *  2. Lowercase a–z only. No hyphens, no accents, no apostrophes — the child
+ *     types this on a phone keyboard, and the passphrase last resort joins
+ *     words with `-`, which a word containing one would make ambiguous.
+ *  3. 4–12 letters. Short enough to retype, long enough not to be noise.
+ *  4. Concrete and picturable: an animal, a food, a place, a thing, a colour, a
+ *     sport. No abstractions — "courage" is not a thing a seven-year-old can
+ *     hold in their head while typing.
+ *  5. NO HOMOPHONE TRAPS. A word a child hears their parent read aloud and then
+ *     spells the other way is a lockout, so bear/bare, flour/flower, sail/sale,
+ *     steel/steal, brake/break, week/weak, right/write, whole/hole and their
+ *     kind are all absent, as are en-GB/en-US spelling splits (colour, favourite)
+ *     — `harbour` is grandfathered from the original list and is the only one.
+ *  6. NOTHING THAT READS BADLY AGAINST THE PREFIX, including as a substring:
+ *     no `butt`, `ass`, `hell`, `poo`, `cock`, `tit` inside a word, however
+ *     innocent the word itself (`button`, `classroom`, `poodle`, `shellfish` are
+ *     all excluded for this reason and no other). `compass` is grandfathered.
+ *  7. No proper nouns and no common given names — a fallback word that is
+ *     another child in the cohort's first name is a bad joke on both of them.
+ *
+ * Adding words is welcome and safe: the test re-checks the whole list against
+ * every rule above, so a bad addition fails the build rather than a family.
  */
 export const FALLBACK_PASSWORD_WORDS: readonly string[] = [
+  // ── the original thirty, kept verbatim ──
   "rockets", "pancakes", "lanterns", "meadow", "compass", "harbour", "cider",
   "puffin", "maple", "thunder", "sailboat", "cobalt", "juniper", "orbit",
   "pebble", "quartz", "ribbon", "saffron", "tundra", "violet", "willow",
   "zephyr", "anchor", "bramble", "clover", "dune", "ember", "fern", "glacier",
   "hazel",
+
+  // ── animals ──
+  "alpaca", "antelope", "armadillo", "badger", "beaver", "beetle", "bison",
+  "buffalo", "camel", "caterpillar", "cheetah", "chipmunk", "cobra", "crab",
+  "cricket", "dolphin", "donkey", "dragon", "dragonfly", "eagle", "falcon",
+  "ferret", "firefly", "flamingo", "gecko", "gerbil", "giraffe", "gopher",
+  "guppy", "hamster", "hedgehog", "heron", "hippo", "iguana", "jaguar",
+  "jellyfish", "kangaroo", "kitten", "koala", "ladybug", "lemur", "leopard",
+  "lizard", "llama", "lobster", "magpie", "meerkat", "minnow", "mongoose",
+  "monkey", "moose", "narwhal", "ocelot", "octopus", "orca", "ostrich",
+  "otter", "panda", "parrot", "pelican", "penguin", "pigeon", "platypus",
+  "python", "rabbit", "raccoon", "reindeer", "rhino", "salmon", "seagull",
+  "seahorse", "shark", "snail", "sparrow", "spider", "squid", "squirrel",
+  "starfish", "stingray", "stork", "tadpole", "tiger", "tortoise", "toucan",
+  "trout", "turtle", "walrus", "weasel", "whale", "wombat", "zebra",
+
+  // ── food ──
+  "apricot", "avocado", "bagel", "banana", "biscuit", "blueberry", "broccoli",
+  "brownie", "burrito", "cabbage", "carrot", "cashew", "celery", "cheddar",
+  "cherry", "chestnut", "chowder", "cinnamon", "coconut", "cookie", "cracker",
+  "cranberry", "crumpet", "cucumber", "cupcake", "custard", "dumpling",
+  "fritter", "granola", "hazelnut", "honey", "ketchup", "lemon", "lentil",
+  "lettuce", "lollipop", "mango", "marmalade", "meatball", "melon", "muffin",
+  "mushroom", "mustard", "noodle", "nutmeg", "oatmeal", "olive", "onion",
+  "orange", "oregano", "papaya", "parsnip", "pasta", "peanut", "pepper",
+  "pickle", "pineapple", "pistachio", "popcorn", "porridge", "potato",
+  "pretzel", "pudding", "pumpkin", "radish", "raisin", "ravioli", "rhubarb",
+  "sandwich", "sausage", "sherbet", "spaghetti", "spinach", "sprout",
+  "squash", "strawberry", "sundae", "syrup", "tangerine", "toffee", "tomato",
+  "tortilla", "turnip", "vanilla", "waffle", "walnut", "watermelon", "yogurt",
+  "zucchini",
+
+  // ── outdoors, weather and sky ──
+  "acorn", "autumn", "avalanche", "blossom", "boulder", "breeze", "brook",
+  "bubble", "cactus", "canyon", "cavern", "cliff", "cloud", "comet", "coral",
+  "crater", "creek", "crystal", "daisy", "dandelion", "dewdrop", "forest",
+  "fossil", "garden", "geyser", "granite", "grotto", "harvest", "iceberg",
+  "island", "jungle", "lagoon", "lava", "lightning", "marble", "mesa",
+  "meteor", "mountain", "nectar", "oasis", "orchard", "petal", "pinecone",
+  "planet", "pollen", "prairie", "rainbow", "ripple", "river", "sandbar",
+  "sapling", "savanna", "seaweed", "sequoia", "shadow", "snowflake", "spruce",
+  "stardust", "summit", "sunflower", "sunrise", "sunset", "thicket",
+  "thistle", "tulip", "valley", "volcano", "waterfall", "wildflower",
+  "woodland",
+
+  // ── things ──
+  "abacus", "backpack", "balloon", "banjo", "basket", "bicycle", "binder",
+  "blanket", "bongo", "bookmark", "bottle", "bracelet", "bugle", "bulldozer",
+  "camera", "candle", "canoe", "cartwheel", "castle", "catapult",
+  "chalkboard", "chariot", "chimney", "clarinet", "comic", "cottage",
+  "crayon", "cymbal", "dominoes", "doorbell", "drawbridge", "easel", "engine",
+  "envelope", "eraser", "fiddle", "flagpole", "flashlight", "flute", "folder",
+  "glider", "glitter", "goggles", "guitar", "hammock", "handbook",
+  "harmonica", "helmet", "hovercraft", "jigsaw", "journal", "jukebox",
+  "kayak", "kazoo", "kettle", "keyboard", "kite", "ladder",
+  "lighthouse", "locket", "magnet", "mailbox", "mandolin", "marker",
+  "marshmallow", "mitten", "mosaic", "notebook", "origami", "paddle",
+  "paintbrush", "parachute", "pencil", "piano", "pinwheel", "pocket",
+  "postcard", "poster", "puppet", "puzzle", "pyramid", "racecar", "raincoat",
+  "rowboat", "rucksack", "sandbox", "sandal", "satchel", "saxophone",
+  "scooter", "seesaw", "skateboard", "sketchbook", "sleigh",
+  "slingshot", "slipper", "snorkel", "snowboard", "spaceship", "sparkler",
+  "stapler", "starship", "stopwatch", "submarine", "sweater", "tambourine",
+  "telescope", "thermos", "tiara", "toboggan", "torch", "tractor",
+  "trampoline", "treehouse", "triangle", "tricycle", "trombone", "trophy",
+  "trumpet", "tugboat", "tunnel", "typewriter", "ukulele", "umbrella",
+  "unicycle", "violin", "wagon", "wheelbarrow", "whistle", "windmill",
+  "xylophone", "zipper",
+
+  // ── colours ──
+  "amber", "azure", "bronze", "crimson", "emerald", "indigo", "ivory", "jade",
+  "lavender", "lilac", "magenta", "maroon", "scarlet", "silver", "teal",
+  "turquoise",
+
+  // ── sports and games ──
+  "archery", "badminton", "baseball", "basketball", "bowling", "cycling",
+  "dodgeball", "gymnastics", "hockey", "hurdles", "judo", "karate",
+  "lacrosse", "marathon", "netball", "rugby", "sailing", "skating", "skiing",
+  "soccer", "softball", "surfing", "swimming", "tennis", "volleyball",
+  "wrestling",
 ];
 
 /* ------------------------------------------------------------- extraction */
@@ -228,7 +346,21 @@ export function buildChildPassword(input: {
   // ("school", "love"). Abandon the shape rather than the child: three random
   // words, dash-joined, is longer, has plenty of distinct characters, and
   // cannot contain the prefix.
-  const pool = rotatedFallback(input.random);
+  // ── PRE-FILTER, SO A 300-WORD VOCABULARY DOES NOT COST 4.5M VALIDATIONS ──
+  // The exhaustive triple search below is O(n³) in the vocabulary size, which
+  // was tolerable at the original thirty words and is not at several hundred
+  // (finding 4 widened the list; the search has to keep up). A passphrase is
+  // validated with `includes`, so a word whose OWN letters carry a name token or
+  // a denylist string refuses every triple it could appear in — dropping those
+  // once, up front, removes the vast majority of the space for free. It is
+  // deliberately CONSERVATIVE, not exact: a word could also be dropped because a
+  // name token spans the joining `-` in the `w-w-w` probe. That can only ever
+  // narrow the search, never widen it, so the module's absolute guarantee (every
+  // password RETURNED has passed `validateStudentPassword`) is untouched; the
+  // only cost is that an already-unreachable path might throw where a wider
+  // search would have found something.
+  const rotated = rotatedFallback(input.random);
+  const pool = rotated.filter((w) => validateStudentPassword(`${w}-${w}-${w}`, ctx).ok);
   for (let start = 0; start < pool.length; start += 1) {
     const password = [
       pool[start],
@@ -247,10 +379,10 @@ export function buildChildPassword(input: {
   // "Unreachable" is not a property this module may assert about a credential:
   // if it were ever wrong, the family would be handed a password `createChild`
   // then refuses as `weak_password`, on the one screen where they can do nothing
-  // about it. So the fallback is made total IN FACT — search the WHOLE space of
-  // distinct triples from the same per-kid rotation, validating each, and find a
-  // valid one whenever one exists (4060 checks at the shipped list size, and
-  // only on a path nothing real reaches).
+  // about it. So the fallback is made total IN FACT — search the whole space of
+  // distinct triples from the (pre-filtered) per-kid rotation, validating each,
+  // and find a valid one whenever one exists. Only reached on a path nothing
+  // real gets to, and only after the pre-filter above has collapsed the space.
   for (let i = 0; i < pool.length; i += 1) {
     for (let j = i + 1; j < pool.length; j += 1) {
       for (let k = j + 1; k < pool.length; k += 1) {

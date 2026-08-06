@@ -606,6 +606,10 @@ describe("error: the durable guess cap, resend during lockout, mail failure", ()
     // `first.last@the120.school`, indistinguishable by shape from staff. This
     // was newly wired into the code path, so it gets its own row: a refusal
     // must reach the family as a plain non-success AND must not mail.
+    //
+    // "EVERY v3 code mail" is now true of RESEND too — it was not when this
+    // comment was first written (whole-branch review, finding 1); see the
+    // dedicated resend row below, which pins it.
     const store = newStore();
     const h = makeHarness(store);
     const kidAddress = "first.last@the120.school";
@@ -636,6 +640,52 @@ describe("error: the durable guess cap, resend during lockout, mail failure", ()
       kind: "code_sent",
     });
     expect(h.sentMail.map((m) => m.to)).toEqual(["peter@the120.school"]);
+  });
+
+  it("RESEND is guarded too: an address the guard would refuse is never mailed a code", async () => {
+    // ── WHY THIS ROW EXISTS (whole-branch review, finding 1) ──
+    // `v3ResendCode` used to call `deps.signup.sendMail(...)` raw — the ONE
+    // unguarded auth-mail send in the v3 tree. Nothing user-facing could reach
+    // it, but ONLY because of an invariant in a DIFFERENT module: a
+    // guard-refused START compensates to `abandoned`, so no `started` row
+    // survives for resend to find. That is precisely how this class of control
+    // stops holding silently, so the guard is now enforced at the POINT OF
+    // SEND and this test pins it against the state resend actually reads,
+    // rather than against the start path's willingness to create it.
+    const store = newStore();
+    const h = makeHarness(store);
+    await v3StartSignup(h.v3Deps, startInput(), CTX);
+    expect(h.sentMail).toHaveLength(1);
+
+    // Retarget the live attempt at a bare funnel-student address — the shape
+    // the guard is default-deny for, and indistinguishable from staff. This
+    // models any future path (a retarget, an ops fix, a new caller) that lands
+    // a student address on a resumable row.
+    const kidAddress = "first.last@the120.school";
+    attemptFor(store).parent_email = kidAddress;
+
+    h.advanceClock(CODE_RESEND_COOLDOWN_MS + 1000);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await v3ResendCode(h.v3Deps, { email: kidAddress })).toEqual({ kind: "failed" });
+
+    // NOT MAILED — the assertion that distinguishes a guard refusal from a
+    // provider failure. Still exactly the one code the start path sent.
+    expect(h.sentMail).toHaveLength(1);
+    expect(h.sentMail.every((m) => m.to !== kidAddress)).toBe(true);
+    expect(
+      errors.mock.calls.some((c) => String(c[0]).includes("refusing v3 code mail"))
+    ).toBe(true);
+    errors.mockRestore();
+
+    // And it is an ALLOWLIST refusal, not a blanket block on the domain: a
+    // staff address on the list resends normally, so the guard cannot be
+    // mistaken for "resend is broken".
+    attemptFor(store, kidAddress).parent_email = "peter@the120.school";
+    h.advanceClock(CODE_RESEND_COOLDOWN_MS + 1000);
+    expect(await v3ResendCode(h.v3Deps, { email: "peter@the120.school" })).toEqual({
+      kind: "sent",
+    });
+    expect(h.sentMail.at(-1)!.to).toBe("peter@the120.school");
   });
 
   it("refuses to verify when cookies are unwritable — BEFORE burning the single-use code", async () => {

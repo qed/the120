@@ -527,12 +527,22 @@ export async function v3AddKid(
     .select("id")
     .single();
   if (draft.error || !draft.data) {
+    // ── COMPENSATE ON *EVERY* LOSING BRANCH (whole-branch review, finding 3) ──
+    // The draft is the LAST of three inserts. When it does not land — because
+    // the partial unique index gave the race to another tab, or because the
+    // write simply failed — the attempt and the consent row minted moments ago
+    // are attached to NOTHING. The consent row is the sharp end: it is legal
+    // evidence, minted alongside a live affirmation, and an orphan of it is
+    // litter with no cleanup path and no meaning. Both branches below therefore
+    // unwind, mirroring signup-core's `abort()` compensation.
+    const code = (draft.error as { code?: unknown } | null)?.code;
+    await compensateAddKid(deps, attemptId, code === "23505" ? "duplicate" : "draft-insert");
+
     // 23505 = the partial unique index fired: another call (another tab, a
     // double-click, a retried POST) already holds an ACTIVE draft for this
     // parent + kid name. That is not an error — it is the authoritative answer
     // to the question this function asked, and it is the ONLY answer that
     // survives a race. Re-read and hand back the winner.
-    const code = (draft.error as { code?: unknown } | null)?.code;
     if (code === "23505") {
       const existing = await loadAllExistingKids(deps, ctx.parentId);
       const dup = findDuplicateKid(
@@ -552,6 +562,64 @@ export async function v3AddKid(
     return { kind: "failed" };
   }
   return { kind: "added", draftId: String((draft.data as { id: unknown }).id) };
+}
+
+/**
+ * Unwind a losing `v3AddKid`: the consent row this call recorded, then the
+ * attempt it was recorded against (whole-branch review, finding 3).
+ *
+ * ── WHY DELETE, NOT `markAttemptAbandoned` ──
+ * signup-core's `abort()` marks the attempt `abandoned`, and that vocabulary is
+ * load-bearing over there: `state='abandoned' AND parent_id IS NOT NULL` is the
+ * documented ops query for "a compensation `deleteUser` failed and a real auth
+ * account is stranded". Reusing it here would manufacture false positives on
+ * that query — this attempt's parent account is the CALLER's, alive, signed in
+ * and entirely fine. (The CAS would also refuse: `markAbandoned` requires
+ * `state='started'`, and a loop-entry attempt is born `verified`.) So the rows
+ * are removed instead. Nothing of value is lost: the attempt carries no
+ * verification secret and no child, and the consent affirms a kid record that
+ * never came into being.
+ *
+ * ── ORDER: CONSENT FIRST ──
+ * `fp_parental_consent.signup_attempt_id` is ON DELETE SET NULL. Deleting the
+ * attempt first would null the only link and leave the consent row permanently
+ * unfindable by attempt — the exact orphan this function exists to prevent.
+ *
+ * ── AND IF THE UNWIND ITSELF FAILS ──
+ * It is logged in the STRANDED vocabulary and left. The draft reaper's orphan
+ * sweep (app/lib/v3-signup/draft-reaper-rules.ts) is the backstop: it collects
+ * attempts that never reached a draft or a child once they are past its age
+ * bound, together with their consent rows. Compensation is the fast path; the
+ * sweep is the guarantee.
+ */
+async function compensateAddKid(
+  deps: V3OnboardingDeps,
+  attemptId: string,
+  stage: string
+): Promise<void> {
+  const consent = await deps.db
+    .from("fp_parental_consent")
+    .delete()
+    .eq("signup_attempt_id", attemptId)
+    .select("id");
+  if (consent.error) {
+    console.error(
+      `[fp/v3-onboarding] STRANDED CONSENT for attempt ${attemptId} (compensating ${stage}): ${consent.error.message} — orphaned consent evidence; the draft reaper's orphan sweep is the backstop`
+    );
+    // The attempt is deliberately LEFT: it is the only handle the sweep (and an
+    // operator) has for finding that consent row again.
+    return;
+  }
+  const attempt = await deps.db
+    .from("fp_signup_attempts")
+    .delete()
+    .eq("id", attemptId)
+    .select("id");
+  if (attempt.error) {
+    console.error(
+      `[fp/v3-onboarding] STRANDED ATTEMPT ${attemptId} (compensating ${stage}): ${attempt.error.message} — orphaned attempt; the draft reaper's orphan sweep is the backstop`
+    );
+  }
 }
 
 /* ------------------------------------------------------------- edit / save */

@@ -123,6 +123,17 @@ a text channel that is fine to leave open — the wrong choice to hand an operat
 mid-incident. Two env vars cost nothing; granular reversal is worth real money
 exactly once.
 
+**⚠ WHAT THE TEXT FLAG IS SCOPED TO.** `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` applies
+**only to a run whose child provenance VERIFIED** — a run filled through the
+content picker with a signed token the server checked. On an unprovenanced run
+the pre-decision behaviour stands: OpenAI cells derive unless the staff
+attestation is ticked. This is the premise, not caution: what was cleared is that
+***scrubbed*** identifier-free text is not personal data, and `scrubNames` only
+removes anything when a verified token identified a child — with no token it is a
+no-op, so unprovenanced text is unscrubbed text of unknown origin. Nothing the
+decision asked for is lost by the scope; see the correction under **CHECK 1,
+OPENAI HALF — SUPERSEDED BY OWNER DECISION** below for the full record.
+
 **What NEITHER flag covers.**
 
 - **Google.** Ungated in all four flag states, before and after. Nothing about this
@@ -303,15 +314,53 @@ for manual review (non-waivable). Three paths:
 > flag-OFF behaviour, which is the code default and what any deployment without
 > the variable runs. (2) The three holes it documents — the template door, the
 > inverted `IMAGE_LAB_REAL_CONTENT_LIVE` conjunct, and the ungated reference leg —
-> were **real defects that were fixed**, and the fixes are still in place; only
-> whether the OpenAI gate *arms* is now a flag. (3) The reasoning that produced
-> path (c) is what a future reader needs in order to re-open the question with the
-> facts, rather than re-deriving it. The question was asked, and it was answered by
-> a decision, not by a discovery — nothing here was found to be wrong.
+> were **real defects that were fixed**, and those fixes are still in place. (3)
+> The reasoning that produced path (c) is what a future reader needs in order to
+> re-open the question with the facts, rather than re-deriving it. The question was
+> asked, and it was answered by a decision, not by a discovery.
+>
+> **⚠ CORRECTION, AND IT IS THE MOST IMPORTANT LINE IN THIS SECTION.** An earlier
+> version of this paragraph said "only whether the OpenAI gate *arms* is now a
+> flag". **That was not true of hole #1, the template door.** As first written,
+> `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` disarmed the forced derived vocabulary
+> unconditionally — and the forced derived vocabulary *was* the fix for hole #1. A
+> compose with no provenance token, the attestation unticked, empty slot values and
+> a child's pitch typed into the **template** therefore dispatched verbatim to
+> gpt-image-2 again, with **nothing scrubbed**. The flag has since been **scoped**;
+> the rule is below.
+>
+> **THE SCOPING RULE.** `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` applies **only to a run
+> whose child provenance VERIFIED** — i.e. one filled through the content picker,
+> whose signed token `createRun` checked against a real child row. On any other
+> run the pre-decision behaviour stands: OpenAI cells derive unless the staff
+> **attestation** is ticked, and an unattested authored prompt is refused at
+> dispatch (`child_text_gate`).
+>
+> **WHY IT EXISTS — the premise, not caution.** What counsel cleared is the narrow
+> reading that ***scrubbed*** business text carrying no identifiers is not personal
+> data of a child. `scrubNames` is what makes "scrubbed" true, and it can only
+> remove the name tokens of a child the server actually identified. With no
+> verified token there is no child, no tokens, and **the scrub is a literal no-op**
+> — `run-core.ts` reads `tokens.length > 0 ? scrubNames(...) : input.template`, so
+> the text passes through byte-for-byte and can still carry a name, a username, a
+> street. Text on that path is unscrubbed text of unknown origin, which is
+> **outside** the premise the decision rests on. Widening the flag to it would not
+> be taking the narrow reading; it would be taking a wider one nobody cleared.
+>
+> **What the scope does NOT cost.** Every capability the decision asked for is
+> intact: a picker-filled run sends the child's scrubbed wording to OpenAI (the
+> point of the decision), and an **attested** staff compose sends authored text
+> exactly as it always did. Only the unattested, unprovenanced compose keeps
+> deriving — and that one was never a capability, it was the hole.
+>
+> Pinned by `the TEMPLATE DOOR: flag on, NO token, UNATTESTED …` and `does NOT
+> scrub a token-less compose …` in `run-core.test.ts`, and by `the dispatch gate
+> applies the text flag only to a provenance-bearing run` in `run-rules.test.ts`.
 >
 > One item below is now **also** load-bearing rather than merely prudent: the
 > **name scrub**. With the flag on it carries the legal argument, because the
-> argument is precisely "no identifiers".
+> argument is precisely "no identifiers" — and the scoping rule above is the direct
+> consequence of the fact that it does not always run.
 
 ### CHECK 1, OPENAI HALF — path (c) IMPLEMENTED, **NOT YET CLOSED**
 

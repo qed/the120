@@ -398,6 +398,25 @@ export type PromptGateContext = {
    * fully independent switch — see {@link decideChildTextGate}. This one never
    * opens it.
    *
+   * ⚠ AND IT ONLY APPLIES ALONGSIDE `childProvenance`. THE SCOPE IS THE LEGAL
+   * PREMISE, NOT CAUTION. Counsel cleared the narrow reading that **scrubbed**
+   * business text carrying no identifiers is not personal data of a child, and
+   * `scrubNames` is what makes "scrubbed" true — but it can only remove tokens
+   * `createRun` derived from the child row a VERIFIED token named. With no token
+   * there are no tokens, and the scrub is a literal no-op (`run-core`:
+   * `tokens.length > 0 ? scrubNames(...) : input.template`).
+   *
+   * So on an unprovenanced compose the flag would be opening a channel for text
+   * that was never scrubbed and whose origin is unknown — a child's pitch typed
+   * into the TEMPLATE with the box unticked is the exact case — which the
+   * premise does not cover. Unscoped, the flag switched off the very control
+   * that used to cover that path (the forced derived vocabulary), so the hole it
+   * opened was the one the forced mode existed to close.
+   *
+   * The capability the owner asked for is unaffected: a picker-filled run has
+   * provenance and sends the child's scrubbed words, and an ATTESTED staff
+   * compose was never constrained by the vocabulary in the first place.
+   *
    * ⚠ ABSENT IS FALSE, AND FALSE IS THE PRE-DECISION BEHAVIOUR. Every function
    * in this module that takes it defaults it off, so a caller that has never
    * heard of the flag gets the restrictive answer. The flag reaches this layer
@@ -428,7 +447,22 @@ export function forcedPromptMode(
   // selectable on every model — comparing a derived prompt against an authored
   // one is one of the experiments this bench exists to run, and removing the
   // option would be the same mistake as forcing it, in the other direction.
-  if (ctx.openVocabulary === true) return null;
+  //
+  // ⚠ AND IT IS SCOPED TO `childProvenance`, WHICH IS NOT BELT-AND-BRACES — IT
+  // IS THE PREMISE. See {@link PromptGateContext.openVocabulary}: the decision
+  // this flag carries is "SCRUBBED text carrying no identifiers is not personal
+  // data", and `scrubNames` only removes anything when `createRun` verified a
+  // token and derived name tokens from a real child row. On an UNPROVENANCED
+  // compose the scrub is a NO-OP — `run-core` passes `tokens = []` and the
+  // template goes through untouched — so an unscoped flag would send unknown,
+  // unscrubbed prose verbatim, which the premise does not cover.
+  //
+  // Nothing the owner asked for is lost. A picker-filled run (provenance) sends
+  // the child's scrubbed words, which IS the decision. An ATTESTED staff compose
+  // takes the `noChildContentAttested !== true` exit below and is unchanged from
+  // before either flag existed. Only the unattested, unprovenanced,
+  // unknown-origin compose keeps deriving — exactly as it did pre-decision.
+  if (ctx.openVocabulary === true && ctx.childProvenance) return null;
   return ctx.childProvenance || ctx.noChildContentAttested !== true ? "derived" : null;
 }
 
@@ -497,6 +531,59 @@ export function promptModeFor(
   return isImageLabPromptMode(chosen)
     ? chosen
     : defaultPromptMode(modelId, childProvenance, noChildContentAttested, openVocabulary);
+}
+
+/**
+ * THE MODE MAP THE CLIENT SUBMITS — one EXPLICIT entry per SELECTED model,
+ * including the models the composer showed as locked.
+ *
+ * ⚠ THIS EXISTS BECAUSE "NO ENTRY" MEANS "THE SERVER GUESSES", AND A STALE TAB
+ * MADE IT GUESS IN THE PERMISSIVE DIRECTION. `page.tsx` reads
+ * `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` ONCE, at render. A tab rendered while the
+ * flag was off computed `lockedToDerived` for every OpenAI model, so the select
+ * was disabled, its `onChange` never fired, and NO entry was written into
+ * `promptModes` — the preview showed the derived string under "Required on this
+ * model". The operator then SET the flag, which is env-only and needs no deploy
+ * (the advertised reversal, run in the other direction). On Generate, `createRun`
+ * read the server's CURRENT value, found no entry for that model, and
+ * {@link defaultPromptMode} answered `authored`. The child's authored wording was
+ * composed and dispatched while the last human check before dispatch said the
+ * vendor REQUIRED the derived prompt.
+ *
+ * ⚠ AND "THE STALE CLIENT ONLY UNDER-PROMISES" IS NOT A DEFENCE FOR A PRIVACY
+ * PREVIEW. Under-promising means the preview shows LESS text than is sent, which
+ * is the harmful direction here — the whole job of that surface is to be the last
+ * place a human can see what is about to leave for a vendor.
+ *
+ * Sending the effective mode for every selected model removes the guess entirely:
+ * the server never falls back to a default, so any disagreement between the tab's
+ * flag reading and the server's shows up as a COMPOSED PROMPT THAT MATCHES THE
+ * PREVIEW rather than as a silent upgrade. A forced mode still wins over an
+ * explicit entry ({@link promptModeFor}), so a stale entry can only ever be
+ * overridden in the RESTRICTIVE direction.
+ *
+ * Pure and here rather than inline in the `.tsx`, for this module's usual reason:
+ * the composer cannot be rendered by this suite, so a rule written there is a
+ * rule nothing asserts.
+ */
+export function effectivePromptModes(input: {
+  modelIds: readonly string[];
+  childProvenance: boolean;
+  modes?: PromptModes;
+  noChildContentAttested?: boolean;
+  openVocabulary?: boolean;
+}): PromptModes {
+  const out: Record<string, ImageLabPromptMode> = {};
+  for (const modelId of input.modelIds) {
+    out[modelId] = promptModeFor(
+      modelId,
+      input.childProvenance,
+      input.modes,
+      input.noChildContentAttested === true,
+      input.openVocabulary === true
+    );
+  }
+  return out;
 }
 
 /** The exact text one model's cells will carry, and whether it is derived. */
@@ -593,6 +680,11 @@ export type ChildTextGateVerdict =
  * decision is carried by two switches (the two bets rest on different things: the
  * text bet on a verified technical control, the reference bet on dialog copy).
  *
+ * ⚠ AND THE TEXT FLAG IS SCOPED TO `childProvenance`, FOR THE SAME REASON THE
+ * TEXT BET RESTS ON A TECHNICAL CONTROL: the control only ran when provenance
+ * verified. See {@link PromptGateContext.openVocabulary}. Without the scope, the
+ * flag's most permissive path is the one path with NO scrub at all.
+ *
  * Everything else on this function is unconditional: Google is ungated in all
  * FOUR flag states, and an unknown model id fails closed in all four, because
  * neither of those is about the decision the flags carry.
@@ -613,6 +705,9 @@ export function decideChildTextGate(input: {
    * ⚠ IT DOES NOT DISARM THE REFERENCE GATE. That is `openReferences`.
    * ⚠ AND ABSENT IS FALSE, so a caller that does not pass it — a test, a future
    * call site, a partially-updated deployment — gets the pre-decision gate.
+   * ⚠ AND IT ONLY APPLIES WITH `childProvenance`, because that is the only run
+   * the name scrub had tokens to work with. Unprovenanced text is unscrubbed
+   * text, which the decision's premise does not cover.
    */
   openVocabulary?: boolean;
   /**
@@ -657,9 +752,20 @@ export function decideChildTextGate(input: {
   // a Google one's. The scrub (`content-picker-core.scrubNames`, re-run
   // server-side in `createRun`) is what that rests on and is untouched here.
   //
+  // ⚠ AND THE FLAG ONLY APPLIES TO A RUN WHOSE PROVENANCE VERIFIED, BECAUSE
+  // THAT IS THE ONLY RUN THE SCRUB ACTUALLY RAN ON. `createRun` derives name
+  // tokens from the child row the verified token names; with no token there are
+  // no tokens, and `scrubNames` is a NO-OP over the template. An unscoped early
+  // return would therefore dispatch UNSCRUBBED text of unknown origin — a name,
+  // a username, a street — which is outside the narrow reading the decision
+  // rests on ("scrubbed business text carrying no identifiers is not personal
+  // data of a child"). Unprovenanced composes fall through to `constrained`
+  // below, where the ATTESTATION is still the way to send authored text: an
+  // attested staff compose passes exactly as it did before either flag existed.
+  //
   // Reached with references already blessed or absent, so text-closed +
   // references-open lands here too and still holds the text to the vocabulary.
-  if (input.openVocabulary === true) return { ok: true };
+  if (input.openVocabulary === true && input.childProvenance) return { ok: true };
 
   const constrained = input.childProvenance || input.noChildContentAttested !== true;
   if (!constrained) return { ok: true };
@@ -1602,6 +1708,13 @@ export function decideGenerateAffordance(input: {
   decision: RunCompositionDecision;
   submitting: boolean;
   live: boolean;
+  /**
+   * Does this compose carry VERIFIED child provenance (the composer's "the
+   * picker minted a token")? Only used for the reference warning below.
+   */
+  childProvenance?: boolean;
+  /** How many reference images are attached. Only used for the warning below. */
+  referenceCount?: number;
 }): GenerateAffordance {
   const copy = IMAGE_LAB_RUN_COPY.composer;
   if (!input.decision.ok) {
@@ -1621,6 +1734,39 @@ export function decideGenerateAffordance(input: {
     warnings.push(copy.unknownSlots(input.decision.resolved.unknown));
   }
   if (!input.live) warnings.push(copy.generationOff);
+
+  // ⚠ THE ONE COMPOSE-TIME SIGNAL THAT REFERENCES MAY BE REFUSED — AND IT READS
+  // NO FLAG, DELIBERATELY.
+  //
+  // On the RECOMMENDED posture (text open, references closed) the composer now
+  // renders gpt-image-2 as unconstrained, and `ReferenceLibrary` actively budgets
+  // against its `refImageLimit: 4` — so the bench INVITES attachments that every
+  // OpenAI cell then refuses at dispatch (`child_reference_gate`). Nothing is
+  // billed, because the gate is pre-CAS, but the run and its dead cells exist and
+  // the staff member learns about it only from a refusal.
+  //
+  // ⚠ IT MUST NOT TAKE A SECOND FLAG READER TO SAY THIS. The references flag is
+  // deliberately never handed to the browser (see `page.tsx`), and adding a
+  // reader here would create exactly the drift-capable second answer that
+  // decision avoids. So the copy is written in the RESTRICTIVE direction — "may
+  // refuse", not "will" — which is TRUE IN ALL FOUR FLAG STATES and cannot go
+  // stale: with references closed it is the accurate warning, and with them open
+  // it is a caveat about a deployment setting, not a false claim.
+  //
+  // Keyed on `childProvenance` because that is precisely what arms the reference
+  // gate. A reference-bearing run with no provenance is never refused for
+  // references, on any deployment, so warning about it would be noise that
+  // teaches staff to ignore the line.
+  const hasOpenAiCell = input.decision.modelIds.some(
+    (modelId) => findModelEntry(modelId)?.provider === "openai"
+  );
+  if (
+    input.childProvenance === true &&
+    (input.referenceCount ?? 0) > 0 &&
+    hasOpenAiCell
+  ) {
+    warnings.push(copy.openAiReferencesMayRefuse);
+  }
 
   return {
     enabled: !input.submitting,
@@ -1941,6 +2087,16 @@ export const IMAGE_LAB_RUN_COPY = {
       "IMAGE_LAB_LIVE is not set to 1 or true, so the run will be recorded but every cell will finish as unconfigured and nothing will be billed.",
     unfilledSlots: (slots: readonly string[]) =>
       `${slots.join(", ")} ${slots.length === 1 ? "has" : "have"} no value, so the literal {{slot}} text will be sent. That is allowed — generate anyway if it is deliberate.`,
+    /**
+     * ⚠ RESTRICTIVE-DIRECTION COPY, AND THAT IS WHAT LETS IT BE CORRECT IN ALL
+     * FOUR FLAG STATES WITHOUT READING A FLAG. "May refuse" is true whether
+     * `IMAGE_LAB_OPENAI_OPEN_REFERENCES` is set or not, so this line cannot drift
+     * out of step with a switch the browser is deliberately never told about. It
+     * names what happens (refused, per cell, before anything is billed) and the
+     * two ways forward, so it is actionable rather than merely ominous.
+     */
+    openAiReferencesMayRefuse:
+      "This run was filled from a child's business content and carries reference images. OpenAI cells MAY refuse references on this deployment — if they do, every gpt-image-2 cell finishes refused before anything is dialled or billed, and Google cells are unaffected. Generate anyway to find out, or drop the references (or the OpenAI model) first.",
     unknownSlots: (slots: readonly string[]) =>
       `${slots.join(", ")} ${slots.length === 1 ? "is not a slot" : "are not slots"} this bench fills. The literal text will be sent.`,
     modelPriced: (id: string, price: string, tier: string) =>

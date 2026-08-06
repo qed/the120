@@ -2726,6 +2726,131 @@ describe("the OpenAI channel flags — the decision, on the paid path", () => {
   });
 
   /**
+   * ⚠ THE TEMPLATE DOOR STAYS SHUT UNDER THE TEXT FLAG — THE P0.
+   *
+   * Every other test in this describe supplies `VALID_SOURCE_TOKEN`, so none of
+   * them could see this: a compose with NO token, attestation absent, EMPTY slot
+   * values, and a child's pitch typed straight into the TEMPLATE. On that path
+   * nothing is scrubbed (no verified token ⇒ no name tokens ⇒ `scrubNames` never
+   * runs), `unverified_slot_source` never fires (it checks slot content), and the
+   * template is never inspected. The only control that ever covered it was the
+   * FORCED derived vocabulary — which is precisely what the text flag switches
+   * off.
+   *
+   * The owner's decision is about SCRUBBED text with no identifiers. This text
+   * was never scrubbed and its origin cannot be established, so the flag must not
+   * reach it: the cell composes derived and a row forced back to the authored
+   * string is refused at dispatch.
+   *
+   * ⚠ MUTATION: drop `&& ctx.childProvenance` from `forcedPromptMode` and the
+   * composition half reddens; drop `&& input.childProvenance` from
+   * `decideChildTextGate` and the dispatch half reddens.
+   */
+  it("the TEMPLATE DOOR: flag on, NO token, UNATTESTED — still derives, and still refuses authored", async () => {
+    const h = makeHarness();
+    h.hooks.openVocabulary = true;
+    h.hooks.openReferences = true;
+    const childsPitch = "I sell hand-drawn sticker packs at the Oak Street school fair";
+
+    const created = await createRun(
+      h.deps,
+      composeInput({
+        template: childsPitch,
+        slotValues: {},
+        noChildContentAttested: false,
+      })
+    );
+    // It COMPOSES — nothing here is refused, and that is the point: the run is
+    // legal, so the only thing standing between this text and the vendor is
+    // which prompt the cell was given.
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.run.sourceChildId).toBeNull();
+    expect(created.run.noChildContentAttested).toBe(false);
+
+    const cell = created.cells[0]!;
+    expect(cell.modelId).toBe("gpt-image-2");
+    // ⚠ COMPOSED DERIVED. The flag did not reach this run.
+    expect(cell.promptDerived).toBe(true);
+    expect(isCategoryDerivedPrompt(cell.resolvedPrompt)).toBe(true);
+    expect(cell.resolvedPrompt).not.toContain("Oak Street");
+
+    const outcome = await generateCell(h.deps, { staffId: "staff-1", imageId: cell.id });
+    expect(outcome.kind).toBe("done");
+    expect(h.dispatched).toEqual([
+      { modelId: "gpt-image-2", prompt: cell.resolvedPrompt },
+    ]);
+
+    // …and a row carrying the authored string is REFUSED at dispatch, with both
+    // flags open. The gate, not just the composer's default.
+    const second = await createRun(
+      h.deps,
+      composeInput({
+        idempotencyKey: "compose-key-0042",
+        template: childsPitch,
+        slotValues: {},
+        noChildContentAttested: false,
+      })
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const cell2 = second.cells[0]!;
+    h.cells.set(cell2.id, {
+      ...h.cells.get(cell2.id)!,
+      resolvedPrompt: childsPitch,
+      promptDerived: false,
+    });
+    expect(
+      await generateCell(h.deps, { staffId: "staff-1", imageId: cell2.id })
+    ).toEqual({ kind: "child_text_gate" });
+    expect(h.dispatched).toHaveLength(1);
+  });
+
+  /**
+   * ⚠ THE SCRUB IS A NO-OP WITHOUT A VERIFIED TOKEN, AND THIS IS WHY THE TEXT
+   * FLAG REQUIRES PROVENANCE.
+   *
+   * `scrubNames` removes the name tokens of an IDENTIFIED child. `createRun`
+   * derives those tokens from the child row a verified token names, so a
+   * token-less compose reaches the scrub with `tokens = []` and the text passes
+   * through byte-for-byte — it can still carry a name, a username, a street.
+   *
+   * The decision's premise is "SCRUBBED business text carrying no identifiers is
+   * not personal data of a child". This test is the negative half of the
+   * `STILL SCRUBS` test above: together they say the premise is TRUE exactly on
+   * the provenance path and FALSE off it, which is the whole justification for
+   * the scope on `forcedPromptMode` / `decideChildTextGate`.
+   *
+   * ⚠ IT IS NOT AN ASSERTION THAT THE NO-OP IS DESIRABLE. It is unfixable at this
+   * layer — there is no child to derive tokens from — which is why the answer is
+   * to withhold the flag rather than to widen the scrub.
+   */
+  it("does NOT scrub a token-less compose — there is no child to scrub against", async () => {
+    const h = makeHarness();
+    h.hooks.openVocabulary = true;
+    h.hooks.openReferences = true;
+
+    const created = await createRun(
+      h.deps,
+      composeInput({
+        // The SAME name the provenance-path scrub test removes.
+        template: "Draw a stall for Maya Chen",
+        slotValues: {},
+        note: "Maya's second attempt",
+        noChildContentAttested: true,
+      })
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    // Verbatim. Nothing was removed, because nothing identified a child.
+    expect(created.run.sourceChildId).toBeNull();
+    expect(created.run.template).toBe("Draw a stall for Maya Chen");
+    expect(created.run.note).toBe("Maya's second attempt");
+    expect(created.run.resolvedPrompt).toMatch(/Maya Chen/);
+  });
+
+  /**
    * ⚠ REVERSING EITHER DECISION IS UNSETTING ITS ENV VAR — NO DEPLOY, AND NO
    * MIGRATION OF THE RUNS COMPOSED WHILE IT WAS ON.
    *

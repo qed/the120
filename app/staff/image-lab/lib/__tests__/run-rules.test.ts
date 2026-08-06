@@ -7,6 +7,7 @@ import {
   decideChildTextGate,
   decideGenerateAffordance,
   decideRunComposition,
+  effectivePromptModes,
   defaultPromptMode,
   describeAttemptLine,
   describeAttemptNumbering,
@@ -607,6 +608,228 @@ describe("decideGenerateAffordance", () => {
       decideGenerateAffordance({ decision: okDecision, submitting: true, live: true }).enabled
     ).toBe(false);
   });
+
+  /**
+   * ⚠ THE COMPOSE-TIME REFERENCE WARNING — the only signal, before Generate, that
+   * an OpenAI cell may refuse the references the composer just invited.
+   *
+   * On the RECOMMENDED posture (text open, references closed) `RunComposer`
+   * renders gpt-image-2 as unconstrained and `ReferenceLibrary` budgets against
+   * its `refImageLimit: 4`, so the bench asks for attachments that every OpenAI
+   * cell then refuses at dispatch. Nothing is billed (the gate is pre-CAS), but
+   * the run and its dead cells exist and nothing said so beforehand.
+   *
+   * ⚠ IT READS NO FLAG, AND THAT IS THE DESIGN. `IMAGE_LAB_OPENAI_OPEN_REFERENCES`
+   * is deliberately never handed to the browser; a reader here would be the
+   * drift-capable second answer that decision avoids. The copy is written in the
+   * restrictive direction ("MAY refuse"), which is true in all four flag states.
+   */
+  describe("the OpenAI reference warning", () => {
+    const withOpenAi = (referenceIds: readonly string[]) =>
+      decideRunComposition({
+        template: "Draw a stall",
+        slotValues: {},
+        modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+        imageCount: 1,
+        referenceIds,
+      });
+
+    const warn = IMAGE_LAB_RUN_COPY.composer.openAiReferencesMayRefuse;
+
+    it("warns on a provenance run with references and an OpenAI model", () => {
+      const affordance = decideGenerateAffordance({
+        decision: withOpenAi(["ref-1"]),
+        submitting: false,
+        live: true,
+        childProvenance: true,
+        referenceCount: 1,
+      });
+      expect(affordance.warnings).toContain(warn);
+      // ⚠ IT WARNS, IT DOES NOT BLOCK. The references may well be fine on this
+      // deployment, and blocking a legal compose on a guess is the opposite
+      // defect.
+      expect(affordance.enabled).toBe(true);
+      expect(affordance.blocker).toBeNull();
+    });
+
+    /**
+     * ⚠ RESTRICTIVE-DIRECTION COPY IS WHAT MAKES ONE STRING CORRECT IN FOUR FLAG
+     * STATES. It must not promise a refusal, and it must not promise success.
+     */
+    it("says references MAY be refused — never that they will be, or will not", () => {
+      expect(warn).toMatch(/\bMAY\b/);
+      expect(warn).not.toMatch(/\bwill be refused\b/i);
+      // …and it names the free part: nothing is dialled or billed.
+      expect(warn).toMatch(/billed/i);
+      // …and that Google is unaffected, so the fix is not "give up on the run".
+      expect(warn).toMatch(/google/i);
+    });
+
+    /**
+     * ⚠ EACH CONJUNCT IS LOAD-BEARING. The reference gate arms on VERIFIED
+     * PROVENANCE and on the OPENAI LEG only, so warning outside those conditions
+     * would be noise — and a warning line staff learn to skip is worse than none,
+     * because it is the line that matters the day it is true.
+     */
+    it("stays silent when any one of the three conditions is absent", () => {
+      // No references.
+      expect(
+        decideGenerateAffordance({
+          decision: withOpenAi([]),
+          submitting: false,
+          live: true,
+          childProvenance: true,
+          referenceCount: 0,
+        }).warnings
+      ).not.toContain(warn);
+
+      // No provenance: the reference gate never arms, on any deployment.
+      expect(
+        decideGenerateAffordance({
+          decision: withOpenAi(["ref-1"]),
+          submitting: false,
+          live: true,
+          childProvenance: false,
+          referenceCount: 1,
+        }).warnings
+      ).not.toContain(warn);
+
+      // No OpenAI model. A Google-only run keeps its references in every state.
+      expect(
+        decideGenerateAffordance({
+          decision: decideRunComposition({
+            template: "Draw a stall",
+            slotValues: {},
+            modelIds: ["gemini-3-pro-image"],
+            imageCount: 1,
+            referenceIds: ["ref-1"],
+          }),
+          submitting: false,
+          live: true,
+          childProvenance: true,
+          referenceCount: 1,
+        }).warnings
+      ).not.toContain(warn);
+    });
+
+    /** A caller that has never heard of the two new fields gets no warning and no
+     *  crash — the same absent-is-safe posture as every flag in this module. */
+    it("is absent-safe: no childProvenance, no referenceCount, no warning", () => {
+      expect(
+        decideGenerateAffordance({
+          decision: withOpenAi(["ref-1"]),
+          submitting: false,
+          live: true,
+        }).warnings
+      ).not.toContain(warn);
+    });
+  });
+});
+
+/**
+ * THE MODE MAP THE COMPOSER SUBMITS — one EXPLICIT entry per selected model.
+ *
+ * ⚠ THE BUG THIS CLOSES IS A PREVIEW/DISPATCH DIVERGENCE IN THE PERMISSIVE
+ * DIRECTION. `page.tsx` reads `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` once, at render.
+ * A tab rendered flag-OFF locked every OpenAI select, so its `onChange` never
+ * fired and NO entry reached `promptModes` — the preview showed the derived
+ * string under "Required on this model". The operator then SET the flag (env
+ * only, no deploy — the advertised reversal run in the other direction). On
+ * Generate, `createRun` read the server's CURRENT value, found no entry, and
+ * `defaultPromptMode` answered `authored`: the child's authored wording composed
+ * and dispatched, while the human's last check before dispatch said the vendor
+ * REQUIRED the derived prompt.
+ *
+ * ⚠ MUTATION: submit the raw `promptModes` state instead of this map — i.e.
+ * revert `RunComposer.onGenerate` — and the divergence test below reddens.
+ */
+describe("effectivePromptModes — the server never guesses a mode", () => {
+  it("writes an entry for EVERY selected model, locked ones included", () => {
+    const modes = effectivePromptModes({
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+      childProvenance: true,
+      modes: {},
+      openVocabulary: false,
+    });
+    // The OpenAI select was disabled, so nothing was ever chosen for it — and it
+    // is exactly the model whose absent entry the server would fill in.
+    expect(Object.keys(modes).sort()).toEqual(["gemini-3-pro-image", "gpt-image-2"]);
+    expect(modes["gpt-image-2"]).toBe("derived");
+    expect(modes["gemini-3-pro-image"]).toBe("authored");
+  });
+
+  it("carries an explicit staff choice through unchanged", () => {
+    const modes = effectivePromptModes({
+      modelIds: ["gpt-image-2"],
+      childProvenance: true,
+      modes: { "gpt-image-2": "derived" },
+      openVocabulary: true,
+    });
+    expect(modes["gpt-image-2"]).toBe("derived");
+  });
+
+  it("names ONLY selected models — a stale entry for a deselected chip never ships", () => {
+    const modes = effectivePromptModes({
+      modelIds: ["gemini-3-pro-image"],
+      childProvenance: false,
+      modes: { "gpt-image-2": "derived" },
+      noChildContentAttested: true,
+    });
+    expect(Object.keys(modes)).toEqual(["gemini-3-pro-image"]);
+  });
+
+  /**
+   * ⚠ THE DIVERGENCE ITSELF, AS ONE ASSERTION.
+   *
+   * The tab computes the map under the flag value it RENDERED with; the server
+   * composes under the value it READS at Generate. With the explicit map, the
+   * composed mode equals the previewed mode across that disagreement. Without it
+   * — passing `{}`, which is what an untouched locked select produces — the
+   * server's default answers `authored` and the preview was a lie.
+   */
+  it("keeps a STALE TAB's composition equal to the preview it showed", () => {
+    const staleTabSawFlagOff = false;
+    const serverReadsFlagOn = true;
+    const modelIds = ["gpt-image-2"];
+
+    // What the tab previewed: locked to derived, no explicit entry written.
+    const previewed = promptModeFor("gpt-image-2", true, {}, false, staleTabSawFlagOff);
+    expect(previewed).toBe("derived");
+
+    // ⚠ THE OLD BEHAVIOUR: submit the raw (empty) state map. The server upgrades.
+    expect(promptModeFor("gpt-image-2", true, {}, false, serverReadsFlagOn)).toBe(
+      "authored"
+    );
+
+    // ⚠ THE FIX: submit the effective map. The server composes what was shown.
+    const submitted = effectivePromptModes({
+      modelIds,
+      childProvenance: true,
+      modes: {},
+      openVocabulary: staleTabSawFlagOff,
+    });
+    expect(
+      promptModeFor("gpt-image-2", true, submitted, false, serverReadsFlagOn)
+    ).toBe(previewed);
+  });
+
+  /**
+   * ⚠ AND THE DISAGREEMENT CAN ONLY EVER BE RESOLVED RESTRICTIVELY. A forced mode
+   * still wins over an explicit entry, so a tab that rendered flag-ON and
+   * submitted `authored` into a server that has since seen the flag unset gets
+   * `derived` — the safe direction — rather than an admission it no longer has.
+   */
+  it("cannot be used to overrule a forced mode", () => {
+    const submitted = effectivePromptModes({
+      modelIds: ["gpt-image-2"],
+      childProvenance: true,
+      modes: { "gpt-image-2": "authored" },
+      openVocabulary: true,
+    });
+    expect(submitted["gpt-image-2"]).toBe("authored");
+    // The operator unsets the flag between render and Generate.
+    expect(promptModeFor("gpt-image-2", true, submitted, false, false)).toBe("derived");
+  });
 });
 
 describe("the composer's section order", () => {
@@ -1100,22 +1323,59 @@ describe("decideChildTextGate — the one non-overridable rule", () => {
      * only `openVocabulary` while sending `hasReferences: true` would be
      * asserting that the text flag opens the reference channel, which is the
      * exact coupling the split removed.
+     *
+     * ⚠ AND IT ASSERTS THE ADMISSION ON THE RUNS THE DECISION IS ABOUT. It used
+     * to loop `childProvenance` over `[true, false]` with no attestation, which
+     * pinned the P0 as correct: an unprovenanced, unattested compose is text the
+     * scrub never touched, and the decision's premise is scrubbed text. The two
+     * admitted shapes are (a) verified provenance, where the scrub ran, and
+     * (b) a staff attestation, which admitted authored text long before either
+     * flag existed. The third shape is a REFUSAL, and it is asserted here so a
+     * future edit cannot quietly restore it.
      */
-    it("EVERY openai entry is ungated with BOTH flags ON — text and references alike", () => {
+    it("EVERY openai entry is ungated with BOTH flags ON — on a provenance run, or under the attestation", () => {
       for (const entry of openaiEntries) {
-        for (const childProvenance of [true, false]) {
-          expect(
-            decideChildTextGate({
-              modelId: entry.id,
-              childProvenance,
-              promptText: CHILDS_OWN_WORDS,
-              hasReferences: true,
-              openVocabulary: true,
-              openReferences: true,
-            }),
-            entry.id
-          ).toEqual({ ok: true });
-        }
+        // (a) The decision's own case: verified provenance, so the scrub ran.
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: true,
+            promptText: CHILDS_OWN_WORDS,
+            hasReferences: true,
+            openVocabulary: true,
+            openReferences: true,
+          }),
+          entry.id
+        ).toEqual({ ok: true });
+
+        // (b) No provenance, but attested as the staff member's own wording.
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: false,
+            noChildContentAttested: true,
+            promptText: CHILDS_OWN_WORDS,
+            hasReferences: true,
+            openVocabulary: true,
+            openReferences: true,
+          }),
+          entry.id
+        ).toEqual({ ok: true });
+
+        // (c) ⚠ NEITHER: unknown origin, never scrubbed. Refused with both flags
+        //     wide open — the most permissive state this code has.
+        expect(
+          decideChildTextGate({
+            modelId: entry.id,
+            childProvenance: false,
+            noChildContentAttested: false,
+            promptText: CHILDS_OWN_WORDS,
+            hasReferences: true,
+            openVocabulary: true,
+            openReferences: true,
+          }),
+          entry.id
+        ).toEqual({ ok: false, reason: "child_text_to_openai" });
       }
     });
 
@@ -1558,16 +1818,83 @@ describe("the OpenAI channel flags — the 2026-08-06 decision", () => {
     ).toBe("authored");
   });
 
-  /** The default under the text flag is `authored` — the same default Google has
-   *  always had, which is the whole shape of "the same terms as Gemini". */
-  it("defaults an OpenAI model to `authored` under the text flag, in every provenance/attestation combination", () => {
-    for (const childProvenance of [true, false]) {
-      for (const attested of [true, false]) {
-        expect(
-          defaultPromptMode("gpt-image-2", childProvenance, attested, true),
-          `provenance=${childProvenance} attested=${attested}`
-        ).toBe("authored");
-      }
+  /**
+   * The default under the text flag is `authored` — the same default Google has
+   * always had, which is the whole shape of "the same terms as Gemini" — ON THE
+   * RUNS THE DECISION IS ABOUT.
+   *
+   * ⚠ THIS TEST USED TO PIN `authored` FOR ALL FOUR COMBINATIONS, INCLUDING
+   * provenance=false + attested=false, AND THAT GREEN ASSERTION WAS THE P0. That
+   * combination is the compose with no verified token, so `createRun` has no name
+   * tokens and the scrub is a no-op — the flag was defaulting UNSCRUBBED text of
+   * unknown origin to `authored` and dispatching it verbatim, which is outside
+   * the premise ("SCRUBBED text carrying no identifiers") the owner's decision
+   * rests on. The forced derived vocabulary was the control on that path, and the
+   * flag switched off exactly that control.
+   *
+   * ⚠ MUTATION: drop `&& ctx.childProvenance` from `forcedPromptMode` and the
+   * last row of this table reddens.
+   */
+  it("defaults an OpenAI model to `authored` under the text flag — but ONLY where the scrub ran", () => {
+    // Verified provenance: the run the decision is about. The scrub had tokens.
+    expect(defaultPromptMode("gpt-image-2", true, false, true)).toBe("authored");
+    expect(defaultPromptMode("gpt-image-2", true, true, true)).toBe("authored");
+    // No provenance, but ATTESTED: a staff member's own wording. Unchanged from
+    // before either flag existed — the attestation was always this path's key.
+    expect(defaultPromptMode("gpt-image-2", false, true, true)).toBe("authored");
+    // ⚠ NO PROVENANCE AND NO ATTESTATION: unknown origin, never scrubbed. The
+    // flag must not reach here, in any deployment.
+    expect(defaultPromptMode("gpt-image-2", false, false, true)).toBe("derived");
+    // …and the flag changed nothing at all about that row.
+    expect(defaultPromptMode("gpt-image-2", false, false, false)).toBe("derived");
+  });
+
+  /**
+   * ⚠ THE SAME SCOPE AT THE DISPATCH GATE, WHICH IS THE ENFORCEMENT. A default is
+   * a thing a client can disagree with; this is not.
+   *
+   * ⚠ MUTATION: drop `&& input.childProvenance` from `decideChildTextGate`'s text
+   * leg and the last expectation reddens.
+   */
+  it("the dispatch gate applies the text flag only to a provenance-bearing run", () => {
+    const authored = "I sell hand-drawn sticker packs at the school fair";
+    // The decision's own case: scrubbed child wording, dispatched.
+    expect(
+      decideChildTextGate({
+        modelId: "gpt-image-2",
+        childProvenance: true,
+        promptText: authored,
+        openVocabulary: true,
+      })
+    ).toEqual({ ok: true });
+    // Attested staff wording, no provenance: allowed, as it was pre-decision —
+    // and allowed with the flag OFF too, which is what proves the flag is not
+    // what is carrying it.
+    for (const openVocabulary of [true, false]) {
+      expect(
+        decideChildTextGate({
+          modelId: "gpt-image-2",
+          childProvenance: false,
+          noChildContentAttested: true,
+          promptText: authored,
+          openVocabulary,
+        }),
+        `attested, flag=${openVocabulary}`
+      ).toEqual({ ok: true });
+    }
+    // ⚠ UNPROVENANCED AND UNATTESTED: refused, flag or no flag. Nothing scrubbed
+    // this string and nothing can vouch for where it came from.
+    for (const openVocabulary of [true, false]) {
+      expect(
+        decideChildTextGate({
+          modelId: "gpt-image-2",
+          childProvenance: false,
+          noChildContentAttested: false,
+          promptText: authored,
+          openVocabulary,
+        }),
+        `unattested, flag=${openVocabulary}`
+      ).toEqual({ ok: false, reason: "child_text_to_openai" });
     }
   });
 

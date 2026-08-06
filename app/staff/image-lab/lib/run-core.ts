@@ -514,11 +514,27 @@ export async function createRun(
     // child content in this compose") authorized the template but not the slots,
     // which is incoherent and reads as arbitrary to whoever hits it.
     //
-    // The P0 property is unchanged: with no token and no attestation, child text
-    // ANYWHERE — template or slots — either forces the derived vocabulary on
-    // every OpenAI cell or is refused outright. The attestation remains the ONLY
-    // way to send authored text to OpenAI without provenance, and it can never
-    // override provenance that actually verified.
+    // The P0 property holds IN ALL FOUR FLAG STATES: with no token and no
+    // attestation, child text ANYWHERE — template or slots — either forces the
+    // derived vocabulary on every OpenAI cell or is refused outright. Slots take
+    // the refusal on this line; the TEMPLATE takes the forced derived mode, from
+    // `forcedPromptMode`/`decideChildTextGate`.
+    //
+    // ⚠ AND THAT IS WHY `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` IS SCOPED TO VERIFIED
+    // PROVENANCE. Written unscoped, the flag disarmed the forced derived mode on
+    // exactly this path — no token, so `tokens` is `[]` and the scrub twenty
+    // lines below is a NO-OP; empty slots, so this refusal never fires; the
+    // template never inspected — and an unattested compose carrying a child's
+    // pitch in the template dispatched VERBATIM and UNSCRUBBED to gpt-image-2.
+    // The owner's decision rests on "SCRUBBED business text carrying no
+    // identifiers", so that path was outside its premise, not inside it. The
+    // flag now applies only where provenance verified and the scrub therefore
+    // ran against a real child row (`run-rules.ts`, `forcedPromptMode` and
+    // `decideChildTextGate`).
+    //
+    // The attestation remains the ONLY way to send authored text to OpenAI
+    // without provenance, in every flag state, and it can never override
+    // provenance that actually verified.
     //
     // ⚠ THE `isRealContentLive()` CONJUNCT USED TO BE HERE, AND IT WAS INVERTED.
     // It made the refusal conditional on the picker being ON — so turning
@@ -537,6 +553,14 @@ export async function createRun(
   // is free to have edited it since. Scrubbing the TEMPLATE too is deliberate —
   // a staff member pasting a child's sentence into the template is the same leak
   // by a different door.
+  //
+  // ⚠ WITH NO TOKENS THIS IS A NO-OP, AND THAT FACT IS LOAD-BEARING. The scrub
+  // removes the tokens of an IDENTIFIED child; no verified token means no child
+  // was identified, so there is nothing to remove and the text passes through
+  // byte-for-byte — it can still carry a name, a username, a street. That is why
+  // `IMAGE_LAB_OPENAI_OPEN_VOCABULARY` applies only to a provenance-bearing run:
+  // the decision's premise is scrubbed text, and this is the line that decides
+  // whether any scrubbing happened. `run-core.test.ts` pins the no-op directly.
   const template = tokens.length > 0 ? scrubNames(input.template, tokens) : input.template;
   const slotValues: SlotValues = scrubSlotValues(input.slotValues, tokens);
   // ⚠ AND THE NOTE. `note` is 2000 characters of free text written straight to a

@@ -128,6 +128,42 @@ export const IMAGE_LAB_BENCH_COPY = {
     body:
       "Nothing has been generated from this bench. Your first run will appear here and in History the moment it is created — before any model is called.",
   },
+
+  /**
+   * THE OPENAI CHANNEL POSTURE — both switches, always stated.
+   *
+   * ⚠ IT EXISTS BECAUSE NOTHING ELSE REPORTED IT. `IMAGE_LAB_LIVE` has
+   * {@link imageLabGenerationNotice} and `IMAGE_LAB_REAL_CONTENT_LIVE` has the
+   * picker's own disabled panel — but the two flags that decide whether a child's
+   * wording and a child's uploaded images reach OpenAI had NO surface at all. An
+   * operator who believed the reference channel was closed had nothing on any page
+   * that confirmed it, and the reference channel is the one whose mistakes are
+   * permanent (references are append-only and undeletable).
+   *
+   * ⚠ FOUR SENTENCES FOR FOUR STATES, NOT A CONDITIONAL BANNER. Same reason as
+   * the generation notice above: an indicator that renders only in the interesting
+   * state cannot be told apart from one that failed to render, and it teaches
+   * nobody what the other state looks like.
+   *
+   * ⚠ AND IT IS PER CHANNEL, because the two flags are independent in both
+   * directions. Collapsing them into one sentence would print exactly the coupling
+   * the split exists to deny.
+   */
+  channels: {
+    heading: "OpenAI channels",
+    textOpen:
+      "Prompt text: OPEN. IMAGE_LAB_OPENAI_OPEN_VOCABULARY is set, so a run filled from a child's business content sends OpenAI models that child's own name-scrubbed wording. Runs with no verified provenance are unaffected — they still derive unless you tick the no-child-content box.",
+    textClosed:
+      "Prompt text: CLOSED. IMAGE_LAB_OPENAI_OPEN_VOCABULARY is not set to 1 or true, so OpenAI models send the closed category vocabulary on any run carrying child provenance or lacking the no-child-content attestation.",
+    /** ⚠ NAMES THE PERMANENCE. It is the one thing an operator cannot undo. */
+    referencesOpen:
+      "Reference images: OPEN. IMAGE_LAB_OPENAI_OPEN_REFERENCES is set, so OpenAI models receive the reference images attached to a run filled from a child's content. There is no scrub for an image and uploads cannot be deleted, so anything sent on this channel is permanent.",
+    referencesClosed:
+      "Reference images: CLOSED. IMAGE_LAB_OPENAI_OPEN_REFERENCES is not set to 1 or true, so an OpenAI cell on a run with child provenance refuses at dispatch if the run carries references. Nothing is billed; Google cells are unaffected.",
+    /** True in every state, and the reason both lines name their variable. */
+    reversal:
+      "Both are read at dispatch and reverse by unsetting the variable — no deploy. Google is never gated by either.",
+  },
 } as const;
 
 /** `/staff/image-lab/history` — every run, ever. */
@@ -185,6 +221,43 @@ export function imageLabGenerationNotice(
   return isLive
     ? { tone: "on", ...IMAGE_LAB_BENCH_COPY.generationOn }
     : { tone: "off", ...IMAGE_LAB_BENCH_COPY.generationOff };
+}
+
+/**
+ * WHAT THE BENCH SAYS ABOUT THE TWO OPENAI CHANNELS.
+ *
+ * Same shape and same reasoning as {@link imageLabGenerationNotice}: it takes the
+ * resolved booleans rather than reading `process.env`, so `isImageLabOpenVocabulary`
+ * / `isImageLabOpenReferences` stay the ONE place that decides what those variables
+ * mean, and it answers in all four states rather than only the interesting ones.
+ *
+ * ⚠ THE TONE FOLLOWS THE GENERATION NOTICE'S CONVENTION: `on` means something is
+ * live. Either channel open is a deployment sending a child's wording or images
+ * to a third-party vendor, and somebody should be able to see that by looking.
+ * Both closed is the code default and takes the quiet `off` skin — not an error
+ * skin, because it is the intended state of every deployment that has not taken
+ * this decision.
+ *
+ * ⚠ ONE STRING, NOT AN ARRAY, so `ImageLabPanel` stays the shape it is and the
+ * page renders this exactly as it renders the generation notice. The joining is
+ * done HERE, where it is tested, rather than in a `.tsx` no test can render.
+ */
+export type ImageLabChannelNotice = ImageLabGenerationNotice;
+
+export function imageLabChannelNotice(
+  openVocabulary: boolean,
+  openReferences: boolean
+): ImageLabChannelNotice {
+  const copy = IMAGE_LAB_BENCH_COPY.channels;
+  return {
+    tone: openVocabulary || openReferences ? "on" : "off",
+    headline: copy.heading,
+    body: [
+      openVocabulary ? copy.textOpen : copy.textClosed,
+      openReferences ? copy.referencesOpen : copy.referencesClosed,
+      copy.reversal,
+    ].join(" "),
+  };
 }
 
 /**

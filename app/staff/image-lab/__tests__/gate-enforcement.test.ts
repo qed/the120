@@ -765,6 +765,46 @@ describe("each page renders ITS OWN segment and ITS OWN copy", () => {
     const bench = sourceOf(`${LAB}page.tsx`);
     expect(bench).toMatch(/<ImageLabPanel[\s\S]{0,120}?tone=\{notice\.tone\}/);
   });
+
+  /**
+   * ⚠ THE CHANNEL POSTURE IS ACTUALLY MOUNTED, WITH BOTH FLAGS.
+   *
+   * `shell-rules.test.ts` proves `imageLabChannelNotice` reports each channel from
+   * its own flag; it cannot see whether any page CALLS it, or with what. The
+   * failure worth catching is the one this file's header names three times over: a
+   * pure rule with no call site, or a call site passing the same flag twice — and
+   * either would leave an operator reading a confident sentence about a switch
+   * nobody read. The reference channel is the one whose mistakes are permanent.
+   */
+  it("the bench renders the channel posture, reading BOTH flags", async () => {
+    const bench = sourceOf(`${LAB}page.tsx`);
+    expect(bench).toMatch(
+      /imageLabChannelNotice\(\s*isImageLabOpenVocabulary\(\),\s*isImageLabOpenReferences\(\)\s*\)/
+    );
+    expect(bench).toMatch(/<ImageLabPanel[\s\S]{0,120}?tone=\{channels\.tone\}/);
+  });
+
+  /**
+   * ⚠ THE COMPOSER SUBMITS AN EXPLICIT MODE PER MODEL — the P1 fix, which no test
+   * in this repo can render.
+   *
+   * `run-rules.test.ts` proves `effectivePromptModes` produces the right map and
+   * that it closes the stale-tab divergence. What only a source fence can see is
+   * that `createImageLabRun` is handed THAT map rather than the raw `promptModes`
+   * state — and reverting exactly that one identifier restores the bug in full,
+   * with every behavioural test still green, because the raw state map is a
+   * perfectly valid `PromptModes`.
+   */
+  it("the composer submits the EFFECTIVE prompt modes, not its raw state map", () => {
+    const composer = sourceOf(`${LAB}RunComposer.tsx`);
+    expect(composer).toContain("const submittedPromptModes = effectivePromptModes({");
+    expect(
+      composer,
+      "createImageLabRun must be given the effective map"
+    ).toMatch(/createImageLabRun\(\{[\s\S]{0,600}?promptModes: submittedPromptModes,/);
+    // …and never the raw state map, which is what it used to send.
+    expect(composer).not.toMatch(/createImageLabRun\(\{[\s\S]{0,600}?\bpromptModes,\n/);
+  });
 });
 
 // ── The card and the bench cannot disagree ───────────────────────────────────
@@ -812,6 +852,58 @@ describe("the hub card carries the generation state (Unit 3 requirement 4)", () 
     expect(sources.length).toBeGreaterThan(0);
     const offenders = sources.filter((f) =>
       /NEXT_PUBLIC_IMAGE_LAB/.test(readFileSync(`${REPO_ROOT}${f}`, "utf8"))
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * ⚠ NO CLIENT MODULE MAY CALL THE OPENAI CHANNEL FLAG READERS.
+   *
+   * `isImageLabOpenVocabulary` and `isImageLabOpenReferences` live in
+   * `lib/image-lab-rules.ts`, which is squarely in the CLIENT import graph:
+   * `RunComposer.tsx` — a `"use client"` module — imports `IMAGE_LAB_SLOTS` from
+   * it. So the two readers are ONE import statement away from being called in the
+   * browser, where `process.env.IMAGE_LAB_OPENAI_OPEN_VOCABULARY` is `undefined`
+   * and both would silently return `false` while the server said `true`.
+   *
+   * The failure that produces is the worst shape available: no error, no warning,
+   * a preview that disagrees with the dispatch about whether a child's wording is
+   * being sent — the exact class of bug that made the composer submit an explicit
+   * mode per model in the first place.
+   *
+   * The docblocks on both readers, on `PromptGateContext`, on `page.tsx` and on
+   * `RunComposer`'s prop all warn about this. Warnings are not mechanisms — the
+   * lesson this file's own header records three times over. Same shape as the
+   * `NEXT_PUBLIC_IMAGE_LAB` fence above: the flags are SERVER facts, handed down
+   * as props, read once.
+   *
+   * ⚠ IT SCANS EVERY MODULE UNDER THE LAB, in every extension, not a pinned list.
+   * A new client component that reaches for the reader directly is precisely the
+   * change worth catching, and a checklist would train the next author to update
+   * the checklist.
+   */
+  it("no `use client` module CALLS a channel flag reader — they are server facts, handed down", async () => {
+    const sources = await glob([LAB_SOURCE_GLOB], {
+      cwd: REPO_ROOT,
+      absolute: false,
+      ignore: ["**/__tests__/**"],
+    });
+    expect(sources.length).toBeGreaterThan(0);
+
+    /** A module-scope `"use client"`: the first statement of the file. */
+    const USE_CLIENT = /^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use client["']/;
+    // A CALL, not a mention: every docblock in this feature names these
+    // functions, and a fence that fired on prose would be deleted within a week.
+    const READER_CALL = /\bisImageLabOpen(?:Vocabulary|References)\s*\(/;
+
+    const clientModules = sources
+      .map((f) => f.replace(/\\/g, "/"))
+      .filter((f) => USE_CLIENT.test(readFileSync(`${REPO_ROOT}${f}`, "utf8")));
+    // The Lab HAS client components; an empty list would pass vacuously.
+    expect(clientModules.length).toBeGreaterThan(0);
+
+    const offenders = clientModules.filter((f) =>
+      READER_CALL.test(readFileSync(`${REPO_ROOT}${f}`, "utf8"))
     );
     expect(offenders).toEqual([]);
   });

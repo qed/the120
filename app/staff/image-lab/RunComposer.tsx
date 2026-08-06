@@ -63,6 +63,7 @@ import {
   describeCompositionRefusal,
   describeGenerateOutcome,
   describeUnverified,
+  effectivePromptModes,
   estimateRunCostUsd,
   formatUsd,
   modelIdsFromCells,
@@ -147,10 +148,26 @@ export function RunComposer({
    * owner's 2026-08-06 decision. See `isImageLabOpenVocabulary` in
    * `./lib/image-lab-rules.ts`.
    *
-   * ⚠ DEFAULTS FALSE, and it is the restrictive answer. This component is a
-   * client component: it can never read the env var itself, so "not told" must
-   * mean "assume the gate is armed" — the preview then under-promises, which is
-   * the harmless direction. The enforcement is server-side regardless.
+   * ⚠ DEFAULTS FALSE, and it is the restrictive answer for the CONTROLS: this
+   * component is a client component and can never read the env var itself, so
+   * "not told" must mean "assume the gate is armed". The enforcement is
+   * server-side regardless.
+   *
+   * ⚠ BUT A STALE VALUE HERE IS NOT HARMLESS, AND THIS DOCBLOCK USED TO SAY IT
+   * WAS. The old wording was "the preview then under-promises, which is the
+   * harmless direction". For a PRIVACY preview that reasoning is inverted:
+   * under-promising means showing LESS text than is actually sent, which is the
+   * harmful direction — this surface exists to be the last place a human sees
+   * what leaves for a vendor, and a preview that undersells the payload fails at
+   * exactly the job it has.
+   *
+   * The read happens ONCE, at server render (`page.tsx`), and both flags are
+   * reversible by env alone with no deploy — so a tab CAN outlive the value it
+   * was rendered with, in either direction. What makes that safe is not this
+   * default: it is that the composer submits an EXPLICIT mode for every selected
+   * model ({@link effectivePromptModes}), so the server never fills a gap with a
+   * default computed from its own, newer reading of the flag. A stale tab now
+   * composes the prompt its preview showed.
    */
   openVocabulary?: boolean;
 }) {
@@ -287,7 +304,16 @@ export function RunComposer({
     [decision]
   );
 
-  const affordance = decideGenerateAffordance({ decision, submitting, live });
+  const affordance = decideGenerateAffordance({
+    decision,
+    submitting,
+    live,
+    // ⚠ THE COMPOSE-TIME REFERENCE WARNING'S TWO INPUTS. It reads no flag — see
+    // `decideGenerateAffordance` — so it stays correct in all four flag states
+    // and needs nothing handed down that the browser is not already told.
+    childProvenance,
+    referenceCount: referenceIds.length,
+  });
 
   /**
    * ⚠ HELD IN SESSION STORAGE, NOT IN REACT STATE — and BOUND TO THE COMPOSITION
@@ -299,6 +325,30 @@ export function RunComposer({
    * different prompt would return the OLD run and silently discard the new
    * intent — the opposite failure and just as bad.
    */
+  /**
+   * ⚠ WHAT IS ACTUALLY SUBMITTED — AN EXPLICIT MODE FOR EVERY SELECTED MODEL,
+   * LOCKED ONES INCLUDED.
+   *
+   * The raw `promptModes` state is written only by the select's `onChange`, and a
+   * locked select never fires one — so a model this tab showed as "Required on
+   * this model" was submitted with NO entry, and the server filled the gap from
+   * its own, possibly NEWER, reading of `IMAGE_LAB_OPENAI_OPEN_VOCABULARY`. Both
+   * flags are reversible by env with no deploy, which is precisely what lets a
+   * tab outlive its reading. See {@link effectivePromptModes} for the full
+   * sequence; the short version is that the human's last check before dispatch
+   * said "derived, required" and authored text went.
+   *
+   * A forced mode still wins over an explicit entry server-side, so this can only
+   * ever be overridden in the restrictive direction.
+   */
+  const submittedPromptModes = effectivePromptModes({
+    modelIds,
+    childProvenance,
+    modes: promptModes,
+    noChildContentAttested,
+    openVocabulary,
+  });
+
   const compositionSignature = JSON.stringify([
     template,
     slotValues,
@@ -320,10 +370,10 @@ export function RunComposer({
     // released; while waiting, select gemini-3-pro-image, set its mode, deselect
     // it again; press Generate → different signature → fresh key → the server
     // sees no collision → a SECOND run with a full second fan.
-    modelIds.map((id) => [
-      id,
-      promptModeFor(id, childProvenance, promptModes, noChildContentAttested, openVocabulary),
-    ]),
+    //
+    // ⚠ AND IT IS THE SAME MAP THAT IS SUBMITTED, so the key and the payload can
+    // never describe different compositions.
+    modelIds.map((id) => [id, submittedPromptModes[id]]),
     childProvenance,
     noChildContentAttested,
   ]);
@@ -541,7 +591,10 @@ export function RunComposer({
         imageCount,
         referenceIds,
         sourceToken,
-        promptModes,
+        // ⚠ EXPLICIT FOR EVERY SELECTED MODEL, never the raw state map. See
+        // {@link submittedPromptModes}: an absent entry is a mode the SERVER
+        // guesses, and a stale tab made it guess permissively.
+        promptModes: submittedPromptModes,
         noChildContentAttested,
       });
       // ⚠ THE KEY IS RELEASED THE MOMENT THE SERVER HAS ANSWERED, AND BEFORE THE

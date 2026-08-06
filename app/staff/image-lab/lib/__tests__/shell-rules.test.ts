@@ -4,6 +4,7 @@ import {
   IMAGE_LAB_BENCH_COPY,
   IMAGE_LAB_HUB_COPY,
   imageLabCardLine,
+  imageLabChannelNotice,
   imageLabGenerationNotice,
 } from "../shell-rules";
 
@@ -90,6 +91,98 @@ describe("the hub card says it first", () => {
     for (const isLive of [true, false]) {
       const cardSaysOn = imageLabCardLine(isLive) === IMAGE_LAB_HUB_COPY.generationOn;
       expect(cardSaysOn).toBe(imageLabGenerationNotice(isLive).tone === "on");
+    }
+  });
+});
+
+/**
+ * THE OPENAI CHANNEL POSTURE, AS A SURFACE.
+ *
+ * ⚠ IT EXISTS BECAUSE THERE WAS NO SURFACE AT ALL. `IMAGE_LAB_LIVE` has the
+ * generation notice above; `IMAGE_LAB_REAL_CONTENT_LIVE` has the picker's own
+ * disabled panel. The two switches deciding whether a child's wording and a
+ * child's uploaded images reach OpenAI had nothing on any page — so an operator
+ * who believed `IMAGE_LAB_OPENAI_OPEN_REFERENCES` was unset had no way to confirm
+ * it, on the one channel whose mistakes are permanent (references are append-only
+ * and undeletable).
+ */
+describe("the OpenAI channel notice reports both flags, in all four states", () => {
+  const STATES = [
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ] as const;
+
+  it("answers in every state — never null, never blank", () => {
+    for (const [vocab, refs] of STATES) {
+      const notice = imageLabChannelNotice(vocab, refs);
+      const label = `vocab=${vocab} refs=${refs}`;
+      expect(notice.headline.length, label).toBeGreaterThan(0);
+      expect(notice.body.length, label).toBeGreaterThan(0);
+    }
+  });
+
+  it("names BOTH variables in BOTH states, so neither can be read off the other", () => {
+    for (const [vocab, refs] of STATES) {
+      const { body } = imageLabChannelNotice(vocab, refs);
+      const label = `vocab=${vocab} refs=${refs}`;
+      expect(body, label).toContain("IMAGE_LAB_OPENAI_OPEN_VOCABULARY");
+      expect(body, label).toContain("IMAGE_LAB_OPENAI_OPEN_REFERENCES");
+    }
+  });
+
+  /**
+   * ⚠ THE WHOLE POINT: the two channels are independent, so the notice must
+   * report them independently. A version that collapsed to one sentence would
+   * print exactly the coupling the flag split exists to deny — and the state most
+   * at risk is the RECOMMENDED production posture, text open + references closed.
+   */
+  it("reports each channel from its OWN flag", () => {
+    const copy = IMAGE_LAB_BENCH_COPY.channels;
+    expect(imageLabChannelNotice(true, false).body).toContain(copy.textOpen);
+    expect(imageLabChannelNotice(true, false).body).toContain(copy.referencesClosed);
+    expect(imageLabChannelNotice(false, true).body).toContain(copy.textClosed);
+    expect(imageLabChannelNotice(false, true).body).toContain(copy.referencesOpen);
+  });
+
+  /** `on` means something is live — the generation notice's own convention. */
+  it("takes the live tone whenever EITHER channel is open", () => {
+    expect(imageLabChannelNotice(false, false).tone).toBe("off");
+    expect(imageLabChannelNotice(true, false).tone).toBe("on");
+    expect(imageLabChannelNotice(false, true).tone).toBe("on");
+    expect(imageLabChannelNotice(true, true).tone).toBe("on");
+  });
+
+  /**
+   * ⚠ THE PERMANENCE IS NAMED WHERE IT APPLIES, AND ONLY THERE. It is the accepted
+   * risk that belongs to the references flag alone — reference bytes are
+   * dispatched uninspected and cannot be deleted — and an operator reading the
+   * open-references line is the person who most needs to know it.
+   */
+  it("names the permanence on the references-open line, and nowhere else", () => {
+    expect(imageLabChannelNotice(false, true).body).toMatch(/permanent/i);
+    expect(imageLabChannelNotice(true, false).body).not.toMatch(/permanent/i);
+    expect(imageLabChannelNotice(false, false).body).not.toMatch(/permanent/i);
+  });
+
+  /**
+   * ⚠ THE SCOPE OF THE TEXT FLAG IS STATED, because an operator reading "prompt
+   * text: OPEN" would otherwise reasonably conclude that every OpenAI cell now
+   * sends whatever was typed. It does not: the flag applies only where provenance
+   * VERIFIED, which is the only run the name scrub had tokens to work with.
+   */
+  it("says the text flag applies to provenance runs, not to every compose", () => {
+    expect(imageLabChannelNotice(true, false).body).toMatch(/no verified provenance/i);
+  });
+
+  /** True in all four states, so it is unconditional. */
+  it("always states that reversal is unsetting the variable, and that Google is never gated", () => {
+    for (const [vocab, refs] of STATES) {
+      const { body } = imageLabChannelNotice(vocab, refs);
+      expect(body, `vocab=${vocab} refs=${refs}`).toContain(
+        IMAGE_LAB_BENCH_COPY.channels.reversal
+      );
     }
   });
 });

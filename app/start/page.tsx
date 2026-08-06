@@ -6,35 +6,30 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consent-rules";
 import { loadV3OnboardingState } from "@/app/lib/v3-signup/v3-onboarding-core";
 import { resolveV3Step } from "@/app/lib/v3-signup/flow-rules";
-import { isV3StartLive, v3UnauthenticatedEntryOpen } from "@/app/lib/v3-signup/v3-signup-rules";
 import { isCoverAiLive } from "@/app/api/fp/cover/cover-rules";
 import { V3Flow } from "./V3Flow";
-import { HoldingPage } from "./HoldingPage";
 
 /**
  * `/start` — the New User Flow v3 front door (plan Unit 3).
  *
- * ── THE GO-LIVE LEVER SHIPS IN THE FIRST COMMIT, FAIL-CLOSED ──
- * This page is PUBLICLY ROUTABLE and wired to REAL provisioning the moment it
- * merges (the plan's per-unit push-to-main cadence), so the flag cannot be a
- * later unit's job. `V3_START_LIVE` must be an explicit, affirmative `1` /
- * `true` / `on`; unset, empty, `0`, `false`, or any typo renders the holding
- * state. There is no "default on" and no inverted "disable" flag — a
- * mis-spelled disable flag is how a surface goes live by accident.
+ * ── THE FRONT DOOR IS UNCONDITIONALLY OPEN ──
+ * Every visitor gets the flow: signed-in, signed-out, no env configured at all.
+ * There is NO go-live lever and NO holding state. `/start` is live the moment it
+ * deploys, exactly as the v2 front door was, and there is nothing to set in
+ * Vercel to open it.
  *
- * ⚠ THE PAGE IS NOT THE ONLY PLACE THE FLAG IS ENFORCED (review FIX 1). Server
- * Actions are separately-addressable POST endpoints; gating only this render
- * would leave `v3StartAction` / `v3VerifyCodeAction` / `v3ResendCodeAction` /
- * `v3EditEmailAction` driving real account creation with the flag off. The same
- * `isV3StartLive` + `v3UnauthenticatedEntryOpen` pair runs at the top of each of
- * those actions. Do not "simplify" either side away.
+ * There WAS a go-live lever here, with a holding state for its off case; it was
+ * removed by owner decision (see the plan's no-go-live-lever entry). Do not
+ * reintroduce one as a "default on" env read — and if a future launch genuinely
+ * needs a gate, it belongs at EVERY entry point, not just this render: the four
+ * Server Actions in `app/start/actions.ts` are separately-addressable POST
+ * endpoints that no page render stands in front of (docs/solutions/security-
+ * issues/a-flag-that-gates-the-page-does-not-gate-its-server-actions-...-
+ * 2026-08-05.md). That lesson is about where a gate lives, and it survives the
+ * removal of the flag it was learned from.
  *
- * WHAT THE FLAG GATES, PRECISELY: **unauthenticated new-signup entry only.** A
- * SIGNED-IN parent always gets the flow, flag or no flag. That is deliberate:
- * plan Unit 8's dashboard retarget and Unit 9's v2 remap send returning families
- * here, and those deploys land BEFORE the flip. Gating them too would strand a
- * mid-flow family on a holding page while v2 is already archived — the exact
- * failure the flag exists to avoid.
+ * The always-live property is asserted behaviorally, with the environment
+ * emptied, by app/lib/v3-signup/__tests__/v3-start-always-live.test.ts.
  *
  * ── FUNNEL ANALYTICS PARITY ──
  * The v2 `/start` page emits `start_view` with `entrySource: readCtaSource(params)`
@@ -43,9 +38,9 @@ import { HoldingPage } from "./HoldingPage";
  * app/start/page.tsx; `entry_source` reaches the tuple only through
  * `readCtaSource`). v3 emits the SAME event through the SAME reader so
  * conversion measurement is continuous across the swap; plan Unit 9 retargets
- * those pins from the v2 file to this one. Emitted BEFORE the flag check on
- * purpose — a family who lands here during the flag-off window is a real visit
- * and belongs in the denominator.
+ * those pins from the v2 file to this one. Emitted first thing in the render, so
+ * every landing is counted in the denominator whatever the visitor's session
+ * state turns out to be.
  */
 
 export const metadata: Metadata = {
@@ -71,18 +66,8 @@ export default async function V3StartPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  // The gate: unauthenticated entry only. The SAME decision is re-applied at
-  // the action boundary (app/start/actions.ts), because a Server Action is a
-  // separately-addressable POST endpoint that no page render stands in front of.
-  if (
-    !v3UnauthenticatedEntryOpen({
-      live: isV3StartLive(process.env.V3_START_LIVE),
-      hasSession: Boolean(user),
-    })
-  ) {
-    return <HoldingPage />;
-  }
-
+  // The session is read to RESUME a returning parent, not to admit anyone: a
+  // visitor with no session simply starts at step 1.
   const parentVerified = Boolean(user?.id && user?.email);
   const state = parentVerified
     ? // The page only READS, so it takes the READ deps: a client and nothing

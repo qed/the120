@@ -235,14 +235,18 @@ redesigned. Additional planning-time boundaries:
   the shared `adoptSession` (wipe → profile → hydrate), so kid B's handoff cleanly
   replaces kid A's session; The120 side shows "this will sign the device into
   <kid>'s account" copy on the second handoff in the same browser.
-- **v3 go-live lever:** new env flag `V3_START_LIVE`, shipped fail-closed in the
-  v3 page from its FIRST commit (Unit 3 — the page is publicly routable and
-  wired to real provisioning the moment it merges under the per-unit
-  push-to-main cadence). The flag gates **unauthenticated new-signup entry
-  only**: signed-in resume/add-kid paths (the remap, the dashboard retarget) are
-  always live, so the deploy-to-flip window never strands a returning family on
-  a holding page while v2 is already archived. The flip itself is done by
-  promoting a known-good deployment, not a redeploy of whatever is on main.
+- **No v3 go-live lever (owner decision, 2026-08-06 — SUPERSEDES the earlier
+  `V3_START_LIVE` decision):** `/start` is open to every visitor the moment it
+  deploys, exactly as the v2 front door was, with nothing to set in Vercel. An
+  env flag `V3_START_LIVE` was built and shipped fail-closed (page + all four
+  unauthenticated-reachable Server Actions, with a holding state for the off
+  case); it has been removed in full — flag, holding page, and all its tests.
+  The go-live act is the DEPLOY. There is no flip step and no holding-page
+  window, so nothing can strand a returning family. The affirmative-only,
+  gate-at-every-entry-point discipline the lever was built with survives as
+  institutional knowledge in
+  docs/solutions/security-issues/a-flag-that-gates-the-page-does-not-gate-its-
+  server-actions-...-2026-08-05.md, and still governs `FP_HANDOFF_LANDING_LIVE`.
   `FP_SIGNUP_TEST_ONLY` is untouched and continues to govern only the
   firstprofit.school HTTP path.
 - **Username minting:** extend `fp-username-rules.ts` with a two-name variant
@@ -568,9 +572,9 @@ child record, not the response). **Draft consumption is stamped only AFTER
 `createChild` returns ok** — stamping before would leave a consumed draft with
 no child on compensated failure (dashboard shows neither draft nor kid); the
 retry path treats an unconsumed draft + `child_created` attempt as the core's
-idempotent-replay case. The page carries the fail-closed `V3_START_LIVE` check
-from its first commit (see go-live lever decision — it is publicly routable the
-moment it merges). The account-ready "Keep building" uses ONE ending on
+idempotent-replay case. The page is publicly routable and live the moment it
+merges, with no gate of its own (see the no-go-live-lever decision). The
+account-ready "Keep building" uses ONE ending on
 every device: sync-open/async-navigate a new tab, consuming Unit 5's mint
 action (see the reversed mobile-ending decision above — Unit 5 review FIX 1). Attempts minted for
 signed-in parents at loop entry are created in state `verified` with parent_id
@@ -896,8 +900,7 @@ mid-application family lands correctly.
 - Move: `app/start/*` (v2) → `archive/new-user-v2/`; v3 flow takes `app/start/`
 - Modify: `tsconfig.json` (exclude `archive/`), `vitest.config.ts` (include
   allowlist unchanged by archive — verify tripwire), `eslint.config.mjs`
-  (ignore `archive/`), v3 `/start` page (`V3_START_LIVE` flag, fail-closed
-  holding state)
+  (ignore `archive/`)
 - Create: `scripts/v3-launch-email.ts` (nurture-send wrapper: CASL footer,
   `isEmailable` + test-family filters, idempotency keys, resume links into the
   remap)
@@ -924,9 +927,10 @@ alongside code, add `archive/` to the include-coverage tripwire's ignore list.
 grep-to-zero that no live code imports from `archive/` — plus the retargeted
 analytics pins if v3 keeps funnel event parity.
 
-**Verification:** typecheck/lint/test green with archive excluded; `V3_START_LIVE`
-off renders holding state, on renders step 1; dry-run of the email script prints
-recipients without sending.
+**Verification:** typecheck/lint/test green with archive excluded; `/start`
+renders step 1 with no env configured at all (asserted behaviorally by
+`app/lib/v3-signup/__tests__/v3-start-always-live.test.ts`); dry-run of the email
+script prints recipients without sending.
 
 ### Phase 2 — FP-surface deletion (ship 2, separable)
 
@@ -1023,27 +1027,34 @@ resolve.
 
 - Operational prerequisites tracked outside code: OpenAI ZDR sales contact (gates
   `COVER_AI_LIVE`), Gemini `personGeneration` allowlist request (future), Vercel
-  Blob store creation + env vars in both Vercel projects, `V3_START_LIVE` flip as
-  the launch act, launch-email script run after flip.
-- **Two env levers, and they are NOT the same lever** (Unit 5 review, FIX 2).
-  `V3_START_LIVE` = "the v3 front door is open to new families"; it is the
-  launch act. `FP_HANDOFF_LANDING_LIVE` (The120) = "firstprofit.school/auth/enter
-  EXISTS"; it is a cross-repo deploy-ordering interlock, flipped as the last
-  step of Unit 6's deploy, and it is checked in `v3MintHandoffAction` itself
-  rather than in the page. Both are fail-closed and both accept `1|true|on`.
+  Blob store creation + env vars in both Vercel projects, launch-email script run
+  after the deploy that opens `/start`.
+- **ONE env lever governs the launch, and it is NOT about the front door**
+  (Unit 5 review FIX 2, amended 2026-08-06). `FP_HANDOFF_LANDING_LIVE` (The120)
+  = "firstprofit.school/auth/enter EXISTS"; it is a cross-repo deploy-ordering
+  interlock, flipped as the last step of Unit 6's deploy, and it is checked in
+  `v3MintHandoffAction` itself rather than in the page. It is fail-closed and
+  accepts `1|true|on`. The v3 front door has no lever at all — deploying The120
+  opens it. Do not conflate the two: this one says a far-side PAGE EXISTS, and
+  it stays.
   While `FP_HANDOFF_LANDING_LIVE` is off, "Keep building" mints NOTHING and
   sends the family to the plain First Profit sign-in page with the credentials
   the screen just showed them — so a code that cannot be redeemed can never come
   into existence, by construction rather than by remembering the deploy order.
-- Deploy order for ship 1: The120 (Units 1–5, Unit 7's The120-side response
-  changes, 8, 9 with flag off) → first-profit (Units 6–7) → flip
-  `FP_HANDOFF_LANDING_LIVE` once `/auth/enter` is confirmed serving → flip
-  `V3_START_LIVE` (by promoting a known-good deployment) → launch email. Each side degrades
-  gracefully alone (R14 phase-gap state; Unit 7 profile fields optional). Note:
-  Unit 8's dashboard changes (hasPassword derivation, path-register widening)
-  take effect for the live beta cohort at The120 deploy time, before the flip —
-  they are an improvement for those families (dashboard instead of misroute),
-  but verify with one beta-family account before proceeding.
+- Deploy order for ship 1: first-profit (Units 6–7) → set
+  `FP_HANDOFF_LANDING_LIVE` once `/auth/enter` is confirmed serving → The120
+  (Units 1–5, Unit 7's The120-side response changes, 8, 9) → launch email.
+  ⚠ THE ORDER MATTERS MORE THAN IT USED TO. There is no `V3_START_LIVE` step:
+  **The120's deploy IS the go-live act** — `/start` is open to new families the
+  instant it lands, so The120 goes LAST, and the far-side interlock must already
+  be on before it does. Deploy from a known-good build; there is no flag to hold
+  traffic back if something is wrong, so the rollback is a Vercel promotion of
+  the previous deployment. Each side still degrades gracefully alone (R14
+  phase-gap state; Unit 7 profile fields optional). Note: Unit 8's dashboard
+  changes (hasPassword derivation, path-register widening) take effect for the
+  live beta cohort at The120 deploy time — they are an improvement for those
+  families (dashboard instead of misroute), but verify with one beta-family
+  account on a preview deployment before promoting.
 - Launch-email resume links ride `/resume/[token]` redemption (single-use +
   TTL); mint them with a TTL sized for a days-later open, and expect
   `link_used`/`link_expired` render states to be some families' first

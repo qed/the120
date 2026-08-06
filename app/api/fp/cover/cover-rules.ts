@@ -148,9 +148,10 @@ export const isPhotoContentType = (contentType: string | null | undefined): bool
 /* ---------------------------------------------------------------- the mode */
 
 /**
- * Affirmative-only flag reading, the same discipline as `isV3StartLive`: unset,
- * empty, `0`, `false`, or a typo means OFF. There is no "default on" and no
- * inverted disable flag.
+ * Affirmative-only flag reading: ON requires an explicit `1`, `true`, `on` or
+ * `yes` after a trim and lowercase. Unset, empty, `0`, `false`, or a typo means
+ * OFF. There is no "default on" and no inverted disable flag — a mis-spelled
+ * disable flag is how a surface goes live by accident.
  */
 export const isCoverAiLive = (raw: string | undefined | null): boolean => {
   const v = (raw ?? "").trim().toLowerCase();

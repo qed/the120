@@ -86,47 +86,22 @@ import {
   V3_VERIFY_IP_NAMESPACE,
 } from "@/app/fp/lib/rate-limit-rules";
 
-/* ------------------------------------------------------------ go-live lever */
-
-/**
- * `V3_START_LIVE`, as a PURE decision over the raw env value (review FIX 1).
+/* ------------------------------------------- no go-live lever (owner decision)
  *
- * Affirmative-only: an explicit `1` / `true` / `on` turns unauthenticated entry
- * on; unset, empty, `0`, `false`, or any typo leaves it off. There is no
- * "default on" and no inverted "disable" flag — a mis-spelled disable flag is
- * how a surface goes live by accident.
+ * There was one: a fail-closed env flag asserted both on `app/start/page.tsx`
+ * (holding page vs. flow) and at the top of each of the four
+ * unauthenticated-reachable Server Actions. It was REMOVED by owner
+ * decision — `/start` is open the moment it deploys, exactly as the v2 front
+ * door was, with nothing to set in Vercel.
  *
- * ── IT LIVES HERE BECAUSE IT IS ENFORCED IN TWO PLACES, NOT ONE ──
- * The lever originally existed only in `app/start/page.tsx`, which chose
- * between the holding page and the flow. That gated the PAGE and nothing else:
- * a Server Action is a SEPARATELY-ADDRESSABLE POST endpoint, reachable by any
- * caller who knows its id, with no page render in front of it. With the flag
- * off, `v3StartAction` / `v3VerifyCodeAction` / `v3ResendCodeAction` /
- * `v3EditEmailAction` would still mint accounts, send mail and hand out cookie
- * sessions. The flag is therefore asserted at the ACTION boundary too, and this
- * one function is what both surfaces call so they can never disagree.
- *
- * WHAT IT GATES, PRECISELY: unauthenticated NEW-SIGNUP entry. A signed-in parent
- * is always let through — plan Unit 8's dashboard retarget and Unit 9's v2 remap
- * deploy BEFORE the flip, and gating them too would strand a returning family on
- * a holding page while v2 is already archived. See `v3UnauthenticatedEntryOpen`.
+ * DO NOT REINTRODUCE IT AS A "default on" ENV READ. If a future launch really
+ * needs a lever, it must be affirmative-only AND asserted at every entry point
+ * (the page and every action), because a Server Action is a separately-
+ * addressable POST endpoint that no page render stands in front of — see
+ * docs/solutions/security-issues/a-flag-that-gates-the-page-does-not-gate-its-
+ * server-actions-they-are-separately-addressable-endpoints-2026-08-05.md. That
+ * lesson outlives this particular flag.
  */
-export function isV3StartLive(raw: string | undefined | null): boolean {
-  const v = (raw ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "on";
-}
-
-/**
- * The one gate both the page and the four unauthenticated-reachable actions
- * apply: entry is open when the lever is on, OR when the caller already holds a
- * session (the signed-in resume paths, always live — see `isV3StartLive`).
- */
-export function v3UnauthenticatedEntryOpen(input: {
-  live: boolean;
-  hasSession: boolean;
-}): boolean {
-  return input.live || input.hasSession;
-}
 
 /* --------------------------------------------------------------- the code */
 

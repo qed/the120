@@ -89,8 +89,13 @@ describe("v3 owns /start (R15)", () => {
   it("app/start/page.tsx is the v3 page, not the archived capture flow", () => {
     const page = read("app/start/page.tsx");
     expect(page).toContain("V3Flow");
-    expect(page).toContain("isV3StartLive");
     expect(page).not.toContain("StartFlow");
+    // The go-live lever and its holding state were removed by owner decision:
+    // /start is live on deploy. The BEHAVIORAL guarantee is
+    // app/lib/v3-signup/__tests__/v3-start-always-live.test.ts; this is only
+    // the source-level companion that the holding branch is gone for good.
+    expect(page).not.toContain("HoldingPage");
+    expect(existsSync(path.resolve(ROOT, "app/start/HoldingPage.tsx"))).toBe(false);
   });
 
   it("no live source still points at /start/v3", () => {

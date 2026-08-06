@@ -76,8 +76,6 @@ import {
   deriveV3StartRateLimitKeys,
   deriveV3VerifyRateLimitKeys,
   formatVerificationCode,
-  isV3StartLive,
-  v3UnauthenticatedEntryOpen,
   VERIFICATION_CODE_SPACE,
 } from "@/app/lib/v3-signup/v3-signup-rules";
 import {
@@ -175,42 +173,24 @@ async function requestContext(): Promise<{ ip: string; ua: string }> {
   return { ip: extractClientIp(h), ua: h.get("user-agent") ?? "" };
 }
 
-/* ------------------------------------------------------- the go-live gate */
-
-/**
- * ⚠ THE FLAG IS ENFORCED HERE, NOT ONLY ON THE PAGE (review FIX 1).
+/* ------------------------------------------- no go-live gate (owner decision)
  *
- * `app/start/page.tsx` chooses between `<HoldingPage/>` and `<V3Flow/>` on
- * `V3_START_LIVE`. That gates the RENDER and nothing else. A Server Action is a
- * separately-addressable POST endpoint: its id is baked into the client bundle
- * of any build where this module exists, and no page render stands in front of
- * it. With the flag off, an unauthenticated caller could therefore POST
  * `v3StartAction` / `v3VerifyCodeAction` / `v3ResendCodeAction` /
- * `v3EditEmailAction` directly and drive REAL parent-account creation, real
- * verification mail, and a real cookie session — the entire thing the lever
- * exists to hold back.
+ * `v3EditEmailAction` used to open with `if (!(await v3EntryOpen())) return
+ * { kind: "failed" }` — a go-live lever, asserted here as well as on the page
+ * precisely because a Server Action is a separately-addressable POST
+ * endpoint. The LEVER was removed by owner decision (the v3 front door is open
+ * on deploy); the REASONING was not, and the four actions keep every other
+ * control they ever had: attested-IP rate limiting recorded before any DB or
+ * mail work, strict parsing in the cores, consent as a parse failure rather
+ * than a branch, one generic refusal, and the caller-owns-the-row scoping on
+ * everything session-gated.
  *
- * WHAT IS STILL ALLOWED WITH THE FLAG OFF: a caller who ALREADY HAS A SESSION.
- * The lever gates unauthenticated NEW-SIGNUP entry only (plan: "v3 go-live
- * lever"), because Unit 8's dashboard retarget and Unit 9's v2 remap deploy
- * before the flip and must not strand a returning family. Steps 2-5 are
- * session-gated by construction and so need no flag check of their own.
+ * If a gate ever comes back, it goes at EVERY entry point — this module's four
+ * actions AND the page — never at one of them (docs/solutions/security-issues/
+ * a-flag-that-gates-the-page-does-not-gate-its-server-actions-they-are-
+ * separately-addressable-endpoints-2026-08-05.md).
  */
-async function v3EntryOpen(): Promise<boolean> {
-  if (isV3StartLive(process.env.V3_START_LIVE)) return true;
-  let hasSession = false;
-  try {
-    const supabase = await supabaseServer();
-    const { data } = await supabase.auth.getUser();
-    hasSession = Boolean(data?.user?.id);
-  } catch (err) {
-    // FAIL CLOSED. An unreadable session is not a session, and the flag is off.
-    console.error(
-      `[fp/v3-signup] go-live session probe threw: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-  return v3UnauthenticatedEntryOpen({ live: false, hasSession });
-}
 
 /** The email a rate-limit key needs, read defensively straight off the unparsed
  *  input: the key must be recorded BEFORE the core parses anything, so a
@@ -234,9 +214,6 @@ function rateLimitVerifyEmail(input: unknown): string {
 
 export async function v3StartAction(input: unknown): Promise<V3StartResult> {
   try {
-    // The go-live gate, BEFORE any work: refused traffic costs nothing and
-    // leaves nothing behind (no strike, no row, no mail).
-    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip, ua } = await requestContext();
     const { emailKey, ipKey } = deriveV3StartRateLimitKeys(ip, rateLimitEmail(input));
     // Both buckets record before either verdict — a short-circuit would leave
@@ -263,7 +240,6 @@ export async function v3StartAction(input: unknown): Promise<V3StartResult> {
 
 export async function v3VerifyCodeAction(input: unknown): Promise<V3VerifyResult> {
   try {
-    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip } = await requestContext();
     const { emailKey, ipKey } = deriveV3VerifyRateLimitKeys(ip, rateLimitVerifyEmail(input));
     const emailCheck = checkAndRecordRateLimit(emailKey, V3_VERIFY_RATE_LIMIT);
@@ -294,7 +270,6 @@ export async function v3VerifyCodeAction(input: unknown): Promise<V3VerifyResult
 
 export async function v3ResendCodeAction(input: unknown): Promise<V3ResendResult> {
   try {
-    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip } = await requestContext();
     // Resend shares the verify budget: both act on one attempt, and letting
     // resend have its own budget would hand an attacker a second lever on the
@@ -489,14 +464,7 @@ export async function v3ProvisionAction(input: unknown): Promise<V3ProvisionResu
  * puts `parent_id` in the WHERE clause, so a child this parent does not own
  * returns no row and no code (the bearer-credential learning, 2026-08-05).
  *
- * ⚠ NO `V3_START_LIVE` CHECK HERE, AND THAT IS DELIBERATE. `v3EntryOpen` gates
- * UNAUTHENTICATED NEW-SIGNUP entry; this action is session-gated by
- * construction and can only act on a child the caller already owns — which
- * means it is one of the signed-in paths the lever must never strand (the same
- * reasoning steps 2-5 carry). A caller with no session gets `failed` before any
- * privileged client is constructed.
- *
- * ⚠ THERE IS A SECOND, DIFFERENT LEVER, AND IT IS CHECKED HERE (review FIX 2).
+ * ⚠ THERE IS A LEVER, AND IT IS CHECKED HERE (review FIX 2).
  * `FP_HANDOFF_LANDING_LIVE` says whether firstprofit.school/auth/enter EXISTS
  * yet — it ships in the other repo, in plan Unit 6. Until it is on, this action
  * MINTS NOTHING and answers `fallback` with the plain sign-in page: a code that
@@ -559,7 +527,6 @@ export async function v3MintHandoffAction(
 
 export async function v3EditEmailAction(input: unknown): Promise<V3StartResult> {
   try {
-    if (!(await v3EntryOpen())) return { kind: "failed" };
     const { ip, ua } = await requestContext();
     // Edit-email IS a start (since review FIX 1 it is nothing else), so it draws
     // on the START budget, keyed by the NEW address it is submitting.

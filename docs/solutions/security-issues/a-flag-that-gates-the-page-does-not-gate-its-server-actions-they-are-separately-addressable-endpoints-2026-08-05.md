@@ -14,6 +14,21 @@ resolution_type: code_fix
 
 # A flag that gates the page does not gate its Server Actions — they are separately addressable endpoints
 
+> **Status note (2026-08-06): `V3_START_LIVE` no longer exists.** The owner decided
+> the v3 signup flow should be on the moment it deploys, so the lever was removed
+> entirely — from the page, from all four actions, from the rules module, and with it
+> the `HoldingPage`. `/start` is now unconditionally live and there is nothing to set
+> in Vercel.
+>
+> **The defect below was real and the lesson is unchanged.** Nothing here is
+> retracted: a gate on a mutating surface still belongs at every entry point, and a
+> `"use server"` export is still a public POST endpoint. The code samples describe the
+> repo as it was at the time of the fix and are kept verbatim as the record. What is
+> stale is only the *example flag's* continued existence — the sibling lever
+> `FP_HANDOFF_LANDING_LIVE` is still live, still fail-closed, and still checked inside
+> `v3MintHandoffAction` rather than in the page, for exactly the reason this document
+> gives.
+
 ## Problem
 
 The v3 signup shipped behind `V3_START_LIVE`, described in the plan as a fail-closed

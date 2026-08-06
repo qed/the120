@@ -149,8 +149,8 @@ export type V3RequestContext = {
  * `isTestSignup` the HTTP route calls — never a client field, and never
  * inherited from the request. The v3 path deliberately does NOT consult
  * `launchGateVerdict`/`FP_SIGNUP_TEST_ONLY`: that gate governs the
- * firstprofit.school HTTP door only, and v3's own go-live lever is
- * `V3_START_LIVE` on the page (Unit 3).
+ * firstprofit.school HTTP door only. v3's `/start` door has no launch gate of
+ * its own — it is open on deploy, by owner decision.
  */
 export async function v3StartSignup(
   deps: V3SignupDeps,

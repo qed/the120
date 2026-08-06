@@ -212,12 +212,14 @@ describe("the v3 front door's single emission (v3 Unit 9)", () => {
     expect((page.match(/emitFunnelEvent\(/g) ?? []).length).toBe(1);
   });
 
-  it("emits BEFORE the go-live gate — a flag-off visit is still a real visit", () => {
-    // Deliberate, and stated in the page: a family who lands during the
-    // flag-off window belongs in the denominator. If the emit ever slid below
-    // the gate, the conversion rate would silently start lying.
+  it("emits BEFORE the session read — every landing is in the denominator", () => {
+    // Deliberate, and stated in the page. The go-live gate this pin
+    // originally guarded was removed by owner decision, but the property it
+    // protected outlived it: the emit must sit above EVERYTHING conditional in
+    // the render, so an auth outage or a signed-out visitor cannot quietly drop
+    // visits out of the conversion denominator.
     expect(page.indexOf('emitFunnelEvent("start_view"')).toBeLessThan(
-      page.indexOf("v3UnauthenticatedEntryOpen(")
+      page.indexOf("supabaseServer()")
     );
   });
 });

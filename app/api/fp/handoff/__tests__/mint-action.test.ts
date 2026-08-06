@@ -108,9 +108,9 @@ describe("v3MintHandoffAction — no session, no code", () => {
  * ── NEVER MINT A CODE THAT CANNOT BE REDEEMED (review FIX 2) ──
  * `FIRST_PROFIT_ENTER_URL` points at a page that ships in the OTHER repo, in
  * plan Unit 6. Between this unit's deploy and that one, a real family CAN reach
- * the account-ready screen (V3_START_LIVE on, or a signed-in returning family
- * through the go-live lever's carve-out) — and clicking would mint a real code,
- * burn it, and land them on a 404 holding a password they see exactly once.
+ * the account-ready screen — `/start` is open to everyone the moment The120
+ * deploys — and clicking would mint a real code, burn it, and land them on a
+ * 404 holding a password they see exactly once.
  *
  * The interlock is checked HERE, in the action, not where the button renders: a
  * Server Action is a separately-addressable POST endpoint (the page-vs-action

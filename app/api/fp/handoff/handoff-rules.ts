@@ -120,9 +120,9 @@ export function buildHandoffDestination(code: string): string {
  * `FIRST_PROFIT_ENTER_URL` points at a page that does NOT EXIST until plan
  * Unit 6 ships in the OTHER repo. This unit already wires the mint live from
  * the "Keep building" button, and the account-ready screen is reachable before
- * that deploy — by anyone with `V3_START_LIVE` on, and by a signed-in returning
- * family through the go-live lever's deliberate carve-out. Clicking then mints
- * a real code, BURNS it on click, and lands the family on a 404.
+ * that deploy — `/start` is open to every visitor the moment The120 deploys, so
+ * any family who finishes onboarding can reach it. Clicking then mints a real
+ * code, BURNS it on click, and lands the family on a 404.
  *
  * "Deploy The120 first, then first-profit" is deploy DISCIPLINE, and discipline
  * is not a control. So the mint is gated on an EXPLICIT SIGNAL that the far side
@@ -138,8 +138,11 @@ export function buildHandoffDestination(code: string): string {
  * username and password the screen just showed the family. A working ending,
  * and no burned code.
  *
- * Same accepted spellings as `isV3StartLive`, deliberately: two levers a human
- * flips in the same dashboard should not disagree about what "on" looks like.
+ * ACCEPTED SPELLINGS, stated here rather than by reference: `1`, `true`, `on`,
+ * after a trim and lowercase. Everything else — unset, empty, `0`, `false`, a
+ * typo — is OFF. Affirmative-only, with no "default on" and no inverted disable
+ * flag, because a mis-spelled disable flag is how a surface goes live by
+ * accident.
  */
 export function isHandoffLandingLive(raw: string | undefined | null): boolean {
   const v = (raw ?? "").trim().toLowerCase();

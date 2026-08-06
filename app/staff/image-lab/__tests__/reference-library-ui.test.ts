@@ -74,7 +74,25 @@ describe("the reference picker states what cannot be undone", () => {
 
   it("is mounted where a staff member can reach it", () => {
     // An unmounted picker is dead code that passes every test above.
-    expect(read(BENCH)).toMatch(/<ReferenceLibrary[\s/>]/);
+    //
+    // ⚠ THE MOUNT MOVED IN UNIT 5, and the whole CHAIN is asserted rather than
+    // just the leaf. The composer now owns the picker as a CONTROLLED child (it
+    // holds the selection, and the picker's budget is the strictest limit across
+    // the chosen models), so the bench mounts `RunComposer` and `RunComposer`
+    // mounts `ReferenceLibrary`. Asserting only the inner mount would stay green
+    // if the composer itself were dropped from the page.
+    expect(read(BENCH)).toMatch(/<RunComposer[\s/>]/);
+    const composer = read("app/staff/image-lab/RunComposer.tsx");
+    expect(composer).toMatch(/<ReferenceLibrary[\s/>]/);
+    // The composer renders its sections by MAPPING over the tested order
+    // constant, so a section present in the record is a section on the screen.
+    expect(markupOf(composer)).toMatch(/IMAGE_LAB_COMPOSER_SECTIONS\.map/);
+    expect(composer).toMatch(/references:\s*\(/);
+    // …and it is CONTROLLED: the composer supplies both halves, or the reference
+    // set the run persists is not the set the picker is counting.
+    expect(composer).toMatch(/selectedIds=\{referenceIds\}/);
+    expect(composer).toMatch(/onSelectionChange=\{setReferenceIds\}/);
+    expect(composer).toMatch(/modelIds=\{modelIds\}/);
   });
 });
 

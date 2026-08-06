@@ -1,0 +1,524 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildGrid,
+  canRetryCell,
+  cellRenderState,
+  decideGenerateAffordance,
+  decideRunComposition,
+  describeCompositionRefusal,
+  describeGenerateOutcome,
+  estimateRunCostUsd,
+  formatGenerationBreadcrumb,
+  formatUsd,
+  generateCellRateLimitKey,
+  IMAGE_LAB_CLIENT_AWAIT_MS,
+  IMAGE_LAB_COMPOSER_SECTIONS,
+  IMAGE_LAB_GENERATE_RATE_LIMIT,
+  IMAGE_LAB_MAX_CELLS_PER_RUN,
+  IMAGE_LAB_MAX_IMAGE_COUNT,
+  IMAGE_LAB_RESOLVED_MAX_CHARS,
+  IMAGE_LAB_RUN_COPY,
+  maxFanCostUsd,
+  resolvePrompt,
+  runObjectKey,
+  type CellRow,
+} from "../run-rules";
+import {
+  IMAGE_LAB_ROUTE_BUDGET_MS,
+  IMAGE_LAB_MODELS,
+} from "../model-registry";
+import { IMAGE_LAB_STALE_AFTER_MS } from "../image-lab-rules";
+
+/**
+ * The run flow's PURE decisions (first-profit repo:
+ * docs/plans/2026-08-05-002-feat-image-lab-v1-plan.md, Unit 5).
+ *
+ * Everything the composer, the grid and the paid route decide lives in
+ * `run-rules.ts` precisely so it can be asserted here: the suite is
+ * `environment: "node"` with NO jsdom, and Unit 4's review demonstrated that
+ * source-scan tests over a component survive deleting the behaviour they claim to
+ * cover — nine of them did, at once.
+ */
+
+const cell = (over: Partial<CellRow> = {}): CellRow => ({
+  id: "img-1",
+  runId: "run-1",
+  modelId: "gpt-image-2",
+  cellOrdinal: 0,
+  state: "requested",
+  attemptedAtMs: null,
+  createdAtMs: 1_000,
+  failureReason: null,
+  failureDetail: null,
+  storageKey: null,
+  billed: false,
+  costEstimatedUsd: null,
+  costReportedUsd: null,
+  ...over,
+});
+
+// ── Slot resolution ──────────────────────────────────────────────────────────
+
+describe("resolvePrompt", () => {
+  it("substitutes filled slots and reports nothing unfilled", () => {
+    const out = resolvePrompt("Draw {{product}} — {{oneLiner}}", {
+      product: "sticker packs",
+      oneLiner: "stickers that tell your street's story",
+    });
+    expect(out.text).toBe("Draw sticker packs — stickers that tell your street's story");
+    expect(out.unfilled).toEqual([]);
+    expect(out.unknown).toEqual([]);
+  });
+
+  it("KEEPS THE LITERAL for an unfilled slot and warns about it", () => {
+    // Warn-not-block: a deliberate template test is a legitimate run, and
+    // blanking the token would make the preview lie about what the vendor saw.
+    const out = resolvePrompt("Draw {{product}} for {{sale}}", { product: "cards" });
+    expect(out.text).toBe("Draw cards for {{sale}}");
+    expect(out.unfilled).toEqual(["sale"]);
+  });
+
+  it("treats a whitespace-only value as unfilled", () => {
+    const out = resolvePrompt("{{pitch}}", { pitch: "   " });
+    expect(out.text).toBe("{{pitch}}");
+    expect(out.unfilled).toEqual(["pitch"]);
+  });
+
+  it("reports an unknown token without substituting it", () => {
+    const out = resolvePrompt("{{product}} and {{whatever}}", { product: "x" });
+    expect(out.text).toBe("x and {{whatever}}");
+    expect(out.unknown).toEqual(["whatever"]);
+  });
+
+  it("does NOT re-expand a slot token that appears inside a slot VALUE", () => {
+    // Child-authored free text can contain anything. One pass over the TEMPLATE
+    // is the whole rule; a recursive expansion would let a value rewrite itself.
+    const out = resolvePrompt("{{product}}", { product: "{{pitch}}", pitch: "boom" });
+    expect(out.text).toBe("{{pitch}}");
+  });
+
+  it("does not treat `$&` in a value as a replacement pattern", () => {
+    const out = resolvePrompt("A {{product}} B", { product: "$& $1" });
+    expect(out.text).toBe("A $& $1 B");
+  });
+
+  it("survives a template with no slots at all", () => {
+    const out = resolvePrompt("just a prompt", {});
+    expect(out.text).toBe("just a prompt");
+    expect(out.unfilled).toEqual([]);
+  });
+});
+
+// ── Cell expansion / compare ─────────────────────────────────────────────────
+
+describe("decideRunComposition", () => {
+  const base = {
+    template: "Draw {{product}}",
+    slotValues: { product: "cards" },
+    imageCount: 2,
+  };
+
+  it("expands cells for exactly the selected models, ordinals per column", () => {
+    const decision = decideRunComposition({
+      ...base,
+      modelIds: ["gpt-image-2", "gemini-3-pro-image"],
+    });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.cells).toEqual([
+      { modelId: "gpt-image-2", cellOrdinal: 0 },
+      { modelId: "gpt-image-2", cellOrdinal: 1 },
+      { modelId: "gemini-3-pro-image", cellOrdinal: 0 },
+      { modelId: "gemini-3-pro-image", cellOrdinal: 1 },
+    ]);
+    // The THIRD registry model is not in the fan at all.
+    expect(decision.cells.some((c) => c.modelId === "gemini-3.1-flash-lite-image")).toBe(
+      false
+    );
+    expect(decision.compare).toBe(true);
+  });
+
+  it("records a ONE-model selection as a normal run, not a comparison", () => {
+    const decision = decideRunComposition({ ...base, modelIds: ["gpt-image-2"] });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.compare).toBe(false);
+    expect(decision.cells).toHaveLength(2);
+  });
+
+  it("REFUSES zero models", () => {
+    const decision = decideRunComposition({ ...base, modelIds: [] });
+    expect(decision).toEqual({ ok: false, reason: "no_models" });
+  });
+
+  it("refuses an unknown model rather than silently dropping it", () => {
+    const decision = decideRunComposition({ ...base, modelIds: ["gpt-image-9"] });
+    expect(decision).toEqual({ ok: false, reason: "unknown_model", modelId: "gpt-image-9" });
+  });
+
+  it("de-duplicates a doubled model id (which would double that column's bill)", () => {
+    const decision = decideRunComposition({
+      ...base,
+      imageCount: 1,
+      modelIds: ["gpt-image-2", "gpt-image-2"],
+    });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.cells).toHaveLength(1);
+    expect(decision.compare).toBe(false);
+  });
+
+  it.each([0, -1, 1.5, IMAGE_LAB_MAX_IMAGE_COUNT + 1])(
+    "refuses an image count of %s",
+    (count) => {
+      const decision = decideRunComposition({
+        ...base,
+        imageCount: count,
+        modelIds: ["gpt-image-2"],
+      });
+      expect(decision.ok).toBe(false);
+    }
+  );
+
+  it("refuses an empty template", () => {
+    const decision = decideRunComposition({
+      ...base,
+      template: "   ",
+      modelIds: ["gpt-image-2"],
+    });
+    expect(decision).toEqual({ ok: false, reason: "empty_template" });
+  });
+
+  it("refuses a resolved prompt past the column's bound", () => {
+    const decision = decideRunComposition({
+      template: "{{pitch}}",
+      slotValues: { pitch: "x".repeat(IMAGE_LAB_RESOLVED_MAX_CHARS + 1) },
+      imageCount: 1,
+      modelIds: ["gpt-image-2"],
+    });
+    expect(decision).toEqual({
+      ok: false,
+      reason: "prompt_too_long",
+      max: IMAGE_LAB_RESOLVED_MAX_CHARS,
+    });
+  });
+
+  it("the largest legal fan is exactly the derived cell cap", () => {
+    const decision = decideRunComposition({
+      ...base,
+      imageCount: IMAGE_LAB_MAX_IMAGE_COUNT,
+      modelIds: IMAGE_LAB_MODELS.map((m) => m.id),
+    });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.cells).toHaveLength(IMAGE_LAB_MAX_CELLS_PER_RUN);
+  });
+
+  it("every refusal has copy that names its bound", () => {
+    for (const refusal of [
+      { ok: false, reason: "no_models" },
+      { ok: false, reason: "unknown_model", modelId: "z" },
+      { ok: false, reason: "bad_image_count", max: 4 },
+      { ok: false, reason: "empty_template" },
+      { ok: false, reason: "template_too_long", max: 8000 },
+      { ok: false, reason: "prompt_too_long", max: 12000 },
+      { ok: false, reason: "too_many_references", max: 16 },
+    ] as const) {
+      expect(describeCompositionRefusal(refusal).length).toBeGreaterThan(10);
+    }
+  });
+});
+
+// ── Cost ─────────────────────────────────────────────────────────────────────
+
+describe("estimateRunCostUsd", () => {
+  it("sums list prices at the registry's default tier", () => {
+    const estimate = estimateRunCostUsd([
+      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 0 },
+      { modelId: "gemini-3.1-flash-lite-image", cellOrdinal: 1 },
+    ]);
+    expect(estimate.totalUsd).toBeCloseTo(0.0672, 6);
+  });
+
+  it("prices the REAL worst fan, computed from the composer's own rules", () => {
+    // ⚠ THE OLD FIGURE WAS ARITHMETICALLY IMPOSSIBLE. Two tests pinned 12 ×
+    // $0.211 (gpt-image-2 at high) as the ceiling, but `decideRunComposition`
+    // caps candidates at 4 PER MODEL — so twelve cells can only ever be 4+4+4
+    // across three DIFFERENT models, and quality is not a run setting at all.
+    // Computed here rather than asserted, so a fourth model cannot leave a stale
+    // number in the evidence.
+    const modelIds = IMAGE_LAB_MODELS.map((entry) => entry.id);
+    const decision = decideRunComposition({
+      template: "Draw {{product}}",
+      slotValues: { product: "x" },
+      modelIds,
+      imageCount: IMAGE_LAB_MAX_IMAGE_COUNT,
+    });
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.cells).toHaveLength(IMAGE_LAB_MAX_CELLS_PER_RUN);
+
+    const expected =
+      IMAGE_LAB_MAX_IMAGE_COUNT * (0.053 + 0.134 + 0.0336); // = $0.88
+    expect(maxFanCostUsd(modelIds)).toBeCloseTo(expected, 6);
+    expect(maxFanCostUsd(modelIds)).toBeCloseTo(0.8824, 4);
+    expect(estimateRunCostUsd(decision.cells).totalUsd).toBeCloseTo(expected, 6);
+  });
+
+  it("prices an unknown model at zero rather than throwing", () => {
+    // `decideRunComposition` refuses an unknown model long before this, so the
+    // branch is defensive only — but a NaN in a money line is worse than a zero.
+    expect(estimateRunCostUsd([{ modelId: "not-a-model", cellOrdinal: 0 }]).totalUsd).toBe(0);
+  });
+
+  it("formats money the way each model needs to be read", () => {
+    expect(formatUsd(2.532)).toBe("$2.53");
+    expect(formatUsd(0.0336)).toBe("$0.0336");
+    expect(formatUsd(0)).toBe("$0.00");
+  });
+});
+
+// ── Staleness / grid ─────────────────────────────────────────────────────────
+
+describe("cellRenderState and canRetryCell", () => {
+  const now = 10_000_000;
+
+  it("distinguishes requested, pending, stale, done and failed", () => {
+    expect(cellRenderState(cell({ createdAtMs: now }), now)).toBe("requested");
+    expect(
+      cellRenderState(cell({ createdAtMs: now, attemptedAtMs: now }), now)
+    ).toBe("pending");
+    expect(
+      cellRenderState(
+        cell({ createdAtMs: now, attemptedAtMs: now - IMAGE_LAB_STALE_AFTER_MS }),
+        now
+      )
+    ).toBe("stale");
+    expect(cellRenderState(cell({ state: "done" }), now)).toBe("done");
+    expect(cellRenderState(cell({ state: "failed" }), now)).toBe("failed");
+  });
+
+  it("ages a NEVER-attempted row from created_at, so a closed tab still goes stale", () => {
+    // `now - attemptedAt` is NaN for this row, which reads as "not stale" and
+    // leaves the cell un-retryable forever.
+    const orphan = cell({ createdAtMs: now - IMAGE_LAB_STALE_AFTER_MS, attemptedAtMs: null });
+    expect(cellRenderState(orphan, now)).toBe("stale");
+    // ⚠ STALE, BUT NOT RETRYABLE — see `run-rules-surfaces.test.ts`. Retrying a
+    // row nothing ever attempted appends a SECOND live `requested` row for one
+    // intended image, and both are generatable. Generate the existing row.
+    expect(canRetryCell(orphan, now)).toBe(false);
+  });
+
+  it("REFUSES retry on a pending cell and allows it once stale", () => {
+    const pending = cell({ createdAtMs: now, attemptedAtMs: now - 1_000 });
+    expect(canRetryCell(pending, now)).toBe(false);
+    expect(canRetryCell(pending, now + IMAGE_LAB_STALE_AFTER_MS)).toBe(true);
+  });
+
+  it("allows retry on a finalized cell immediately", () => {
+    expect(canRetryCell(cell({ state: "failed", attemptedAtMs: now }), now)).toBe(true);
+    expect(canRetryCell(cell({ state: "done", attemptedAtMs: now }), now)).toBe(true);
+  });
+
+  it("stale is DERIVED, never a fourth persisted state", () => {
+    // A row rendered stale still says `requested` on the row — nothing writes it.
+    const row = cell({ createdAtMs: 0, attemptedAtMs: null });
+    expect(cellRenderState(row, IMAGE_LAB_STALE_AFTER_MS)).toBe("stale");
+    expect(row.state).toBe("requested");
+  });
+});
+
+describe("buildGrid", () => {
+  it("stacks retries within their cell, newest first, with a count", () => {
+    const first = cell({ id: "a", createdAtMs: 100, state: "failed" });
+    const retry = cell({ id: "b", createdAtMs: 200 });
+    const grid = buildGrid([first, retry], ["gpt-image-2"]);
+    expect(grid).toHaveLength(1);
+    expect(grid[0]!.attemptCount).toBe(2);
+    expect(grid[0]!.attempts.map((a) => a.id)).toEqual(["b", "a"]);
+  });
+
+  it("breaks a created_at TIE deterministically (every cell of a run shares one)", () => {
+    // Postgres now() is the transaction timestamp: a comparator reading only the
+    // timestamp hands the order to the runtime, and the grid re-flows on a
+    // re-render with no data change.
+    const a = cell({ id: "aaa", createdAtMs: 100 });
+    const b = cell({ id: "bbb", createdAtMs: 100 });
+    expect(buildGrid([a, b], ["gpt-image-2"])[0]!.attempts.map((x) => x.id)).toEqual([
+      "bbb",
+      "aaa",
+    ]);
+    expect(buildGrid([b, a], ["gpt-image-2"])[0]!.attempts.map((x) => x.id)).toEqual([
+      "bbb",
+      "aaa",
+    ]);
+  });
+
+  it("keeps the RUN's model order, so a wholly-failed model keeps its column", () => {
+    const rows = [
+      cell({ id: "g", modelId: "gemini-3-pro-image" }),
+      cell({ id: "o", modelId: "gpt-image-2" }),
+    ];
+    const grid = buildGrid(rows, ["gpt-image-2", "gemini-3-pro-image"]);
+    expect(grid.map((c) => c.modelId)).toEqual(["gpt-image-2", "gemini-3-pro-image"]);
+  });
+});
+
+// ── The composer's decisions ─────────────────────────────────────────────────
+
+describe("decideGenerateAffordance", () => {
+  const okDecision = decideRunComposition({
+    template: "Draw {{product}} and {{sale}}",
+    slotValues: { product: "cards" },
+    modelIds: ["gpt-image-2"],
+    imageCount: 1,
+  });
+
+  it("WARNS about an unfilled slot but leaves Generate enabled", () => {
+    const affordance = decideGenerateAffordance({
+      decision: okDecision,
+      submitting: false,
+      live: true,
+    });
+    expect(affordance.enabled).toBe(true);
+    expect(affordance.blocker).toBeNull();
+    expect(affordance.warnings.join(" ")).toContain("sale");
+  });
+
+  it("BLOCKS on a refusal and says which", () => {
+    const affordance = decideGenerateAffordance({
+      decision: { ok: false, reason: "no_models" },
+      submitting: false,
+      live: true,
+    });
+    expect(affordance.enabled).toBe(false);
+    expect(affordance.blocker).toBe(IMAGE_LAB_RUN_COPY.refusals.noModels);
+  });
+
+  it("warns when generation is switched off, without blocking the compose", () => {
+    const affordance = decideGenerateAffordance({
+      decision: okDecision,
+      submitting: false,
+      live: false,
+    });
+    expect(affordance.enabled).toBe(true);
+    expect(affordance.warnings.join(" ")).toContain("IMAGE_LAB_LIVE");
+  });
+
+  it("disables itself while a compose is in flight", () => {
+    expect(
+      decideGenerateAffordance({ decision: okDecision, submitting: true, live: true }).enabled
+    ).toBe(false);
+  });
+});
+
+describe("the composer's section order", () => {
+  it("puts the resolved-prompt preview BEFORE every irreversible control", () => {
+    // The preview is the last human check before child-authored text leaves for a
+    // vendor, so it cannot sit below the button that sends it.
+    const order = IMAGE_LAB_COMPOSER_SECTIONS;
+    expect(order.indexOf("template")).toBeLessThan(order.indexOf("slots"));
+    expect(order.indexOf("slots")).toBeLessThan(order.indexOf("preview"));
+    expect(order.indexOf("preview")).toBeLessThan(order.indexOf("references"));
+    expect(order.indexOf("references")).toBeLessThan(order.indexOf("models"));
+    expect(order.indexOf("models")).toBeLessThan(order.indexOf("generate"));
+    expect(order.indexOf("generate")).toBeLessThan(order.indexOf("results"));
+  });
+});
+
+// ── Storage keys, budgets, breadcrumbs ───────────────────────────────────────
+
+describe("runObjectKey", () => {
+  it("is deterministic, prefixed, and carries no extension", () => {
+    expect(runObjectKey("run-1", "img-9")).toBe("runs/run-1/img-9");
+    expect(runObjectKey("run-1", "img-9")).toBe(runObjectKey("run-1", "img-9"));
+    expect(runObjectKey("run-1", "img-9")).not.toMatch(/\.(png|jpe?g|webp)$/);
+  });
+
+  it("never collides with the reference prefix", () => {
+    expect(runObjectKey("r", "i").startsWith("references/")).toBe(false);
+  });
+});
+
+describe("the two budgets that must not be inverted", () => {
+  it("the CLIENT waits longer than the SERVER's whole function budget", () => {
+    // Invert this and duplicate spend becomes the designed behaviour for the
+    // slowest model: the browser gives up, the server keeps going, the vendor
+    // bills, and the staff member retries a cell that says "failed".
+    expect(IMAGE_LAB_CLIENT_AWAIT_MS).toBeGreaterThan(IMAGE_LAB_ROUTE_BUDGET_MS);
+  });
+
+  it("the cooldown burst allows a FULL 12-cell compare fan, twice over", () => {
+    expect(IMAGE_LAB_GENERATE_RATE_LIMIT.limit).toBeGreaterThanOrEqual(
+      IMAGE_LAB_MAX_CELLS_PER_RUN
+    );
+    expect(IMAGE_LAB_GENERATE_RATE_LIMIT.limit).toBeGreaterThan(
+      2 * IMAGE_LAB_MAX_CELLS_PER_RUN
+    );
+  });
+
+  it("keys the cooldown per staff member, so one runaway tab cannot lock a colleague out", () => {
+    expect(generateCellRateLimitKey("a")).not.toBe(generateCellRateLimitKey("b"));
+    expect(generateCellRateLimitKey("a")).toContain("a");
+  });
+});
+
+describe("formatGenerationBreadcrumb", () => {
+  it("carries who/when/which/how-many and the DB-content boolean", () => {
+    const line = formatGenerationBreadcrumb({
+      staffId: "staff-1",
+      atIso: "2026-08-05T00:00:00.000Z",
+      modelId: "gpt-image-2",
+      cellCount: 12,
+      usedDbContent: true,
+      outcome: "done",
+      billed: true,
+    });
+    expect(line).toContain("staff=staff-1");
+    expect(line).toContain("model=gpt-image-2");
+    expect(line).toContain("runCells=12");
+    expect(line).toContain("dbContent=true");
+  });
+
+  it("has no field a prompt, a slot value or a child field could travel in", () => {
+    // The TYPE is the enforcement — this asserts the rendered line as well, so a
+    // future field added to the type is caught by a human-readable failure.
+    const line = formatGenerationBreadcrumb({
+      staffId: "s",
+      atIso: "2026-08-05T00:00:00.000Z",
+      modelId: "m",
+      cellCount: 1,
+      usedDbContent: false,
+      outcome: "done",
+      billed: false,
+    });
+    expect(line).not.toMatch(/prompt|slot|template|child|pitch/i);
+  });
+});
+
+describe("outcome copy", () => {
+  it("says something actionable for every member of the closed set", () => {
+    const outcomes = [
+      { kind: "done", imageId: "i" },
+      { kind: "failed", imageId: "i", reason: "safety_blocked", detail: "d" },
+      { kind: "not_found" },
+      { kind: "not_admitted" },
+      { kind: "already_finalized", state: "done" },
+      { kind: "retry_refused", retryAfterMs: 60_000 },
+      { kind: "run_purged" },
+      { kind: "cooldown", retryAfterMs: 60_000 },
+      { kind: "invalid_input" },
+      { kind: "unavailable" },
+    ] as const;
+    for (const outcome of outcomes) {
+      expect(describeGenerateOutcome(outcome).length).toBeGreaterThan(3);
+    }
+  });
+
+  it("tells staff a late success can still land beside a retry", () => {
+    // `failed → done` is a real transition when a killed function's vendor call
+    // completes afterwards. Staff must be told before they press Retry.
+    expect(IMAGE_LAB_RUN_COPY.grid.retryWarning).toMatch(/late|still/i);
+    expect(IMAGE_LAB_RUN_COPY.grid.retryWarning).toMatch(/billed/i);
+  });
+});

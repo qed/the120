@@ -4,9 +4,10 @@ import {
   imageLabGenerationNotice,
   IMAGE_LAB_BENCH_COPY,
 } from "./lib/shell-rules";
+import { isImageLabRealContentLive } from "./lib/content-picker-core";
 import { ImageLabNav } from "./ImageLabNav";
 import { ImageLabPanel } from "./ImageLabPanel";
-import { ReferenceLibrary } from "./ReferenceLibrary";
+import { RunComposer } from "./RunComposer";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row per
@@ -65,23 +66,18 @@ export default async function ImageLabBenchPage() {
         body={notice.body}
       />
 
-      <ImageLabPanel
-        headline={IMAGE_LAB_BENCH_COPY.composerPending.headline}
-        body={IMAGE_LAB_BENCH_COPY.composerPending.body}
-      />
+      {/* Unit 5. The composer OWNS the reference picker now (it is a controlled
+          child: the composer holds the selection, and the picker's budget is the
+          strictest limit across the chosen models), so `ReferenceLibrary` is no
+          longer mounted here.
 
-      {/* Unit 4. Mounted with NO model selection, so the reference budget is the
-          strictest limit in the registry and anything picked here stays legal
-          once Unit 5's composer names the models. It loads its own list through
-          the gated `listReferenceLibrary` action rather than being handed data
-          by this page — the page stays a pure render of the shell's copy, and
-          the library refreshes its own short-lived signed thumbnail URLs. */}
-      <ReferenceLibrary />
-
-      <ImageLabPanel
-        headline={IMAGE_LAB_BENCH_COPY.emptyRuns.headline}
-        body={IMAGE_LAB_BENCH_COPY.emptyRuns.body}
-      />
+          BOTH FLAGS ARE READ SERVER-SIDE AND HANDED DOWN, never re-read in the
+          browser: they are operational facts about the deployment, and a
+          `NEXT_PUBLIC_` copy would be a second reader resolved at BUILD time that
+          could disagree with the server on a warm deploy. They gate different
+          things — `live` is whether a model may be called, `pickerLive` is
+          whether a real child's authored text may be loaded at all. */}
+      <RunComposer live={isImageLabLive()} pickerLive={isImageLabRealContentLive()} />
     </>
   );
 }

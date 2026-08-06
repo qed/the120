@@ -271,7 +271,13 @@ const ENTRIES: readonly ImageLabModelEntry[] = deepFreeze([
       "403'd during research 2026-08-05).",
     restrictions: [
       "Slowest launch model: 15s typical, 2+ min at high quality.",
-      "High quality is ~35× the price of low ($0.211 vs $0.006 per 1024² image).",
+      // ⚠ A STATEMENT, NOT AN OFFER. The earlier wording advertised a high/low
+      // choice the composer does not have: quality is not a run setting in v1
+      // (no column on fp_image_lab_runs), so every cell dials `medium`. A chip
+      // describing a control that is not there sends staff looking for it.
+      "Quality is fixed at medium on this bench ($0.053). The API's low ($0.006) " +
+        "and high ($0.211) tiers are not selectable — that is a schema change, " +
+        "not a form field.",
     ],
     verified: {
       gatewayRoutable: routableByCatalog("GatewayImageModelId"),
@@ -404,8 +410,16 @@ export function estimatedCostUsd(
     : null;
 }
 
-/** Quality tiers this model offers, for the run-settings selector. */
-export function qualityTiers(entry: ImageLabModelEntry): string[] {
+/**
+ * Quality tiers this model prices.
+ *
+ * ⚠ NOT A SELECTOR'S DATA SOURCE. Quality is NOT a run setting in v1 —
+ * `fp_image_lab_runs` has no `quality` column, so an unstored run setting would
+ * make the cost evidence unreproducible (see `run-core.ts`'s header). Every cell
+ * dials {@link ImageLabModelEntry.qualityDefault}. This exists for the registry's
+ * own consistency assertions, which is the only caller there has ever been.
+ */
+export function pricedQualityTiers(entry: ImageLabModelEntry): string[] {
   return Object.keys(entry.priceNoteUsd);
 }
 
@@ -435,19 +449,39 @@ export function unverifiedItems(entry: ImageLabModelEntry): string[] {
  * is stuck `requested` with `attempted_at` set (which blocks retry for the full
  * staleness window), and the vendor bills for the image anyway.
  */
-export function assertRouteBudget(maxDurationSeconds: number): void {
+export function assertRouteBudget(
+  maxDurationSeconds: number,
+  /**
+   * Everything the route spends BEFORE the adapter is dialled.
+   *
+   * ⚠ THE ADAPTER USED TO BE THE ONLY TERM, and the omission was expensive: the
+   * generate route loads up to sixteen reference objects from Storage on the way
+   * to the vendor call, and none of that time was in this arithmetic. A
+   * reference-heavy run could be killed by the platform with the vendor billed,
+   * nothing put, nothing finalized and the row latched. Callers pass
+   * `IMAGE_LAB_PRE_ADAPTER_BUDGET_MS`; the default keeps this usable from a
+   * route that genuinely dials first.
+   */
+  preAdapterMs: number = 0
+): void {
   const slowestMs = Math.max(...ENTRIES.map((entry) => entry.timeoutMs));
-  const requiredMs = slowestMs + IMAGE_LAB_TIMEOUT_HEADROOM_MS;
+  const requiredMs = slowestMs + IMAGE_LAB_TIMEOUT_HEADROOM_MS + preAdapterMs;
   if (!Number.isFinite(maxDurationSeconds) || maxDurationSeconds <= 0) {
     throw new Error(
       `[image-lab] assertRouteBudget needs a positive maxDuration in seconds, got ${maxDurationSeconds}`
+    );
+  }
+  if (!Number.isFinite(preAdapterMs) || preAdapterMs < 0) {
+    throw new Error(
+      `[image-lab] assertRouteBudget needs a non-negative pre-adapter budget, got ${preAdapterMs}`
     );
   }
   if (requiredMs > maxDurationSeconds * 1000) {
     throw new Error(
       `[image-lab] route maxDuration ${maxDurationSeconds}s is too short: the ` +
         `slowest model needs ${slowestMs}ms plus ${IMAGE_LAB_TIMEOUT_HEADROOM_MS}ms ` +
-        `of finalize headroom (${requiredMs}ms). Raise maxDuration to at least ` +
+        `of finalize headroom and ${preAdapterMs}ms of pre-adapter work ` +
+        `(${requiredMs}ms). Raise maxDuration to at least ` +
         `${Math.ceil(requiredMs / 1000)}s, or lower the model timeouts.`
     );
   }

@@ -300,6 +300,88 @@ describe("every Image Lab DB touch goes through the service role", () => {
     }
   });
 
+  /**
+   * ⚠ THE HANDLE IS THE WHOLE PROJECT, AND UNIT 5 IS THE FIRST TO LEAVE THE LAB.
+   *
+   * `imageLabDb()` hands back a raw `supabaseAdmin()` client with full project
+   * access, and until now the only table assertion above keyed on the literal
+   * `fp_image_lab` prefix — which said nothing at all about the five tables this
+   * unit newly reads: `children`, `families`, `fp_player_profiles`,
+   * `fp_player_saves` and `fp_ledger`. Those are the child-data tables. So the
+   * set of tables the Lab may name is enumerated, and adding a sixth is a
+   * deliberate edit here rather than a silent one there.
+   */
+  const LAB_TABLE_ALLOWLIST = new Set([
+    // The Lab's own three.
+    "fp_image_lab_runs",
+    "fp_image_lab_images",
+    "fp_image_lab_references",
+    // Read by the content picker and by `createRun`'s provenance check.
+    "children",
+    "families",
+    "fp_player_profiles",
+    "fp_player_saves",
+    "fp_ledger",
+  ]);
+
+  const fromLiterals = async (): Promise<{ file: string; table: string }[]> => {
+    const out: { file: string; table: string }[] = [];
+    for (const file of await labSources()) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      // `Array.from(...)` is not a table read; everything else that spells
+      // `.from(` on a Supabase handle is.
+      for (const match of source.matchAll(/(?<!\bArray)\.from\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) {
+        out.push({ file, table: match[1]! });
+      }
+    }
+    return out;
+  };
+
+  it("names ONLY the tables on the reviewed allowlist", async () => {
+    const literals = await fromLiterals();
+    expect(literals.length).toBeGreaterThan(0);
+    const offenders = literals.filter(
+      ({ table }) =>
+        !LAB_TABLE_ALLOWLIST.has(table) &&
+        // `storage.from(bucket)` is a bucket, not a table.
+        table !== "image-lab" &&
+        !table.startsWith("image-lab")
+    );
+    expect(
+      offenders.map((o) => `${o.file}: ${o.table}`),
+      "a Lab module names a table outside the reviewed allowlist"
+    ).toEqual([]);
+  });
+
+  it("resolves every table name through a LITERAL, so the allowlist can see it", async () => {
+    // A `.from(someVariable)` would make the assertion above vacuous for that
+    // call, exactly as a template literal defeated the earlier prefix scan.
+    for (const file of await labSources()) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      const dynamic = [...source.matchAll(/(?<!\bArray)\.from\(\s*([^"'`\s)][^)]*)\)/g)]
+        .map((m) => m[1]!.trim())
+        // Constants declared in the same module are literals by another name; the
+        // allowlist test above reads their values from the same file.
+        .filter((expr) => !/^[A-Z_][A-Z0-9_]*$/.test(expr));
+      expect(dynamic, `${file} builds a table name at runtime`).toEqual([]);
+    }
+  });
+
+  it("NEVER selects `payer` — the only protection a non-consenting third party has", async () => {
+    // The buyer's name is excluded by CONSTRUCTION (origin R12a): it is enforced
+    // by a select-list STRING and nothing else, and `SaleRow.source` is already
+    // selected-and-unused, which proves unused columns do get pulled when listed.
+    for (const file of await labSources()) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      const stripped = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      expect(stripped, `${file} names payer`).not.toMatch(/\bpayer\b/);
+      // …and no `select("*")` anywhere, which would pull it without naming it.
+      expect(stripped, `${file} selects *`).not.toMatch(/\.select\(\s*["'`]\s*\*/);
+    }
+  });
+
   it("the reference loader is server-only, so it can never be bundled to a client", async () => {
     expect(readFileSync(path.join(REPO_ROOT, `${LAB}lib/reference-loader.ts`), "utf8")).toMatch(
       /import\s+["']server-only["']/

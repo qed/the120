@@ -7,7 +7,7 @@ import {
   IMAGE_LAB_MODELS,
   IMAGE_LAB_ROUTE_BUDGET_MS,
   IMAGE_LAB_TIMEOUT_HEADROOM_MS,
-  qualityTiers,
+  pricedQualityTiers,
   unverifiedItems,
   type ImageLabModelEntry,
 } from "../model-registry";
@@ -45,7 +45,7 @@ describe("model-registry: shape invariants", () => {
   });
 
   it.each(entries)("%s: prices are positive and qualityDefault names a real tier", (_id, entry: ImageLabModelEntry) => {
-    const tiers = qualityTiers(entry);
+    const tiers = pricedQualityTiers(entry);
     expect(tiers.length).toBeGreaterThan(0);
     for (const tier of tiers) expect(entry.priceNoteUsd[tier]!).toBeGreaterThan(0);
     // Without this, `estimatedCostUsd(entry)` returns null for the DEFAULT tier

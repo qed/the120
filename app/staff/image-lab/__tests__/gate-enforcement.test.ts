@@ -292,11 +292,24 @@ const functionBody = (code: string, start: number) => {
   return code.slice(open, end === -1 ? code.length : end);
 };
 
-/** Every exported entry point in a module, as source slices. */
+/**
+ * Every exported entry point in a module, as source slices.
+ *
+ * ⚠ `async` IS NOT PART OF THE THREAT MODEL. The earlier pattern required it, so
+ * an exported NON-async function in a `"use server"` module was invisible to all
+ * four source fences — while still being a network-reachable POST endpoint. And
+ * because the sibling exports in the same file DID match, the
+ * `expect(bodies.length).toBeGreaterThan(0)` guard passed happily on their
+ * behalf, so the hole was silent rather than loud.
+ *
+ * A Server Action must be async to be callable from a client, but nothing stops
+ * one being declared without the keyword and returning a promise — and nothing
+ * about "did this body await the gate" needs the keyword to be true.
+ */
 const exportedFunctionBodies = (code: string) => {
   const bodies: string[] = [];
   const re =
-    /export\s+(?:default\s+)?(?:async\s+function\b|const\s+\w+\s*(?::[^=\n]+)?=\s*async\b)/g;
+    /export\s+(?:default\s+)?(?:(?:async\s+)?function\b|const\s+\w+\s*(?::[^=\n]+)?=\s*(?:async\s*)?(?:\(|function\b))/g;
   for (const match of code.matchAll(re)) {
     bodies.push(functionBody(code, match.index));
   }
@@ -568,5 +581,49 @@ describe("the hub card carries the generation state (Unit 3 requirement 4)", () 
       /NEXT_PUBLIC_IMAGE_LAB/.test(readFileSync(`${REPO_ROOT}${f}`, "utf8"))
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the extractor the four source fences depend on", () => {
+  /**
+   * ⚠ A FENCE THAT CANNOT SEE AN EXPORT IS NOT A FENCE. `exportedFunctionBodies`
+   * required the `async` keyword, so an exported NON-async function in a
+   * `"use server"` module was invisible to every source assertion above — while
+   * remaining a network-reachable POST endpoint. Worse, the emptiness guard
+   * (`bodies.length > 0`) passed on its async SIBLINGS' behalf, so the hole was
+   * silent. These fixtures are what keep the extractor honest.
+   */
+  const fixture = [
+    'export async function alpha(input?: unknown) {',
+    "  await requireStaff();",
+    "  return input;",
+    "\n}",
+    "",
+    "export function beta(input?: unknown) {",
+    "  return Promise.resolve(input);",
+    "\n}",
+    "",
+    "export const gamma = async (input?: unknown) => {",
+    "  await requireStaff();",
+    "  return input;",
+    "\n}",
+    "",
+    "export const delta = (input?: unknown) => {",
+    "  return Promise.resolve(input);",
+    "\n}",
+  ].join("\n");
+
+  it("sees an exported NON-async function and a non-async arrow, not only the async ones", () => {
+    const bodies = exportedFunctionBodies(fixture);
+    expect(bodies).toHaveLength(4);
+    // The two that used to be invisible are the two with no gate in them.
+    const ungated = bodies.filter((body) => !GATE_CALL.test(body));
+    expect(ungated).toHaveLength(2);
+  });
+
+  it("still reports EVERY body, so one gated sibling cannot vouch for the file", () => {
+    const gated = exportedFunctionBodies(fixture).filter((body) => GATE_CALL.test(body));
+    expect(gated).toHaveLength(2);
+    expect(gated.length).toBeLessThan(exportedFunctionBodies(fixture).length);
   });
 });

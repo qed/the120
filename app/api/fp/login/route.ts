@@ -100,12 +100,25 @@ function corsJsonHeaders(origin: string): Record<string, string> {
   };
 }
 
+/**
+ * The 403 branch was blind through the Aug 2026 www-origin incident (BUG-001):
+ * refused browsers saw "credentials don't match" and the server recorded
+ * nothing. The Origin header is attacker-chosen but not sensitive (no
+ * credentials, no user data), so it is safe — and necessary — to log.
+ */
+function logRefusedOrigin(method: string, origin: string | null): void {
+  console.warn(
+    `[fp/login] refused origin (403): method=${method} origin=${origin === null ? "<none>" : JSON.stringify(origin)}`
+  );
+}
+
 export async function OPTIONS(req: Request): Promise<Response> {
   const verdict = checkOrigin(
     req.headers.get("origin"),
     buildAllowedOrigins(process.env.FP_PREVIEW_ORIGIN)
   );
   if (!verdict.ok) {
+    logRefusedOrigin("OPTIONS", req.headers.get("origin"));
     return new Response(null, {
       status: 403,
       headers: { "Cache-Control": "no-store", Vary: "Origin" },
@@ -133,6 +146,7 @@ export async function POST(req: Request): Promise<Response> {
     buildAllowedOrigins(process.env.FP_PREVIEW_ORIGIN)
   );
   if (!verdict.ok) {
+    logRefusedOrigin("POST", req.headers.get("origin"));
     return new Response(null, {
       status: 403,
       headers: { "Cache-Control": "no-store", Vary: "Origin" },

@@ -164,6 +164,7 @@ describe("origin allowlist", () => {
     const allowed = buildAllowedOrigins("https://fp-git-feat-team.vercel.app");
     for (const origin of [
       "https://firstprofit.school",
+      "https://www.firstprofit.school",
       "http://localhost:5173",
       "http://localhost:3000",
       "https://fp-git-feat-team.vercel.app",
@@ -179,8 +180,8 @@ describe("origin allowlist", () => {
   });
 
   it("omits the preview origin when the env var is unset or blank", () => {
-    expect(buildAllowedOrigins(undefined)).toHaveLength(3);
-    expect(buildAllowedOrigins("")).toHaveLength(3);
+    expect(buildAllowedOrigins(undefined)).toHaveLength(4);
+    expect(buildAllowedOrigins("")).toHaveLength(4);
     const verdict = checkOrigin("https://fp-git-feat-team.vercel.app", buildAllowedOrigins(undefined));
     expect(verdict.ok).toBe(false);
   });

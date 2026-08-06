@@ -7,7 +7,7 @@
  * request shape, the refusal shaping, the refundable-refusal ALLOWLIST, the
  * replay classification, and the rate-limit key. The impure sequencing lives in
  * ./handoff-core.ts (`server-only`, deps-injected); the wires are
- * ./exchange/route.ts (exchange) and app/start/v3/actions.ts (mint).
+ * ./exchange/route.ts (exchange) and app/start/actions.ts (mint).
  *
  * ── THE THREAT MODEL, STATED ONCE ──
  * A row in `fp_handoff_codes` is a BEARER CREDENTIAL for a child's session. The

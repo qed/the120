@@ -718,7 +718,7 @@ describe("FIX 3 — concurrent guessing cannot buy free guesses", () => {
     // Sustained concurrency against ONE attempt — the exact traffic shape that
     // exhausts bumpCodeGuessCount's bounded CAS retries. Before the fix that
     // returned `failed`, which BOTH left the durable counter untouched AND made
-    // app/start/v3/actions.ts release the volumetric strike: guesses free of
+    // app/start/actions.ts release the volumetric strike: guesses free of
     // every control. Now exhaustion locks the row and reports `locked`.
     const results = await Promise.all(
       Array.from({ length: 12 }, () => verify(h, { code: bad }))

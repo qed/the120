@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -84,24 +81,10 @@ describe("safeReturnTo — the bypass matrix (every shape → null)", () => {
   }
 });
 
-/* ─────────────────────────── page pin (R12's auth-fix half) ─────────────────────────── */
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const pageSrc = readFileSync(
-  path.resolve(here, "../../start/child/[childId]/page.tsx"),
-  "utf8"
-);
-
-describe("/start/child/[childId] — unauthenticated bounce carries returnTo", () => {
-  it("no longer restarts the funnel at /start", () => {
-    expect(pageSrc).not.toMatch(/redirect\(\s*"\/start"\s*\)/);
-  });
-
-  it("redirects through returnToHref with the page's own URL", () => {
-    expect(pageSrc).toMatch(/returnToHref\(/);
-    expect(pageSrc).toMatch(/\/start\/child\/\$\{childId\}/);
-    expect(pageSrc).toMatch(
-      /import \{ returnToHref \} from "@\/app\/lib\/funnel\/return-to-rules";/
-    );
-  });
-});
+/* RETIRED (v3 plan Unit 9): the page pin for R12's auth-fix half. It read
+ * app/start/child/[childId]/page.tsx and asserted the unauthenticated bounce
+ * carried `returnTo` — that page is now archive/new-user-v2/child/[childId]/.
+ * `safeReturnTo`/`returnToHref` themselves are LIVE: the dashboard's SignIn
+ * still consumes a validated `returnTo`, and the open-redirect matrix above is
+ * the assertion that matters. It admits `/start/…` paths, which is still the
+ * right shape — `/start` is the v3 flow now. */

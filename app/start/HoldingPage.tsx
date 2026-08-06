@@ -8,7 +8,7 @@
  * separately-addressable POST endpoint whose id ships in any build where the
  * action module exists, so "this page imports no action" stops nobody from
  * POSTing to one. The REAL gate is the flag check at the top of each
- * unauthenticated-reachable action in app/start/v3/actions.ts (review FIX 1);
+ * unauthenticated-reachable action in app/start/actions.ts (review FIX 1);
  * this page is only the honest thing to SHOW while that gate is closed.
  *
  * The copy is honest and short. It does not promise a date (the flip is a

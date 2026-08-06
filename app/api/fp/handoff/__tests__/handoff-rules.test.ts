@@ -51,7 +51,7 @@ const RULES_SRC = readFileSync(
   "utf8"
 );
 const ACTIONS_SRC = readFileSync(
-  path.resolve(process.cwd(), "app/start/v3/actions.ts"),
+  path.resolve(process.cwd(), "app/start/actions.ts"),
   "utf8"
 );
 

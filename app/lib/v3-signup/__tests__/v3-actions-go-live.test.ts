@@ -5,7 +5,7 @@ import { resetRateLimitStoreForTests } from "@/app/fp/lib/rate-limit-store";
  * THE GO-LIVE FLAG IS ENFORCED AT THE ACTION BOUNDARY, NOT ONLY ON THE PAGE
  * (review FIX 1).
  *
- * `V3_START_LIVE` was referenced in exactly ONE place — app/start/v3/page.tsx,
+ * `V3_START_LIVE` was referenced in exactly ONE place — app/start/page.tsx,
  * choosing between <HoldingPage/> and <V3Flow/>. But a Server Action is a
  * SEPARATELY-ADDRESSABLE POST endpoint: its id ships in the client bundle and no
  * page render stands in front of it. So with the flag off, an unauthenticated
@@ -55,7 +55,7 @@ const cores = [v3StartSignup, v3VerifyCode, v3ResendCode, v3EditEmail];
 
 /** The four unauthenticated-reachable actions, with a body each would accept. */
 async function actions() {
-  const mod = await import("@/app/start/v3/actions");
+  const mod = await import("@/app/start/actions");
   const start = {
     parentName: "Alex Newal",
     parentEmail: "alex@example.com",

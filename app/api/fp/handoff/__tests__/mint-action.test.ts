@@ -43,7 +43,7 @@ const NO_SESSION = { data: { user: null }, error: null };
 const SESSION = { data: { user: { id: "parent-1", email: "alex@example.com" } }, error: null };
 
 async function action() {
-  const mod = await import("@/app/start/v3/actions");
+  const mod = await import("@/app/start/actions");
   return mod.v3MintHandoffAction;
 }
 

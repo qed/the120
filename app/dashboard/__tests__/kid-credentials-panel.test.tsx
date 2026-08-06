@@ -113,7 +113,7 @@ describe("KidCredentials — first render", () => {
 
 describe("SetPasswordForm — first render", () => {
   it("renders one password field, a submit, and no error", () => {
-    const out = html(<SetPasswordForm next="/start/v3?step=kid" />);
+    const out = html(<SetPasswordForm next="/start?step=kid" />);
     expect(out).toContain('type="password"');
     // A password MANAGER hint, not a browser autofill of the old value: this
     // field mints a new credential.
@@ -128,7 +128,7 @@ describe("SetPasswordForm — first render", () => {
     // The `next` value drives a post-success `window.location`, never an anchor:
     // a just-authenticated page with a followable destination is where open
     // redirects come from, and this one is a fixed first-party path anyway.
-    const out = html(<SetPasswordForm next="/start/v3?step=kid" />);
+    const out = html(<SetPasswordForm next="/start?step=kid" />);
     expect(out).not.toContain("<a ");
     expect(out).not.toContain("href=");
   });

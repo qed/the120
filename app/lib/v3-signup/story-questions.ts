@@ -11,12 +11,12 @@
  * password word).
  *
  * ── WHY IT LIVES IN app/lib AND NOT NEXT TO THE SCREEN (review FIX 9b) ──
- * It was authored in `app/start/v3/`, which made a `server-only` core in
+ * It was authored in `app/start/`, which made a `server-only` core in
  * `app/lib` import from a ROUTE folder — an inverted dependency the two
  * consumers then disagreed about (`v3-onboarding-core.ts` imported the ids while
  * `credentials-rules.ts` DUPLICATED them to avoid the coupling, so the two could
  * silently drift). One place, both importers, no route dependency: plan Unit 9's
- * `app/start/v3` → `app/start` move now touches nothing here.
+ * `app/start/v3` → `app/start` move touched nothing here.
  *
  * The prototype's `sample` text doubles as the textarea PLACEHOLDER. It is never
  * pre-typed into the field: a pre-filled answer is the child's answer to every

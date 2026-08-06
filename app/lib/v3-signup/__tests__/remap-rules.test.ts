@@ -120,18 +120,21 @@ type Row = [V2VerdictKey, string | null, RecordsToMint];
  * observable a producer actually uses, so pinning it also pins `v3RemapRoute`.
  */
 const ROWS: readonly Row[] = [
-  // The two cells that owed real work on a child → the v3 kid step, minting the
+  // The FOUR cells that owe real work on a child → the v3 kid step, minting the
   // whole trio (a v2 child has no attempt, no v3-era consent and no draft).
+  // `dossier` and `waitlisted` joined the first two in Unit 9's review: pointed
+  // at the dashboard they were already standing on, their card had NO BUTTON —
+  // and the launch email tells the waitlisted ones their kid can start today.
   ["child:mini_app.resume", `${V3_FLOW_PATH}?step=kid`, TRIO],
   ["child:mini_app.compose", `${V3_FLOW_PATH}?step=kid`, TRIO],
+  ["child:dashboard.dossier", `${V3_FLOW_PATH}?step=kid`, TRIO],
+  ["child:status_only.waitlisted", `${V3_FLOW_PATH}?step=kid`, TRIO],
   // Every review-pipeline position collapses onto the dashboard — v3 has no
-  // application, no review queue, no waitlist and no deposit to resume into.
+  // application, no review queue and no deposit to resume into.
   ["child:dashboard.legacy", "/dashboard", NOTHING],
-  ["child:dashboard.dossier", "/dashboard", NOTHING],
   ["child:dashboard.enrolled", "/dashboard", NOTHING],
   ["child:status_only.submitted", "/dashboard", NOTHING],
   ["child:status_only.in_review", "/dashboard", NOTHING],
-  ["child:status_only.waitlisted", "/dashboard", NOTHING],
   ["child:next_steps.reserve", "/dashboard", NOTHING],
   ["child:next_steps.re_reserve", "/dashboard", NOTHING],
   ["child:arrival.arrival", "/dashboard", NOTHING],
@@ -208,6 +211,20 @@ describe("the override diverts flow entries only, and never cancels their record
     expect(cell.mint).toEqual(TRIO);
   });
 
+  it("the two cells Unit 9's review moved onto the kid step are diverted too", () => {
+    // They are flow cells past the parent step now, so the converted-parent
+    // lockout applies to them exactly as it does to the mini_app pair. A cell
+    // that gained a destination must also gain that destination's guards.
+    for (const key of [
+      "child:dashboard.dossier",
+      "child:status_only.waitlisted",
+    ] as V2VerdictKey[]) {
+      const cell = remapV2Verdict(key, converted);
+      expect(cell.verdict, key).toEqual({ screen: "set_password" });
+      expect(cell.mint, key).toEqual(TRIO);
+    }
+  });
+
   it("the PARENT step is never diverted — that is where a password is chosen", () => {
     expect(remapV2Verdict("reentry:capture", converted).verdict).toEqual({
       screen: "v3_flow",
@@ -217,7 +234,7 @@ describe("the override diverts flow entries only, and never cancels their record
 
   it("non-flow cells are override-immune (nothing there provisions anything)", () => {
     for (const key of [
-      "child:status_only.waitlisted",
+      "child:status_only.submitted",
       "reentry:dashboard",
       "reentry:sign_in",
       "resume:expired",

@@ -11,7 +11,7 @@ import "server-only";
  * arrive from the wire, so a core with a `deps` parameter must never live in
  * one (docs/solutions/best-practices/shared-db-taking-core-must-not-live-in-a-
  * use-server-file-server-action-boundary-2026-07-17.md). The thin wrappers that
- * ARE actions live in app/start/v3/actions.ts; they build deps and call these.
+ * ARE actions live in app/start/actions.ts; they build deps and call these.
  *
  * ── WHAT THIS UNIT REUSES, AND WHY IT IS NOT A SECOND SIGNUP ──
  * The account lifecycle stays where it is tested: `startSignup` in

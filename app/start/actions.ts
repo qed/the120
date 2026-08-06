@@ -180,7 +180,7 @@ async function requestContext(): Promise<{ ip: string; ua: string }> {
 /**
  * ⚠ THE FLAG IS ENFORCED HERE, NOT ONLY ON THE PAGE (review FIX 1).
  *
- * `app/start/v3/page.tsx` chooses between `<HoldingPage/>` and `<V3Flow/>` on
+ * `app/start/page.tsx` chooses between `<HoldingPage/>` and `<V3Flow/>` on
  * `V3_START_LIVE`. That gates the RENDER and nothing else. A Server Action is a
  * separately-addressable POST endpoint: its id is baked into the client bundle
  * of any build where this module exists, and no page render stands in front of

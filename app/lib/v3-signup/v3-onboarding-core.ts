@@ -7,7 +7,7 @@ import "server-only";
  * a core with a `deps` parameter may never live in a file whose every export is
  * client-callable (docs/solutions/best-practices/shared-db-taking-core-must-not-
  * live-in-a-use-server-file-server-action-boundary-2026-07-17.md). The thin
- * actions live in app/start/v3/actions.ts.
+ * actions live in app/start/actions.ts.
  *
  * ── THE STATED INVARIANT: A LOOP-ENTRY ATTEMPT IS BORN 'verified' ──
  * `recordConsent` REFUSES a non-`verified` attempt, and `createChild` refuses

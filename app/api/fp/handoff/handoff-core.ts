@@ -284,7 +284,7 @@ export async function exchangeHandoffCode(
     // username and password we just showed them, so a plain sign-in is a real,
     // immediate way in — a resume link has no such fallback. ⚠ (b) IS A CLAIM
     // ABOUT ANOTHER FILE, AND IT IS LOAD-BEARING: it holds only because
-    // app/start/v3/StepAccountReady.tsx opens the handoff in a NEW TAB on every
+    // app/start/StepAccountReady.tsx opens the handoff in a NEW TAB on every
     // device, so the tab showing those credentials is still there when this
     // refuses. The plan's original phone ending navigated the SAME tab away
     // before the exchange ran, which quietly made this reasoning false on

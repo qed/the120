@@ -64,7 +64,7 @@ const PASSWORD_WORD_PREFERRED_ANSWERS: readonly string[] = ["matters", "intro"];
  *
  * ── ONE SOURCE FOR THE IDS (review FIX 9b) ──
  * The ids used to be DUPLICATED here, to keep this `app/lib` module free of a
- * dependency on the then-route-local `app/start/v3/story-questions.ts`. That
+ * dependency on the then-route-local `app/start/story-questions.ts`. That
  * module now lives BESIDE this one, so the duplication (and the drift it
  * invited — the core imported the ids while this file re-typed them) is gone:
  * both importers read `STORY_QUESTION_IDS`. An answer key that is not a known

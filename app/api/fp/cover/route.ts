@@ -14,7 +14,7 @@
  *      unauthenticated flood from ever reaching the session probe. It is an
  *      in-memory counter, not work: nothing privileged has been constructed.
  *      Released ONLY on genuine infrastructure failure, the same rule
- *      app/start/v3/actions.ts follows.
+ *      app/start/actions.ts follows.
  *   3. AUTHORIZATION (phase one of the core): authenticate the caller, refuse
  *      the not-yet-built kid-Bearer path, parse, refuse a photo body, and only
  *      THEN build the service-role client and resolve ownership, consent and cap.

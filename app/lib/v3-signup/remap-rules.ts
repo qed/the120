@@ -41,11 +41,13 @@ import { V3_STEPS, type V3Step } from "./flow-rules";
 /* ------------------------------------------------------------- the routes */
 
 /**
- * Where the v3 flow lives TODAY. Unit 9 moves `app/start/v3` to `app/start`;
- * when it does, this constant is the ONE edit, because every producer builds
- * its URL from `v3RemapRoute` rather than from a literal of its own.
+ * Where the v3 flow lives. Unit 9 moved `app/start/v3` to `app/start` (v2 is in
+ * `archive/new-user-v2/`) and this constant WAS the one edit, exactly as it was
+ * written to be: every producer builds its URL from `v3RemapRoute` rather than
+ * from a literal of its own, so promoting the flow to the front door touched one
+ * string here and nothing in any render file.
  */
-export const V3_FLOW_PATH = "/start/v3";
+export const V3_FLOW_PATH = "/start";
 
 /**
  * The one-time set-password step for a CONVERTED FUNNEL PARENT (see
@@ -155,31 +157,48 @@ export function childNextVerdictKey(v: ChildNextVerdict): ChildNextKey {
  * v3 has no application, no review queue, no waitlist and no seat deposit: a
  * family either has kids playing First Profit or is adding one. So every v2
  * cell that described a POSITION IN A REVIEW PIPELINE (`submitted`,
- * `in_review`, `waitlisted`, `offered`/`reserve`, `re_reserve`, `arrival`,
- * `enrolled`, the composed-dossier cell) has no v3 analogue to resume INTO, and
- * its family's honest destination is the dashboard, where their existing kids
- * and the "add a child" entry live. This is the plan's hard-launch decision
- * ("v3 is also a hard launch for ALL families"), stated as data.
+ * `in_review`, `offered`/`reserve`, `re_reserve`, `arrival`, `enrolled`) has no
+ * v3 analogue to resume INTO, and its family's honest destination is the
+ * dashboard, where their existing kids and the "add a child" entry live. This is
+ * the plan's hard-launch decision ("v3 is also a hard launch for ALL families"),
+ * stated as data. Those cells all keep a card that still shows a CTA of its own
+ * (the reserve flow, or the seat-reserved badge), so the dashboard is a landing,
+ * not a dead end — which is exactly what the two cells below did NOT have.
  *
- * `waitlisted` is worth naming explicitly: it must land on the dashboard like
- * everyone else. Under v2 a waitlisted family's old resume link led to a
- * status page; if the remap sent them at a retired route they would get a 404,
- * which is the one outcome the success criterion ("no family stranded")
- * forbids.
+ * ── THE FOUR CELLS THAT OWE UNFINISHED WORK BECOME THE KID STEP ──
+ * `mini_app.resume`, `mini_app.compose`, `dashboard.dossier` and
+ * `status_only.waitlisted`. Each names a family with a real child and NO First
+ * Profit account for them: the v2 work they were mid-way through (or waiting
+ * for permission to do) is retired, so the equivalent v3 obligation is "give
+ * this kid a First Profit account" — the kid step — and that step mints the
+ * whole trio because a v2 child carries no attempt, no v3-era consent and no
+ * draft.
  *
- * ── WHY THE TWO `mini_app` CELLS BECOME THE KID STEP ──
- * They are the only v2 cells whose family owes UNFINISHED WORK on a child. The
- * work itself (the v2 application) is retired, so the equivalent v3 obligation
- * is "give this kid a First Profit account" — the kid step — and that step
- * mints the whole trio because a v2 child carries no attempt, no v3-era
- * consent and no draft.
+ * The last two joined that group in Unit 9's review, and the reason is the same
+ * one for both: they were the only cells whose family got a card with NO BUTTON
+ * ON IT. `dashboard.dossier` is a family that did MORE work than the `mini_app`
+ * ones (they composed a project) and, pointed at the dashboard they were already
+ * standing on, `cardVerdict` rendered them a status line and nothing else.
+ * `status_only.waitlisted` is worse: the launch email tells that family "there
+ * is no waitlist any more, sign in and your kid can start building today", and
+ * the dashboard they arrive at answered with a WAITLISTED badge and no way
+ * forward. The hard-launch requirement is that EVERY existing family is routed
+ * into v3 at their first incomplete step, and for a family with a kid and no FP
+ * account that step is the kid step. (F7 still holds — the destination is
+ * onboarding, never checkout.)
+ *
+ * A `v3_flow` cell does NOT change the server-side gates: `dashboardGateVerdict`
+ * and `resolveReentry` redirect only on a `mini_app` SURFACE, so these two
+ * families still LAND on the dashboard and are offered the step by their card
+ * rather than being thrown into the flow by a page load.
  */
 export const V2_TO_V3_REMAP: Readonly<Record<V2VerdictKey, V3RemapCell>> = {
   /* ── the per-child cells ── */
   // A pre-funnel child. Nothing to resume; the dashboard shows their card.
   "child:dashboard.legacy": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
-  // A composed v2 dossier. The dossier editor is retired with the flow.
-  "child:dashboard.dossier": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
+  // A composed v2 dossier. The dossier editor is retired with the flow, but the
+  // FAMILY is not: see "the cells that owe unfinished work" below.
+  "child:dashboard.dossier": { verdict: { screen: "v3_flow", step: "kid" }, mint: MINT_KID_TRIO },
   "child:dashboard.enrolled": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
   // The two cells that owed real work — see the docblock.
   "child:mini_app.resume": { verdict: { screen: "v3_flow", step: "kid" }, mint: MINT_KID_TRIO },
@@ -187,7 +206,10 @@ export const V2_TO_V3_REMAP: Readonly<Record<V2VerdictKey, V3RemapCell>> = {
   // Review-pipeline positions with no v3 analogue.
   "child:status_only.submitted": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
   "child:status_only.in_review": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
-  "child:status_only.waitlisted": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
+  "child:status_only.waitlisted": {
+    verdict: { screen: "v3_flow", step: "kid" },
+    mint: MINT_KID_TRIO,
+  },
   "child:next_steps.reserve": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
   "child:next_steps.re_reserve": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },
   "child:arrival.arrival": { verdict: { screen: "dashboard" }, mint: MINT_NOTHING },

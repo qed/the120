@@ -22,7 +22,7 @@
  *     silently clamped.
  *   - the LANDING (`firstIncompleteV3Step`) is where a URL that says NOTHING
  *     goes. It is the first step whose work is not done, so a family returning
- *     to a bare `/start/v3` resumes where they actually are.
+ *     to a bare `/start` resumes where they actually are.
  *
  * They differ because the cover and story steps are OPTIONAL and SKIPPABLE. A
  * family may legitimately stand on `ready` with no cover and no answers, so

@@ -200,26 +200,17 @@ export default function DashboardApp({
   // `review` is the verdict's computed link (data.ts stays the ONE source
   // of label/href); the legacy card, whose verdict carries none, falls
   // back to the same mini-app walk.
-  const renderReserveCta = (c: Child, review?: { label: string; href: string }) => {
-    const link = review ?? { label: "Review application", href: `/start/child/${c.id}` };
+  const renderReserveCta = (c: Child) => {
     const reserving = reservingId === c.id;
-    // Item 55 (2026-07-30): the outlined Review twin leads and the filled
-    // Reserve pill sits in the bottom-right — the primary CTA holds the same
-    // right-justified spot as every other card's single button (item 45).
+    // v3 Unit 9: the outlined "Review application" TWIN IS GONE. It opened the
+    // v2 read-only application walkthrough, which now lives in
+    // `archive/new-user-v2/` — see the retired `secondaryReviewLink` note in
+    // app/dashboard/data.ts. What is left is the filled Reserve pill in the
+    // bottom-right, the same right-justified spot every other card's single
+    // button holds (item 45).
     return (
       <>
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <a
-            href={link.href}
-            aria-disabled={reserving}
-            tabIndex={reserving ? -1 : undefined}
-            onClick={(e) => {
-              if (reservingId === c.id) e.preventDefault();
-            }}
-            className={`${reviewPillClass} ${reserving ? "pointer-events-none opacity-60" : ""}`}
-          >
-            {link.label}
-          </a>
           <button
             onClick={() => reserveSeat(c.id)}
             disabled={reserving}
@@ -262,16 +253,19 @@ export default function DashboardApp({
   // register from no session as "application" too — they agree).
   if (ready && !session) return <SignIn />;
 
-  // Unified-flow U9 (R5/R7): every application entry point is a LINK into
-  // the merged flow at /start/child/<id> — the server landing rule picks the
-  // step, so no `?step=` rides on these hrefs. The embedded editor/preview
-  // views are retired; ADD A CHILD routes to /start/children, the funnel's
-  // add-child flow (the store's local-first addChild raced its own debounced
-  // insert against the navigation, so the server-action flow owns creation).
-  const flowHref = (id: string) => `/start/child/${id}`;
+  // v3 Unit 9: `flowHref` IS GONE. It built the v2 literal `/start/child/<id>`
+  // — the merged application walk — for the legacy card's three entry pills
+  // ("Continue application", "Start new flow", "Review application") and for
+  // the reserve block's Review twin. That flow is archived
+  // (`archive/new-user-v2/child/[childId]`), the URL now redirects to this very
+  // dashboard, and the remap table's answer for the `legacy` cell is
+  // `dashboard`. So the pills are removed rather than repointed: a button that
+  // reloads the page you are already on is not an entry point. A legacy card
+  // now shows its status, its meter, and its deposit block — every affordance
+  // it has that still leads somewhere.
   // v3 Unit 8: ADD A CHILD re-enters the V3 KID FLOW, not v2's add-child page.
   // The literal lives in the remap module (`V3_ADD_KID_HREF`) with every other
-  // v3 destination, so Unit 9's `app/start/v3` → `app/start` move is one edit
+  // v3 destination, so Unit 9's `app/start/v3` → `app/start` move was one edit
   // there rather than a hunt through render files. The source-text pin in
   // app/lib/__tests__/funnel-dashboard-cards.test.ts asserts THIS line and the
   // constant's value together.
@@ -516,7 +510,7 @@ export default function DashboardApp({
                     </p>
                   )}
                   {cta?.kind === "reserve" ? (
-                    renderReserveCta(c, verdict.kind === "funnel" ? verdict.secondaryReviewLink : undefined)
+                    renderReserveCta(c)
                   ) : (
                     <div className="flex items-center justify-end gap-3">
                       {cta?.kind === "keep_building" ? (
@@ -545,13 +539,6 @@ export default function DashboardApp({
                         ) : (
                           <span className={`${pathPill} !bg-crm-green`}>{cta.label}</span>
                         )
-                      ) : verdict.kind === "legacy" ? (
-                        // The legacy pill links into the same flow — the
-                        // landing rule resumes a draft at its first
-                        // incomplete form step (I2, no regression).
-                        <a href={flowHref(c.id)} className={pathPill}>
-                          Open application
-                        </a>
                       ) : null}
                     </div>
                   )}
@@ -561,17 +548,6 @@ export default function DashboardApp({
                     verdict.secondaryReserveCta &&
                     cta?.kind !== "reserve" &&
                     renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
-                  {/* R1: the reserve block already carries the pill twin;
-                      render here only when it did not. */}
-                  {verdict.kind === "funnel" &&
-                    verdict.secondaryReviewLink &&
-                    cta?.kind !== "reserve" && (
-                      <p className="mt-3">
-                        <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
-                          {verdict.secondaryReviewLink.label}
-                        </a>
-                      </p>
-                    )}
                 </div>
                 {credentialsPanel(c)}
               </div>
@@ -755,7 +731,7 @@ export default function DashboardApp({
                           </p>
                         )}
                         {cta?.kind === "reserve" ? (
-                          renderReserveCta(c, verdict.secondaryReviewLink)
+                          renderReserveCta(c)
                         ) : (
                           // Item 45 (2026-07-30): the band note is gone —
                           // ONE right-justified button, same position on
@@ -803,15 +779,6 @@ export default function DashboardApp({
                         {verdict.secondaryReserveCta &&
                           cta?.kind !== "reserve" &&
                           renderSecondaryReserve(c, verdict.secondaryReserveCta.label)}
-                        {/* R1: the reserve block already carries the pill
-                            twin; render here only when it did not. */}
-                        {verdict.secondaryReviewLink && cta?.kind !== "reserve" && (
-                          <p className="mt-3">
-                            <a href={verdict.secondaryReviewLink.href} className={reviewPillClass}>
-                              {verdict.secondaryReviewLink.label}
-                            </a>
-                          </p>
-                        )}
                         {credentialsPanel(c)}
                       </div>
                     </div>
@@ -822,11 +789,11 @@ export default function DashboardApp({
                     key={c.id}
                     className="rounded-2xl border border-line bg-white p-6 text-left transition-shadow hover:shadow-[0_20px_50px_-35px_rgba(19,20,22,0.4)]"
                   >
-                    {/* U9: the legacy card links into the merged flow — a
-                        draft resumes at its first incomplete form step; a
-                        locked row opens the read-only walk (R5). 2026-07-30:
-                        the red "Open application →" card link is retired —
-                        the blue CTA pill below is the ONE entry. */}
+                    {/* v3 Unit 9: the legacy card's three application pills
+                        (Continue application / Start new flow / Review
+                        application) are RETIRED with the flow they entered —
+                        see the `flowHref` note above. Status, meter and the
+                        deposit block remain. */}
                     <div className="w-full text-left">
                       <div className="flex items-center gap-4">
                         <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden rounded-full border border-line-strong bg-paper-2 text-muted">
@@ -852,30 +819,6 @@ export default function DashboardApp({
                         </div>
                       </div>
                       <Meter value={pct} className="mt-5" />
-                      <p className="mt-4">
-                        {c.status === "draft" ? (
-                          <a href={flowHref(c.id)} className={bluePillClass}>
-                            Continue application
-                          </a>
-                        ) : !composedChildIds.has(c.id) ? (
-                          // The redo exception (2026-07-30, Abe's class): the
-                          // offer stands, but the NEW unified flow was never
-                          // walked (no designed business). The secondary CTA
-                          // starts the new flow and persists until the
-                          // application is completed.
-                          <a href={flowHref(c.id)} className={reviewPillClass}>
-                            Start new flow
-                          </a>
-                        ) : !canReserve || paid || pendingLegacy ? (
-                          // Complete (submitted+): the outlined Review twin —
-                          // unless the reserve block below renders, which
-                          // already carries it (the R1 no-duplicate rule).
-                          // Item 43: review = the read-only walkthrough.
-                          <a href={flowHref(c.id)} className={reviewPillClass}>
-                            Review application
-                          </a>
-                        ) : null}
-                      </p>
                     </div>
 
                     {/* Seat deposit CTA: paid always wins; since direct

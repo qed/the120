@@ -97,7 +97,7 @@ import {
  * how a surface goes live by accident.
  *
  * ── IT LIVES HERE BECAUSE IT IS ENFORCED IN TWO PLACES, NOT ONE ──
- * The lever originally existed only in `app/start/v3/page.tsx`, which chose
+ * The lever originally existed only in `app/start/page.tsx`, which chose
  * between the holding page and the flow. That gated the PAGE and nothing else:
  * a Server Action is a SEPARATELY-ADDRESSABLE POST endpoint, reachable by any
  * caller who knows its id, with no page render in front of it. With the flag

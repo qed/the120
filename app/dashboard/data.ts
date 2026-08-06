@@ -204,6 +204,12 @@ export function bandNote(grade: number | ""): string {
 const WAITLIST_CARD_NOTE = "Seats open when plans change. We contact you first.";
 const PENDING_DEPOSIT_NOTE =
   "Payment processing. Bank debits can take a few days. No further action needed.";
+/** ONE label for every card whose remap destination is the v3 kid step
+ *  (`mini_app.resume`, `mini_app.compose`, `dashboard.dossier`,
+ *  `status_only.waitlisted`). They all open the same screen, so they say the
+ *  same thing — and what that screen does is set up a First Profit account, not
+ *  continue an application v3 no longer has. */
+const V3_KID_STEP_CTA_LABEL = "Start building";
 
 /** What the funnel card's primary affordance IS — layout renders, never
  *  decides (repo convention: components are layout-only). */
@@ -241,11 +247,18 @@ export type CardVerdict =
       /** Small mono context line (waitlist / clearing-debit), no CTA. */
       note?: string;
       primaryCta?: FunnelCardCta;
-      /** The R13 review-walk entry: read-only mini-app, `submitted`+ only.
-       *  Always the outlined blue pill twin (2026-07-30: the red mono
-       *  "Open application" links are retired — every card carries only the
-       *  blue CTA pair, Continue application / Review application). */
-      secondaryReviewLink?: { label: string; href: string };
+      /* ── RETIRED (v3 plan Unit 9): `secondaryReviewLink`. ──
+       * It was the R13 review-walk entry — an outlined "Review application"
+       * pill pointing at the v2 literal `/start/child/<id>`, the read-only
+       * walkthrough of a submitted application. Unit 8 deliberately LEFT it as
+       * a v2 literal while that walkthrough was still real content; this unit
+       * archived the walkthrough (`archive/new-user-v2/child/[childId]`), so
+       * the link now has nothing to open. Its URL still resolves — the retired
+       * route redirects to the dashboard — which is exactly why the field had
+       * to go rather than be left: a button labelled "Review application" that
+       * returns the family to the page they are standing on is worse than no
+       * button. There is no v3 walkthrough to retarget it at; v3 families have
+       * no application to review. Removed, not repointed. */
       /** Direct reserve (2026-08-02): pre-submission cells whose child passes
        *  the relaxed gate carry the reserve action as a SECONDARY button —
        *  the primary CTA stays "Continue application" (the `/start` flow is
@@ -355,33 +368,20 @@ export function cardVerdict(
   const ctaHref = childNextRoute(next, remapCtx);
   // A cell whose v3 destination IS the dashboard has nothing left to continue —
   // the family is already looking at it. Render no primary CTA rather than a
-  // button that links to the page it sits on. (Only the `dossier` cell reaches
-  // this: the two `mini_app` cells remap to the kid step.)
+  // button that links to the page it sits on. No cell that reaches this line
+  // answers `dashboard` today (Unit 9's review moved the last two — `dossier`
+  // and `waitlisted` — onto the kid step, because "no CTA" turned out to mean
+  // "no way forward at all" for them); the guard stays because it is what keeps
+  // a future re-point from shipping a button that reloads the page.
   const ctaTarget = ctaHref && ctaHref !== DASHBOARD_HREF ? ctaHref : null;
-  // ⚠ THE REVIEW-WALK LINK IS DELIBERATELY STILL THE v2 LITERAL. It opens the
-  // READ-ONLY walkthrough of a submitted application, which is real content
-  // that still exists until Unit 9 archives `app/start/child`; the remap's
-  // answer for those cells is `dashboard`, i.e. no walkthrough at all. Routing
-  // it through the table today would silently delete the affordance. Unit 9
-  // owns retiring it along with the route it points at.
-  const miniAppHref = `/start/child/${child.id}`;
-  // `submitted`-and-later, read off the verdict: the pre-submission cells are
-  // exactly the mini_app surfaces (`added`, compose owed) and the `dossier`
-  // intent (`project_created` with a project); every other cell is at or past
-  // submission and carries the R13 review-walk link.
-  const submittedPlus =
-    next.surface !== "mini_app" &&
-    !(next.surface === "dashboard" && next.intent === "dossier");
-  // 2026-07-30 (item 43, superseding item 17): the review entry opens the
-  // READ-ONLY WALKTHROUGH of the application flow — forward/back only, the
-  // landing rule starts it at the top. The one-page summary is retired.
-  const secondaryReviewLink = submittedPlus
-    ? { label: "Review application", href: miniAppHref }
-    : undefined;
+  // The v2 review-walk link (`/start/child/<id>`) used to be computed here for
+  // every `submitted`-and-later cell. Unit 9 archived the walkthrough it opened;
+  // see the `secondaryReviewLink` note on the verdict type above for why it was
+  // removed rather than repointed.
 
   // Pre-guard 1: ENROLLED (see the precedence docblock).
   if (next.surface === "dashboard" && next.intent === "enrolled") {
-    return { kind: "funnel", statusLine: "ENROLLED", tone: "red", secondaryReviewLink };
+    return { kind: "funnel", statusLine: "ENROLLED", tone: "red" };
   }
 
   // Pre-guard 2: the paid-deposit bridge — every live-paid cell except the
@@ -396,7 +396,6 @@ export function cardVerdict(
         label: "Seat reserved ✓",
         ...(next.surface === "arrival" ? { href: "/start/arrival" } : {}),
       },
-      secondaryReviewLink,
     };
   }
 
@@ -429,7 +428,11 @@ export function cardVerdict(
           ? {
               primaryCta: {
                 kind: next.intent === "resume" ? ("start" as const) : ("compose" as const),
-                label: "Continue application",
+                // ONE label across every cell that remaps to the kid step
+                // (Unit 9 review): they all lead to the same screen now, and
+                // "Continue application" was describing a thing v3 does not
+                // have, on a button that opens First Profit onboarding.
+                label: V3_KID_STEP_CTA_LABEL,
                 href: ctaTarget,
               },
             }
@@ -447,16 +450,18 @@ export function cardVerdict(
         // (2026-07-30).
         statusLine: activeProjectName?.trim() || "APPLICATION JUST STARTED",
         tone: "red",
-        // The v2 dossier editor is retired with the flow, so the remap answers
-        // `dashboard` for this cell and `ctaTarget` is null — no CTA. The shape
-        // stays here (rather than being deleted) because it is the table, not
-        // this switch, that decides: give the cell a navigable v3 destination
-        // again and the button returns without another edit.
+        // The v2 dossier editor is retired with the flow, and for one release
+        // this cell's remap answered `dashboard`, which left the card with a
+        // status line and NO BUTTON — the family that had done the MOST v2 work
+        // was the one with nowhere to go. The table now sends them at the kid
+        // step like every other family with a child and no First Profit
+        // account, and this shape (unchanged, because it was always the table
+        // that decided) picks the button back up.
         ...(ctaTarget
           ? {
               primaryCta: {
                 kind: "continue_dossier" as const,
-                label: "Continue application",
+                label: V3_KID_STEP_CTA_LABEL,
                 href: ctaTarget,
               },
             }
@@ -477,7 +482,6 @@ export function cardVerdict(
             statusLine: activeProjectName?.trim() || "SUBMITTED FOR REVIEW",
             tone: "red",
             note: pendingNote,
-            secondaryReviewLink,
             secondaryReserveCta: reserveCta,
           };
         case "in_review":
@@ -486,17 +490,31 @@ export function cardVerdict(
             statusLine: activeProjectName?.trim() || "UNDER REVIEW",
             tone: "red",
             note: pendingNote,
-            secondaryReviewLink,
             secondaryReserveCta: reserveCta,
           };
         case "waitlisted":
-          // F7: never a payment CTA — checkout is closed for this family.
+          // F7 still holds: never a PAYMENT CTA — checkout is closed for this
+          // family, paid or not. What they get instead (Unit 9 review) is the
+          // ONBOARDING CTA every other kid-owning family gets: the launch email
+          // tells them "there is no waitlist any more, sign in and your kid can
+          // start building today", and until this cell carried a forward path
+          // the dashboard answered that promise with a badge and nothing else.
+          // The href is the remap table's, so it is the same destination the
+          // email's own resume path resolves to.
           return {
             kind: "funnel",
             statusLine: "WAITLISTED",
             tone: "red",
             note: WAITLIST_CARD_NOTE,
-            secondaryReviewLink,
+            ...(ctaTarget
+              ? {
+                  primaryCta: {
+                    kind: "start" as const,
+                    label: V3_KID_STEP_CTA_LABEL,
+                    href: ctaTarget,
+                  },
+                }
+              : {}),
           };
         default: {
           const exhaustive: never = next;
@@ -516,7 +534,6 @@ export function cardVerdict(
         primaryCta: reserveCta,
         // R1: the outlined pill twin — beside Reserve when it renders, alone
         // (R1a) when reserve is suppressed (pending debit / gate refusal).
-        secondaryReviewLink,
       };
     case "arrival":
       // Unreachable: `arrival` exists only with a live deposit, which the
@@ -527,7 +544,6 @@ export function cardVerdict(
         statusLine: "SEAT RESERVED",
         tone: "green",
         primaryCta: { kind: "reserved", label: "Seat reserved ✓", href: "/start/arrival" },
-        secondaryReviewLink,
       };
     default: {
       const exhaustive: never = next;

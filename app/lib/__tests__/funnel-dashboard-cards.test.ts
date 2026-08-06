@@ -121,37 +121,40 @@ describe("cardVerdict — the secondary reserve CTA (direct reserve 2026-08-02)"
     const paidCard = funnel(cardVerdict(child("added"), paid, false));
     expect(paidCard.statusLine).toBe("SEAT RESERVED");
     expect(paidCard.secondaryReserveCta).toBeUndefined();
-    // ...and the paid pre-submission card carries NO submitted-only review link.
-    expect(paidCard.secondaryReviewLink).toBeUndefined();
   });
 });
 
 describe("cardVerdict — one verdict per ladder state", () => {
-  it("added → APPLICATION JUST STARTED with a blue CONTINUE APPLICATION into the mini-app", () => {
+  it("added → APPLICATION JUST STARTED with a blue START BUILDING into the kid step", () => {
     const v = funnel(cardVerdict(child("added"), none, false));
     expect(v.statusLine).toBe("APPLICATION JUST STARTED");
     expect(v.tone).toBe("red");
     // v3 Unit 8 review (FIX 1): the destination comes from the ONE remap table,
     // not a v2 literal built here. The v2 mini-app is retired at the hard
     // launch; the equivalent obligation for this child is a First Profit
-    // account, i.e. the kid step.
+    // account, i.e. the kid step. Unit 9's review made the LABEL say that too —
+    // every card that opens this screen now shares one label, because
+    // "Continue application" described a thing v3 does not have.
     expect(v.primaryCta).toEqual({
       kind: "start",
-      label: "Continue application",
+      label: "Start building",
       href: V3_ADD_KID_HREF,
     });
-    expect(v.secondaryReviewLink).toBeUndefined();
   });
 
-  it("project_created WITH a composed project → NO primary CTA: the remap's answer is the dashboard they are already on (v3 Unit 8 review)", () => {
+  it("project_created WITH a composed project → the kid step, because a card with no button is a strand (Unit 9 review)", () => {
     const v = funnel(cardVerdict(child("project_created"), none, true));
     expect(v.statusLine).toBe("APPLICATION JUST STARTED");
-    // The v2 dossier editor is retired with the flow, so `dashboard.dossier`
-    // remaps to `dashboard` — and a "Continue application" button that links to
-    // the page it sits on is a no-op wearing a promise. The card keeps its
-    // status line; the button is gone.
-    expect(v.primaryCta).toBeUndefined();
-    expect(childNextRoute({ surface: "dashboard", intent: "dossier" })).toBe("/dashboard");
+    // For one release this cell remapped to `dashboard`, which left the family
+    // that had done the MOST v2 work (they composed a project) with a status
+    // line and nothing to press. The v2 dossier editor is still retired; what
+    // replaced it is the same forward path the mini_app cells get.
+    expect(v.primaryCta).toEqual({
+      kind: "continue_dossier",
+      label: "Start building",
+      href: V3_ADD_KID_HREF,
+    });
+    expect(childNextRoute({ surface: "dashboard", intent: "dossier" })).toBe(V3_ADD_KID_HREF);
   });
 
   it("the review states carry the company name too (item 37): submitted/in_review read the NAME when known", () => {
@@ -196,35 +199,28 @@ describe("cardVerdict — one verdict per ladder state", () => {
     const v = funnel(cardVerdict(child("project_created"), none, false));
     expect(v.primaryCta).toEqual({
       kind: "compose",
-      label: "Continue application",
+      label: "Start building",
       href: V3_ADD_KID_HREF,
     });
   });
 
-  it("submitted → SUBMITTED FOR REVIEW, no primary CTA, the Review pill", () => {
+  it("submitted → SUBMITTED FOR REVIEW, no primary CTA", () => {
     const v = funnel(cardVerdict(child("submitted"), none, true));
     expect(v.statusLine).toBe("SUBMITTED FOR REVIEW");
     expect(v.primaryCta).toBeUndefined();
-    expect(v.secondaryReviewLink).toEqual({
-      label: "Review application",
-      href: "/start/child/kid-1",
-    });
   });
 
-  it("offered → the review entry is the outlined pill twin (unified-flow R1), beside Reserve", () => {
-    const v = funnel(cardVerdict(child("offered"), none, true));
-    expect(v.primaryCta).toEqual({ kind: "reserve", label: "Reserve seat · $250" });
-    expect(v.secondaryReviewLink).toEqual({
-      label: "Review application",
-      href: "/start/child/kid-1",
-    });
-  });
+  // RETIRED (v3 Unit 9): "the review entry is the outlined pill twin" and
+  // "submitted-and-later ALL carry the review-walk link". Both pinned
+  // `secondaryReviewLink`, whose destination was the v2 read-only application
+  // walkthrough now living in `archive/new-user-v2/child/[childId]`. The field
+  // is gone from the verdict (see app/dashboard/data.ts) because there is no v3
+  // walkthrough to repoint it at — a v3 family has no application to review.
 
-  it("offered + pending debit → Reserve suppressed but the pill survives ALONE (R1a)", () => {
+  it("offered + pending debit → Reserve suppressed, the clearing-debit note stands alone (R1a)", () => {
     const v = funnel(cardVerdict(child("offered"), [{ status: "pending" }], true));
     expect(v.primaryCta).toBeUndefined();
     expect(v.note).toBeDefined();
-    expect(v.secondaryReviewLink).toBeDefined();
   });
 
   it("in_review → UNDER REVIEW, no primary CTA", () => {
@@ -262,22 +258,37 @@ describe("cardVerdict — one verdict per ladder state", () => {
     expect(v.note).toContain("Payment processing");
   });
 
-  it("waitlisted → WAITLISTED with NO payment CTA (F7: checkout is closed)", () => {
+  it("waitlisted → WAITLISTED, no payment CTA (F7), but a REAL forward path (Unit 9 review)", () => {
     const v = funnel(cardVerdict(child("waitlisted"), none, true));
     expect(v.statusLine).toBe("WAITLISTED");
-    expect(v.primaryCta).toBeUndefined();
     expect(v.note).toBe("Seats open when plans change. We contact you first.");
-    expect(v.secondaryReviewLink).toBeDefined();
+    // F7 is about PAYMENT, and it holds: nothing here reserves or charges.
+    expect(v.primaryCta?.kind).not.toBe("reserve");
+    expect(v.secondaryReserveCta).toBeUndefined();
+    // What they get instead is the onboarding step the launch email promises
+    // them ("sign in and your kid can start building today"). Before this, the
+    // card answered that promise with a badge and no way forward at all.
+    expect(v.primaryCta).toEqual({
+      kind: "start",
+      label: "Start building",
+      href: V3_ADD_KID_HREF,
+    });
   });
 
-  it("waitlisted + live paid deposit → still WAITLISTED, no payment CTA (F7 outranks the paid shortcut)", () => {
+  it("waitlisted + live paid deposit → still WAITLISTED, still no payment CTA (F7 outranks the paid shortcut)", () => {
     // The offered → waitlisted staff move is legal without touching deposit
     // rows, so this combination is reachable — the state must win over paid.
     const v = funnel(cardVerdict(child("waitlisted"), paid, true));
     expect(v.statusLine).toBe("WAITLISTED");
     expect(v.tone).toBe("red");
-    expect(v.primaryCta).toBeUndefined();
     expect(v.note).toBe("Seats open when plans change. We contact you first.");
+    expect(v.primaryCta?.kind).not.toBe("reserve");
+    expect(v.primaryCta?.kind).not.toBe("reserved");
+    expect(v.primaryCta).toEqual({
+      kind: "start",
+      label: "Start building",
+      href: V3_ADD_KID_HREF,
+    });
   });
 
   it("deposited + live deposit → SEAT RESERVED, green, arrival link", () => {
@@ -305,19 +316,17 @@ describe("cardVerdict — one verdict per ladder state", () => {
       const v = funnel(cardVerdict(child("enrolled"), deposits, true));
       expect(v.statusLine).toBe("ENROLLED");
       expect(v.primaryCta).toBeUndefined();
-      expect(v.secondaryReviewLink).toBeDefined();
     }
   });
 
-  it("submitted-and-later ALL carry the review-walk link; earlier rungs never do", () => {
-    const submittedIdx = APPLICANT_STATES.indexOf("submitted");
+  it("NO cell anywhere on the ladder links at the archived v2 application walk (v3 Unit 9)", () => {
+    // The negative half of the retired review-pill pins: sweeping every state
+    // proves the literal is gone from the verdict rather than merely gone from
+    // the two cells the old tests happened to name.
     for (const state of APPLICANT_STATES) {
-      const v = funnel(cardVerdict(child(state), none, true));
-      const expected = APPLICANT_STATES.indexOf(state) >= submittedIdx;
-      expect(!!v.secondaryReviewLink, state).toBe(expected);
-      if (v.secondaryReviewLink) {
-        // Item 43: review opens the read-only walkthrough of the flow.
-        expect(v.secondaryReviewLink.href).toBe("/start/child/kid-1");
+      for (const deposits of [none, paid]) {
+        const v = cardVerdict(child(state), deposits, true);
+        expect(JSON.stringify(v), state).not.toContain("/start/child");
       }
     }
   });
@@ -352,13 +361,21 @@ describe("cardVerdict × childNextScreen — the card's CTA agrees with the shar
           }
           const cta = funnel(v).primaryCta;
 
-          // A mini-app CTA only when the mapping says mini_app.
-          if (cta?.kind === "start" || cta?.kind === "compose") {
-            expect(next.surface, label).toBe("mini_app");
-          }
-          // The dossier opener only on the dashboard/dossier cell.
-          if (cta?.kind === "continue_dossier") {
-            expect(next, label).toEqual({ surface: "dashboard", intent: "dossier" });
+          // The kid-step CTA kinds (`start` / `compose` / `continue_dossier`)
+          // ride EXACTLY the four cells the remap sends to that step, and they
+          // all carry the one label and the one href. Asserted as a set rather
+          // than per-kind: the point is that no other cell grows a forward path
+          // by accident, and that these four never lose one again.
+          const kidStepCell =
+            next.surface === "mini_app" ||
+            (next.surface === "dashboard" && next.intent === "dossier") ||
+            (next.surface === "status_only" && next.intent === "waitlisted");
+          if (cta && ["start", "compose", "continue_dossier"].includes(cta.kind)) {
+            expect(kidStepCell, label).toBe(true);
+            expect(cta, label).toMatchObject({
+              label: "Start building",
+              href: V3_ADD_KID_HREF,
+            });
           }
           // A reserve CTA only when the mapping says next_steps.
           if (cta?.kind === "reserve") {
@@ -369,10 +386,20 @@ describe("cardVerdict × childNextScreen — the card's CTA agrees with the shar
           expect(cta?.kind === "reserved" && cta.href === "/start/arrival", label).toBe(
             next.surface === "arrival"
           );
-          // A status_only cell with no live deposit renders nothing
-          // actionable (submitted / in_review / waitlisted).
+          // A status_only cell with no live deposit renders nothing that
+          // takes money (submitted / in_review / waitlisted). The waitlisted
+          // cell DOES carry the onboarding CTA (Unit 9 review) — free, and the
+          // same destination every kid-step card uses.
           if (next.surface === "status_only" && !liveDeposit) {
-            expect(cta, label).toBeUndefined();
+            if (next.intent === "waitlisted") {
+              expect(cta, label).toEqual({
+                kind: "start",
+                label: "Start building",
+                href: V3_ADD_KID_HREF,
+              });
+            } else {
+              expect(cta, label).toBeUndefined();
+            }
           }
         }
       }
@@ -478,7 +505,6 @@ describe("cardVerdict — copy rules (handoff): no em dashes, never 'failed'", (
             v.statusLine,
             v.note ?? "",
             v.primaryCta?.label ?? "",
-            v.secondaryReviewLink?.label ?? "",
           ]
         : []
     );
@@ -620,10 +646,18 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     expect(src).not.toContain("openEditor");
     expect(src).not.toContain("DossierEditor");
     expect(src).not.toContain("DossierPreview");
-    // …and the flow href is built once, with no ?step= (the server landing
-    // rule owns the step; R5).
-    expect(src).toContain("const flowHref = (id: string) => `/start/child/${id}`");
-    expect(src).not.toMatch(/\/start\/child\/[^`"']*\?step=/);
+    // v3 Unit 9: `flowHref` — the one builder of the v2 literal
+    // `/start/child/<id>` — is GONE, along with the legacy card's three
+    // application pills and the reserve block's Review twin. The flow it
+    // entered lives in `archive/new-user-v2/`; the URL now redirects to this
+    // dashboard, so a pill pointing at it would reload the page it sits on.
+    // Asserted as an ABSENCE over the whole file, which is what "retired" has
+    // to mean for a literal that four render sites used to share.
+    // Comment-stripped, because the retirement is explained in the very file
+    // it is asserted over.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code).not.toContain("flowHref");
+    expect(code).not.toContain("/start/child/");
     // v3 Unit 8 review (FIX 1): the CARD's CTA no longer builds a v2 literal at
     // all — `cardVerdict` reads `childNextRoute`, the one remap table, and the
     // page hands it the same `remapCtx` the gate used. Pinned as source text
@@ -640,7 +674,7 @@ describe("wiring — the dashboard actually consumes the verdict", () => {
     // only the value would let the render stop using it.
     expect(src).toContain("const ADD_CHILD_HREF = V3_ADD_KID_HREF");
     expect(src).not.toContain('"/start/children"');
-    expect(V3_ADD_KID_HREF).toBe("/start/v3?step=kid");
+    expect(V3_ADD_KID_HREF).toBe("/start?step=kid");
     expect(src).not.toContain("addChild(");
   });
 
@@ -681,7 +715,6 @@ describe("the FP card cell — no 'Continue application', no live $250 CTA", () 
     const verdict = cardVerdict(fpKid(), [], false, null);
     if (verdict.kind !== "funnel") throw new Error("unreachable");
     expect(verdict.secondaryReserveCta).toBeUndefined();
-    expect(verdict.secondaryReviewLink).toBeUndefined();
     expect(verdict.primaryCta?.kind).not.toBe("reserve");
   });
 

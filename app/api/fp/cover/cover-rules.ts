@@ -296,7 +296,7 @@ export const COVER_REFUSAL_MESSAGE: Record<CoverRefusalReason, string> = {
 
 /**
  * Which refusals are OUR fault, and therefore the only ones whose rate-limit
- * strike is handed back. Same rule as app/start/v3/actions.ts: a genuine
+ * strike is handed back. Same rule as app/start/actions.ts: a genuine
  * infrastructure fault is not an attempt. Everything else — including
  * `cap_exhausted` and `photo_closed` — is a real attempt that made a real
  * request, and its strike stands.
@@ -329,7 +329,7 @@ export const isCoverInfraFailure = (reason: CoverRefusalReason): boolean =>
 /**
  * CSRF posture. This endpoint is COOKIE-AUTHENTICATED and state-changing, so it
  * must not be drivable from another site's page. It is called same-origin from
- * `/start/v3`, and a same-origin POST still sends an `Origin` header, so an
+ * `/start`, and a same-origin POST still sends an `Origin` header, so an
  * exact match against our own origin is a complete check and a missing Origin is
  * refused.
  *

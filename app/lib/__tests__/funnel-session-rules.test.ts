@@ -227,10 +227,10 @@ describe("screenRoute — v3 destinations, through the remap table (v3 Unit 8)",
     // The v2 literals are GONE on purpose: /start's capture explainer, the
     // add-child grid and the mini-app seam are all retired, and this function
     // now reads app/lib/v3-signup/remap-rules.ts rather than owning routes.
-    expect(screenRoute({ screen: "capture", reason: "cold" })).toBe("/start/v3?step=parent");
-    expect(screenRoute({ screen: "children_grid", reason: "resume" })).toBe("/start/v3?step=kid");
+    expect(screenRoute({ screen: "capture", reason: "cold" })).toBe("/start?step=parent");
+    expect(screenRoute({ screen: "children_grid", reason: "resume" })).toBe("/start?step=kid");
     expect(screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" })).toBe(
-      "/start/v3?step=kid"
+      "/start?step=kid"
     );
     expect(screenRoute({ screen: "sign_in", reason: "enrolled" })).toBe("/dashboard");
     expect(screenRoute({ screen: "dashboard", reason: "enrolled" })).toBe("/dashboard");
@@ -251,12 +251,12 @@ describe("screenRoute — v3 destinations, through the remap table (v3 Unit 8)",
     // …and the divert ENDS. Once the stamp exists, the flow route returns.
     expect(
       screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" }, { ...converted, passwordChosen: true })
-    ).toBe("/start/v3?step=kid");
+    ).toBe("/start?step=kid");
     // A beta/FP family predates the stamp but already chose a real password at
     // verifyCompletion — they must never be asked for another one.
     expect(
       screenRoute({ screen: "child_resume", childId: "abc", reason: "resume" }, { ...converted, hasFpChild: true })
-    ).toBe("/start/v3?step=kid");
+    ).toBe("/start?step=kid");
   });
 });
 

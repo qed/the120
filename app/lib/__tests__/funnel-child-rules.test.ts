@@ -179,17 +179,10 @@ describe("activeChildAfterAdd — adding a sibling must not move the active chil
     expect(activeChildAfterAdd("first", "second")).toBe("first");
   });
 
-  it("is wired to the RESOLVED active id, never the raw stored value", () => {
-    // The caller-side half of the contract, which the pure tests above cannot
-    // see: on a fresh device the store is null while a furthest-progressed
-    // child is already rendered as Active. Passing the raw null hands the
-    // brand-new sibling the active slot — both reviewers found this
-    // independently. A wiring assertion because `environment: "node"` cannot
-    // mount the component.
-    const flow = stripComments(read("../../start/children/ChildrenFlow.tsx"));
-    expect(flow).toMatch(/activeChildAfterAdd\(\s*active\?\.id/);
-    expect(flow).not.toMatch(/activeChildAfterAdd\(\s*selectedId/);
-  });
+  /* RETIRED (v3 Unit 9): "is wired to the RESOLVED active id". Its subject was
+   * ChildrenFlow.tsx — the v2 add-a-child grid, now in
+   * `archive/new-user-v2/children/`. `activeChildAfterAdd` itself is still
+   * pinned by the pure tests above; what is gone is its only caller. */
 });
 
 /* ─────────────────────────── seats (R31) ─────────────────────────── */
@@ -326,19 +319,31 @@ describe("children-core relies on RLS, not a hand-written scope check", () => {
   });
 });
 
-describe("/start turns a signed-in visitor away from capture", () => {
+describe("/start and a signed-in visitor (v3 Unit 9: the v2 self-redirect is retired)", () => {
   const code = stripComments(read("../../start/page.tsx"));
 
-  it("consults the re-entry matrix rather than offering the form again", () => {
-    // Without this, a signed-in family reaching /start from any marketing CTA
-    // could capture under a DIFFERENT email and silently swap their own
-    // session (U6 review).
+  /* ⚠ JUDGMENT CALL, stated rather than buried. The v2 page answered a
+   * signed-in visitor with `resolveReentry` + `redirect()`, because v2's
+   * `/start` was an EMAIL CAPTURE form and re-capturing under a different
+   * address would have swapped a family's own session. v3's `/start` is not a
+   * capture form: it is the five-step flow, and a signed-in parent standing on
+   * it is the ordinary add-another-kid case. Porting the redirect would have
+   * been actively harmful — `resolveReentry` answers `dashboard` for a family
+   * that already has a First Profit child, which is exactly the family walking
+   * the add-a-kid loop, and V3_ADD_KID_HREF points AT this page. The bounce
+   * would have made the loop unenterable.
+   *
+   * What replaces it is the flow's own resolver: `resolveV3Step` clamps the
+   * URL against server facts, so a signed-in family lands where they actually
+   * are instead of where a URL claims. */
+
+  it("reads the session and resolves the step from server facts, not from the URL alone", () => {
     expect(code).toMatch(/getUser\(\)/);
-    expect(code).toMatch(/resolveReentry/);
-    expect(code).toMatch(/redirect\(/);
+    expect(code).toMatch(/resolveV3Step\(/);
   });
 
-  it("keeps redirect() outside a try — a caught NEXT_REDIRECT reports failure on success", () => {
-    expect(code).not.toMatch(/try\s*\{[\s\S]*redirect\(/);
+  it("does not bounce a signed-in family away from the flow they were sent to", () => {
+    // No redirect at all on this page — the add-a-kid destination IS here.
+    expect(code).not.toMatch(/\bredirect\(/);
   });
 });

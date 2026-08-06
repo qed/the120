@@ -108,11 +108,27 @@ children's consent cannot be retroactively widened.
 >
 > **OPENAI: fix in flight — `feat/image-lab-category-prompts`.** Rather than wait
 > on a sales-gated ZDR contract, we remove the condition that requires it:
-> gpt-image-2 will never receive a child's own words. When a run carries child
-> provenance, **every** model gets a prompt derived from a closed vocabulary of
-> business-category terms — not per-model, because sanitizing only OpenAI would
-> mean a compare run sent different inputs to different models and silently
-> stopped comparing like with like. Once that ships, OpenAI's under-18 rule
+> gpt-image-2 will never receive a child's own words. A cell targeting an OpenAI
+> model must dispatch a prompt derived from a closed vocabulary of business-
+> category terms; the gate is enforced server-side on the resolved string at
+> dispatch, and it refuses rather than silently rewriting, so a stored row never
+> misreports its own input.
+>
+> **The gate is asymmetric on purpose, and it does NOT extend to Google.** An
+> earlier draft of this section applied the derived prompt to every model in a
+> run "so the compare stays honest." That was wrong and the owner corrected it:
+> the Lab is a prompt bench, not a model tournament. Discovering that gpt-image-2
+> needs different prompt phrasing than gemini-3-pro-image is a *result* the panel
+> engine needs, not a confound to be eliminated — the engine will hand each model
+> its own best prompt. So staff choose prompt text per cell and may deliberately
+> send different text to different models in one run. The constraint is
+> asymmetric because the vendors' *terms* are asymmetric: OpenAI requires ZDR for
+> under-13 personal data and we lack it; Google's paid tier is contractually
+> no-training. Applying the gate to a Google cell is a defect, not caution — it
+> would block the experimentation the tool exists for. Comparability is preserved
+> by *recording* each result's actual prompt and whether it was derived or
+> child-authored, not by forcing the inputs to match. Once the gate ships,
+> OpenAI's under-18 rule
 > ("do not process personal data of under-13s without ZDR") no longer binds this
 > pipeline, because no personal data of a child is sent. Until it ships, this half
 > stays open — and `IMAGE_LAB_REAL_CONTENT_LIVE` stays off regardless, because

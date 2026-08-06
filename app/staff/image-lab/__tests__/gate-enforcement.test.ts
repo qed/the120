@@ -31,6 +31,15 @@ import { glob } from "tinyglobby";
  * function of that name, and that it is UNCONDITIONAL (under `NODE_ENV=test`
  * a production-only bypass calls the spy quite happily).
  *
+ * ⚠ AND IT RUNS OVER SERVER ACTIONS, NOT ONLY OVER ROUTABLE FILES. The four
+ * fences used to iterate the `{page,layout,template,default,route}` glob alone,
+ * which does not match `lib/reference-actions.ts` — so the ONLY check reaching
+ * an action was the behavioural invoke, under exactly the NODE_ENV a production
+ * bypass survives. Verified: an action gated by
+ * `if (process.env.NODE_ENV !== "production") { await gate(); }` passed this
+ * file with fourteen tests green while shipping a wide-open POST. `gatedFiles()`
+ * is the union, and every fence below uses it.
+ *
  * Prior art for why wiring gets asserted at all:
  *   docs/solutions/security-issues/guard-function-with-no-callers-is-not-a-\
  *     mechanism-client-side-supabase-auth-bypasses-server-guards-2026-07-23.md
@@ -91,6 +100,40 @@ const routableFiles = async (): Promise<string[]> => {
   // An empty expansion would make every assertion below pass vacuously.
   expect(files.length).toBeGreaterThan(0);
   return files.map((f) => f.replace(/\\/g, "/")).sort();
+};
+
+/**
+ * Every `"use server"` module under the Lab.
+ *
+ * ⚠ SERVER ACTIONS ARE NOT ROUTABLE FILES, and that gap was a wide-open POST.
+ * `ROUTABLE_GLOB` matches `{page,layout,template,default,route}` only, so
+ * `lib/reference-actions.ts` was reached by the BEHAVIOURAL invoke and by
+ * nothing else — and the behavioural invoke runs under `NODE_ENV=test`, which
+ * is precisely the condition a production bypass leaves true. Verified: an
+ * action gated by `if (process.env.NODE_ENV !== "production") { await gate(); }`
+ * passed the whole file with fourteen tests green, while shipping an ungated
+ * network-reachable endpoint — and Unit 5's paid endpoint is an action.
+ *
+ * So the four source fences below run over THESE files as well.
+ */
+const actionFiles = async (): Promise<string[]> => {
+  const sources = await glob([`${LAB}**/*.{ts,tsx}`], {
+    cwd: REPO_ROOT,
+    absolute: false,
+    ignore: ["**/__tests__/**"],
+  });
+  return sources
+    .map((f) => f.replace(/\\/g, "/"))
+    .filter((f) => /^\s*["']use server["']/m.test(readFileSync(`${REPO_ROOT}${f}`, "utf8")))
+    .sort();
+};
+
+/** Everything the source fences apply to: what Next can render, plus what a
+ *  browser can POST to directly. */
+const gatedFiles = async (): Promise<string[]> => {
+  const files = [...(await routableFiles()), ...(await actionFiles())];
+  expect(files.length).toBeGreaterThan(0);
+  return files;
 };
 
 /** Repo-relative path → a specifier this test can `import()`. */
@@ -280,7 +323,7 @@ describe("supplementary source fence — properties a spy cannot see", () => {
     // Not any function of that name: `app/crm/lib/auth.ts` verifies the session
     // against the auth server AND the `staff` row's `is_active`, memoized per
     // request.
-    for (const file of await routableFiles()) {
+    for (const file of await gatedFiles()) {
       expect(sourceOf(file), file).toMatch(
         /import\s*\{[^}]*\brequireStaff\b[^}]*\}\s*from\s*["']@\/app\/crm\/lib\/auth["']/
       );
@@ -292,7 +335,7 @@ describe("supplementary source fence — properties a spy cannot see", () => {
     // body, real import untouched. The behavioural test above already reddens on
     // it; this names the cause in the failure message and covers a shadow in a
     // module the invoker could not reach.
-    for (const file of await routableFiles()) {
+    for (const file of await gatedFiles()) {
       const code = sourceOf(file);
       expect(code, `${file} re-binds requireStaff`).not.toMatch(
         /(?:const|let|var|function)\s+requireStaff\b/
@@ -307,7 +350,7 @@ describe("supplementary source fence — properties a spy cannot see", () => {
     // `if (process.env.NODE_ENV !== "production") await requireStaff();` calls
     // the spy under vitest and is off in production — invisible to a
     // behavioural test, and the reason this fence exists.
-    for (const file of await routableFiles()) {
+    for (const file of await gatedFiles()) {
       const bodies = exportedFunctionBodies(sourceOf(file));
       expect(bodies.length, `${file}: no exported entry point found`).toBeGreaterThan(0);
 
@@ -332,7 +375,7 @@ describe("supplementary source fence — properties a spy cannot see", () => {
   });
 
   it("the gate is the FIRST await — only route props may be read before it", async () => {
-    for (const file of await routableFiles()) {
+    for (const file of await gatedFiles()) {
       for (const body of exportedFunctionBodies(sourceOf(file))) {
         const gateAt = body.search(GATE_CALL);
         const before = body.slice(0, gateAt);
@@ -349,19 +392,14 @@ describe("supplementary source fence — properties a spy cannot see", () => {
 
   it("every `use server` file under the Lab gates each of its exported actions", async () => {
     // Server Actions do not render through a layout either, and `proxy.ts` does
-    // not reliably cover Server Function calls. Nothing under the Lab declares
-    // `"use server"` today, so this is a forward fence for Units 4–6 — it is
-    // BEHAVIOURAL rather than a scan for the same reason as everything above.
-    const sources = await glob([`${LAB}**/*.{ts,tsx}`], {
-      cwd: REPO_ROOT,
-      absolute: false,
-      ignore: ["**/__tests__/**"],
-    });
-    const actionFiles = sources
-      .map((f) => f.replace(/\\/g, "/"))
-      .filter((f) => /^\s*["']use server["']/m.test(readFileSync(`${REPO_ROOT}${f}`, "utf8")));
+    // not reliably cover Server Function calls. BEHAVIOURAL, for the same reason
+    // as everything above — and paired with the four SOURCE fences, which now
+    // iterate these files too. Behavioural alone is not enough here: it runs
+    // under NODE_ENV=test, so a production-only bypass calls the spy happily.
+    const files = await actionFiles();
+    expect(files.length, "the Lab declares no server actions to check").toBeGreaterThan(0);
 
-    for (const file of actionFiles) {
+    for (const file of files) {
       const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
         string,
         unknown

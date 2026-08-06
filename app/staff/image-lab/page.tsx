@@ -6,6 +6,7 @@ import {
 } from "./lib/shell-rules";
 import { ImageLabNav } from "./ImageLabNav";
 import { ImageLabPanel } from "./ImageLabPanel";
+import { ReferenceLibrary } from "./ReferenceLibrary";
 
 /**
  * Force-dynamic: the gate reads the session and the service-role `staff` row per
@@ -68,6 +69,14 @@ export default async function ImageLabBenchPage() {
         headline={IMAGE_LAB_BENCH_COPY.composerPending.headline}
         body={IMAGE_LAB_BENCH_COPY.composerPending.body}
       />
+
+      {/* Unit 4. Mounted with NO model selection, so the reference budget is the
+          strictest limit in the registry and anything picked here stays legal
+          once Unit 5's composer names the models. It loads its own list through
+          the gated `listReferenceLibrary` action rather than being handed data
+          by this page — the page stays a pure render of the shell's copy, and
+          the library refreshes its own short-lived signed thumbnail URLs. */}
+      <ReferenceLibrary />
 
       <ImageLabPanel
         headline={IMAGE_LAB_BENCH_COPY.emptyRuns.headline}

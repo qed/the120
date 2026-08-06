@@ -24,6 +24,9 @@ import {
   normalizeMimeType,
   SUPABASE_TIER_MAX_OBJECT_BYTES,
 } from "../image-lab-rules";
+// The TS bound the SQL CHECK mirrors. Imported, never retyped: a hardcoded 120
+// here lets the two drift while both stay green (review finding 24).
+import { IMAGE_LAB_REFERENCE_LABEL_MAX } from "../reference-rules";
 
 // ── Migration ↔ TS parity (the SQL is a copy the node suite cannot run) ──
 // Per docs/solutions/test-failures/security-definer-sql-case-third-untested-
@@ -273,7 +276,12 @@ describe("migration parity: fp_image_lab.sql", () => {
   it("the bounded-input constraints hold their stated bounds", () => {
     expect(/array_length\s*\(\s*reference_ids\s*,\s*1\s*\)\s*<=\s*16/i.test(sql)).toBe(true);
     expect(/jsonb_typeof\s*\(\s*slot_values\s*\)\s*=\s*'object'/i.test(sql)).toBe(true);
-    expect(/char_length\s*\(\s*label\s*\)\s*<=\s*120/i.test(sql)).toBe(true);
+    expect(
+      new RegExp(
+        `char_length\\s*\\(\\s*label\\s*\\)\\s*<=\\s*${IMAGE_LAB_REFERENCE_LABEL_MAX}`,
+        "i"
+      ).test(sql)
+    ).toBe(true);
     expect(/char_length\s*\(\s*template\s*\)\s*<=\s*8000/i.test(sql)).toBe(true);
     expect(/char_length\s*\(\s*resolved_prompt\s*\)\s*<=\s*12000/i.test(sql)).toBe(true);
   });

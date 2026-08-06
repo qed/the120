@@ -123,7 +123,7 @@ export const IMAGE_LAB_BENCH_COPY = {
   composerPending: {
     headline: "The composer is not built yet.",
     body:
-      "This is the Image Lab shell. The prompt composer, reference picker, and result grid land with the run flow; today this page exists so the route, the gate, and the navigation are real.",
+      "The reference library below is live — upload a character sheet or style sample now and it will be waiting. The prompt composer and result grid land with the run flow.",
   },
   emptyRuns: {
     headline: "No runs yet.",

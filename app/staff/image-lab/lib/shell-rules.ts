@@ -85,8 +85,6 @@ export const IMAGE_LAB_HUB_COPY = {
 /** The shell chrome: the heading and the nav label, on every Lab surface. */
 export const IMAGE_LAB_SHELL_COPY = {
   title: "Image Lab",
-  subtitle:
-    "A staff bench for prompt-to-image drills across the three launch models.",
   navLabel: "Image Lab sections",
 } as const;
 

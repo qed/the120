@@ -70,9 +70,6 @@ export default async function ImageLabLayout({
       <h1 className="mt-2 font-path-display text-2xl text-hq-ink">
         {IMAGE_LAB_SHELL_COPY.title}
       </h1>
-      <p className="mt-2 text-sm text-hq-ink-soft">
-        {IMAGE_LAB_SHELL_COPY.subtitle}
-      </p>
       {children}
     </main>
   );

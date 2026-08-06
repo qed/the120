@@ -1,6 +1,7 @@
 ---
 title: "A composite rate-limit / cache key built by string-joining on ':' collides when a segment contains the delimiter (IPv6 addresses, un-normalized names) — encode the segments"
 date: 2026-07-31
+last_updated: 2026-08-05
 category: security-issues
 module: fp-login
 problem_type: security_issue
@@ -61,8 +62,8 @@ segments can legitimately contain the delimiter `:`.
 
 ## Solution
 
-Escape each segment with `encodeURIComponent` before joining, so the delimiter
-can never appear inside a segment:
+Escape each segment before joining, so the delimiter can never appear inside a
+segment:
 
 ```ts
 // BEFORE — ambiguous: ':' can appear inside ip (IPv6) or name
@@ -72,12 +73,22 @@ return {
 };
 
 // AFTER — injective: every ':' inside a segment becomes %3A
-const ipEnc = encodeURIComponent(ip);
+const ipEnc = encodeRateLimitSegment(ip);
 return {
-  nameKey: `fp-login:${ipEnc}:${encodeURIComponent(normalizedName)}`,
+  nameKey: `fp-login:${ipEnc}:${encodeRateLimitSegment(normalizedName)}`,
   ipKey: `fp-login-ip:${ipEnc}`,
 };
 ```
+
+> **2026-08-05 — use `encodeRateLimitSegment`, not a bare `encodeURIComponent`.**
+> Per-segment encoding is the right answer for injectivity, and this doc's
+> reasoning below is unchanged. But `encodeURIComponent` is **not total**: it
+> throws `URIError: URI malformed` on a lone surrogate, which an attacker can
+> put in an unverified JWT `sub`. On the token-bearing FP routes that throw
+> lands *before* the rate-limit strikes are recorded, bypassing throttling
+> entirely. `encodeRateLimitSegment` (`app/fp/lib/rate-limit-rules.ts`) is the
+> total drop-in and is byte-identical for well-formed input. See
+> `docs/solutions/security-issues/encodeuricomponent-is-not-total-a-lone-surrogate-in-an-unverified-jwt-sub-throws-before-the-rate-limit-strike-is-recorded-2026-08-05.md`.
 
 Regression tests that pin the property (not just happy-path IPv4):
 

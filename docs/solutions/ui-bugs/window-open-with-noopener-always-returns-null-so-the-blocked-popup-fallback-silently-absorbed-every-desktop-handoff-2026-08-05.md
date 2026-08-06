@@ -109,5 +109,5 @@ platform to withhold the handle.
   before the exchange ran. When a comment in module A justifies a behavior using a
   property of module B, say so explicitly in the comment so the two cannot drift apart
   silently — and re-check it whenever either side changes.
-- Related: [a flag that gates the page does not gate its Server Actions](../security-issues/a-flag-that-gates-the-page-does-not-gate-its-server-actions-they-are-separately-addressable-endpoints-2026-08-05.md)
+- Related: [a flag that gates the page does not gate its Server Actions](../security-issues/a-flag-that-gates-the-page-does-not-gate-its-server-actions-v3-signup-2026-08-05.md)
   (same family: a guarantee assumed at one layer that the other layer never provided).

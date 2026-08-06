@@ -209,6 +209,10 @@ export const CHILD_LEAF_DELETE_ORDER = [
   // v3: MUST precede the `children` delete — child_id is ON DELETE SET NULL, so
   // a roster delete first would orphan a row full of a minor's data.
   "fp_onboarding_drafts",
+  // Image Lab v1: the SAME hazard as the drafts above, one table over.
+  // `source_child_id -> children ON DELETE SET NULL`, so the roster delete keeps
+  // the run and erases its provenance. Deleted here, after its storage objects.
+  "fp_image_lab_runs",
 ] as const;
 
 /**
@@ -255,6 +259,67 @@ export const RELEASED_CLAIM_PII_COLUMNS = [
 export const RELEASED_CLAIM_PRESERVED_COLUMN = "local_part" as const;
 
 /* ────────────────────────── external objects (the blob rule) ────────────── */
+
+/* ────────────────────────────── the Image Lab purge ─────────────────────── */
+
+/**
+ * IMAGE LAB v1 (#140/#143) — the third table of a child's data the eraser has to
+ * know about, and the one whose purge is a PROCEDURE rather than a delete.
+ *
+ * `fp_image_lab_runs` records a staff prompt→image run. `source_child_id`
+ * references `children(id)` ON DELETE SET NULL, and `template` / `slot_values` /
+ * `resolved_prompt` carry the CHILD'S OWN AUTHORED TEXT — the migration header
+ * (20260919120000) says so explicitly and instructs the reader to treat these
+ * rows as child-PII-bearing. Two consequences make a plain delete wrong:
+ *
+ *   1. ORDER. SET NULL means a `children` delete does not remove the run — it
+ *      removes the only link that could ever FIND it again. So the purge must
+ *      run BEFORE the roster row, like the drafts sweep and for the same reason.
+ *   2. LINEAGE. Iterating on a run COPIES its template and slot values forward,
+ *      and `iterated_from_run_id` is ALSO ON DELETE SET NULL, so deleting the
+ *      parent first severs the only breadcrumb to a descendant carrying the same
+ *      child's words. The purge walks descendants first, then deletes the set.
+ *
+ * And the images are BYTES OUTSIDE POSTGRES (`fp_image_lab_images.storage_key`,
+ * in the private `fp-image-lab` bucket, cascade-deleted with their run). Same
+ * object-before-row rule as the cover blobs: the row is the only record of its
+ * key, so deleting rows past a failed object delete leaves the survivors
+ * permanently unattributable.
+ *
+ * ⚠ THE IN-FLIGHT WINDOW (purge step 0 in the migration). A cell that is
+ * `requested` with a non-null `attempted_at` has a vendor call running and no
+ * `storage_key` yet: its bytes are ON THE WAY and would land in the bucket after
+ * we collected the keys, surviving the erasure with nothing left pointing at
+ * them. The eraser does not wait out IMAGE_LAB_STALE_AFTER_MS inside a request —
+ * it STRANDS the child, which preserves the anchor and makes the re-run finish
+ * the job once the window drains. Deferring loudly beats erasing incompletely.
+ */
+export const IMAGE_LAB_RUNS_TABLE = "fp_image_lab_runs" as const;
+export const IMAGE_LAB_IMAGES_TABLE = "fp_image_lab_images" as const;
+
+/** Bound on the lineage walk. Each hop is one round trip; a `seen` set already
+ *  guarantees termination, so this only caps a pathological chain depth. */
+export const IMAGE_LAB_LINEAGE_MAX_HOPS = 64;
+
+/** An image row is IN FLIGHT when it is latched but not finalized: a vendor call
+ *  may be running and its object may not exist yet. See the ⚠ above. */
+export function isImageLabCellInFlight(row: {
+  state?: unknown;
+  attempted_at?: unknown;
+}): boolean {
+  return row.state === "requested" && row.attempted_at != null;
+}
+
+/**
+ * Generated-image keys are DETERMINISTIC — `runs/{run_id}/{image_id}` (migration
+ * header). The eraser only ever deletes a key it read off a row it selected by
+ * run id, so provenance is already established; this re-derives it anyway, for
+ * the same reason `keyBelongsTo` exists on the cover path. A mistaken caller
+ * must only ever fail to delete, never delete someone else's object.
+ */
+export function imageLabKeyBelongsToRun(key: string, runId: string): boolean {
+  return key.startsWith(`runs/${runId}/`);
+}
 
 /** Columns on `fp_onboarding_drafts` that NAME an object in the blob store.
  *  `photo_blob_key` is the source photo of a minor; `cover_blob_key` is the

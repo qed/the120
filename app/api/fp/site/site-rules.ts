@@ -31,7 +31,10 @@
 
 import { z } from "zod";
 import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import {
+  encodeRateLimitSegment,
+  type RateLimitConfig,
+} from "@/app/fp/lib/rate-limit-rules";
 import {
   containsBlockedTerm,
   isReservedHandle,
@@ -202,19 +205,28 @@ export const SITE_PUBLISH_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000,
 export const SITE_IP_RATE_LIMIT: RateLimitConfig = { windowMs: 15 * 60_000, limit: 240 };
 
 /**
- * Composite keys with BOTH segments `encodeURIComponent`-escaped before the
- * `:` join (the composite-key collision learning — IPv6 ips carry `:`). The
- * user segment is the token's unverified sub, a BUCKET KEY only, never an
- * identity (grade-rules pins the rationale).
+ * Composite keys with BOTH segments escaped before the `:` join (the
+ * composite-key collision learning — IPv6 ips carry `:`). The user segment is
+ * the token's unverified sub, a BUCKET KEY only, never an identity
+ * (grade-rules pins the rationale).
+ *
+ * `encodeRateLimitSegment` rather than a bare `encodeURIComponent`: the user
+ * segment is an attacker-supplied JWT `sub` that this route never charset-
+ * validates, and a LONE SURROGATE in it makes encodeURIComponent THROW —
+ * before either strike is recorded, on a path the routes run pre-DB. Output is
+ * byte-identical to the bare call for well-formed input (pinned by test).
+ * Contrast ../login/login-rules.ts, which is safe WITHOUT the helper only
+ * because classifyIdentifier's USERNAME_FORMAT regex rejects a surrogate
+ * before the derivation runs.
  */
 export function deriveSiteRateLimitKeys(
   endpoint: "read" | "availability" | "claim" | "publish",
   ip: string,
   userSegment: string
 ): { userKey: string; ipKey: string } {
-  const ipEnc = encodeURIComponent(ip);
+  const ipEnc = encodeRateLimitSegment(ip);
   return {
-    userKey: `fp-site-${endpoint}:${ipEnc}:${encodeURIComponent(userSegment)}`,
+    userKey: `fp-site-${endpoint}:${ipEnc}:${encodeRateLimitSegment(userSegment)}`,
     ipKey: `fp-site-ip:${ipEnc}`,
   };
 }

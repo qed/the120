@@ -29,6 +29,9 @@ import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import type { EraseFamilyDeps } from "@/app/lib/funnel/erase-family-core";
 import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
+// Pure constant only — image-lab-rules.ts imports nothing (no next, no supabase),
+// so it is safe on the script's "no server-only in the graph" path.
+import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
 
 const saKeyRaw = (): string => process.env.GOOGLE_WORKSPACE_SA_KEY ?? "";
 
@@ -105,6 +108,19 @@ export function scriptEraseFamilyDeps(): EraseFamilyDeps {
     // non-null key it finds rather than deleting the row that names it. Keep
     // this in lockstep with provision-deps.ts when the adapter lands.
     blobConfigured: false,
+    // Mirror of realEraseFamilyDeps: the Image Lab bucket IS reachable through
+    // this same service-role client, so unlike the blob seam above there is no
+    // honest "unconfigured" state and the dep is required by the type. `remove()`
+    // is idempotent: no error + no rows means the object was already gone, which
+    // is a completed erasure.
+    deleteImageLabObject: async (key) => {
+      const { data, error } = await db.storage.from(IMAGE_LAB_BUCKET).remove([key]);
+      if (error) {
+        console.error(`[erase] image-lab object delete failed for ${key}: ${error.message}`);
+        return "error";
+      }
+      return (data ?? []).length > 0 ? "deleted" : "missing";
+    },
     deleteAuthUser: async (userId) => {
       const res = await db.auth.admin.deleteUser(userId);
       if (res.error) {

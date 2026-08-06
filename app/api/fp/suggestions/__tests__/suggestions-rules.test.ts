@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readStaffRoleCheckRoles } from "@/app/api/fp/__tests__/helpers/staff-role-check";
 import {
   deriveSuggestionsRateLimitKeys,
   isAllowedStaffRole,
@@ -21,18 +20,10 @@ describe("suggestions rules — staff role vocabulary", () => {
   it("parity: the allowed set equals the staff table's role CHECK (crm_core migration)", () => {
     // The role vocabulary lives in the DB CHECK; if it is ever widened
     // (super_admin / staff tiers), this endpoint's allowed set must be widened
-    // in the same change — this parse holds the two lists together.
-    const sql = readFileSync(
-      path.resolve(process.cwd(), "supabase/migrations/20260713110000_crm_core.sql"),
-      "utf8"
-    ).replace(/--[^\n]*/g, "");
-    const m = sql.match(/role\s+text\s+not\s+null\s+default\s+'admin'\s+check\s*\(\s*role\s+in\s*\(([^)]*)\)/i);
-    expect(m, "staff.role CHECK (role in (...))").not.toBeNull();
-    const dbRoles = m![1]
-      .split(",")
-      .map((s) => s.trim().replace(/^'|'$/g, ""))
-      .filter(Boolean);
-    expect([...SUGGESTIONS_ALLOWED_STAFF_ROLES]).toEqual(dbRoles);
+    // in the same change — this parse holds the two lists together. The PARSE
+    // is shared with the progress endpoint's test; the ASSERTION stays here, so
+    // the two endpoints' allowed sets remain independent decisions.
+    expect([...SUGGESTIONS_ALLOWED_STAFF_ROLES]).toEqual(readStaffRoleCheckRoles());
   });
 
   it("isAllowedStaffRole: exact string membership only", () => {
@@ -78,6 +69,27 @@ describe("suggestions rules — rate limiting", () => {
     expect(a.ipKey).toContain("fp-suggestions-ip:");
     // Own namespace — never shared with login/grade buckets.
     expect(a.userKey.startsWith("fp-grade")).toBe(false);
+  });
+
+  it("well-formed input keeps the SHIPPED key format byte-for-byte", () => {
+    expect(deriveSuggestionsRateLimitKeys("1.2.3.4", "sub-1")).toEqual({
+      userKey: "fp-suggestions:1.2.3.4:sub-1",
+      ipKey: "fp-suggestions-ip:1.2.3.4",
+    });
+    expect(deriveSuggestionsRateLimitKeys("2001:db8::1", "user:x")).toEqual({
+      userKey: "fp-suggestions:2001%3Adb8%3A%3A1:user%3Ax",
+      ipKey: "fp-suggestions-ip:2001%3Adb8%3A%3A1",
+    });
+  });
+
+  it("is TOTAL: a lone-surrogate sub does not throw before the strikes are recorded", () => {
+    // encodeURIComponent("\ud800") throws URIError. unverifiedJwtSub returns
+    // the claim unvalidated, and the route derives these keys BEFORE any DB
+    // I/O — so the throw would land before either bucket is written, bypassing
+    // throttling entirely and 500ing instead of refusing.
+    const loneSurrogate = JSON.parse('"\\ud800"') as string;
+    expect(() => deriveSuggestionsRateLimitKeys("1.2.3.4", loneSurrogate)).not.toThrow();
+    expect(() => deriveSuggestionsRateLimitKeys(loneSurrogate, "sub-1")).not.toThrow();
   });
 });
 

@@ -17,6 +17,9 @@
  *     `children.fp_cover_blob_key` are deleted at the STORE, object before row
  *     (a row delete only drops the pointer; the bytes stay readable forever).
  *     A missing object is success; a store outage is stranded, never swallowed.
+ *     The Image Lab's generated images (`fp_image_lab_images.storage_key`, in the
+ *     private `fp-image-lab` bucket) get the same treatment via `purgeImageLab`,
+ *     which also walks the run lineage the migration's purge runbook requires.
  *   - The Workspace suspend+delete is GATED on `workspaceConfigured`: with no
  *     `GOOGLE_WORKSPACE_SA_KEY` the Google legs are skipped (counted `skipped`),
  *     exactly as provisioning parks `pending`. The one live exercise is Unit 11.
@@ -42,6 +45,11 @@ import {
   dedupeAuthUserIds,
   DRAFT_BLOB_KEY_COLUMNS,
   hasWorkspaceMailbox,
+  IMAGE_LAB_IMAGES_TABLE,
+  IMAGE_LAB_LINEAGE_MAX_HOPS,
+  IMAGE_LAB_RUNS_TABLE,
+  imageLabKeyBelongsToRun,
+  isImageLabCellInFlight,
   planSubjectBlobDeletes,
   RELEASED_CLAIM_PII_COLUMNS,
   type PlannedBlobDelete,
@@ -78,6 +86,21 @@ export type EraseFamilyDeps = {
    * (the shipped reality) it is simply never consulted.
    */
   blobConfigured: boolean;
+  /**
+   * Delete ONE object from the Image Lab's private Supabase Storage bucket
+   * (`fp-image-lab`), by storage key. Same idempotent contract as `deleteBlob`:
+   * "missing" (already gone) is SUCCESS, "error" is a real store failure and is
+   * stranded.
+   *
+   * REQUIRED, with NO `imageLabConfigured` twin, and the asymmetry with
+   * `deleteBlob` is deliberate: Vercel Blob has no adapter and no token in this
+   * repo, so "unconfigured" is an honest state there. This bucket is reached
+   * through the very service-role client `db` already is — it is always wired,
+   * so there is no honest way to be unconfigured, and making the dep mandatory
+   * means a future deps factory cannot quietly omit it and leave a minor's
+   * generated imagery in the bucket.
+   */
+  deleteImageLabObject: (key: string) => Promise<"deleted" | "missing" | "error">;
   now: () => number;
 };
 
@@ -110,6 +133,9 @@ export type EraseFamilySummary = {
     fp_handoff_codes: number;
     /** v3: the kid-first onboarding drafts (name, age, story answers, cover). */
     fp_onboarding_drafts: number;
+    /** Image Lab: runs sourced from this child, plus their copy-forward
+     *  descendants. `fp_image_lab_images` rows CASCADE with them. */
+    fp_image_lab_runs: number;
     children: number;
     authUsers: number;
     fp_parental_consent: number;
@@ -129,6 +155,20 @@ export type EraseFamilySummary = {
     errored: number;
     refused: number;
     unconfigured: number;
+  };
+  /**
+   * The Image Lab purge's object accounting, kept separate from `blobs` because
+   * it is a different store with a different adapter: `missing` is success,
+   * `errored` is a store outage, `refused` is a key outside its own run's
+   * namespace, and `deferred` counts children whose purge was postponed because
+   * a cell was still IN FLIGHT. Every non-success is also in `stranded`.
+   */
+  imageLab: {
+    objectsDeleted: number;
+    objectsMissing: number;
+    objectsErrored: number;
+    objectsRefused: number;
+    deferredInFlight: number;
   };
   /** Released provisioning claims whose residual PII was scrubbed after the child
    *  delete (row + local_part preserved; email/attempted-email/supabase_user_id
@@ -331,6 +371,160 @@ async function eraseDrafts(
   );
 }
 
+/**
+ * THE IMAGE LAB PURGE (Image Lab v1, #140/#143) — the migration's own runbook
+ * (20260919120000, "CONSENT-REVOCATION PURGE"), executed for real rather than
+ * left as prose. See the long note in erase-family-rules.ts for WHY each step
+ * exists; this function is the sequence:
+ *
+ *   1. seed   — runs whose `source_child_id` is this child
+ *   2. walk   — copy-forward descendants via `iterated_from_run_id`
+ *   3. gather — the images of every run in that set
+ *   4. defer  — if ANY cell is in flight, strand and stop (bytes still landing)
+ *   5. delete — the OBJECTS, at the store, before any row
+ *   6. verify — a single failed object delete keeps EVERY row, because the row
+ *               is the only record of its key
+ *   7. delete — the run rows; images CASCADE
+ *
+ * Every failure is stranded, so the caller's per-child guard preserves the
+ * `children` anchor and the whole run reports ok:false. Zero runs (production
+ * today) costs exactly one SELECT and returns.
+ */
+async function purgeImageLab(
+  deps: EraseFamilyDeps,
+  summary: EraseFamilySummary,
+  childId: string
+): Promise<void> {
+  const { db } = deps;
+  const label = `child:${childId}`;
+  const strandedBefore = summary.stranded.length;
+
+  // 1: the runs this child sourced.
+  const seed = await db.from(IMAGE_LAB_RUNS_TABLE).select("id").eq("source_child_id", childId);
+  if (seed.error) {
+    console.error(`[erase] STRANDED: ${IMAGE_LAB_RUNS_TABLE} read (${label}) failed: ${seed.error.message}`);
+    summary.stranded.push(`${IMAGE_LAB_RUNS_TABLE}:read:${label}:${seed.error.message}`);
+    return;
+  }
+  const runIds = new Set<string>(((seed.data ?? []) as Record<string, unknown>[]).map((r) => String(r.id)));
+  if (runIds.size === 0) return; // The universal case today: nothing to purge.
+
+  // 2: the copy-forward lineage. A `seen` set terminates the walk even if the
+  //    self-referencing FK ever forms a cycle; the hop cap is belt-and-braces.
+  let frontier = [...runIds];
+  for (let hop = 0; hop < IMAGE_LAB_LINEAGE_MAX_HOPS && frontier.length > 0; hop++) {
+    const kids = await db
+      .from(IMAGE_LAB_RUNS_TABLE)
+      .select("id")
+      .in("iterated_from_run_id", frontier);
+    if (kids.error) {
+      console.error(
+        `[erase] STRANDED: ${IMAGE_LAB_RUNS_TABLE} lineage walk (${label}) failed: ${kids.error.message}`
+      );
+      summary.stranded.push(`${IMAGE_LAB_RUNS_TABLE}:lineage:${label}:${kids.error.message}`);
+      return;
+    }
+    const next: string[] = [];
+    for (const r of (kids.data ?? []) as Record<string, unknown>[]) {
+      const id = String(r.id);
+      if (!runIds.has(id)) {
+        runIds.add(id);
+        next.push(id);
+      }
+    }
+    frontier = next;
+  }
+  const allRunIds = [...runIds];
+
+  // 3: the images of every run in the tainted set.
+  const images = await db
+    .from(IMAGE_LAB_IMAGES_TABLE)
+    .select("id, run_id, state, attempted_at, storage_key")
+    .in("run_id", allRunIds);
+  if (images.error) {
+    console.error(
+      `[erase] STRANDED: ${IMAGE_LAB_IMAGES_TABLE} read (${label}) failed: ${images.error.message}`
+    );
+    summary.stranded.push(`${IMAGE_LAB_IMAGES_TABLE}:read:${label}:${images.error.message}`);
+    return;
+  }
+  const imageRows = (images.data ?? []) as Record<string, unknown>[];
+
+  // 4: the in-flight window. Its bytes have not landed yet, so collecting keys
+  //    now would miss them and deleting the rows would erase the only record of
+  //    where they land. Defer the whole child to the re-run, loudly.
+  const inFlight = imageRows.filter(isImageLabCellInFlight);
+  if (inFlight.length > 0) {
+    console.error(
+      `[erase] STRANDED: ${inFlight.length} Image Lab cell(s) for ${label} are IN FLIGHT (requested + attempted) — their objects have not landed; deferring the purge and preserving the child anchor, re-run once the stale window drains`
+    );
+    summary.imageLab.deferredInFlight++;
+    summary.stranded.push(`${IMAGE_LAB_RUNS_TABLE}:in_flight:${childId}`);
+    summary.order.push(`${IMAGE_LAB_RUNS_TABLE}:deferred(${label})`);
+    return;
+  }
+
+  // 5: the objects, before any row.
+  const seenKeys = new Set<string>();
+  for (const row of imageRows) {
+    const key = typeof row.storage_key === "string" ? row.storage_key.trim() : "";
+    if (key.length === 0 || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const runId = String(row.run_id);
+    if (!imageLabKeyBelongsToRun(key, runId)) {
+      console.error(
+        `[erase] STRANDED: refusing to delete Image Lab key ${key} — it is not in run ${runId}'s namespace (${label})`
+      );
+      summary.imageLab.objectsRefused++;
+      summary.stranded.push(`image_lab:not_owned:${label}:${key}`);
+      continue;
+    }
+    let outcome: "deleted" | "missing" | "error";
+    try {
+      outcome = await deps.deleteImageLabObject(key);
+    } catch (err) {
+      console.error(
+        `[erase] Image Lab object delete threw for ${key} (${label}): ${err instanceof Error ? err.message : String(err)}`
+      );
+      outcome = "error";
+    }
+    if (outcome === "deleted") {
+      summary.imageLab.objectsDeleted++;
+      summary.order.push(`image_lab:object-deleted(${label})`);
+    } else if (outcome === "missing") {
+      summary.imageLab.objectsMissing++;
+      summary.order.push(`image_lab:object-missing(${label})`);
+    } else {
+      console.error(
+        `[erase] STRANDED: Image Lab object delete failed for ${key} (${label}) — the bytes may still exist; re-run after the store recovers`
+      );
+      summary.imageLab.objectsErrored++;
+      summary.stranded.push(`image_lab:error:${label}:${key}`);
+    }
+  }
+
+  // 6: verify before deleting rows (migration purge step 3). The row is the ONLY
+  //    record of its key, so a partial object delete followed by a row delete
+  //    leaves the survivors permanently unattributable.
+  if (summary.stranded.length > strandedBefore) {
+    console.error(
+      `[erase] ${IMAGE_LAB_RUNS_TABLE} rows for ${label} PRESERVED — an object delete did not succeed; re-run to finish`
+    );
+    summary.order.push(`${IMAGE_LAB_RUNS_TABLE}:preserved(${label})`);
+    return;
+  }
+
+  // 7: the rows. fp_image_lab_images CASCADEs with its run.
+  summary.deleted.fp_image_lab_runs += await del(
+    db,
+    IMAGE_LAB_RUNS_TABLE,
+    "id",
+    allRunIds,
+    summary,
+    label
+  );
+}
+
 type ChildRow = {
   childId: string;
   profileIds: string[];
@@ -403,6 +597,7 @@ export async function eraseFamily(
       path_student_profiles: 0,
       fp_handoff_codes: 0,
       fp_onboarding_drafts: 0,
+      fp_image_lab_runs: 0,
       children: 0,
       authUsers: 0,
       fp_parental_consent: 0,
@@ -410,6 +605,13 @@ export async function eraseFamily(
     },
     workspace: { suspended: 0, deleted: 0, missing: 0, skipped: 0, errored: 0 },
     blobs: { deleted: 0, missing: 0, errored: 0, refused: 0, unconfigured: 0 },
+    imageLab: {
+      objectsDeleted: 0,
+      objectsMissing: 0,
+      objectsErrored: 0,
+      objectsRefused: 0,
+      deferredInFlight: 0,
+    },
     scrubbedReleasedClaims: 0,
     parentAccountDeleted: false,
     order: [],
@@ -511,6 +713,14 @@ export async function eraseFamily(
       //     roster delete first would leave this row alive and unfindable by
       //     child. Blobs are deleted before the row (see the blob rule).
       await eraseDrafts(deps, summary, "child_id", childId, `child:${childId}`);
+
+      // 4c (Image Lab): the runs this child's product text was fed into, their
+      //     copy-forward descendants, and the generated images in the private
+      //     `fp-image-lab` bucket. SAME hazard as the drafts above —
+      //     `source_child_id -> children ON DELETE SET NULL` means the roster
+      //     delete would keep the row and erase its provenance — so it MUST
+      //     precede the `children` delete. Objects before rows; see purgeImageLab.
+      await purgeImageLab(deps, summary, childId);
 
       // 5: Workspace mailbox (path b) — SUSPEND then DELETE, read the address
       //    BEFORE the child delete cascades the provisioning claim away.

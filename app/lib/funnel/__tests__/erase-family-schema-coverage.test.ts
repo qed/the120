@@ -143,6 +143,27 @@ describe("R28 erasure coverage — the ledger matches the real schema", () => {
     }
   });
 
+  it("the Image Lab's classification is backed by an executor that really purges it", () => {
+    // The classification is only honest if the code matches it. `runs` is
+    // erased-explicitly and listed in the shared order; `images.storage_key` is
+    // external:true, which is a PROMISE that the bytes are deleted — so the
+    // executor must actually name that column and call the object-delete dep.
+    expect(ERASURE_TABLE_LEDGER.fp_image_lab_runs.disposition).toBe("erased-explicitly");
+    expect(CHILD_LEAF_DELETE_ORDER).toContain("fp_image_lab_runs");
+    expect(ERASURE_EXTERNAL_OBJECT_LEDGER["fp_image_lab_images.storage_key"].external).toBe(true);
+    const core = readFileSync(
+      path.resolve(process.cwd(), "app/lib/funnel/erase-family-core.ts"),
+      "utf8"
+    );
+    const projections = [...core.matchAll(/\.select\("([^"]*)"\)/g)].map((m) => m[1]).join(" | ");
+    expect(projections).toContain("storage_key");
+    expect(core).toContain("deleteImageLabObject");
+    // References are the deliberate NON-deletion, and it must stay reasoned.
+    const refs = ERASURE_EXTERNAL_OBJECT_LEDGER["fp_image_lab_references.storage_key"];
+    expect(refs.external).toBe(false);
+    expect(refs.note).toMatch(/append-only/i);
+  });
+
   it("every column-audited table is also table-classified", () => {
     for (const t of COLUMN_AUDITED_TABLES) {
       expect(ERASURE_TABLE_LEDGER[t], `${t} needs a table disposition too`).toBeTruthy();

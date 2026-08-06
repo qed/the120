@@ -51,13 +51,21 @@
  *       Postgres, and a Blob URL stays readable forever until the object itself
  *       is deleted.
  *
- * ── KNOWN BLIND SPOT (stated, not papered over) ─────────────────────────────
- * This ledger sees the schema THE REPO REPRESENTS. Production currently also
- * carries `fp_image_lab_runs` / `fp_image_lab_images` / `fp_image_lab_references`
- * (a staff image lab with `source_child_id` and `storage_key`), which have NO
- * migration and no code in this repository — the applied-but-unmerged hazard
- * docs/LANES.md warns about. Nothing here can see them; they are called out in
- * the erasure review notes instead.
+ * ── THE BLIND SPOT THIS FILE USED TO DECLARE, AND HOW IT CLOSED (2026-08-06) ─
+ * An earlier version of this header said the Image Lab tables
+ * (`fp_image_lab_runs` / `_images` / `_references`) were invisible here because
+ * they had no migration in this repo. Image Lab v1 merged (#140, #143) and they
+ * do now — and the tripwire immediately reported both `storage_key` columns,
+ * which is the mechanism working exactly as designed. All three are classified
+ * below and `fp_image_lab_runs` is really purged by `erase-family-core.ts`.
+ *
+ * The merge ALSO exposed a hole in the tripwire's own reach, which is fixed
+ * here rather than noted: `source_child_id` is a real FK to `children.id`, but
+ * TABLE scope matched the column name `child_id` EXACTLY, so a table hanging
+ * off a child under any other prefix was silently out of scope. Scope now
+ * matches the SUFFIX (`(^|_)child_id$` / `(^|_)profile_id$`), which is what a
+ * link-shaped column actually looks like. That also pulled in
+ * `path_fw_released_aliases.released_profile_id`, classified below.
  */
 
 /* ───────────────────────────────── table scope ─────────────────────────────── */
@@ -84,9 +92,24 @@ export type TableLedgerEntry = { disposition: TableDisposition; note: string };
 /** Anchors audited regardless of their column names. */
 export const ERASURE_ANCHOR_TABLES = ["children", "parents"] as const;
 
-/** A table is in TABLE scope if it carries one of these columns (i.e. it hangs
- *  off a child or off a child's player profile) — or is an anchor above. */
+/**
+ * A table is in TABLE scope if it carries a column whose name ENDS IN one of
+ * these (i.e. it hangs off a child or off a child's profile) — or is an anchor.
+ *
+ * SUFFIX, not equality, and the difference is not cosmetic: Image Lab landed
+ * `fp_image_lab_runs.source_child_id` — a genuine `references children(id)` —
+ * and an exact-name match let a table full of a child's authored text sit
+ * entirely outside this audit. A link-shaped column is `<qualifier>_child_id`
+ * as often as it is bare `child_id`, so the pattern matches how the schema is
+ * really written. (`^|_` anchors the boundary, so a hypothetical `grandchild_id`
+ * still matches by design — over-inclusion costs one ledger line.)
+ */
 export const CHILD_LINK_COLUMNS = ["child_id", "profile_id"] as const;
+
+/** True if `col` names a link to a child or a child's profile. */
+export function isChildLinkColumn(col: string): boolean {
+  return CHILD_LINK_COLUMNS.some((c) => col === c || col.endsWith(`_${c}`));
+}
 
 export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   /* ── the anchors ── */
@@ -171,6 +194,18 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   deposit_attempts: {
     disposition: "erased-by-cascade",
     note: "child_id -> children ON DELETE CASCADE (20260811120000). Deposit-policy acceptance evidence (policy hash + accepted IP); same retention flag as `deposits`.",
+  },
+
+  /* ── Image Lab v1 (#140/#143) ── */
+  fp_image_lab_runs: {
+    disposition: "erased-explicitly",
+    note: "Step 0a, FIRST in the per-child pass. source_child_id -> children ON DELETE SET NULL, so the roster delete would keep the row and ERASE ITS PROVENANCE — the run would survive, unfindable, still carrying the child's authored text (template / slot_values / resolved_prompt, which routinely contain the kid's own first name inside `pitch`). Purged per the migration's own runbook: walk the iterated_from_run_id lineage (copy-forward descendants carry the same text and are ALSO SET NULL), delete every fp_image_lab_images object at the store, then delete the runs — fp_image_lab_images rows CASCADE with them. Empty in production as of 2026-08-06, so nothing is stranded today.",
+  },
+
+  /* ── the FW never-reissue ledger ── */
+  path_fw_released_aliases: {
+    disposition: "retained",
+    note: "The FW twin of funnel_released_aliases: a name-derived local_part freed by an anonymization, recorded FOREVER so the next same-name student cannot inherit it. Retained for the same reason, and note the FK is `released_profile_id -> path_student_profiles ON DELETE RESTRICT` — it would BLOCK step 4 for an enrolled child. Per erase-family-rules.ts an FP-signup child is never enrolled in Path/FW coursework, so this table is expected EMPTY for every subject this eraser sees; if it is not, the path_student_profiles delete raises 23503 and the child is stranded fail-safe rather than half-erased.",
   },
 
   /* ── telemetry / audit, deliberately NOT erased ── */
@@ -373,6 +408,14 @@ export const ERASURE_EXTERNAL_OBJECT_LEDGER: Record<string, ExternalObjectEntry>
     external: true,
     note: "The SOURCE PHOTO of a minor — the highest-value object in the system. Deleted at the store before the draft row (steps 4b / 7c).",
   },
+  "fp_image_lab_images.storage_key": {
+    external: true,
+    note: "An object in the private `fp-image-lab` Supabase Storage bucket, at `runs/{run_id}/{image_id}`. The row is CASCADE-deleted with its run, which drops the pointer and leaves the bytes — imagery generated from a minor's own product text — sitting in the bucket, readable to anyone who can mint a signed URL. So the eraser really deletes it: step 0a collects the keys across the run's whole copy-forward lineage and calls deps.deleteImageLabObject BEFORE deleting any run row, exactly the object-before-row rule the cover blobs already follow. A delete failure strands the child and preserves its anchor for the re-run; the row is the ONLY record of its key, so deleting rows past a failed object delete would make the survivors permanently unattributable (migration 20260919120000, purge step 3).",
+  },
+  "fp_image_lab_references.storage_key": {
+    external: false,
+    note: "NOT erased by this path, and the reason is structural rather than a shrug. A reference is a STAFF-AUTHORED character sheet or style sample: the table carries no child link of any kind (no FK, no id column that reaches a child), so a family erasure has nothing to select on — and it is APPEND-ONLY BY TRIGGER (fp_image_lab_references_append_only_guard, no role exemption, because fp_image_lab_runs points at these ids inside a uuid[] with no FK and a delete would dangle every referencing run). The migration states the condition that would make this wrong: a reference derived from a child's drawing, product photo, or likeness is an unrecoverable v1 mistake, which is why Unit 4's upload UI forbids it at the point of upload. If references ever become child-derived or gain a child link, this entry flips to external:true and the append-only trigger has to go with it.",
+  },
   "funnel_rate_events.bucket": {
     external: false,
     note: "Not storage: the rate-limiter's time/namespace bucket. Nothing external to delete.",
@@ -404,7 +447,7 @@ export function tablesInErasureScope(schema: Record<string, string[]>): string[]
     .filter(
       ([table, cols]) =>
         (ERASURE_ANCHOR_TABLES as readonly string[]).includes(table) ||
-        CHILD_LINK_COLUMNS.some((c) => cols.includes(c))
+        cols.some(isChildLinkColumn)
     )
     .map(([table]) => table)
     .sort();

@@ -118,9 +118,44 @@ export function clearRateLimitBucket(key: string): void {
   buckets.delete(key);
 }
 
+/**
+ * Is this the FIRST refusal for `key` in the current window?
+ *
+ * ⚠ A LOG LINE PER REFUSED REQUEST IS A FLOOD, ON EXACTLY THE BRANCH THE FLOOD
+ * COMES FROM. A cooldown warning that fires once per refusal fires at whatever
+ * rate the runaway tab is looping, for the rest of the window — which is the very
+ * scenario the warning exists to make visible, and the one where thousands of
+ * identical lines bury it. Log the TRIP, not the requests behind it.
+ *
+ * The trip is per key per window: the first refusal after a window opens returns
+ * true, every refusal until that window elapses returns false, and the next
+ * window trips again. Kept beside the buckets because the store is the thing that
+ * knows when a window opened; callers own only the message.
+ */
+const refusalNoted = new Map<string, number>();
+
+export function isFirstRefusalInWindow(
+  key: string,
+  config: RateLimitConfig,
+  now: number = Date.now()
+): boolean {
+  const last = refusalNoted.get(key);
+  if (last !== undefined && now - last < config.windowMs) return false;
+  refusalNoted.set(key, now);
+  // Bounded by the same reasoning as `buckets`: an attacker iterating keys must
+  // not grow memory. Cheapest correct sweep — drop everything already stale.
+  if (refusalNoted.size > MAX_RATE_LIMIT_BUCKETS) {
+    for (const [k, at] of refusalNoted) {
+      if (now - at >= config.windowMs) refusalNoted.delete(k);
+    }
+  }
+  return true;
+}
+
 /** Test isolation only. */
 export function resetRateLimitStoreForTests(): void {
   buckets.clear();
+  refusalNoted.clear();
 }
 
 /**

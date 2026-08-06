@@ -155,4 +155,20 @@ describe("deriveSiteRateLimitKeys", () => {
     expect(keys.ipKey).toBe("fp-site-ip:2001%3Adb8%3A%3A1");
     expect(deriveSiteRateLimitKeys("read", "1.2.3.4", "s").userKey).toContain("fp-site-read:");
   });
+
+  // The user segment is an UNVERIFIED JWT sub this surface never charset-
+  // validates, so it can carry a lone UTF-16 surrogate — on which a bare
+  // encodeURIComponent throws URIError. The routes derive these keys BEFORE
+  // recording either strike, so a throw here would skip the rate-limit
+  // accounting entirely. The assertion above is the byte-identity pin that
+  // proves the totality fix did not move any well-formed key.
+  it("is total on a lone surrogate in either segment (no URIError)", () => {
+    const lone = JSON.parse('"\\ud800"') as string;
+    expect(() => deriveSiteRateLimitKeys("publish", "1.2.3.4", lone)).not.toThrow();
+    expect(() => deriveSiteRateLimitKeys("publish", lone, "sub")).not.toThrow();
+    // Still namespaced and still composite — degraded, not dropped.
+    const keys = deriveSiteRateLimitKeys("publish", "1.2.3.4", lone);
+    expect(keys.userKey.startsWith("fp-site-publish:1.2.3.4:")).toBe(true);
+    expect(keys.ipKey).toBe("fp-site-ip:1.2.3.4");
+  });
 });

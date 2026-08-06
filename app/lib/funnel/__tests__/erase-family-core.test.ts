@@ -56,6 +56,17 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
     // Apply the delete.
     t[table] = rows.filter((r) => !matches(r, filters));
     deleteLog.push(`${table}(${doomed.length})`);
+    // Image Lab: `fp_image_lab_images.run_id -> fp_image_lab_runs ON DELETE
+    // CASCADE` (so the purge deletes runs and the image rows go with them), and
+    // `iterated_from_run_id -> fp_image_lab_runs ON DELETE SET NULL` (which is
+    // why the lineage MUST be walked before anything is deleted).
+    if (table === "fp_image_lab_runs") {
+      const gone = new Set(doomed.map((r) => r.id));
+      t.fp_image_lab_images = (t.fp_image_lab_images ?? []).filter((x) => !gone.has(x.run_id));
+      for (const r of t.fp_image_lab_runs ?? []) {
+        if (gone.has(r.iterated_from_run_id)) r.iterated_from_run_id = null;
+      }
+    }
     // children side effects: deposits CASCADE; consent/attempts SET NULL; the
     // provisioning claim SET NULL + the released trigger (row SURVIVES).
     if (table === "children") {
@@ -69,6 +80,12 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
         // AFTER the roster row can no longer be found by child_id, so a test
         // that asserts the draft is gone is really asserting the order.
         for (const d of t.fp_onboarding_drafts ?? []) if (d.child_id === cid) d.child_id = null;
+        // Image Lab: `fp_image_lab_runs.source_child_id -> children ON DELETE SET
+        // NULL`. Modeled precisely because it is the SAME ordering hazard as the
+        // drafts: a run purged AFTER the roster row can no longer be found by
+        // child at all, so a test that asserts the run is gone is really
+        // asserting the order.
+        for (const r of t.fp_image_lab_runs ?? []) if (r.source_child_id === cid) r.source_child_id = null;
         for (const c of t.fp_parental_consent ?? []) if (c.child_id === cid) c.child_id = null;
         for (const a of t.fp_signup_attempts ?? []) if (a.child_id === cid) a.child_id = null;
         // NOT cascade: the claim's child_id → children is ON DELETE SET NULL, and
@@ -298,11 +315,16 @@ function makeDeps(
     blobFails?: boolean;
     /** Force the adapter to THROW rather than answer (a rude SDK). */
     blobThrows?: boolean;
+    /** Image Lab bucket contents; anything else answers "missing". */
+    imageLabStore?: Set<string>;
+    /** Force every Image Lab object delete to report a store outage. */
+    imageLabFails?: boolean;
   } = {}
 ) {
   const wsCalls: string[] = [];
   const deletedAuth: string[] = [];
   const blobCalls: string[] = [];
+  const imageLabCalls: string[] = [];
   const deps: EraseFamilyDeps = {
     db: undefined as never, // filled by caller
     workspaceConfigured: opts.workspaceConfigured ?? true,
@@ -319,6 +341,16 @@ function makeDeps(
             return "deleted" as const;
           })
         : undefined,
+    // Unlike deleteBlob there is no "configured" flag: the Image Lab bucket is
+    // the same service-role client, so the dep is always present (fail-closed by
+    // type). Idempotent by contract — an absent object is a COMPLETED erasure.
+    deleteImageLabObject: vi.fn(async (key: string) => {
+      imageLabCalls.push(key);
+      if (opts.imageLabFails) return "error" as const;
+      if (!opts.imageLabStore || !opts.imageLabStore.has(key)) return "missing" as const;
+      opts.imageLabStore.delete(key);
+      return "deleted" as const;
+    }),
     deleteAuthUser: vi.fn(async (userId: string) => {
       if (opts.authFails) return { ok: false };
       if ((t.fp_player_profiles ?? []).some((x) => x.user_id === userId) || (t.path_student_profiles ?? []).some((x) => x.user_id === userId)) {
@@ -346,7 +378,7 @@ function makeDeps(
     }),
     now: () => 0,
   };
-  return { deps, wsCalls, deletedAuth, blobCalls };
+  return { deps, wsCalls, deletedAuth, blobCalls, imageLabCalls };
 }
 
 describe("eraseFamily — full family, FK-safe order", () => {
@@ -1097,6 +1129,188 @@ describe("eraseFamily — external blob objects (the two-store erasure)", () => 
     expect(t.fp_onboarding_drafts).toHaveLength(1);
     expect(t.children).toHaveLength(1);
     errors.mockRestore();
+  });
+});
+
+/* ───────────────────────── Image Lab purge (#140/#143) ──────────────────── */
+
+/**
+ * The Image Lab is the THIRD store a family erasure has to reach into, and the
+ * only one whose purge is a procedure rather than a delete. These fixtures put
+ * the two hazards the migration's runbook names on the table:
+ *
+ *   * a COPY-FORWARD DESCENDANT (`run2` iterated from `run1`) that carries the
+ *     same child's authored text but has no `source_child_id` of its own, and
+ *   * a run belonging to nobody in this family (`run3`), which must survive.
+ *
+ * Keys are `runs/{run_id}/{image_id}` — the deterministic scheme the migration
+ * pins — because the executor re-derives ownership from it.
+ */
+function seedWithImageLab(): Tables {
+  const t = seedFamily();
+  t.fp_image_lab_runs = [
+    { id: "run1", source_child_id: "childA", iterated_from_run_id: null, resolved_prompt: "Hi, I'm Ada…" },
+    // The descendant: no child link of its own, reachable ONLY by lineage.
+    { id: "run2", source_child_id: null, iterated_from_run_id: "run1", resolved_prompt: "Hi, I'm Ada…" },
+    // Somebody else's run entirely.
+    { id: "run3", source_child_id: null, iterated_from_run_id: null, resolved_prompt: "a synthetic pitch" },
+  ];
+  t.fp_image_lab_images = [
+    { id: "img1", run_id: "run1", state: "done", attempted_at: "t0", storage_key: "runs/run1/img1" },
+    { id: "img2", run_id: "run2", state: "done", attempted_at: "t0", storage_key: "runs/run2/img2" },
+    { id: "img3", run_id: "run3", state: "done", attempted_at: "t0", storage_key: "runs/run3/img3" },
+  ];
+  return t;
+}
+
+const LAB_KEYS = ["runs/run1/img1", "runs/run2/img2", "runs/run3/img3"];
+
+describe("eraseFamily — the Image Lab purge (source_child_id is SET NULL, so order is everything)", () => {
+  it("deletes the child's runs AND their copy-forward descendants, objects first, leaving other runs alone", async () => {
+    const store = new Set(LAB_KEYS);
+    const { db, t, deleteLog } = makeDb(seedWithImageLab());
+    const { deps, imageLabCalls } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    // run1 (linked) and run2 (its descendant) are gone; run3 is untouched.
+    expect((t.fp_image_lab_runs ?? []).map((r) => r.id)).toEqual(["run3"]);
+    expect(out.deleted.fp_image_lab_runs).toBe(2);
+    // Their image rows CASCADEd; run3's survives.
+    expect((t.fp_image_lab_images ?? []).map((r) => r.id)).toEqual(["img3"]);
+    // And the BYTES are really gone from the bucket — the whole point.
+    expect(imageLabCalls.sort()).toEqual(["runs/run1/img1", "runs/run2/img2"]);
+    expect([...store]).toEqual(["runs/run3/img3"]);
+    expect(out.imageLab.objectsDeleted).toBe(2);
+
+    // ORDER: the purge must precede the `children` delete, or source_child_id is
+    // SET NULL and the run survives with its provenance erased.
+    expect(deleteLog.indexOf("fp_image_lab_runs(2)")).toBeGreaterThanOrEqual(0);
+    expect(deleteLog.indexOf("fp_image_lab_runs(2)")).toBeLessThan(deleteLog.indexOf("children(1)"));
+  });
+
+  it("an object the store could not delete PRESERVES every run row (the row is the only record of its key)", async () => {
+    const store = new Set(LAB_KEYS);
+    const { db, t } = makeDb(seedWithImageLab());
+    const { deps } = makeDeps(t, { imageLabStore: store, imageLabFails: true });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.objectsErrored).toBeGreaterThan(0);
+    expect(out.stranded.some((s) => s.startsWith("image_lab:error:"))).toBe(true);
+    // Nothing deleted: rows AND objects both survive for the re-run.
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect(out.deleted.fp_image_lab_runs).toBe(0);
+    expect([...store].sort()).toEqual([...LAB_KEYS].sort());
+    // The child anchor is preserved, so the re-run can still find the runs.
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("an IN-FLIGHT cell defers the whole child rather than erasing around bytes still landing", async () => {
+    const seed = seedWithImageLab();
+    // The descendant's cell is latched with a vendor call running: no
+    // storage_key yet, so its object would land AFTER a purge that ran now.
+    seed.fp_image_lab_images[1] = {
+      id: "img2",
+      run_id: "run2",
+      state: "requested",
+      attempted_at: "t0",
+      storage_key: null,
+    };
+    const store = new Set(["runs/run1/img1", "runs/run3/img3"]);
+    const { db, t } = makeDb(seed);
+    const { deps, imageLabCalls } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.deferredInFlight).toBe(1);
+    expect(out.stranded).toContain("fp_image_lab_runs:in_flight:childA");
+    // NOTHING was touched — not even the settled sibling's object, because the
+    // whole child is deferred to the re-run.
+    expect(imageLabCalls).toEqual([]);
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("a key outside its own run's namespace is refused, never deleted", async () => {
+    const seed = seedWithImageLab();
+    seed.fp_image_lab_images[0].storage_key = "runs/run3/img1"; // wrong run
+    const store = new Set(["runs/run3/img1", "runs/run2/img2", "runs/run3/img3"]);
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t, { imageLabStore: store });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.imageLab.objectsRefused).toBe(1);
+    expect(out.stranded.some((s) => s.startsWith("image_lab:not_owned:"))).toBe(true);
+    expect(store.has("runs/run3/img1")).toBe(true); // NOT deleted
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3); // rows preserved
+    errors.mockRestore();
+  });
+
+  it("a failed run READ strands rather than concluding the child had no runs", async () => {
+    const { db, t } = makeDb(seedWithImageLab(), { selectFaultTable: "fp_image_lab_runs" });
+    const { deps } = makeDeps(t, { imageLabStore: new Set(LAB_KEYS) });
+    deps.db = db;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.stranded.some((s) => s.startsWith("fp_image_lab_runs:read:"))).toBe(true);
+    expect((t.fp_image_lab_runs ?? [])).toHaveLength(3);
+    expect((t.children ?? []).some((c) => c.id === "childA")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("costs one SELECT and nothing else when the child has no runs (production today)", async () => {
+    const { db, t } = makeDb(seedFamily()); // no fp_image_lab_* rows at all
+    const { deps, imageLabCalls } = makeDeps(t, {});
+    deps.db = db;
+
+    const out = await eraseFamily(deps, {
+      parentUserId: "parentU",
+      parentEmail: "fam@test.the120.invalid",
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.deleted.fp_image_lab_runs).toBe(0);
+    expect(imageLabCalls).toEqual([]);
+    expect(out.imageLab).toEqual({
+      objectsDeleted: 0,
+      objectsMissing: 0,
+      objectsErrored: 0,
+      objectsRefused: 0,
+      deferredInFlight: 0,
+    });
   });
 });
 

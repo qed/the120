@@ -264,6 +264,155 @@ const scanCode = (code: string, asFile = `${LAB}lib/fixture.ts`): Violation[] =>
     .filter((v): v is Violation => v !== undefined);
 };
 
+// ── Resolving what a `.from()` / `.select()` argument actually IS ───────────
+
+/**
+ * ⚠ THE ARGUMENT IS RESOLVED, NOT MATCHED.
+ *
+ * Every version of this guard that read the ARGUMENT'S SPELLING lost. A literal
+ * scan misses `db.from(RUNS)`; exempting SCREAMING_CASE misses
+ * `const T = "staff"`; a `\bpayer\b` scan misses `"pay" + "er"`. What follows
+ * computes the VALUE — from a literal, from a `const` binding in the same file,
+ * or from any `+`-concatenation of those — and everything downstream compares
+ * values. An expression this cannot resolve is a FAILURE, never an exemption.
+ */
+const LITERAL_SOURCE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|` + "`[^`$\\n]*`" + `)`;
+
+/** `const NAME = "a" + "b";` → `NAME → "ab"`, for one file. */
+const stringConstants = (source: string): Map<string, string> => {
+  const bindings = new Map<string, string>();
+  const re = new RegExp(
+    String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(` +
+      LITERAL_SOURCE +
+      String.raw`(?:\s*\+\s*` +
+      LITERAL_SOURCE +
+      String.raw`)*)\s*;`,
+    "g"
+  );
+  for (const match of source.matchAll(re)) {
+    const value = [...match[2]!.matchAll(new RegExp(LITERAL_SOURCE, "g"))]
+      .map((literal) => literal[0].slice(1, -1))
+      .join("");
+    bindings.set(match[1]!, value);
+  }
+  return bindings;
+};
+
+/** An expression's string VALUE, or null when it cannot be computed statically. */
+const resolveExpr = (expr: string, bindings: Map<string, string>): string | null => {
+  const token = new RegExp(`^\\s*(?:${LITERAL_SOURCE}|[A-Za-z_$][\\w$]*)`);
+  let rest = expr.trim();
+  if (rest === "") return null;
+  let out = "";
+  for (;;) {
+    const match = token.exec(rest);
+    if (match === null) return null;
+    const piece = match[0].trim();
+    if (/^["'`]/.test(piece)) out += piece.slice(1, -1);
+    else {
+      const bound = bindings.get(piece);
+      if (bound === undefined) return null;
+      out += bound;
+    }
+    rest = rest.slice(match[0].length);
+    const plus = /^\s*\+\s*/.exec(rest);
+    if (plus === null) break;
+    rest = rest.slice(plus[0].length);
+  }
+  return rest.trim() === "" ? out : null;
+};
+
+/** The first argument of an argument list, splitting on the TOP-LEVEL comma. */
+const firstArg = (args: string): string => {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i]!;
+    if (quote !== null) {
+      if (c === quote && args[i - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) return args.slice(0, i);
+  }
+  return args;
+};
+
+/** Every `.name(…)` call site, with its argument text and where it ends. */
+const callSites = (source: string, name: string): { args: string; end: number }[] => {
+  const sites: { args: string; end: number }[] = [];
+  for (const match of source.matchAll(new RegExp(String.raw`\.${name}\(`, "g"))) {
+    const before = source.slice(0, match.index);
+    // `Array.from(...)` is not a table read, and `db.storage.from(bucket)` is a
+    // BUCKET — the object store, not a table, and not what the allowlist is about.
+    // `\s*$` because the chain is wrapped: `db.storage\n  .from(BUCKET)`.
+    if (name === "from" && /\b(?:Array|storage)\s*$/.test(before)) continue;
+    const open = match.index + match[0].length - 1;
+    let depth = 0;
+    let quote: string | null = null;
+    let i = open;
+    for (; i < source.length; i++) {
+      const c = source[i]!;
+      if (quote !== null) {
+        if (c === quote && source[i - 1] !== "\\") quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      else if (c === "(") depth++;
+      else if (c === ")" && --depth === 0) break;
+    }
+    sites.push({ args: source.slice(open + 1, i), end: i + 1 });
+  }
+  return sites;
+};
+
+type TableCall = {
+  file: string;
+  /** The resolved table/bucket name, or null when it could not be computed. */
+  table: string | null;
+  /** The source text of the argument, for the failure message. */
+  expr: string;
+  /** The resolved argument of the `.select()` IMMEDIATELY following, if any. */
+  select: string | null;
+};
+
+/**
+ * Every `.from()` in one file, resolved.
+ *
+ * ⚠ COMMENTS ARE STRIPPED FIRST. These files are heavily commented by design and
+ * the comments QUOTE the very calls being scanned — the docblock explaining this
+ * guard names `.from("fp_ledger")` in prose, which the scanner would otherwise
+ * report as a real read with no select list. Fix the scan, never the comment.
+ */
+const tableCallsIn = (file: string, rawSource: string): TableCall[] => {
+  const source = rawSource
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const bindings = stringConstants(source);
+  return callSites(source, "from").map((site) => {
+    const expr = firstArg(site.args).trim();
+    const following = /^\s*\.select\(/.exec(source.slice(site.end));
+    let select: string | null = null;
+    if (following !== null) {
+      const selectSite = callSites(source.slice(site.end), "select")[0];
+      if (selectSite !== undefined) {
+        select = resolveExpr(firstArg(selectSite.args).trim(), bindings);
+      }
+    }
+    return { file, table: resolveExpr(expr, bindings), expr, select };
+  });
+};
+
+const tableCalls = async (): Promise<TableCall[]> => {
+  const out: TableCall[] = [];
+  for (const file of await labSources()) {
+    out.push(...tableCallsIn(file, readFileSync(path.join(REPO_ROOT, file), "utf8")));
+  }
+  return out;
+};
+
 // ── The graph assertions ─────────────────────────────────────────────────────
 
 describe("every Image Lab DB touch goes through the service role", () => {
@@ -324,24 +473,24 @@ describe("every Image Lab DB touch goes through the service role", () => {
     "fp_ledger",
   ]);
 
-  const fromLiterals = async (): Promise<{ file: string; table: string }[]> => {
-    const out: { file: string; table: string }[] = [];
-    for (const file of await labSources()) {
-      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
-      // `Array.from(...)` is not a table read; everything else that spells
-      // `.from(` on a Supabase handle is.
-      for (const match of source.matchAll(/(?<!\bArray)\.from\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) {
-        out.push({ file, table: match[1]! });
-      }
-    }
-    return out;
-  };
+  /**
+   * ⚠ THE SELECT LISTS THE LAB MAY USE AGAINST `fp_ledger`, ENUMERATED.
+   *
+   * R12a — the buyer's name never leaves the ledger — used to be defended by a
+   * `\bpayer\b` TEXT SCAN, and a text scan is a spelling test. Verified: a probe
+   * module whose select list was built as `const COLS = "id, " + "pay" + "er"`
+   * passed the whole file, because the word is never spelled whole anywhere in
+   * it. So the list is RESOLVED and matched against this set, and widening it is
+   * a two-file diff with this docblock on the other side of it.
+   */
+  const LEDGER_SELECT_ALLOWLIST = new Set(["amount_cents, source, created_at"]);
 
   it("names ONLY the tables on the reviewed allowlist", async () => {
-    const literals = await fromLiterals();
-    expect(literals.length).toBeGreaterThan(0);
-    const offenders = literals.filter(
+    const calls = await tableCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    const offenders = calls.filter(
       ({ table }) =>
+        table !== null &&
         !LAB_TABLE_ALLOWLIST.has(table) &&
         // `storage.from(bucket)` is a bucket, not a table.
         table !== "image-lab" &&
@@ -353,24 +502,69 @@ describe("every Image Lab DB touch goes through the service role", () => {
     ).toEqual([]);
   });
 
-  it("resolves every table name through a LITERAL, so the allowlist can see it", async () => {
-    // A `.from(someVariable)` would make the assertion above vacuous for that
-    // call, exactly as a template literal defeated the earlier prefix scan.
-    for (const file of await labSources()) {
-      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
-      const dynamic = [...source.matchAll(/(?<!\bArray)\.from\(\s*([^"'`\s)][^)]*)\)/g)]
-        .map((m) => m[1]!.trim())
-        // Constants declared in the same module are literals by another name; the
-        // allowlist test above reads their values from the same file.
-        .filter((expr) => !/^[A-Z_][A-Z0-9_]*$/.test(expr));
-      expect(dynamic, `${file} builds a table name at runtime`).toEqual([]);
-    }
+  /**
+   * ⚠ THE HOLE THIS CLOSES WAS THE WHOLE UNIT.
+   *
+   * The previous version of this pair matched only `.from("literal")`, and the
+   * companion test EXEMPTED SCREAMING_CASE identifiers on the stated assumption
+   * that "the allowlist test above reads their values from the same file". It did
+   * not. Unit 6's loader names every table through a module constant
+   * (`const RUNS = "fp_image_lab_runs"`), so NONE of its fourteen `.from()` calls
+   * was checked by anything. Verified: a probe module doing
+   * `const T = "staff"; db.from(T).select("id, email, is_active")` passed 23/23.
+   *
+   * The exemption is gone. An argument that cannot be RESOLVED — to a literal, or
+   * through a `const` binding in the same file, or through a concatenation of
+   * those — is a violation outright.
+   */
+  it("resolves every table name to a value the allowlist can actually see", async () => {
+    const unresolved = (await tableCalls()).filter((call) => call.table === null);
+    expect(
+      unresolved.map((c) => `${c.file}: .from(${c.expr})`),
+      "a Lab module builds a table name the allowlist cannot resolve"
+    ).toEqual([]);
+  });
+
+  /**
+   * ⚠ NON-VACUITY, PER FILE, FOR THE FILE THAT ALMOST GOT AWAY.
+   *
+   * `expect(calls.length).toBeGreaterThan(0)` is satisfied by ANY file's calls,
+   * which is exactly how history-loader's fourteen went unchecked while the suite
+   * reported the allowlist as exercised.
+   */
+  it("the allowlist is non-vacuous for history-loader SPECIFICALLY", async () => {
+    const loader = (await tableCalls()).filter((c) =>
+      c.file.endsWith("lib/history-loader.ts")
+    );
+    expect(loader.length).toBeGreaterThanOrEqual(10);
+    expect(loader.every((c) => c.table !== null)).toBe(true);
+    expect(new Set(loader.map((c) => c.table))).toEqual(
+      new Set(["fp_image_lab_runs", "fp_image_lab_images", "fp_image_lab_references"])
+    );
   });
 
   it("NEVER selects `payer` — the only protection a non-consenting third party has", async () => {
-    // The buyer's name is excluded by CONSTRUCTION (origin R12a): it is enforced
-    // by a select-list STRING and nothing else, and `SaleRow.source` is already
-    // selected-and-unused, which proves unused columns do get pulled when listed.
+    // Two mechanisms, because the word scan alone is a spelling test:
+    //
+    //  A. STRUCTURAL. Every read of `fp_ledger` must be followed immediately by a
+    //     `.select()` whose argument RESOLVES to one of the reviewed lists above.
+    //     A concatenation that never spells `payer` still fails, because the
+    //     resolved value is what is compared.
+    const ledger = (await tableCalls()).filter((call) => call.table === "fp_ledger");
+    expect(ledger.length, "no fp_ledger read found — has the picker moved?").toBeGreaterThan(0);
+    for (const call of ledger) {
+      expect(
+        call.select,
+        `${call.file}: the fp_ledger read's select list does not resolve`
+      ).not.toBeNull();
+      expect(
+        LEDGER_SELECT_ALLOWLIST.has(call.select ?? ""),
+        `${call.file}: fp_ledger select list "${call.select}" is not on the reviewed allowlist`
+      ).toBe(true);
+    }
+
+    //  B. And the cheap scan, kept, because it also catches the column named in a
+    //     comment, a log line, or a type.
     for (const file of await labSources()) {
       const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
       const stripped = source
@@ -554,6 +748,104 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
     // traversing nothing and every assertion above would pass vacuously.
     expect(resolved).toContain(`${LAB}lib/image-lab-rules.ts`);
     expect(resolved).toContain("app/fp/lib/upload-rules.ts");
+  });
+
+  /**
+   * ⚠ THE TABLE ALLOWLIST AND THE PAYER FENCE HAD NO NEGATIVE FIXTURES AT ALL —
+   * alone among every guard in this file — AND THAT IS EXACTLY WHY BOTH FELL.
+   *
+   * Each case below is a bypass that was VERIFIED to pass the previous version
+   * with the whole suite green. They are judged as SOURCE TEXT so a fixture can
+   * never itself become the defect it describes.
+   */
+  describe("the table allowlist CATCHES what it is supposed to catch", () => {
+    const LAB_TABLES = new Set([
+      "fp_image_lab_runs",
+      "fp_image_lab_images",
+      "fp_image_lab_references",
+      "children",
+      "families",
+      "fp_player_profiles",
+      "fp_player_saves",
+      "fp_ledger",
+    ]);
+    const LEDGER_OK = new Set(["amount_cents, source, created_at"]);
+
+    /** The production judgement, applied to one fixture's text. */
+    const judge = (code: string) => {
+      const calls = tableCallsIn("fixture.ts", code);
+      return {
+        unresolved: calls.filter((c) => c.table === null),
+        offTable: calls.filter(
+          (c) =>
+            c.table !== null && !LAB_TABLES.has(c.table) && !c.table.startsWith("image-lab")
+        ),
+        badLedger: calls.filter(
+          (c) => c.table === "fp_ledger" && !LEDGER_OK.has(c.select ?? "")
+        ),
+      };
+    };
+
+    it("REPORTS `const T = \"staff\"; db.from(T)` — the probe that passed 23/23", () => {
+      const found = judge(
+        `const T = "staff";\nconst rows = db.from(T).select("id, email, is_active");`
+      );
+      expect(found.unresolved).toEqual([]);
+      expect(found.offTable.map((c) => c.table)).toEqual(["staff"]);
+    });
+
+    it("REPORTS a concatenated table name that never spells the table whole", () => {
+      const found = judge(`const T = "st" + "aff";\nconst rows = db.from(T).select("id");`);
+      expect(found.offTable.map((c) => c.table)).toEqual(["staff"]);
+    });
+
+    it("REPORTS a table name it cannot resolve at all — no exemption for ALL CAPS", () => {
+      // The old companion test skipped `/^[A-Z_][A-Z0-9_]*$/` outright.
+      expect(judge(`const rows = db.from(TABLE_NAME).select("id");`).unresolved).toHaveLength(1);
+      expect(judge(`const rows = db.from(pick(x)).select("id");`).unresolved).toHaveLength(1);
+      expect(judge("const rows = db.from(`fp_${x}`).select(\"id\");").unresolved).toHaveLength(1);
+    });
+
+    it("REPORTS the payer probe: a ledger select built by concatenation", () => {
+      // VERIFIED to defeat the `\bpayer\b` scan: the word is never spelled whole.
+      const found = judge(
+        `const COLS = "id, " + "pay" + "er";\nconst rows = db.from("fp_ledger").select(COLS);`
+      );
+      expect(found.badLedger).toHaveLength(1);
+      expect(found.badLedger[0]!.select).toBe("id, payer");
+    });
+
+    it("REPORTS a ledger select it cannot resolve", () => {
+      expect(
+        judge(`const rows = db.from("fp_ledger").select(buildColumns());`).badLedger
+      ).toHaveLength(1);
+    });
+
+    it("does NOT report the real shapes — a rule that reddens on correct code gets deleted", () => {
+      const found = judge(
+        [
+          `const RUNS = "fp_image_lab_runs";`,
+          `const COLUMNS = "id, staff_id, " + "created_at";`,
+          `const a = db.from(RUNS).select(COLUMNS).eq("id", runId);`,
+          `const b = db.from("fp_ledger").select("amount_cents, source, created_at");`,
+          `const c = db.storage.from(IMAGE_LAB_BUCKET).createSignedUrl(k, 600);`,
+          `const d = Array.from({ length: 3 }, (_, i) => i);`,
+        ].join("\n")
+      );
+      expect(found.offTable).toEqual([]);
+      expect(found.badLedger).toEqual([]);
+      // `db.storage.from(bucket)` is skipped outright — it is the object store,
+      // not a table — so nothing here is unresolvable.
+      expect(found.unresolved).toEqual([]);
+    });
+
+    it("resolves a MULTI-LINE concatenated constant — the real RUN_COLUMNS shape", () => {
+      const calls = tableCallsIn(
+        "f.ts",
+        `const C =\n  "id, staff_id, " +\n  "template, created_at";\nconst q = db.from("fp_ledger").select(C);`
+      );
+      expect(calls[0]!.select).toBe("id, staff_id, template, created_at");
+    });
   });
 
   it("the source list includes every extension and excludes only *.test.*", async () => {

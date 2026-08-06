@@ -45,6 +45,20 @@ import type {
  */
 export const IMAGE_LAB_PICKER_CHILD_LIMIT = 200;
 
+/**
+ * ⚠ THE LEDGER SELECT LIST, AS A NAMED CONSTANT — because the guard that keeps
+ * `payer` out is now STRUCTURAL rather than a word search.
+ *
+ * `service-role-only.test.ts` used to defend R12a with a `\bpayer\b` text scan,
+ * which a select list built as `"id, " + "pay" + "er"` walks straight past — the
+ * word is never spelled whole anywhere in the file. So the test now RESOLVES the
+ * argument of the `.select()` that immediately follows `.from("fp_ledger")` and
+ * requires it to be one of a small reviewed set of exact column lists. Widening
+ * this string is therefore a two-file diff with the reviewed allowlist on the
+ * other side of it, which is the review conversation the word scan skipped.
+ */
+export const LEDGER_SALE_COLUMNS = "amount_cents, source, created_at";
+
 async function loadChildRows(
   db: ImageLabDb,
   filter: { childId?: string }
@@ -140,10 +154,11 @@ export function contentPickerDeps(db: ImageLabDb): ContentPickerDeps {
     },
 
     async loadSales(profileId) {
-      // ⚠ NO `payer`. Read the module header before adding a column here.
+      // ⚠ NO `payer`. Read the module header before widening LEDGER_SALE_COLUMNS,
+      // and expect the guard test's reviewed allowlist to red until you do.
       const { data, error } = await db
         .from("fp_ledger")
-        .select("amount_cents, source, created_at")
+        .select(LEDGER_SALE_COLUMNS)
         .eq("profile_id", profileId)
         .eq("kind", "sale")
         .order("created_at", { ascending: false })

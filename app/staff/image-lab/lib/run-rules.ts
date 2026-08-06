@@ -706,7 +706,7 @@ export function buildGrid<T extends GridAttempt>(
 ): GridCell<T>[] {
   const byKey = new Map<string, T[]>();
   for (const row of rows) {
-    const key = `${row.modelId} ${row.cellOrdinal}`;
+    const key = `${row.modelId}\u0000${row.cellOrdinal}`;
     const bucket = byKey.get(key);
     if (bucket) bucket.push(row);
     else byKey.set(key, [row]);
@@ -723,7 +723,7 @@ export function buildGrid<T extends GridAttempt>(
       ...new Set(rows.filter((r) => r.modelId === modelId).map((r) => r.cellOrdinal)),
     ].sort((a, b) => a - b);
     for (const cellOrdinal of ordinals) {
-      const attempts = [...(byKey.get(`${modelId} ${cellOrdinal}`) ?? [])].sort(
+      const attempts = [...(byKey.get(`${modelId}\u0000${cellOrdinal}`) ?? [])].sort(
         (a, b) =>
           b.createdAtMs - a.createdAtMs || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
       );

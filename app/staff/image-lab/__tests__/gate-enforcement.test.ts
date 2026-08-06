@@ -306,15 +306,59 @@ const functionBody = (code: string, start: number) => {
  * one being declared without the keyword and returning a promise — and nothing
  * about "did this body await the gate" needs the keyword to be true.
  */
-const exportedFunctionBodies = (code: string) => {
-  const bodies: string[] = [];
-  const re =
-    /export\s+(?:default\s+)?(?:(?:async\s+)?function\b|const\s+\w+\s*(?::[^=\n]+)?=\s*(?:async\s*)?(?:\(|function\b))/g;
-  for (const match of code.matchAll(re)) {
-    bodies.push(functionBody(code, match.index));
-  }
-  return bodies;
+/**
+ * ⚠ AND A BARE-IDENTIFIER PARAMETER IS NOT PART OF THE THREAT MODEL EITHER.
+ *
+ * The pattern required `(` or `function` after `async`, so
+ * `export const foo = async input => {}` — a perfectly ordinary Server Action —
+ * matched NOTHING, and all four source fences skipped it while
+ * `expect(bodies.length).toBeGreaterThan(0)` passed on a gated sibling's behalf.
+ * VERIFIED: a probe action
+ *
+ *   export const wideOpen = async input => {
+ *     if (process.env.NODE_ENV !== "production") { await requireStaff(); }
+ *     …
+ *   }
+ *
+ * passed all 39 tests while being a network-reachable, UNGATED POST in
+ * production. The parenless arrow is now sliced like any other export.
+ *
+ * The body of a parenless arrow starts after the `=>`; the paren-stepping in
+ * {@link functionBody} would otherwise run off into the first `(` it could find.
+ * A CONCISE body (no `{`) yields "" deliberately — an exported function with no
+ * braced body cannot contain `await requireStaff();` as a standalone statement,
+ * so it must fail the fence loudly rather than be skipped quietly.
+ */
+const EXPORTED_HEAD =
+  /export\s+(?:(default)\s+)?(?:(?:async\s+)?function\s*(\w+)?|const\s+(\w+)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:(\w+)\s*=>|\(|function\b))/g;
+
+/** The body starting at the first `{` at or after `i`, bounded as above. */
+const bracedBodyFrom = (code: string, i: number) => {
+  const rest = code.slice(i);
+  if (!/^\s*\{/.test(rest)) return "";
+  const open = code.indexOf("{", i);
+  const end = code.indexOf("\n}", open);
+  return code.slice(open, end === -1 ? code.length : end);
 };
+
+/** Every exported entry point, NAMED, as a source slice. */
+const exportedFunctionEntries = (code: string): { name: string; body: string }[] => {
+  const entries: { name: string; body: string }[] = [];
+  for (const match of code.matchAll(EXPORTED_HEAD)) {
+    const name = match[1] !== undefined ? "default" : match[2] ?? match[3] ?? "(anonymous)";
+    // Group 4 is the bare identifier of a parenless arrow; when it matched, the
+    // match ends AT the `=>` and the body follows directly.
+    const body =
+      match[4] !== undefined
+        ? bracedBodyFrom(code, match.index + match[0].length)
+        : functionBody(code, match.index);
+    entries.push({ name, body });
+  }
+  return entries;
+};
+
+const exportedFunctionBodies = (code: string) =>
+  exportedFunctionEntries(code).map((entry) => entry.body);
 
 const GATE_CALL = /await\s+requireStaff\s*\(\s*\)/;
 
@@ -402,6 +446,37 @@ describe("supplementary source fence — properties a spy cannot see", () => {
       }
     }
   });
+
+  /**
+   * ⚠ THE FENCE'S EXPORT LIST IS CROSS-CHECKED AGAINST THE MODULE'S RUNTIME
+   * `Object.keys`. AN EXPORT THE REGEX COULD NOT SLICE FAILS LOUDLY.
+   *
+   * This is the structural answer to the whole class of bug the two fixes above
+   * are instances of. A regex over source will always have shapes it does not
+   * know — the parenless arrow was one, `export { foo }` list-exports are
+   * another, and there will be a third — and every one of them was SILENT,
+   * because the emptiness guard was satisfied by the exports it COULD see. The
+   * runtime module knows exactly which functions it exports. If the fence cannot
+   * name one of them, the fence is not covering it, and that is a failure rather
+   * than a gap.
+   */
+  it("the source fence can SEE every function the module actually exports", async () => {
+    for (const file of await gatedFiles()) {
+      const mod = (await import(/* @vite-ignore */ specifierFor(file))) as Record<
+        string,
+        unknown
+      >;
+      const runtime = Object.keys(mod).filter((key) => typeof mod[key] === "function");
+      expect(runtime.length, `${file} exports no function at all`).toBeGreaterThan(0);
+
+      const sliced = new Set(exportedFunctionEntries(sourceOf(file)).map((e) => e.name));
+      const invisible = runtime.filter((name) => !sliced.has(name));
+      expect(
+        invisible,
+        `${file}: the source fence cannot slice ${invisible.join(", ")} — it is exported and UNCHECKED`
+      ).toEqual([]);
+    }
+  }, IMPORT_TIMEOUT_MS);
 
   it("every `use server` file under the Lab gates each of its exported actions", async () => {
     // Server Actions do not render through a layout either, and `proxy.ts` does
@@ -625,5 +700,78 @@ describe("the extractor the four source fences depend on", () => {
     const gated = exportedFunctionBodies(fixture).filter((body) => GATE_CALL.test(body));
     expect(gated).toHaveLength(2);
     expect(gated.length).toBeLessThan(exportedFunctionBodies(fixture).length);
+  });
+
+  // ── NEGATIVE FIXTURES for the two shapes that shipped past this fence ──────
+
+  /**
+   * ⚠ THE PARENLESS ASYNC ARROW. VERIFIED to pass all 39 tests while being an
+   * ungated network-reachable POST in production, because the extractor matched
+   * NOTHING for it and the gated sibling satisfied the emptiness guard.
+   */
+  const parenless = [
+    "export const gated = async (input?: unknown) => {",
+    "  await requireStaff();",
+    "  return input;",
+    "\n}",
+    "",
+    "export const wideOpen = async input => {",
+    '  if (process.env.NODE_ENV !== "production") {',
+    "    await requireStaff();",
+    "  }",
+    "  return danger(input);",
+    "\n}",
+    "",
+    "export const concise = async input => danger(input);",
+  ].join("\n");
+
+  it("SEES a parenless async arrow, and reports it as ungated at the top level", () => {
+    const entries = exportedFunctionEntries(parenless);
+    expect(entries.map((e) => e.name)).toEqual(["gated", "wideOpen", "concise"]);
+
+    const wideOpen = entries.find((e) => e.name === "wideOpen")!;
+    // The gate IS in the body — behind a branch. The unconditional fence reads
+    // what precedes it, and what precedes it is an `if`.
+    expect(wideOpen.body).toMatch(GATE_CALL);
+    expect(wideOpen.body.slice(0, wideOpen.body.search(GATE_CALL))).toMatch(
+      /\b(?:if|else|switch|try|catch|for|while)\s*[({]/
+    );
+
+    // A CONCISE body cannot hold a standalone gate statement, so it is reported
+    // as an empty body and reddens the fence rather than being skipped.
+    expect(entries.find((e) => e.name === "concise")!.body).toBe("");
+  });
+
+  it("the cross-check NAMES an export the regex cannot slice — `export { foo }`", () => {
+    // List-exports are invisible to the head regex in exactly the way the
+    // parenless arrow was. The runtime `Object.keys` cross-check is what turns
+    // that from a silent gap into a failure.
+    const listExport = [
+      "async function hidden(input?: unknown) {",
+      "  return input;",
+      "\n}",
+      "",
+      "export { hidden };",
+    ].join("\n");
+    const sliced = new Set(exportedFunctionEntries(listExport).map((e) => e.name));
+    expect(sliced.has("hidden")).toBe(false);
+    // …which is precisely what the production cross-check asserts on: a runtime
+    // export named `hidden` with no slice by that name.
+    expect(["hidden"].filter((name) => !sliced.has(name))).toEqual(["hidden"]);
+  });
+
+  it("still names a default export and an ordinary declaration", () => {
+    const names = exportedFunctionEntries(
+      [
+        "export default async function Page(props) {",
+        "  await requireStaff();",
+        "\n}",
+        "",
+        "export async function POST(request) {",
+        "  await requireStaff();",
+        "\n}",
+      ].join("\n")
+    ).map((e) => e.name);
+    expect(names).toEqual(["default", "POST"]);
   });
 });

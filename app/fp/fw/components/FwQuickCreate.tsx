@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/app/fp/components/system/Button";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { BANDS } from "@/app/fp/content/types";
-import type { Band } from "@/app/fp/content/types";
-import { lookupFwStudentMatch, quickCreateFwStudent } from "@/app/fp/lib/actions/fw-student";
-import type { FwMatchVerdict } from "@/app/fp/lib/fw-match-rules";
-import { FW_BAND_LABEL } from "@/app/fp/lib/fw-nav-rules";
-import { isNextRedirect } from "@/app/fp/lib/next-redirect";
-import type { FwQuickCreateActionResult } from "@/app/fp/lib/fw-student-core";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { BANDS } from "@/app/lib/fp/content/types";
+import type { Band } from "@/app/lib/fp/content/types";
+import { lookupFwStudentMatch, quickCreateFwStudent } from "@/app/lib/fp/actions/fw-student";
+import type { FwMatchVerdict } from "@/app/lib/fp/fw-match-rules";
+import { FW_BAND_LABEL } from "@/app/lib/fp/fw-nav-rules";
+import { isNextRedirect } from "@/app/lib/fp/next-redirect";
+import type { FwQuickCreateActionResult } from "@/app/lib/fp/fw-student-core";
 
 /**
  * Quick-create (FW Unit 4; FW-R7, Decision 13, PROPOSED-1, gaps G6/G10) — three

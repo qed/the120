@@ -8,9 +8,9 @@ import {
   type DashboardGateChild,
 } from "@/app/lib/funnel/session-rules";
 import { PATH_TASK_TOTAL, pathBarWidthPct, sumVerifiedTaskCounts } from "@/app/dashboard/data";
-import { MANIFEST_2026_27 } from "@/app/fp/content/manifest";
-import { VERIFIED_TASK_STATE } from "@/app/fp/lib/progress-core";
-import { TASK_STATES } from "@/app/fp/lib/transition-table";
+import { MANIFEST_2026_27 } from "@/app/lib/fp/content/manifest";
+import { VERIFIED_TASK_STATE } from "@/app/lib/fp/progress-core";
+import { TASK_STATES } from "@/app/lib/fp/transition-table";
 
 /**
  * Reconnect U11 (R12, flip tier): the whole-dashboard register flip.
@@ -253,7 +253,12 @@ describe("DashboardApp — the two registers never mix on one screen", () => {
     expect(home).toMatch(/Welcome,/);
     expect(home).toMatch(/Your children/);
     expect(home).toMatch(/Keep building/);
-    expect(home).toMatch(/href="\/fp"/);
+    // "Keep building" used to point at `/fp`, The120's own First Profit UI.
+    // v3 Unit 10 deleted that UI; the button now sends the family to the app
+    // in its own codebase, through the SAME constant the account-ready screen
+    // and the dashboard data layer already use.
+    expect(home).toMatch(/href=\{FIRST_PROFIT_SIGN_IN_URL\}/);
+    expect(home).not.toMatch(/href="\/fp"/);
     // The application register's furniture stays out of the Path shell.
     expect(home).not.toMatch(/Gauntlet/);
     expect(home).not.toMatch(/seats remain/);
@@ -373,7 +378,7 @@ describe("the screen-16 bars carry REAL verified counts, not the 0 placeholder",
 
 describe("ONE verified-count definition — fp's canonical rule, pinned end to end", () => {
   const migration = read("supabase/migrations/20260722120000_path_progress.sql");
-  const journeyLoader = read("app/fp/lib/journey-loader.ts");
+  const gateCore = read("app/lib/funnel/dashboard-gate-core.ts");
 
   it("VERIFIED_TASK_STATE is the fp state machine's terminal 'verified' member", () => {
     expect(VERIFIED_TASK_STATE).toBe("verified");
@@ -391,10 +396,14 @@ describe("ONE verified-count definition — fp's canonical rule, pinned end to e
     expect(dbStates).toContain(VERIFIED_TASK_STATE);
   });
 
-  it("fp's own verifiedTotal fold counts through the SAME constant — the definition cannot fork", () => {
-    expect(journeyLoader).toMatch(/if \(state === VERIFIED_TASK_STATE\) phaseVerified\+\+;/);
-    // No stray literal comparison left behind in the loader's fold.
-    expect(journeyLoader).not.toMatch(/state === "verified"/);
+  it("the dashboard's own count query filters through the SAME constant — the definition cannot fork", () => {
+    // This pin used to name `app/fp/lib/journey-loader.ts`, the Path app's
+    // fold. v3 Unit 10 deleted the First Profit UI, so the dashboard's own
+    // query is now the only consumer of the rule — and it is the one that
+    // matters, because it is what a family sees.
+    expect(gateCore).toMatch(/\.eq\("state", VERIFIED_TASK_STATE\)/);
+    // No stray literal comparison left behind beside it.
+    expect(gateCore).not.toMatch(/"state", "verified"/);
   });
 
   it("the dashboard total IS the fp manifest's task count — 125 today, one source", () => {

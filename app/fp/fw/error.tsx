@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { Button } from "@/app/fp/components/system/Button";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 
 /**
  * The FW subtree's error boundary (FW Unit 4, added by the reliability review).

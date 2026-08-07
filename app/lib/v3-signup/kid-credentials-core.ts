@@ -39,7 +39,7 @@ import {
   consentVerdict,
   FP_CONSENT_POLICY,
 } from "@/app/api/fp/signup/consent-rules";
-import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
+import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
 import { V3_CONSENT_JURISDICTION } from "./v3-onboarding-core";
 
 /* ------------------------------------------------------------------- deps */

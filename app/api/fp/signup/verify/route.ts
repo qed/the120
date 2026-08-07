@@ -19,7 +19,7 @@ import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import { z } from "zod";
 import {
   buildAllowedOrigins,

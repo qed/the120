@@ -2,18 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { applyFwCheckIn } from "@/app/fp/lib/actions/fw-checkin";
-import type { FwCheckInActionResult } from "@/app/fp/lib/fw-checkin-core";
-import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
-import { enqueueFwCheckIns, enqueueFwFlip } from "@/app/fp/lib/fw-sync-client";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { applyFwCheckIn } from "@/app/lib/fp/actions/fw-checkin";
+import type { FwCheckInActionResult } from "@/app/lib/fp/fw-checkin-core";
+import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/lib/fp/fw-call";
+import { enqueueFwCheckIns, enqueueFwFlip } from "@/app/lib/fp/fw-sync-client";
 import {
   fwFlipLeg1Verdict,
   fwPendingMarker,
   projectFwPendingState,
   type FwFlipLeg,
   type FwQueueEntry,
-} from "@/app/fp/lib/fw-sync-rules";
+} from "@/app/lib/fp/fw-sync-rules";
 import {
   decideFwAction,
   fwActionTarget,
@@ -22,8 +22,8 @@ import {
   type FwAction,
   type FwClientIdLedger,
   type FwStudentResult,
-} from "@/app/fp/lib/fw-rules";
-import type { TaskState } from "@/app/fp/lib/transition-table";
+} from "@/app/lib/fp/fw-rules";
+import type { TaskState } from "@/app/lib/fp/transition-table";
 
 /**
  * The inline decision control (ops-guide redesign Unit 9; R20, R22, R22a, R22b,

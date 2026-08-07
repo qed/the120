@@ -30,7 +30,7 @@ vi.mock("@/app/lib/supabase/parent-token", () => ({
     },
   }),
 }));
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: () => ({ allowed: true }),
   releaseRateLimitEvent: () => {},
   clearRateLimitBucket: () => {},

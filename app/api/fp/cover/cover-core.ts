@@ -77,8 +77,8 @@ import {
   photoConsentVerdict,
   type PhotoConsentRow,
 } from "@/app/api/fp/signup/consent-rules";
-import { decideCoverStatusWrite, type CoverStatus } from "@/app/fp/lib/cover-store-rules";
-import { renderTemplateCover, type CoverTemplateInput } from "@/app/fp/lib/cover-template";
+import { decideCoverStatusWrite, type CoverStatus } from "@/app/lib/fp/cover-store-rules";
+import { renderTemplateCover, type CoverTemplateInput } from "@/app/lib/fp/cover-template";
 import {
   COVER_GENERATION_CAP,
   COVER_RESERVE_CAS_RETRIES,
@@ -126,7 +126,7 @@ export type CoverDeps = {
    * ⚠ THE AI VENDOR SEAM — ABSENT IN THIS BUILD, ON PURPOSE.
    *
    * When the gpt-image-2 adapter lands it is injected here, alongside a
-   * `BlobPort` for persistence (app/fp/lib/cover-store.ts already defines the
+   * `BlobPort` for persistence (app/lib/fp/cover-store.ts already defines the
    * port and documents what a real adapter must satisfy). Until then it is
    * `undefined`, `resolveCoverMode` therefore answers `"template"` regardless of
    * `COVER_AI_LIVE`, and no code path can reach a vendor call. It is deliberately

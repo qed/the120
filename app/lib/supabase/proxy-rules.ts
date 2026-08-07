@@ -27,15 +27,13 @@ export type ProxyOutcome =
   | "crm-login"
   /** Session without the admin claim → rewrite to 404 semantics. */
   | "crm-staff-only"
-  /** No session on a guarded /fp route → redirect to the First Profit sign-in. */
-  | "path-login"
   /**
    * No session on a guarded /fp/fw route → redirect to the GUIDE sign-in
-   * (FW Unit 2). Deliberately a separate outcome rather than reusing
-   * "path-login": /fp/fw is a different audience behind the same URL prefix.
-   * A guide whose session expired at 9:05 on a Saturday must land on the door
-   * that takes their email and password, not on the student/parent door — which
-   * would take their name, fail, and tell them a parent can reset it.
+   * (FW Unit 2). The student/parent counterpart ("path-login" → /fp/sign-in)
+   * went with the First Profit UI in v3 plan Unit 10: /fp/* is now nothing but
+   * redirect stubs, so there is no signed-out /fp route left to send anywhere.
+   * A guide whose session expired at 9:05 on a Saturday must still land on the
+   * door that takes their email and password.
    */
   | "fw-login";
 
@@ -164,20 +162,19 @@ function resolveAdminClaimOutcome(session: ProxySessionLike): AdminClaimOutcome 
  * - unguarded path                       → "pass"
  * - /fp/fw/* without a session         → "fw-login"   (the GUIDE door)
  * - /fp/fw/* with any session          → "pass"
- * - /fp/*   without a session          → "path-login"
- * - /fp/*   with any session           → "pass"  (role checks are per-Server-Function)
+ * - /fp/*   (the retired UI redirect stubs) → "pass", session or not
  * - /staff/*  → the admin-claim gate, identical to /crm (R6)
  * - /crm/*    without a session          → "crm-login"
  * - /crm/*    without the admin claim    → "crm-staff-only"
  * - /crm/*    with the admin claim       → "pass"
  *
- * The /fp/fw branch must come BEFORE the /fp branch — /fp/fw/* also
- * matches /fp/*, and whichever runs first decides which door an expired
- * session lands on. This ordering is asserted directly in the proxy tests.
+ * The /fp/fw branch must come BEFORE the /fp branch — /fp/fw/* also matches
+ * /fp/*, and the /fp branch now passes everything, so losing the ordering would
+ * silently unguard the whole guide app. This ordering is asserted directly in
+ * the proxy tests.
  *
- * Neither /fp branch checks a role here, and the FW one is no exception. Path
- * and FW roles are grants (Decision 2 / FW-D9), not a JWT claim, so the
- * authoritative checks are requirePathUser() and resolveFwActor() inside every
+ * The FW branch checks no role here. FW roles are grants (FW-D9), not a JWT
+ * claim, so the authoritative check is resolveFwActor() inside every
  * Server Function and page — and Next 16's own docs warn that a proxy matcher
  * does not reliably cover Server Function calls anyway. A signed-in student
  * therefore PASSES the proxy at /fp/fw and is refused by the surface itself,
@@ -197,9 +194,15 @@ export function resolveProxyOutcome({
     return session ? "pass" : "fw-login";
   }
 
-  if (pathname === "/fp" || pathname.startsWith("/fp/")) {
-    return session ? "pass" : "path-login";
-  }
+  // Everything else under /fp is a RETIRED First Profit UI route — a page whose
+  // whole body is a redirect to firstprofit.school or the dashboard (v3 plan
+  // Unit 10, `app/lib/fp/retired-ui-routes.ts`). There is nothing left behind
+  // this prefix to guard: no data read, no session used, no render. Gating it
+  // would be actively wrong rather than merely useless — a signed-out PARENT
+  // holding `/fp/family` or `/fp/review` would be bounced to the kid's sign-in
+  // door instead of to their own dashboard, which is the one thing the
+  // redirects exist to prevent.
+  if (pathname === "/fp" || pathname.startsWith("/fp/")) return "pass";
 
   // The staff hub (Staff Front Door Unit 2, R6). This branch and the catch-all
   // below return the SAME thing today, deliberately — it is a tripwire, not a
@@ -225,8 +228,6 @@ export function outcomeDestination(
       return "/crm/login";
     case "crm-staff-only":
       return "/crm/staff-only";
-    case "path-login":
-      return "/fp/sign-in";
     case "fw-login":
       return "/fp/fw/sign-in";
   }

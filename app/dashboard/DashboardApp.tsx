@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SEATS_REMAINING, SEATS_TOTAL, groups } from "@/app/lib/site";
 import { skinForGrade } from "@/app/lib/funnel/miniapp-rules";
 import {
@@ -23,6 +24,8 @@ import { useDashboard } from "./store";
 import { DashHeader, Meter } from "./ui";
 import SignIn from "./SignIn";
 import KidCredentials, { type ConsentPolicyBundle } from "./KidCredentials";
+import KidSite from "./KidSite";
+import type { ParentSiteRow } from "@/app/lib/fp/fp-public-site-rules";
 import { V3_ADD_KID_HREF, type RemapContext } from "@/app/lib/v3-signup/remap-rules";
 
 /**
@@ -64,9 +67,17 @@ export default function DashboardApp({
   photoConsentChildIds = null,
   consentPolicy,
   remapCtx,
+  fpSites = null,
 }: {
   seatsRemaining?: number;
   register?: DashboardRegister;
+  /** Each child's First Profit PUBLIC PAGE and its state (R21/R22), loaded
+   *  server-side and scoped to this parent. A child with no claimed handle is
+   *  simply absent. `null` = the read failed or there was no session, and the
+   *  take-offline control then renders for nobody — offering the wrong
+   *  affordance is worse than offering none until the next load. Optional so
+   *  tests that mount this component without a server keep compiling. */
+  fpSites?: ParentSiteRow[] | null;
   /** Child ids whose photo/cover consent gate is OPEN (v3 Unit 8); null = the
    *  server read failed, and the panel then offers neither affordance. */
   photoConsentChildIds?: string[] | null;
@@ -275,10 +286,20 @@ export default function DashboardApp({
   // "open" answer, and the panel treats null as "offer nothing".
   const consentFor = (id: string): boolean | null =>
     photoConsentChildIds === null ? null : photoConsentChildIds.includes(id);
-  const credentialsPanel = (c: Child) =>
-    consentPolicy ? (
-      <KidCredentials child={c} photoConsentOpen={consentFor(c.id)} policy={consentPolicy} />
-    ) : null;
+  // The per-child parent panels, in ONE helper so every card carries the same
+  // set: the credentials/permissions disclosure, then the public-page control
+  // for a child who has claimed a handle. A child with no site gets no strip.
+  const credentialsPanel = (c: Child) => {
+    const site = fpSites?.find((s) => s.childId === c.id) ?? null;
+    return (
+      <>
+        {consentPolicy ? (
+          <KidCredentials child={c} photoConsentOpen={consentFor(c.id)} policy={consentPolicy} />
+        ) : null}
+        {site ? <KidSite site={site} /> : null}
+      </>
+    );
+  };
 
   const isPath = register === "path";
 
@@ -482,7 +503,7 @@ export default function DashboardApp({
                         : `Deposited · working to ${DEPOSIT_REFUND_DEADLINE_LABEL}`}
                     </span>
                     <Link
-                      href="/fp"
+                      href={FIRST_PROFIT_SIGN_IN_URL}
                       className="inline-flex h-10 flex-none items-center justify-center rounded-lg bg-hq-ink px-4 font-path-mono text-[0.65rem] uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90"
                     >
                       Keep building

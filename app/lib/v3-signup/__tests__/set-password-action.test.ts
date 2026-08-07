@@ -20,7 +20,7 @@ const rate = vi.hoisted(() => ({
 const session = vi.hoisted(() => ({ user: null as { id: string } | null }));
 const core = vi.hoisted(() => ({ setParentPassword: vi.fn() }));
 
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: (key: string) => {
     rate.checked.push(key);
     return { allowed: rate.allowed, retryAfterMs: 0 };

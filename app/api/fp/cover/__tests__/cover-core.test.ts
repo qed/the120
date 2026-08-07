@@ -21,7 +21,7 @@ import {
   stagesForMode,
   type CoverStage,
 } from "../cover-rules";
-import { isTerminalCoverStatus, type CoverStatus } from "@/app/fp/lib/cover-store-rules";
+import { isTerminalCoverStatus, type CoverStatus } from "@/app/lib/fp/cover-store-rules";
 
 /**
  * The cover core (plan Unit 4) driven by EXECUTION against the stateful

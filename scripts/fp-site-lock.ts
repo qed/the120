@@ -1,7 +1,7 @@
 /**
  * Operator CLI: lock/unlock a First Profit public site by handle
  * (real-public-site plan, Unit 2; R22). Drives the SAME core as the CRM staff
- * action (app/fp/lib/fp-site-ops-core.ts — the fw-ops convention: the CLI is
+ * action (app/lib/fp/fp-site-ops-core.ts — the fw-ops convention: the CLI is
  * never a fork) and writes the SAME 'fp-site-lock' audit row.
  *
  *   ACTOR=<staff auth user id> npx tsx scripts/fp-site-lock.ts lock cedric
@@ -15,7 +15,7 @@ import { loadSupabaseEnv } from "./load-env";
 import {
   recordFpSiteLockAudit,
   setFpSiteOperatorLock,
-} from "../app/fp/lib/fp-site-ops-core";
+} from "../app/lib/fp/fp-site-ops-core";
 
 async function main() {
   const [verb, handle] = process.argv.slice(2);

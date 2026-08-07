@@ -11,11 +11,17 @@ export default defineConfig({
       "app/lib/**/__tests__/**/*.test.{ts,tsx}",
       "app/gauntlet/**/__tests__/**/*.test.{ts,tsx}",
       "app/api/**/__tests__/**/*.test.{ts,tsx}",
-      // First Profit (T1 Unit 2). Added with the first Path test, not after it —
-      // a directory outside this allowlist silently never runs while
-      // `npm run test` stays green (docs/solutions/test-failures/
-      // vitest-include-allowlist-new-test-dirs-silently-never-run-2026-07-18.md).
-      "app/fp/**/__tests__/**/*.test.{ts,tsx}",
+      // NOT listed, deliberately: `app/fp/**` (v3 plan Unit 10). It carried the
+      // First Profit tests from T1 Unit 2 until that unit relocated the shared
+      // modules to `app/lib/fp/**` — which `app/lib/**` above already covers —
+      // and deleted the First Profit UI. What is left under `app/fp` is the
+      // Founders Weekend guide app and the retirement redirect stubs, and NO
+      // test file lives under either: FW's source-pin tests sit beside the
+      // modules they pin, in `app/lib/fp/__tests__`. A glob matching nothing is
+      // worse than no glob — it reads as coverage. If a test is ever added
+      // under `app/fp` the include-coverage tripwire
+      // (app/lib/__tests__/vitest-include-coverage.test.ts) reddens and asks
+      // for the glob back, which is the correct signal rather than a nuisance.
       // The staff hub (Staff Front Door Unit 2). Same rule, same commit as the
       // first test under it — and from this unit on, enforced rather than
       // remembered: app/lib/__tests__/vitest-include-coverage.test.ts fails if

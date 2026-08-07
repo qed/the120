@@ -42,15 +42,15 @@
  * newest first, capped at SUGGESTIONS_PAGE_CAP.
  */
 
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
 import {
   encodeRateLimitSegment,
   type RateLimitConfig,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 import {
   normalizeFeedbackKind,
   type FeedbackKind,
-} from "@/app/fp/lib/fp-task-feedback-rules";
+} from "@/app/lib/fp/fp-task-feedback-rules";
 
 /* -------------------------------------------------------------- staff roles */
 

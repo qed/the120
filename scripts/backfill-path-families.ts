@@ -23,7 +23,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
+import { ensurePathFamilyForParent } from "@/app/lib/fp/provision-core";
 import { loadSupabaseEnv } from "./load-env";
 
 async function main() {

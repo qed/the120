@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 
 /**
  * The sticky ops tab row (ops redesign Unit 1; R1–R4, R10, R11, R13) — CrmTabs'
@@ -14,7 +14,7 @@ import { Icon } from "@/app/fp/components/system/Icon";
  * the bar is ever unmounted (the staff-bar plan's named rollback). This contract
  * moved here from `(app)/ops/layout.tsx` and is pinned in both
  * `app/lib/staff-bar/__tests__/bar-wiring.test.ts` and
- * `app/fp/lib/__tests__/fw-ops-chrome-wiring.test.ts`.
+ * `app/lib/fp/__tests__/fw-ops-chrome-wiring.test.ts`.
  *
  * Client component only for pathname/searchParams-driven state — active pill,
  * archived-toggle direction. Everything it links to stays server-rendered.

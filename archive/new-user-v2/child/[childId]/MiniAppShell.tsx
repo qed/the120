@@ -80,7 +80,7 @@ import { DOOR_CLASSES, GROUP_SLUGS } from "@/app/lib/site";
 import { Button } from "@/app/fp/components/system/Button";
 import { Seal } from "@/app/fp/components/system/Seal";
 import { phaseColor, phaseColorAlpha } from "@/app/fp/components/system/phases";
-import type { PhaseKey } from "@/app/fp/content/types";
+import type { PhaseKey } from "@/app/lib/fp/content/types";
 import type { GroupSlug } from "@/app/lib/site";
 import {
   OWN_IDEA,

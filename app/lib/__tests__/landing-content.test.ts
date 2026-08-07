@@ -119,9 +119,12 @@ describe("R21/R22 — the shared content is shared by IDENTITY", () => {
 });
 
 describe("Decision 4 — the landings EMIT params and never READ them", () => {
+  // `app/first-profit/page.tsx` was the sixth landing. v3 plan Unit 10 retired
+  // it to a redirect (R16: no First Profit surface on the120.school), so it is
+  // no longer a landing to hold to landing rules — the pins that survive it are
+  // the two below: that it still RESOLVES, and that nothing internal links it.
   const LANDING_SOURCES = [
     "app/groups/[slug]/page.tsx",
-    "app/first-profit/page.tsx",
     "app/components/landing/LandingPage.tsx",
   ];
 
@@ -138,7 +141,7 @@ describe("Decision 4 — the landings EMIT params and never READ them", () => {
   });
 
   it("seats come from getSeatsRemaining (ISR), never the scaffolding constant directly", () => {
-    for (const f of ["app/groups/[slug]/page.tsx", "app/first-profit/page.tsx"]) {
+    for (const f of ["app/groups/[slug]/page.tsx"]) {
       const src = stripComments(read(f));
       expect(src, f).toMatch(/getSeatsRemaining/);
       expect(src, f).not.toMatch(/SEATS_REMAINING/);
@@ -170,14 +173,20 @@ describe("Decision 4 — the landings EMIT params and never READ them", () => {
 });
 
 describe("R24/R25 — attribution and the ad-only sixth page", () => {
-  it("group landings carry g and src; /first-profit carries src only", () => {
+  it("group landings carry g and src", () => {
     const groupPage = stripComments(read("app/groups/[slug]/page.tsx"));
     expect(groupPage).toMatch(/source: groupCtaSource\(group\.slug\)/);
     expect(groupPage).toMatch(/group: group\.slug/);
+  });
 
+  it("/first-profit is RETIRED to a redirect, and still resolves (R16, v3 Unit 10)", () => {
+    // Broad ad creative already in flight names this URL, so it may not 404.
+    // The whole body is the redirect — no render, no data read, no session.
     const fp = stripComments(read("app/first-profit/page.tsx"));
-    expect(fp).toMatch(/source: "fp-generic"/);
-    expect(fp).not.toMatch(/group:\s/);
+    expect(fp).toContain("FP_LANDING_TARGET");
+    expect(fp).toContain("redirect(FP_LANDING_TARGET)");
+    expect(fp).not.toContain("return (");
+    expect(fp).not.toMatch(/source: "fp-generic"/);
   });
 
   it("nothing internal links to /first-profit (R25 — the broad-ads destination only)", () => {

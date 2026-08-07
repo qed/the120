@@ -61,11 +61,11 @@
 
 import { z } from "zod";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
 import {
   encodeRateLimitSegment,
   type RateLimitConfig,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 
 /* ------------------------------------------------- school-year derivation */
 

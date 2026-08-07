@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
+import { Button } from "@/app/fp/fw/components/system/Button";
 import {
   remintBoardTokenForWindowAction,
   updateCohortWindowAction,
-} from "@/app/fp/lib/actions/fw-ops";
-import { FW_EVENT_TIME_ZONES, fwEventLocalParts } from "@/app/fp/lib/fw-ops-rules";
+} from "@/app/lib/fp/actions/fw-ops";
+import { FW_EVENT_TIME_ZONES, fwEventLocalParts } from "@/app/lib/fp/fw-ops-rules";
 
 /**
  * The weekend-window editor (ops redesign Unit 4; R14/R14a) — start, end, and

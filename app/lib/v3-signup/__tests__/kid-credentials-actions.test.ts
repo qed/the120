@@ -36,7 +36,7 @@ const cores = vi.hoisted(() => ({
   revoke: vi.fn(),
 }));
 
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: (key: string) => {
     rate.checked.push(key);
     return { allowed: rate.allowed, retryAfterMs: 0 };

@@ -35,7 +35,7 @@ import "server-only";
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { VERIFIED_TASK_STATE } from "@/app/fp/lib/progress-core";
+import { VERIFIED_TASK_STATE } from "@/app/lib/fp/progress-core";
 import {
   photoConsentVerdict,
   type PhotoConsentRow,

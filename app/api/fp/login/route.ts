@@ -6,7 +6,7 @@
  *
  * Thin impure wrapper over ./login-rules (pure, tested) + ./profile-core
  * (shared with Slice B's signup route later). The discipline mirrors
- * app/fp/lib/actions/sign-in.ts — atomic (ip,name)+ip rate-limit strike
+ * app/lib/fp/actions/sign-in.ts — atomic (ip,name)+ip rate-limit strike
  * BEFORE any DB I/O with release-on-outage, max-5 candidate scan with
  * fail-closed row narrowing, first password success wins — with three
  * route-specific deltas:
@@ -62,16 +62,16 @@ import {
   MAX_SIGN_IN_CANDIDATES,
   parseCandidateRow,
   type SignInCandidate,
-} from "@/app/fp/lib/provision-rules";
+} from "@/app/lib/fp/provision-rules";
 import {
   SIGN_IN_IP_RATE_LIMIT,
   SIGN_IN_RATE_LIMIT,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 import {
   checkAndRecordRateLimit,
   clearRateLimitBucket,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import {
   buildAllowedOrigins,
   checkOrigin,
@@ -249,7 +249,7 @@ export async function POST(req: Request): Promise<Response> {
       // idempotent) to sweep children created by other products (funnel / FW /
       // Path) after the initial backfill. The durable follow-up (not built here)
       // is a children-INSERT auto-username trigger so every new child is born
-      // loginable — see app/fp/lib/fp-username-rules.ts mintUsername header.
+      // loginable — see app/lib/fp/fp-username-rules.ts mintUsername header.
       if (childUsernameMatches(candidate.username, classified.normalized)) candidates.push(candidate);
       if (candidates.length >= MAX_SIGN_IN_CANDIDATES) break;
     }

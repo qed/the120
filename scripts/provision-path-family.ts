@@ -38,7 +38,7 @@ import {
   ensureStudentProgress,
   findAuthUserByEmail,
   provisionStudent,
-} from "@/app/fp/lib/provision-core";
+} from "@/app/lib/fp/provision-core";
 import { loadSupabaseEnv } from "./load-env";
 
 const PARENT_EMAIL = "path-test-parent@test.the120.invalid";

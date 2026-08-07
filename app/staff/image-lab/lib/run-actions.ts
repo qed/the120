@@ -42,7 +42,7 @@
 
 import { z } from "zod";
 import { requireStaff } from "@/app/crm/lib/auth";
-import { checkAndRecordRateLimit } from "@/app/fp/lib/rate-limit-store";
+import { checkAndRecordRateLimit } from "@/app/lib/fp/rate-limit-store";
 import { imageLabDb } from "./image-lab-db";
 import { IMAGE_LAB_SLOTS } from "./image-lab-rules";
 import {

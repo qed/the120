@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { loadFwBoard, resolveFwBoardToken } from "@/app/fp/lib/fw-board-loader";
+import { loadFwBoard, resolveFwBoardToken } from "@/app/lib/fp/fw-board-loader";
 
 /**
  * /fp/fw/board/[token]/feed — the board's poll transport (FW Unit 6).

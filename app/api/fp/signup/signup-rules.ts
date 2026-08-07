@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import type { RateLimitConfig } from "@/app/lib/fp/rate-limit-rules";
 
 // Reused verbatim from the login surface — same allowlist, same attested-IP
 // rule. Re-exported so the route imports its whole origin/IP contract from one

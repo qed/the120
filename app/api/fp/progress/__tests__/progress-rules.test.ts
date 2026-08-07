@@ -29,7 +29,7 @@ import {
   type ProgressRefusalReason,
 } from "../progress-rules";
 import { shapeSuggestionsRefusal } from "@/app/api/fp/suggestions/suggestions-rules";
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
 import { readStaffRoleCheckRoles } from "@/app/api/fp/__tests__/helpers/staff-role-check";
 
 /* ------------------------------------------------------------- role vocabulary */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetRateLimitStoreForTests } from "@/app/fp/lib/rate-limit-store";
+import { resetRateLimitStoreForTests } from "@/app/lib/fp/rate-limit-store";
 
 /**
  * THE MINT IS A SERVER ACTION, WHICH IS A SEPARATELY-ADDRESSABLE POST ENDPOINT

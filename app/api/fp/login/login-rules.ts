@@ -27,7 +27,7 @@
  *     hop. NEVER the leftmost hop — this route is public and cross-origin, so
  *     the left side of x-forwarded-for is attacker-controlled, and a spoofable
  *     IP would defeat all rate-limit buckets at once. Do NOT reuse
- *     app/fp/lib/client-ip.ts here: it returns the LEFTMOST hop by design for
+ *     app/lib/fp/client-ip.ts here: it returns the LEFTMOST hop by design for
  *     the proxied /fp surface and is wrong for this one.
  *   - Origins are exact-match strings passed IN by the caller (buildAllowedOrigins
  *     takes the preview origin as a value, not process.env) — never a
@@ -36,15 +36,15 @@
 
 import { z } from "zod";
 // The cover STORAGE rules — the artifact gate and the status vocabulary. Note
-// what is deliberately NOT imported here: `@/app/fp/lib/cover-template`. This
+// what is deliberately NOT imported here: `@/app/lib/fp/cover-template`. This
 // module SERVES a stored picture and never renders one (v3 Unit 7 owner
 // rework); the product has exactly one renderer call site, in the signup path.
 import {
   asStoredCoverDataUrl,
   statusImpliesCoverBlob,
   isCoverStatus,
-} from "@/app/fp/lib/cover-store-rules";
-import { SIGN_IN_FAILED_MESSAGE } from "@/app/fp/lib/provision-rules";
+} from "@/app/lib/fp/cover-store-rules";
+import { SIGN_IN_FAILED_MESSAGE } from "@/app/lib/fp/provision-rules";
 
 /* ----------------------------------------------------------- request parse */
 

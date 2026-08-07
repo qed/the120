@@ -41,17 +41,17 @@ import { PASSWORD_CHOSEN_METADATA_KEY } from "@/app/lib/funnel/resume-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import {
   V3_ONBOARDING_RATE_LIMIT,
   V3_START_IP_RATE_LIMIT,
   V3_START_RATE_LIMIT,
   V3_VERIFY_IP_RATE_LIMIT,
   V3_VERIFY_RATE_LIMIT,
-} from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-rules";
 import { extractClientIp } from "@/app/api/fp/signup/signup-rules";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
-import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
+import { buildStudentCreateUserPayload } from "@/app/lib/fp/provision-rules";
 import { createChild } from "@/app/api/fp/signup/child-core";
 import type { SignupCoreDeps } from "@/app/api/fp/signup/signup-core";
 import { FIRST_PROFIT_SIGN_IN_URL } from "@/app/lib/v3-signup/flow-rules";

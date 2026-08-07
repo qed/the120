@@ -87,13 +87,13 @@ import { createClient } from "@supabase/supabase-js";
 import { loadSupabaseEnv } from "./load-env";
 import { sendEmail } from "../app/lib/email";
 import { SITE_URL } from "../app/lib/site";
-import { narrowFwBand } from "../app/fp/lib/fw-provision-rules";
-import { runFwCheckIn } from "../app/fp/lib/fw-checkin-core";
-import { issueFwGuideInvite, provisionFwGuide } from "../app/fp/lib/fw-guide-core";
-import { buildFwGuideInviteEmail } from "../app/fp/lib/fw-guide-invite-email";
-import { assertNoAuthMailToFwStudent } from "../app/fp/lib/fw-provision-rules";
-import { loadFwBoard } from "../app/fp/lib/fw-board-loader";
-import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/fp/lib/fw-loader";
+import { narrowFwBand } from "../app/lib/fp/fw-provision-rules";
+import { runFwCheckIn } from "../app/lib/fp/fw-checkin-core";
+import { issueFwGuideInvite, provisionFwGuide } from "../app/lib/fp/fw-guide-core";
+import { buildFwGuideInviteEmail } from "../app/lib/fp/fw-guide-invite-email";
+import { assertNoAuthMailToFwStudent } from "../app/lib/fp/fw-provision-rules";
+import { loadFwBoard } from "../app/lib/fp/fw-board-loader";
+import { loadFwCohortRoster, loadFwStudentDrilldown } from "../app/lib/fp/fw-loader";
 import {
   anonymizeFwStudent,
   createFwCohort,
@@ -113,14 +113,14 @@ import {
   archiveFwCohort,
   unarchiveFwCohort,
   updateFwCohortWindow,
-} from "../app/fp/lib/fw-ops-core";
+} from "../app/lib/fp/fw-ops-core";
 import {
   fwCohortWindowFromLocal,
   fwReplayRejectReasonCopy,
   normalizeFwCohortSlug,
   remintFwBoardTokenFailureCopy,
   updateFwCohortWindowFailureCopy,
-} from "../app/fp/lib/fw-ops-rules";
+} from "../app/lib/fp/fw-ops-rules";
 import {
   DEFAULT_FW_IMPORT_CHUNK_SIZE,
   FW_IMPORT_PARSE_ERROR_COPY,
@@ -128,25 +128,25 @@ import {
   dedupeFwImportRows,
   parseFwImportCsv,
   planFwImportChunks,
-} from "../app/fp/lib/fw-import-rules";
+} from "../app/lib/fp/fw-import-rules";
 import {
   listFwImportExceptions,
   resolveFwImportException,
   runFwImportChunk,
   type FwImportOutcome,
-} from "../app/fp/lib/fw-import-core";
-import { loadFwMatchCandidates } from "../app/fp/lib/fw-loader";
-import { fwMatchKey } from "../app/fp/lib/fw-match-rules";
-import { isFwAction } from "../app/fp/lib/fw-rules";
-import { runFwQuickCreate } from "../app/fp/lib/fw-student-core";
-import { loadFwProgressRow, planFwDrain, runFwDrain } from "../app/fp/lib/fw-sync-engine";
+} from "../app/lib/fp/fw-import-core";
+import { loadFwMatchCandidates } from "../app/lib/fp/fw-loader";
+import { fwMatchKey } from "../app/lib/fp/fw-match-rules";
+import { isFwAction } from "../app/lib/fp/fw-rules";
+import { runFwQuickCreate } from "../app/lib/fp/fw-student-core";
+import { loadFwProgressRow, planFwDrain, runFwDrain } from "../app/lib/fp/fw-sync-engine";
 import {
   groupFwEntriesByStudentTask,
   isRecognizedFwEntry,
   reduceFwOps,
   type FwQueueEntry,
   type FwServerRow,
-} from "../app/fp/lib/fw-sync-rules";
+} from "../app/lib/fp/fw-sync-rules";
 
 const COMMANDS = [
   "roster",

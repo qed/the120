@@ -46,7 +46,7 @@
  * and in docs/runbooks/2026-08-05-image-lab-operations.md, in those terms.
  */
 
-import { SITE_DOC_VERSION_GATE } from "@/app/fp/lib/fp-public-site-rules";
+import { SITE_DOC_VERSION_GATE } from "@/app/lib/fp/fp-public-site-rules";
 import { isRealFamily } from "@/app/crm/lib/test-family-filter";
 import { IMAGE_LAB_SLOTS, type ImageLabSlot } from "./image-lab-rules";
 import type { SlotValues } from "./run-rules";

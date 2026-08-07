@@ -22,7 +22,7 @@
  * The STICKY CONTRACT is untouched: this shell adds no wrapper element around
  * the row — `FwOpsTabRow` still renders the `sticky top-[var(--staff-bar-h,0px)]`
  * header at the same depth the layout used to mount it. Pinned in
- * `app/fp/lib/__tests__/fw-ops-chrome-wiring.test.ts`.
+ * `app/lib/fp/__tests__/fw-ops-chrome-wiring.test.ts`.
  */
 
 import { createContext, useContext, useState, type ReactNode } from "react";

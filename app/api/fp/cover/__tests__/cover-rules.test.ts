@@ -19,7 +19,7 @@ import {
   stagesForMode,
   type CoverRefusalReason,
 } from "../cover-rules";
-import { V3_COVER_NAMESPACE } from "@/app/fp/lib/rate-limit-rules";
+import { V3_COVER_NAMESPACE } from "@/app/lib/fp/rate-limit-rules";
 
 const UUID = "11111111-2222-4333-8444-555555555555";
 

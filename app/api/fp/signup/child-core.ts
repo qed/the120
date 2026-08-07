@@ -62,9 +62,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { consentGate } from "./consent-core";
 import { ensurePlayerProfile } from "../login/profile-core";
-import { ensurePathFamilyForParent } from "@/app/fp/lib/provision-core";
-import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
-import { mintUsernameFromNames } from "@/app/fp/lib/fp-username-rules";
+import { ensurePathFamilyForParent } from "@/app/lib/fp/provision-core";
+import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
+import { mintUsernameFromNames } from "@/app/lib/fp/fp-username-rules";
 import { gradeVerdict } from "@/app/lib/funnel/child-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 

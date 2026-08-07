@@ -36,8 +36,8 @@ import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+} from "@/app/lib/fp/rate-limit-store";
+import type { RateLimitConfig } from "@/app/lib/fp/rate-limit-rules";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildAllowedOrigins,
@@ -54,8 +54,9 @@ import {
 } from "./site-rules";
 import { resolveFpChild, type SiteCoreDeps } from "./site-core";
 import { sendEmail } from "@/app/lib/email";
+import { FP_PARENT_TARGET } from "@/app/lib/fp/retired-ui-routes";
 import { SITE_URL } from "@/app/lib/site";
-import type { SiteContent, SiteProduct } from "@/app/fp/lib/fp-public-site-rules";
+import type { SiteContent, SiteProduct } from "@/app/lib/fp/fp-public-site-rules";
 
 /**
  * The real SiteCoreDeps the claim/publish routes hand the cores. Content
@@ -94,7 +95,11 @@ export function buildSiteCoreDeps(admin: SupabaseClient): SiteCoreDeps {
       }
     },
     sendMail: (input) => sendEmail(input),
-    manageUrl: `${SITE_URL}/fp/family`,
+    // Was `/fp/family` — the First Profit parent page, retired in v3 plan
+    // Unit 10. The dashboard is where a parent's kids live now; the mail that
+    // renders this no longer claims the page itself can take a site offline
+    // (see the banner on `buildFpSiteLiveNotice`).
+    manageUrl: `${SITE_URL}${FP_PARENT_TARGET}`,
   };
 }
 

@@ -33,7 +33,7 @@ import "server-only";
  */
 
 import { randomUUID } from "node:crypto";
-import { buildResumableEndpoint } from "@/app/fp/lib/upload-rules";
+import { buildResumableEndpoint } from "@/app/lib/fp/upload-rules";
 import { IMAGE_LAB_BUCKET, normalizeMimeType } from "./image-lab-rules";
 import { sniffImageType } from "./image-model-rules";
 import { type ImageLabDb } from "./image-lab-db";

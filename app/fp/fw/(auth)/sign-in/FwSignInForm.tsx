@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/app/fp/components/system/Button";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { signInGuide } from "@/app/fp/lib/actions/fw-guide";
-import { isNextRedirect } from "@/app/fp/lib/next-redirect";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { signInGuide } from "@/app/lib/fp/actions/fw-guide";
+import { isNextRedirect } from "@/app/lib/fp/next-redirect";
 
 /**
  * The guide door's form (FW Unit 2) — email + password, one door, no tabs.

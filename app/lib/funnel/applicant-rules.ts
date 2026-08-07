@@ -35,7 +35,7 @@
  * error at every consumer), and it is pinned to the DB CHECK constraint
  * `children_applicant_state_check` by `funnel-migration-parity.test.ts`.
  *
- * Follows `app/fp/lib/access-rules.ts` (`PATH_ROLES` / `PATH_SCOPES`).
+ * Follows `app/lib/fp/access-rules.ts` (`PATH_ROLES` / `PATH_SCOPES`).
  *
  * `in_review`, `offered` and `waitlisted` are the F5/F7 rungs the original R4
  * ladder omitted: admissions approval is preserved, so a staff offer — not

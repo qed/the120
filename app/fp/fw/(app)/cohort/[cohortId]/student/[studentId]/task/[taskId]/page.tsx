@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { fwPhaseParamForTaskId, FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
+import { fwPhaseParamForTaskId, FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
 
 // Never rendered (the page body is a redirect) — declared because the D1 brand
 // scan requires every /fp/fw page to carry a titled construct, and an exemption

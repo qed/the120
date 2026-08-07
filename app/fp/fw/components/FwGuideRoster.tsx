@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { provisionGuideAction, reissueGuideInviteAction } from "@/app/fp/lib/actions/fw-guide";
-import { revokeGuideGrantAction } from "@/app/fp/lib/actions/fw-ops";
-import type { FwGuideCredentialStatus, FwOpsGuide } from "@/app/fp/lib/fw-ops-core";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { provisionGuideAction, reissueGuideInviteAction } from "@/app/lib/fp/actions/fw-guide";
+import { revokeGuideGrantAction } from "@/app/lib/fp/actions/fw-ops";
+import type { FwGuideCredentialStatus, FwOpsGuide } from "@/app/lib/fp/fw-ops-core";
 
 /**
  * The guide roster for one weekend (FW Unit 5; FW-R4, Decision 12).

@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/app/fp/components/system/Button";
-import { createFwCohortAction } from "@/app/fp/lib/actions/fw-ops";
-import { FW_EVENT_TIME_ZONES } from "@/app/fp/lib/fw-ops-rules";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { createFwCohortAction } from "@/app/lib/fp/actions/fw-ops";
+import { FW_EVENT_TIME_ZONES } from "@/app/lib/fp/fw-ops-rules";
 
 /**
  * The cohort-creation form (FW Unit 5; FW-R23, Decision 4).

@@ -20,7 +20,7 @@ const { createChildRef, rateRef } = vi.hoisted(() => ({
 vi.mock("@/app/api/fp/signup/child-core", () => ({
   createChild: (...args: unknown[]) => createChildRef.fn(...args),
 }));
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: (key: string) => {
     rateRef.checks.push(key);
     return { allowed: rateRef.allowed };

@@ -15,9 +15,9 @@
  */
 
 import { useState } from "react";
-import { Button } from "@/app/fp/components/system/Button";
-import { claimGuideInviteAction } from "@/app/fp/lib/actions/fw-guide";
-import { isNextRedirect } from "@/app/fp/lib/next-redirect";
+import { Button } from "@/app/fp/fw/components/system/Button";
+import { claimGuideInviteAction } from "@/app/lib/fp/actions/fw-guide";
+import { isNextRedirect } from "@/app/lib/fp/next-redirect";
 
 export default function ClaimGuideInviteForm({
   token,

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireStaff } from "@/app/crm/lib/auth";
 import { getSeatsRemaining } from "@/app/lib/seats";
 import { SEATS_REMAINING } from "@/app/lib/site";
-import { withFwTimeout } from "@/app/fp/lib/fw-call";
+import { withFwTimeout } from "@/app/lib/fp/fw-call";
 import { crmCardLine } from "@/app/staff/lib/hub-rules";
 // Both from PLAIN modules. The flag reader lives in `image-lab-rules` rather
 // than the `server-only` `image-model` adapter it is re-exported from, so the

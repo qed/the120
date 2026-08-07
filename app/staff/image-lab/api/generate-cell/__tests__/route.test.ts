@@ -36,7 +36,7 @@ import {
   IMAGE_LAB_GENERATE_RATE_LIMIT,
   IMAGE_LAB_MAX_CELLS_PER_RUN,
 } from "../../../lib/run-rules";
-import { resetRateLimitStoreForTests } from "@/app/fp/lib/rate-limit-store";
+import { resetRateLimitStoreForTests } from "@/app/lib/fp/rate-limit-store";
 
 const STAFF = { staffId: "00000000-0000-4000-8000-000000000001", email: "s@the120.example" };
 const IMAGE_ID = "11111111-1111-4111-8111-111111111111";

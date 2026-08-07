@@ -2,11 +2,11 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import FwCohortMemory from "@/app/fp/fw/components/FwCohortMemory";
-import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
-import { grantedCohortIds, resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { listFwCohortsForActor } from "@/app/fp/lib/fw-guide-core";
+import { isFwStaffActor } from "@/app/lib/fp/fw-access-rules";
+import { grantedCohortIds, resolveFwActorForCohort } from "@/app/lib/fp/fw-auth";
+import { listFwCohortsForActor } from "@/app/lib/fp/fw-guide-core";
 
 /**
  * The per-cohort shell (FW Unit 4) — the chrome every guide surface sits inside,

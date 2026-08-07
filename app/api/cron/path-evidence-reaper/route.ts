@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { reapOrphans } from "@/app/fp/lib/evidence-loader";
+import { reapOrphans } from "@/app/lib/fp/evidence-loader";
 
 /**
  * First Profit T1 Unit 10 orphan reaper — SCHEDULED by Unit 12 (vercel.json, daily

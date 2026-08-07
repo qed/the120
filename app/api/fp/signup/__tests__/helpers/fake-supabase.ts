@@ -80,7 +80,7 @@
   */
 
 import { randomUUID } from "node:crypto";
-import { extractSiteContent } from "@/app/fp/lib/fp-public-site-rules";
+import { extractSiteContent } from "@/app/lib/fp/fp-public-site-rules";
 
 export type Row = Record<string, unknown>;
 export type Store = Record<string, Row[]>;

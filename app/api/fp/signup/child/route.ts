@@ -26,11 +26,11 @@
 
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
 import { supabaseParentToken } from "@/app/lib/supabase/parent-token";
-import { buildStudentCreateUserPayload } from "@/app/fp/lib/provision-rules";
+import { buildStudentCreateUserPayload } from "@/app/lib/fp/provision-rules";
 import {
   checkAndRecordRateLimit,
   releaseRateLimitEvent,
-} from "@/app/fp/lib/rate-limit-store";
+} from "@/app/lib/fp/rate-limit-store";
 import { z } from "zod";
 import {
   buildAllowedOrigins,
@@ -41,8 +41,8 @@ import {
   SIGNUP_RATE_LIMIT,
 } from "../signup-rules";
 import { createChild, type CreateChildDeps } from "../child-core";
-import { sendSignupRecap } from "@/app/fp/lib/parent-email/send";
-import type { RecapChild } from "@/app/fp/lib/parent-email/rules";
+import { sendSignupRecap } from "@/app/lib/fp/parent-email/send";
+import type { RecapChild } from "@/app/lib/fp/parent-email/rules";
 
 export const dynamic = "force-dynamic";
 

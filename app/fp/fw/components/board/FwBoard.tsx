@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
-import type { FwBoardColumnPhase, FwBoardShell } from "@/app/fp/lib/fw-board-loader";
+import type { FwBoardColumnPhase, FwBoardShell } from "@/app/lib/fp/fw-board-loader";
 import {
   FW_BOARD_CONNECTION_INITIAL,
   FW_BOARD_DEAD_LINK_MESSAGE,
@@ -19,7 +19,7 @@ import {
   type FwBoardRollups,
   type FwFirstDollarCelebration,
   type FwTickerLine,
-} from "@/app/fp/lib/fw-board-rules";
+} from "@/app/lib/fp/fw-board-rules";
 
 /**
  * The projected cohort board (FW Unit 6) — the room's spectacle.

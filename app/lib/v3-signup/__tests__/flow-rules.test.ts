@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeStudentName } from "@/app/fp/lib/provision-rules";
+import { normalizeStudentName } from "@/app/lib/fp/provision-rules";
 import {
   ageBandForAge,
   findDuplicateKid,

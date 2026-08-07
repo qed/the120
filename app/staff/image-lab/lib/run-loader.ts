@@ -41,7 +41,7 @@ import {
   type CellRow,
   type SlotValues,
 } from "./run-rules";
-import { withFwTimeout } from "@/app/fp/lib/fw-call";
+import { withFwTimeout } from "@/app/lib/fp/fw-call";
 import { errorName } from "./run-core";
 import type { FinalizePatch, NewCellRow, RunDeps, RunRow } from "./run-core";
 

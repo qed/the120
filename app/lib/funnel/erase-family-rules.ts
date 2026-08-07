@@ -100,7 +100,7 @@
  * readable forever by anyone holding the URL. The erasure therefore deletes the
  * OBJECT FIRST and the ROW SECOND, which INVERTS the pipeline's normal rule (2)
  * ("a blob is deleted only after no row references its key",
- * app/fp/lib/cover-store-rules.ts) — deliberately, and only here:
+ * app/lib/fp/cover-store-rules.ts) — deliberately, and only here:
  *
  *   - Rule (2) protects LIVE rows from dangling references. In an erasure the
  *     referencing row is being destroyed in the next breath, so the reference it
@@ -235,7 +235,7 @@
 // The blob namespace scheme + its ownership guard. `cover-store-rules` is PURE
 // (no SDK, no Supabase, no Next), so importing it here keeps this file pure too;
 // the vendor-facing side of the port lives behind an injected dep in the core.
-import { keyBelongsTo, type CoverOwnerScope } from "@/app/fp/lib/cover-store-rules";
+import { keyBelongsTo, type CoverOwnerScope } from "@/app/lib/fp/cover-store-rules";
 
 /** The ordered per-child leaf tables (before the child's own auth + children
  *  row). Exported so the executor and its tests share ONE definition of order. */

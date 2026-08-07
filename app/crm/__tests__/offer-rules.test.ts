@@ -9,6 +9,7 @@ import {
 } from "@/app/crm/lib/offer-rules";
 import { sendOfferEmailSchema } from "@/app/crm/lib/reviews-rules";
 import { DEPOSIT_REFUND_DEADLINE_LABEL, SITE_URL } from "@/app/lib/site";
+import { V2_DEEP_ROUTE_TARGET } from "@/app/lib/v3-signup/v2-deep-routes";
 
 /**
  * Offer email rules (plan 2026-07-15-001 Unit 2). Pure functions only —
@@ -28,10 +29,13 @@ describe("offerEmailTemplate", () => {
     expect(out.html).toContain("Clay");
   });
 
-  it("greets the parent and links Next Steps via SITE_URL (R50, funnel U14)", () => {
+  it("greets the parent and links the live next-steps destination via SITE_URL", () => {
+    // Was `${SITE_URL}/start/next-steps` (R50, funnel U14). That route is a
+    // redirect stub since v3 Unit 9; Unit 10's copy pass points the mail at the
+    // destination itself, read from the retirement table.
     expect(out.text).toContain("Kevin");
-    expect(out.text).toContain(`${SITE_URL}/start/next-steps`);
-    expect(out.html).toContain(`${SITE_URL}/start/next-steps`);
+    expect(out.text).toContain(`${SITE_URL}${V2_DEEP_ROUTE_TARGET}`);
+    expect(out.html).toContain(`${SITE_URL}${V2_DEEP_ROUTE_TARGET}`);
   });
 
   it("reads the refund deadline from the shared constant in text and html", () => {

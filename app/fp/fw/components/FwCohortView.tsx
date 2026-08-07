@@ -3,8 +3,8 @@
 import { useState } from "react";
 import FwQuickCreate from "./FwQuickCreate";
 import FwStudentSidebar from "./FwStudentSidebar";
-import type { FwRosterEntry } from "@/app/fp/lib/fw-loader";
-import type { FwUnfinishedStudent } from "@/app/fp/lib/fw-nav-rules";
+import type { FwRosterEntry } from "@/app/lib/fp/fw-loader";
+import type { FwUnfinishedStudent } from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The two-pane cohort view (ops-guide redesign Unit 7; R18, R23) — student

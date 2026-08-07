@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/app/lib/supabase/admin";
-import { Icon } from "@/app/fp/components/system/Icon";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
 import FwImport from "@/app/fp/fw/components/FwImport";
-import { isFwStaffActor } from "@/app/fp/lib/fw-access-rules";
-import { resolveFwActorForCohort } from "@/app/fp/lib/fw-auth";
-import { FW_BRAND_SUFFIX } from "@/app/fp/lib/fw-nav-rules";
-import { loadFwOpsCohort } from "@/app/fp/lib/fw-ops-core";
+import { isFwStaffActor } from "@/app/lib/fp/fw-access-rules";
+import { resolveFwActorForCohort } from "@/app/lib/fp/fw-auth";
+import { FW_BRAND_SUFFIX } from "@/app/lib/fp/fw-nav-rules";
+import { loadFwOpsCohort } from "@/app/lib/fp/fw-ops-core";
 
 /**
  * /fp/fw/ops/cohort/[cohortId]/import — bulk roster import (FW Unit 7).

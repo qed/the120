@@ -120,7 +120,7 @@ vi.mock("@/app/lib/supabase/parent-token", () => ({
   supabaseParentToken: () => ({ auth: { getUser: () => tokenRef.getUser() } }),
 }));
 
-vi.mock("@/app/fp/lib/rate-limit-store", () => ({
+vi.mock("@/app/lib/fp/rate-limit-store", () => ({
   checkAndRecordRateLimit: (key: string, config: unknown) => {
     callLog.push(`rate:${key}`);
     rateRef.configs.push(config);

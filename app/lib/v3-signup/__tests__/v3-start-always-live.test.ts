@@ -180,7 +180,7 @@ describe("the four unauthenticated-reachable actions run with NO env configured 
     // The counterpart assertion to the one above, and the reason this file can
     // be trusted as evidence that "always live" did not mean "unguarded": the
     // per-(ip,email) budget is untouched, so a loop still gets refused.
-    const { resetRateLimitStoreForTests } = await import("@/app/fp/lib/rate-limit-store");
+    const { resetRateLimitStoreForTests } = await import("@/app/lib/fp/rate-limit-store");
     resetRateLimitStoreForTests();
     const mod = await import("@/app/start/actions");
     v3StartSignup.mockResolvedValue({ kind: "code_sent" });

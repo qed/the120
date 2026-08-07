@@ -212,7 +212,7 @@ export function ageBandForAge(age: number): "under_13" | "13_to_15" | "16_plus" 
 /**
  * One normalization for BOTH sides of every kid-name comparison — NFKC, trimmed,
  * inner whitespace collapsed, lowercased. Deliberately the same recipe as
- * `normalizeStudentName` (app/fp/lib/provision-rules.ts); duplicated rather than
+ * `normalizeStudentName` (app/lib/fp/provision-rules.ts); duplicated rather than
  * imported only to keep this module free of the fp surface, and pinned equal by
  * test.
  */

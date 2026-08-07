@@ -44,7 +44,7 @@ import {
   type ImageLabModelEntry,
 } from "./model-registry";
 import { deriveCategoryPrompt } from "./category-prompt-rules";
-import type { RateLimitConfig } from "@/app/fp/lib/rate-limit-rules";
+import type { RateLimitConfig } from "@/app/lib/fp/rate-limit-rules";
 
 // ── Bounds ───────────────────────────────────────────────────────────────────
 

@@ -38,20 +38,20 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/fp/lib/fw-call";
+import { FW_ACTION_TIMEOUT_MS, withFwTimeout } from "@/app/lib/fp/fw-call";
 import {
   readFwDeviceQueueState,
   reconcileFwCacheOwner,
   runFwSignOut,
   subscribeFwQueue,
-} from "@/app/fp/lib/fw-sync-client";
+} from "@/app/lib/fp/fw-sync-client";
 import {
   fwResidueBeacon,
   fwSignOutOutcomeCopy,
   type FwReconcileOutcome,
   type FwSignOutOutcome,
-} from "@/app/fp/lib/fw-sync-rules";
-import { isNextRedirect } from "@/app/fp/lib/next-redirect";
+} from "@/app/lib/fp/fw-sync-rules";
+import { isNextRedirect } from "@/app/lib/fp/next-redirect";
 import { loadStaffBarIdentity, sendFwResidueBeacon, signOutStaffBar } from "./actions";
 import {
   parseStaffBarIdentity,

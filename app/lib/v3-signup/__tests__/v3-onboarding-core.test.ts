@@ -9,7 +9,7 @@ import {
 } from "@/app/api/fp/signup/__tests__/helpers/fake-supabase";
 import { FP_CONSENT_POLICY, currentPolicyHash } from "@/app/api/fp/signup/consent-rules";
 import type { CreateChildInput, CreateChildResult } from "@/app/api/fp/signup/child-core";
-import { blobKey } from "@/app/fp/lib/cover-store-rules";
+import { blobKey } from "@/app/lib/fp/cover-store-rules";
 import {
   loadV3OnboardingState,
   v3AddKid,

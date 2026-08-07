@@ -35,7 +35,7 @@ import "server-only";
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { deriveStudentEmail } from "@/app/fp/lib/provision-rules";
+import { deriveStudentEmail } from "@/app/lib/fp/provision-rules";
 import { resolveChildGrade } from "../grade/grade-rules";
 import { deriveCoverSessionFields, type FpSessionBody } from "../login/login-rules";
 import { ensurePlayerProfile, type EnsureProfileResult } from "../login/profile-core";

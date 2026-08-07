@@ -67,8 +67,8 @@ import { z } from "zod";
 import { sendEmail } from "@/app/lib/email";
 import { SITE_URL } from "@/app/lib/site";
 import { supabaseServer } from "@/app/lib/supabase/server";
-import { clientIp } from "@/app/fp/lib/client-ip";
-import { assertNoAuthMailToFwStudent } from "@/app/fp/lib/fw-provision-rules";
+import { clientIp } from "@/app/lib/fp/client-ip";
+import { assertNoAuthMailToFwStudent } from "@/app/lib/fp/fw-provision-rules";
 import {
   REQUEST_LINK_RESPONSE,
   RESUME_REQUEST_IP_RATE_LIMIT,

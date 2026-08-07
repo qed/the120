@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
-import { Icon } from "@/app/fp/components/system/Icon";
-import { StatusChip } from "@/app/fp/components/system/StatusChip";
+import { Icon } from "@/app/fp/fw/components/system/Icon";
+import { StatusChip } from "@/app/fp/fw/components/system/StatusChip";
 import FwTaskDetailModal, { type FwTaskDetail } from "./FwTaskDetailModal";
-import type { FwTreeCriterion, FwTreePhase, FwTreeTask } from "@/app/fp/lib/fw-nav-rules";
+import type { FwTreeCriterion, FwTreePhase, FwTreeTask } from "@/app/lib/fp/fw-nav-rules";
 
 /**
  * The steps accordion (FW Unit 4, reshaped by ops-guide redesign Unit 8;

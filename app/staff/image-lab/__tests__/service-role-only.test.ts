@@ -166,7 +166,7 @@ const VENDOR_CLIENT_PACKAGES = ["@supabase/supabase-js", "@supabase/ssr"];
  * would be a one-line diff in this file with this docblock directly above it,
  * which is exactly the review conversation the barrel bypass skipped.
  *
- *   * `app/fp/lib/upload-client.ts` — the shipped direct-to-storage upload leg.
+ *   * `app/lib/fp/upload-client.ts` — the shipped direct-to-storage upload leg.
  *     It constructs the BROWSER client to PUT bytes against a server-minted
  *     signed token; it reads no table and it is the reason the Lab does not
  *     reimplement the plain/TUS split. Nothing it does touches fp_image_lab_*.
@@ -174,7 +174,7 @@ const VENDOR_CLIENT_PACKAGES = ["@supabase/supabase-js", "@supabase/ssr"];
  *     cookie-session client and the `staff` row through the service role is its
  *     entire job, and it is the module whose verdict authorizes the Lab.
  */
-const AUDITED_CROSSINGS = ["app/fp/lib/upload-client.ts", "app/crm/lib/auth.ts"];
+const AUDITED_CROSSINGS = ["app/lib/fp/upload-client.ts", "app/crm/lib/auth.ts"];
 
 type Violation = { file: string; specifier: string; why: string };
 
@@ -874,7 +874,7 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
       `import { z } from "zod";`,
       `import { requireStaff } from "@/app/crm/lib/auth";`,
       `import { imageLabDb } from "./image-lab-db";`,
-      `import { uploadWithSlot } from "@/app/fp/lib/upload-client";`,
+      `import { uploadWithSlot } from "@/app/lib/fp/upload-client";`,
     ].join("\n");
     expect(lint(code)).toEqual([]);
     expect(scanCode(code)).toEqual([]);
@@ -907,14 +907,14 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
     //
     // Run with an EMPTY crossing list, the same walk over the same entries must
     // report violations — because the Lab really does import
-    // `app/fp/lib/upload-client.ts`, which really does import the browser
+    // `app/lib/fp/upload-client.ts`, which really does import the browser
     // client, exactly the shape a barrel has. That the production run is clean
     // is therefore a fact about the ALLOWLIST, not about a walk that never
     // leaves home and would have found nothing either way.
     const entries = await labSources();
     const unaudited = walkForbiddenImports(entries, []);
     expect(unaudited.length).toBeGreaterThan(0);
-    expect(unaudited.map((v) => v.file)).toContain("app/fp/lib/upload-client.ts");
+    expect(unaudited.map((v) => v.file)).toContain("app/lib/fp/upload-client.ts");
     expect(unaudited.some((v) => v.why.includes("anon-key"))).toBe(true);
   });
 
@@ -923,11 +923,11 @@ describe("the guard CATCHES what it is supposed to catch (negative fixtures)", (
     const resolved = specifiersOf(abs)
       .map((s) => resolveSpecifier(abs, s))
       .filter((s): s is string => s !== null);
-    // Relative (`./image-lab-rules`) and aliased (`@/app/fp/lib/upload-rules`)
+    // Relative (`./image-lab-rules`) and aliased (`@/app/lib/fp/upload-rules`)
     // both land on real repo files — if they did not, the walk would be
     // traversing nothing and every assertion above would pass vacuously.
     expect(resolved).toContain(`${LAB}lib/image-lab-rules.ts`);
-    expect(resolved).toContain("app/fp/lib/upload-rules.ts");
+    expect(resolved).toContain("app/lib/fp/upload-rules.ts");
   });
 
   /**

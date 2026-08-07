@@ -9,7 +9,7 @@
  * The password is `iloveschool<word>` — the design's memorable-for-an-eight-
  * year-old shape. It is NOT trusted to be valid just because it is generated:
  * EVERY candidate this module returns has been run through
- * `validateStudentPassword` (app/fp/lib/provision-rules.ts), the same floor
+ * `validateStudentPassword` (app/lib/fp/provision-rules.ts), the same floor
  * `createChild` re-applies at mint time. Generating a password that the mint
  * would then refuse is how a family ends up staring at a provisioning failure
  * they cannot act on, so the validation happens HERE, before anything is shown.
@@ -42,7 +42,7 @@
  * 10a); the caller's catch turns that into the one generic failure.
  */
 
-import { validateStudentPassword } from "@/app/fp/lib/provision-rules";
+import { validateStudentPassword } from "@/app/lib/fp/provision-rules";
 import { STORY_QUESTION_IDS } from "./story-questions";
 
 /* --------------------------------------------------------------- the shape */

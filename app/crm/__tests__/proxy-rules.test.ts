@@ -158,10 +158,11 @@ describe("resolveProxyOutcome — /fp/fw (the guide door, FW Unit 2)", () => {
   });
 
   it("the FW branch is evaluated BEFORE the /fp branch", () => {
-    // /fp/fw/* also matches /fp/*; whichever branch runs first decides the
-    // door. Asserted directly so a reordering cannot pass silently.
-    expect(outcome("/fp/fw/anything", null)).not.toBe("path-login");
-    expect(outcome("/fp/anything", null)).toBe("path-login");
+    // /fp/fw/* also matches /fp/*, and since Unit 10 the /fp branch PASSES
+    // everything — so a reordering would not merely send guides to the wrong
+    // door, it would unguard the whole guide app. Asserted directly.
+    expect(outcome("/fp/fw/anything", null)).toBe("fw-login");
+    expect(outcome("/fp/anything", null)).toBe("pass");
   });
 
   it("any session passes — FW roles are grants + the bridge, not a JWT claim", () => {
@@ -189,23 +190,29 @@ describe("resolveProxyOutcome — /fp/fw (the guide door, FW Unit 2)", () => {
 
   it("routes that merely share the /fp/fw prefix are NOT the guide subtree", () => {
     // A future /fp/fwiw must not inherit the guide door's redirect — the same
-    // trap /fpology sets for the /fp branch.
-    expect(outcome("/fp/fwiw", null)).toBe("path-login");
-    expect(outcome("/fp/fw-archive", null)).toBe("path-login");
+    // trap /fpology sets for the /fp branch. Since Unit 10 retired the First
+    // Profit UI, the neighbouring /fp branch answers "pass", so the witness is
+    // pass-vs-fw-login rather than path-login-vs-fw-login. It is still a
+    // witness: a leak would send an anonymous visitor to the GUIDE door.
+    expect(outcome("/fp/fwiw", null)).toBe("pass");
+    expect(outcome("/fp/fw-archive", null)).toBe("pass");
   });
 });
 
-describe("resolveProxyOutcome — /fp (renamed from /path in Unit 10)", () => {
-  it("no session → path-login, never the CRM sign-in", () => {
-    // Sending a child to /crm/login would be both confusing and a hint that
-    // /crm exists at all.
-    expect(outcome("/fp", null)).toBe("path-login");
-    expect(outcome("/fp/task/1.2.4", null)).toBe("path-login");
+describe("resolveProxyOutcome — /fp (the retired UI, v3 plan Unit 10)", () => {
+  it("passes session-less: every /fp route left is a redirect stub", () => {
+    // The First Profit UI is gone; `/fp/*` is nothing but pages whose whole
+    // body is `redirect(...)` (app/lib/fp/retired-ui-routes.ts). Gating them
+    // would bounce a signed-out PARENT holding /fp/family or /fp/review to the
+    // kid's sign-in door instead of to their own dashboard — the exact strand
+    // the redirects exist to prevent.
+    expect(outcome("/fp", null)).toBe("pass");
+    expect(outcome("/fp/task/1.2.4", null)).toBe("pass");
+    expect(outcome("/fp/family", null)).toBe("pass");
+    expect(outcome("/fp/review", null)).toBe("pass");
   });
 
-  it("any session passes — Path roles are grants, not a JWT claim", () => {
-    // requirePathUser() inside each Server Function is the authoritative
-    // check; the proxy only answers signed-in-or-not for /path.
+  it("a session changes nothing — there is nothing behind /fp to authorize", () => {
     expect(outcome("/fp", parentSession)).toBe("pass");
     expect(outcome("/fp/task/1.2.4", claimlessSession)).toBe("pass");
     expect(outcome("/fp", adminSession)).toBe("pass");
@@ -354,20 +361,19 @@ describe("outcomeDestination", () => {
   it("maps each gated outcome to its route", () => {
     expect(outcomeDestination("crm-login")).toBe("/crm/login");
     expect(outcomeDestination("crm-staff-only")).toBe("/crm/staff-only");
-    expect(outcomeDestination("path-login")).toBe("/fp/sign-in");
     expect(outcomeDestination("fw-login")).toBe("/fp/fw/sign-in");
   });
 
   it("every destination is itself unguarded, or the gate self-locks", () => {
     // If a destination were guarded, redirecting to it would loop forever.
-    for (const o of ["crm-login", "crm-staff-only", "path-login", "fw-login"] as const) {
+    for (const o of ["crm-login", "crm-staff-only", "fw-login"] as const) {
       expect(isUnguarded(outcomeDestination(o))).toBe(true);
     }
   });
 
   it("each destination resolves to `pass` session-less — the loop check, end to end", () => {
     // isUnguarded() is the mechanism, but the outcome is what the proxy acts on.
-    for (const o of ["crm-login", "crm-staff-only", "path-login", "fw-login"] as const) {
+    for (const o of ["crm-login", "crm-staff-only", "fw-login"] as const) {
       expect(resolveProxyOutcome({ pathname: outcomeDestination(o), session: null })).toBe("pass");
     }
   });

@@ -41,7 +41,6 @@ const RESEND_COOLDOWN_SECONDS = 60;
 type Phase = "form" | "code";
 
 export function StepParent({
-  consentPolicy,
   onVerified,
 }: {
   consentPolicy: { version: string; hash: string; text: string };
@@ -51,7 +50,6 @@ export function StepParent({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [accepted, setAccepted] = useState(false);
   const [code, setCode] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<"info" | "error">("error");
@@ -107,10 +105,6 @@ export function StepParent({
   const submitForm = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
-    if (!accepted) {
-      say("Please tick the box to continue.");
-      return;
-    }
     setNotice(null);
     startTransition(async () => {
       const result = await v3StartAction({
@@ -267,8 +261,13 @@ export function StepParent({
     <section className="mx-auto w-full max-w-xl px-5 py-10 sm:py-16">
       <p className="v3-label text-v3-one20">Welcome from The 120</p>
       <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
-        Start your kid&rsquo;s first business.
+        Enrollment
       </h1>
+      <p className="mt-4 max-w-md text-base leading-relaxed text-v3-stone">
+        The 120 offers academic programs in learning math at 2X-4X normal speed and First
+        Profit, a business program where your kid earns their first $1,000 over a 5 phase,
+        25 step process.
+      </p>
 
       <form
         onSubmit={(e) => {
@@ -324,22 +323,9 @@ export function StepParent({
           />
         </V3Field>
 
-        <label className="flex items-start gap-3 rounded-2xl border border-v3-ink/10 bg-white/70 p-4">
-          <input
-            type="checkbox"
-            checked={accepted}
-            onChange={(e) => setAccepted(e.target.checked)}
-            className="mt-1 h-5 w-5 flex-none accent-v3-profit"
-          />
-          <span className="text-sm leading-relaxed text-v3-stone">
-            I am the parent or guardian, I am at least 18, and I agree to The 120&rsquo;s terms for
-            this account. The full consent notice comes next, before we create your kid&rsquo;s
-            account.
-            <span className="v3-label mt-1 block text-v3-stone/70">
-              Notice version {consentPolicy.version}
-            </span>
-          </span>
-        </label>
+        <p className="rounded-2xl border border-v3-ink/10 bg-white/70 p-4 text-sm leading-relaxed text-v3-stone">
+          Please sign up for the Admissions Portal and start the enrollment process.
+        </p>
 
         {notice && <V3Notice tone={noticeTone}>{notice}</V3Notice>}
         {showSignIn && (

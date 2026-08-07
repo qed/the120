@@ -134,13 +134,9 @@ function browserIdempotencyStore(): IdempotencyStore {
 
 export function RunComposer({
   live,
-  pickerLive,
 }: {
-  /** `IMAGE_LAB_LIVE`, read SERVER-side and handed down. */
+  /** `IMAGE_LAB_LIVE`, read SERVER-side and handed down. The Lab's only flag. */
   live: boolean;
-  /** `IMAGE_LAB_REAL_CONTENT_LIVE` — a SEPARATE switch. Unset means the picker is
-   *  absent while manual prompts still generate. */
-  pickerLive: boolean;
 }) {
   const [template, setTemplate] = useState<string>(COPY.composer.template.placeholder);
   const [slotValues, setSlotValues] = useState<SlotValues>({});
@@ -149,24 +145,11 @@ export function RunComposer({
   const [imageCount, setImageCount] = useState(1);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   /**
-   * ⚠ PER MODEL, AND EMPTY MEANS "TAKE THE DEFAULT" rather than "authored".
-   * `promptModeFor` owns the default — an OpenAI model on a provenance-bearing
-   * run derives, everything else sends what was written — so a model this map
-   * has never heard of still gets the lawful answer.
+   * ⚠ PER MODEL, AND EMPTY MEANS "TAKE THE DEFAULT". `promptModeFor` owns the
+   * default (`authored`), so a model this map has never heard of still composes.
+   * `derived` is selectable on every model and compulsory on none.
    */
   const [promptModes, setPromptModes] = useState<PromptModes>({});
-  /**
-   * ⚠ THE STAFF ATTESTATION, AND IT STARTS FALSE ON EVERY MOUNT.
-   *
-   * It is deliberately NOT persisted to sessionStorage the way the run id is. A
-   * remembered "yes, this is my own wording" would carry a previous compose's
-   * assertion onto the next one, which is precisely the state this control
-   * exists to make impossible. One compose, one deliberate tick.
-   *
-   * Unticked, `promptModeFor` forces every OpenAI cell to the derived
-   * vocabulary and the preview shows that — no refusal, no dead end.
-   */
-  const [noChildContentAttested, setNoChildContentAttested] = useState(false);
 
   /**
    * ⚠ RESTORED AT FIRST RENDER, not in an effect.
@@ -199,16 +182,6 @@ export function RunComposer({
   const [childId, setChildId] = useState("");
   const [ideas, setIdeas] = useState<PickerIdea[]>([]);
   const [ideaId, setIdeaId] = useState("");
-  /**
-   * ⚠ THE SERVER-SIGNED PROVENANCE TOKEN, CARRIED VERBATIM.
-   *
-   * This used to be a `{ childId, ideaId, taskId }` object the composer ASSERTED
-   * back to `createImageLabRun`, which made the server's whole re-scrub and
-   * consent-audit block opt-in on a field a caller could simply omit. The client
-   * now states nothing about provenance: it holds an opaque token the fill
-   * minted and hands it back, and the server derives the three ids from it.
-   */
-  const [sourceToken, setSourceToken] = useState<string | null>(null);
   const [excluded, setExcluded] = useState<
     readonly { slot: string; field: string; why: string }[]
   >([]);
@@ -239,11 +212,6 @@ export function RunComposer({
   const serverNow = () => Date.now() + clockOffsetMs.current;
   const [serverNowMs, setServerNowMs] = useState(() => Date.now());
 
-  /** ⚠ "THE PICKER MINTED A TOKEN", which is what the SERVER will verify. The
-   *  preview would otherwise show the wrong prompt for every provenance-bearing
-   *  compose — see `decideRunComposition`'s `childProvenance`. */
-  const childProvenance = sourceToken !== null;
-
   const decision = useMemo(
     () =>
       decideRunComposition({
@@ -252,20 +220,9 @@ export function RunComposer({
         modelIds,
         imageCount,
         referenceIds,
-        childProvenance,
-        noChildContentAttested,
         promptModes,
       }),
-    [
-      template,
-      slotValues,
-      modelIds,
-      imageCount,
-      referenceIds,
-      childProvenance,
-      noChildContentAttested,
-      promptModes,
-    ]
+    [template, slotValues, modelIds, imageCount, referenceIds, promptModes]
   );
 
   const cost = useMemo(
@@ -306,15 +263,12 @@ export function RunComposer({
     // released; while waiting, select gemini-3-pro-image, set its mode, deselect
     // it again; press Generate → different signature → fresh key → the server
     // sees no collision → a SECOND run with a full second fan.
-    modelIds.map((id) => [id, promptModeFor(id, childProvenance, promptModes, noChildContentAttested)]),
-    childProvenance,
-    noChildContentAttested,
+    modelIds.map((id) => [id, promptModeFor(id, promptModes)]),
   ]);
 
   // ── The picker ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!pickerLive) return;
     void (async () => {
       try {
         const result = await listImageLabPickerChildren();
@@ -323,12 +277,12 @@ export function RunComposer({
         console.error("[image-lab/composer] child listing threw:", e);
       }
     })();
-  }, [pickerLive]);
+  }, []);
 
   // Cleared by the CHANGE HANDLER, never by a setState in this effect's body:
   // clearing here would fire a cascading render on every mount.
   useEffect(() => {
-    if (!pickerLive || childId === "") return;
+    if (childId === "") return;
     void (async () => {
       try {
         const result = await listImageLabPickerIdeas({ childId });
@@ -339,7 +293,7 @@ export function RunComposer({
         console.error("[image-lab/composer] idea listing threw:", e);
       }
     })();
-  }, [pickerLive, childId]);
+  }, [childId]);
 
   async function onFillSlots() {
     if (childId === "") return;
@@ -365,8 +319,7 @@ export function RunComposer({
       // by this call, which is the whole R16 arrangement.
       setSlotValues(result.slots);
       setExcluded(result.excluded);
-      setSourceToken(result.provenance);
-      // Re-sync the select to the idea the run will actually record.
+      // Re-sync the select to the idea the slots were actually filled from.
       setIdeaId(result.ideaId ?? "");
       setDocGated(!result.docReadable);
       setScrubCovered(result.scrubCovered);
@@ -523,9 +476,7 @@ export function RunComposer({
         modelIds,
         imageCount,
         referenceIds,
-        sourceToken,
         promptModes,
-        noChildContentAttested,
       });
       // ⚠ THE KEY IS RELEASED THE MOMENT THE SERVER HAS ANSWERED, AND BEFORE THE
       // mounted check, so a staff member who navigated away is not left holding a
@@ -668,30 +619,6 @@ export function RunComposer({
           />
           <span className="text-xs text-hq-ink-soft">{COPY.composer.template.hint}</span>
         </label>
-
-        {/* ⚠ THE ATTESTATION, ON THE TEMPLATE, because the template is what it is
-            about. `sourceChildId` is a fact about the FETCH PATH — a child's pitch
-            typed in above with no picker token armed nothing at all, and the
-            refusal copy used to recommend doing exactly that. Unticked is the
-            safe answer and costs nothing: OpenAI cells derive, Google cells are
-            untouched, and nothing is refused. See run-rules `PromptGateContext`. */}
-        <label className="mt-3 flex items-start gap-2 text-sm text-hq-ink">
-          <input
-            type="checkbox"
-            checked={noChildContentAttested}
-            disabled={childProvenance}
-            onChange={(e) => setNoChildContentAttested(e.target.checked)}
-            className="mt-1 size-5 shrink-0"
-          />
-          <span className="flex flex-col gap-1">
-            <span className="text-pretty">{COPY.composer.attestation.label}</span>
-            <span className="text-pretty text-xs text-hq-ink-soft">
-              {childProvenance
-                ? COPY.composer.attestation.lockedByProvenance
-                : COPY.composer.attestation.hint}
-            </span>
-          </span>
-        </label>
       </section>
     ),
 
@@ -714,8 +641,7 @@ export function RunComposer({
           <div className="mt-3 flex flex-col gap-3">
             <p className="text-xs text-hq-ink-soft">{COPY.composer.slots.manualHint}</p>
 
-            {pickerLive ? (
-              <div className="flex flex-col gap-2 rounded-xl border border-hq-border bg-hq-surface p-3">
+            <div className="flex flex-col gap-2 rounded-xl border border-hq-border bg-hq-surface p-3">
                 <h4 className="font-path-display text-sm text-hq-ink">
                   {COPY.picker.heading}
                 </h4>
@@ -782,17 +708,7 @@ export function RunComposer({
                     <p className="text-xs text-hq-ink-soft">{COPY.picker.noIdeas}</p>
                   )
                 )}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-hq-border-strong bg-hq-surface p-3">
-                <p className="font-path-display text-sm text-hq-ink">
-                  {COPY.picker.disabled.headline}
-                </p>
-                <p className="mt-1 text-pretty text-sm text-hq-ink-soft">
-                  {COPY.picker.disabled.body}
-                </p>
-              </div>
-            )}
+            </div>
 
             {IMAGE_LAB_SLOTS.map((slot) => (
               <label key={slot} className="flex flex-col gap-1 text-sm text-hq-ink">
@@ -904,15 +820,12 @@ export function RunComposer({
         <ul className="mt-3 flex flex-col gap-2">
           {IMAGE_LAB_MODELS.map((entry) => {
             const picked = modelIds.includes(entry.id);
-            // ⚠ THE CONTROL IS DISABLED, AND THE SERVER STILL REFUSES. Disabling
-            // is courtesy — `decideChildTextGate` runs on the paid path against a
-            // crafted request, which is where the rule actually lives.
-            // ⚠ TWO CAUSES, ONE LOCK, AND THE NOTE SAYS WHICH. Provenance is not
-            // liftable; a missing attestation is, by ticking the box above — and
-            // a lock with no stated escape is exactly the trap this replaced.
-            const lockedByProvenance = childProvenance && entry.provider === "openai";
-            const lockedToDerived =
-              entry.provider === "openai" && (childProvenance || !noChildContentAttested);
+            // ⚠ NO LOCK, AND NO PER-VENDOR BRANCH. `derived` used to be forced on
+            // OpenAI models by provenance or by a missing staff attestation; both
+            // inputs were removed on 2026-08-06 and the select is now free on
+            // every model. Reintroducing a `entry.provider === "openai"` test here
+            // would put the composer back out of step with the server, which is
+            // the bug this arrangement was built to escape.
             return (
               <li key={entry.id}>
                 <button
@@ -960,13 +873,7 @@ export function RunComposer({
                       // `disabled`, so the select read "As written" directly above
                       // a note saying the model was locked to derived. The fix is
                       // in `promptModeFor` itself, where it is testable.
-                      value={promptModeFor(
-                        entry.id,
-                        childProvenance,
-                        promptModes,
-                        noChildContentAttested
-                      )}
-                      disabled={lockedToDerived}
+                      value={promptModeFor(entry.id, promptModes)}
                       onChange={(e) =>
                         setPromptModes((prev) => ({
                           ...prev,
@@ -982,13 +889,6 @@ export function RunComposer({
                         {COPY.composer.preview.modeDerived}
                       </option>
                     </select>
-                    {lockedToDerived && (
-                      <span className="text-pretty text-hq-ink-soft">
-                        {lockedByProvenance
-                          ? COPY.composer.preview.lockedNote
-                          : COPY.composer.preview.lockedUnattestedNote}
-                      </span>
-                    )}
                   </label>
                 )}
               </li>

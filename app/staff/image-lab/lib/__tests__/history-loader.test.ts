@@ -637,8 +637,7 @@ describe("the pure mirror and the emitted SQL agree, from one fixture", () => {
     compare: false,
     iteratedOnModel: null,
     iteratedFromRunId: null,
-    sourceChildId: null,
-    createdAtMs: 0,
+      createdAtMs: 0,
     ...over,
   });
 

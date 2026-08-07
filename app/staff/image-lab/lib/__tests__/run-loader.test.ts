@@ -245,10 +245,6 @@ describe("insertRun maps the unique violation, and only that", () => {
     compare: false,
     iteratedOnModel: null,
     iteratedFromRunId: null,
-    sourceChildId: null,
-    sourceIdeaId: null,
-    sourceTaskId: null,
-    noChildContentAttested: false,
     createdAtMs: 0,
     cellCount: 1,
   };
@@ -338,22 +334,27 @@ describe("insertRun maps the unique violation, and only that", () => {
 // ── The row mapper's ONE restrictive default ─────────────────────────────────
 
 /**
- * ⚠ `no_child_content_attested` IS THE ONLY COLUMN WHOSE WRONG READING IS A
- * PRIVACY INCIDENT, AND THE MAPPER IS WHERE IT IS READ.
+ * ⚠ THIS BLOCK USED TO BE "toRunRow reads the attestation RESTRICTIVELY", AND IT
+ * WAS DELETED WITH THE ATTESTATION (2026-08-06, owner decision).
  *
- * `raw.no_child_content_attested === true` → `!== false` survived the entire
- * suite. The column is `NOT NULL DEFAULT FALSE`, so a row written by today's
- * schema always carries a real boolean and the flip is invisible to every test
- * that goes through the writer — but this mapper is the ONE place where a
- * missing column, a renamed column, a `select` that forgot to list it, or a
- * partially applied migration turns into "attested". `undefined !== false`.
+ * It pinned that `no_child_content_attested` mapped to `false` for an absent
+ * column, a null, a string, a number and an object — because
+ * `raw.no_child_content_attested === true` → `!== false` survived the whole
+ * suite otherwise, and `undefined !== false` is "attested" on a column whose
+ * wrong reading was a privacy incident.
  *
- * The gate downstream reads `run.noChildContentAttested` and treats `true` as
- * "the staff member vouched for this text", so ABSENT, NULL AND GARBAGE MUST ALL
- * MAP TO `false`. `insertRun` is the cheapest door onto the mapper: it maps
- * whatever the row-shaped answer contains and hands it back.
+ * The COLUMN still exists (additive-only migration lock) but nothing writes or
+ * reads it, and `RUN_COLUMNS` no longer selects it — so there is no coercion
+ * boundary left to defend. The general lesson it taught, that a safety default
+ * is only as safe as its least-tested coercion boundary, is recorded in
+ * docs/solutions/test-failures/ and still applies to every other mapper here;
+ * `closed-set columns are NARROWED, never asserted` below is the surviving
+ * instance of it on this file.
+ *
+ * What replaces it is a single assertion that the columns really are gone from
+ * the read path, so a future edit cannot quietly reinstate a half-wired one.
  */
-describe("toRunRow reads the attestation RESTRICTIVELY", () => {
+describe("toRunRow carries no provenance fields", () => {
   const runRow = {
     id: "run-1",
     staffId: "staff-1",
@@ -367,59 +368,44 @@ describe("toRunRow reads the attestation RESTRICTIVELY", () => {
     compare: false,
     iteratedOnModel: null,
     iteratedFromRunId: null,
-    sourceChildId: null,
-    sourceIdeaId: null,
-    sourceTaskId: null,
-    noChildContentAttested: false,
     createdAtMs: 0,
     cellCount: 1,
   };
 
-  /** The columns `RUN_COLUMNS` selects, as postgrest hands them back. */
-  const rawRow = (over: Record<string, unknown>) => ({
-    id: "run-1",
-    staff_id: "staff-1",
-    idempotency_key: "key-1",
-    template: "t",
-    slot_values: {},
-    resolved_prompt: "t",
-    reference_ids: [],
-    drill_tags: [],
-    note: "",
-    compare: false,
-    iterated_on_model: null,
-    iterated_from_run_id: null,
-    source_child_id: null,
-    source_idea_id: null,
-    source_task_id: null,
-    created_at: "2026-08-05T00:00:00.000Z",
-    ...over,
-  });
-
-  const mapped = async (over: Record<string, unknown>) => {
-    const { db } = fakeDb({ data: rawRow(over), error: null });
+  it("ignores the retired columns even when postgrest hands them back", async () => {
+    const { db } = fakeDb({
+      data: {
+        id: "run-1",
+        staff_id: "staff-1",
+        idempotency_key: "key-1",
+        template: "t",
+        slot_values: {},
+        resolved_prompt: "t",
+        reference_ids: [],
+        drill_tags: [],
+        note: "",
+        compare: false,
+        iterated_on_model: null,
+        iterated_from_run_id: null,
+        // Present in the SCHEMA, absent from `RUN_COLUMNS`. A row that carries
+        // them anyway must not resurrect them on the mapped object.
+        source_child_id: "child-1",
+        source_idea_id: "idea-a",
+        source_task_id: "1.1.2",
+        no_child_content_attested: true,
+        created_at: "2026-08-05T00:00:00.000Z",
+      },
+      error: null,
+    });
     const result = await runDeps(db).insertRun(runRow);
     if (!result.ok) throw new Error("fixture: insertRun should have succeeded");
-    return result.run;
-  };
 
-  it.each([
-    ["the column is ABSENT — a stale select, a renamed column", {}],
-    ["the column is NULL — a row that predates the NOT NULL default", { no_child_content_attested: null }],
-    ["the value is the STRING \"false\"", { no_child_content_attested: "false" }],
-    ["the value is the STRING \"true\"", { no_child_content_attested: "true" }],
-    ["the value is the NUMBER 1", { no_child_content_attested: 1 }],
-    ["the value is an OBJECT", { no_child_content_attested: {} }],
-  ])("maps to `false` when %s", async (_label, over) => {
-    const run = await mapped(over);
-    // Not `toBeFalsy()`: `undefined` is falsy, and `undefined` is precisely what
-    // the permissive mutation lets through to a gate that reads `!== true`.
-    expect(run.noChildContentAttested).toBe(false);
-  });
-
-  it("maps a real `true` to `true`, so the attestation is not inert", async () => {
-    const run = await mapped({ no_child_content_attested: true });
-    expect(run.noChildContentAttested).toBe(true);
+    const keys = Object.keys(result.run);
+    expect(keys).not.toContain("sourceChildId");
+    expect(keys).not.toContain("sourceIdeaId");
+    expect(keys).not.toContain("sourceTaskId");
+    expect(keys).not.toContain("noChildContentAttested");
+    expect(JSON.stringify(result.run)).not.toContain("child-1");
   });
 });
 

@@ -4,7 +4,6 @@ import {
   imageLabGenerationNotice,
   IMAGE_LAB_BENCH_COPY,
 } from "./lib/shell-rules";
-import { isImageLabRealContentLive } from "./lib/content-picker-core";
 import { ImageLabNav } from "./ImageLabNav";
 import { ImageLabPanel } from "./ImageLabPanel";
 import { RunComposer } from "./RunComposer";
@@ -71,13 +70,13 @@ export default async function ImageLabBenchPage() {
           strictest limit across the chosen models), so `ReferenceLibrary` is no
           longer mounted here.
 
-          BOTH FLAGS ARE READ SERVER-SIDE AND HANDED DOWN, never re-read in the
-          browser: they are operational facts about the deployment, and a
+          `IMAGE_LAB_LIVE` IS READ SERVER-SIDE AND HANDED DOWN, never re-read in
+          the browser: it is an operational fact about the deployment, and a
           `NEXT_PUBLIC_` copy would be a second reader resolved at BUILD time that
-          could disagree with the server on a warm deploy. They gate different
-          things — `live` is whether a model may be called, `pickerLive` is
-          whether a real child's authored text may be loaded at all. */}
-      <RunComposer live={isImageLabLive()} pickerLive={isImageLabRealContentLive()} />
+          could disagree with the server on a warm deploy. It is the Lab's only
+          flag now — the picker's consent flag was removed on 2026-08-06 and the
+          picker is always available. */}
+      <RunComposer live={isImageLabLive()} />
     </>
   );
 }

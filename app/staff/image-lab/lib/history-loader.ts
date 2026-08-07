@@ -61,8 +61,11 @@ const REFERENCES = "fp_image_lab_references";
  *  this feature and a column somebody adds later that nobody meant to render. */
 const RUN_COLUMNS =
   "id, staff_id, template, slot_values, resolved_prompt, reference_ids, " +
+  // ⚠ `source_child_id` IS NOT SELECTED. Provenance was removed on 2026-08-06
+  // and the column is never written; a History badge over an always-null column
+  // would tell every reader the opposite of the truth.
   "drill_tags, note, compare, iterated_on_model, iterated_from_run_id, " +
-  "source_child_id, created_at";
+  "created_at";
 
 const IMAGE_COLUMNS =
   "id, run_id, model_id, cell_ordinal, state, attempted_at, billed, " +
@@ -126,7 +129,6 @@ function toRunRow(raw: Record<string, unknown>): HistoryRunRow {
       typeof raw.iterated_on_model === "string" ? raw.iterated_on_model : null,
     iteratedFromRunId:
       typeof raw.iterated_from_run_id === "string" ? raw.iterated_from_run_id : null,
-    sourceChildId: typeof raw.source_child_id === "string" ? raw.source_child_id : null,
     createdAtMs: asMs(raw.created_at, "created_at", raw.id),
   };
 }

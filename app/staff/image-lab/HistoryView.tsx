@@ -595,7 +595,6 @@ function RunCard({
         <p className="text-xs text-hq-ink-soft">
           {run.compare ? `${COPY.runs.compare} · ` : ""}
           {run.iteratedOnModel ? `${COPY.runs.iteratedOn(run.iteratedOnModel)} · ` : ""}
-          {run.sourceChildId ? `${COPY.runs.sourceChild} · ` : ""}
           {run.staffId.slice(0, 8)}
         </p>
       </header>

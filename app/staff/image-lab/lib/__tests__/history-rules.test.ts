@@ -99,7 +99,6 @@ const run = (over: Partial<HistoryRunRow> = {}): HistoryRunRow => ({
   compare: false,
   iteratedOnModel: null,
   iteratedFromRunId: null,
-  sourceChildId: null,
   createdAtMs: NOW - 5000,
   ...over,
 });

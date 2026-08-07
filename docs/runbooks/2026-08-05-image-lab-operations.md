@@ -468,14 +468,32 @@ history. In summary, for the record:
   never the 17 already-enrolled children retroactively. **Superseded:** the legal
   advice above means no such clause is required, and the Lab is no longer coupled
   to consent versions at all.
-- **CHECK 1, PROVIDER TERMS, GOOGLE — closed, and it stays closed.** The Gemini
-  key bills against a **paid** project. Under the Gemini API Additional Terms
-  effective 2026-03-23, paid tier means Google "doesn't use your prompts … or
-  responses to improve our products", with limited-period logging solely for
-  policy enforcement. **One standing operational condition survives all of this:
-  no fallback path may route a prompt through unpaid quota** — a dev key, AI
-  Studio, or quota overflow lands under the unpaid terms, which ARE trained on
-  and human-reviewed. Keep the production credential paid-only.
+- **CHECK 1, PROVIDER TERMS, GOOGLE — the CHAIN OF CUSTODY CHANGED on 2026-08-06.
+  Re-read this before citing it as closed.** It was closed on the basis that the
+  Gemini key billed against the owner's own **paid** project, so the Gemini API
+  Additional Terms effective 2026-03-23 applied directly to us: paid tier means
+  Google "doesn't use your prompts … or responses to improve our products", with
+  limited-period logging solely for policy enforcement.
+
+  **That is no longer the arrangement.** The owner chose **Vercel-billed** AI
+  Gateway over bring-your-own-key, so no provider key of ours reaches Google.
+  Vercel settles with Google, which means the no-training guarantee we relied on
+  now sits in **Vercel's** agreement with Google plus **Vercel's own** data-use
+  and retention policy — not in a contract we are party to. The trade-off was
+  surfaced before the choice and accepted deliberately: one credential reaches all
+  three models, and provider keys stop being something we hold or rotate.
+
+  **What this changes in practice:**
+  - The old standing condition ("no fallback may route a prompt through unpaid
+    quota — a dev key, AI Studio, or quota overflow lands under the unpaid terms,
+    which ARE trained on and human-reviewed") **no longer applies to us**, because
+    we hold no Google quota of any kind. It becomes Vercel's problem, not ours.
+  - **Verify the gateway's data-use posture directly** rather than inheriting this
+    section's conclusion. Vercel AI Gateway offers zero data retention; confirm
+    whether it is ON for this project, since that — not the Gemini paid tier — is
+    now the control that matters.
+  - If the arrangement ever moves back to BYOK, the paragraph above becomes live
+    again verbatim, including the unpaid-quota condition.
 - **CHECK 1, PROVIDER TERMS, OPENAI — removed rather than closed.** OpenAI's
   under-18 API guidance ("do not process personal data of children under 13
   without zero data retention") bound the pipeline, and ZDR for `gpt-image-*` is

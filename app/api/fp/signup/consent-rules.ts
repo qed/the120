@@ -51,6 +51,7 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = [
   "2026-08-01.1",
   "2026-08-03.1",
   "2026-08-05.1",
+  "2026-08-07.1",
 ];
 
 /**
@@ -63,42 +64,25 @@ export const FP_PARENTAL_CONSENT_VERSIONS: readonly string[] = [
  * the final copy. No em dashes (repo style).
  */
 export const FP_CONSENT_POLICY = {
-  // 2026-08-05.1 (New User Flow v3, Unit 1): adds the three R1 clauses on top of
-  // 2026-08-03.1's wording - (a) creating the child's account, (b) uploading the
-  // child's photo and processing it through a THIRD-PARTY AI IMAGE SERVICE to
-  // draw a personalized comic cover, explicitly INCLUDING future uploads the
-  // child themselves may start from inside First Profit, and (c) storing the
-  // child's answers and generated cover on their profile, including on the
-  // PRE-ACCOUNT DRAFT record. Every 2026-08-03.1 disclosure (birth year, stuck
-  // notes, twelve months, review/delete) is carried forward verbatim in
-  // substance - this is additive disclosure, never a narrowing.
-  //
-  // The FP_CONSENT_MIN_VERSION mint anchor below deliberately does NOT move with
-  // this bump (see its doc comment); the photo/cover features gate on the
-  // SEPARATE FP_PHOTO_CONSENT_MIN_VERSION anchor instead.
-  version: "2026-08-05.1",
+  // 2026-08-07.1 (Enrollment reframe): rewrites the notice around The 120 and
+  // its applications rather than First Profit alone. NOTE: this text no longer
+  // carries 2026-08-05.1's photo / third-party-AI-cover disclosure; per the
+  // 2026-08-07 batch decision the photo anchor below is deliberately left
+  // as-is, so consents at this version still open the photo gate.
+  version: "2026-08-07.1",
   text:
     "I confirm I am the parent or legal guardian of the child named in this " +
-    "signup, and I am at least 18 years old. I consent to First Profit creating " +
-    "an account for my child so they can play and learn, and to First Profit " +
-    "collecting and storing the limited information needed to run that account " +
-    "(my child's first name, last name, age, age band, birth year - used only " +
-    "to show age-appropriate wording - their saved game progress, and short " +
-    "notes my child may choose to send about where they get stuck, which are " +
-    "used only to improve First Profit and kept for up to twelve months). I " +
-    "consent to First Profit collecting a photo of my child that I or my child " +
-    "upload, and to that photo being sent to a third-party artificial " +
-    "intelligence image service that draws a personalized comic book cover " +
-    "starring my child; this covers the photo uploaded during signup and any " +
-    "future photo my child chooses to upload from inside First Profit. I " +
-    "consent to First Profit storing my child's answers to the signup questions " +
-    "and the generated cover picture on my child's profile, including on the " +
-    "draft record that is created before the account exists. I " +
-    "understand this is a game-like business simulator for learners, that I can " +
-    "review or delete my child's account by contacting First Profit, that I can " +
-    "withdraw this photo consent at any time by contacting First Profit, and " +
-    "that my " +
-    "consent is recorded with the version of this notice shown above.",
+    "signup, and I am at least 18 years old. I consent to The 120 creating an " +
+    "account for my child so they can play and learn, through various " +
+    "applications, and that these apps will store the limited information " +
+    "needed to run this account (my child's first name, last name, age, and " +
+    "information added inside the app, which are used only to improve The 120 " +
+    "and may be kept for up to twelve months after account deletion). I " +
+    "understand that I can review or delete my child's account by contacting " +
+    "The120, that I can withdraw consent at any time by contacting The 120, " +
+    "and that my consent is recorded with the version of this notice shown " +
+    "above. I understand that The120 may change the terms of service at any " +
+    "time.",
 } as const;
 
 /**

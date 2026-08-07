@@ -717,9 +717,12 @@ describe("the consent that covers the redraw inputs (v3 Unit 8)", () => {
     // Verified rather than assumed, and pinned so a later narrowing of the
     // notice reddens HERE — beside the code that relies on it — instead of
     // silently leaving two columns outside what families agreed to.
+    // The 2026-08-05.1 text itemized "answers stored on the child's profile";
+    // the 2026-08-07.1 Enrollment rewrite folds that into the broader
+    // "information added inside the app" account-data clause (a deliberate
+    // narrowing accepted in the 2026-08-07 copy batch).
     const text = FP_CONSENT_POLICY.text;
-    expect(text).toContain("storing my child's answers to the signup questions");
-    expect(text).toContain("on my child's profile");
+    expect(text).toContain("information added inside the app");
     // Age is disclosed in the same paragraph, in the account-data list.
     expect(text).toMatch(/first name, last name, age/);
   });

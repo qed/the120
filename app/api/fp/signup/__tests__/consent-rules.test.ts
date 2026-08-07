@@ -156,69 +156,56 @@ describe("2026-08-03.1 policy bump (Phase A cohort instrument)", () => {
     expect(consentVerdict({ echoedVersion: "2026-08-01.1", echoedHash: hashPolicyText(oldText) })).toBe("stale");
   });
 
-  it("the current policy text discloses every Phase A collection surface (birth year + stuck notes + retention)", () => {
-    // Ties the legal text to the collection surfaces (fp/grade birth-year
-    // write; fp_task_feedback stuck notes with the ~12-month purge). A copy
-    // edit that drops a disclosure must fail here, not in a lawyer's inbox.
-    expect(FP_CONSENT_POLICY.text).toContain("birth year");
-    expect(FP_CONSENT_POLICY.text).toContain("stuck");
-    expect(FP_CONSENT_POLICY.text).toContain("twelve months");
+  it("the current policy text discloses the collected fields and the retention window", () => {
+    // Ties the legal text to the collection surfaces. A copy edit that drops a
+    // disclosure must fail here, not in a lawyer's inbox. (The 2026-08-07.1
+    // rewrite deliberately narrowed the itemized list to name/age/in-app info;
+    // see that bump's describe below.)
     expect(FP_CONSENT_POLICY.text).toContain("first name");
-    expect(FP_CONSENT_POLICY.text).toContain("age band");
-    expect(FP_CONSENT_POLICY.text).toContain("saved game progress");
+    expect(FP_CONSENT_POLICY.text).toContain("last name");
+    expect(FP_CONSENT_POLICY.text).toContain("age");
+    expect(FP_CONSENT_POLICY.text).toContain("twelve months");
   });
 });
 
-/* ------------------------------------- the 2026-08-05.1 bump (New User Flow v3) */
+/* ------------------------------------- the 2026-08-07.1 bump (Enrollment reframe) */
 
-describe("2026-08-05.1 policy bump (v3 photo + AI cover + draft storage)", () => {
+describe("2026-08-07.1 policy bump (Enrollment reframe, The 120 apps)", () => {
   it("is published AND is the version the server currently renders", () => {
-    expect(isPublishedConsentVersion("2026-08-05.1")).toBe(true);
-    expect(FP_CONSENT_POLICY.version).toBe("2026-08-05.1");
-    expect(FP_PARENTAL_CONSENT_VERSIONS[FP_PARENTAL_CONSENT_VERSIONS.length - 1]).toBe("2026-08-05.1");
+    expect(isPublishedConsentVersion("2026-08-07.1")).toBe(true);
+    expect(FP_CONSENT_POLICY.version).toBe("2026-08-07.1");
+    expect(FP_PARENTAL_CONSENT_VERSIONS[FP_PARENTAL_CONSENT_VERSIONS.length - 1]).toBe("2026-08-07.1");
   });
 
   it("binds by hash: the current version with the current text is ok, with any other text is a mismatch", () => {
     expect(
-      consentVerdict({ echoedVersion: "2026-08-05.1", echoedHash: currentPolicyHash() })
+      consentVerdict({ echoedVersion: "2026-08-07.1", echoedHash: currentPolicyHash() })
     ).toBe("ok");
-    // The 2026-08-03.1 text echoed under the new version number is exactly the
-    // tamper/drift case the hash exists to catch.
-    const priorText = FP_CONSENT_POLICY.text.replace(
-      "I consent to First Profit collecting a photo of my child",
-      "I do not consent to any photo of my child"
+    // A tampered/drifted text echoed under the current version number is
+    // exactly the case the hash exists to catch.
+    const tamperedText = FP_CONSENT_POLICY.text.replace(
+      "I consent to The 120 creating an account for my child",
+      "I do not consent to any account for my child"
     );
-    expect(consentVerdict({ echoedVersion: "2026-08-05.1", echoedHash: hashPolicyText(priorText) })).toBe(
+    expect(consentVerdict({ echoedVersion: "2026-08-07.1", echoedHash: hashPolicyText(tamperedText) })).toBe(
       "version_mismatch"
     );
   });
 
-  it("discloses all three R1 clauses (account, photo -> third-party AI cover incl. future kid uploads, storage incl. the draft)", () => {
-    // (a) creating the child's account
-    expect(FP_CONSENT_POLICY.text).toContain("creating an account for my child");
-    // (b) photo -> third-party AI image service -> comic cover, incl. FUTURE
-    //     uploads the child themselves starts from inside First Profit
-    expect(FP_CONSENT_POLICY.text).toContain("collecting a photo of my child");
-    expect(FP_CONSENT_POLICY.text).toContain("third-party artificial intelligence image service");
-    expect(FP_CONSENT_POLICY.text).toContain("comic book cover");
-    expect(FP_CONSENT_POLICY.text).toContain("future photo my child chooses to upload from inside First Profit");
-    // (c) storing answers + generated cover on the profile, incl. the PRE-ACCOUNT draft
-    expect(FP_CONSENT_POLICY.text).toContain("answers to the signup questions");
-    expect(FP_CONSENT_POLICY.text).toContain("draft record that is created before the account exists");
+  it("the superseded 2026-08-05.1 version stays published and now resolves to stale", () => {
+    expect(isPublishedConsentVersion("2026-08-05.1")).toBe(true);
+    expect(
+      consentVerdict({ echoedVersion: "2026-08-05.1", echoedHash: currentPolicyHash() })
+    ).toBe("stale");
   });
 
-  it("carries every pre-existing disclosure forward (additive only, never a narrowing)", () => {
-    for (const phrase of [
-      "first name",
-      "age band",
-      "birth year",
-      "stuck",
-      "twelve months",
-      "saved game progress",
-      "review or delete my child's account",
-    ]) {
-      expect(FP_CONSENT_POLICY.text).toContain(phrase);
-    }
+  it("discloses the core clauses (account creation, stored fields, retention, review/delete, withdrawal, ToS changes)", () => {
+    expect(FP_CONSENT_POLICY.text).toContain("creating an account for my child");
+    expect(FP_CONSENT_POLICY.text).toContain("first name, last name, age");
+    expect(FP_CONSENT_POLICY.text).toContain("twelve months after account deletion");
+    expect(FP_CONSENT_POLICY.text).toContain("review or delete my child's account");
+    expect(FP_CONSENT_POLICY.text).toContain("withdraw consent at any time");
+    expect(FP_CONSENT_POLICY.text).toContain("change the terms of service at any time");
   });
 
   it("has no em dashes anywhere in the rendered text (repo style)", () => {

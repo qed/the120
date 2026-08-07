@@ -22,7 +22,6 @@
 import { useState, useTransition } from "react";
 import { v3AddKidAction, v3EditKidAction } from "./actions";
 import type { ExistingKid } from "@/app/lib/v3-signup/flow-rules";
-import { KID_MAX_AGE, KID_MIN_AGE } from "@/app/lib/v3-signup/flow-rules";
 import { V3Button, V3Field, V3Notice, V3TextButton, V3_INPUT_CLASSES } from "./v3-ui";
 
 export function StepAddKid({
@@ -106,10 +105,6 @@ export function StepAddKid({
       <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
         Add your kid, and their story starts.
       </h1>
-      <p className="mt-4 max-w-md text-base leading-relaxed text-v3-stone">
-        First Profit turns starting a real, tiny business into a guided graphic novel. It begins
-        with one page &mdash; theirs.
-      </p>
 
       <form onSubmit={onSubmit} noValidate className="mt-8 space-y-5">
         <V3Field id="v3-kid-name" label="Kid's full name">
@@ -137,9 +132,6 @@ export function StepAddKid({
             // never exceeds the column at 390px.
             className={`${V3_INPUT_CLASSES} max-w-[8rem]`}
           />
-          <p className="mt-1 text-sm text-v3-stone">
-            Between {KID_MIN_AGE} and {KID_MAX_AGE}.
-          </p>
         </V3Field>
 
         {!draftId && (
@@ -152,9 +144,7 @@ export function StepAddKid({
                 className="mt-1 h-5 w-5 flex-none accent-v3-profit"
               />
               <span className="text-sm leading-relaxed text-v3-stone">
-                I am this child&rsquo;s parent or guardian and I give consent for First Profit to
-                create their account, to draw their comic cover from a photo we upload, and to
-                store their answers and cover on their profile.
+                I agree to Terms of Service
               </span>
             </label>
             <button

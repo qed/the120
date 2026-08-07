@@ -5,6 +5,14 @@
  *
  *   PARENT_PASSWORD='...' CHILD_PASSWORD='...' npx tsx scripts/provision-fp-family.ts
  *
+ * WHO gets provisioned is env-overridable (PARENT_EMAIL, PARENT_FIRST_NAME,
+ * PARENT_LAST_NAME, CHILD_FIRST_NAME, FP_USERNAME), defaulting to the original
+ * Cedric family below — so a second demo family does not require editing and
+ * re-committing this file. FP_USERNAME may be EMAIL-SHAPED
+ * (e.g. `ethan@firstprofit.school`): it is an OPAQUE login handle, never a
+ * mailbox. It is validated with the login door's own `classifyIdentifier`, so
+ * this script cannot claim a username that /api/fp/login would then refuse.
+ *
  * Unlike scripts/provision-path-family.ts (which provisions the OLD /fp Path
  * student that signs in by first name), this composes the SAME primitives the FP
  * signup child flow (app/api/fp/signup/child-core.ts) uses, so the child is
@@ -25,14 +33,20 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { deriveStudentEmail, validateStudentPassword } from "@/app/lib/fp/provision-rules";
 import { ensurePathFamilyForParent, findAuthUserByEmail } from "@/app/lib/fp/provision-core";
 import { ensurePlayerProfile } from "@/app/api/fp/login/profile-core";
+import { classifyIdentifier } from "@/app/api/fp/login/login-rules";
 import { APPLICANT_ENTRY_STATE } from "@/app/lib/funnel/applicant-rules";
 import { loadSupabaseEnv } from "./load-env";
 
-// --- What we provision (edit here for a different family) --------------------
-const PARENT_EMAIL = "pkuperman@gmail.com";
-const PARENT_NAME = { first_name: "Caradoc", last_name: "Kuperman" };
-const CHILD_FIRST_NAME = "Cedric";
-const FP_USERNAME = "cedrick"; // must match ^[a-z0-9]+$ (children_fp_username_format)
+// --- What we provision (env-overridable; defaults = the original family) -----
+const PARENT_EMAIL = process.env.PARENT_EMAIL ?? "pkuperman@gmail.com";
+const PARENT_NAME = {
+  first_name: process.env.PARENT_FIRST_NAME ?? "Caradoc",
+  last_name: process.env.PARENT_LAST_NAME ?? "Kuperman",
+};
+const CHILD_FIRST_NAME = process.env.CHILD_FIRST_NAME ?? "Cedric";
+// Opaque lowercase login handle. May be email-shaped — validated below against
+// children_fp_username_format's twin, the login door's USERNAME_FORMAT.
+const FP_USERNAME = (process.env.FP_USERNAME ?? "cedrick").toLowerCase();
 // -----------------------------------------------------------------------------
 
 const PARENT_PASSWORD = process.env.PARENT_PASSWORD;
@@ -49,8 +63,16 @@ async function main() {
   const parentPassword = requireEnv("PARENT_PASSWORD", PARENT_PASSWORD);
   const childPassword = requireEnv("CHILD_PASSWORD", CHILD_PASSWORD);
 
-  if (!/^[a-z0-9]+$/.test(FP_USERNAME)) {
-    throw new Error(`fp_username "${FP_USERNAME}" must be lowercase alphanumeric (^[a-z0-9]+$).`);
+  // Validate with the LOGIN DOOR's own classifier rather than a restated regex:
+  // the generator/CHECK/regex charset-agreement invariant means a handle this
+  // script can claim must be one /api/fp/login can resolve. A local
+  // `^[a-z0-9]+$` copy was the pre-email-shaped subset and would reject a
+  // perfectly valid `name@firstprofit.school`.
+  const handle = classifyIdentifier(FP_USERNAME);
+  if (handle.kind !== "username" || handle.normalized !== FP_USERNAME) {
+    throw new Error(
+      `fp_username "${FP_USERNAME}" is not a valid login handle (must be lowercase, start and end alphanumeric, interior [a-z0-9._+@-] only, <= 80 chars).`
+    );
   }
   // The child password must clear the same R29 floor the app enforces.
   const pw = validateStudentPassword(childPassword, { studentName: CHILD_FIRST_NAME });
@@ -76,6 +98,21 @@ async function main() {
     parent = created.data.user;
     console.log(`parent created + confirmed: ${PARENT_EMAIL}`);
   } else {
+    // ⚠ REFUSE TO CLOBBER A PRIVILEGED ACCOUNT. The update below RESETS the
+    // password of whatever already sits on PARENT_EMAIL. That is fine for the
+    // owner's own parent account (the original use), and catastrophic for a
+    // staff/admin login: `app_metadata.role === "admin"` is the whole /crm +
+    // /staff gate (app/lib/supabase/proxy-rules.ts), so a demo-grade parent
+    // password would silently become an admin password. A student role is
+    // refused for the same reason in the other direction — a child's auth user
+    // must never also be a parent. Hit for real on 2026-08-07: the demo email
+    // `ethan@the120.school` was already a live CRM admin.
+    const existingRole = (parent.app_metadata as { role?: unknown } | null)?.role;
+    if (typeof existingRole === "string" && existingRole !== "parent") {
+      throw new Error(
+        `${PARENT_EMAIL} already exists with app_metadata.role="${existingRole}" — refusing to reset its password or attach a parents row. Pick a different PARENT_EMAIL.`
+      );
+    }
     // Parent pre-exists: the caller explicitly wants a known parent password set,
     // so update it to PARENT_PASSWORD (this is the owner's own account).
     const upd = await db.auth.admin.updateUserById(parent.id, {

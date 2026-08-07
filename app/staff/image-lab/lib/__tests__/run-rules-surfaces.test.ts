@@ -8,7 +8,6 @@ import {
   clockOffsetFor,
   hashSignature,
   idempotencyStorageKey,
-  isRecordableSourceId,
   modelIdsFromCells,
   newestAttempt,
   releaseIdempotencyKey,
@@ -446,21 +445,17 @@ describe("polling, so the recovery loop is reachable at all", () => {
   });
 });
 
-describe("provenance ids are a CLOSED shape", () => {
-  it("accepts the ids the picker mints and refuses prose", () => {
-    expect(isRecordableSourceId("idea:2")).toBe(true);
-    // The curriculum's own task ids are dotted (`1.1.2`).
-    expect(isRecordableSourceId("1.1.2")).toBe(true);
-    expect(isRecordableSourceId("9f1c8b2e-0000-4000-8000-000000000000")).toBe(true);
-    expect(isRecordableSourceId(null)).toBe(true);
-    expect(isRecordableSourceId(undefined)).toBe(true);
-    // These columns are documented "internal ids ONLY — never a name", and they
-    // arrived as free 200-character client strings.
-    expect(isRecordableSourceId("Maya Chen")).toBe(false);
-    expect(isRecordableSourceId("x".repeat(65))).toBe(false);
-    expect(isRecordableSourceId("")).toBe(false);
-  });
-});
+/**
+ * ⚠ `isRecordableSourceId` AND ITS TEST WERE DELETED (2026-08-06). It bounded
+ * `source_idea_id` / `source_task_id` — run columns that are no longer written —
+ * to a closed character class, because they were documented "internal ids ONLY"
+ * and arrived as free 200-character client strings.
+ *
+ * The property still matters in one smaller place, and it is still enforced
+ * there: `run-actions.fillSchema` bounds the picker's `ideaId` with
+ * `IMAGE_LAB_SOURCE_ID_PATTERN`, which is the value that goes into a lookup. The
+ * pattern is exercised through that schema in `run-actions.test.ts`.
+ */
 
 describe("the pre-adapter budget is part of the route's arithmetic", () => {
   it("leaves the slowest model AND the reference load inside the ceiling", () => {
@@ -526,45 +521,36 @@ describe("the run-level prompt is labelled as evidence, not as what retry sends"
 });
 
 /**
- * ⚠ THE REFUSAL COPY MUST NOT PRINT THE BYPASS.
+ * ⚠ THE COPY MUST NOT ASSERT A PROTECTION THAT NO LONGER RUNS.
  *
- * `unverified_slot_source` used to end "…or put the wording straight into the
- * template instead" — an instruction for the exact door the attestation now
- * closes: the template was never examined by that refusal, was not scrubbed
- * without tokens, and left `source_child_id` null so nothing armed. A product
- * must not point at its own hole.
+ * This block used to check that `unverified_slot_source` did not print its own
+ * bypass ("…or put the wording straight into the template instead") and that the
+ * slot hint named the attestation. Both refusals and the attestation are gone.
+ *
+ * The GENERAL property — surface copy tells the truth about what protects the
+ * staff member — matters MORE now, not less, because the scrub is the only
+ * control left on this path and it runs exactly once. So the test inverts: the
+ * copy must not claim a second, server-side scrub, and it must say where the
+ * scrub stops.
  */
-describe("no refusal recommends routing around itself", () => {
-  it("the unverified-slot refusal does not name the template as an escape hatch", () => {
-    const copy = IMAGE_LAB_RUN_COPY.refusals.unverifiedSlotSource;
-    expect(copy).not.toMatch(/straight into the template/i);
-    expect(copy).not.toMatch(/into the template instead/i);
-    // It still has to say what TO do.
-    expect(copy).toMatch(/picker/i);
+describe("the copy tells the truth about how far the scrub reaches", () => {
+  it("the scrub note does NOT claim a second server-side pass", () => {
+    const note = IMAGE_LAB_RUN_COPY.picker.scrubNote;
+    // It used to end "…and again on the server before anything is sent". That
+    // re-scrub needed the provenance token to name a child, and it is gone.
+    expect(note).not.toMatch(/again on the server/i);
+    expect(note).not.toMatch(/re-?scrub/i);
+    // And it says where the protection stops, so a staff member keeps checking.
+    expect(note).toMatch(/once/i);
+    expect(note).toMatch(/preview/i);
   });
 
-  /**
-   * ⚠ THE SLOT HINT MUST TEACH THE RULE, NOT JUST THE PERMISSION. Hand-typed slot
-   * values are allowed again — composing a synthetic test case is core bench work
-   * — but only under the attestation, because a hand-typed slot value and a
-   * replayed child's are the same POST. A hint that offered hand-typing without
-   * naming the requirement would send staff straight into a refusal they could
-   * not explain; one that denied hand-typing altogether would be describing a
-   * capability the bench has.
-   */
-  it("the slot hint offers hand-typing AND names the attestation it needs", () => {
+  it("the slot hint offers hand-typing AND names the scrub's limit", () => {
     const hint = IMAGE_LAB_RUN_COPY.composer.slots.manualHint;
     expect(hint).toMatch(/by hand/i);
-    expect(hint).toMatch(/no-child-content|box/i);
-  });
-
-  it("the two gate refusals read differently, so History can tell them apart", () => {
-    const text = IMAGE_LAB_RUN_COPY.outcomes.childTextGate;
-    const refs = IMAGE_LAB_RUN_COPY.outcomes.childReferenceGate;
-    expect(refs).not.toBe(text);
-    // The reference copy must talk about references, or staff will go and change
-    // the prompt in response to a refusal about an attached PNG.
-    expect(refs).toMatch(/reference/i);
-    expect(refs).toMatch(/google/i);
+    // Hand-typed values are no longer refused, so the hint must not imply they
+    // are — but it must say they are not scrubbed.
+    expect(hint).not.toMatch(/refuses|refused/i);
+    expect(hint).toMatch(/scrub/i);
   });
 });

@@ -56,16 +56,16 @@ import {
 } from "./image-model-rules";
 import { estimatedCostUsd, findModelEntry } from "./model-registry";
 import {
+  IMAGE_LAB_SLOTS,
   IMAGE_LAB_STALE_AFTER_MS,
   type ImageLabFailureReason,
   type ImageLabMimeType,
 } from "./image-lab-rules";
 import {
   canRetryCell,
-  decideChildTextGate,
+  decideDispatchGate,
   decideRunComposition,
   formatGenerationBreadcrumb,
-  isRecordableSourceId,
   runObjectKey,
   type CellRow,
   type CellSpec,
@@ -74,9 +74,6 @@ import {
   type RunCompositionRefusal,
   type SlotValues,
 } from "./run-rules";
-import { nameTokensFor, scrubNames } from "./content-picker-core";
-import { isRealFamily } from "@/app/crm/lib/test-family-filter";
-import { IMAGE_LAB_SLOTS } from "./image-lab-rules";
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -94,21 +91,24 @@ export type RunRow = {
   readonly compare: boolean;
   readonly iteratedOnModel: string | null;
   readonly iteratedFromRunId: string | null;
-  /** Internal ids ONLY — never a name (origin R17, migration header). */
-  readonly sourceChildId: string | null;
-  readonly sourceIdeaId: string | null;
-  readonly sourceTaskId: string | null;
   /**
-   * ⚠ THE STAFF ATTESTATION, RECORDED. `staffId` above is who asserted it and
-   * `createdAtMs` is when — which is the whole reason it is a column and not a
-   * request-scoped boolean. See `run-rules.PromptGateContext`.
+   * ⚠ THE PROVENANCE FIELDS ARE GONE FROM THIS TYPE (2026-08-06, owner decision).
    *
-   * It is the run-level fact `generateCell`'s gate reads for a run with NO
-   * provenance: false (the default, and the value of every run composed by a
-   * client that has never heard of this field) means every OpenAI cell must carry
-   * the derived vocabulary, exactly as verified provenance does.
+   * `sourceChildId` / `sourceIdeaId` / `sourceTaskId` / `noChildContentAttested`
+   * used to live here. The COLUMNS still exist in `fp_image_lab_runs` — the
+   * migration lock is additive-only and nothing may be dropped — but they are
+   * neither written nor read by any code. `source_child_id` stays null and
+   * `no_child_content_attested` takes its `false` default on every insert.
+   *
+   * ⚠ THE CONSEQUENCE, STATED WHERE IT LANDS: `source_child_id` was the index
+   * that made a data-deletion or consent-revocation purge possible — "delete
+   * everything derived from this child". Without it, a run containing a child's
+   * writing CANNOT BE LOCATED BY CHILD, now or retroactively. If a parent asks
+   * for their child's data to be deleted, the Lab's rows cannot be found by child
+   * id; the only recourse is deleting runs wholesale. That is accepted, and the
+   * runbook's purge section says so in those terms rather than describing a
+   * procedure that no longer works.
    */
-  readonly noChildContentAttested: boolean;
   readonly createdAtMs: number;
   /**
    * How many cells this run fanned to — the ONE number the audit breadcrumb
@@ -181,53 +181,17 @@ export type RunDeps = {
   ): Promise<{ bytes: Uint8Array; contentType: ImageLabMimeType }[]>;
 
   /**
-   * The scrub inputs and the real-family posture for one child, by id.
+   * ⚠ THERE IS NO `loadChildIdentity`, NO `verifySourceToken` AND NO
+   * `isRealContentLive` DEP ANY MORE (2026-08-06, owner decision).
    *
-   * ⚠ THIS IS WHAT MAKES THE NAME SCRUB A PROPERTY OF THE PAID PATH rather than
-   * advisory UI behaviour. The scrub used to run ONLY inside `pickSlotValues`,
-   * while the prompt that actually reaches a vendor is assembled in `createRun`
-   * from CLIENT-SUPPLIED slot values — so a stale tab, a replayed action or a
-   * compromised session could POST unscrubbed child prose and still stamp
-   * `source.childId` on it. And `source.*` being client-asserted is also what
-   * made the consent audit caller-controlled. Both are fixed by looking the
-   * child up here, server-side, before a row is written.
+   * The first existed so `createRun` could RE-SCRUB the incoming template, slot
+   * values and note against the child identity proved by the picker's signed
+   * token — the enforcing copy of the name scrub. With provenance removed the
+   * server does not know which child any text came from, so there is no subject
+   * to scrub against and the re-scrub is not merely unimplemented but
+   * IMPOSSIBLE. The scrub is now a pick-time transform only; see
+   * `content-picker-core.scrubNames`, which states the cost.
    */
-  loadChildIdentity(childId: string): Promise<{
-    firstName: string;
-    lastName: string;
-    username: string | null;
-    isTest: boolean | null;
-  } | null>;
-
-  /**
-   * Verify the picker's server-signed provenance token (`./source-token.ts`).
-   *
-   * ⚠ THIS IS WHAT REPLACED A CLIENT-ASSERTED `source` OBJECT. The chokepoint
-   * below used to be guarded by `if (input.source && input.source.childId !==
-   * null)` over an OPTIONAL field, so the re-scrub and the consent breadcrumb
-   * were both defeated by DELETING a field rather than by forging one. A caller
-   * cannot obtain filled slots without also carrying this token, and it cannot
-   * mint one.
-   *
-   * ⚠ IT TAKES THE CALLER'S STAFF ID, AND THE TOKEN IS BOUND TO THE MINTER'S.
-   * The signed payload used to be `{c,i,t,at}` — no staff id, no nonce — so one
-   * token was replayable for its whole two-hour life by ANY staff session onto
-   * ANY compose. That is not a route for child text to reach OpenAI (the token
-   * makes the gate STRICTER, never looser); what it corrupts is the CONSENT
-   * RECORD. `source_child_id` is what the revocation purge keys on, and a
-   * floating token makes it attachable to runs containing none of that child's
-   * content — so a purge would delete the wrong rows and leave the right ones.
-   */
-  verifySourceToken(
-    token: string,
-    staffId: string
-  ): {
-    ok: boolean;
-    provenance?: { childId: string; ideaId: string | null; taskId: string | null };
-  };
-
-  /** Is the consent flag on? Injected so the sequence is testable without env. */
-  isRealContentLive(): boolean;
 
   generate(request: {
     modelId: string;
@@ -306,12 +270,6 @@ export function errorName(e: unknown): string {
   return `${name} class=${classifyError(e)}${code === null ? "" : ` cause=${code}`}`;
 }
 
-/** Does this compose carry any slot content at all? See `createRun`'s chokepoint. */
-function hasSlotContent(values: SlotValues | undefined): boolean {
-  if (!values) return false;
-  return IMAGE_LAB_SLOTS.some((slot) => (values[slot] ?? "").trim() !== "");
-}
-
 // ── 1. Create a run ──────────────────────────────────────────────────────────
 
 export type CreateRunInput = {
@@ -328,38 +286,12 @@ export type CreateRunInput = {
   iteratedOnModel?: string | null;
   iteratedFromRunId?: string | null;
   /**
-   * The picker's SERVER-SIGNED provenance token (origin R17), verbatim.
-   *
-   * ⚠ NOT A `source` OBJECT ANY MORE. The three ids are DERIVED from this token,
-   * so a caller states nothing about which child a run was built from — see
-   * `./source-token.ts` for what that closed.
-   */
-  sourceToken?: string | null;
-  /**
    * Per-model prompt choice (`run-rules.PromptModes`).
    *
-   * ⚠ ADVISORY, AND SAFE TO BE SO. A caller can ask for `authored` on an OpenAI
-   * model and this function will honour it — the row is written, nothing is sent,
-   * and {@link generateCell}'s gate refuses the cell at dispatch. The refusal is
-   * deliberately NOT moved here: compose is not the threat surface, dispatch is,
-   * and a compose-time rewrite would produce rows that misreport their own input.
+   * The staff choice stands on every model: `derived` is selectable everywhere
+   * and compulsory nowhere. An absent or unrecognized entry composes `authored`.
    */
   promptModes?: PromptModes;
-  /**
-   * ⚠ THE EXPLICIT STAFF ATTESTATION: "the template and slot values on this
-   * compose contain no child-authored content."
-   *
-   * ABSENT AND FALSE ARE THE SAME ANSWER, AND IT IS THE SAFE ONE. Without it,
-   * every OpenAI cell on this run composes — and dispatches — on the closed
-   * category vocabulary, exactly as if a provenance token had verified. With it,
-   * authored text is allowed to OpenAI and the boolean is written to the run row
-   * beside `staff_id`, so the assertion has an owner.
-   *
-   * This is the field that closes the template door: `sourceChildId` is a fact
-   * about the FETCH PATH, so a child's pitch typed into `template` with no token
-   * and empty slots armed nothing at all. See `run-rules.PromptGateContext`.
-   */
-  noChildContentAttested?: boolean;
 };
 
 export type CreateRunResult =
@@ -380,139 +312,32 @@ export type CreateRunResult =
  * to `deps.generate` at all, which is a stronger statement than "it does not call
  * it": the ordering test asserts the journal, and the absence of the edge is what
  * makes the assertion durable.
+ *
+ * ⚠ THE CHOKEPOINT THAT USED TO OPEN THIS FUNCTION IS GONE (2026-08-06, owner
+ * decision), AND IT CANNOT BE REBUILT AS IT WAS. It verified the picker's signed
+ * provenance token, looked the named child up server-side, and RE-SCRUBBED the
+ * template, the slot values and the note against that child's name tokens — the
+ * enforcing copy of the name scrub, and the one thing that made the scrub a
+ * property of the paid path rather than of the UI. With provenance removed there
+ * is no child to scrub against, so the scrub now runs once, at pick time, and
+ * everything after it is client-editable. Read
+ * `content-picker-core.scrubNames` before assuming otherwise.
  */
 export async function createRun(
   deps: RunDeps,
   input: CreateRunInput
 ): Promise<CreateRunResult> {
-  // ⚠ `=== true`, NOT TRUTHINESS. The field arrives over the wire; anything that
-  // is not literally `true` is "the caller did not assert this", which is the
-  // safe reading. It is recorded verbatim even on a provenance-bearing run, where
-  // it changes nothing — the record is of what the staff member claimed, not of
-  // what the server concluded from it.
-  //
-  // Read BEFORE the chokepoint because the unverified-slot refusal below now
-  // consults it: the attestation is a claim about the WHOLE compose, template and
-  // slot values alike.
-  const attested = input.noChildContentAttested === true;
-
-  // ── THE CHOKEPOINT. Provenance is VERIFIED (not asserted) and the scrub is
-  //    RE-RUN here, because this — not the picker — is the last code that
-  //    touches the text before it becomes `resolved_prompt` and is sent. ───────
-  let tokens: readonly string[] = [];
-  let source: {
-    childId: string;
-    ideaId: string | null;
-    taskId: string | null;
-  } | null = null;
-  const presented =
-    typeof input.sourceToken === "string" && input.sourceToken !== ""
-      ? input.sourceToken
-      : null;
-
-  if (presented !== null) {
-    // ⚠ THE CONSENT FLAG GATES THIS LEG TOO, and it did not used to.
-    // `IMAGE_LAB_REAL_CONTENT_LIVE` was read ONLY by the picker's entry points
-    // and by the composer's render — so with generation on and consent off, a
-    // stale tab or a replayed action still drove the service-role `children` /
-    // `families` lookup, stamped `source_child_id`, and logged `dbContent=true`
-    // on a deployment whose operator believed the switch was off. Both this
-    // module's and the picker's docblocks call the flag "the technical
-    // enforcement" of the consent check; this is what makes that true.
-    if (!deps.isRealContentLive()) {
-      return { ok: false, refusal: { ok: false, reason: "content_picker_off" } };
-    }
-
-    // ⚠ A TOKEN THAT DOES NOT VERIFY IS A REFUSAL, NEVER A SILENT DOWNGRADE to
-    // the unprovenanced path. Falling through would restore the exact bypass the
-    // token replaces, reachable by flipping one character.
-    const verdict = deps.verifySourceToken(presented, input.staffId);
-    if (!verdict.ok || !verdict.provenance) {
-      return { ok: false, refusal: { ok: false, reason: "bad_source_token" } };
-    }
-    const provenance = verdict.provenance;
-    // Belt and braces: the signature proves WE minted these ids, the pattern
-    // proves they still satisfy today's rule for the columns they land on.
-    if (
-      !isRecordableSourceId(provenance.ideaId) ||
-      !isRecordableSourceId(provenance.taskId)
-    ) {
-      return { ok: false, refusal: { ok: false, reason: "bad_source_id" } };
-    }
-
-    let child: Awaited<ReturnType<RunDeps["loadChildIdentity"]>>;
-    try {
-      child = await deps.loadChildIdentity(provenance.childId);
-    } catch (e) {
-      console.error(`[image-lab/run] source child lookup failed: ${errorName(e)}`);
-      return { ok: false, reason: "unavailable" };
-    }
-    // The SAME predicate the picker applies, on the same fail-closed posture: an
-    // unknown child or a test family is not a child this bench may build a
-    // consent-audited, money-spending run from.
-    if (!child || !isRealFamily({ is_test: child.isTest })) {
-      return { ok: false, refusal: { ok: false, reason: "unknown_source_child" } };
-    }
-    tokens = nameTokensFor(child);
-    source = provenance;
-  } else if (hasSlotContent(input.slotValues) && !attested) {
-    // ⚠ NO TOKEN + NON-EMPTY SLOTS + NO ATTESTATION ⇒ REFUSED, ON EVERY
-    //   DEPLOYMENT.
-    //
-    // This is the other half of "`source` must stop being optional in practice".
-    // Every slot value this bench serves carries a token, so a compose that
-    // presents slot content WITHOUT one is either a replay that stripped the
-    // field or a hand-typed value we cannot distinguish from a replay — and the
-    // first of those is precisely the "POST unscrubbed child prose and it is
-    // stored, sent, and invisible to the purge" case.
-    //
-    // ⚠ AND THE ATTESTATION IS WHAT TELLS THE TWO APART. It was briefly written
-    // without it, which made slots PICKER-ONLY on every deployment forever — a
-    // staff member composing a synthetic test case ("dog treats", "a lemonade
-    // stand") could no longer fill a slot by hand at all, for any model. That is
-    // a capability taken away from the one thing this bench exists to do, and it
-    // was being traded against a distinction that does not hold up: the line that
-    // matters is ATTESTED vs UNATTESTED, not SLOTS vs TEMPLATE.
-    //
-    // A hand-typed slot and a replayed child's slot really are the same POST —
-    // which is exactly why an unattested one must be refused, and exactly why an
-    // attested one is fine. Splitting the two channels would mean one claim ("no
-    // child content in this compose") authorized the template but not the slots,
-    // which is incoherent and reads as arbitrary to whoever hits it.
-    //
-    // The P0 property is unchanged: with no token and no attestation, child text
-    // ANYWHERE — template or slots — either forces the derived vocabulary on
-    // every OpenAI cell or is refused outright. The attestation remains the ONLY
-    // way to send authored text to OpenAI without provenance, and it can never
-    // override provenance that actually verified.
-    //
-    // ⚠ THE `isRealContentLive()` CONJUNCT USED TO BE HERE, AND IT WAS INVERTED.
-    // It made the refusal conditional on the picker being ON — so turning
-    // `IMAGE_LAB_REAL_CONTENT_LIVE` OFF, which is the action an operator takes to
-    // mean "stop touching child content", REMOVED the only refusal on this path
-    // and let a token-less POST full of a child's prose compose and dispatch
-    // un-gated. The docblock defended it with "with the picker off, no child
-    // content is in circulation at all", and that premise is simply false:
-    // content served during a flag-on window persists in staff notes, in earlier
-    // runs' `slot_values` (which History and Kit both render), and in open tabs.
-    // Slot content with no token is at LEAST as suspect once the switch is off.
-    return { ok: false, refusal: { ok: false, reason: "unverified_slot_source" } };
-  }
-
-  // Belt AND braces: the picker already scrubbed what it returned, and a client
-  // is free to have edited it since. Scrubbing the TEMPLATE too is deliberate —
-  // a staff member pasting a child's sentence into the template is the same leak
-  // by a different door.
-  const template = tokens.length > 0 ? scrubNames(input.template, tokens) : input.template;
-  const slotValues: SlotValues = scrubSlotValues(input.slotValues, tokens);
-  // ⚠ AND THE NOTE. `note` is 2000 characters of free text written straight to a
-  // row the migration header describes as recording internal ids only, and it was
-  // the one prose field the scrub skipped EVEN WHEN THE TOKENS WERE AVAILABLE —
-  // "Maya's second attempt at the soap panel" is exactly what a staff member
-  // types there. Unit 5 closed this class for `source_idea_id`/`source_task_id`
-  // with a closed character class; free prose cannot take that treatment, so it
-  // takes the scrub instead.
-  const note = tokens.length > 0 ? scrubNames(input.note ?? "", tokens) : input.note ?? "";
+  // ⚠ NOTHING IS SCRUBBED HERE. There is no child identity in scope to scrub
+  // against — see this function's header and `content-picker-core.scrubNames`.
+  // The template and the note are recorded as submitted.
+  const template = input.template;
+  // ⚠ THE SLOT ALLOWLIST SURVIVES THE SCRUB'S REMOVAL. It used to be a side
+  // effect of `scrubSlotValues` walking `IMAGE_LAB_SLOTS`; it is its own step
+  // now, because "a key nobody audited cannot reach the resolved prompt or the
+  // stored `slot_values`" is a separate property from scrubbing and must not
+  // disappear with it.
+  const slotValues: SlotValues = keepKnownSlots(input.slotValues);
+  const note = input.note ?? "";
 
   const decision = decideRunComposition({
     template,
@@ -520,15 +345,6 @@ export async function createRun(
     modelIds: input.modelIds,
     imageCount: input.imageCount,
     referenceIds: input.referenceIds,
-    // ⚠ FROM THE VERIFIED TOKEN, never from a client claim. The composer passes
-    // "the picker minted a token" to get an honest preview; this passes "the
-    // server verified one", which is the fact the prompt choice hangs off.
-    childProvenance: source !== null,
-    // ⚠ AND THE ATTESTATION, WHICH IS WHAT AN UNPROVENANCED COMPOSE HANGS OFF.
-    // Absent ⇒ false ⇒ every OpenAI cell is composed derived. A client that has
-    // never heard of this field therefore gets the safe composition, which is the
-    // whole design: the lazy path must be the safe one.
-    noChildContentAttested: attested,
     promptModes: input.promptModes,
   });
   if (!decision.ok) return { ok: false, refusal: decision };
@@ -556,13 +372,6 @@ export async function createRun(
         ? input.iteratedOnModel
         : null,
     iteratedFromRunId: input.iteratedFromRunId ?? null,
-    // ⚠ FROM THE VERIFIED TOKEN, never off the input. This is the field
-    // `usedDbContent` on the audit line is derived from, and the field the
-    // consent-revocation purge keys on.
-    sourceChildId: source?.childId ?? null,
-    sourceIdeaId: source?.ideaId ?? null,
-    sourceTaskId: source?.taskId ?? null,
-    noChildContentAttested: attested,
     createdAtMs: deps.now(),
     cellCount: decision.cells.length,
   };
@@ -587,9 +396,6 @@ export async function createRun(
         template,
         resolvedPrompt: decision.resolved.text,
         referenceIds: input.referenceIds ?? [],
-        // ⚠ PART OF THE COMPOSITION, NOT A FLAG BESIDE IT — see the equality
-        // check in `resolveExistingRun`.
-        noChildContentAttested: attested,
       },
     });
   }
@@ -629,18 +435,17 @@ function cellRowsFor(
 }
 
 /**
- * Re-run the scrub over every slot value, dropping nothing and adding nothing.
+ * Keep only the four slots the vocabulary defines.
  *
- * Only the four known slots are walked — the same allowlist `run-actions`
- * applies — so a key nobody audited cannot ride in and reach the resolved
- * prompt through this function either.
+ * The same allowlist `run-actions` applies at the wire boundary, re-applied here
+ * so a caller reaching `createRun` by any other route cannot ride an unaudited
+ * key into `slot_values` or into the resolved prompt.
  */
-function scrubSlotValues(values: SlotValues, tokens: readonly string[]): SlotValues {
+function keepKnownSlots(values: SlotValues | undefined): SlotValues {
   const out: SlotValues = {};
   for (const slot of IMAGE_LAB_SLOTS) {
     const value = values?.[slot];
-    if (typeof value !== "string") continue;
-    out[slot] = tokens.length > 0 ? scrubNames(value, tokens) : value;
+    if (typeof value === "string") out[slot] = value;
   }
   return out;
 }
@@ -667,9 +472,6 @@ async function resolveExistingRun(
       template: string;
       resolvedPrompt: string;
       referenceIds: readonly string[];
-      /** See the equality check below — the attestation is composition, not
-       *  metadata about it. */
-      noChildContentAttested: boolean;
     };
   }
 ): Promise<CreateRunResult> {
@@ -687,26 +489,9 @@ async function resolveExistingRun(
   if (!existing) return { ok: false, reason: "unavailable" };
 
   // The stored run is the authority on what this key bought.
-  //
-  // ⚠ THE ATTESTATION IS PART OF THE COMPOSITION, and leaving it out was the
-  // one way this repair could still mint a MISMATCHED ROW. Template, prompt and
-  // references can all match across two composes that DISAGREE about whether the
-  // text was vouched for — and when they do, the repair inserts the incoming
-  // (attested ⇒ possibly AUTHORED) cells against the stored (UNATTESTED) run.
-  // The result is an authored OpenAI cell on a run whose row says "not
-  // attested", which only the dispatch-side gate then catches. Two composes that
-  // disagree about the attestation are not the same composition; treating them
-  // as identical is exactly the confusion that produces that row.
-  //
-  // The real composer cannot reach here — `noChildContentAttested` is already in
-  // `compositionSignature`, so a changed attestation mints a new idempotency key
-  // — which means the only caller that CAN is a hand-rolled POST reusing a key.
-  // That is precisely the threat model the gate exists for, so the honest answer
-  // is `idempotency_conflict` rather than somebody else's composition.
   if (
     existing.template !== input.composition.template ||
     existing.resolvedPrompt !== input.composition.resolvedPrompt ||
-    existing.noChildContentAttested !== input.composition.noChildContentAttested ||
     existing.referenceIds.length !== input.composition.referenceIds.length ||
     existing.referenceIds.some((id, i) => id !== input.composition.referenceIds[i])
   ) {
@@ -818,27 +603,22 @@ export async function generateCell(
     return { kind: "not_found" };
   }
 
-  // ── THE DISPATCH GATE. The one rule no staff choice can override. ─────────
+  // ── THE DISPATCH GATE. ────────────────────────────────────────────────────
   //
-  // ⚠ IT RUNS HERE — SERVER-SIDE, ON THE PAID PATH, ON THE EXACT STRING ABOUT TO
-  // BE SENT — and every word of that is load-bearing:
+  // ⚠ WHAT IT NO LONGER DOES. Until 2026-08-06 this was `decideChildTextGate`: a
+  // per-vendor rule that refused authored text and reference images on the
+  // OpenAI leg of any run carrying child provenance or lacking a staff
+  // attestation. Provenance and the attestation were removed by owner decision,
+  // and with them the rule — reference images will only ever be AI-generated, so
+  // nothing about a child reaches a vendor through one. GOOGLE AND OPENAI ARE
+  // NOW TREATED IDENTICALLY ON THIS PATH; a `provider === "openai"` branch
+  // reappearing here would be a regression, and a test pins its absence.
   //
-  //   * SERVER-SIDE, not in the composer. The composer's per-model selector is a
-  //     convenience; the threat is a crafted or replayed POST to this route, and
-  //     a client-side check is advisory against exactly that.
-  //   * ON THE RESOLVED STRING, not on `run.template` and not on the run's
-  //     default prompt. A template of pure `{{slot}}` tokens looks innocent and
-  //     resolves to the child's whole pitch; a template a staff member pasted the
-  //     derived wording into would clear a template-level check while this row
-  //     carried something else entirely.
-  //   * AND IT REFUSES RATHER THAN SUBSTITUTING. Swapping the derived prompt in
-  //     silently would leave a row whose `resolved_prompt` is not what the vendor
-  //     received — and every keep/reject judged on that image would be attributed
-  //     to a prompt that never ran. A refused cell is recoverable; corrupted
-  //     evidence is not.
+  // ⚠ WHAT SURVIVES: the unknown-model FAIL-CLOSED, before the CAS, so a refusal
+  // leaves the cell untouched with nothing dialled and nothing billed. It is not
+  // redundant with the adapter's own lookup — that is precisely the borrowing
+  // `decideDispatchGate`'s docblock describes.
   //
-  // BEFORE THE CAS, so a refusal leaves the cell untouched and re-generatable
-  // once the prompt choice is fixed, with nothing dialled and nothing billed.
   // ⚠ NO `?? run.resolvedPrompt` FALLBACK. It existed for "rows written before
   // per-cell prompts existed" — a population that does not exist and never will
   // (the table was empty when the column landed), so what it actually did was
@@ -853,34 +633,14 @@ export async function generateCell(
     return { kind: "prompt_missing" };
   }
 
-  const gate = decideChildTextGate({
-    modelId: cell.modelId,
-    // From the ROW, which `createRun` derived from a verified token. Not from the
-    // request, which states nothing about provenance at all.
-    childProvenance: run.sourceChildId !== null,
-    // Also from the ROW. A run composed by a client that never sent the field has
-    // `false` here, which is the constrained answer.
-    noChildContentAttested: run.noChildContentAttested,
-    promptText: dispatchPrompt,
-    // ⚠ THE REFERENCES ARE PART OF THE DISPATCH. Loaded below, but their PRESENCE
-    // is known from the run row now — the gate must not be asked to bless a call
-    // whose second payload it never saw.
-    hasReferences: run.referenceIds.length > 0,
-  });
+  const gate = decideDispatchGate({ modelId: cell.modelId });
   if (!gate.ok) {
-    // Ids and the closed-set reason only — no prompt, no slot value, no child id.
+    // Ids and the closed-set reason only — no prompt, no slot value.
     console.warn(
-      `[image-lab/run] child-text gate refused: caller=${input.staffId} ` +
+      `[image-lab/run] dispatch gate refused: caller=${input.staffId} ` +
         `image=${input.imageId} model=${cell.modelId} reason=${gate.reason}`
     );
-    switch (gate.reason) {
-      case "child_reference_to_openai":
-        return { kind: "child_reference_gate" };
-      case "unknown_model":
-        return { kind: "unknown_model_gate" };
-      case "child_text_to_openai":
-        return { kind: "child_text_gate" };
-    }
+    return { kind: "unknown_model_gate" };
   }
 
   // ── REFERENCES BEFORE THE CAS, and that ordering is two fixes at once ─────
@@ -1218,10 +978,6 @@ function audit(
       atIso: new Date(deps.now()).toISOString(),
       modelId: input.cell.modelId,
       cellCount: input.run.cellCount,
-      // ⚠ A BOOLEAN, NEVER THE CONTENT. A consent audit needs to know that a run
-      // was built from a real child's authored text; it does not need — and must
-      // never be handed — the text itself, or the child's id in a log line.
-      usedDbContent: input.run.sourceChildId !== null,
       outcome: input.outcome,
       billed: input.billed,
     })

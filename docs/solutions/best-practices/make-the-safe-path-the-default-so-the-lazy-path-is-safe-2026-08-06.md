@@ -24,6 +24,27 @@ tags:
 
 # Make the safe path the default, so the lazy path is safe
 
+> **⚠ 2026-08-06 — THE SPECIFIC RULE THIS DOCUMENT DESCRIBES IS NO LONGER LIVE.**
+> The Image Lab's OpenAI constraint — that `gpt-image-2` must never receive a
+> child's own words, because OpenAI's under-18 API guidance requires zero data
+> retention to process an under-13's personal data — **was removed by owner
+> decision on legal advice**, together with the consent regime, the provenance
+> token and the staff attestation. Two verified facts carry it: reference images
+> will only ever be AI-generated, and scrubbed child-authored business text was
+> cleared as not personal data of a child. See
+> `docs/runbooks/2026-08-05-image-lab-operations.md` §9.
+>
+> The attestation this document is built around (`no_child_content_attested`) was
+> the exception switch on that gate, and it was removed with it.
+>
+> **THE LESSON STANDS INDEPENDENT OF THAT RULE.** It is about the SHAPE of an
+> exception, not about which restriction needed one: absent must mean the
+> restrictive answer, the exception must be an explicit and attributable act, and
+> "always apply the restriction" is not a safe default when it disables the
+> feature the tool exists for. The over-restriction half of that argument is what
+> kept the derived vocabulary selectable rather than mandatory when the rule went
+> away.
+
 ## Context
 
 The Image Lab's OpenAI child-text gate had a P0: a child's pitch typed into the

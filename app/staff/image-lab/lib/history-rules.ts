@@ -114,7 +114,6 @@ export type HistoryRunRow = {
   readonly compare: boolean;
   readonly iteratedOnModel: string | null;
   readonly iteratedFromRunId: string | null;
-  readonly sourceChildId: string | null;
   readonly createdAtMs: number;
 };
 
@@ -1498,7 +1497,6 @@ export const IMAGE_LAB_EVIDENCE_COPY = {
     drillTags: "Drill tags",
     compare: "Compare run",
     iteratedOn: (model: string) => `Prompt iterated on ${model}`,
-    sourceChild: "Built from a child's business content",
     /**
      * ⚠ PER ATTEMPT, because the prompt is a per-model choice. The run-level
      * line above is the run's DEFAULT, not necessarily what any image sent.

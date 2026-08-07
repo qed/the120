@@ -25,6 +25,27 @@ tags:
 
 # Evaluation tools compare configurations, not contestants
 
+> **⚠ 2026-08-06 — THE SPECIFIC RULE THIS DOCUMENT DESCRIBES IS NO LONGER LIVE.**
+> The Image Lab's OpenAI constraint — that `gpt-image-2` must never receive a
+> child's own words, because OpenAI's under-18 API guidance requires zero data
+> retention to process an under-13's personal data — **was removed by owner
+> decision on legal advice**, together with the consent regime, the provenance
+> token and the staff attestation. Two verified facts carry it: reference images
+> will only ever be AI-generated, and scrubbed child-authored business text was
+> cleared as not personal data of a child. See
+> `docs/runbooks/2026-08-05-image-lab-operations.md` §9.
+>
+> **THE LESSON STANDS INDEPENDENT OF THAT RULE, and is arguably cleaner without
+> it.** The claim here was never "OpenAI is special"; it was that an evaluation
+> tool must not equalize the inputs it exists to vary, and that a constraint
+> binding one alternative must not be applied to the others for the sake of
+> symmetry. The asymmetric constraint was only the example. What the removal
+> actually demonstrates is the other half of the same principle: when the
+> constraint went away, the derived vocabulary **stayed — as a SELECTABLE option
+> on every model**, because comparing a derived prompt against an authored one is
+> a real experiment. A tool that had deleted the vocabulary along with the rule
+> would have lost a configuration it was built to compare.
+
 ## Context
 
 The Image Lab exists to answer one question: **which image model, driven how,

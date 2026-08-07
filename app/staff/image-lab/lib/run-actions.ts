@@ -117,43 +117,14 @@ const createRunSchema = z.object({
   iteratedOnModel: z.string().max(120).nullable().optional(),
   iteratedFromRunId: z.uuid().nullable().optional(),
   /**
-   * ⚠ THE PICKER'S SERVER-SIGNED PROVENANCE TOKEN — and it REPLACED a
-   * client-asserted `{ childId, ideaId, taskId }` object.
-   *
-   * That object was `.nullable().optional()`, and `createRun`'s whole chokepoint
-   * (the re-scrub AND the consent breadcrumb) was guarded by `if (input.source &&
-   * input.source.childId !== null)`. So the protection was defeated by DELETING a
-   * field rather than by forging one — strictly easier than the threat the
-   * docblock named — and the resulting row carried `source_child_id = null`,
-   * which made it invisible to the consent-revocation purge.
-   *
-   * The three ids are now DERIVED from this token inside `run-core`, so there is
-   * nothing here for a caller to assert. See `./source-token.ts`.
-   */
-  sourceToken: z.string().min(16).max(1024).nullable().optional(),
-  /**
    * Per-model prompt choice. Keys are model ids; unknown keys are harmless
    * because only SELECTED models are ever looked up, and an unknown value fails
-   * the enum rather than being coerced.
-   *
-   * ⚠ ADVISORY ON PURPOSE. A hand-rolled POST asking for `authored` on an OpenAI
-   * model composes fine and is refused at DISPATCH by `decideChildTextGate`.
-   * Refusing here as well would look like defence in depth and would actually be
-   * the opposite: it would tempt a future edit to treat the compose check as the
-   * gate, which is the one place it cannot be.
+   * the enum rather than being coerced. `derived` is selectable on every model
+   * and compulsory on none.
    */
   promptModes: z
     .record(z.string().max(120), z.enum(IMAGE_LAB_PROMPT_MODES))
     .optional(),
-  /**
-   * ⚠ THE STAFF ATTESTATION, AND `.optional()` IS SAFE HERE ONLY BECAUSE ABSENT
-   * MEANS "NO". Every other optional field in this schema degrades to a harmless
-   * default; this one degrades to the RESTRICTIVE answer, which is what makes a
-   * stale client, a replay, or a hand-rolled POST land on the derived vocabulary
-   * for OpenAI rather than on the child's words. `run-core` reads it with
-   * `=== true`. See `run-rules.PromptGateContext`.
-   */
-  noChildContentAttested: z.boolean().optional(),
 });
 
 /**
@@ -185,8 +156,6 @@ function refusalForIssues(error: z.ZodError): RunCompositionRefusal {
           reason: "too_many_references",
           max: IMAGE_LAB_MAX_REFERENCES_PER_RUN,
         };
-      case "sourceToken":
-        return { ok: false, reason: "bad_source_token" };
       case "promptModes":
         // Not a composition bound — a stale client sent a mode this build does
         // not know. "Write a template first" would be a lie, so fall through to
@@ -248,9 +217,7 @@ export async function createImageLabRun(input?: unknown): Promise<CreateRunResul
     note: parsed.data.note,
     iteratedOnModel: parsed.data.iteratedOnModel ?? null,
     iteratedFromRunId: parsed.data.iteratedFromRunId ?? null,
-    sourceToken: parsed.data.sourceToken ?? null,
     promptModes: parsed.data.promptModes,
-    noChildContentAttested: parsed.data.noChildContentAttested === true,
   });
 }
 
@@ -337,14 +304,13 @@ export async function loadImageLabRunCells(input?: unknown): Promise<RunCellsRes
   }
 }
 
-// ── The content picker (gated a SECOND time, by its own flag) ────────────────
+// ── The content picker ──────────────────────────────────────────────────────
 
 /**
- * ⚠ THE PICKER HAS TWO GATES AND THEY AUTHORIZE DIFFERENT THINGS.
- * `requireStaff()` says WHO may call; `IMAGE_LAB_REAL_CONTENT_LIVE` (checked in
- * `content-picker-core`) says whether a real child's authored text may be loaded
- * at all. With the flag unset every entry point below returns `disabled` and the
- * composer renders the picker absent — while manual prompts generate normally.
+ * ⚠ THE PICKER HAS ONE GATE NOW: `requireStaff()`. The second — a consent flag
+ * (`IMAGE_LAB_REAL_CONTENT_LIVE`) that decided whether a real child's authored
+ * text could be loaded at all — was removed on 2026-08-06 by owner decision, so
+ * the picker is always available to staff. See `image-lab-rules.ts`.
  */
 export async function listImageLabPickerChildren(): Promise<
   { ok: true; children: PickerChildOption[] } | PickerRefusal
@@ -369,25 +335,23 @@ export async function listImageLabPickerIdeas(
 
 const fillSchema = z.object({
   childId: z.uuid(),
-  // The same closed class the run row records — a value this action accepts and
-  // `createRun` then refuses would be a dead end the composer cannot explain.
+  // A closed character class on a value that goes straight into a lookup.
   ideaId: z.string().regex(IMAGE_LAB_SOURCE_ID_PATTERN).nullable().optional(),
-  taskId: z.string().regex(IMAGE_LAB_SOURCE_ID_PATTERN).nullable().optional(),
 });
 
 /**
  * Fill the four slots from one child's saved work.
  *
- * The child's first name and username are scrubbed out of every value before it
- * is returned (`content-picker-core`), and the buyer's name is never read at all.
+ * ⚠ THE VALUES COME BACK SCRUBBED, AND THAT IS THE ONLY TIME THEY ARE SCRUBBED.
+ * The child's first name and username are removed from every value here
+ * (`content-picker-core`), and the buyer's name is never read at all. `createRun`
+ * used to re-scrub server-side against the child a provenance token named;
+ * provenance is gone, so it cannot. See `content-picker-core.scrubNames`.
  */
 export async function fillImageLabSlots(
   input?: unknown
 ): Promise<PickerContent | PickerRefusal> {
-  // ⚠ THE ID IS KEPT NOW, NOT DISCARDED. The provenance token this fill mints is
-  // bound to the staff member who minted it, and this gate is the only honest
-  // source of that id — a caller does not get to say who it is minting for.
-  const { staffId } = await requireStaff();
+  await requireStaff();
 
   const parsed = fillSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "unknown_child" };
@@ -395,7 +359,5 @@ export async function fillImageLabSlots(
   return pickSlotValues(contentPickerDeps(imageLabDb()), {
     childId: parsed.data.childId,
     ideaId: parsed.data.ideaId ?? null,
-    taskId: parsed.data.taskId ?? null,
-    staffId,
   });
 }

@@ -116,14 +116,11 @@ function statusFor(outcome: GenerateCellOutcome): number {
     case "invalid_input":
       return 400;
     // ⚠ 403, NOT 409 AND NOT 400. The request is well-formed and the cell is in a
-    // perfectly good state; what is refused is the COMBINATION — an OpenAI model,
-    // a run built from a child's business content, and a prompt that is not the
-    // category-derived one. That is a forbidden action, and a caller that retries
-    // it unchanged will be refused identically forever.
-    // The same posture for the reference leg: a forbidden COMBINATION, not a bad
-    // request and not a bad row state.
-    case "child_text_gate":
-    case "child_reference_gate":
+    // perfectly good state; what is refused is the MODEL — an id the registry
+    // does not know, so nothing can be proven about where its data would go. A
+    // caller that retries it unchanged will be refused identically forever.
+    // (`child_text_gate` and `child_reference_gate` were also 403 here until
+    // 2026-08-06; both were removed with provenance — see `run-rules`.)
     case "unknown_model_gate":
       return 403;
     // The row cannot say what it would send. Nothing a caller can fix by

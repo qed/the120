@@ -25,6 +25,31 @@ tags:
 
 # Provenance is a property of the FETCH PATH, not of the CONTENT
 
+> **⚠ 2026-08-06 — THE SPECIFIC RULE THIS DOCUMENT DESCRIBES IS NO LONGER LIVE.**
+> The Image Lab's OpenAI constraint — that `gpt-image-2` must never receive a
+> child's own words, because OpenAI's under-18 API guidance requires zero data
+> retention to process an under-13's personal data — **was removed by owner
+> decision on legal advice**, together with the consent regime, the provenance
+> token and the staff attestation. Two verified facts carry it: reference images
+> will only ever be AI-generated, and scrubbed child-authored business text was
+> cleared as not personal data of a child. See
+> `docs/runbooks/2026-08-05-image-lab-operations.md` §9.
+>
+> **THE LESSON STANDS INDEPENDENT OF THAT RULE, and it outlived the guard it was
+> written about.** The finding is about ARMING CONDITIONS, not about OpenAI: a
+> guard keyed on "did our endpoint fetch this?" cannot answer "is this a child's
+> text?", so every other door into the same field is unguarded — and the fix
+> class (an explicit assertion, a door per arrival, copy that does not print the
+> bypass) is general.
+>
+> It also has a live consequence in this codebase RIGHT NOW, which is the
+> strongest possible reason not to dilute it. Removing provenance removed the
+> server's ability to know which child any text came from — so the name scrub
+> became a PICK-TIME transform with no server-side re-scrub, and Lab rows can no
+> longer be located by child for a deletion request. Both are documented as
+> accepted costs in the runbook (§2 and §5) precisely because this document made
+> the shape of the trade legible.
+
 ## Problem
 
 The Image Lab sends staff-composed prompts to third-party image models. One rule

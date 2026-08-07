@@ -269,10 +269,6 @@ export function StepParent({
       <h1 className="mt-3 font-path-display text-4xl leading-[1.05] font-black text-v3-ink sm:text-5xl">
         Start your kid&rsquo;s first business.
       </h1>
-      <p className="mt-4 max-w-md text-base leading-relaxed text-v3-stone">
-        First Profit turns starting a real, tiny business into a guided graphic novel. It begins
-        with one page &mdash; theirs. This part is yours: it takes a minute.
-      </p>
 
       <form
         onSubmit={(e) => {

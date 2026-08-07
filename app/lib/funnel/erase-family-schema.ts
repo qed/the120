@@ -104,11 +104,56 @@ export const ERASURE_ANCHOR_TABLES = ["children", "parents"] as const;
  * really written. (`^|_` anchors the boundary, so a hypothetical `grandchild_id`
  * still matches by design — over-inclusion costs one ledger line.)
  */
-export const CHILD_LINK_COLUMNS = ["child_id", "profile_id"] as const;
+export const CHILD_LINK_COLUMNS = [
+  "child_id",
+  "profile_id",
+  // 2026-08-06 (adversarial review of the step-8b fix): the Path graph keys a
+  // child's coursework on `student_id -> path_student_profiles`, a table the
+  // eraser deletes at step 4 — every such table RESTRICT-blocks an ACTIVE
+  // child's erasure and was structurally invisible to this scope. Matching the
+  // suffix forces each one onto the ledger.
+  "student_id",
+] as const;
 
 /** True if `col` names a link to a child or a child's profile. */
 export function isChildLinkColumn(col: string): boolean {
   return CHILD_LINK_COLUMNS.some((c) => col === c || col.endsWith(`_${c}`));
+}
+
+/**
+ * THE USER-LINK LEG (2026-08-06). The first LIVE family erasure stranded on a
+ * table this file had never heard of: `path_role_grants.user_id -> auth.users
+ * ON DELETE RESTRICT`, a row EVERY v3 parent holds (the verifier grant), which
+ * blocked the parent account delete outright. The child/profile leg above was
+ * structurally blind to it — the whole scope was keyed on reaching a CHILD,
+ * and this row hangs off the PARENT'S AUTH ACCOUNT.
+ *
+ * So scope grows a third structural leg: any table carrying a column whose name
+ * ends in `user_id` links a row to an auth account this eraser deletes (a
+ * child's or the parent's), and must state its disposition below.
+ *
+ * KNOWN LIMIT, on purpose: attribution columns named `*_by` / `actor` /
+ * `created_by` do not match. They were audited by hand against the live
+ * pg_constraint list (2026-08-06): every one is either staff-only (cohorts, FW,
+ * reviews-as-staff) or lives on the student graph that steps 3-4 already
+ * delete. A suffix that broad (`_by`) would drag half the schema into a ledger
+ * nobody maintains — the header's own anti-goal. If a new attribution column
+ * ever references a family principal, step 9 strands loudly at run time, which
+ * is the fail-closed backstop.
+ */
+export const USER_LINK_COLUMNS = [
+  "user_id",
+  // This codebase's single most common way to key a row on the parent's auth
+  // account is `parent_id` (the eraser itself deletes by parent_id) — so the
+  // NEXT parent-keyed table is more likely to be named parent_id than user_id,
+  // and would have sailed past a user_id-only leg exactly as path_role_grants
+  // sailed past the child leg. (2026-08-06, same review.)
+  "parent_id",
+] as const;
+
+/** True if `col` names a link to an auth.users account. */
+export function isUserLinkColumn(col: string): boolean {
+  return USER_LINK_COLUMNS.some((c) => col === c || col.endsWith(`_${c}`));
 }
 
 export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
@@ -206,6 +251,88 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   path_fw_released_aliases: {
     disposition: "retained",
     note: "The FW twin of funnel_released_aliases: a name-derived local_part freed by an anonymization, recorded FOREVER so the next same-name student cannot inherit it. Retained for the same reason, and note the FK is `released_profile_id -> path_student_profiles ON DELETE RESTRICT` — it would BLOCK step 4 for an enrolled child. Per erase-family-rules.ts an FP-signup child is never enrolled in Path/FW coursework, so this table is expected EMPTY for every subject this eraser sees; if it is not, the path_student_profiles delete raises 23503 and the child is stranded fail-safe rather than half-erased.",
+  },
+
+  /* ── the parent-keyed RESTRICT referrers of auth.users (step 8b) ── */
+  path_role_grants: {
+    disposition: "erased-explicitly",
+    note: "user_id -> auth.users ON DELETE RESTRICT, and EVERY v3 parent holds a verifier grant (minted at provisioning) — the row that stranded the FIRST live family erasure. Swept in step 8b (PARENT_AUTH_RESTRICT_SWEEP), immediately before the parent account delete, family scope only.",
+  },
+  path_notification_sends: {
+    disposition: "erased-explicitly",
+    note: "recipient_user_id -> auth.users ON DELETE RESTRICT — the notifications cron's send log, keyed on the recipient. A send log about an erased person is itself personal data, and RESTRICT physically blocks the account delete while it exists. Swept in step 8b beside the role grant.",
+  },
+
+  /* ── the Gauntlet (the120's own game, same auth namespace) ── */
+  gauntlet_saves: {
+    disposition: "erased-by-cascade",
+    note: "user_id -> auth.users ON DELETE CASCADE. A family member who ever played the Gauntlet loses their save with their account delete (child accounts in step 6, the parent in step 9).",
+  },
+  gauntlet_daily_sprints: {
+    disposition: "erased-by-cascade",
+    note: "user_id -> auth.users ON DELETE CASCADE — goes with the account delete, same as gauntlet_saves.",
+  },
+  gauntlet_tournament_events: {
+    disposition: "erased-by-cascade",
+    note: "user_id -> auth.users ON DELETE CASCADE — goes with the account delete.",
+  },
+  gauntlet_tournament_entries: {
+    disposition: "retained",
+    note: "user_id -> auth.users ON DELETE SET NULL: the account delete unlinks the entry (the row survives with its user pointer nulled) rather than deleting it, keeping past standings internally consistent. The surviving row holds a self-chosen kid-safe `handle` (never a real name, by the entry flow's own rule) and a `parent_email` collected under the GAUNTLET'S OWN CASL consent — a separate consent chain this family eraser does not sweep. ⚠ RETENTION FLAG: a maximal erasure would also delete Gauntlet entries by parent_email; that is a deliberate out-of-scope decision recorded here, not an oversight.",
+  },
+
+  /* ── the parent-keyed tables the parent_id leg now sees ── */
+  funnel_resume_tokens: {
+    disposition: "erased-by-cascade",
+    note: "parent_id -> auth.users ON DELETE CASCADE (20260805150000) — the parent's magic-link resume tokens go with the step-9 account delete.",
+  },
+  families: {
+    disposition: "retained",
+    note: "The CRM row. parent_id -> parents ON DELETE SET NULL, deliberately (its own migration: 'account deletion degrades the row to a lead with CRM history intact'). ⚠ RESIDUAL-PII FLAG, caught by the parent_id tripwire leg 2026-08-06: the surviving row carries an IDENTITY SNAPSHOT — parent_name, email, spouse_name, phone, and a kids jsonb with children's names/grades — so after a 'complete' family erasure the CRM still knows who everyone was. A true data-rights erasure should scrub that snapshot off the degraded lead row (or delete it); that is a product/retention decision recorded here as an open obligation, same posture as the deposits retention flag.",
+  },
+
+  /* ── the ACTIVE child's Path student graph (NOT yet drained — see rules) ── */
+  path_task_progress: {
+    disposition: "retained",
+    note: "student_id -> path_student_profiles ON DELETE RESTRICT. An ACTIVE FP child's task spine. NOT drained yet: erasing such a child 23503s at step 4 and strands FAIL-SAFE (loud, resumable, operator escalates). Draining the whole graph in FK-safe order is the documented follow-up unit; this entry flips to erased-explicitly when it lands.",
+  },
+  path_task_events: {
+    disposition: "retained",
+    note: "student_id RESTRICT — same posture as path_task_progress: fail-safe strand today, drained by the follow-up unit. Also the notification pipeline's derivation input, which is why step 8b's send-log sweep only runs once every child is fully erased.",
+  },
+  path_reviews: {
+    disposition: "retained",
+    note: "student_id RESTRICT — the parent-verification review spine. Same posture: fail-safe strand today, follow-up unit drains it.",
+  },
+  path_evidence_items: {
+    disposition: "retained",
+    note: "student_id RESTRICT, and the HEAVIEST entry in the graph: rows name storage objects (bucket/object_path/poster_object_path) and carry EXIF that can include a child's home coordinates. Same fail-safe strand today; the follow-up unit MUST delete objects before rows (the blob rule). See also the external-object ledger's path_evidence_items.bucket entry.",
+  },
+  path_notification_events: {
+    disposition: "retained",
+    note: "student_id RESTRICT — the notify pipeline's event spine. Fail-safe strand today; follow-up unit. (Its sibling path_notification_sends is additionally recipient-keyed on the PARENT, which is why the send log alone is already swept in step 8b once every child is gone.)",
+  },
+  path_cohort_members: {
+    disposition: "retained",
+    note: "student_id RESTRICT — cohort membership. Fail-safe strand today; follow-up unit.",
+  },
+  path_fw_replay_rejects: {
+    disposition: "retained",
+    note: "student_id RESTRICT, but an FW-ops artifact (replay-reject triage) about FW students — no FP family principal is expected here. If one ever is, step 4 strands loudly, same fail-closed posture as the other FW tables.",
+  },
+
+  /* ── FW staff tables the user-link leg now sees ── */
+  path_fw_guide_invites: {
+    disposition: "retained",
+    note: "user_id -> auth.users ON DELETE RESTRICT, but a guide invite references STAFF/guide accounts, never a family principal — expected empty for every subject this eraser sees. If one ever references an erased account, the auth delete 23503s and strands loudly for triage (fail-closed), same posture as path_fw_released_aliases.",
+  },
+  path_fw_ops_audit: {
+    disposition: "retained",
+    note: "subject_user_id / claimed-actor columns -> auth.users ON DELETE RESTRICT. An FW ops audit trail about STAFF actions on FW students; an audit log a subject can delete is not an audit log, and no v3 family principal appears in it. If one ever does, the account delete strands loudly rather than half-erasing.",
+  },
+  path_fw_residue_reports: {
+    disposition: "erased-by-cascade",
+    note: "session_user_id -> auth.users ON DELETE CASCADE — an FW anonymization-session artifact that goes with the session-runner's own account. Staff-only in practice; nothing here references a family principal.",
   },
 
   /* ── telemetry / audit, deliberately NOT erased ── */
@@ -422,7 +549,7 @@ export const ERASURE_EXTERNAL_OBJECT_LEDGER: Record<string, ExternalObjectEntry>
   },
   "path_evidence_items.bucket": {
     external: false,
-    note: "Path/FW coursework evidence in Supabase Storage. NOT erased by this path, and deliberately so: erase-family-rules.ts documents that an FP-signup child is never enrolled in Path/FW coursework, and draining that graph (≈10 RESTRICT dependents) is a separate unit. If an FP child ever gains coursework, this entry must flip.",
+    note: "Path coursework evidence in Supabase Storage. NOT erased by this path YET — and no longer hidden behind the stale 'FP children carry no coursework' invariant: active FP children DO accrue evidence (2026-08-06 review). Today an active child's erasure strands FAIL-SAFE at step 4 before any evidence row could be orphaned, so the objects never outlive their rows' erasure. The follow-up drain unit flips this to external:true and deletes objects before rows.",
   },
 };
 
@@ -447,7 +574,8 @@ export function tablesInErasureScope(schema: Record<string, string[]>): string[]
     .filter(
       ([table, cols]) =>
         (ERASURE_ANCHOR_TABLES as readonly string[]).includes(table) ||
-        cols.some(isChildLinkColumn)
+        cols.some(isChildLinkColumn) ||
+        cols.some(isUserLinkColumn)
     )
     .map(([table]) => table)
     .sort();
@@ -468,7 +596,7 @@ export function auditErasureCoverage(schema: Record<string, string[]>): Coverage
       findings.push({
         kind: "unclassified-table",
         subject: table,
-        detail: `${table} hangs off a child (child_id/profile_id) but ERASURE_TABLE_LEDGER says nothing about it. Decide what a family erasure does with its rows and record it — "retained, because X" is a valid answer.`,
+        detail: `${table} hangs off a child (child_id/profile_id) or an auth account (user_id) but ERASURE_TABLE_LEDGER says nothing about it. Decide what a family erasure does with its rows and record it — "retained, because X" is a valid answer.`,
       });
     }
   }

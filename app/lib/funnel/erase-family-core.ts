@@ -50,6 +50,7 @@ import {
   IMAGE_LAB_RUNS_TABLE,
   imageLabKeyBelongsToRun,
   isImageLabCellInFlight,
+  PARENT_AUTH_RESTRICT_SWEEP,
   planSubjectBlobDeletes,
   RELEASED_CLAIM_PII_COLUMNS,
   type PlannedBlobDelete,
@@ -140,6 +141,11 @@ export type EraseFamilySummary = {
     authUsers: number;
     fp_parental_consent: number;
     fp_signup_attempts: number;
+    /** Step 8b: the parent-keyed RESTRICT referrers of auth.users, swept so the
+     *  account delete can succeed (the verifier grant every v3 parent holds, and
+     *  the notification send log). Family scope only. */
+    path_role_grants: number;
+    path_notification_sends: number;
   };
   workspace: { suspended: number; deleted: number; missing: number; skipped: number; errored: number };
   /**
@@ -602,6 +608,8 @@ export async function eraseFamily(
       authUsers: 0,
       fp_parental_consent: 0,
       fp_signup_attempts: 0,
+      path_role_grants: 0,
+      path_notification_sends: 0,
     },
     workspace: { suspended: 0, deleted: 0, missing: 0, skipped: 0, errored: 0 },
     blobs: { deleted: 0, missing: 0, errored: 0, refused: 0, unconfigured: 0 },
@@ -883,6 +891,34 @@ export async function eraseFamily(
         );
         summary.order.push(`auth_users:parent:deferred(${input.parentUserId})`);
       } else {
+        // 8b: the parent-keyed RESTRICT referrers of auth.users (see the step
+        //     8b note in erase-family-rules.ts). `path_role_grants.user_id` and
+        //     `path_notification_sends.recipient_user_id` are both ON DELETE
+        //     RESTRICT, rows exist for every ordinary v3 parent (the universal
+        //     verifier grant; the notification cron's send log), and nothing
+        //     upstream removes them — the FIRST live erasure proved it by
+        //     stranding the parent account on 23503.
+        //
+        //     DELIBERATELY INSIDE the zero-stranded branch, not before it: the
+        //     send log is the notification pipeline's only idempotency record,
+        //     and its derivation inputs (task events, the grant) must be GONE
+        //     before it is safe to delete. Sweep it while a stranded child's
+        //     spine survives and the cron's reconcile pass re-derives the rows
+        //     from the surviving events and RE-EMAILS the parent who asked to
+        //     be erased. Here, every child is fully erased (nothing stranded),
+        //     so the inputs no longer exist and the sweep cannot resurrect.
+        //     A failed sweep strands via del(), and the account delete below
+        //     then fails on the surviving referrer — loud twice, never half.
+        for (const sweep of PARENT_AUTH_RESTRICT_SWEEP) {
+          summary.deleted[sweep.table] += await del(
+            db,
+            sweep.table,
+            sweep.column,
+            input.parentUserId,
+            summary,
+            "family"
+          );
+        }
         const res = await deps.deleteAuthUser(input.parentUserId);
         if (res.ok) {
           summary.parentAccountDeleted = true;

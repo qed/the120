@@ -193,6 +193,21 @@ describe("R28 coverage tripwire — it actually catches an ADDITION", () => {
     );
   });
 
+  it("a NEW TABLE hanging off an AUTH ACCOUNT (user_id) is reported — the leg the first live erasure was missing", () => {
+    // Exactly the shape of path_role_grants: no child link anywhere, keyed on
+    // the PARENT'S auth account, ON DELETE RESTRICT. The old child/profile-only
+    // scope was structurally blind to it.
+    const findings = auditErasureCoverage(
+      withChange((s) => {
+        s.fp_parent_badges = ["id", "user_id", "badge", "granted_at"];
+        s.fp_parent_pings = ["id", "recipient_user_id", "sent_at"]; // suffix form too
+      })
+    );
+    const seen = findings.map((f) => `${f.kind}:${f.subject}`);
+    expect(seen).toContain("unclassified-table:fp_parent_badges");
+    expect(seen).toContain("unclassified-table:fp_parent_pings");
+  });
+
   it("a NEW COLUMN on `children` is reported as unclassified", () => {
     // Exactly the shape of the miss that produced this file: 20260918120000
     // added fp_kid_age + fp_story_answers and touched no erasure code.

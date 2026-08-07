@@ -143,17 +143,21 @@
  * Deleting the anchor while an account is orphaned (or worse, deleting the parent,
  * which CASCADEs the anchor away) is the resumability hole this guards.
  *
- * ── INVARIANT: FP-signup children carry NO Path/FW coursework (Slice B) ──
- * path_student_profiles has ~10 inbound RESTRICT FKs (path_progress.student_id,
- * path_evidence.student_id, path_notifications.student_id/recipient,
- * fw_cohort_sprints, path_task_reviews, ...). An FP-signup child is minted fresh
- * (child-core.ts) and is NEVER enrolled in Path/FW coursework in Slice B, so those
- * dependents are EXPECTED EMPTY and the enumeration deliberately does NOT drain
- * them (out of scope — draining the whole Path/FW graph is a different unit). The
- * executor is nonetheless FAIL-SAFE: if the path_student_profiles delete is
- * RESTRICT-blocked (23503, an unexpected dependent), the child is recorded stranded
- * and its `children` anchor is preserved (same guard as the resumability hole),
- * never silently proceeding past the block.
+ * ── KNOWN LIMIT: an ACTIVE child's Path student graph is NOT drained (yet) ──
+ * path_student_profiles has ~9 inbound RESTRICT FKs on student_id
+ * (path_task_progress, path_task_events, path_reviews, path_evidence_items,
+ * path_notification_events, path_notification_sends, path_cohort_members,
+ * path_fw_replay_rejects, path_fw_released_aliases.released_profile_id).
+ * The Slice-B era statement "an FP-signup child is never enrolled in Path/FW
+ * coursework" is STALE: the full-path work made FP children real path students,
+ * and an ACTIVE child (any task submit) accrues progress/events/reviews/
+ * evidence (with storage objects + EXIF) and notification rows. Erasing such a
+ * child today RESTRICT-blocks step 4 (23503): the child is recorded stranded,
+ * its `children` anchor is preserved (same guard as the resumability hole), and
+ * an operator escalates — FAIL-SAFE, never silent, but not yet self-service.
+ * Draining that graph in FK-safe order (evidence objects before rows) is the
+ * documented follow-up unit; the coverage ledger classifies every one of those
+ * tables so the obligation is written down rather than remembered.
  *
  * NOTE — fp_ledger is deleted FIRST, not last. The plan-brief's prose ordered it
  * after children, but `fp_ledger.profile_id -> fp_player_profiles ON DELETE
@@ -182,6 +186,44 @@
  *      — an unscoped email delete would destroy a DIFFERENT principal's attempt
  *      rows that merely reused the same email. DOCUMENTED ordering choice:
  *      evidence is removed last, on purpose.
+ *   8b. the PARENT-KEYED RESTRICT REFERRERS of auth.users (2026-08-06, found by
+ *      the FIRST live family erasure, not by review). `path_role_grants.user_id`
+ *      is ON DELETE RESTRICT, and EVERY v3 parent holds a verifier grant
+ *      (child-core mints it at provisioning), so step 9 failed for a perfectly
+ *      ordinary family: the account delete 23503'd, the parent stranded, and
+ *      only a hand-issued SQL delete finished the job. The full audit of
+ *      auth.users' RESTRICT referrers (pg_constraint, live, 2026-08-06) splits
+ *      them three ways:
+ *        - profile tables (fp_player_profiles / path_student_profiles.user_id):
+ *          already deleted per child in steps 3-4;
+ *        - attribution columns on the STUDENT's own graph (path_task_progress.
+ *          verified_by, path_task_events.actor, path_reviews.opened_by/
+ *          decided_by): those rows cascade away with the child's profile before
+ *          step 9 runs, so a parent who verified their own kids' work is clear;
+ *        - rows keyed DIRECTLY on the parent, which nothing upstream removes:
+ *          path_role_grants.user_id (the universal verifier grant) and
+ *          path_notification_sends.recipient_user_id (the notifications cron's
+ *          send log). These are swept HERE — PARENT_AUTH_RESTRICT_SWEEP is the
+ *          shared definition — and the sweep runs INSIDE the zero-stranded
+ *          branch, immediately before the account delete, never earlier: the
+ *          send log is the pipeline's only idempotency record, and deleting it
+ *          while a stranded child's task events survive lets the cron's
+ *          reconcile pass re-derive the rows and RE-EMAIL the parent who asked
+ *          to be erased. Only when every child is fully gone are the
+ *          derivation inputs gone too.
+ *      The remaining referrers are NOT swept, each for a stated reason:
+ *        - staff-only attribution (path_cohorts.created_by, the FW audit
+ *          tables, ...) can never reference a v3 parent;
+ *        - path_parent_invites.invited_by/accepted_by ARE parent-held columns,
+ *          but the co-parent invite flow has ZERO rows in production, ever,
+ *          and its UI is retired in the FP-surface-deletion ship. An invite
+ *          row also references TWO principals, so what one principal's erasure
+ *          does with it is a real decision for whenever the flow revives —
+ *          not a default sweep now.
+ *      If any of these ever DOES reference an erased account, step 9 strands
+ *      loudly for triage, which is the correct fail-closed posture. Full-family
+ *      scope only: a child-scoped erasure preserves the parent, their grant,
+ *      and their mail history.
  *   9. the parent auth.users account (CASCADE-removes parents -> any remaining
  *      children/deposits — by now the children are already gone).
  *
@@ -224,6 +266,24 @@ export const PARENT_SCOPED_DELETE_ORDER = ["fp_onboarding_drafts"] as const;
 
 /** The family-level evidence tables removed as the deliberate final step. */
 export const FAMILY_EVIDENCE_DELETE_ORDER = ["fp_parental_consent", "fp_signup_attempts"] as const;
+
+/**
+ * Rows keyed DIRECTLY on the parent's auth user id whose FK to auth.users is
+ * ON DELETE RESTRICT — they physically block step 9's account delete and
+ * nothing upstream removes them (see step 8b in the header; discovered live,
+ * 2026-08-06). Swept once per family, immediately before the account delete.
+ * Order is irrelevant (both reference only auth.users); the list is exported so
+ * the executor and its tests share one definition, like the orders above.
+ */
+export const PARENT_AUTH_RESTRICT_SWEEP = [
+  // The verifier grant child-core mints for EVERY v3 parent at provisioning —
+  // the row that made the first live erasure strand its parent.
+  { table: "path_role_grants", column: "user_id" },
+  // The path-notifications cron's send log, keyed on the recipient. A send log
+  // about an erased person is itself personal data; RESTRICT forces the choice
+  // and deletion is the right one.
+  { table: "path_notification_sends", column: "recipient_user_id" },
+] as const;
 
 /** Tables an erasure must NEVER touch (the never-reissue address ledger). */
 export const ERASURE_PRESERVED_TABLES = ["funnel_released_aliases"] as const;

@@ -22,7 +22,7 @@ import {
 type Rows = Record<string, unknown>[];
 type Tables = Record<string, Rows>;
 
-function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
+function makeDb(seed: Tables, opts: { selectFaultTable?: string; deleteFaultTable?: string } = {}) {
   const t: Tables = JSON.parse(JSON.stringify(seed));
   const deleteLog: string[] = [];
 
@@ -30,6 +30,11 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
     filters.every((f) => (f.kind === "in" ? (f.val as unknown[]).includes(row[f.col]) : row[f.col] === f.val));
 
   function runDelete(table: string, filters: { col: string; val: unknown; kind: "eq" | "in" }[]) {
+    // Injected DELETE fault (the row-stage partial-failure path): deletes on
+    // the named table fail; every other operation runs normally.
+    if (opts.deleteFaultTable === table) {
+      return { data: null, error: { message: `delete fault (injected) on ${table}` } };
+    }
     const rows = t[table] ?? [];
     const doomed = rows.filter((r) => matches(r, filters));
     // RESTRICT enforcement (referenced side): refuse if a referencing row exists.
@@ -52,19 +57,35 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
           return { data: null, error: { message: `23503: children ${cid} still referenced` } };
         }
       }
-      // The Path student graph (path_notification_sends/events, task progress,
-      // ...) is student_id -> path_student_profiles ON DELETE RESTRICT. Modeled
-      // so the suite cannot pin an ordering production refuses: an ACTIVE
-      // child's profile delete must 23503 and strand fail-safe (the documented
-      // posture until the drain unit lands).
+      // The Path student graph is student_id -> path_student_profiles ON
+      // DELETE RESTRICT, for EVERY graph table. Modeled so the suite cannot
+      // pin an ordering production refuses: the step-3b drain must empty all
+      // seven tables before the step-4 profile delete can succeed.
       if (table === "path_student_profiles") {
         const sid = r.id;
-        if (
-          (t.path_notification_sends ?? []).some((x) => x.student_id === sid) ||
-          (t.path_notification_events ?? []).some((x) => x.student_id === sid) ||
-          (t.path_task_events ?? []).some((x) => x.student_id === sid)
-        ) {
-          return { data: null, error: { message: `23503: path_student_profiles ${sid} still referenced` } };
+        const graphTables = [
+          "path_evidence_items",
+          "path_reviews",
+          "path_task_events",
+          "path_notification_sends",
+          "path_notification_events",
+          "path_cohort_members",
+          "path_fw_replay_rejects",
+          "path_task_progress",
+        ];
+        for (const g of graphTables) {
+          if ((t[g] ?? []).some((x) => x.student_id === sid)) {
+            return { data: null, error: { message: `23503: path_student_profiles ${sid} still referenced by ${g}` } };
+          }
+        }
+      }
+      // The graph's ONE inter-table FK: path_evidence_items.(task_progress_id,
+      // student_id) -> path_task_progress ON DELETE RESTRICT — evidence rows
+      // must die before their progress row, proving the drain's order.
+      if (table === "path_task_progress") {
+        const pid = r.id;
+        if ((t.path_evidence_items ?? []).some((x) => x.task_progress_id === pid)) {
+          return { data: null, error: { message: `23503: path_task_progress ${pid} still referenced by evidence` } };
         }
       }
     }
@@ -137,6 +158,8 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
     op: "select" | "delete" | "update";
     filters: { col: string; val: unknown; kind: "eq" | "in" }[];
     patch?: Record<string, unknown>;
+    /** PostgREST .range(from, to) — inclusive slice, like the real thing. */
+    range?: { from: number; to: number };
   };
   function builder(state: State): Record<string, unknown> {
     const exec = () => {
@@ -148,7 +171,8 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
         return { data: null, error: { message: "select fault (injected)" } };
       }
       const rows = (t[state.table] ?? []).filter((r) => matches(r, state.filters));
-      return { data: rows, error: null };
+      const sliced = state.range ? rows.slice(state.range.from, state.range.to + 1) : rows;
+      return { data: sliced, error: null };
     };
     return {
       select() {
@@ -165,6 +189,9 @@ function makeDb(seed: Tables, opts: { selectFaultTable?: string } = {}) {
       },
       in(col: string, val: unknown[]) {
         return builder({ ...state, filters: [...state.filters, { col, val, kind: "in" }] });
+      },
+      range(from: number, to: number) {
+        return builder({ ...state, range: { from, to } });
       },
       maybeSingle() {
         const r = exec();
@@ -290,6 +317,49 @@ function seedFamily(): Tables {
   };
 }
 
+/** seedFamily plus a fully ACTIVE childA: rows in every student-graph table,
+ *  two evidence rows naming three real objects under pspA's own folder. The
+ *  task-#16 scenario — before the drain, this family could not be erased. */
+function activeChildSeed(): Tables {
+  const seed = seedFamily();
+  seed.path_task_progress = [{ id: "tp1", student_id: "pspA", state: "verified" }];
+  seed.path_task_events = [
+    { id: "te1", student_id: "pspA", transition: "submit", actor: "authA" },
+    { id: "te2", student_id: "pspA", transition: "verify", actor: "parentU" },
+  ];
+  seed.path_reviews = [{ id: "rv1", student_id: "pspA", opened_by: "parentU" }];
+  seed.path_evidence_items = [
+    {
+      id: "ev1",
+      student_id: "pspA",
+      task_progress_id: "tp1",
+      bucket: "path-evidence",
+      object_path: "pspA/ev1/photo.jpg",
+      poster_object_path: null,
+    },
+    {
+      id: "ev2",
+      student_id: "pspA",
+      task_progress_id: "tp1",
+      bucket: "path-evidence",
+      object_path: "pspA/ev2/video.mp4",
+      poster_object_path: "pspA/ev2/poster.jpg",
+    },
+  ];
+  seed.path_notification_events = [{ id: "ne1", student_id: "pspA", kind: "submitted" }];
+  seed.path_notification_sends.push({
+    id: "n2",
+    recipient_user_id: "parentU",
+    student_id: "pspA",
+    kind: "submitted",
+  });
+  seed.path_cohort_members = [{ id: "cm1", student_id: "pspA", cohort_id: "cohort1" }];
+  // The FW leg cohort membership concedes: a guide's rejected offline replay
+  // about this student — student-keyed, RESTRICT, drained with the graph.
+  seed.path_fw_replay_rejects = [{ id: "rr1", student_id: "pspA", action: "check_in" }];
+  return seed;
+}
+
 /** A single path-b child, for the resumability strand/resume scenario (its auth
  *  account is recoverable across the profile deletion via the claim's
  *  supabase_user_id). */
@@ -342,12 +412,17 @@ function makeDeps(
     imageLabStore?: Set<string>;
     /** Force every Image Lab object delete to report a store outage. */
     imageLabFails?: boolean;
+    /** path-evidence bucket contents; anything else answers "missing". */
+    evidenceStore?: Set<string>;
+    /** Force every evidence object delete to report a store outage. */
+    evidenceFails?: boolean;
   } = {}
 ) {
   const wsCalls: string[] = [];
   const deletedAuth: string[] = [];
   const blobCalls: string[] = [];
   const imageLabCalls: string[] = [];
+  const evidenceCalls: string[] = [];
   const deps: EraseFamilyDeps = {
     db: undefined as never, // filled by caller
     workspaceConfigured: opts.workspaceConfigured ?? true,
@@ -372,6 +447,14 @@ function makeDeps(
       if (opts.imageLabFails) return "error" as const;
       if (!opts.imageLabStore || !opts.imageLabStore.has(key)) return "missing" as const;
       opts.imageLabStore.delete(key);
+      return "deleted" as const;
+    }),
+    // Step 3b: same idempotent contract, third store (path-evidence).
+    deleteEvidenceObject: vi.fn(async (key: string) => {
+      evidenceCalls.push(key);
+      if (opts.evidenceFails) return "error" as const;
+      if (!opts.evidenceStore || !opts.evidenceStore.has(key)) return "missing" as const;
+      opts.evidenceStore.delete(key);
       return "deleted" as const;
     }),
     deleteAuthUser: vi.fn(async (userId: string) => {
@@ -411,7 +494,7 @@ function makeDeps(
     }),
     now: () => 0,
   };
-  return { deps, wsCalls, deletedAuth, blobCalls, imageLabCalls };
+  return { deps, wsCalls, deletedAuth, blobCalls, imageLabCalls, evidenceCalls };
 }
 
 describe("eraseFamily — full family, FK-safe order", () => {
@@ -524,37 +607,192 @@ describe("eraseFamily — full family, FK-safe order", () => {
     expect(out.deleted.path_notification_sends).toBe(0);
   });
 
-  it("an ACTIVE child strands fail-safe AND the step-8b sweep does NOT run (the send log survives for the cron)", async () => {
-    // The documented pre-drain-unit posture: a child with Path-graph rows
-    // (here: a notification send about them, still derivable from a surviving
-    // task event) cannot be erased yet — step 4 23503s, the child strands, and
-    // CRUCIALLY the parent's grant + send log survive too. Sweeping the send
-    // log while the derivation inputs survive would let the cron's reconcile
-    // pass re-insert it and RE-EMAIL the erasure-requesting parent (ADV-3).
-    const seed = seedFamily();
-    seed.path_task_events = [{ id: "e1", student_id: "pspA", kind: "submitted" }];
-    seed.path_notification_sends.push({
-      id: "n2",
-      recipient_user_id: "parentU",
-      student_id: "pspA",
-      kind: "submitted",
-    });
+  it("an ACTIVE child's whole student graph is drained — objects first, evidence before progress, graph before profile", async () => {
+    // The task-#16 scenario: childA has submitted work. Every graph table has
+    // a row, the evidence rows name real objects in the fake store, and the
+    // fake enforces BOTH RESTRICT directions (graph -> profile, evidence ->
+    // progress), so this passing PROVES the drain and its order.
+    const seed = activeChildSeed();
+    const store = new Set([
+      "pspA/ev1/photo.jpg",
+      "pspA/ev2/video.mp4",
+      "pspA/ev2/poster.jpg",
+    ]);
+    const { db, t, deleteLog } = makeDb(seed);
+    const { deps, evidenceCalls } = makeDeps(t, { evidenceStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.stranded).toEqual([]);
+    expect(out.ok).toBe(true);
+    expect(out.parentAccountDeleted).toBe(true);
+    // Every graph table emptied and counted.
+    for (const table of [
+      "path_evidence_items",
+      "path_reviews",
+      "path_task_events",
+      "path_notification_sends",
+      "path_notification_events",
+      "path_cohort_members",
+      "path_fw_replay_rejects",
+      "path_task_progress",
+    ]) {
+      expect(t[table], `${table} should be empty`).toHaveLength(0);
+    }
+    expect(out.deleted.path_task_progress).toBe(1);
+    expect(out.deleted.path_evidence_items).toBe(2);
+    // The BYTES are gone — all three objects deleted at the store.
+    expect(store.size).toBe(0);
+    expect(evidenceCalls.sort()).toEqual(["pspA/ev1/photo.jpg", "pspA/ev2/poster.jpg", "pspA/ev2/video.mp4"]);
+    expect(out.pathEvidence.objectsDeleted).toBe(3);
+    // Order: evidence rows before task_progress (the composite RESTRICT), and
+    // the whole graph before the profile row.
+    const evidenceAt = deleteLog.indexOf("path_evidence_items(2)");
+    const progressAt = deleteLog.indexOf("path_task_progress(1)");
+    const profileAt = deleteLog.findIndex((s) => s.startsWith("path_student_profiles"));
+    expect(evidenceAt).toBeGreaterThanOrEqual(0);
+    expect(evidenceAt).toBeLessThan(progressAt);
+    expect(progressAt).toBeLessThan(profileAt);
+  });
+
+  it("an evidence-store outage strands the child, preserves EVERY graph row, and the step-8b sweep does NOT run", async () => {
+    // Object-before-row, fail-closed: a failed object delete must keep the
+    // rows (they are the only record of the keys) — and the parent's grant +
+    // send log must survive too, because sweeping the send log while the
+    // child's task events survive would let the cron's reconcile re-derive
+    // the sends and RE-EMAIL the erasure-requesting parent (ADV-3 gating).
+    const seed = activeChildSeed();
     const { db, t } = makeDb(seed);
-    const { deps, deletedAuth } = makeDeps(t);
+    const { deps, deletedAuth } = makeDeps(t, {
+      evidenceStore: new Set(["pspA/ev1/photo.jpg"]),
+      evidenceFails: true,
+    });
     deps.db = db;
 
     const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
 
     expect(out.ok).toBe(false);
-    // childA stranded on the RESTRICT-blocked profile delete; anchor preserved.
+    expect(out.pathEvidence.objectsErrored).toBeGreaterThan(0);
+    // The whole graph is preserved for the re-run — nothing half-deleted.
+    expect(t.path_evidence_items).toHaveLength(2);
+    expect(t.path_task_progress).toHaveLength(1);
     expect((t.children as { id: string }[]).map((c) => c.id)).toContain("childA");
-    // The parent delete deferred — and the sweep did not run: grant + BOTH send
-    // rows survive, so the pipeline's idempotency record is intact.
+    // And the 8b sweep did not run: grant + send log intact, parent deferred.
     expect(deletedAuth).not.toContain("parentU");
     expect(t.path_role_grants).toHaveLength(1);
-    expect(t.path_notification_sends).toHaveLength(2);
     expect(out.deleted.path_role_grants).toBe(0);
     expect(out.deleted.path_notification_sends).toBe(0);
+  });
+
+  it("a re-run after the store recovers finishes the active child cleanly", async () => {
+    const seed = activeChildSeed();
+    const store = new Set(["pspA/ev1/photo.jpg", "pspA/ev2/video.mp4", "pspA/ev2/poster.jpg"]);
+    const { db, t } = makeDb(seed);
+    const first = makeDeps(t, { evidenceStore: store, evidenceFails: true });
+    first.deps.db = db;
+    const run1 = await eraseFamily(first.deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+    expect(run1.ok).toBe(false);
+
+    const second = makeDeps(t, { evidenceStore: store });
+    second.deps.db = db;
+    const run2 = await eraseFamily(second.deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+    expect(run2.ok).toBe(true);
+    expect(run2.parentAccountDeleted).toBe(true);
+    expect(store.size).toBe(0);
+    expect(t.path_evidence_items).toHaveLength(0);
+    expect(t.children).toHaveLength(0);
+  });
+
+  it("a mid-loop row-delete failure STOPS the drain — the send log never outlives its derivation inputs", async () => {
+    // ADV-16-1: task_events (a derivation input for the notification cron's
+    // reconcile) fails to delete. The drain must STOP there, leaving the send
+    // log intact — deleting it while the events survive would let the cron
+    // re-derive the sends and re-email the erasure-requesting parent.
+    const seed = activeChildSeed();
+    const store = new Set(["pspA/ev1/photo.jpg", "pspA/ev2/video.mp4", "pspA/ev2/poster.jpg"]);
+    const { db, t } = makeDb(seed, { deleteFaultTable: "path_task_events" });
+    const { deps } = makeDeps(t, { evidenceStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(false);
+    // Tables BEFORE the fault were drained; the fault table and everything
+    // AFTER it survive — including both notification tables.
+    expect(t.path_evidence_items).toHaveLength(0);
+    expect(t.path_reviews).toHaveLength(0);
+    expect(t.path_task_events).toHaveLength(2); // the fault
+    expect((t.path_notification_sends as { student_id?: string }[]).filter((s) => s.student_id === "pspA")).toHaveLength(1);
+    expect(t.path_notification_events).toHaveLength(1);
+    expect(out.order).toContain("student_graph:stopped-at:path_task_events(child:childA)");
+    // Child anchor preserved for the re-run; parent deferred.
+    expect((t.children as { id: string }[]).map((c) => c.id)).toContain("childA");
+    expect(out.parentAccountDeleted).toBe(false);
+  });
+
+  it("the evidence read PAGINATES — an object on row 501+ is still deleted", async () => {
+    // ADV-16-2: PostgREST silently truncates unranged selects. Seed 501
+    // evidence rows with the ONLY object-bearing row last: an unpaginated
+    // read (one page of 500) would never see its key, stage 4 would delete
+    // the row anyway, and the child's media would survive an ok:true erasure.
+    const seed = activeChildSeed();
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 500; i++) {
+      rows.push({
+        id: `evp${i}`,
+        student_id: "pspA",
+        task_progress_id: "tp1",
+        bucket: "path-evidence",
+        object_path: null, // kind='log'/'link' rows: no object
+        poster_object_path: null,
+      });
+    }
+    rows.push({
+      id: "evLast",
+      student_id: "pspA",
+      task_progress_id: "tp1",
+      bucket: "path-evidence",
+      object_path: "pspA/evLast/photo.jpg",
+      poster_object_path: null,
+    });
+    seed.path_evidence_items = rows;
+    const store = new Set(["pspA/evLast/photo.jpg"]);
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t, { evidenceStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(true);
+    expect(store.size).toBe(0); // the past-page-1 object really died
+    expect(out.pathEvidence.objectsDeleted).toBe(1);
+    expect(t.path_evidence_items).toHaveLength(0);
+  });
+
+  it("a refused evidence key (outside the student's folder) is never deleted and strands the child", async () => {
+    // The namespace guard: a row pointing at ANOTHER student's folder — or at
+    // a foreign bucket — must only ever fail to delete, never delete.
+    const seed = activeChildSeed();
+    (seed.path_evidence_items as Record<string, unknown>[]).push({
+      id: "evX",
+      student_id: "pspA",
+      task_progress_id: "tp1",
+      bucket: "path-evidence",
+      object_path: "OTHER-student/evX/photo.jpg",
+      poster_object_path: null,
+    });
+    const store = new Set(["OTHER-student/evX/photo.jpg"]);
+    const { db, t } = makeDb(seed);
+    const { deps } = makeDeps(t, { evidenceStore: store });
+    deps.db = db;
+
+    const out = await eraseFamily(deps, { parentUserId: "parentU", parentEmail: "fam@test.the120.invalid" });
+
+    expect(out.ok).toBe(false);
+    expect(out.pathEvidence.objectsRefused).toBe(1);
+    expect(store.has("OTHER-student/evX/photo.jpg")).toBe(true); // never deleted
+    expect(t.path_evidence_items.length).toBeGreaterThan(0); // rows preserved
   });
 
   it("RESTRICT never blocks (order is correct) — no stranded rows", async () => {

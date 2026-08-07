@@ -32,6 +32,7 @@ import { buildWorkspaceJwtConfig } from "@/app/lib/funnel/workspace-auth";
 // Pure constant only — image-lab-rules.ts imports nothing (no next, no supabase),
 // so it is safe on the script's "no server-only in the graph" path.
 import { IMAGE_LAB_BUCKET } from "@/app/staff/image-lab/lib/image-lab-rules";
+import { PATH_EVIDENCE_BUCKET } from "@/app/lib/funnel/erase-family-rules";
 
 const saKeyRaw = (): string => process.env.GOOGLE_WORKSPACE_SA_KEY ?? "";
 
@@ -117,6 +118,17 @@ export function scriptEraseFamilyDeps(): EraseFamilyDeps {
       const { data, error } = await db.storage.from(IMAGE_LAB_BUCKET).remove([key]);
       if (error) {
         console.error(`[erase] image-lab object delete failed for ${key}: ${error.message}`);
+        return "error";
+      }
+      return (data ?? []).length > 0 ? "deleted" : "missing";
+    },
+    // Step 3b (task #16): the child's uploaded task evidence in the private
+    // path-evidence bucket. Same client, same idempotent remove() contract as
+    // the Image Lab dep above.
+    deleteEvidenceObject: async (key) => {
+      const { data, error } = await db.storage.from(PATH_EVIDENCE_BUCKET).remove([key]);
+      if (error) {
+        console.error(`[erase] evidence object delete failed for ${key}: ${error.message}`);
         return "error";
       }
       return (data ?? []).length > 0 ? "deleted" : "missing";

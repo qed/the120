@@ -37,8 +37,19 @@ db enforced exactly the RESTRICT FKs the author knew about.
    the CRM `families` row survives erasure with an identity snapshot
    (parent name/email/phone + kids' names — flagged as an open retention
    obligation), and the whole Path student graph (task progress/events/reviews/
-   evidence/notifications) RESTRICT-blocks step 4 for any ACTIVE child —
-   classified `retained` with a documented follow-up drain unit (task #16).
+   evidence/notifications) RESTRICT-blocks step 4 for any ACTIVE child.
+   The graph drain landed the next day (step 3b, 2026-08-07): evidence objects
+   deleted at the store first under a student-folder namespace guard, then the
+   eight tables leaf-first past the one inter-table RESTRICT (evidence →
+   task_progress). Its own adversarial review added three load-bearing rules:
+   the row loop STOPS on the first failed delete (the send log must never
+   outlive its derivation inputs, or the notification cron re-derives and
+   re-emails the erasure-requesting parent); the evidence read PAGINATES
+   (PostgREST truncates unranged selects at 1000 rows silently, and the DELETE
+   is not row-capped — an unpaginated read destroys the only record of every
+   key past the first page while the bytes survive); and
+   `path_fw_replay_rejects` joined the drain (cohort membership concedes FW
+   attendance, and a replay-reject about the child is the child's data).
 3. **Fake parity**: the test fake's `deleteAuthUser` and
    `path_student_profiles` delete now enforce the same RESTRICTs production
    has, so the suite can no longer certify an ordering the live schema refuses.

@@ -668,6 +668,11 @@ describe("deletion ordering — fp_public_sites dies FIRST", () => {
       deleteImageLabObject: async (key: string) => {
         throw new Error(`unexpected image-lab object delete: ${key}`);
       },
+      // Same posture: these fixtures seed no path_evidence_items, so the
+      // step-3b drain finds nothing and this is never called.
+      deleteEvidenceObject: async (key: string) => {
+        throw new Error(`unexpected evidence object delete: ${key}`);
+      },
       now: () => Date.now(),
     };
   }

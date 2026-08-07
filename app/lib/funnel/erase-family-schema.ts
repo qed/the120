@@ -260,7 +260,7 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
   },
   path_notification_sends: {
     disposition: "erased-explicitly",
-    note: "recipient_user_id -> auth.users ON DELETE RESTRICT — the notifications cron's send log, keyed on the recipient. A send log about an erased person is itself personal data, and RESTRICT physically blocks the account delete while it exists. Swept in step 8b beside the role grant.",
+    note: "Doubly keyed, doubly erased: student_id RESTRICT (drained per child in step 3b, so step 4 cannot block) AND recipient_user_id -> auth.users RESTRICT (swept parent-keyed in step 8b beside the role grant, so step 9 cannot block). A send log about an erased person is itself personal data.",
   },
 
   /* ── the Gauntlet (the120's own game, same auth namespace) ── */
@@ -291,34 +291,34 @@ export const ERASURE_TABLE_LEDGER: Record<string, TableLedgerEntry> = {
     note: "The CRM row. parent_id -> parents ON DELETE SET NULL, deliberately (its own migration: 'account deletion degrades the row to a lead with CRM history intact'). ⚠ RESIDUAL-PII FLAG, caught by the parent_id tripwire leg 2026-08-06: the surviving row carries an IDENTITY SNAPSHOT — parent_name, email, spouse_name, phone, and a kids jsonb with children's names/grades — so after a 'complete' family erasure the CRM still knows who everyone was. A true data-rights erasure should scrub that snapshot off the degraded lead row (or delete it); that is a product/retention decision recorded here as an open obligation, same posture as the deposits retention flag.",
   },
 
-  /* ── the ACTIVE child's Path student graph (NOT yet drained — see rules) ── */
+  /* ── the ACTIVE child's Path student graph (step 3b drain, task #16) ── */
   path_task_progress: {
-    disposition: "retained",
-    note: "student_id -> path_student_profiles ON DELETE RESTRICT. An ACTIVE FP child's task spine. NOT drained yet: erasing such a child 23503s at step 4 and strands FAIL-SAFE (loud, resumable, operator escalates). Draining the whole graph in FK-safe order is the documented follow-up unit; this entry flips to erased-explicitly when it lands.",
+    disposition: "erased-explicitly",
+    note: "student_id -> path_student_profiles ON DELETE RESTRICT. The task spine, drained per child in step 3b — LAST in STUDENT_GRAPH_DELETE_ORDER because path_evidence_items' composite FK RESTRICTs it.",
   },
   path_task_events: {
-    disposition: "retained",
-    note: "student_id RESTRICT — same posture as path_task_progress: fail-safe strand today, drained by the follow-up unit. Also the notification pipeline's derivation input, which is why step 8b's send-log sweep only runs once every child is fully erased.",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT — the append-only R6 verification record, drained in step 3b. Append-only is a convention (no delete-blocking trigger) and a data-rights erasure is the documented exception: an adult-verification record about an erased child is itself the child's personal data. Also the notification pipeline's derivation input, which is why step 8b's send-log sweep only runs once every child is fully erased.",
   },
   path_reviews: {
-    disposition: "retained",
-    note: "student_id RESTRICT — the parent-verification review spine. Same posture: fail-safe strand today, follow-up unit drains it.",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT — the parent-verification review spine, drained in step 3b.",
   },
   path_evidence_items: {
-    disposition: "retained",
-    note: "student_id RESTRICT, and the HEAVIEST entry in the graph: rows name storage objects (bucket/object_path/poster_object_path) and carry EXIF that can include a child's home coordinates. Same fail-safe strand today; the follow-up unit MUST delete objects before rows (the blob rule). See also the external-object ledger's path_evidence_items.bucket entry.",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT, and the HEAVIEST entry in the graph: rows name storage objects (bucket/object_path/poster_object_path) in the private path-evidence bucket and carry EXIF that can include a child's home coordinates. Drained FIRST in step 3b (its composite FK RESTRICTs path_task_progress), OBJECTS BEFORE ROWS under the student-folder namespace guard; a failed object delete preserves the whole graph for the re-run. See the external-object ledger entries.",
   },
   path_notification_events: {
-    disposition: "retained",
-    note: "student_id RESTRICT — the notify pipeline's event spine. Fail-safe strand today; follow-up unit. (Its sibling path_notification_sends is additionally recipient-keyed on the PARENT, which is why the send log alone is already swept in step 8b once every child is gone.)",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT — the notify pipeline's event spine, drained in step 3b.",
   },
   path_cohort_members: {
-    disposition: "retained",
-    note: "student_id RESTRICT — cohort membership. Fail-safe strand today; follow-up unit.",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT — cohort membership, drained in step 3b.",
   },
   path_fw_replay_rejects: {
-    disposition: "retained",
-    note: "student_id RESTRICT, but an FW-ops artifact (replay-reject triage) about FW students — no FP family principal is expected here. If one ever is, step 4 strands loudly, same fail-closed posture as the other FW tables.",
+    disposition: "erased-explicitly",
+    note: "student_id RESTRICT — a guide's rejected offline check-in ABOUT this student (task, action, capture time): the child's own data, and a permanent step-4 blocker for any FW-attending child. Drained in step 3b beside path_cohort_members, which concedes exactly that attendance. (2026-08-07 review: the earlier 'no FP principal expected here' posture contradicted the drain's own inclusion of cohort membership.)",
   },
 
   /* ── FW staff tables the user-link leg now sees ── */
@@ -514,7 +514,10 @@ export const ERASURE_COLUMN_LEDGER: Record<string, Record<string, ColumnDisposit
  * delete cannot erase. Intentionally broad: a false positive costs one ledger
  * line, a false negative costs a minor's photo surviving their erasure.
  */
-export const EXTERNAL_OBJECT_COLUMN_PATTERN = /(blob|storage|bucket|object_key)/;
+// `object_path` joined the pattern with the step-3b evidence purge (task #16):
+// path_evidence_items.{object_path,poster_object_path} name real bytes and were
+// invisible to the original pattern — only the row's `bucket` column matched.
+export const EXTERNAL_OBJECT_COLUMN_PATTERN = /(blob|storage|bucket|object_key|object_path)/;
 
 export type ExternalObjectEntry = {
   /** true = it really names an external object an erasure must delete. */
@@ -549,7 +552,15 @@ export const ERASURE_EXTERNAL_OBJECT_LEDGER: Record<string, ExternalObjectEntry>
   },
   "path_evidence_items.bucket": {
     external: false,
-    note: "Path coursework evidence in Supabase Storage. NOT erased by this path YET — and no longer hidden behind the stale 'FP children carry no coursework' invariant: active FP children DO accrue evidence (2026-08-06 review). Today an active child's erasure strands FAIL-SAFE at step 4 before any evidence row could be orphaned, so the objects never outlive their rows' erasure. The follow-up drain unit flips this to external:true and deletes objects before rows.",
+    note: "The bucket NAME, not an object key — always 'path-evidence' (a row claiming otherwise is refused + stranded by the step-3b purge). The keys themselves are object_path/poster_object_path, both external:true below.",
+  },
+  "path_evidence_items.object_path": {
+    external: true,
+    note: "The child's uploaded task evidence — photo/video/audio bytes in the private path-evidence bucket at {student_id}/{evidence_id}/{filename}, whose EXIF can carry the family's home coordinates. Deleted AT THE STORE in step 3b, before any graph row, under the student-folder namespace guard (evidenceKeyBelongsToStudent); a failed delete preserves the whole student graph for the re-run.",
+  },
+  "path_evidence_items.poster_object_path": {
+    external: true,
+    note: "The video poster frame, generated on-device at capture — same bucket, same namespace guard, same step-3b object-before-row deletion as object_path.",
   },
 };
 

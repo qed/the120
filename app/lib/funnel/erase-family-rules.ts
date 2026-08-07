@@ -143,21 +143,66 @@
  * Deleting the anchor while an account is orphaned (or worse, deleting the parent,
  * which CASCADEs the anchor away) is the resumability hole this guards.
  *
- * ── KNOWN LIMIT: an ACTIVE child's Path student graph is NOT drained (yet) ──
- * path_student_profiles has ~9 inbound RESTRICT FKs on student_id
- * (path_task_progress, path_task_events, path_reviews, path_evidence_items,
- * path_notification_events, path_notification_sends, path_cohort_members,
- * path_fw_replay_rejects, path_fw_released_aliases.released_profile_id).
- * The Slice-B era statement "an FP-signup child is never enrolled in Path/FW
+ * ── THE STUDENT-GRAPH DRAIN (step 3b, added 2026-08-07 — task #16) ──────────
+ * path_student_profiles has ~9 inbound RESTRICT FKs on student_id, and the
+ * Slice-B era statement "an FP-signup child is never enrolled in Path/FW
  * coursework" is STALE: the full-path work made FP children real path students,
  * and an ACTIVE child (any task submit) accrues progress/events/reviews/
- * evidence (with storage objects + EXIF) and notification rows. Erasing such a
- * child today RESTRICT-blocks step 4 (23503): the child is recorded stranded,
- * its `children` anchor is preserved (same guard as the resumability hole), and
- * an operator escalates — FAIL-SAFE, never silent, but not yet self-service.
- * Draining that graph in FK-safe order (evidence objects before rows) is the
- * documented follow-up unit; the coverage ledger classifies every one of those
- * tables so the obligation is written down rather than remembered.
+ * evidence (with storage objects + EXIF) and notification rows. Before this
+ * drain existed, erasing such a child 23503'd at step 4 and stranded fail-safe.
+ * Now, per child, BEFORE the path_student_profiles delete, the eraser drains
+ * the whole graph in FK-safe order (STUDENT_GRAPH_DELETE_ORDER):
+ *
+ *   path_evidence_items       FIRST among the rows — it is the ONLY table with
+ *                             an FK into another graph table (composite
+ *                             (task_progress_id, student_id) ->
+ *                             path_task_progress ON DELETE RESTRICT), so it
+ *                             must precede path_task_progress. And its rows
+ *                             name BYTES OUTSIDE POSTGRES: `bucket` +
+ *                             `object_path` + `poster_object_path` point into
+ *                             the private `path-evidence` bucket at
+ *                             `{student_id}/{evidence_id}/{filename}`, and the
+ *                             `exif` column documents why the bytes matter (GPS
+ *                             of a child's home). Objects are deleted AT THE
+ *                             STORE before any row (the blob rule above); a
+ *                             failed object delete preserves EVERY graph row
+ *                             for the re-run, because the row is the only
+ *                             record of its key. The namespace guard
+ *                             (evidenceKeyBelongsToStudent) refuses any key
+ *                             outside the student's own folder, and a row whose
+ *                             `bucket` is not the known evidence bucket is
+ *                             refused rather than guessed at.
+ *   path_reviews              student-keyed, no graph FKs.
+ *   path_task_events          the append-only R6 record. Append-only is a
+ *                             CONVENTION (no delete-blocking trigger), and a
+ *                             data-rights erasure is the documented exception:
+ *                             an adult-verification record about an erased
+ *                             child is itself the child's personal data.
+ *   path_notification_sends   also swept parent-keyed in step 8b; the per-child
+ *                             leg here removes the same rows student-side so
+ *                             step 4 cannot block on them.
+ *   path_notification_events
+ *   path_cohort_members
+ *   path_task_progress        LAST — evidence's RESTRICT FK points at it.
+ *
+ * IN-FLIGHT WINDOW, accepted: an evidence upload racing the erasure could land
+ * bytes after the keys were collected. The slot flow writes the row before the
+ * bytes move, so the common case is covered; the residue of a lost race lives
+ * under the student's own folder prefix and is the evidence reaper/quota
+ * sweep's territory, not silently unreachable. Not stranded — documented.
+ *
+ * RECONCILE RACE, accepted (2026-08-07 review): the notifications cron's
+ * reconcile pass can re-insert a send/event between the drain and the step-4
+ * profile delete (its window SELECT ran before the drain deleted the task
+ * events). Worst case is ONE strand + at most one spurious email, and the
+ * re-run converges: the task events are gone, so the reconcile has nothing
+ * left to derive from and the drain removes the fresh rows. A cross-system
+ * lock to close a seconds-wide window against a 10-minute cron is not worth
+ * its failure modes; documented instead.
+ *
+ * path_fw_released_aliases keeps its FW posture: the never-reissue ledger is
+ * NEVER deleted by an erasure, so a row here (only an FW anonymization writes
+ * one) strands step 4 fail-safe for an operator — deliberately.
  *
  * NOTE — fp_ledger is deleted FIRST, not last. The plan-brief's prose ordered it
  * after children, but `fp_ledger.profile_id -> fp_player_profiles ON DELETE
@@ -198,8 +243,9 @@
  *          already deleted per child in steps 3-4;
  *        - attribution columns on the STUDENT's own graph (path_task_progress.
  *          verified_by, path_task_events.actor, path_reviews.opened_by/
- *          decided_by): those rows cascade away with the child's profile before
- *          step 9 runs, so a parent who verified their own kids' work is clear;
+ *          decided_by): those rows are removed by the step-3b student-graph
+ *          drain before step 9 runs, so a parent who verified their own kids'
+ *          work is clear;
  *        - rows keyed DIRECTLY on the parent, which nothing upstream removes:
  *          path_role_grants.user_id (the universal verifier grant) and
  *          path_notification_sends.recipient_user_id (the notifications cron's
@@ -236,6 +282,48 @@
 // (no SDK, no Supabase, no Next), so importing it here keeps this file pure too;
 // the vendor-facing side of the port lives behind an injected dep in the core.
 import { keyBelongsTo, type CoverOwnerScope } from "@/app/lib/fp/cover-store-rules";
+
+/**
+ * The Path student graph, drained per child BEFORE the path_student_profiles
+ * delete (step 3b — every table here is `student_id -> path_student_profiles
+ * ON DELETE RESTRICT`). Order is load-bearing at exactly one point:
+ * path_evidence_items carries the graph's only inter-table FK
+ * ((task_progress_id, student_id) -> path_task_progress ON DELETE RESTRICT),
+ * so it is FIRST and path_task_progress is LAST. See the header.
+ */
+export const STUDENT_GRAPH_DELETE_ORDER = [
+  "path_evidence_items",
+  "path_reviews",
+  "path_task_events",
+  "path_notification_sends",
+  "path_notification_events",
+  "path_cohort_members",
+  // An FP child CAN attend a Founders Weekend (that is what cohort_members
+  // above concedes), and a guide's rejected offline replay writes a
+  // replay-reject row about them — student-keyed, RESTRICT, and the child's
+  // own personal data (task, action, capture time). Drained with the rest;
+  // leaving it would strand step 4 permanently for any FW-attending child.
+  "path_fw_replay_rejects",
+  "path_task_progress",
+] as const;
+
+/** The one bucket evidence objects live in (migration 20260722140000). A row
+ *  claiming any other bucket is refused, never guessed at. */
+export const PATH_EVIDENCE_BUCKET = "path-evidence" as const;
+
+/** The evidence columns that NAME an object in the path-evidence bucket. */
+export const EVIDENCE_OBJECT_COLUMNS = ["object_path", "poster_object_path"] as const;
+
+/**
+ * The evidence namespace guard, same shape as imageLabKeyBelongsToRun: keys are
+ * `{student_id}/{evidence_id}/{filename}` (the storage policies key on
+ * foldername[1] = student_id), so a key outside the student's own folder is
+ * refused + stranded rather than deleted. A mistaken caller must only ever
+ * fail to delete, never delete another child's evidence.
+ */
+export function evidenceKeyBelongsToStudent(key: string, studentId: string): boolean {
+  return key.startsWith(`${studentId}/`);
+}
 
 /** The ordered per-child leaf tables (before the child's own auth + children
  *  row). Exported so the executor and its tests share ONE definition of order. */

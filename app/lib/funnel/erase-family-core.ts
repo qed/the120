@@ -44,6 +44,8 @@ import {
   CHILD_BLOB_KEY_COLUMNS,
   dedupeAuthUserIds,
   DRAFT_BLOB_KEY_COLUMNS,
+  evidenceKeyBelongsToStudent,
+  EVIDENCE_OBJECT_COLUMNS,
   hasWorkspaceMailbox,
   IMAGE_LAB_IMAGES_TABLE,
   IMAGE_LAB_LINEAGE_MAX_HOPS,
@@ -51,8 +53,10 @@ import {
   imageLabKeyBelongsToRun,
   isImageLabCellInFlight,
   PARENT_AUTH_RESTRICT_SWEEP,
+  PATH_EVIDENCE_BUCKET,
   planSubjectBlobDeletes,
   RELEASED_CLAIM_PII_COLUMNS,
+  STUDENT_GRAPH_DELETE_ORDER,
   type PlannedBlobDelete,
 } from "./erase-family-rules";
 
@@ -102,6 +106,15 @@ export type EraseFamilyDeps = {
    * generated imagery in the bucket.
    */
   deleteImageLabObject: (key: string) => Promise<"deleted" | "missing" | "error">;
+  /**
+   * Delete ONE object from the private `path-evidence` bucket (the child's
+   * uploaded task evidence — photos/videos whose EXIF can carry the family's
+   * home coordinates), by storage key. Same idempotent contract as the two
+   * deps above, and REQUIRED for the same reason as deleteImageLabObject:
+   * the bucket is reached through the very service-role client `db` already
+   * is, so there is no honest "unconfigured" state.
+   */
+  deleteEvidenceObject: (key: string) => Promise<"deleted" | "missing" | "error">;
   now: () => number;
 };
 
@@ -146,6 +159,16 @@ export type EraseFamilySummary = {
      *  the notification send log). Family scope only. */
     path_role_grants: number;
     path_notification_sends: number;
+    /** Step 3b: the ACTIVE child's Path student graph (task #16). Drained per
+     *  child before the path_student_profiles delete; evidence objects are
+     *  deleted at the store first (see `pathEvidence`). */
+    path_evidence_items: number;
+    path_reviews: number;
+    path_task_events: number;
+    path_notification_events: number;
+    path_cohort_members: number;
+    path_fw_replay_rejects: number;
+    path_task_progress: number;
   };
   workspace: { suspended: number; deleted: number; missing: number; skipped: number; errored: number };
   /**
@@ -175,6 +198,19 @@ export type EraseFamilySummary = {
     objectsErrored: number;
     objectsRefused: number;
     deferredInFlight: number;
+  };
+  /**
+   * The evidence purge's object accounting (step 3b), separate because it is a
+   * third store with a third adapter: `missing` is success, `errored` is a
+   * store outage, `refused` is a key outside the student's own folder OR a row
+   * claiming an unknown bucket. Every non-success is also in `stranded` and
+   * preserves the whole graph for the re-run.
+   */
+  pathEvidence: {
+    objectsDeleted: number;
+    objectsMissing: number;
+    objectsErrored: number;
+    objectsRefused: number;
   };
   /** Released provisioning claims whose residual PII was scrubbed after the child
    *  delete (row + local_part preserved; email/attempted-email/supabase_user_id
@@ -531,9 +567,154 @@ async function purgeImageLab(
   );
 }
 
+/**
+ * STEP 3b — THE STUDENT-GRAPH DRAIN (task #16; see the header block in
+ * erase-family-rules.ts). Every table here is `student_id ->
+ * path_student_profiles ON DELETE RESTRICT`, so an ACTIVE child (any task
+ * submit) used to 23503 the step-4 profile delete and strand. The sequence:
+ *
+ *   1. read   — the evidence rows, with their object columns (a read failure
+ *               strands: silently proceeding would delete the profile past
+ *               rows we never saw)
+ *   2. delete — the OBJECTS, at the store, before any row: `object_path` and
+ *               `poster_object_path` in the private `path-evidence` bucket.
+ *               A key outside the student's own `{student_id}/…` folder — or a
+ *               row claiming a bucket that is not path-evidence — is REFUSED
+ *               and stranded, never deleted.
+ *   3. verify — a single failed/refused object keeps EVERY graph row (the row
+ *               is the only record of its key)
+ *   4. delete — the rows, in STUDENT_GRAPH_DELETE_ORDER (evidence first: its
+ *               composite FK RESTRICTs path_task_progress, which goes last)
+ *
+ * Zero graph rows (every pre-launch child) costs one SELECT per student id
+ * plus the ordered deletes, all no-ops.
+ */
+/** One PostgREST page for the paginated evidence read below. Kept well under
+ *  the server's silent max-rows cap so the short-page loop terminus is ours,
+ *  never the server's truncation. */
+const EVIDENCE_READ_PAGE_SIZE = 500;
+
+async function drainStudentGraph(
+  deps: EraseFamilyDeps,
+  summary: EraseFamilySummary,
+  child: ChildRow
+): Promise<void> {
+  const { db } = deps;
+  const label = `child:${child.childId}`;
+  for (const studentId of child.pathProfileIds) {
+    const strandedBefore = summary.stranded.length;
+
+    // 1: the evidence rows and the objects they name — PAGINATED. PostgREST
+    //    silently truncates an unranged select at its max-rows (default 1000)
+    //    with NO error, and stage 4's DELETE is not row-capped, so an
+    //    unpaginated read here would destroy the only record of every key past
+    //    the first page while their bytes survive — the exact failure the
+    //    evidence reaper is already hardened against (evidence-loader.ts).
+    //    Loop until a short page. (Static projection — the coverage test
+    //    asserts every EVIDENCE_OBJECT_COLUMNS entry appears in a .select()
+    //    literal in this file, so the two cannot drift.)
+    const evidenceRows: Record<string, unknown>[] = [];
+    let readFailed = false;
+    for (let from = 0; ; from += EVIDENCE_READ_PAGE_SIZE) {
+      const page = await db
+        .from("path_evidence_items")
+        .select("id, bucket, object_path, poster_object_path")
+        .eq("student_id", studentId)
+        .range(from, from + EVIDENCE_READ_PAGE_SIZE - 1);
+      if (page.error) {
+        console.error(
+          `[erase] STRANDED: path_evidence_items read (${label}) failed: ${page.error.message}`
+        );
+        summary.stranded.push(`path_evidence_items:read:${label}:${page.error.message}`);
+        readFailed = true;
+        break;
+      }
+      const rows = (page.data ?? []) as Record<string, unknown>[];
+      evidenceRows.push(...rows);
+      if (rows.length < EVIDENCE_READ_PAGE_SIZE) break;
+    }
+    if (readFailed) continue; // this profile strands; a sibling's graph is still drainable
+
+    // 2: the objects, before any row.
+    const seenKeys = new Set<string>();
+    for (const row of evidenceRows) {
+      for (const col of EVIDENCE_OBJECT_COLUMNS) {
+        const key = typeof row[col] === "string" ? (row[col] as string).trim() : "";
+        if (key.length === 0 || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        const bucket = typeof row.bucket === "string" ? row.bucket : "";
+        if (bucket !== PATH_EVIDENCE_BUCKET || !evidenceKeyBelongsToStudent(key, studentId)) {
+          console.error(
+            `[erase] STRANDED: refusing to delete evidence key ${key} (bucket ${bucket || "?"}) — not in student ${studentId}'s ${PATH_EVIDENCE_BUCKET} namespace (${label})`
+          );
+          summary.pathEvidence.objectsRefused++;
+          summary.stranded.push(`path_evidence:not_owned:${label}:${key}`);
+          continue;
+        }
+        let outcome: "deleted" | "missing" | "error";
+        try {
+          outcome = await deps.deleteEvidenceObject(key);
+        } catch (err) {
+          console.error(
+            `[erase] evidence object delete threw for ${key} (${label}): ${err instanceof Error ? err.message : String(err)}`
+          );
+          outcome = "error";
+        }
+        if (outcome === "deleted") {
+          summary.pathEvidence.objectsDeleted++;
+          summary.order.push(`path_evidence:object-deleted(${label})`);
+        } else if (outcome === "missing") {
+          summary.pathEvidence.objectsMissing++;
+          summary.order.push(`path_evidence:object-missing(${label})`);
+        } else {
+          console.error(
+            `[erase] STRANDED: evidence object delete failed for ${key} (${label}) — the bytes may still exist; re-run after the store recovers`
+          );
+          summary.pathEvidence.objectsErrored++;
+          summary.stranded.push(`path_evidence:error:${label}:${key}`);
+        }
+      }
+    }
+
+    // 3: verify before deleting rows — same rule as the Image Lab purge.
+    //    `continue`, not return: a permanently-refused key on THIS profile must
+    //    not stop a sibling profile's whole graph from being drained; the
+    //    per-child strand guard still preserves the anchor either way.
+    if (summary.stranded.length > strandedBefore) {
+      console.error(
+        `[erase] student graph for ${label} PRESERVED — an evidence object delete did not succeed; re-run to finish`
+      );
+      summary.order.push(`student_graph:preserved(${label})`);
+      continue;
+    }
+
+    // 4: the rows, leaf-first past the one inter-table RESTRICT. STOP on the
+    //    first failed delete: the order is derivation-inputs-first (task
+    //    events/reviews BEFORE the notification send log), so continuing past
+    //    a failed table would delete the send log while its derivation inputs
+    //    survive — and the notification cron's reconcile pass would re-derive
+    //    the sends and RE-EMAIL the erasure-requesting parent (the same ADV-3
+    //    hazard the step-8b gate exists for, one level down).
+    for (const table of STUDENT_GRAPH_DELETE_ORDER) {
+      const before = summary.stranded.length;
+      summary.deleted[table] += await del(db, table, "student_id", studentId, summary, label);
+      if (summary.stranded.length > before) {
+        console.error(
+          `[erase] student graph for ${label} PARTIALLY drained — ${table} delete failed; later tables left intact so the send log never outlives its derivation inputs; re-run to finish`
+        );
+        summary.order.push(`student_graph:stopped-at:${table}(${label})`);
+        break;
+      }
+    }
+  }
+}
+
 type ChildRow = {
   childId: string;
   profileIds: string[];
+  /** path_student_profiles ids — the key the step-3b student-graph drain
+   *  deletes by (every graph table is student_id -> path_student_profiles). */
+  pathProfileIds: string[];
   authUserIds: string[];
   workspaceEmail: string | null;
   /** The provisioning claim's stable row id (path b only), used to SCRUB its PII
@@ -560,6 +741,7 @@ async function enumerateChild(db: Db, childId: string): Promise<ChildRow> {
   return {
     childId,
     profileIds: ppRows.map((r) => r.id),
+    pathProfileIds: pspRows.map((r) => r.id),
     // RESUMABILITY (FIX 1b): fold the claim's `supabase_user_id` into the auth-id
     // set. It is the path-b account's DURABLE handle — it survives the profile
     // deletes (steps 3-4), so a re-run after a mid-erase failure can still tear
@@ -610,6 +792,13 @@ export async function eraseFamily(
       fp_signup_attempts: 0,
       path_role_grants: 0,
       path_notification_sends: 0,
+      path_evidence_items: 0,
+      path_reviews: 0,
+      path_task_events: 0,
+      path_notification_events: 0,
+      path_cohort_members: 0,
+      path_fw_replay_rejects: 0,
+      path_task_progress: 0,
     },
     workspace: { suspended: 0, deleted: 0, missing: 0, skipped: 0, errored: 0 },
     blobs: { deleted: 0, missing: 0, errored: 0, refused: 0, unconfigured: 0 },
@@ -619,6 +808,12 @@ export async function eraseFamily(
       objectsErrored: 0,
       objectsRefused: 0,
       deferredInFlight: 0,
+    },
+    pathEvidence: {
+      objectsDeleted: 0,
+      objectsMissing: 0,
+      objectsErrored: 0,
+      objectsRefused: 0,
     },
     scrubbedReleasedClaims: 0,
     parentAccountDeleted: false,
@@ -705,6 +900,14 @@ export async function eraseFamily(
       }
       // 3: fp_player_profiles (RESTRICT -> children AND auth.users)
       summary.deleted.fp_player_profiles += await del(db, "fp_player_profiles", "child_id", childId, summary, `child:${childId}`);
+      // 3b: THE STUDENT-GRAPH DRAIN (task #16) — evidence objects, then the
+      //     seven student-keyed tables, evidence rows first and task_progress
+      //     last. MUST precede step 4: every one of them RESTRICTs the
+      //     path_student_profiles delete, so an ACTIVE child used to 23503
+      //     here and strand. A drain failure strands and the guard below
+      //     preserves the child anchor for the re-run.
+      await drainStudentGraph(deps, summary, child);
+
       // 4: path_student_profiles (RESTRICT -> children AND auth.users)
       summary.deleted.path_student_profiles += await del(db, "path_student_profiles", "child_id", childId, summary, `child:${childId}`);
 

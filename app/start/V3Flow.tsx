@@ -21,9 +21,10 @@
  * A step-2 submit mints the draft through a Server Action, and the props from
  * the last server render do not know about it yet. So the two facts the client
  * can establish for itself (the parent verified; a draft now exists and is
- * named) are held locally and merged over the server's. `router.refresh()` then
- * reconciles the real state in the background. Without this, "Start their
- * journey" would clamp straight back to step 2.
+ * named) are held locally and merged over the server's. The `go()` push then
+ * re-renders /start with the new ?step= server-side, which re-reads the real
+ * state on the same round trip. Without the shadow, "Start their journey"
+ * would clamp straight back to step 2.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -101,10 +102,16 @@ export function V3Flow({
     (next: V3Step) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("step", next);
+      // NO router.refresh() beside this push. The pair races the Next 16
+      // client cache — the refresh clears the route the in-flight push is
+      // resolving against, the navigation never commits, and a step-2 save
+      // sits on "Saving…" forever while the draft row lands fine (docs/
+      // solutions/ui-bugs/router-push-then-refresh-races-next16-client-cache-
+      // redirect-from-the-action-instead-2026-07-28.md). The push alone
+      // re-renders /start with the new ?step= server-side, which re-reads the
+      // onboarding state — so the facts the refresh existed to reconcile
+      // arrive on the same round trip; the local shadow covers the interim.
       router.push(`?${params.toString()}`, { scroll: true });
-      // Bring the server's facts up to date behind the navigation; the local
-      // shadow above keeps the screen correct until it lands.
-      router.refresh();
     },
     [router, searchParams]
   );
